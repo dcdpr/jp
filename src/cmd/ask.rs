@@ -18,6 +18,9 @@ pub struct AskArgs {
     #[arg(short, long, default_value_t)]
     pub reasoning: Reasoning,
 
+    #[arg(short = 's', long)]
+    pub web_search: Option<WebSearch>,
+
     /// Override the system prompt for the chat model.
     ///
     /// This takes precedence over the config file setting.
@@ -54,6 +57,21 @@ pub enum Reasoning {
     Hide,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum WebSearch {
+    /// Disable web search.
+    Disable,
+
+    /// Enable web search for both LLMs.
+    Enable,
+
+    /// Enable web search only for "reasoning" LLM.
+    Reasoning,
+
+    /// Enable web search only for "chat" LLM.
+    Chat,
+}
+
 impl fmt::Display for Reasoning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -76,6 +94,26 @@ pub async fn run(mut ctx: Context, args: &AskArgs) -> Result<()> {
 
     if let Some(reasoning_prompt) = &args.reasoning_prompt {
         ctx.config.llm.reasoning.system_prompt = reasoning_prompt.to_owned();
+    }
+
+    match args.web_search {
+        Some(WebSearch::Enable) => {
+            ctx.config.llm.chat.web_search = true;
+            ctx.config.llm.reasoning.web_search = true;
+        }
+        Some(WebSearch::Reasoning) => {
+            ctx.config.llm.chat.web_search = false;
+            ctx.config.llm.reasoning.web_search = true;
+        }
+        Some(WebSearch::Chat) => {
+            ctx.config.llm.chat.web_search = true;
+            ctx.config.llm.reasoning.web_search = false;
+        }
+        Some(WebSearch::Disable) => {
+            ctx.config.llm.chat.web_search = false;
+            ctx.config.llm.reasoning.web_search = false;
+        }
+        None => {}
     }
 
     process_question(&client, &ctx, &args.question, args.reasoning).await
