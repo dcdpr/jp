@@ -12,12 +12,12 @@ use session::Session;
 use uuid::Uuid;
 
 use crate::{
+    config::WORKSPACE_CONFIG_FILENAME,
     openrouter::{ChatMessage, Role},
     Message, WorkspaceSessions,
 };
 
 pub const WORKSPACE_DIR: &str = ".jp";
-pub const WORKSPACE_CONFIG: &str = ".jp.toml";
 
 #[derive(Debug)]
 pub struct Workspace {
@@ -86,7 +86,7 @@ pub fn find_root(starting_dir: &Path) -> Option<PathBuf> {
     let mut current_dir = starting_dir.to_path_buf();
 
     loop {
-        let config_path = current_dir.join(WORKSPACE_CONFIG);
+        let config_path = current_dir.join(WORKSPACE_CONFIG_FILENAME);
         if config_path.exists() {
             return Some(current_dir);
         }

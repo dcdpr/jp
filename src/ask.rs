@@ -10,11 +10,13 @@ use std::{
 use anyhow::Result;
 
 use crate::{
+    artifacts,
     cmd::ask::Reasoning,
     context::Context,
-    openrouter::{ChatMessage, Client, Role, StreamDelta},
+    openrouter::{Client, StreamDelta},
     reasoning,
     workspace::{message::Message, Workspace},
+    ThreadBuilder,
 };
 
 pub async fn process_question(
@@ -23,18 +25,19 @@ pub async fn process_question(
     message: &str,
     reason_preference: Reasoning,
 ) -> Result<()> {
-    let mut messages: Vec<_> = ctx
-        .workspace
-        .iter()
-        .flat_map(Workspace::chat_history)
-        .chain(std::iter::once(ChatMessage {
-            role: Role::User,
-            content: message.to_string(),
-        }))
-        .collect();
+    let mut thread = ThreadBuilder::new()
+        .with_artifacts(artifacts::iter(ctx))
+        .with_instructions(&ctx.config.llm.chat.instructions)
+        .with_history(
+            ctx.workspace
+                .iter()
+                .flat_map(Workspace::chat_history)
+                .collect(),
+        )
+        .with_query(message);
 
     let reasoning_response = (!matches!(reason_preference, Reasoning::Disable)).then_some({
-        let messages = messages.clone();
+        let thread = thread.clone();
         async {
             let handler = (!matches!(reason_preference, Reasoning::Hide)).then_some({
                 |_, delta: StreamDelta| async move {
@@ -51,7 +54,7 @@ pub async fn process_question(
                 }
             });
 
-            reasoning::get_with_handler(client, ctx, messages, handler).await
+            reasoning::get_with_handler(client, ctx, thread, handler).await
         }
     });
 
@@ -97,18 +100,17 @@ pub async fn process_question(
     }
 
     if let Some(message) = reasoning.clone() {
-        messages.push(message);
+        thread = thread.with_reasoning(message.content);
     }
 
     // Insert chat system message at the beginning of the conversation.
-    messages.insert(0, ChatMessage {
-        role: Role::System,
-        content: ctx.config.llm.chat.system_prompt().to_string(),
-    });
+    let messages = thread
+        .with_system(ctx.config.llm.chat.model().system_prompt().to_string())
+        .build()?;
 
     // Create response with the main LLM
     let response = client
-        .request(&ctx.config.llm.chat, messages.clone(), true)
+        .request(&ctx.config.llm.chat.model(), messages.clone(), true)
         .stream(|_, delta| async move {
             if let Some(content) = &delta.content {
                 print!("{content}");

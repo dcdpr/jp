@@ -6,9 +6,8 @@ use clap::Args;
 use super::ConfigArgs;
 use crate::{
     cmd::canonical_path,
-    config::{get_global_config_path, get_local_config_path, ConfigFile},
+    config::{get_global_config_path, get_local_config_path, Config, WORKSPACE_CONFIG_FILENAME},
     context::Context,
-    workspace::WORKSPACE_CONFIG,
 };
 
 #[derive(Args)]
@@ -42,16 +41,18 @@ pub async fn run(_ctx: Context, config_args: &ConfigArgs, args: &InitArgs) -> Re
             .context(format!("Failed to create directory at {:?}", parent))?;
     }
 
-    // Generate the config file
-    let mut config = ConfigFile::default();
+    // Generate the template
+    let template = Config::generate_template(true);
 
-    // Set inherit = false if --no-inherit is specified and we're not in global mode
-    if args.no_inherit && !global {
-        config.set_inherit(false);
-    }
+    // Apply the no-inherit flag if needed
+    let final_template = if args.no_inherit && !global {
+        template.replace("#inherit = true", "inherit = false")
+    } else {
+        template
+    };
 
-    // Generate the config file
-    config.save(&config_path, true)?;
+    // Write to file
+    fs::write(&config_path, final_template)?;
 
     let location = if global { "Global" } else { "Local" };
     println!(
@@ -91,7 +92,7 @@ fn determine_config_path(global: bool, custom_path: Option<PathBuf>) -> Result<P
                     path
                 );
             }
-            path = path.join(".jp.toml");
+            path = path.join(WORKSPACE_CONFIG_FILENAME);
         }
 
         return Ok(path);
@@ -103,6 +104,6 @@ fn determine_config_path(global: bool, custom_path: Option<PathBuf>) -> Result<P
             .ok_or_else(|| anyhow!("Could not determine global config path. Set `JP_GLOBAL_CONFIG_FILE` environment variable."))
     } else {
         let current_dir = env::current_dir()?;
-        Ok(get_local_config_path().unwrap_or_else(|| current_dir.join(WORKSPACE_CONFIG)))
+        Ok(get_local_config_path().unwrap_or_else(|| current_dir.join(WORKSPACE_CONFIG_FILENAME)))
     }
 }

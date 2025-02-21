@@ -1,6 +1,6 @@
 use crate::{workspace::Workspace, Config};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Context {
     pub config: Config,
     pub workspace: Option<Workspace>,

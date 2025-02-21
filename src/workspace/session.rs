@@ -52,7 +52,10 @@ impl WorkspaceSessions {
         sessions.save(workspace_root)?;
 
         // Create messages directory for the initial scope
-        let messages_dir = jp_dir.join("messages").join(initial_session_id.to_string());
+        let messages_dir = jp_dir
+            .join("messages")
+            .join(format!("{now}-{initial_session_id}"));
+
         fs::create_dir_all(messages_dir)
             .context("Failed to create messages directory for initial session")?;
 

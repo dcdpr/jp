@@ -7,10 +7,12 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
+    artifacts,
     context::Context,
     openrouter::{ChatMessage, Client, Role},
     reasoning,
     workspace::Workspace,
+    ThreadBuilder,
 };
 
 // Server streaming response format (compatible with OpenAI)
@@ -78,12 +80,12 @@ pub async fn http_response_stream(
         }];
 
         let request = client.request(
-            &ctx.config.llm.chat,
+            &ctx.config.llm.chat.model(),
             messages,
             true, // Stream mode
         );
 
-        let model = ctx.config.llm.chat.model().to_owned();
+        let model = ctx.config.llm.chat.model().model().to_owned();
 
         let result = request
             .stream(|_, line| {
@@ -133,7 +135,7 @@ pub async fn http_response(client: &Client, ctx: &Context, question: &str) -> Re
 
     let response = client
         .request(
-            &ctx.config.llm.chat,
+            &ctx.config.llm.chat.model(),
             messages,
             false, // No streaming
         )
@@ -149,17 +151,17 @@ pub async fn http_response(client: &Client, ctx: &Context, question: &str) -> Re
 }
 
 async fn generate_prompt(client: &Client, ctx: &Context, message: &str) -> String {
-    let messages: Vec<_> = ctx
-        .workspace
-        .iter()
-        .flat_map(Workspace::chat_history)
-        .chain(std::iter::once(ChatMessage {
-            role: Role::User,
-            content: message.to_string(),
-        }))
-        .collect();
+    let thread = ThreadBuilder::new()
+        .with_query(message)
+        .with_history(
+            ctx.workspace
+                .iter()
+                .flat_map(Workspace::chat_history)
+                .collect(),
+        )
+        .with_artifacts(artifacts::iter(ctx));
 
-    match reasoning::get(client, ctx, messages).await {
+    match reasoning::get(client, ctx, thread).await {
         Ok(Some(reasoning)) => {
             format!(
                 "{}\n\nHere is some additional context added by an AI co-worker of mine, they are an expert on this subject and should be taken seriously:\n\n{}",

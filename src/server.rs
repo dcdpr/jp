@@ -45,7 +45,7 @@ async fn handle_chat_completion(
                 id: format!("chatcmpl-{}", uuid::Uuid::new_v4()),
                 object: "chat.completion".to_string(),
                 created: chrono::Utc::now().timestamp() as u64,
-                model: state.context.config.llm.chat.model().to_owned(),
+                model: state.context.config.llm.chat.model().model().to_owned(),
                 choices: vec![ChatCompletionChoice {
                     index: 0,
                     message: ChatCompletionMessage {

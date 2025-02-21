@@ -45,8 +45,13 @@ impl Client {
         messages: Vec<ChatMessage>,
         stream: bool,
     ) -> Request {
+        let mut model = config.model().to_owned();
+        if config.web_search() {
+            model.push_str(":online");
+        }
+
         let mut request = Request {
-            model: config.model().to_owned(),
+            model,
             messages,
             stream: Some(stream),
             max_tokens: Some(config.max_tokens()),

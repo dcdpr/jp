@@ -71,11 +71,11 @@ pub async fn run(mut ctx: Context, args: &AskArgs) -> Result<()> {
     let client = Client::from_config(&ctx.config)?;
 
     if let Some(chat_prompt) = &args.chat_prompt {
-        *ctx.config.llm.chat.system_prompt_mut() = chat_prompt.clone();
+        ctx.config.llm.chat.system_prompt = chat_prompt.to_owned();
     }
 
     if let Some(reasoning_prompt) = &args.reasoning_prompt {
-        *ctx.config.llm.reasoning.system_prompt_mut() = reasoning_prompt.clone();
+        ctx.config.llm.reasoning.system_prompt = reasoning_prompt.to_owned();
     }
 
     process_question(&client, &ctx, &args.question, args.reasoning).await
