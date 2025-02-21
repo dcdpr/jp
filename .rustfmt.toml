@@ -1,0 +1,11 @@
+edition = "2021"
+style_edition = "2021"
+
+comment_width = 80
+format_code_in_doc_comments = true
+group_imports = "StdExternalCrate"
+imports_granularity = "Crate"
+normalize_comments = true
+overflow_delimited_expr = true
+reorder_imports = true
+wrap_comments = false              # See: <https://github.com/rust-lang/rustfmt/pull/5943>

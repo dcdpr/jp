@@ -1,0 +1,5 @@
+disallowed-macros = []
+disallowed-methods = []
+disallowed-types = []
+
+too-many-arguments-threshold = 10

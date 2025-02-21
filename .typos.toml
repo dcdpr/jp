@@ -1,0 +1,7 @@
+[files]
+extend-exclude = []
+
+[default]
+extend-words = [
+    { ser = "ser" },
+]

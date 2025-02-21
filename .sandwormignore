@@ -1,0 +1,7 @@
+# Ignore everything except Rust source files and documentation
+*
+!*.rs
+!docs/**/*.md
+!**/Cargo.toml
+!**/.jp.toml
+/target
