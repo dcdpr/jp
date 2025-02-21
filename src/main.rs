@@ -4,7 +4,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use exodus_trace::debug;
 use jp::{
-    cmd::{self, ask::AskArgs, canonical_path, config::ConfigArgs, serve::ServeArgs},
+    cmd::{
+        self, ask::AskArgs, canonical_path, config::ConfigArgs, serve::ServeArgs, watch::WatchArgs,
+    },
     context::Context,
     workspace::Workspace,
     Config,
@@ -30,6 +32,8 @@ enum Commands {
     Serve(ServeArgs),
     /// Manage configuration files
     Config(ConfigArgs),
+    /// Watch for changes in the workspace and act on them
+    Watch(WatchArgs),
 }
 
 #[tokio::main]
@@ -55,6 +59,9 @@ async fn main() -> Result<()> {
         }
         Commands::Config(args) => {
             cmd::config::run(ctx, args).await?;
+        }
+        Commands::Watch(args) => {
+            cmd::watch::run(ctx, args).await?;
         }
     }
 

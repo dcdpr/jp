@@ -6,6 +6,7 @@ use path_clean::PathClean as _;
 pub mod ask;
 pub mod config;
 pub mod serve;
+pub mod watch;
 
 // Custom value parser for paths
 pub fn canonical_path(s: &str) -> Result<PathBuf, clap::Error> {
