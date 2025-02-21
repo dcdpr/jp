@@ -10,6 +10,7 @@ use crate::{
     context::Context,
     openrouter::{ChatMessage, Client, Role},
     reasoning,
+    workspace::Workspace,
 };
 
 // Server streaming response format (compatible with OpenAI)
@@ -147,21 +148,31 @@ pub async fn http_response(client: &Client, ctx: &Context, question: &str) -> Re
     }
 }
 
-async fn generate_prompt(client: &Client, ctx: &Context, question: &str) -> String {
-    match reasoning::get(client, ctx, question).await {
+async fn generate_prompt(client: &Client, ctx: &Context, message: &str) -> String {
+    let messages: Vec<_> = ctx
+        .workspace
+        .iter()
+        .flat_map(Workspace::chat_history)
+        .chain(std::iter::once(ChatMessage {
+            role: Role::User,
+            content: message.to_string(),
+        }))
+        .collect();
+
+    match reasoning::get(client, ctx, messages).await {
         Ok(Some(reasoning)) => {
             format!(
                 "{}\n\nHere is some additional context added by an AI co-worker of mine, they are an expert on this subject and should be taken seriously:\n\n{}",
-                question, reasoning
+                message, reasoning.content
             )
         }
         Ok(None) => {
             warn!("Reasoning response was empty, using original question as prompt.");
-            question.to_string()
+            message.to_string()
         }
         Err(err) => {
             error!("Failed to generate reasoning: {err}, using original question as prompt.");
-            question.to_string()
+            message.to_string()
         }
     }
 }

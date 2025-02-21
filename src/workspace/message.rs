@@ -89,7 +89,7 @@ impl Message {
         }
 
         // Sort messages by creation time
-        messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        messages.sort_by_key(|msg| msg.created_at);
 
         Ok(messages)
     }

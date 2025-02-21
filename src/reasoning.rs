@@ -1,40 +1,68 @@
+use std::future::{Future, Ready};
+
 use anyhow::Result;
-use exodus_trace::{debug, info};
 
 use crate::{
     context::Context,
-    openrouter::{ChatMessage, Client, Role},
+    openrouter::{ChatMessage, Client, Role, StreamDelta},
 };
 
-pub async fn get(client: &Client, ctx: &Context, question: &str) -> Result<Option<String>> {
-    info!("Generating reasoning for: {}", question);
+type NoopHandler = fn(usize, StreamDelta) -> Ready<Result<()>>;
 
-    let messages = vec![
-        ChatMessage {
-            role: Role::System,
-            content: "You are a helpful AI assistant. Process each request thoughtfully and methodically.".to_string(),
-        },
-        ChatMessage {
-            role: Role::User,
-            content: question.to_string(),
-        },
-    ];
+pub async fn get_with_handler<F, Fut>(
+    client: &Client,
+    ctx: &Context,
+    // TODO: Take &mut [ChatMessage], and move "add history as messages" logic
+    // to a separate function.
+    mut messages: Vec<ChatMessage>,
+    handler: Option<F>,
+) -> Result<Option<ChatMessage>>
+where
+    F: FnMut(usize, StreamDelta) -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    // Insert reasoning system message at the beginning of the conversation.
+    messages.insert(0, ChatMessage {
+        role: Role::System,
+        content: ctx.config.llm.reasoning.system_prompt().to_string(),
+    });
 
     let request = client.request(
         &ctx.config.llm.reasoning,
-        messages,
-        false, // No streaming for reasoning generation
+        messages.clone(),
+        handler.is_some(),
     );
 
-    debug!(
-        "Sending request to reasoning model: {}",
-        &ctx.config.llm.reasoning.model()
-    );
-
-    request.send().await.map(|response| {
-        response
+    let content = if let Some(handler) = handler {
+        request
+            .stream(handler)
+            .await?
+            .into_iter()
+            .filter_map(|delta| delta.reasoning)
+            .collect::<Vec<_>>()
+            .join("")
+    } else {
+        request
+            .send()
+            .await?
             .choices
-            .first()
-            .map(|choice| choice.message.content.clone())
-    })
+            .into_iter()
+            .filter_map(|choice| choice.message.reasoning)
+            .collect::<Vec<_>>()
+            .join("")
+    };
+
+    Ok((!content.is_empty()).then_some(ChatMessage {
+        role: Role::Assistant,
+        content,
+    }))
+}
+
+// Add this function to handle the non-handler case
+pub async fn get(
+    client: &Client,
+    ctx: &Context,
+    messages: Vec<ChatMessage>,
+) -> Result<Option<ChatMessage>> {
+    get_with_handler::<NoopHandler, Ready<Result<()>>>(client, ctx, messages, None).await
 }

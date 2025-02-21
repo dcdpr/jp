@@ -11,7 +11,10 @@ use exodus_trace::info;
 use session::Session;
 use uuid::Uuid;
 
-use crate::{Message, WorkspaceSessions};
+use crate::{
+    openrouter::{ChatMessage, Role},
+    Message, WorkspaceSessions,
+};
 
 pub const WORKSPACE_DIR: &str = ".jp";
 pub const WORKSPACE_CONFIG: &str = ".jp.toml";
@@ -41,6 +44,21 @@ impl Workspace {
             active_session: active_id,
             sessions,
             messages,
+        })
+    }
+
+    pub fn chat_history(&self) -> impl Iterator<Item = ChatMessage> {
+        self.messages.clone().into_iter().flat_map(|msg| {
+            vec![
+                ChatMessage {
+                    role: Role::User,
+                    content: msg.query.clone(),
+                },
+                ChatMessage {
+                    role: Role::Assistant,
+                    content: msg.response.clone(),
+                },
+            ]
         })
     }
 }

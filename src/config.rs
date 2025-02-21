@@ -20,11 +20,54 @@ const DEFAULT_OPENROUTER_APP_NAME: &str = "JP";
 const DEFAULT_CHAT_MODEL: &str = "anthropic/claude-3.5-sonnet";
 const DEFAULT_CHAT_MAX_TOKENS: u32 = 8192;
 const DEFAULT_CHAT_TEMPERATURE: f64 = 0.0;
+const DEFAULT_CHAT_SYSTEM_PROMPT: &str = "
+You are an AI programming assistant named \"Jean-Pierre\".
+
+Your core tasks include:
+- Answering general programming questions.
+- Explaining how the code works.
+- Reviewing the discussed code.
+- Generating unit tests for the selected code.
+- Proposing fixes for problems in the selected code.
+- Scaffolding code for a new workspace.
+- Finding relevant code to the user's query.
+- Proposing fixes for test failures.
+- Answering questions about programming concepts.
+
+You must:
+- Follow the user's requirements carefully and to the letter.
+- Keep your answers short and impersonal, especially if the user responds with context outside of your tasks.
+- Minimize other prose.
+- Use Markdown formatting in your answers.
+- Include the programming language name at the start of the Markdown code blocks.
+- Avoid including line numbers in code blocks.
+- Avoid wrapping the whole response in triple backticks.
+- Only return code that's relevant to the task at hand. You may not need to return all of the code that the user has shared.
+- Use actual line breaks instead of '\n' in your response to begin new lines.
+- Use '\n' only when you want a literal backslash followed by a character 'n'.
+
+When given a task:
+1. Think step-by-step and describe your plan for what to build in pseudocode, written out in great detail, unless asked not to do so.
+2. Output the code in a single code block, being careful to only return relevant code.
+3. You should always generate short suggestions for the next user message that are relevant to the conversation.
+4. You can only give one reply for each conversation message.
+";
+
+// You are a helpful expert software engineer. \
+// You have been tasked with solving a software challenge with your team. \
+// Your colleagues have provided you with a question, and a brainstorming session. \
+// Answer the question thoughtfully, taking into account the results of the brainstorming session. \
 
 const DEFAULT_REASONING_MODEL: &str = "deepseek/deepseek-r1";
 const DEFAULT_REASONING_MAX_TOKENS: u32 = 8192;
 const DEFAULT_REASONING_TEMPERATURE: f64 = 0.6;
 const DEFAULT_REASONING_STOP_WORD: &str = "</think>";
+const DEFAULT_REASONING_SYSTEM_PROMPT: &str = "\
+You are a helpful expert software engineer. \
+Your colleague has asked you to reason about a software challenge. \
+Your response will inform their final decision making. \
+Process each request thoughtfully and methodically.\
+";
 
 // File paths and environment variables
 const PROJECT_CONFIG_FILENAME: &str = ".jp.toml";
@@ -116,6 +159,12 @@ struct ModelConfigFile {
     /// For `deepseek/deepseek-r1`, the stop word is `</think>`.
     #[serde(skip_serializing_if = "Option::is_none")]
     stop_word: Option<Option<String>>,
+
+    /// System prompt to use with this model.
+    ///
+    /// If not specified, a default system prompt will be used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system_prompt: Option<String>,
 }
 
 // Runtime configuration - fully resolved values
@@ -152,12 +201,14 @@ pub enum ModelConfig {
         max_tokens: u32,
         temperature: f64,
         model: String,
+        system_prompt: String,
     },
     Reasoning {
         max_tokens: u32,
         temperature: f64,
         model: String,
         stop_word: Option<String>,
+        system_prompt: String,
     },
 }
 
@@ -194,11 +245,26 @@ impl ModelConfig {
         }
     }
 
+    pub fn system_prompt(&self) -> &str {
+        match self {
+            Self::Chat { system_prompt, .. } => system_prompt,
+            Self::Reasoning { system_prompt, .. } => system_prompt,
+        }
+    }
+
+    pub fn system_prompt_mut(&mut self) -> &mut String {
+        match self {
+            Self::Chat { system_prompt, .. } => system_prompt,
+            Self::Reasoning { system_prompt, .. } => system_prompt,
+        }
+    }
+
     fn default_chat() -> Self {
         Self::Chat {
             max_tokens: DEFAULT_CHAT_MAX_TOKENS,
             temperature: DEFAULT_CHAT_TEMPERATURE,
             model: DEFAULT_CHAT_MODEL.to_string(),
+            system_prompt: DEFAULT_CHAT_SYSTEM_PROMPT.to_string(),
         }
     }
 
@@ -208,6 +274,7 @@ impl ModelConfig {
             temperature: DEFAULT_REASONING_TEMPERATURE,
             model: DEFAULT_REASONING_MODEL.to_string(),
             stop_word: Some(DEFAULT_REASONING_STOP_WORD.to_string()),
+            system_prompt: DEFAULT_REASONING_SYSTEM_PROMPT.to_string(),
         }
     }
 }
@@ -335,7 +402,8 @@ impl ConfigFile {
                         max_tokens,
                         temperature,
                         model,
-                    } => (max_tokens, temperature, model),
+                        system_prompt,
+                    } => (max_tokens, temperature, model, system_prompt),
                     _ => unreachable!(), // Default is always Chat
                 };
 
@@ -349,12 +417,16 @@ impl ConfigFile {
                 if let Some(model) = chat_file.model {
                     chat_config.2 = model;
                 }
+                if let Some(model) = chat_file.system_prompt {
+                    chat_config.3 = model;
+                }
 
                 // Update config
                 config.llm.chat = ModelConfig::Chat {
                     max_tokens: chat_config.0,
                     temperature: chat_config.1,
                     model: chat_config.2,
+                    system_prompt: chat_config.3,
                 };
             }
 
@@ -367,7 +439,14 @@ impl ConfigFile {
                         temperature,
                         model,
                         stop_word,
-                    } => (*max_tokens, *temperature, model.clone(), stop_word.clone()),
+                        system_prompt,
+                    } => (
+                        *max_tokens,
+                        *temperature,
+                        model.clone(),
+                        stop_word.clone(),
+                        system_prompt.clone(),
+                    ),
                     _ => unreachable!(), // Default is always Reasoning
                 };
 
@@ -384,6 +463,9 @@ impl ConfigFile {
                 if let Some(stop_word) = reasoning_file.stop_word {
                     reasoning_config.3 = stop_word; // Option<Option<String>> -> Option<String>
                 }
+                if let Some(system_prompt) = reasoning_file.system_prompt {
+                    reasoning_config.4 = system_prompt;
+                }
 
                 // Update config
                 config.llm.reasoning = ModelConfig::Reasoning {
@@ -391,6 +473,7 @@ impl ConfigFile {
                     temperature: reasoning_config.1,
                     model: reasoning_config.2,
                     stop_word: reasoning_config.3,
+                    system_prompt: reasoning_config.4,
                 };
             }
         }
@@ -544,12 +627,14 @@ impl From<&Config> for ConfigFile {
                     max_tokens: Some(config.llm.chat.max_tokens()),
                     temperature: Some(config.llm.chat.temperature()),
                     stop_word: None,
+                    system_prompt: Some(config.llm.chat.system_prompt().to_owned()),
                 }),
                 reasoning: Some(ModelConfigFile {
                     model: Some(config.llm.reasoning.model().to_owned()),
                     max_tokens: Some(config.llm.reasoning.max_tokens()),
                     temperature: Some(config.llm.reasoning.temperature()),
                     stop_word: Some(config.llm.reasoning.stop_word().map(|s| s.to_owned())),
+                    system_prompt: Some(config.llm.reasoning.system_prompt().to_owned()),
                 }),
             }),
         }
@@ -592,6 +677,7 @@ impl ModelConfigFile {
             temperature: other.temperature.or(self.temperature),
             model: other.model.or(self.model),
             stop_word: other.stop_word.or(self.stop_word),
+            system_prompt: other.system_prompt.or(self.system_prompt),
         }
     }
 }
