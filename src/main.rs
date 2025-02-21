@@ -1,24 +1,22 @@
-mod ask;
-mod chat;
-mod config;
-mod openrouter;
-mod reasoning;
-mod server;
+use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
-use log::info;
-use openrouter::Client;
-use std::env;
-use std::sync::Arc;
+use exodus_trace::debug;
+use jp::{
+    cmd::{self, ask::AskArgs, canonical_path, config::ConfigArgs, serve::ServeArgs},
+    context::Context,
+    workspace::Workspace,
+    Config,
+};
 
 // CLI command structure
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// Optional path to config file (defaults to ./clauder.toml)
-    #[arg(short, long)]
-    config: Option<String>,
+    /// Optional path to config file
+    #[arg(short, long, value_parser = canonical_path)]
+    config: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
@@ -27,57 +25,36 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Ask a question and get a response
-    Ask {
-        /// The question to ask
-        #[arg(required = true)]
-        question: String,
-    },
+    Ask(AskArgs),
     /// Start a server for API access
-    Serve {
-        /// Port to listen on (overrides config file)
-        #[arg(short, long)]
-        port: Option<u16>,
-    },
-    /// Generate a default config file
-    Init {
-        /// Path where to save the config file
-        #[arg(default_value = "./clauder.toml")]
-        path: String,
-    },
+    Serve(ServeArgs),
+    /// Manage configuration files
+    Config(ConfigArgs),
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
-    env_logger::init();
+    let _guard = exodus_trace::init(None);
 
-    // Load environment variables
     dotenv::dotenv().ok();
-
-    // Parse CLI arguments
     let cli = Cli::parse();
 
-    // Load config
-    let mut config = config::Config::load(cli.config.as_deref())?;
+    let config = Config::load(cli.config.as_deref())?;
+    let workspace = Workspace::load()
+        .inspect_err(|err| debug!("Could not find workspace, using non-workspace workflow: {err}"))
+        .ok();
 
-    match cli.command {
-        Commands::Ask { question } => {
-            info!("Ask command invoked.");
-            let client = Client::from_config(&config)?;
-            ask::process_question(&client, &config, &question).await?;
-        }
-        Commands::Serve { port } => {
-            if let Some(port) = port {
-                config.server.port = port;
-            }
+    let ctx = Context { config, workspace };
 
-            info!("Starting server on port {}", config.server.port);
-            server::start_server(config.into()).await?;
+    match &cli.command {
+        Commands::Ask(args) => {
+            cmd::ask::run(ctx, args).await?;
         }
-        Commands::Init { path } => {
-            info!("Generating default config file at {}", path);
-            config::generate_default_config(&path)?;
-            println!("Config file generated successfully at {}", path);
+        Commands::Serve(args) => {
+            cmd::serve::run(ctx, args).await?;
+        }
+        Commands::Config(args) => {
+            cmd::config::run(ctx, args).await?;
         }
     }
 

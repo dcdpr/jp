@@ -1,43 +1,16 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use axum::response::sse::Event;
-use log::{error, info, warn};
-use std::io::Write;
+use exodus_trace::{error, warn};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::config::Config;
-use crate::openrouter::{ChatMessage, Client, Role};
-use crate::reasoning;
-
-// Stream responses to stdout in CLI mode
-pub async fn stdout(client: &Client, config: &Config, question: &str) -> Result<()> {
-    let messages = vec![ChatMessage {
-        role: Role::User,
-        content: question.to_owned(),
-    }];
-
-    let request = client.request(
-        &config.llm.chat,
-        messages,
-        true, // Stream mode
-    );
-
-    info!(
-        "Sending streaming request to chat model: {}",
-        config.llm.chat.model()
-    );
-
-    println!();
-
-    request
-        .stream(|line| async move {
-            print!("{}", line);
-            std::io::stdout().flush()?;
-
-            Ok(())
-        })
-        .await
-}
+use crate::{
+    context::Context,
+    openrouter::{ChatMessage, Client, Role},
+    reasoning,
+};
 
 // Server streaming response format (compatible with OpenAI)
 #[derive(Debug, serde::Serialize)]
@@ -87,16 +60,16 @@ pub struct ChatCompletionMessage {
 // Get streaming response for server mode
 pub async fn http_response_stream(
     client: &Client,
-    config: &Config,
+    ctx: Arc<Context>,
     question: &str,
 ) -> Result<impl futures_util::Stream<Item = Result<Event, axum::Error>>> {
     let (tx, rx) = mpsc::channel(100);
-    let config = config.clone();
+    let ctx = ctx.clone();
     let question = question.to_string();
     let client = client.clone();
 
     tokio::spawn(async move {
-        let content = generate_prompt(&client, &config, &question).await;
+        let content = generate_prompt(&client, &ctx, &question).await;
 
         let messages = vec![ChatMessage {
             role: Role::User,
@@ -104,15 +77,15 @@ pub async fn http_response_stream(
         }];
 
         let request = client.request(
-            &config.llm.chat,
+            &ctx.config.llm.chat,
             messages,
             true, // Stream mode
         );
 
-        let model = config.llm.chat.model().to_owned();
+        let model = ctx.config.llm.chat.model().to_owned();
 
         let result = request
-            .stream(|line| {
+            .stream(|_, line| {
                 let model = model.clone();
                 let tx = tx.clone();
                 async move {
@@ -125,7 +98,7 @@ pub async fn http_response_stream(
                         choices: vec![ChatCompletionChunkChoice {
                             index: 0,
                             delta: ChatCompletionChunkDelta {
-                                content: Some(line),
+                                content: line.content,
                             },
                             finish_reason: None,
                         }],
@@ -150,8 +123,8 @@ pub async fn http_response_stream(
 }
 
 // Non-streaming completion
-pub async fn http_response(client: &Client, config: &Config, question: &str) -> Result<String> {
-    let content = generate_prompt(client, config, question).await;
+pub async fn http_response(client: &Client, ctx: &Context, question: &str) -> Result<String> {
+    let content = generate_prompt(client, ctx, question).await;
     let messages = vec![ChatMessage {
         role: Role::User,
         content,
@@ -159,7 +132,7 @@ pub async fn http_response(client: &Client, config: &Config, question: &str) -> 
 
     let response = client
         .request(
-            &config.llm.chat,
+            &ctx.config.llm.chat,
             messages,
             false, // No streaming
         )
@@ -174,8 +147,8 @@ pub async fn http_response(client: &Client, config: &Config, question: &str) -> 
     }
 }
 
-async fn generate_prompt(client: &Client, config: &Config, question: &str) -> String {
-    match reasoning::get(client, config, question).await {
+async fn generate_prompt(client: &Client, ctx: &Context, question: &str) -> String {
+    match reasoning::get(client, ctx, question).await {
         Ok(Some(reasoning)) => {
             format!(
                 "{}\n\nHere is some additional context added by an AI co-worker of mine, they are an expert on this subject and should be taken seriously:\n\n{}",

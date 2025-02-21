@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use axum::{
     extract::State,
@@ -8,22 +10,20 @@ use axum::{
     routing::post,
     Json, Router,
 };
-use log::info;
-use std::sync::Arc;
+use exodus_trace::{error, info};
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::config::Config;
-use crate::openrouter::Request;
 use crate::{
     chat::{ChatCompletionChoice, ChatCompletionMessage, ChatCompletionResponse},
-    openrouter::Client,
+    context::Context,
+    openrouter::{Client, Request},
 };
 
 // Server state
 #[derive(Clone)]
 pub struct AppState {
     pub client: Client,
-    pub config: Arc<Config>,
+    pub context: Arc<Context>,
 }
 
 #[axum::debug_handler]
@@ -38,14 +38,14 @@ async fn handle_chat_completion(
         return Err(axum::http::StatusCode::BAD_REQUEST);
     };
 
-    match crate::chat::http_response(&state.client, &state.config, question).await {
+    match crate::chat::http_response(&state.client, &state.context, question).await {
         Ok(content) => {
             // Return OpenAI-compatible response
             let response = ChatCompletionResponse {
                 id: format!("chatcmpl-{}", uuid::Uuid::new_v4()),
                 object: "chat.completion".to_string(),
                 created: chrono::Utc::now().timestamp() as u64,
-                model: state.config.llm.chat.model().to_owned(),
+                model: state.context.config.llm.chat.model().to_owned(),
                 choices: vec![ChatCompletionChoice {
                     index: 0,
                     message: ChatCompletionMessage {
@@ -58,8 +58,7 @@ async fn handle_chat_completion(
             Ok(Json(response))
         }
         Err(e) => {
-            // Log the actual error but return a generic error code
-            log::error!("Error processing completion request: {}", e);
+            error!("Error processing completion request: {}", e);
             Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
@@ -79,25 +78,28 @@ async fn handle_chat_completion_stream(
     };
 
     // Get streaming response
-    match crate::chat::http_response_stream(&state.client, &state.config, &question).await {
-        Ok(stream) => Ok(Sse::new(stream).keep_alive(
+    if let Ok(stream) =
+        crate::chat::http_response_stream(&state.client, state.context, &question).await
+    {
+        Ok(Sse::new(stream).keep_alive(
             axum::response::sse::KeepAlive::new()
                 .interval(std::time::Duration::from_secs(15))
                 .text("keep-alive"),
-        )),
-        Err(_) => Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
+        ))
+    } else {
+        Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR)
     }
 }
 
-pub async fn start_server(config: Arc<Config>) -> Result<()> {
-    let port = config.server.port;
-    let address = config.server.address.clone();
+pub async fn start_server(ctx: Arc<Context>) -> Result<()> {
+    let port = ctx.config.server.port;
+    let address = ctx.config.server.address.clone();
 
     info!("Starting server on {}:{}", address, port);
 
     let app_state = AppState {
-        client: Client::from_config(&config)?,
-        config: config.clone(),
+        client: Client::from_config(&ctx.config)?,
+        context: ctx,
     };
 
     // Create CORS middleware

@@ -1,11 +1,10 @@
-use core::fmt;
 use std::{collections::HashMap, future::Future};
 
 use anyhow::{Context, Result};
+use exodus_trace::{debug, error};
 use futures_util::StreamExt;
-use log::{debug, error};
 use reqwest::header::HeaderMap;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::config::{Config, ModelConfig};
 
@@ -156,9 +155,9 @@ impl Request {
         Ok(parsed_response)
     }
 
-    pub async fn stream<F, Fut>(&self, mut message_handler: F) -> Result<()>
+    pub async fn stream<F, Fut>(&self, mut message_handler: F) -> Result<Vec<StreamDelta>>
     where
-        F: FnMut(String) -> Fut,
+        F: FnMut(usize, StreamDelta) -> Fut,
         Fut: Future<Output = Result<()>>,
     {
         let response = self
@@ -172,20 +171,22 @@ impl Request {
 
         // Check for non-success status
         if !response.status().is_success() {
-            // TODO: Use a custom error type
             error!("Chat API returned error status: {}", response.status());
-            return Ok(());
+            return Ok(vec![]);
         }
 
         let mut stream = response.bytes_stream();
         let mut received_data = false;
+        let mut deltas = vec![];
 
         // Process the stream with error handling
+        let mut index = 0;
         while let Some(chunk_result) = stream.next().await {
             match chunk_result {
                 Ok(chunk) => {
                     // Convert chunk to string and split into SSE messages
                     let chunk_str = String::from_utf8_lossy(&chunk);
+
                     for line in chunk_str.lines() {
                         if !line.starts_with("data: ") {
                             continue;
@@ -202,12 +203,13 @@ impl Request {
                         // Parse the message with error handling
                         match serde_json::from_str::<StreamResponse>(data) {
                             Ok(response) => {
-                                if let Some(content) = response
-                                    .choices
-                                    .first()
-                                    .and_then(|choice| choice.delta.content.as_ref())
-                                {
-                                    message_handler(content.to_owned()).await?;
+                                for choice in &response.choices {
+                                    let delta = choice.delta.clone();
+                                    if delta.content.is_some() || delta.reasoning.is_some() {
+                                        message_handler(index, delta.clone()).await?;
+                                        deltas.push(delta);
+                                        index += 1;
+                                    }
                                 }
                             }
                             Err(e) => {
@@ -232,7 +234,7 @@ impl Request {
             error!("No data received from stream");
         }
 
-        Ok(())
+        Ok(deltas)
     }
 }
 
@@ -252,7 +254,6 @@ pub enum Role {
 
 #[derive(Debug, Deserialize)]
 pub struct Response {
-    #[expect(dead_code)]
     pub id: String,
     pub choices: Vec<Choice>,
     #[serde(flatten)]
@@ -262,7 +263,6 @@ pub struct Response {
 #[derive(Debug, Deserialize)]
 pub struct Choice {
     pub message: Message,
-    #[expect(dead_code)]
     #[serde(default)]
     pub finish_reason: Option<String>,
     #[serde(flatten)]
@@ -271,10 +271,10 @@ pub struct Choice {
 
 #[derive(Debug, Deserialize)]
 pub struct Message {
+    #[serde(deserialize_with = "null_as_empty_string")]
+    // Can be null if we only ask for the reasoning.
     pub content: String,
-    #[expect(dead_code)]
     pub role: Role,
-    #[expect(dead_code)]
     pub reasoning: Option<String>,
     #[serde(flatten)]
     pub _extra: serde_json::Value,
@@ -293,7 +293,16 @@ pub struct StreamChoice {
     pub finish_reason: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct StreamDelta {
     pub content: Option<String>,
+    pub reasoning: Option<String>,
+}
+
+fn null_as_empty_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
 }
