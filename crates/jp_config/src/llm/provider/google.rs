@@ -1,0 +1,23 @@
+use confique::Config as Confique;
+
+use crate::error::Result;
+
+/// Google API configuration.
+#[derive(Debug, Clone, Confique)]
+pub struct Config {
+    /// Environment variable that contains the API key.
+    #[config(default = "GEMINI_API_KEY", env = "JP_LLM_PROVIDER_GOOGLE_API_KEY_ENV")]
+    pub api_key_env: String,
+}
+
+impl Config {
+    /// Set a configuration value using a stringified key/value pair.
+    pub fn set(&mut self, key: &str, value: impl Into<String>) -> Result<()> {
+        match key {
+            "api_key_env" => self.api_key_env = value.into(),
+            _ => return crate::set_error(key),
+        }
+
+        Ok(())
+    }
+}
