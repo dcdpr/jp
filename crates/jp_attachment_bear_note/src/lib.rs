@@ -1,13 +1,14 @@
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
+    rc::Rc,
 };
 
 use directories::BaseDirs;
 use jp_attachment::{
     distributed_slice, linkme, typetag, Attachment, BoxedHandler, Handler, HANDLERS,
 };
-use rusqlite::{params, Connection, OptionalExtension as _};
+use rusqlite::{params, types::Value, Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
 use url::Url;
@@ -31,22 +32,30 @@ pub struct BearNotes(BTreeSet<Query>);
 
 impl BearNotes {
     fn query_to_uri(&self, query: &Query) -> Result<Url, Box<dyn std::error::Error>> {
-        let (host, path) = match query {
-            Query::Get(path) => ("get", path),
-            Query::Tagged(path) => ("tagged", path),
-            Query::Search(path) => ("search", path),
+        let (host, path, query_pairs) = match query {
+            Query::Get(path) => ("get", path, vec![]),
+            Query::Search { query, tags } => (
+                "search",
+                query,
+                tags.clone()
+                    .iter()
+                    .map(|t| ("tag".to_owned(), t.to_owned()))
+                    .collect::<Vec<_>>(),
+            ),
         };
 
-        let path =
-            percent_encoding::percent_encode(path.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
-                .to_string();
+        let query_pairs = query_pairs
+            .iter()
+            .map(|(k, v)| format!("{k}={}", percent_encode_str(v)))
+            .collect::<Vec<_>>()
+            .join("&");
 
-        Ok(Url::parse(&format!(
-            "{}://{}/{}",
-            self.scheme(),
-            host,
-            path
-        ))?)
+        let mut uri = format!("{}://{}/{}", self.scheme(), host, percent_encode_str(path));
+        if !query_pairs.is_empty() {
+            uri.push_str(&format!("?{query_pairs}"));
+        }
+
+        Ok(Url::parse(&uri)?)
     }
 }
 
@@ -61,11 +70,8 @@ enum Query {
     /// Get a note by its unique identifier.
     Get(String),
 
-    /// Get all notes tagged with a specific tag.
-    Tagged(String),
-
-    /// Search for a note by its title or content.
-    Search(String),
+    /// Search for a note by its title or content, optionally filtering by tags.
+    Search { query: String, tags: Vec<String> },
 }
 
 /// A note from the Bear note-taking app.
@@ -133,16 +139,38 @@ impl Handler for BearNotes {
     }
 }
 
+/// Decodes a percent-encoded query parameter value, handling potential UTF-8
+/// errors.
+fn percent_decode_str(encoded: &str) -> Result<String, Box<dyn std::error::Error>> {
+    percent_encoding::percent_decode_str(encoded)
+        .decode_utf8()
+        .map(|s| s.to_string())
+        .map_err(Into::into)
+}
+
+fn percent_encode_str(encoded: &str) -> String {
+    percent_encoding::percent_encode(encoded.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
+        .to_string()
+}
+
 fn uri_to_query(uri: &Url) -> Result<Query, Box<dyn std::error::Error>> {
     let path = uri.path().trim_start_matches('/');
-    let path = percent_encoding::percent_decode_str(path)
-        .decode_utf8()?
-        .to_string();
+    let path = percent_decode_str(path)?;
+    let query_pairs = uri
+        .query_pairs()
+        .map(|(k, v)| percent_decode_str(&v).map(|v| (k.to_string(), v)))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let query = match uri.host_str() {
         Some("get") => Query::Get(path),
-        Some("tagged") => Query::Tagged(path),
-        Some("search") => Query::Search(path),
+        Some("search") => {
+            let tags = query_pairs
+                .into_iter()
+                .filter_map(|(k, v)| if k == "tag" { Some(v) } else { None })
+                .collect();
+
+            Query::Search { query: path, tags }
+        }
         _ => return Err("Invalid bear note query".into()),
     };
 
@@ -154,31 +182,45 @@ fn get_notes(query: &Query) -> Result<Vec<Note>, Box<dyn std::error::Error>> {
     let db = get_database_path()?;
     trace!(db = %db.display(), "Connecting to Bear database.");
     let conn = Connection::open(db)?;
+    rusqlite::vtab::array::load_module(&conn)?;
 
     let mut notes = Vec::new();
 
     let ids = match query {
         Query::Get(id) => vec![id.to_owned()],
-        Query::Tagged(tag) => {
-            let mut stmt = conn.prepare(
-                "SELECT N.ZUNIQUEIDENTIFIER
-                FROM ZSFNOTE N
-                JOIN Z_5TAGS NT ON N.Z_PK = NT.Z_5NOTES
-                JOIN ZSFNOTETAG T ON NT.Z_13TAGS = T.Z_PK
-                WHERE T.ZTITLE = ?1 AND N.ZTRASHED = 0 AND N.ZENCRYPTED = 0",
-            )?;
-            stmt.query_map(params![tag], |row| row.get(0))?
-                .collect::<Result<Vec<String>, _>>()?
-        }
-        Query::Search(query) => {
+        Query::Search { query, tags } => {
             let pat = format!("%{query}%");
-            let mut stmt = conn.prepare(
-                "SELECT ZUNIQUEIDENTIFIER FROM ZSFNOTE
-                 WHERE (ZTITLE LIKE ?1 OR ZTEXT LIKE ?1) AND ZTRASHED = 0 AND ZENCRYPTED = 0",
-            )?;
 
-            stmt.query_map(params![pat], |row| row.get(0))?
-                .collect::<Result<Vec<String>, _>>()?
+            let sql = if tags.is_empty() {
+                "SELECT ZUNIQUEIDENTIFIER FROM ZSFNOTE N
+                  WHERE (N.ZTITLE LIKE ?1 OR N.ZTEXT LIKE ?1)
+                    AND N.ZTRASHED = 0 AND N.ZENCRYPTED = 0"
+            } else {
+                "SELECT N.ZUNIQUEIDENTIFIER
+                  FROM ZSFNOTE N
+                  JOIN Z_5TAGS NT ON N.Z_PK = NT.Z_5NOTES
+                  JOIN ZSFNOTETAG T ON NT.Z_13TAGS = T.Z_PK
+                  WHERE (N.ZTITLE LIKE ?1 OR N.ZTEXT LIKE ?1)
+                    AND T.ZTITLE IN rarray(?2)
+                    AND N.ZTRASHED = 0 AND N.ZENCRYPTED = 0
+                  GROUP BY N.ZUNIQUEIDENTIFIER"
+            };
+
+            let mut stmt = conn.prepare(sql)?;
+
+            if tags.is_empty() {
+                stmt.query_map(params![pat], |row| row.get(0))?
+                    .collect::<Result<Vec<String>, _>>()?
+            } else {
+                let values = Rc::new(
+                    tags.iter()
+                        .cloned()
+                        .map(Value::from)
+                        .collect::<Vec<Value>>(),
+                );
+                stmt.query_map(params![pat, values], |row| row.get(0))?
+                    .collect::<Result<Vec<String>, _>>()?
+            }
         }
     };
 

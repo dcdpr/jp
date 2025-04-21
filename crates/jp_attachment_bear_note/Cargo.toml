@@ -17,7 +17,7 @@ jp_attachment = { workspace = true }
 directories = { workspace = true }
 percent-encoding = { workspace = true }
 quick-xml = { workspace = true }
-rusqlite = { workspace = true }
+rusqlite = { workspace = true, features = ["array", "vtab"] }
 serde = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }

@@ -4,25 +4,44 @@ An attachment handler for the [Bear Note](https://bear.app/) note-taking app
 (macOS only).
 
 It allows retrieving the full content of a single note, or a list of notes based
-on a search query or tag.
+on a search query, optionally filtered by tags.
 
 ## Usage
 
-The handler supports fetching notes based on three different queries:
-
-- `bear://get/<note-id>`: Fetches a single note by its unique identifier.
-- `bear://search/<query>`: Fetches a list of notes matching a search query.
-- `bear://tagged/<tag>`: Fetches a list of notes tagged with a specific tag.
+Fetch a single note by its unique identifier:
 
 ```sh
 # You can copy the note ID using <kbd>⌥⇧⌘I</kbd>
-jp attachment add bear://get/<note-id>
+jp attachment add "bear://get/2356A6D7-49D7-4818-8E37-3E02D1B95146"
 ```
 
-```sh
-jp attachment add bear://search/my%20query
-```
+Fetch a list of notes based on a search query:
 
 ```sh
-jp attachment add bear://tagged/my/tag
+# path and query is URL-encoded
+jp attachment add "bear://search/my query"
+```
+
+Fetch a list of notes based on a search query, filtered by tags:
+
+```sh
+jp attachment add "bear://search/my query?tag=foo&tag=bar"
+```
+
+Fetch a list of notes tagged with a specific tag:
+
+```sh
+jp attachment add "bear://search/?tag=project/my-project"
+```
+
+List all added URIs:
+
+```sh
+jp attachment ls
+
+Attachments:
+  bear://get/2356A6D7%2D49D7%2D4818%2D8E37%2D3E02D1B95146
+  bear://search/?tag=project%2Fmy%2Dproject
+  bear://search/my%20query
+  bear://search/my%20query?tag=foo&tag=bar
 ```
