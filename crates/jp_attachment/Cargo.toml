@@ -1,0 +1,23 @@
+[package]
+name = "jp_attachment"
+authors.workspace = true
+description.workspace = true
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+license-file.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+[dependencies]
+dyn-clone = { workspace = true }
+dyn-hash = { workspace = true }
+linkme = { workspace = true }
+serde = { workspace = true }
+typetag = { workspace = true }
+url = { workspace = true }
+
+[lints]
+workspace = true

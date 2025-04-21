@@ -1,0 +1,26 @@
+[package]
+name = "jp_attachment_file_content"
+authors.workspace = true
+description.workspace = true
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+license-file.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+[dependencies]
+jp_attachment = { workspace = true }
+
+glob = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
