@@ -83,7 +83,6 @@ impl Handler for FileContent {
         }
 
         let mut paths = BTreeSet::new();
-
         for full_path in files_in_dir(cwd)? {
             let Ok(mut path) = full_path.strip_prefix(cwd).map(PathBuf::from) else {
                 warn!(
@@ -99,30 +98,36 @@ impl Handler for FileContent {
                 path = PathBuf::from("/").join(path);
             }
 
-            let included = self
-                .includes
-                .iter()
-                .any(|include| include.matches_path(&path));
-
-            // Skip if not included.
-            if !included {
-                continue;
-            }
+            let opts = glob::MatchOptions {
+                case_sensitive: false,
+                require_literal_separator: true,
+                require_literal_leading_dot: true,
+            };
 
             let excluded = self
                 .excludes
                 .iter()
-                .any(|exclude| exclude.matches_path(&path));
+                .any(|exclude| exclude.matches_path_with(&path, opts));
 
             // Skip if excluded.
             if excluded {
                 continue;
             }
 
+            let included = self
+                .includes
+                .iter()
+                .any(|include| include.matches_path_with(&path, opts));
+
+            // Skip if not included.
+            if !included {
+                continue;
+            }
+
             paths.insert(full_path);
         }
 
-        let mut attachmnts = Vec::new();
+        let mut attachments = Vec::new();
         for path in paths {
             let Ok(content) = fs::read_to_string(&path) else {
                 continue;
@@ -131,13 +136,13 @@ impl Handler for FileContent {
                 continue;
             };
 
-            attachmnts.push(Attachment {
+            attachments.push(Attachment {
                 source: path.to_string_lossy().to_string(),
                 content,
             });
         }
 
-        Ok(attachmnts)
+        Ok(attachments)
     }
 }
 
