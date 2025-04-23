@@ -1,0 +1,10 @@
+when:
+  path: /api/v1/chat/completions
+  method: POST
+  body: '{"model":"anthropic/claude-3-haiku","messages":[{"role":"user","content":[{"type":"text","text":"Hello, world!"}]}]}'
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/json
+  body: "\n         \n\n         \n{\"id\":\"gen-1745228394-JVwICJulYb3JF3JPgMLr\",\"provider\":\"Anthropic\",\"model\":\"anthropic/claude-3-haiku\",\"object\":\"chat.completion\",\"created\":1745228394,\"choices\":[{\"logprobs\":null,\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Hello! I'm an AI assistant created by Anthropic. I'm here to help with a variety of tasks. How can I assist you today?\",\"refusal\":null,\"reasoning\":null}}],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":36,\"total_tokens\":47}}"
