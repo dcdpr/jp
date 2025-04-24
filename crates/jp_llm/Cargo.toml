@@ -1,0 +1,31 @@
+[package]
+name = "jp_llm"
+
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+jp_config = { workspace = true }
+jp_conversation = { workspace = true }
+jp_mcp = { workspace = true }
+jp_openrouter = { workspace = true }
+
+async-stream = { workspace = true }
+futures = { workspace = true }
+openai = { workspace = true, features = ["rustls", "reqwest"] }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order"] }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
