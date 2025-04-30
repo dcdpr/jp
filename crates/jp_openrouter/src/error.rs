@@ -2,9 +2,6 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Conversation error: {0}")]
-    Conversation(#[from] jp_conversation::Error),
-
     #[error("Request error: {0}")]
     Request(#[from] reqwest::Error),
 

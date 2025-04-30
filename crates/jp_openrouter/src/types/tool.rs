@@ -35,6 +35,29 @@ pub enum ToolCall {
     },
 }
 
+impl ToolCall {
+    #[must_use]
+    pub fn id(&self) -> Option<String> {
+        match self {
+            Self::Function { id, .. } => id.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn name(&self) -> Option<String> {
+        match self {
+            Self::Function { function, .. } => function.name.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn arguments(&self) -> Option<String> {
+        match self {
+            Self::Function { function, .. } => function.arguments.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FunctionCall {
     pub name: Option<String>,

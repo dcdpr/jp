@@ -81,6 +81,13 @@ pub enum Content {
 }
 
 impl Content {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text {
+            text: text.into(),
+            cache_control: None,
+        }
+    }
+
     pub fn disable_cache(&mut self) {
         match self {
             Self::Text { cache_control, .. } => *cache_control = None,

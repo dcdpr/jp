@@ -267,6 +267,6 @@ fn is_transient_error(err: &Error) -> bool {
         Error::Request(req_err) => req_err.is_timeout() || req_err.is_connect(),
         Error::Api { code, .. } => matches!(code, 408 | 429 | 500 | 502 | 503 | 504),
         Error::Stream(_) => true, // Retry on stream processing errors
-        Error::Config(_) | Error::Json(_) | Error::Conversation(_) => false,
+        Error::Config(_) | Error::Json(_) => false,
     }
 }

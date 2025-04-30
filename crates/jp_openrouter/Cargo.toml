@@ -1,5 +1,6 @@
 [package]
 name = "jp_openrouter"
+
 authors.workspace = true
 description.workspace = true
 documentation.workspace = true
@@ -12,22 +13,31 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-jp_conversation = { workspace = true }
-
 async-stream = { workspace = true }
-backoff = { workspace = true }
+backoff = { workspace = true, features = ["tokio"] }
 futures = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = [
+    "charset",
+    "http2",
+    "json",
+    "rustls-tls",
+    "stream",
+] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-time = { workspace = true }
+time = { workspace = true, features = [
+    "serde",
+    "serde-human-readable",
+    "serde-well-known",
+    "std",
+] }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-httpmock = { workspace = true }
+httpmock = { workspace = true, features = ["record", "proxy"] }
 
 [lints]
 workspace = true
