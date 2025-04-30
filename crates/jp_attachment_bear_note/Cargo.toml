@@ -1,23 +1,24 @@
 [package]
 name = "jp_attachment_bear_note"
+
 authors.workspace = true
 description.workspace = true
-version.workspace = true
+documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true
-repository.workspace = true
-documentation.workspace = true
 license-file.workspace = true
-readme.workspace = true
 publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
 jp_attachment = { workspace = true }
 
 directories = { workspace = true }
 percent-encoding = { workspace = true }
-quick-xml = { workspace = true }
-rusqlite = { workspace = true, features = ["array", "vtab"] }
+quick-xml = { workspace = true, features = ["serialize"] }
+rusqlite = { workspace = true, features = ["bundled", "array", "vtab"] }
 serde = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }

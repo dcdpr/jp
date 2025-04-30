@@ -93,7 +93,11 @@ struct Note {
 
 impl Note {
     pub fn try_to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
-        quick_xml::se::to_string(self).map_err(Into::into)
+        let mut buffer = String::new();
+        let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
+        serializer.indent(' ', 2);
+        self.serialize(serializer)?;
+        Ok(buffer)
     }
 }
 
