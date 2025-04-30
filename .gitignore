@@ -1,3 +1,6 @@
+# JP, Until encrypted, and local conversations exist
+/.jp/conversations
+
 # Rust specific
 /target
 /.cargo/config.toml
@@ -7,3 +10,6 @@
 .sandworm
 .sandworm*.txt
 sandworm.txt
+
+# Logs
+*.log
