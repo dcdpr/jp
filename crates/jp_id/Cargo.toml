@@ -1,0 +1,21 @@
+[package]
+name = "jp_id"
+
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true, features = ["macros", "formatting", "parsing"] }
+
+[lints]
+workspace = true
