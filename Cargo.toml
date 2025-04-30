@@ -1,30 +1,86 @@
-[package]
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.dependencies]
+jp_attachment = { path = "crates/jp_attachment" }
+jp_attachment_bear_note = { path = "crates/jp_attachment_bear_note" }
+jp_attachment_file_content = { path = "crates/jp_attachment_file_content" }
+jp_config = { path = "crates/jp_config" }
+jp_conversation = { path = "crates/jp_conversation" }
+jp_id = { path = "crates/jp_id" }
+jp_llm = { path = "crates/jp_llm" }
+jp_mcp = { path = "crates/jp_mcp" }
+jp_openrouter = { path = "crates/jp_openrouter" }
+jp_term = { path = "crates/jp_term" }
+jp_workspace = { path = "crates/jp_workspace" }
+
+async-stream = { version = "0.3", default-features = false }
+backoff = { version = "0.4", default-features = false }
+bat = { version = "0.25", default-features = false }
+clap = { version = "4", default-features = false }
+comfy-table = { version = "7", default-features = false }
+comrak = { version = "0.38", default-features = false }
+confique = { version = "0.3", default-features = false }
+crossterm = { version = "0.29", default-features = false }
+directories = { version = "6", default-features = false }
+dyn-clone = { version = "1", default-features = false }
+dyn-hash = { version = "0.2", default-features = false }
+futures = { version = "0.3", default-features = false }
+glob = { version = "0.3", default-features = false }
+httpmock = { git = "https://github.com/alexliesenfeld/httpmock", default-features = false }
+linkme = { version = "0.3", default-features = false }
+openai = { version = "1", default-features = false }
+path-clean = { version = "1", default-features = false }
+percent-encoding = { version = "2", default-features = false }
+quick-xml = { version = "0.37", default-features = false }
+reqwest = { version = "0.12", default-features = false }
+rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main" }
+rusqlite = { version = "0.35", default-features = false }
+serde = { version = "1", default-features = false }
+serde_json = { version = "1", default-features = false }
+serial_test = { version = "3", default-features = false }
+strip-ansi-escapes = { version = "0.2", default-features = false }
+tempfile = { version = "3", default-features = false }
+termimad = { version = "0.31", default-features = false }
+thiserror = { version = "2", default-features = false }
+time = { version = "0.3", default-features = false }
+timeago = { version = "0.4", default-features = false }
+tokio = { version = "1", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false }
+typetag = { version = "0.2", default-features = false }
+url = { version = "2", default-features = false }
+uuid = { version = "1", default-features = false }
+
+[workspace.package]
 authors = ["Jean Mertz <git@jeanmertz.com>"]
 description = "Jean-Pierre, a programmer's LLM toolkit."
-edition = "2021"
-name = "jp"
 version = "0.1.0"
+edition = "2024"
+homepage = "https://github.com/dcdpr/jp"
+repository = "https://github.com/dcdpr/jp"
+documentation = "https://docs.rs/jp"
+license-file = "LICENSE"
+readme = "README.md"
+publish = false
 
-[dependencies]
-anyhow = "1"
-axum = { version = "0.8", features = ["macros", "http2"] }
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
-confique = { version = "0.3", features = ["toml"] }
-directories = "6"
-documented = "0.9"
-dotenv = "0.15"
-exodus_trace = { path = "/Users/jean/Projects/Rustic Games/exodus/crates/exodus_trace" }
-futures-util = "0.3"
-ignore = { version = "0.4.23", default-features = false }
-path-clean = "1"
-quick-xml = { version = "0.37", features = ["serialize"] }
-reqwest = { version = "0.12", features = ["json", "stream"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-termion = "4"
-tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
-toml = "0.8"
-tower-http = { version = "0.6", features = ["cors"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+[workspace.lints.rust]
+future-incompatible = "warn"
+let-underscore = "warn"
+missing_docs = "allow" # Temporary
+nonstandard-style = "warn"
+rust-2018-compatibility = "warn"
+rust-2018-idioms = "warn"
+rust-2021-compatibility = "warn"
+rust-2024-compatibility = { level = "warn", priority = -1 } # See: <https://github.com/rust-lang/rust-clippy/pull/12827>
+tail_expr_drop_order = "allow"
+unused = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+enum_glob_use = "allow"
+missing_errors_doc = "allow" # Temporary
+pedantic = { level = "warn", priority = -1 }
+similar_names = "allow"
