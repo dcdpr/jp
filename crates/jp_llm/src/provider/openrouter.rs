@@ -162,8 +162,11 @@ impl TryFrom<&openrouter::Config> for Openrouter {
     type Error = Error;
 
     fn try_from(config: &openrouter::Config) -> Result<Self> {
+        let api_key = env::var(&config.api_key_env)
+            .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
+
         Ok(Openrouter::new(
-            env::var(&config.api_key_env)?,
+            api_key,
             Some(config.app_name.clone()),
             config.app_referrer.clone(),
         ))

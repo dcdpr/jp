@@ -82,8 +82,7 @@ impl Provider for Openai {
             let mut current_state = AccumulationState::default();
             let stream = request
                 .create_stream()
-                .await
-                .map_err(|e| Error::Other(format!("Failed to create Openai stream: {e}")))?;
+                .await.expect("Should not fail to clone");
             tokio::pin!(stream);
 
             while let Some(delta) = stream.recv().await {
@@ -132,8 +131,10 @@ impl TryFrom<&llm::provider::openai::Config> for Openai {
 
     fn try_from(config: &llm::provider::openai::Config) -> Result<Self> {
         let base_url = env::var(&config.base_url_env).unwrap_or(config.base_url.clone());
+        let api_key = env::var(&config.api_key_env)
+            .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
-        Ok(Openai::new(env::var(&config.api_key_env)?, base_url))
+        Ok(Openai::new(api_key, base_url))
     }
 }
 

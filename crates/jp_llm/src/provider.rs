@@ -124,7 +124,7 @@ fn handle_delta(delta: Delta, state: &mut AccumulationState) -> Result<Option<St
                 };
             }
             None if tool_call_arguments.is_some() => {
-                return Err(Error::Other(
+                return Err(Error::InvalidChunk(
                     "Received function call arguments without a function name.".into(),
                 ));
             }
@@ -156,7 +156,7 @@ fn handle_delta(delta: Delta, state: &mut AccumulationState) -> Result<Option<St
         let arguments = match serde_json::from_str(arguments_buffer) {
             Ok(arguments) => arguments,
             Err(e) => {
-                return Err(Error::Other(format!(
+                return Err(Error::InvalidChunk(format!(
                     "Failed to parse function call arguments: {e}. Buffer was: \
                      '{arguments_buffer}'"
                 )));

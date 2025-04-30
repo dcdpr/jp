@@ -2,8 +2,8 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("missing env var: {0}")]
-    MissingEnv(#[from] std::env::VarError),
+    #[error("Missing environment variable: {0}")]
+    MissingEnv(String),
 
     #[error("OpenRouter error: {0}")]
     OpenRouter(#[from] jp_openrouter::Error),
@@ -11,9 +11,8 @@ pub enum Error {
     #[error("Conversation error: {0}")]
     Conversation(#[from] jp_conversation::Error),
 
-    // TODO: remove this
-    #[error("{0}")]
-    Other(String),
+    #[error("Invalid chunk received: {0}")]
+    InvalidChunk(String),
 }
 
 #[cfg(test)]

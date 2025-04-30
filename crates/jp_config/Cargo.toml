@@ -1,20 +1,21 @@
 [package]
 name = "jp_config"
+
 authors.workspace = true
 description.workspace = true
-version.workspace = true
+documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true
-repository.workspace = true
-documentation.workspace = true
 license-file.workspace = true
-readme.workspace = true
 publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
 jp_conversation = { workspace = true }
 
-confique = { workspace = true }
+confique = { workspace = true, features = ["toml", "yaml", "json5"] }
 directories = { workspace = true }
 path-clean = { workspace = true }
 serde = { workspace = true }

@@ -265,19 +265,13 @@ impl Storage {
             let Some(filename) = path.file_name().and_then(|n| n.to_str()) else {
                 continue;
             };
-            let Some(id_str) = filename.strip_suffix(".json") else {
+            let Ok(id) = ContextId::from_filename(filename) else {
+                warn!(?path, "Invalid context filename. Skipping.");
                 continue;
             };
-            let Ok(id) = id_str.parse::<ContextId>() else {
-                warn!(?path, "Invalid ContextId in filename. Skipping.");
+            let Ok(context) = read_json::<Context>(&path) else {
+                warn!(?path, "Failed to read context file. Skipping.");
                 continue;
-            };
-            let context = match read_json::<Context>(&path) {
-                Ok(context) => context,
-                Err(error) => {
-                    warn!(?path, ?error, "Failed to read NamedContext file. Skipping.");
-                    continue;
-                }
             };
 
             contexts.insert(id, context);
@@ -420,7 +414,7 @@ fn persist_named_contexts(state: &State, source: &Path) -> Result<()> {
 
     persist_inner(source, &contexts_source, |written| {
         for (id, context) in &state.workspace.named_contexts {
-            let context_file_path = contexts_source.join(format!("{id}.json"));
+            let context_file_path = contexts_source.join(id.to_filename());
             write_json(&context_file_path, context)?;
             written.insert(context_file_path);
         }
@@ -1240,14 +1234,14 @@ mod tests {
         let contexts_path = root.join(CONTEXTS_DIR);
         fs::create_dir(&contexts_path).unwrap();
 
-        let id1 = ContextId::new("foo");
+        let id1 = ContextId::try_from("foo").unwrap();
         let ctx1 = Context::new(PersonaId::try_from("p1").unwrap());
 
-        let id2 = ContextId::new("bar");
+        let id2 = ContextId::try_from("bar").unwrap();
         let ctx2 = Context::new(PersonaId::try_from("p2").unwrap());
 
-        write_json(&contexts_path.join(format!("{id1}.json")), &ctx1).unwrap();
-        write_json(&contexts_path.join(format!("{id2}.json")), &ctx2).unwrap();
+        write_json(&contexts_path.join(id1.to_filename()), &ctx1).unwrap();
+        write_json(&contexts_path.join(id2.to_filename()), &ctx2).unwrap();
         fs::write(contexts_path.join("ignore_me.txt"), "data").unwrap();
 
         let storage = Storage::new(root).unwrap();
@@ -1263,7 +1257,7 @@ mod tests {
         let root = tmp.path();
         let mut storage = Storage::new(root).unwrap();
 
-        let id = ContextId::new("ctx-gamma");
+        let id = ContextId::try_from("ctx-gamma").unwrap();
         let ctx = Context::new(PersonaId::try_from("default").unwrap());
         let state = State {
             workspace: WorkspaceState {
@@ -1276,7 +1270,7 @@ mod tests {
 
         let contexts_path = root.join(CONTEXTS_DIR);
         assert!(contexts_path.is_dir());
-        assert!(contexts_path.join(format!("{id}.json")).is_file());
+        assert!(contexts_path.join(id.to_filename()).is_file());
 
         let storage = Storage::new(root).unwrap();
         let ctxs = storage.load_named_contexts().unwrap();
