@@ -1,0 +1,69 @@
+[package]
+name = "jp_cli"
+
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+jp_attachment = { workspace = true }
+jp_attachment_bear_note = { workspace = true }
+jp_attachment_file_content = { workspace = true }
+jp_config = { workspace = true }
+jp_conversation = { workspace = true }
+jp_format = { workspace = true }
+jp_id = { workspace = true }
+jp_llm = { workspace = true }
+jp_mcp = { workspace = true }
+jp_openrouter = { workspace = true }
+jp_term = { workspace = true }
+jp_workspace = { workspace = true }
+
+bat = { workspace = true, features = ["regex-onig"] }
+clap = { workspace = true, features = [
+    "std",
+    "derive",
+    "help",
+    "suggestions",
+    "color",
+    "usage",
+    "error-context",
+] }
+comfy-table = { workspace = true, features = ["tty", "custom_styling"] }
+comrak = { workspace = true }
+crossterm = { workspace = true }
+futures = { workspace = true }
+inquire = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+strip-ansi-escapes = { workspace = true }
+termimad = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true, features = ["local-offset"] }
+timeago = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = [
+    "ansi",
+    "env-filter",
+    "fmt",
+    "smallvec",
+    "std",
+    "tracing-log",
+    "valuable",
+] }
+url = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "jp"
+path = "src/main.rs"
