@@ -21,7 +21,7 @@ quick-xml = { workspace = true, features = ["serialize"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-time = { workspace = true }
+time = { workspace = true, features = ["serde-human-readable"] }
 
 [lints]
 workspace = true

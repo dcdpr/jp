@@ -40,7 +40,8 @@ comfy-table = { workspace = true, features = ["tty", "custom_styling"] }
 comrak = { workspace = true }
 crossterm = { workspace = true }
 futures = { workspace = true }
-inquire = { workspace = true }
+inquire = { workspace = true, features = ["crossterm"] }
+path-clean = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
 strip-ansi-escapes = { workspace = true }

@@ -25,12 +25,13 @@ comrak = { version = "0.38", default-features = false }
 confique = { version = "0.3", default-features = false }
 crossterm = { version = "0.29", default-features = false }
 directories = { version = "6", default-features = false }
+dotenv = { version = "0.15", default-features = false }
 dyn-clone = { version = "1", default-features = false }
 dyn-hash = { version = "0.2", default-features = false }
 futures = { version = "0.3", default-features = false }
 glob = { version = "0.3", default-features = false }
 httpmock = { git = "https://github.com/alexliesenfeld/httpmock", default-features = false }
-inquire = { version = "0.7", default-features = false, features = ["crossterm"] }
+inquire = { version = "0.7", default-features = false }
 linkme = { version = "0.3", default-features = false }
 openai = { version = "1", default-features = false }
 path-clean = { version = "1", default-features = false }
