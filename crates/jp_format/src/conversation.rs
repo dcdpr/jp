@@ -1,0 +1,179 @@
+use std::fmt;
+
+use comfy_table::{Cell, CellAlignment, Row, Table};
+use crossterm::style::Stylize as _;
+use jp_conversation::{Conversation, ConversationId, MessagePair, PersonaId};
+use jp_id::Id as _;
+use jp_term::osc::hyperlink;
+use time::UtcDateTime;
+
+use crate::datetime::DateTimeFmt;
+
+pub struct DetailsFmt {
+    /// The ID of the conversation.
+    pub id: ConversationId,
+
+    /// The conversation title.
+    pub title: Option<String>,
+
+    /// The ID of the persona used in the conversation.
+    pub persona_id: PersonaId,
+
+    /// The number of messages in the conversation.
+    pub message_count: usize,
+
+    /// Mark the active conversation.
+    pub active_conversation: Option<ConversationId>,
+
+    /// Display the timestamp of the last message in the conversation.
+    pub last_message_at: Option<UtcDateTime>,
+
+    /// Display the last time the conversation was activated.
+    pub last_activated_at: UtcDateTime,
+
+    /// Use OSC-8 hyperlinks.
+    pub hyperlinks: bool,
+
+    /// Use color in the output.
+    pub color: bool,
+}
+
+impl DetailsFmt {
+    #[must_use]
+    pub fn new(id: ConversationId, conversation: Conversation, messages: &[MessagePair]) -> Self {
+        let Conversation {
+            title,
+            last_activated_at,
+            context,
+        } = conversation;
+
+        let last_message_at = messages.iter().map(|m| m.timestamp).max();
+
+        Self {
+            id,
+            title: title.clone(),
+            persona_id: context.persona_id,
+            message_count: messages.len(),
+            active_conversation: None,
+            last_message_at,
+            last_activated_at,
+            hyperlinks: true,
+            color: true,
+        }
+    }
+
+    #[must_use]
+    pub fn with_title(self, title: impl Into<String>) -> Self {
+        Self {
+            title: Some(title.into()),
+            ..self
+        }
+    }
+
+    /// Mark the active conversation.
+    #[must_use]
+    pub fn with_active_conversation(self, active_conversation: ConversationId) -> Self {
+        Self {
+            active_conversation: Some(active_conversation),
+            ..self
+        }
+    }
+
+    /// Use color in the output.
+    #[must_use]
+    pub fn with_color(self, color: bool) -> Self {
+        Self { color, ..self }
+    }
+
+    /// Use OSC-8 hyperlinks.
+    #[must_use]
+    pub fn with_hyperlinks(self, hyperlinks: bool) -> Self {
+        Self { hyperlinks, ..self }
+    }
+
+    /// Return the title of the conversation.
+    #[must_use]
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Return rows for a table displaying the conversation details.
+    #[must_use]
+    pub fn rows(&self) -> Vec<Row> {
+        let mut map = vec![];
+
+        map.push(("ID".to_owned(), self.id.to_string()));
+
+        map.push((
+            "Persona".to_owned(),
+            if self.hyperlinks {
+                hyperlink(
+                    format!("jp://show-metadata/{}", self.persona_id),
+                    if self.color {
+                        self.persona_id.target_id().blue().to_string()
+                    } else {
+                        self.persona_id.target_id().to_string()
+                    },
+                )
+            } else {
+                self.persona_id.target_id().to_string()
+            },
+        ));
+
+        if let Some(last_message_at) = self.last_message_at {
+            map.push((
+                "Latest Message".to_owned(),
+                DateTimeFmt::new(last_message_at).to_string(),
+            ));
+        }
+
+        if let Some(active) = self.active_conversation {
+            map.push((
+                "Last Activated".to_owned(),
+                if active == self.id && self.color {
+                    "Currently Active".green().bold().to_string()
+                } else if active == self.id {
+                    "Currently Active".to_owned()
+                } else {
+                    DateTimeFmt::new(self.last_activated_at).to_string()
+                },
+            ));
+        }
+
+        let mut rows = vec![];
+        for (key, value) in map {
+            let mut row = Row::new();
+            row.add_cell(
+                Cell::new(if self.color {
+                    key.bold().to_string()
+                } else {
+                    key
+                })
+                .set_alignment(CellAlignment::Right),
+            );
+            row.add_cell(Cell::new(value).set_alignment(CellAlignment::Left));
+            rows.push(row);
+        }
+
+        rows
+    }
+}
+
+impl fmt::Display for DetailsFmt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let rows = self.rows();
+        let mut buf = String::new();
+
+        if let Some(title) = self.title() {
+            buf.push_str(title);
+            buf.push_str("\n\n");
+        }
+
+        let mut table = Table::new();
+        table.load_preset(comfy_table::presets::NOTHING);
+        table.add_rows(rows);
+        buf.push_str(&table.trim_fmt());
+
+        write!(f, "{buf}")
+    }
+}
