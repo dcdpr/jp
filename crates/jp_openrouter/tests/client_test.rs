@@ -80,7 +80,8 @@ pub async fn with_recording<R, F, Fut>(
     } else {
         assert!(
             fixture_path.exists(),
-            "Recording not found at {fixture_path:?}. Run with RECORD=1 to create it."
+            "Recording not found at {}. Run with RECORD=1 to create it.",
+            fixture_path.display()
         );
 
         server.playback_async(&fixture_path).await;

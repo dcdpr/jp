@@ -184,9 +184,7 @@ impl Client {
             });
         }
 
-        let byte_stream = response
-            .bytes_stream()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
+        let byte_stream = response.bytes_stream().map_err(io::Error::other);
         let lines = FramedRead::new(StreamReader::new(byte_stream), LinesCodec::new());
 
         // Transform the lines stream into a completion chunk stream
