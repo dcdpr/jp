@@ -9,20 +9,24 @@ use crate::{cmd::Success, ctx::Ctx, Output};
 #[derive(Debug, clap::Args)]
 pub struct Args {
     /// Sort conversations by a specific field.
-    #[arg(short, long)]
+    #[arg(long)]
     sort: Option<Sort>,
 
     /// Sort conversations in descending order.
-    #[arg(short, long)]
+    #[arg(long)]
     descending: bool,
 
     /// Limit the number of conversations to display.
-    #[arg(short, long)]
+    #[arg(long)]
     limit: Option<usize>,
 
     /// Display full conversation details.
-    #[arg(short, long)]
+    #[arg(long)]
     full: bool,
+
+    /// Show only private conversations.
+    #[arg(long)]
+    private: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, clap::ValueEnum)]
@@ -32,12 +36,14 @@ enum Sort {
     Created,
     Activity,
     Messages,
+    Private,
 }
 
 struct Details {
     id: ConversationId,
     messages: usize,
     last_message_at: Option<UtcDateTime>,
+    private: bool,
 }
 
 impl Args {
@@ -48,18 +54,24 @@ impl Args {
         let mut conversations = ctx
             .workspace
             .conversations()
-            .map(|(id, _)| (id, ctx.workspace.get_messages(id)))
-            .map(|(id, messages)| Details {
+            .filter(|(_, c)| !self.private || c.private)
+            .map(|(id, c)| (id, c, ctx.workspace.get_messages(id)))
+            .map(|(id, c, messages)| Details {
                 id: *id,
                 messages: messages.len(),
                 last_message_at: messages.last().map(|m| m.timestamp),
+                private: c.private,
             })
             .collect::<Vec<_>>();
+
+        let count = conversations.len();
+        let skip = count.saturating_sub(limit);
 
         conversations.sort_by(|a, b| match self.sort {
             Some(Sort::Created) => a.id.timestamp().cmp(&b.id.timestamp()),
             Some(Sort::Messages) => a.messages.cmp(&b.messages),
             Some(Sort::Activity) => a.last_message_at.cmp(&b.last_message_at),
+            Some(Sort::Private) => a.private.cmp(&b.private),
             _ => a.id.cmp(&b.id),
         });
 
@@ -72,10 +84,14 @@ impl Args {
         header.add_cell(Cell::new("#").set_alignment(CellAlignment::Right));
         header.add_cell(Cell::new("Activity").set_alignment(CellAlignment::Right));
 
-        let mut rows = vec![];
+        // Show "private" column if any conversations are private.
+        let mut private_column = false;
+        if conversations.iter().skip(skip).any(|d| d.private) {
+            private_column = true;
+            header.add_cell(Cell::new("Private").set_alignment(CellAlignment::Right));
+        }
 
-        let count = conversations.len();
-        let skip = count.saturating_sub(limit);
+        let mut rows = vec![];
         if count > limit {
             let mut row = Row::new();
             row.add_cell(Cell::new(
@@ -86,25 +102,11 @@ impl Args {
             rows.push(row);
         }
 
-        // TODO:
-        //
-        // Make all of this generic.
-        //
-        // Have a `TablePrinter` that takes an iterator of `T: Serialize`, and
-        // have a common group of flags that can be used for all tables:
-        // --format <table-pretty (default)|table|json|json-pretty|jsonl>
-        // --sort <any field in the serialized T>
-        // --descending
-        // --limit <number of rows>
-        // --width <number of columns> (only applicable for table formats)
-        // --filter <jq filter expression using `jaq` crate>
-        // ... others?
-        //
-        // See conversation: 01966832-fb24-71c3-a6e4-7f69d21c7df9
         for Details {
             id,
             messages,
             last_message_at,
+            private,
         } in conversations.into_iter().skip(skip)
         {
             let mut id_fmt = if id == active_conversation_id {
@@ -145,6 +147,16 @@ impl Args {
             row.add_cell(Cell::new(id_fmt));
             row.add_cell(Cell::new(messages_fmt));
             row.add_cell(Cell::new(last_message_at_fmt));
+            if private_column {
+                let private = if private {
+                    "Yes".bold().yellow().to_string()
+                } else {
+                    "No".to_string()
+                };
+
+                row.add_cell(Cell::new(private));
+            }
+
             rows.push(row);
         }
 

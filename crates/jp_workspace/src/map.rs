@@ -1101,7 +1101,7 @@ where
 // See also the equivalent impl on HashSet.
 impl<K, V, const N: usize> From<[(K, V); N]> for TombMap<K, V, RandomState>
 where
-    K: Eq + Hash,
+    K: Eq + Hash + Clone,
 {
     /// Converts a `[(K, V); N]` into a `HashMap<K, V>`.
     ///
@@ -1719,7 +1719,7 @@ impl<'a, K: 'a, V: 'a> VacantEntry<'a, K, V> {
 
 impl<K, V, S> FromIterator<(K, V)> for TombMap<K, V, S>
 where
-    K: Eq + Hash,
+    K: Eq + Hash + Clone,
     S: BuildHasher + Default,
 {
     /// Constructs a `HashMap<K, V>` from an iterator of key-value pairs.
@@ -1737,12 +1737,14 @@ where
 /// keys with new values returned from the iterator.
 impl<K, V, S> Extend<(K, V)> for TombMap<K, V, S>
 where
-    K: Eq + Hash,
+    K: Eq + Hash + Clone,
     S: BuildHasher,
 {
     #[inline]
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
-        self.live.extend(iter);
+        for (k, v) in iter {
+            self.insert(k, v);
+        }
     }
 }
 
@@ -1754,7 +1756,9 @@ where
 {
     #[inline]
     fn extend<T: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, iter: T) {
-        self.live.extend(iter);
+        for (k, v) in iter {
+            self.insert(*k, *v);
+        }
     }
 }
 

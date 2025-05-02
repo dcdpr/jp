@@ -22,6 +22,10 @@ pub struct DetailsFmt {
     /// The number of messages in the conversation.
     pub message_count: usize,
 
+    /// Whether the conversation is private. If `None`, the details are not
+    /// shown.
+    pub private: Option<bool>,
+
     /// Mark the active conversation.
     pub active_conversation: Option<ConversationId>,
 
@@ -45,6 +49,7 @@ impl DetailsFmt {
             title,
             last_activated_at,
             context,
+            ..
         } = conversation;
 
         let last_message_at = messages.iter().map(|m| m.timestamp).max();
@@ -54,6 +59,7 @@ impl DetailsFmt {
             title: title.clone(),
             persona_id: context.persona_id,
             message_count: messages.len(),
+            private: None,
             active_conversation: None,
             last_message_at,
             last_activated_at,
@@ -66,6 +72,14 @@ impl DetailsFmt {
     pub fn with_title(self, title: impl Into<String>) -> Self {
         Self {
             title: Some(title.into()),
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub fn with_private_flag(self, private: bool) -> Self {
+        Self {
+            private: Some(private),
             ..self
         }
     }
@@ -136,6 +150,17 @@ impl DetailsFmt {
                     "Currently Active".to_owned()
                 } else {
                     DateTimeFmt::new(self.last_activated_at).to_string()
+                },
+            ));
+        }
+
+        if let Some(private) = self.private {
+            map.push((
+                "Private".to_owned(),
+                if private {
+                    "Yes".bold().yellow().to_string()
+                } else {
+                    "No".to_string()
                 },
             ));
         }

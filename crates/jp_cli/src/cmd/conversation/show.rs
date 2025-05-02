@@ -19,7 +19,9 @@ impl Args {
             return Err(Error::NotFound("Conversation", id.to_string()).into());
         };
         let messages = ctx.workspace.get_messages(&id);
+        let private = conversation.private;
         let details = DetailsFmt::new(id, conversation, messages)
+            .with_private_flag(private)
             .with_active_conversation(active_id)
             .with_hyperlinks(ctx.term.args.hyperlinks)
             .with_color(ctx.term.args.colors);

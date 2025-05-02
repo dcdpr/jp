@@ -1,5 +1,6 @@
 # JP, Until encrypted, and local conversations exist
-/.jp/conversations
+/.jp/conversations/*
+!/.jp/conversations/17462040864/
 
 # Rust specific
 /target
