@@ -1857,6 +1857,7 @@ dependencies = [
  "jp_openrouter",
  "jp_term",
  "jp_workspace",
+ "path-clean",
  "reqwest",
  "serde_json",
  "strip-ansi-escapes",

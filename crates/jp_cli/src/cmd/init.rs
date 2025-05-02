@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 use crossterm::style::Stylize as _;
 use jp_conversation::{
@@ -6,6 +6,7 @@ use jp_conversation::{
     Model, ModelId, Persona, PersonaId,
 };
 use jp_workspace::Workspace;
+use path_clean::PathClean as _;
 
 use crate::{Output, DEFAULT_STORAGE_DIR};
 
@@ -17,10 +18,13 @@ pub struct Args {
 
 impl Args {
     pub fn run(self) -> Output {
-        let root = self
-            .path
-            .unwrap_or_else(|| PathBuf::from("."))
-            .canonicalize()?;
+        let cwd = std::env::current_dir()?;
+        let mut root = self.path.unwrap_or_else(|| PathBuf::from(".")).clean();
+        if !root.is_absolute() {
+            root = cwd.join(root);
+        }
+
+        fs::create_dir_all(&root)?;
 
         let storage = root.join(DEFAULT_STORAGE_DIR);
         let id = jp_workspace::id::new();
