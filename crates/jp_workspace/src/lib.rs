@@ -438,8 +438,13 @@ impl Workspace {
     ///
     /// This cannot remove the active conversation. If the active conversation
     /// needs to be removed, mark another conversation as active first.
-    pub fn remove_conversation(&mut self, id: &ConversationId) -> Option<Conversation> {
-        self.state.workspace.conversations.remove(id)
+    pub fn remove_conversation(&mut self, id: &ConversationId) -> Result<Option<Conversation>> {
+        let active_id = self.active_conversation_id();
+        if id == &active_id {
+            return Err(Error::CannotRemoveActiveConversation(active_id));
+        }
+
+        Ok(self.state.workspace.conversations.remove(id))
     }
 
     /// Gets a reference to the currently active conversation.
