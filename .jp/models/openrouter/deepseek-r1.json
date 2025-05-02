@@ -1,0 +1,9 @@
+{
+  "slug": "deepseek/deepseek-r1",
+  "max_tokens": 164000,
+  "reasoning": {
+    "effort": "high",
+    "exclude": false
+  },
+  "temperature": 1.0
+}

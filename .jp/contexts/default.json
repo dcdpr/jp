@@ -1,0 +1,19 @@
+{
+  "persona_id": "default",
+  "attachments": {
+    "file_content": {
+      "type": "file_content",
+      "includes": [
+        "/**/*.json",
+        "/**/*.md",
+        "/**/*.rs",
+        "/**/*.toml"
+      ],
+      "excludes": [
+        "/**/target/**",
+        "/codecompanion-workspace.json",
+        "/rust-toolchain.toml"
+      ]
+    }
+  }
+}
