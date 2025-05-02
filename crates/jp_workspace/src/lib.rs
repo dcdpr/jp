@@ -303,11 +303,19 @@ impl Workspace {
         );
 
         // Insert the old active conversation back into the list of
-        // conversations.
-        self.state
+        // conversations, but only if it has any messages attached.
+        if self
+            .state
             .workspace
-            .conversations
-            .insert(old_active_conversation_id, old_active_conversation);
+            .messages
+            .get(&old_active_conversation_id)
+            .is_some_and(|v| !v.is_empty())
+        {
+            self.state
+                .workspace
+                .conversations
+                .insert(old_active_conversation_id, old_active_conversation);
+        }
 
         Ok(())
     }
