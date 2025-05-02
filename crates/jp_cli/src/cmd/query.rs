@@ -47,6 +47,10 @@ pub struct Args {
     #[arg(short = 'n', long = "new")]
     pub new_conversation: bool,
 
+    /// Mark the conversation as private.
+    #[arg(short = 'P', long = "private", requires = "new_conversation")]
+    pub private: bool,
+
     /// Add attachment to the context.
     #[arg(short = 'a', long = "attachment")]
     pub attachments: Vec<String>,
@@ -72,8 +76,17 @@ impl Args {
 
         let old_conversation_id = ctx.workspace.active_conversation_id();
         let conversation_id = if self.new_conversation {
-            let id = ctx.workspace.create_conversation(Conversation::default());
-            debug!(id = %id, "Creating new active conversation due to --new flag.");
+            let mut conversation = Conversation::default();
+            if self.private {
+                conversation.private = true;
+            }
+
+            let id = ctx.workspace.create_conversation(conversation);
+            debug!(
+                id = %id,
+                private = %self.private,
+                "Creating new active conversation due to --new flag."
+            );
 
             ctx.workspace.set_active_conversation_id(id)?;
             id

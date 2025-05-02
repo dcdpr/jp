@@ -21,6 +21,11 @@ pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     pub context: Context,
+
+    /// Whether the conversation is private (stored locally, outside of the
+    /// workspace).
+    #[serde(skip)]
+    pub private: bool,
 }
 
 impl Default for Conversation {
@@ -29,6 +34,7 @@ impl Default for Conversation {
             last_activated_at: UtcDateTime::now(),
             title: None,
             context: Context::default(),
+            private: false,
         }
     }
 }
@@ -40,6 +46,7 @@ impl Conversation {
             last_activated_at: UtcDateTime::now(),
             title: Some(title.into()),
             context: Context::default(),
+            private: false,
         }
     }
 }

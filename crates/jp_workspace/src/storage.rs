@@ -24,6 +24,11 @@ use crate::{
     State,
 };
 
+type ConversationsAndMessages = (
+    TombMap<ConversationId, Conversation>,
+    TombMap<ConversationId, Vec<MessagePair>>,
+);
+
 pub const DEFAULT_STORAGE_DIR: &str = ".jp";
 pub(crate) const METADATA_FILE: &str = "metadata.json";
 const MESSAGES_FILE: &str = "messages.json";
@@ -264,65 +269,23 @@ impl Storage {
         Ok(contexts)
     }
 
-    /// Loads all conversations and their associated messages.
+    /// Loads all conversations and their associated messages, including
+    /// private/local conversations.
     #[allow(clippy::type_complexity)]
-    pub(crate) fn load_conversations_and_messages(
-        &self,
-    ) -> Result<(
-        TombMap<ConversationId, Conversation>,
-        TombMap<ConversationId, Vec<MessagePair>>,
-    )> {
-        let conversations_path = self.root.join(CONVERSATIONS_DIR);
-        trace!(path = %conversations_path.display(), "Loading conversations.");
+    pub(crate) fn load_conversations_and_messages(&self) -> Result<ConversationsAndMessages> {
+        let (mut conversations, mut messages) =
+            load_conversations_and_messages_from_dir(&self.root)?;
 
-        let mut conversations = TombMap::new();
-        let mut messages = TombMap::new();
+        if let Some(local) = self.local.as_ref() {
+            let (mut local_conversations, local_messages) =
+                load_conversations_and_messages_from_dir(local)?;
 
-        for entry in fs::read_dir(&conversations_path).ok().into_iter().flatten() {
-            let path = entry?.path();
-
-            if !path.is_dir() {
-                continue;
+            for (_, conversation) in &mut local_conversations {
+                conversation.private = true;
             }
-            let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) else {
-                warn!(?path, "Skipping directory with invalid name.");
-                continue;
-            };
 
-            let conversation_id = match ConversationId::from_dirname(dir_name) {
-                Ok(id) => id,
-                Err(error) => {
-                    warn!(
-                        %error,
-                        ?path,
-                        "Failed to parse ConversationId from directory name. Skipping."
-                    );
-                    continue;
-                }
-            };
-
-            let metadata_path = path.join(METADATA_FILE);
-            match read_json::<Conversation>(&metadata_path) {
-                Ok(conversation) => conversations.insert(conversation_id, conversation),
-                Err(error) => {
-                    warn!(
-                        %error,
-                        path = metadata_path.to_string_lossy().to_string(),
-                        "Failed to load conversation metadata. Skipping."
-                    );
-                    continue;
-                }
-            };
-
-            let messages_path = path.join(MESSAGES_FILE);
-            match read_json::<Vec<MessagePair>>(&messages_path) {
-                Ok(data) => {
-                    messages.insert(conversation_id, data);
-                }
-                Err(error) => {
-                    warn!(%error, ?messages_path, "Failed to load messages. Skipping.");
-                }
-            }
+            conversations.extend(local_conversations);
+            messages.extend(local_messages);
         }
 
         Ok((conversations, messages))
@@ -341,7 +304,7 @@ impl Storage {
         persist_conversations_metadata(state, local_or_root_path)?;
         persist_personas(state, root_path)?;
         persist_models(state, root_path)?;
-        persist_conversations_and_messages(state, root_path)?;
+        persist_conversations_and_messages(state, root_path, local_or_root_path)?;
         persist_mcp_servers(state, root_path)?;
         persist_named_contexts(state, root_path)?;
 
@@ -349,6 +312,63 @@ impl Storage {
 
         Ok(())
     }
+}
+
+fn load_conversations_and_messages_from_dir(path: &Path) -> Result<ConversationsAndMessages> {
+    let conversations_path = path.join(CONVERSATIONS_DIR);
+    trace!(path = %conversations_path.display(), "Loading conversations.");
+
+    let mut conversations = TombMap::new();
+    let mut messages = TombMap::new();
+
+    for entry in fs::read_dir(&conversations_path).ok().into_iter().flatten() {
+        let path = entry?.path();
+
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) else {
+            warn!(?path, "Skipping directory with invalid name.");
+            continue;
+        };
+
+        let conversation_id = match ConversationId::from_dirname(dir_name) {
+            Ok(id) => id,
+            Err(error) => {
+                warn!(
+                    %error,
+                    ?path,
+                    "Failed to parse ConversationId from directory name. Skipping."
+                );
+                continue;
+            }
+        };
+
+        let metadata_path = path.join(METADATA_FILE);
+        match read_json::<Conversation>(&metadata_path) {
+            Ok(conversation) => conversations.insert(conversation_id, conversation),
+            Err(error) => {
+                warn!(
+                    %error,
+                    path = metadata_path.to_string_lossy().to_string(),
+                    "Failed to load conversation metadata. Skipping."
+                );
+                continue;
+            }
+        };
+
+        let messages_path = path.join(MESSAGES_FILE);
+        match read_json::<Vec<MessagePair>>(&messages_path) {
+            Ok(data) => {
+                messages.insert(conversation_id, data);
+            }
+            Err(error) => {
+                warn!(%error, ?messages_path, "Failed to load messages. Skipping.");
+            }
+        }
+    }
+
+    Ok((conversations, messages))
 }
 
 fn persist_named_contexts(state: &State, root: &Path) -> Result<()> {
@@ -372,9 +392,15 @@ fn persist_mcp_servers(state: &State, root: &Path) -> Result<()> {
     })
 }
 
-fn persist_conversations_and_messages(state: &State, root: &Path) -> Result<()> {
+fn persist_conversations_and_messages(state: &State, root: &Path, local: &Path) -> Result<()> {
     let conversations_dir = root.join(CONVERSATIONS_DIR);
-    trace!(path = %conversations_dir.display(), "Persisting conversations.");
+    let local_conversations_dir = local.join(CONVERSATIONS_DIR);
+
+    trace!(
+        global = %conversations_dir.display(),
+        local = %local_conversations_dir.display(),
+        "Persisting conversations."
+    );
 
     // Append the active conversation to the list of conversations to
     // persist.
@@ -386,7 +412,11 @@ fn persist_conversations_and_messages(state: &State, root: &Path) -> Result<()> 
     for (id, conversation) in conversations {
         // Determine directory name based on current title
         let dir_name = id.to_dirname(conversation.title.as_deref())?;
-        let conv_dir = conversations_dir.join(dir_name);
+        let conv_dir = if conversation.private {
+            local_conversations_dir.join(dir_name)
+        } else {
+            conversations_dir.join(dir_name)
+        };
         fs::create_dir_all(&conv_dir)?;
 
         // Write conversation metadata
@@ -921,6 +951,7 @@ mod tests {
             last_activated_at: UtcDateTime::now(),
             title: Some("Conv 1".into()),
             context: context1.clone(),
+            ..Default::default()
         };
         write_json(&conv1_dir.join(METADATA_FILE), &conv1).unwrap();
         let messages1 = vec![MessagePair::new("Q1".into(), "R1".into()).with_context(context1)];
@@ -932,6 +963,7 @@ mod tests {
             last_activated_at: UtcDateTime::now(),
             title: None,
             context: context2.clone(),
+            ..Default::default()
         };
         write_json(&conv2_dir.join(METADATA_FILE), &conv2).unwrap();
         // No messages file for conv2
