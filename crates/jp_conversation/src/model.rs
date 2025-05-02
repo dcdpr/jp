@@ -197,7 +197,8 @@ impl TryFrom<String> for ModelId {
                 || (c.is_ascii_alphabetic() && c.is_ascii_lowercase())
                 || c == '-'
                 || c == '_'
-                || c == '/')
+                || c == '/'
+                || c == '.')
         }) {
             return Err(Error::InvalidIdFormat(
                 "Model ID must be [a-z0-9_-/]".to_string(),
