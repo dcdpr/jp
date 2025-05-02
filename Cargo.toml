@@ -8,6 +8,7 @@ jp_attachment_bear_note = { path = "crates/jp_attachment_bear_note" }
 jp_attachment_file_content = { path = "crates/jp_attachment_file_content" }
 jp_config = { path = "crates/jp_config" }
 jp_conversation = { path = "crates/jp_conversation" }
+jp_format = { path = "crates/jp_format" }
 jp_id = { path = "crates/jp_id" }
 jp_llm = { path = "crates/jp_llm" }
 jp_mcp = { path = "crates/jp_mcp" }
@@ -29,6 +30,7 @@ dyn-hash = { version = "0.2", default-features = false }
 futures = { version = "0.3", default-features = false }
 glob = { version = "0.3", default-features = false }
 httpmock = { git = "https://github.com/alexliesenfeld/httpmock", default-features = false }
+inquire = { version = "0.7", default-features = false, features = ["crossterm"] }
 linkme = { version = "0.3", default-features = false }
 openai = { version = "1", default-features = false }
 path-clean = { version = "1", default-features = false }
