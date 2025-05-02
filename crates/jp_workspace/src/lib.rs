@@ -44,6 +44,7 @@
 mod error;
 pub mod id;
 mod map;
+pub mod query;
 mod state;
 mod storage;
 
