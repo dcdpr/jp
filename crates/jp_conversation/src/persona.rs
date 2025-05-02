@@ -1,4 +1,4 @@
-use std::{fmt, str::FromStr};
+use std::{fmt, path::PathBuf, str::FromStr};
 
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
@@ -107,8 +107,8 @@ impl PersonaId {
     }
 
     #[must_use]
-    pub fn to_filename(&self) -> String {
-        format!("{}.json", self.target_id())
+    pub fn to_path_buf(&self) -> PathBuf {
+        format!("{}.json", self.target_id()).into()
     }
 
     pub fn from_filename(filename: &str) -> Result<Self> {

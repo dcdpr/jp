@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fmt, ops::Deref};
+use std::{borrow::Cow, fmt, ops::Deref, path::Path};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TargetId(Cow<'static, str>);
@@ -8,6 +8,11 @@ impl TargetId {
     #[must_use]
     pub fn new(id: impl Into<Cow<'static, str>>) -> Self {
         Self(id.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_ref()
     }
 
     /// Returns `true` if the variant is valid.
@@ -31,6 +36,12 @@ impl Deref for TargetId {
 impl AsRef<str> for TargetId {
     fn as_ref(&self) -> &str {
         self.0.as_ref()
+    }
+}
+
+impl AsRef<Path> for TargetId {
+    fn as_ref(&self) -> &Path {
+        self.0.as_ref().as_ref()
     }
 }
 

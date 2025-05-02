@@ -1,7 +1,6 @@
 //! Handles the physical storage aspects, including temporary copying and persistence.
 
 use std::{
-    collections::{HashMap, HashSet},
     fs,
     io::{BufReader, BufWriter},
     iter,
@@ -13,13 +12,14 @@ use jp_conversation::{
     model::ProviderId, Context, ContextId, Conversation, ConversationId, MessagePair, Model,
     ModelId, Persona, PersonaId,
 };
+use jp_id::Id as _;
 use jp_mcp::config::{McpServer, McpServerId};
 use serde::{de::DeserializeOwned, Serialize};
-use tempfile::TempDir;
 use tracing::{debug, trace, warn};
 
 use crate::{
     error::{Error, Result},
+    map::TombMap,
     state::ConversationsMetadata,
     State,
 };
@@ -44,19 +44,12 @@ pub(crate) struct Storage {
     ///
     /// If unset, local storage is disabled.
     local: Option<PathBuf>,
-
-    /// The temporary directory we are operating on.
-    tmpdir: TempDir,
 }
 
 impl Storage {
     /// Creates a new Storage instance by creating a temporary directory and
     /// copying the contents of `root` into it.
     pub(crate) fn new(root: impl Into<PathBuf>) -> Result<Self> {
-        // Create temporary directory.
-        let tmpdir = tempfile::Builder::new().prefix("jp_storage_").tempdir()?;
-        trace!(tmp = %tmpdir.path().display(), "Created temporary storage directory.");
-
         // Create root storage directory, if needed.
         let root: PathBuf = root.into();
         if root.exists() {
@@ -68,16 +61,7 @@ impl Storage {
             trace!(path = %root.display(), "Created storage directory.");
         }
 
-        // Copy root storage directory to temporary directory.
-        let dst = tmpdir.path().to_path_buf();
-        trace!(path = %root.display(), "Copying storage directory.");
-        copy_dir_recursive(&root, &dst)?;
-
-        Ok(Self {
-            root,
-            local: None,
-            tmpdir,
-        })
+        Ok(Self { root, local: None })
     }
 
     pub fn with_local(mut self, local: impl Into<PathBuf>) -> Result<Self> {
@@ -135,11 +119,11 @@ impl Storage {
     }
 
     /// Loads all personas from the (copied) storage.
-    pub(crate) fn load_personas(&self) -> Result<HashMap<PersonaId, Persona>> {
-        let personas_path = self.tmpdir.path().join(PERSONAS_DIR);
+    pub(crate) fn load_personas(&self) -> Result<TombMap<PersonaId, Persona>> {
+        let personas_path = self.root.join(PERSONAS_DIR);
         trace!(path = %personas_path.display(), "Loading personas.");
 
-        let mut personas = HashMap::new();
+        let mut personas = TombMap::new();
 
         for entry in fs::read_dir(&personas_path).ok().into_iter().flatten() {
             let path = entry?.path();
@@ -171,11 +155,11 @@ impl Storage {
     }
 
     /// Loads all LLM models from the (copied) storage.
-    pub(crate) fn load_models(&self) -> Result<HashMap<ModelId, Model>> {
-        let models_path = self.tmpdir.path().join(MODELS_DIR);
+    pub(crate) fn load_models(&self) -> Result<TombMap<ModelId, Model>> {
+        let models_path = self.root.join(MODELS_DIR);
         trace!(path = %models_path.display(), "Loading models.");
 
-        let mut models = HashMap::new();
+        let mut models = TombMap::new();
 
         for entry in fs::read_dir(&models_path).ok().into_iter().flatten() {
             let path = entry?.path();
@@ -208,7 +192,7 @@ impl Storage {
                 };
 
                 model.provider = provider;
-                models.insert(ModelId::from_filename(id)?, model);
+                models.insert(ModelId::from_path(&format!("{provider}/{id}"))?, model);
             }
         }
 
@@ -220,11 +204,11 @@ impl Storage {
     }
 
     /// Loads all MCP Servers from the (copied) storage.
-    pub(crate) fn load_mcp_servers(&self) -> Result<HashMap<McpServerId, McpServer>> {
-        let mcp_path = self.tmpdir.path().join(MCP_SERVERS_DIR);
+    pub(crate) fn load_mcp_servers(&self) -> Result<TombMap<McpServerId, McpServer>> {
+        let mcp_path = self.root.join(MCP_SERVERS_DIR);
         trace!(path = %mcp_path.display(), "Loading MCP servers.");
 
-        let mut servers = HashMap::new();
+        let mut servers = TombMap::new();
 
         for entry in fs::read_dir(&mcp_path).ok().into_iter().flatten() {
             let path = entry?.path();
@@ -251,11 +235,11 @@ impl Storage {
     }
 
     /// Loads all Named Contexts from the (copied) storage.
-    pub(crate) fn load_named_contexts(&self) -> Result<HashMap<ContextId, Context>> {
-        let contexts_path = self.tmpdir.path().join(CONTEXTS_DIR);
+    pub(crate) fn load_named_contexts(&self) -> Result<TombMap<ContextId, Context>> {
+        let contexts_path = self.root.join(CONTEXTS_DIR);
         trace!(path = %contexts_path.display(), "Loading named contexts.");
 
-        let mut contexts = HashMap::new();
+        let mut contexts = TombMap::new();
 
         for entry in fs::read_dir(&contexts_path).ok().into_iter().flatten() {
             let path = entry?.path();
@@ -285,14 +269,14 @@ impl Storage {
     pub(crate) fn load_conversations_and_messages(
         &self,
     ) -> Result<(
-        HashMap<ConversationId, Conversation>,
-        HashMap<ConversationId, Vec<MessagePair>>,
+        TombMap<ConversationId, Conversation>,
+        TombMap<ConversationId, Vec<MessagePair>>,
     )> {
-        let conversations_path = self.tmpdir.path().join(CONVERSATIONS_DIR);
+        let conversations_path = self.root.join(CONVERSATIONS_DIR);
         trace!(path = %conversations_path.display(), "Loading conversations.");
 
-        let mut conversations = HashMap::new();
-        let mut messages = HashMap::new();
+        let mut conversations = TombMap::new();
+        let mut messages = TombMap::new();
 
         for entry in fs::read_dir(&conversations_path).ok().into_iter().flatten() {
             let path = entry?.path();
@@ -350,57 +334,16 @@ impl Storage {
 
         // Some data is stored locally, if configured, otherwise it is stored
         // in the workspace storage.
-        let temp_path = self.tmpdir.path();
-        let local_or_temp_path = self.local.as_deref().unwrap_or(temp_path);
+        let root_path = self.root.as_path();
+        let local_or_root_path = self.local.as_deref().unwrap_or(root_path);
 
         // Step 1: Write state to local or temp dir
-        persist_conversations_metadata(state, local_or_temp_path)?;
-        persist_personas(state, temp_path)?;
-        persist_models(state, temp_path)?;
-        persist_conversations_and_messages(state, temp_path)?;
-        persist_mcp_servers(state, temp_path)?;
-        persist_named_contexts(state, temp_path)?;
-
-        // Step 2: Atomic replace
-        let original_path = &self.root;
-        let backup_path = original_path.with_extension("bak");
-
-        // Cleanup old backup
-        if backup_path.is_dir() {
-            fs::remove_dir_all(&backup_path)?;
-        } else if backup_path.try_exists()? {
-            fs::remove_file(&backup_path)?;
-        }
-
-        // Rename original to backup
-        let original_existed = original_path.exists();
-        if original_existed {
-            fs::rename(original_path, &backup_path)?;
-        }
-
-        // Ensure storage parent dir exists
-        if let Some(parent) = original_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // Rename temp to original
-        if let Err(rename_error) = fs::rename(temp_path, original_path) {
-            // Attempt restore
-            if original_existed {
-                fs::rename(&backup_path, original_path)?;
-            }
-
-            return Err(Error::AtomicReplaceFailed {
-                src: temp_path.to_path_buf(),
-                dst: original_path.clone(),
-                error: rename_error,
-            });
-        }
-
-        // Step 3: Cleanup backup
-        if original_existed && backup_path.is_dir() {
-            fs::remove_dir_all(&backup_path)?;
-        }
+        persist_conversations_metadata(state, local_or_root_path)?;
+        persist_personas(state, root_path)?;
+        persist_models(state, root_path)?;
+        persist_conversations_and_messages(state, root_path)?;
+        persist_mcp_servers(state, root_path)?;
+        persist_named_contexts(state, root_path)?;
 
         debug!(path = %self.root.display(), "Persisted state.");
 
@@ -408,89 +351,93 @@ impl Storage {
     }
 }
 
-fn persist_named_contexts(state: &State, source: &Path) -> Result<()> {
-    let contexts_source = source.join(CONTEXTS_DIR);
-    trace!(path = %contexts_source.display(), "Persisting named contexts.");
+fn persist_named_contexts(state: &State, root: &Path) -> Result<()> {
+    let contexts_dir = root.join(CONTEXTS_DIR);
+    trace!(path = %contexts_dir.display(), "Persisting named contexts.");
 
-    persist_inner(source, &contexts_source, |written| {
-        for (id, context) in &state.workspace.named_contexts {
-            let context_file_path = contexts_source.join(id.to_filename());
-            write_json(&context_file_path, context)?;
-            written.insert(context_file_path);
-        }
+    persist_inner(
+        root,
+        &contexts_dir,
+        &state.workspace.named_contexts,
+        ContextId::to_path_buf,
+    )
+}
 
-        Ok(())
+fn persist_mcp_servers(state: &State, root: &Path) -> Result<()> {
+    let mcp_servers_dir = root.join(MCP_SERVERS_DIR);
+    trace!(path = %mcp_servers_dir.display(), "Persisting MCP servers.");
+
+    persist_inner(root, &mcp_servers_dir, &state.workspace.mcp_servers, |id| {
+        format!("{id}.json").into()
     })
 }
 
-fn persist_mcp_servers(state: &State, source: &Path) -> Result<()> {
-    let mcp_source = source.join(MCP_SERVERS_DIR);
-    trace!(path = %mcp_source.display(), "Persisting MCP servers.");
+fn persist_conversations_and_messages(state: &State, root: &Path) -> Result<()> {
+    let conversations_dir = root.join(CONVERSATIONS_DIR);
+    trace!(path = %conversations_dir.display(), "Persisting conversations.");
 
-    persist_inner(source, &mcp_source, |written| {
-        for (id, server) in &state.workspace.mcp_servers {
-            let server_file_path = mcp_source.join(format!("{id}.json"));
-            write_json(&server_file_path, server)?;
-            written.insert(server_file_path);
+    // Append the active conversation to the list of conversations to
+    // persist.
+    let conversations = state.workspace.conversations.iter().chain(iter::once((
+        &state.local.conversations_metadata.active_conversation_id,
+        &state.workspace.active_conversation,
+    )));
+
+    for (id, conversation) in conversations {
+        // Determine directory name based on current title
+        let dir_name = id.to_dirname(conversation.title.as_deref())?;
+        let conv_dir = conversations_dir.join(dir_name);
+        fs::create_dir_all(&conv_dir)?;
+
+        // Write conversation metadata
+        let meta_path = conv_dir.join(METADATA_FILE);
+        write_json(&meta_path, conversation)?;
+
+        let messages = state.workspace.messages.get(id).map_or(vec![], Vec::clone);
+        let messages_path = conv_dir.join(MESSAGES_FILE);
+        write_json(&messages_path, &messages)?;
+    }
+
+    // Don't mark active conversation as removed.
+    let mut removed_ids = state
+        .workspace
+        .conversations
+        .removed_keys()
+        .filter(|&id| id != &state.local.conversations_metadata.active_conversation_id);
+
+    let mut deleted = Vec::new();
+    for entry in conversations_dir.read_dir()?.flatten() {
+        let path = entry.path();
+        let name_starts_with_id = path.file_name().is_some_and(|v| {
+            removed_ids.any(|d| v.to_string_lossy().starts_with(d.target_id().as_str()))
+        });
+
+        if path.is_dir() && name_starts_with_id {
+            if let Ok(path) = path.strip_prefix(&conversations_dir) {
+                deleted.push(path.to_path_buf());
+            }
         }
+    }
 
-        Ok(())
-    })
+    remove_deleted(root, &conversations_dir, deleted.into_iter())?;
+
+    Ok(())
 }
 
-fn persist_conversations_and_messages(state: &State, source: &Path) -> Result<()> {
-    let conversations_source = source.join(CONVERSATIONS_DIR);
-    trace!(path = %conversations_source.display(), "Persisting conversations.");
+fn persist_models(state: &State, root: &Path) -> Result<()> {
+    let models_dir = root.join(MODELS_DIR);
+    trace!(path = %models_dir.display(), "Persisting models.");
 
-    persist_inner(source, &conversations_source, |written| {
-        // Append the active conversation to the list of conversations to
-        // persist.
-        let conversations = state.workspace.conversations.iter().chain(iter::once((
-            &state.local.conversations_metadata.active_conversation_id,
-            &state.workspace.active_conversation,
-        )));
-
-        for (id, conversation) in conversations {
-            // Determine directory name based on current title
-            let dir_name = id.to_dirname(conversation.title.as_deref())?;
-            let conv_dir = conversations_source.join(dir_name);
-            fs::create_dir_all(&conv_dir)?;
-
-            // Write conversation metadata
-            let meta_path = conv_dir.join(METADATA_FILE);
-            write_json(&meta_path, conversation)?;
-
-            let messages = state.workspace.messages.get(id).map_or(vec![], Vec::clone);
-            let messages_path = conv_dir.join(MESSAGES_FILE);
-            write_json(&messages_path, &messages)?;
-
-            written.insert(meta_path);
-            written.insert(messages_path);
-        }
-
-        Ok(())
-    })
+    persist_inner(
+        root,
+        &models_dir,
+        &state.workspace.models,
+        ModelId::to_path_buf,
+    )
 }
 
-fn persist_models(state: &State, source: &Path) -> Result<()> {
-    let models_source = source.join(MODELS_DIR);
-    trace!(path = %models_source.display(), "Persisting models.");
-
-    persist_inner(source, &models_source, |written| {
-        for (id, model) in &state.workspace.models {
-            let model_file_path = models_source
-                .join(model.provider.to_string())
-                .join(id.to_filename());
-            write_json(&model_file_path, model)?;
-            written.insert(model_file_path);
-        }
-
-        Ok(())
-    })
-}
-
-fn persist_conversations_metadata(state: &State, source: &Path) -> Result<()> {
-    let metadata_path = source.join(CONVERSATIONS_DIR).join(METADATA_FILE);
+fn persist_conversations_metadata(state: &State, root: &Path) -> Result<()> {
+    let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
     trace!(path = %metadata_path.display(), "Persisting local conversations metadata.");
 
     write_json(&metadata_path, &state.local.conversations_metadata)?;
@@ -498,38 +445,60 @@ fn persist_conversations_metadata(state: &State, source: &Path) -> Result<()> {
     Ok(())
 }
 
-fn persist_personas(state: &State, source: &Path) -> Result<()> {
-    let personas_source = source.join(PERSONAS_DIR);
-    trace!(path = %personas_source.display(), "Persisting personas.");
+fn persist_personas(state: &State, root: &Path) -> Result<()> {
+    let personas_dir = root.join(PERSONAS_DIR);
+    trace!(path = %personas_dir.display(), "Persisting personas.");
 
-    persist_inner(source, &personas_source, |written| {
-        for (id, persona) in &state.workspace.personas {
-            let persona_file_path = personas_source.join(id.to_filename());
-
-            write_json(&persona_file_path, persona)?;
-            written.insert(persona_file_path);
-        }
-
-        Ok(())
-    })
+    persist_inner(
+        root,
+        &personas_dir,
+        &state.workspace.personas,
+        PersonaId::to_path_buf,
+    )
 }
 
-fn persist_inner(
+fn persist_inner<'a, K, V>(
     root: &Path,
     source: &Path,
-    write: impl FnOnce(&mut HashSet<PathBuf>) -> Result<()>,
-) -> Result<()> {
+    data: &'a TombMap<K, V>,
+    to_path: impl Fn(&K) -> PathBuf,
+) -> Result<()>
+where
+    K: Eq + std::hash::Hash + 'a,
+    V: Serialize + 'a,
+{
     fs::create_dir_all(source)?;
 
-    let existing_files = find_json_files_in_dir(source)?;
-    let mut written_files = HashSet::new();
-    write(&mut written_files)?;
+    let deleted = data.removed_keys().map(&to_path);
+    remove_deleted(root, source, deleted)?;
 
-    for path_to_delete in existing_files.difference(&written_files) {
-        fs::remove_file(path_to_delete)?;
+    for (id, value) in data {
+        let dest = source.join(to_path(id));
+
+        // Only write if the file doesn't exist or the value has changed.
+        if !dest.exists() || data.is_modified(id) {
+            write_json(&dest, value)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn remove_deleted(root: &Path, dir: &Path, deleted: impl Iterator<Item = PathBuf>) -> Result<()> {
+    for entry in deleted {
+        let mut path = dir.join(entry);
+        if path.is_file() {
+            fs::remove_file(&path)?;
+        } else if path.is_dir() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            warn!(
+                path = %path.display(),
+                "File or directory marked for deletion not found. Skipping."
+            );
+        }
 
         // Remove empty parent directories, until we reach the root.
-        let mut path = path_to_delete.as_path();
         while let Some(parent) = path.parent() {
             if parent.as_os_str() == "" || parent == root || !parent.is_dir() {
                 break;
@@ -539,7 +508,7 @@ fn persist_inner(
             }
 
             fs::remove_dir(parent)?;
-            path = parent;
+            path = parent.to_path_buf();
         }
     }
 
@@ -561,45 +530,6 @@ pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     serde_json::to_writer_pretty(BufWriter::new(file), value).map_err(Into::into)
 }
 
-/// Recursively copies the contents of a directory.
-///
-/// Creates `dst` if it doesn't exist.
-fn copy_dir_recursive(src: &Path, dst: &Path) -> std::result::Result<(), std::io::Error> {
-    fs::create_dir_all(dst)?;
-
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let src_path = entry.path();
-        let Some(file_name) = src_path.file_name() else {
-            continue;
-        };
-
-        let dst_path = dst.join(file_name);
-        if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else if file_type.is_file() {
-            fs::copy(&src_path, &dst_path)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn find_json_files_in_dir(dir: &Path) -> Result<HashSet<PathBuf>> {
-    let mut files = HashSet::new();
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            files.extend(find_json_files_in_dir(&path)?);
-        } else if path.extension().is_some_and(|ext| ext == "json") {
-            files.insert(path);
-        }
-    }
-    Ok(files)
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -617,56 +547,13 @@ mod tests {
     use crate::state::WorkspaceState;
 
     #[test]
-    fn test_storage_new_creates_temp_dir() {
-        let source_dir = tempdir().unwrap();
-        let storage = Storage::new(source_dir.path()).unwrap();
-
-        assert!(storage.tmpdir.path().is_dir());
-        assert!(storage.tmpdir.path() != source_dir.path());
-        assert_eq!(storage.root, source_dir.path());
-    }
-
-    #[test]
-    fn test_storage_new_copies_content_flat() {
-        let source_dir = tempdir().unwrap();
-        let source_file_path = source_dir.path().join("test.txt");
-        let file_content = "Hello, world!";
-        fs::write(&source_file_path, file_content).unwrap();
-
-        let storage = Storage::new(source_dir.path()).unwrap();
-        let dest_file_path = storage.tmpdir.path().join("test.txt");
-
-        assert!(dest_file_path.is_file());
-        assert_eq!(fs::read_to_string(&dest_file_path).unwrap(), file_content);
-    }
-
-    #[test]
-    fn test_storage_new_copies_content_recursive() {
-        let source_dir = tempdir().unwrap();
-        let sub_dir_path = source_dir.path().join("subdir");
-        fs::create_dir(&sub_dir_path).unwrap();
-        let source_file_path = sub_dir_path.join("nested.txt");
-        let file_content = "Nested content";
-        fs::write(&source_file_path, file_content).unwrap();
-
-        let storage = Storage::new(source_dir.path()).unwrap();
-        let dest_sub_dir = storage.tmpdir.path().join("subdir");
-        let dest_file_path = dest_sub_dir.join("nested.txt");
-
-        assert!(dest_sub_dir.is_dir());
-        assert!(dest_file_path.is_file());
-        let read_content = fs::read_to_string(&dest_file_path).unwrap();
-        assert_eq!(read_content, file_content);
-    }
-
-    #[test]
     fn test_storage_handles_missing_src() {
         let missing_path = PathBuf::from("./non_existent_jp_workspace_source_dir_abc123");
         assert!(!missing_path.exists());
 
         let storage = Storage::new(&missing_path).expect("must succeed");
-        assert!(storage.tmpdir.path().is_dir());
-        assert_eq!(fs::read_dir(storage.tmpdir.path()).unwrap().count(), 0);
+        assert!(storage.root.is_dir());
+        assert_eq!(fs::read_dir(&storage.root).unwrap().count(), 0);
         assert_eq!(storage.root, missing_path);
 
         fs::remove_dir_all(&missing_path).ok();
@@ -683,32 +570,6 @@ mod tests {
             Error::NotDir(path) => assert_eq!(path, source_file_path),
             _ => panic!("Expected Error::SourceNotDir"),
         }
-    }
-
-    #[test]
-    fn test_storage_temp_dir_cleanup_implicit() {
-        let source_dir = tempdir().unwrap();
-        let storage = Storage::new(source_dir.path()).unwrap();
-        let temp_path = storage.tmpdir.path().to_path_buf();
-        assert!(temp_path.exists());
-
-        drop(storage); // Explicitly drop to trigger cleanup
-        assert!(
-            !temp_path.exists(),
-            "Temporary directory should be cleaned up"
-        );
-    }
-
-    #[test]
-    fn copy_dir_recursive_handles_empty_dir() {
-        let src = tempdir().unwrap();
-        let dst = tempdir().unwrap();
-        let dst_path = dst.path().join("target");
-
-        let result = copy_dir_recursive(src.path(), &dst_path);
-        assert!(result.is_ok());
-        assert!(dst_path.is_dir());
-        assert_eq!(fs::read_dir(&dst_path).unwrap().count(), 0);
     }
 
     #[test]
@@ -790,8 +651,8 @@ mod tests {
         let id1 = PersonaId::try_from("p1").unwrap();
         let id2 = PersonaId::try_from("p2").unwrap();
 
-        write_json(&personas_orig_path.join(id1.to_filename()), &persona1).unwrap();
-        write_json(&personas_orig_path.join(id2.to_filename()), &persona2).unwrap();
+        write_json(&personas_orig_path.join(id1.to_path_buf()), &persona1).unwrap();
+        write_json(&personas_orig_path.join(id2.to_path_buf()), &persona2).unwrap();
         fs::write(personas_orig_path.join("not-a-persona.txt"), "ignore me").unwrap(); // Non-json file
 
         let storage = Storage::new(original_dir.path()).unwrap();
@@ -842,7 +703,7 @@ mod tests {
             ..Default::default()
         };
         let id1 = PersonaId::try_from("p1").unwrap();
-        write_json(&personas_orig_path.join(id1.to_filename()), &persona1).unwrap();
+        write_json(&personas_orig_path.join(id1.to_path_buf()), &persona1).unwrap();
 
         let storage = Storage::new(original_dir.path()).unwrap();
         let loaded_personas = storage.load_personas().unwrap();
@@ -867,12 +728,12 @@ mod tests {
         };
 
         write_json(
-            &personas_orig_path.join(id_good.to_filename()),
+            &personas_orig_path.join(id_good.to_path_buf()),
             &persona_good,
         )
         .unwrap();
         fs::write(
-            personas_orig_path.join(id_bad.to_filename()),
+            personas_orig_path.join(id_bad.to_path_buf()),
             "{ invalid json ",
         )
         .unwrap();
@@ -885,78 +746,6 @@ mod tests {
         assert!(loaded.contains_key(&id_good));
         assert!(loaded.contains_key(&PersonaId::try_from("default").unwrap()));
         assert!(!loaded.contains_key(&id_bad));
-    }
-
-    #[test]
-    fn test_persist_writes_personas_and_deletes_stale() {
-        let original_dir = tempdir().unwrap();
-        let original_path = original_dir.path();
-
-        // Setup initial state with p1 and p_stale
-        let personas_orig_path = original_path.join(PERSONAS_DIR);
-        fs::create_dir(&personas_orig_path).unwrap();
-        let id_p1 = PersonaId::try_from("p1").unwrap();
-        let id_stale = PersonaId::try_from("p_stale").unwrap();
-        write_json(
-            &personas_orig_path.join(id_p1.to_filename()),
-            &Persona::default(),
-        )
-        .unwrap();
-        write_json(
-            &personas_orig_path.join(id_stale.to_filename()),
-            &Persona::default(),
-        )
-        .unwrap();
-
-        // Load (copies p1 and p_stale to temp)
-        let mut storage = Storage::new(original_path).unwrap();
-
-        // Prepare new state: p1 (updated) and p2 (new), default (always included)
-        // p_stale is omitted from the new state.
-        let id_p2 = PersonaId::try_from("p2").unwrap();
-        let mut new_personas = HashMap::new();
-        new_personas.insert(id_p1.clone(), Persona {
-            name: "P1 Updated".into(),
-            ..Default::default()
-        });
-        new_personas.insert(id_p2.clone(), Persona {
-            name: "P2 New".into(),
-            ..Default::default()
-        });
-        new_personas.insert(PersonaId::try_from("default").unwrap(), Persona::default()); // Ensure default persists
-
-        let new_state = State {
-            workspace: WorkspaceState {
-                personas: new_personas,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        // Persist
-        storage.persist(&new_state).unwrap();
-
-        // Verify final state in original directory
-        let final_personas_path = original_path.join(PERSONAS_DIR);
-        assert!(final_personas_path.exists());
-
-        let p1_final_path = final_personas_path.join(id_p1.to_filename());
-        let p2_final_path = final_personas_path.join(id_p2.to_filename());
-        let default_final_path =
-            final_personas_path.join(PersonaId::try_from("default").unwrap().to_filename());
-        let stale_final_path = final_personas_path.join(id_stale.to_filename());
-
-        assert!(p1_final_path.exists());
-        assert!(p2_final_path.exists());
-        assert!(default_final_path.exists()); // Check default exists
-        assert!(
-            !stale_final_path.exists(),
-            "Stale persona file should be deleted"
-        );
-
-        // Verify content of updated persona
-        let p1_final: Persona = read_json(&p1_final_path).unwrap();
-        assert_eq!(p1_final.name, "P1 Updated");
     }
 
     #[test]
@@ -975,23 +764,11 @@ mod tests {
             provider: ProviderId::Openrouter,
             ..Default::default()
         };
-        let id1 = ModelId::try_from("m1").unwrap();
-        let id2 = ModelId::try_from("m2").unwrap();
+        let id1 = ModelId::try_from("openrouter/m1").unwrap();
+        let id2 = ModelId::try_from("openrouter/m2").unwrap();
 
-        write_json(
-            &models_path
-                .join(model1.provider.to_string())
-                .join(id1.to_filename()),
-            &model1,
-        )
-        .unwrap();
-        write_json(
-            &models_path
-                .join(model2.provider.to_string())
-                .join(id2.to_filename()),
-            &model2,
-        )
-        .unwrap();
+        write_json(&models_path.join(id1.to_path_buf()), &model1).unwrap();
+        write_json(&models_path.join(id2.to_path_buf()), &model2).unwrap();
         fs::write(models_path.join("readme.txt"), "ignore me").unwrap();
 
         jp_id::global::set("foo".to_owned());
@@ -1016,16 +793,16 @@ mod tests {
     fn test_load_models_invalid_provider() {
         let tmp = tempdir().unwrap();
         let models_path = tmp.path().join(MODELS_DIR);
-        fs::create_dir(&models_path).unwrap();
+        fs::create_dir_all(models_path.join("openrouter")).unwrap();
 
         let model1 = Model {
             slug: "model-1".into(),
             ..Default::default()
         };
-        let id1 = ModelId::try_from("m1").unwrap();
+        let id1 = ModelId::try_from("openrouter/m1").unwrap();
 
         write_json(
-            &models_path.join("invalid_provider").join(id1.to_filename()),
+            &models_path.join("invalid_provider").join(id1.to_path_buf()),
             &model1,
         )
         .unwrap();
@@ -1042,18 +819,18 @@ mod tests {
         let tmp = tempdir().unwrap();
 
         let path = tmp.path();
-        let provider_path = path.join(MODELS_DIR).join("openrouter");
-        fs::create_dir_all(&provider_path).unwrap();
+        let provider_path = path.join(MODELS_DIR);
+        fs::create_dir(&provider_path).unwrap();
 
-        let id_m1 = ModelId::try_from("m1").unwrap();
-        let id_stale = ModelId::try_from("m_stale").unwrap();
+        let id_m1 = ModelId::try_from("openrouter/m1").unwrap();
+        let id_stale = ModelId::try_from("openrouter/m_stale").unwrap();
 
-        write_json(&provider_path.join(id_m1.to_filename()), &Model {
+        write_json(&provider_path.join(id_m1.to_path_buf()), &Model {
             slug: "old".into(),
             ..Default::default()
         })
         .unwrap();
-        write_json(&provider_path.join(id_stale.to_filename()), &Model {
+        write_json(&provider_path.join(id_stale.to_path_buf()), &Model {
             slug: "stale".into(),
             ..Default::default()
         })
@@ -1062,17 +839,21 @@ mod tests {
         let mut storage = Storage::new(path).unwrap();
 
         // Prepare new state: m1 (updated) and m2 (new)
-        let id_m2 = ModelId::try_from("m2").unwrap();
-        let mut new_models = HashMap::new();
+        let id_m2 = ModelId::try_from("openrouter/m2").unwrap();
+        let mut new_models = TombMap::new();
+        new_models.insert(id_stale.clone(), Model {
+            slug: "stale".into(),
+            ..Default::default()
+        });
         new_models.insert(id_m1.clone(), Model {
-            slug: "updated".into(),
+            slug: "old".into(),
             ..Default::default()
         });
         new_models.insert(id_m2.clone(), Model {
             slug: "new".into(),
             ..Default::default()
         });
-        let new_state = State {
+        let mut new_state = State {
             workspace: WorkspaceState {
                 models: new_models,
                 ..Default::default()
@@ -1080,15 +861,15 @@ mod tests {
             ..Default::default()
         };
 
+        new_state.workspace.models.remove(&id_stale);
+        new_state.workspace.models.get_mut(&id_m1).unwrap().slug = "updated".into();
+
         storage.persist(&new_state).unwrap();
 
-        assert!(provider_path.join(id_m1.to_filename()).exists());
-        assert!(provider_path.join(id_m2.to_filename()).exists());
-        assert!(
-            !provider_path.join(id_stale.to_filename()).exists(),
-            "Stale model deleted"
-        );
-        let m1_final: Model = read_json(&provider_path.join(id_m1.to_filename())).unwrap();
+        assert!(provider_path.join(id_m1.to_path_buf()).exists());
+        assert!(provider_path.join(id_m2.to_path_buf()).exists());
+        assert!(!provider_path.join(id_stale.to_path_buf()).exists());
+        let m1_final: Model = read_json(&provider_path.join(id_m1.to_path_buf())).unwrap();
         assert_eq!(m1_final.slug, "updated");
     }
 
@@ -1124,7 +905,7 @@ mod tests {
         let storage = Storage::new(original_dir.path()).unwrap(); // Storage uses temp copy
 
         // Setup: Create conversation directories in the *storage's* temp dir
-        let conv_dir_path = storage.tmpdir.path().join(CONVERSATIONS_DIR);
+        let conv_dir_path = storage.root.join(CONVERSATIONS_DIR);
         fs::create_dir(&conv_dir_path).unwrap();
 
         let now = UtcDateTime::now();
@@ -1174,7 +955,7 @@ mod tests {
     fn test_load_mcp_servers() {
         let original_dir = tempdir().unwrap();
         let storage = Storage::new(original_dir.path()).unwrap();
-        let mcp_path = storage.tmpdir.path().join(MCP_SERVERS_DIR);
+        let mcp_path = storage.root.join(MCP_SERVERS_DIR);
         fs::create_dir(&mcp_path).unwrap();
 
         let id1 = McpServerId::new("server1");
@@ -1210,7 +991,7 @@ mod tests {
         };
         let state = State {
             workspace: WorkspaceState {
-                mcp_servers: HashMap::from([(id.clone(), server.clone())]),
+                mcp_servers: TombMap::from([(id.clone(), server.clone())]),
                 ..Default::default()
             },
             ..Default::default()
@@ -1240,8 +1021,8 @@ mod tests {
         let id2 = ContextId::try_from("bar").unwrap();
         let ctx2 = Context::new(PersonaId::try_from("p2").unwrap());
 
-        write_json(&contexts_path.join(id1.to_filename()), &ctx1).unwrap();
-        write_json(&contexts_path.join(id2.to_filename()), &ctx2).unwrap();
+        write_json(&contexts_path.join(id1.to_path_buf()), &ctx1).unwrap();
+        write_json(&contexts_path.join(id2.to_path_buf()), &ctx2).unwrap();
         fs::write(contexts_path.join("ignore_me.txt"), "data").unwrap();
 
         let storage = Storage::new(root).unwrap();
@@ -1261,7 +1042,7 @@ mod tests {
         let ctx = Context::new(PersonaId::try_from("default").unwrap());
         let state = State {
             workspace: WorkspaceState {
-                named_contexts: HashMap::from([(id.clone(), ctx.clone())]),
+                named_contexts: TombMap::from([(id.clone(), ctx.clone())]),
                 ..Default::default()
             },
             ..Default::default()
@@ -1270,7 +1051,7 @@ mod tests {
 
         let contexts_path = root.join(CONTEXTS_DIR);
         assert!(contexts_path.is_dir());
-        assert!(contexts_path.join(id.to_filename()).is_file());
+        assert!(contexts_path.join(id.to_path_buf()).is_file());
 
         let storage = Storage::new(root).unwrap();
         let ctxs = storage.load_named_contexts().unwrap();

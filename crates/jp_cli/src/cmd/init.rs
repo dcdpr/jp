@@ -38,7 +38,7 @@ impl Args {
         workspace = workspace.with_local_storage()?;
 
         for (id, model) in default_models() {
-            let id = ModelId::try_from(id)?;
+            let id = ModelId::try_from((model.provider, id))?;
             workspace.create_model_with_id(id, model)?;
         }
 

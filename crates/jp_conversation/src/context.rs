@@ -3,6 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    path::PathBuf,
     str::FromStr,
 };
 
@@ -59,8 +60,8 @@ impl ContextId {
     }
 
     #[must_use]
-    pub fn to_filename(&self) -> String {
-        format!("{}.json", self.target_id())
+    pub fn to_path_buf(&self) -> PathBuf {
+        format!("{}.json", self.target_id()).into()
     }
 
     pub fn from_filename(filename: &str) -> Result<Self> {

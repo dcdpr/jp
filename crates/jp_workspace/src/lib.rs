@@ -43,6 +43,7 @@
 
 mod error;
 pub mod id;
+mod map;
 mod state;
 mod storage;
 
@@ -116,20 +117,18 @@ impl Workspace {
 
     /// Creates a new workspace with the given root directory.
     pub fn new(root: impl AsRef<Path>) -> Self {
-        Self {
-            root: root.as_ref().to_path_buf(),
-            id: id::new(),
-            storage: None,
-            state: State::default(),
-            disable_persistence: false,
-        }
+        Self::new_with_id(root, id::new())
     }
 
     /// Creates a new workspace with the given root directory and ID.
     pub fn new_with_id(root: impl AsRef<Path>, id: impl Into<String>) -> Self {
+        let id = id.into();
+        let root = root.as_ref().to_path_buf();
+        trace!(root = %root.display(), id, "Initializing Workspace.");
+
         Self {
-            root: root.as_ref().to_path_buf(),
-            id: id.into(),
+            root,
+            id,
             storage: None,
             state: State::default(),
             disable_persistence: false,
@@ -238,9 +237,9 @@ impl Workspace {
 
         self.state = State {
             workspace: WorkspaceState {
+                active_conversation,
                 named_contexts,
                 conversations,
-                active_conversation,
                 messages,
                 personas,
                 models,
@@ -324,16 +323,25 @@ impl Workspace {
         self.state.workspace.personas.get(id)
     }
 
-    /// Creates a new persona.
+    /// Create a new persona.
     ///
     /// Returns an error if a persona with that ID already exists.
     pub fn create_persona(&mut self, persona: Persona) -> Result<PersonaId> {
         let id = PersonaId::try_from(&persona.name)?;
-        if self.state.workspace.personas.contains_key(&id) {
-            return Err(Error::exists("Persona", &id));
-        }
+        self.create_persona_with_id(id, persona)
+    }
 
-        self.state.workspace.personas.insert(id.clone(), persona);
+    /// Create a new persona with the given ID.
+    ///
+    /// Returns an error if a persona with that ID already exists.
+    pub fn create_persona_with_id(&mut self, id: PersonaId, persona: Persona) -> Result<PersonaId> {
+        use map::Entry::*;
+
+        let id = match self.state.workspace.personas.entry(id) {
+            Occupied(entry) => return Err(Error::exists("Persona", entry.key())),
+            Vacant(entry) => entry.insert_entry(persona).key().clone(),
+        };
+
         Ok(id)
     }
 
@@ -341,9 +349,10 @@ impl Workspace {
     ///
     /// Returns the removed persona if it existed.
     pub fn remove_persona(&mut self, id: &PersonaId) -> Option<Persona> {
-        if id.as_str() == "default" {
+        if id == &PersonaId::default() {
             return None;
         }
+
         self.state.workspace.personas.remove(id)
     }
 
@@ -374,7 +383,7 @@ impl Workspace {
     ///
     /// Returns an error if a model with that ID already exists.
     pub fn create_model(&mut self, model: Model) -> Result<ModelId> {
-        let id = ModelId::try_from(&model.slug)?;
+        let id = ModelId::try_from((model.provider, model.slug.as_str()))?;
         self.create_model_with_id(id, model)
     }
 
@@ -645,6 +654,8 @@ mod tests {
 
     #[test]
     fn test_workspace_persist_saves_in_memory_state() {
+        jp_id::global::set("foo".to_owned());
+
         let tmp = tempdir().unwrap();
         let root = tmp.path().join("root");
         let storage = root.join("storage");
@@ -688,7 +699,7 @@ mod tests {
             name: "p1".into(),
             ..Default::default()
         };
-        write_json(&personas_path.join(id.to_filename()), &persona).unwrap();
+        write_json(&personas_path.join(id.to_path_buf()), &persona).unwrap();
 
         let mut workspace = Workspace::new(root).persisted_at(&storage).unwrap();
         workspace.load().unwrap();
@@ -698,6 +709,8 @@ mod tests {
 
     #[test]
     fn test_workspace_personas() {
+        jp_id::global::set("foo".to_owned());
+
         let mut workspace = Workspace::new(PathBuf::new());
         assert_eq!(workspace.personas().count(), 0);
 
@@ -709,6 +722,8 @@ mod tests {
 
     #[test]
     fn test_workspace_get_persona() {
+        jp_id::global::set("foo".to_owned());
+
         let mut workspace = Workspace::new(PathBuf::new());
         let id = PersonaId::try_from("p1").unwrap();
         assert_eq!(workspace.get_persona(&id), None);
@@ -724,6 +739,8 @@ mod tests {
 
     #[test]
     fn test_workspace_create_persona() {
+        jp_id::global::set("foo".to_owned());
+
         let mut workspace = Workspace::new(PathBuf::new());
         assert!(workspace.state.workspace.personas.is_empty());
 
@@ -734,6 +751,8 @@ mod tests {
 
     #[test]
     fn test_workspace_create_persona_duplicate() {
+        jp_id::global::set("foo".to_owned());
+
         let mut workspace = Workspace::new(PathBuf::new());
         assert!(workspace.state.workspace.personas.is_empty());
 
@@ -748,6 +767,8 @@ mod tests {
 
     #[test]
     fn test_workspace_remove_persona() {
+        jp_id::global::set("foo".to_owned());
+
         let mut workspace = Workspace::new(PathBuf::new());
         assert!(workspace.state.workspace.personas.is_empty());
 
@@ -766,6 +787,8 @@ mod tests {
 
     #[test]
     fn test_workspace_remove_persona_ignores_default() {
+        jp_id::global::set("foo".to_owned());
+
         let mut workspace = Workspace::new(PathBuf::new());
         assert!(workspace.state.workspace.personas.is_empty());
 
@@ -784,6 +807,8 @@ mod tests {
 
     #[test]
     fn test_workspace_models() {
+        jp_id::global::set("foo".to_owned());
+
         let mut workspace = Workspace::new(PathBuf::new());
         assert_eq!(workspace.models().count(), 0);
 
@@ -795,6 +820,8 @@ mod tests {
 
     #[test]
     fn test_workspace_get_model() {
+        jp_id::global::set("foo".to_owned());
+
         let mut workspace = Workspace::new(PathBuf::new());
         let id = ModelId::try_from("openrouter/p1").unwrap();
         assert_eq!(workspace.get_model(&id), None);
@@ -810,6 +837,8 @@ mod tests {
 
     #[test]
     fn test_workspace_create_model() {
+        jp_id::global::set("foo".to_owned());
+
         let mut workspace = Workspace::new(PathBuf::new());
         assert!(workspace.state.workspace.models.is_empty());
 
@@ -902,7 +931,7 @@ mod tests {
         let mut workspace = Workspace::new(PathBuf::new());
         assert!(workspace.state.workspace.conversations.is_empty());
 
-        let id = ConversationId::default();
+        let id = ConversationId::try_from(UtcDateTime::now() - Duration::from_secs(1)).unwrap();
         let conversation = Conversation::default();
         workspace
             .state
@@ -910,7 +939,8 @@ mod tests {
             .conversations
             .insert(id, conversation.clone());
 
-        let removed_conversation = workspace.remove_conversation(&id).unwrap();
+        assert_ne!(workspace.active_conversation_id(), id);
+        let removed_conversation = workspace.remove_conversation(&id).unwrap().unwrap();
         assert_eq!(removed_conversation, conversation);
         assert!(workspace.state.workspace.conversations.is_empty());
     }
@@ -927,7 +957,7 @@ mod tests {
             .active_conversation_id;
         let active_conversation = workspace.state.workspace.active_conversation.clone();
 
-        assert!(workspace.remove_conversation(&active_id).is_none());
+        assert!(workspace.remove_conversation(&active_id).is_err());
         assert_eq!(
             workspace.state.workspace.active_conversation,
             active_conversation

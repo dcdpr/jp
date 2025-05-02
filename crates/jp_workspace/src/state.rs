@@ -1,13 +1,13 @@
 //! Represents the in-memory state of the workspace.
 
-use std::collections::HashMap;
-
 use jp_conversation::{
     message::MessagePair, Context, ContextId, Conversation, ConversationId, Model, ModelId,
     Persona, PersonaId,
 };
 use jp_mcp::config::{McpServer, McpServerId};
 use serde::{Deserialize, Serialize};
+
+use crate::map::TombMap;
 
 /// Represents the entire in-memory state, both for the workspace and user-local
 /// state.
@@ -20,12 +20,6 @@ pub(crate) struct State {
 /// Represents the entire in-memory workspace state.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub(crate) struct WorkspaceState {
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub named_contexts: HashMap<ContextId, Context>,
-
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub conversations: HashMap<ConversationId, Conversation>,
-
     /// The active conversation.
     ///
     /// This is stored separately, to guarantee that an active conversation
@@ -33,17 +27,23 @@ pub(crate) struct WorkspaceState {
     #[serde(skip)]
     pub active_conversation: Conversation,
 
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub messages: HashMap<ConversationId, Vec<MessagePair>>,
+    #[serde(skip_serializing_if = "TombMap::is_empty")]
+    pub named_contexts: TombMap<ContextId, Context>,
 
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub personas: HashMap<PersonaId, Persona>,
+    #[serde(skip_serializing_if = "TombMap::is_empty")]
+    pub conversations: TombMap<ConversationId, Conversation>,
 
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub models: HashMap<ModelId, Model>,
+    #[serde(skip_serializing_if = "TombMap::is_empty")]
+    pub messages: TombMap<ConversationId, Vec<MessagePair>>,
 
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub mcp_servers: HashMap<McpServerId, McpServer>,
+    #[serde(skip_serializing_if = "TombMap::is_empty")]
+    pub personas: TombMap<PersonaId, Persona>,
+
+    #[serde(skip_serializing_if = "TombMap::is_empty")]
+    pub models: TombMap<ModelId, Model>,
+
+    #[serde(skip_serializing_if = "TombMap::is_empty")]
+    pub mcp_servers: TombMap<McpServerId, McpServer>,
 }
 
 /// Represents the entire in-memory local state.

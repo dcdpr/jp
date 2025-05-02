@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, str::FromStr};
+use std::{collections::HashMap, fmt, path::PathBuf, str::FromStr};
 
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
@@ -112,32 +112,25 @@ impl Default for ModelReference {
 /// This is used for storage and display purposes, it is **NOT** the same as
 /// [`Model::slug`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ModelId(String);
+pub struct ModelId {
+    provider: Option<ProviderId>,
+    name: String,
+}
 
 impl ModelId {
     #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
+    pub fn to_path_buf(&self) -> PathBuf {
+        let mut path = PathBuf::new();
+        if let Some(provider) = &self.provider {
+            path.push(provider.target_id());
+        }
+
+        path.join(format!("{}.json", self.name))
     }
 
-    #[must_use]
-    pub fn to_filename(&self) -> String {
-        format!("{}.json", self.target_id())
-    }
-
-    // FIXME:
-    //
-    // Since models are stored in `<provider>/<slug>.json` files, basing the
-    // model ID on the file name alone is not sufficient, as multiple providers
-    // may have the same model file name.
-    //
-    // For example, the file `claude-3.7-sonnet.json` could live in
-    // `anthropic/claude-3.7-sonnet.json` or in
-    // `openrouter/claude-3.7-sonnet.json`.
-    pub fn from_filename(filename: &str) -> Result<Self> {
-        filename
-            .strip_suffix(".json")
-            .ok_or_else(|| Error::InvalidIdFormat(format!("Invalid model filename: {filename}")))
+    pub fn from_path(path: &str) -> Result<Self> {
+        path.strip_suffix(".json")
+            .ok_or_else(|| Error::InvalidIdFormat(format!("Invalid model path: {path}")))
             .and_then(ModelId::try_from)
     }
 }
@@ -148,7 +141,12 @@ impl Id for ModelId {
     }
 
     fn target_id(&self) -> TargetId {
-        self.0.clone().into()
+        let prefix = self
+            .provider
+            .map(|p| format!("{}-", p.target_id()))
+            .unwrap_or_default();
+
+        format!("{}{}", prefix, self.name).into()
     }
 
     fn global_id(&self) -> GlobalId {
@@ -162,7 +160,12 @@ impl Id for ModelId {
 
 impl Default for ModelId {
     fn default() -> Self {
-        Self(DEFAULT_SLUG.to_owned())
+        let (provider, name) = DEFAULT_SLUG.split_once('/').unwrap_or(("", DEFAULT_SLUG));
+
+        Self {
+            provider: ProviderId::from_str(provider).ok(),
+            name: name.to_owned(),
+        }
     }
 }
 
@@ -192,20 +195,32 @@ impl TryFrom<String> for ModelId {
     type Error = Error;
 
     fn try_from(s: String) -> Result<Self> {
-        if s.chars().any(|c| {
+        let (provider, name) = s.split_once('/').unwrap_or(("", s.as_str()));
+
+        if name.chars().any(|c| {
             !(c.is_numeric()
                 || (c.is_ascii_alphabetic() && c.is_ascii_lowercase())
                 || c == '-'
                 || c == '_'
-                || c == '/'
                 || c == '.')
         }) {
             return Err(Error::InvalidIdFormat(
-                "Model ID must be [a-z0-9_-/]".to_string(),
+                "Model ID must be [a-z0-9_-]".to_string(),
             ));
         }
 
-        Ok(Self(s))
+        Ok(Self {
+            provider: Some(ProviderId::from_str(provider)?),
+            name: name.to_owned(),
+        })
+    }
+}
+
+impl TryFrom<(ProviderId, &str)> for ModelId {
+    type Error = Error;
+
+    fn try_from((provider, name): (ProviderId, &str)) -> Result<Self> {
+        Self::try_from(format!("{provider}/{name}"))
     }
 }
 
@@ -213,9 +228,14 @@ impl FromStr for ModelId {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        jp_id::parse::<Self>(s)
-            .map(|p| Self(p.target_id.to_string()))
-            .map_err(Into::into)
+        jp_id::parse::<Self>(s).map_err(Into::into).and_then(|p| {
+            let (provider, name) = p.target_id.split_once('/').unwrap_or(("", &p.target_id));
+
+            Ok(Self {
+                provider: Some(ProviderId::from_str(provider)?),
+                name: name.to_owned(),
+            })
+        })
     }
 }
 
@@ -254,6 +274,24 @@ impl ProviderId {
     #[must_use]
     pub fn is_openrouter(&self) -> bool {
         matches!(self, Self::Openrouter)
+    }
+}
+
+impl Id for ProviderId {
+    fn variant() -> Variant {
+        'p'.into()
+    }
+
+    fn target_id(&self) -> TargetId {
+        self.to_string().into()
+    }
+
+    fn global_id(&self) -> GlobalId {
+        jp_id::global::get().into()
+    }
+
+    fn is_valid(&self) -> bool {
+        Self::variant().is_valid() && self.global_id().is_valid()
     }
 }
 
