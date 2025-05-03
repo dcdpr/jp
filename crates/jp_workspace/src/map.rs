@@ -339,8 +339,16 @@ impl<K, V, S> TombMap<K, V, S> {
     ///
     /// In the current implementation, iterating over map takes O(capacity) time
     /// instead of O(len) because it internally visits empty buckets too.
+    #[expect(clippy::unused_self)]
     pub fn iter_mut(&mut self) -> hash_map::IterMut<'_, K, V> {
-        self.live.iter_mut()
+        // FIXME: This does **NOT** have change detection.
+        //
+        // We will need to return our own `IterMut` type, which returns a custom
+        // `Mut<&mut V>` type, which then implements `DerefMut` to return a
+        // `&mut V`.
+        //
+        // self.live.iter_mut()
+        panic!("`iter_mut` is not yet implemented. Use `iter_mut_untracked` instead.");
     }
 
     /// Returns the number of elements in the map.
@@ -417,6 +425,18 @@ impl<K, V, S> TombMap<K, V, S> {
         K: Eq + Hash,
     {
         self.live.iter().filter(|(k, _)| self.modified.contains(k))
+    }
+
+    /// This is a (temporary) workaround for the fact that `iter_mut` does not
+    /// do change detection for individual elements in the mutable iterator.
+    ///
+    /// Sometimes that is okay, in which case you can use this specialized
+    /// method.
+    pub fn iter_mut_untracked(&mut self) -> impl Iterator<Item = (&K, &mut V)>
+    where
+        K: Eq + Hash,
+    {
+        self.live.iter_mut()
     }
 }
 
@@ -1191,7 +1211,7 @@ impl<'a, K, V, S> IntoIterator for &'a mut TombMap<K, V, S> {
 
     #[inline]
     fn into_iter(self) -> hash_map::IterMut<'a, K, V> {
-        self.iter_mut()
+        panic!("`iter_mut` is not yet implemented. Use `iter_mut_untracked` instead.");
     }
 }
 

@@ -280,7 +280,7 @@ impl Storage {
             let (mut local_conversations, local_messages) =
                 load_conversations_and_messages_from_dir(local)?;
 
-            for (_, conversation) in &mut local_conversations {
+            for (_, conversation) in local_conversations.iter_mut_untracked() {
                 conversation.private = true;
             }
 
@@ -410,13 +410,20 @@ fn persist_conversations_and_messages(state: &State, root: &Path, local: &Path) 
     )));
 
     for (id, conversation) in conversations {
-        // Determine directory name based on current title
         let dir_name = id.to_dirname(conversation.title.as_deref())?;
         let conv_dir = if conversation.private {
             local_conversations_dir.join(dir_name)
         } else {
             conversations_dir.join(dir_name)
         };
+
+        remove_unused_conversation_dirs(
+            id,
+            &conv_dir,
+            &conversations_dir,
+            &local_conversations_dir,
+        )?;
+
         fs::create_dir_all(&conv_dir)?;
 
         // Write conversation metadata
@@ -450,6 +457,48 @@ fn persist_conversations_and_messages(state: &State, root: &Path, local: &Path) 
     }
 
     remove_deleted(root, &conversations_dir, deleted.into_iter())?;
+
+    Ok(())
+}
+
+fn remove_unused_conversation_dirs(
+    id: &ConversationId,
+    conversation_dir: &Path,
+    workspace_conversations_dir: &Path,
+    local_conversations_dir: &Path,
+) -> Result<()> {
+    // Gather all possible conversation directory names
+    let mut dirs = vec![];
+    for conversations_dir in &[workspace_conversations_dir, local_conversations_dir] {
+        let pat = id.to_dirname(None)?;
+        dirs.push(conversations_dir.join(&pat));
+        for entry in fs::read_dir(conversations_dir).ok().into_iter().flatten() {
+            let path = entry?.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if path
+                .file_name()
+                .is_none_or(|v| !v.to_string_lossy().starts_with(&format!("{pat}-")))
+            {
+                continue;
+            }
+
+            dirs.push(path);
+        }
+    }
+
+    // Exclude the one we actually want to keep
+    dirs.retain(|d| d != conversation_dir);
+
+    // Remove the rest
+    for dir in dirs {
+        if !dir.exists() {
+            continue;
+        }
+
+        fs::remove_dir_all(dir)?;
+    }
 
     Ok(())
 }

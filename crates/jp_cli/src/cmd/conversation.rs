@@ -1,6 +1,7 @@
 use super::Output;
 use crate::ctx::Ctx;
 
+mod edit;
 mod ls;
 mod rm;
 mod show;
@@ -19,6 +20,7 @@ impl Args {
             Commands::Remove(args) => args.run(ctx),
             Commands::List(args) => args.run(ctx),
             Commands::Use(args) => args.run(ctx),
+            Commands::Edit(args) => args.run(ctx),
         }
     }
 }
@@ -40,4 +42,8 @@ enum Commands {
     /// Set the active conversation.
     #[command(name = "use")]
     Use(use_::Args),
+
+    /// Edit conversation details.
+    #[command(name = "edit")]
+    Edit(edit::Args),
 }

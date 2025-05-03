@@ -430,8 +430,11 @@ impl Workspace {
     /// Gets a mutable reference to a conversation by its ID.
     #[must_use]
     pub fn get_conversation_mut(&mut self, id: &ConversationId) -> Option<&mut Conversation> {
-        self.all_conversations_mut()
-            .find_map(|(i, c)| (id == i).then_some(c))
+        if id == &self.active_conversation_id() {
+            return Some(&mut self.state.workspace.active_conversation);
+        }
+
+        self.state.workspace.conversations.get_mut(id)
     }
 
     /// Creates a new conversation.
@@ -538,24 +541,6 @@ impl Workspace {
                 .active_conversation_id,
             &self.state.workspace.active_conversation,
         )))
-    }
-
-    /// Returns an iterator over all conversations, including the active one.
-    fn all_conversations_mut(
-        &mut self,
-    ) -> impl Iterator<Item = (&ConversationId, &mut Conversation)> {
-        self.state
-            .workspace
-            .conversations
-            .iter_mut()
-            .chain(iter::once((
-                &self
-                    .state
-                    .local
-                    .conversations_metadata
-                    .active_conversation_id,
-                &mut self.state.workspace.active_conversation,
-            )))
     }
 
     /// Returns the globally unique ID of the workspace.
