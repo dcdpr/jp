@@ -2,7 +2,7 @@
 
 use std::{
     fs,
-    io::{BufReader, BufWriter},
+    io::{BufReader, BufWriter, Write as _},
     iter,
     path::{Path, PathBuf},
     str::FromStr as _,
@@ -606,7 +606,12 @@ pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     }
 
     let file = fs::File::create(path)?;
-    serde_json::to_writer_pretty(BufWriter::new(file), value).map_err(Into::into)
+    let mut buf = BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut buf, value)?;
+    buf.write_all(b"\n")?;
+    buf.flush()?;
+
+    Ok(())
 }
 
 #[cfg(test)]
