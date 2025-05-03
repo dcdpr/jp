@@ -30,19 +30,19 @@ const DEFAULT_VARIABLE_PREFIX: &str = "JP_";
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// Override a configuration value for the duration of the command.
-    #[arg(short, long, value_name = "KEY=VALUE", global = true, action = ArgAction::Append)]
-    config: Vec<String>,
-
-    #[command(flatten)]
+    #[command(flatten, next_help_heading = "Global Options")]
     globals: Globals,
 
-    #[command(subcommand)]
+    #[command(subcommand, next_help_heading = "Options")]
     command: Commands,
 }
 
 #[derive(Debug, clap::Args)]
 pub struct Globals {
+    /// Override a configuration value for the duration of the command.
+    #[arg(short, long, value_name = "KEY=VALUE", global = true, action = ArgAction::Append)]
+    config: Vec<String>,
+
     /// Increase verbosity of logging.
     ///
     /// Can be specified multiple times to increase verbosity.
@@ -103,7 +103,7 @@ pub struct Globals {
 impl fmt::Display for Cli {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_map()
-            .entry(&"config", &self.config)
+            .entry(&"config", &self.globals.config)
             .entry(&"verbose", &self.globals.verbose)
             .entry(&"quiet", &self.globals.quiet)
             .finish()
@@ -204,7 +204,7 @@ async fn run_inner(cli: Cli) -> Result<Success> {
         cmd => {
             let mut workspace = load_workspace()?;
             let mut config = jp_config::load(&workspace.root, true)?;
-            apply_cli_configs(&cli.config, &mut config)?;
+            apply_cli_configs(&cli.globals.config, &mut config)?;
 
             workspace.load()?;
 

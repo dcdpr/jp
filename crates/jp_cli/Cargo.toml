@@ -28,13 +28,14 @@ jp_workspace = { workspace = true }
 
 bat = { workspace = true, features = ["regex-onig"] }
 clap = { workspace = true, features = [
-    "std",
-    "derive",
-    "help",
-    "suggestions",
     "color",
-    "usage",
+    "derive",
     "error-context",
+    "help",
+    "std",
+    "suggestions",
+    "usage",
+    "wrap_help",
 ] }
 comfy-table = { workspace = true, features = ["tty", "custom_styling"] }
 comrak = { workspace = true }
