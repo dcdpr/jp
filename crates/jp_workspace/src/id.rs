@@ -45,7 +45,7 @@ pub fn load(root: impl AsRef<Path>) -> Option<String> {
 
 /// Store the globally unique workspace ID to the given root path.
 pub fn store(id: &str, storage: &Path) -> io::Result<()> {
-    fs::write(storage.join(ID_FILE), format!("{ID_PREAMBLE}\n{id}"))
+    fs::write(storage.join(ID_FILE), format!("{ID_PREAMBLE}\n{id}\n"))
 }
 
 /// Generates a fixed-length ID from a timestamp using Base63 encoding.
