@@ -41,6 +41,7 @@ enum Sort {
 
 struct Details {
     id: ConversationId,
+    title: Option<String>,
     messages: usize,
     last_message_at: Option<UtcDateTime>,
     private: bool,
@@ -58,6 +59,7 @@ impl Args {
             .map(|(id, c)| (id, c, ctx.workspace.get_messages(id)))
             .map(|(id, c, messages)| Details {
                 id: *id,
+                title: c.title.clone(),
                 messages: messages.len(),
                 last_message_at: messages.last().map(|m| m.timestamp),
                 private: c.private,
@@ -79,17 +81,8 @@ impl Args {
             conversations.reverse();
         }
 
-        let mut header = Row::new();
-        header.add_cell(Cell::new("ID"));
-        header.add_cell(Cell::new("#").set_alignment(CellAlignment::Right));
-        header.add_cell(Cell::new("Activity").set_alignment(CellAlignment::Right));
-
-        // Show "private" column if any conversations are private.
-        let mut private_column = false;
-        if conversations.iter().skip(skip).any(|d| d.private) {
-            private_column = true;
-            header.add_cell(Cell::new("Private").set_alignment(CellAlignment::Right));
-        }
+        let conversations: Vec<_> = conversations.into_iter().skip(skip).collect();
+        let (private_column, title_column, header) = build_header_row(&conversations);
 
         let mut rows = vec![];
         if count > limit {
@@ -102,64 +95,108 @@ impl Args {
             rows.push(row);
         }
 
-        for Details {
-            id,
-            messages,
-            last_message_at,
-            private,
-        } in conversations.into_iter().skip(skip)
-        {
-            let mut id_fmt = if id == active_conversation_id {
-                id.to_string().bold().yellow().to_string()
-            } else {
-                id.to_string()
-            };
-
-            if ctx.term.args.hyperlinks {
-                id_fmt = hyperlink(format!("jp://show-metadata/{id}"), id_fmt);
-            }
-
-            let messages_fmt = if ctx.term.args.hyperlinks {
-                hyperlink(format!("jp://show-messages/{id}"), messages.to_string())
-            } else {
-                messages.to_string()
-            };
-
-            let last_message_at_fmt = if self.full {
-                last_message_at
-                    .and_then(|t| {
-                        let format =
-                            format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
-                        let local_offset =
-                            UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
-
-                        t.to_offset(local_offset).format(&format).ok()
-                    })
-                    .unwrap_or_default()
-            } else {
-                last_message_at.map_or_else(String::new, |t| {
-                    let ago = (UtcDateTime::now() - t).try_into().expect("valid duration");
-                    timeago::Formatter::new().convert(ago)
-                })
-            };
-
-            let mut row = Row::new();
-            row.add_cell(Cell::new(id_fmt));
-            row.add_cell(Cell::new(messages_fmt));
-            row.add_cell(Cell::new(last_message_at_fmt));
-            if private_column {
-                let private = if private {
-                    "Yes".bold().yellow().to_string()
-                } else {
-                    "No".to_string()
-                };
-
-                row.add_cell(Cell::new(private));
-            }
-
-            rows.push(row);
+        for details in conversations.into_iter().skip(skip) {
+            rows.push(self.build_conversation_row(
+                ctx,
+                active_conversation_id,
+                private_column,
+                title_column,
+                details,
+            ));
         }
 
         Ok(Success::Table { header, rows })
     }
+
+    fn build_conversation_row(
+        &self,
+        ctx: &Ctx,
+        active_conversation_id: ConversationId,
+        private_column: bool,
+        title_column: bool,
+        details: Details,
+    ) -> Row {
+        let Details {
+            id,
+            title,
+            messages,
+            last_message_at,
+            private,
+        } = details;
+
+        let mut id_fmt = if id == active_conversation_id {
+            id.to_string().bold().yellow().to_string()
+        } else {
+            id.to_string()
+        };
+
+        if ctx.term.args.hyperlinks {
+            id_fmt = hyperlink(format!("jp://show-metadata/{id}"), id_fmt);
+        }
+
+        let messages_fmt = if ctx.term.args.hyperlinks {
+            hyperlink(format!("jp://show-messages/{id}"), messages.to_string())
+        } else {
+            messages.to_string()
+        };
+
+        let last_message_at_fmt = if self.full {
+            last_message_at
+                .and_then(|t| {
+                    let format =
+                        format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+                    let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+
+                    t.to_offset(local_offset).format(&format).ok()
+                })
+                .unwrap_or_default()
+        } else {
+            last_message_at.map_or_else(String::new, |t| {
+                let ago = (UtcDateTime::now() - t).try_into().expect("valid duration");
+                timeago::Formatter::new().convert(ago)
+            })
+        };
+
+        let mut row = Row::new();
+        row.add_cell(Cell::new(id_fmt));
+        row.add_cell(Cell::new(messages_fmt).set_alignment(CellAlignment::Right));
+        row.add_cell(Cell::new(last_message_at_fmt).set_alignment(CellAlignment::Right));
+        if private_column {
+            let private = if private {
+                "Y".blue().to_string()
+            } else {
+                "N".to_string()
+            };
+
+            row.add_cell(Cell::new(private).set_alignment(CellAlignment::Center));
+        }
+        if title_column {
+            let title = title.unwrap_or_default();
+            row.add_cell(Cell::new(title));
+        }
+
+        row
+    }
+}
+
+fn build_header_row(conversations: &[Details]) -> (bool, bool, Row) {
+    let mut header = Row::new();
+    header.add_cell(Cell::new("ID"));
+    header.add_cell(Cell::new("#").set_alignment(CellAlignment::Right));
+    header.add_cell(Cell::new("Activity").set_alignment(CellAlignment::Right));
+
+    // Show "private" column if any conversations are private.
+    let mut private_column = false;
+    if conversations.iter().any(|d| d.private) {
+        private_column = true;
+        header.add_cell(Cell::new("Local").set_alignment(CellAlignment::Right));
+    }
+
+    let mut title_column = false;
+    if conversations.iter().any(|d| d.title.is_some()) {
+        title_column = true;
+        header.add_cell(Cell::new("Title").set_alignment(CellAlignment::Left));
+    }
+
+    (private_column, title_column, header)
 }
