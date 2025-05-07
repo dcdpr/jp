@@ -13,10 +13,13 @@ jp_id = { path = "crates/jp_id" }
 jp_llm = { path = "crates/jp_llm" }
 jp_mcp = { path = "crates/jp_mcp" }
 jp_openrouter = { path = "crates/jp_openrouter" }
+jp_query = { path = "crates/jp_query" }
 jp_term = { path = "crates/jp_term" }
+jp_test = { path = "crates/jp_test" }
 jp_workspace = { path = "crates/jp_workspace" }
 
 async-stream = { version = "0.3", default-features = false }
+async-trait = { version = "0.1", default-features = false }
 backoff = { version = "0.4", default-features = false }
 bat = { version = "0.25", default-features = false }
 clap = { version = "4", default-features = false }
@@ -25,7 +28,6 @@ comrak = { version = "0.38", default-features = false }
 confique = { version = "0.3", default-features = false }
 crossterm = { version = "0.29", default-features = false }
 directories = { version = "6", default-features = false }
-dotenv = { version = "0.15", default-features = false }
 dyn-clone = { version = "1", default-features = false }
 dyn-hash = { version = "0.2", default-features = false }
 futures = { version = "0.3", default-features = false }
@@ -43,6 +45,8 @@ reqwest = { version = "0.12", default-features = false }
 reqwest-eventsource = { version = "0.6", default-features = false }
 rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main" }
 rusqlite = { version = "0.35", default-features = false }
+saphyr = { version = "0.0.4", default-features = false }
+schemars = { version = "1.0.0-alpha.17", default-features = false }
 serde = { version = "1", default-features = false }
 serde_json = { version = "1", default-features = false }
 serial_test = { version = "3", default-features = false }
