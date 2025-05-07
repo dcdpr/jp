@@ -112,6 +112,7 @@ impl Default for ModelReference {
 /// This is used for storage and display purposes, it is **NOT** the same as
 /// [`Model::slug`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct ModelId {
     provider: Option<ProviderId>,
     name: String,
@@ -141,12 +142,7 @@ impl Id for ModelId {
     }
 
     fn target_id(&self) -> TargetId {
-        let prefix = self
-            .provider
-            .map(|p| format!("{}-", p.target_id()))
-            .unwrap_or_default();
-
-        format!("{}{}", prefix, self.name).into()
+        self.to_string().into()
     }
 
     fn global_id(&self) -> GlobalId {
@@ -171,7 +167,18 @@ impl Default for ModelId {
 
 impl fmt::Display for ModelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.format_id(f)
+        let prefix = self
+            .provider
+            .map(|p| format!("{}-", p.target_id()))
+            .unwrap_or_default();
+
+        write!(f, "{}{}", prefix, self.name)
+    }
+}
+
+impl From<ModelId> for String {
+    fn from(model: ModelId) -> Self {
+        model.to_string()
     }
 }
 
@@ -216,6 +223,22 @@ impl TryFrom<String> for ModelId {
     }
 }
 
+impl TryFrom<(ProviderId, String)> for ModelId {
+    type Error = Error;
+
+    fn try_from((provider, name): (ProviderId, String)) -> Result<Self> {
+        Self::try_from((provider, name.as_str()))
+    }
+}
+
+impl TryFrom<(ProviderId, &String)> for ModelId {
+    type Error = Error;
+
+    fn try_from((provider, name): (ProviderId, &String)) -> Result<Self> {
+        Self::try_from((provider, name.as_str()))
+    }
+}
+
 impl TryFrom<(ProviderId, &str)> for ModelId {
     type Error = Error;
 
@@ -248,33 +271,6 @@ pub enum ProviderId {
     Openai,
     #[default]
     Openrouter,
-}
-
-impl ProviderId {
-    #[must_use]
-    pub fn is_anthropic(&self) -> bool {
-        matches!(self, Self::Anthropic)
-    }
-
-    #[must_use]
-    pub fn is_deepseek(&self) -> bool {
-        matches!(self, Self::Deepseek)
-    }
-
-    #[must_use]
-    pub fn is_google(&self) -> bool {
-        matches!(self, Self::Google)
-    }
-
-    #[must_use]
-    pub fn is_openai(&self) -> bool {
-        matches!(self, Self::Openai)
-    }
-
-    #[must_use]
-    pub fn is_openrouter(&self) -> bool {
-        matches!(self, Self::Openrouter)
-    }
 }
 
 impl Id for ProviderId {
