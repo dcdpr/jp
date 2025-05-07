@@ -10,6 +10,14 @@ pub struct Config {
     pub api_key_env: String,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            api_key_env: "GEMINI_API_KEY".to_owned(),
+        }
+    }
+}
+
 impl Config {
     /// Set a configuration value using a stringified key/value pair.
     pub fn set(&mut self, key: &str, value: impl Into<String>) -> Result<()> {
