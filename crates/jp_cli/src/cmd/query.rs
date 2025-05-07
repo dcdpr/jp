@@ -2,7 +2,7 @@ use std::{collections::HashSet, path::PathBuf, time::Duration};
 
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
-use jp_config::style::code::LinkStyle;
+use jp_config::{llm::ToolChoice, style::code::LinkStyle};
 use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
     persona::Instructions,
@@ -11,6 +11,7 @@ use jp_conversation::{
 };
 use jp_llm::provider::{self, CompletionChunk, StreamEvent};
 use jp_mcp::{config::McpServerId, ResourceContents, Tool};
+use jp_query::query::ChatQuery;
 use jp_term::{code, osc::hyperlink, stdout};
 use termimad::FmtText;
 use tracing::{debug, info, trace};
@@ -203,8 +204,7 @@ impl Args {
         // Messages
         let messages = ctx.workspace.get_messages(&conversation_id);
         let tools = ctx.mcp_client.list_tools().await?;
-        let mut thread_builder = ThreadBuilder::new(conversation.clone())
-            .with_model(model.clone())
+        let mut thread_builder = ThreadBuilder::default()
             .with_system_prompt(persona.system_prompt.clone())
             .with_instructions(persona.instructions.clone())
             .with_attachments(attachments)
@@ -316,8 +316,13 @@ async fn handle_stream(
     tools: Vec<Tool>,
 ) -> Result<()> {
     let provider = provider::get_provider(model.provider, &ctx.config.llm.provider)?;
-    let mut stream =
-        provider.chat_completion_stream(&ctx.config.llm, thread.clone(), tools.clone())?;
+    let query = ChatQuery {
+        thread: thread.clone(),
+        tools: tools.clone(),
+        tool_choice: ToolChoice::Auto,
+        ..Default::default()
+    };
+    let mut stream = provider.chat_completion_stream(&model, query)?;
 
     let mut content_tokens = String::new();
     let mut reasoning_tokens = String::new();
@@ -408,13 +413,8 @@ async fn handle_stream(
 
     if !tool_calls.is_empty() {
         let results = handle_tool_calls(ctx, tool_calls).await?;
-        Box::pin(handle_stream(
-            ctx,
-            thread.with_message(UserMessage::ToolCallResults(results)),
-            model,
-            tools,
-        ))
-        .await?;
+        thread.message = UserMessage::ToolCallResults(results);
+        Box::pin(handle_stream(ctx, thread, model, tools)).await?;
     }
 
     Ok(())
