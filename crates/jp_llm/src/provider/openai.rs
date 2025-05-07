@@ -1,108 +1,59 @@
-use std::{env, pin::Pin};
+use std::env;
 
 use async_stream::stream;
-use futures::Stream;
+use async_trait::async_trait;
+use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::llm;
 use jp_conversation::{
+    message::ToolCallRequest,
+    model,
     thread::{Document, Documents, Thinking, Thread},
-    AssistantMessage, MessagePair, UserMessage,
+    AssistantMessage, MessagePair, Model, UserMessage,
 };
-use jp_mcp::Tool;
-use openai::{
-    chat::{
-        self, ChatCompletionBuilder, ChatCompletionChoiceDelta, ChatCompletionDelta,
-        ChatCompletionFunctionDefinition, ChatCompletionGeneric, ChatCompletionMessage,
-        ChatCompletionMessageDelta, ChatCompletionMessageRole, ToolCallFunction,
-    },
-    Credentials,
+use jp_query::query::ChatQuery;
+use openai_responses::{
+    types::{self, ReasoningEffort, Request},
+    Client, StreamError,
 };
-use serde::Serialize;
-use tracing::{debug, trace, warn};
+use serde_json::Value;
+use tracing::trace;
 
-use super::{CompletionChunk, Delta, StreamEvent};
+use super::{handle_delta, Delta, Event, EventStream, Provider, StreamEvent};
 use crate::{
     error::{Error, Result},
-    provider::{handle_delta, AccumulationState, Provider},
+    provider::AccumulationState,
 };
 
 #[derive(Debug, Clone)]
 pub struct Openai {
-    credentials: Credentials,
+    client: Client,
 }
 
-impl Openai {
-    fn new(api_key: String, base_url: String) -> Self {
-        let credentials = Credentials::new(api_key, base_url);
-
-        Self { credentials }
-    }
-
-    /// Build request for Openai API.
-    fn build_request(&self, thread: Thread, tools: Vec<Tool>) -> Result<ChatCompletionBuilder> {
-        let slug = thread.model.slug.clone();
-        let messages: Messages = thread.try_into()?;
-        let tools = tools
-            .into_iter()
-            .map(|tool| ChatCompletionFunctionDefinition {
-                name: tool.name.to_string(),
-                description: tool.description.map(|v| v.to_string()),
-                parameters: Some(serde_json::Value::Object(
-                    tool.input_schema.as_ref().clone(),
-                )),
-            })
-            .collect::<Vec<_>>();
-
-        trace!(
-            slug,
-            messages_size = messages.0.len(),
-            tools_size = tools.len(),
-            "Built Openai request."
-        );
-
-        Ok(ChatCompletionDelta::builder(&slug, messages.0)
-            .credentials(self.credentials.clone())
-            .functions(tools))
-    }
-}
-
+#[async_trait]
 impl Provider for Openai {
-    fn chat_completion_stream(
-        &self,
-        _config: &llm::Config,
-        thread: Thread,
-        tools: Vec<Tool>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>> {
-        debug!(
-            model = thread.model.slug,
-            "Starting Openai chat completion stream."
-        );
+    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
+        let client = self.client.clone();
+        let request = create_request(model, query)?;
+        client
+            .create(request)
+            .await?
+            .map_err(Into::into)
+            .and_then(map_response)
+    }
 
-        let request = self.build_request(thread, tools)?;
+    fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
+        let client = self.client.clone();
+        let request = create_request(model, query)?;
         let stream = Box::pin(stream! {
             let mut current_state = AccumulationState::default();
-            let stream = request
-                .create_stream()
-                .await.expect("Should not fail to clone");
+            let stream = client
+                .stream(request)
+                .or_else(handle_error);
+
             tokio::pin!(stream);
-
-            while let Some(delta) = stream.recv().await {
-                trace!(?delta, "Received delta.");
-
-                let delta = delta.choices.into_iter().next().map(|c| (c.delta, c.finish_reason));
-                let Some((delta, finish_reason)) = delta else {
-                    continue
-                };
-
-                let mut delta: Delta = delta.into();
-                delta.tool_call_finished = finish_reason.is_some_and(|reason| reason == "function_call");
-
-                match handle_delta(delta, &mut current_state) {
-                    Ok(Some(event)) => yield Ok(event),
-                    Ok(None) => {}
-                    Err(error) => {
-                        warn!(?error, "Error handling OpenAI delta.");
-                        yield Err(error);
-                    }
+            while let Some(event) = stream.next().await {
+                if let Some(event) = map_event(event?, &mut current_state) {
+                    yield event;
                 }
             }
         });
@@ -111,52 +62,161 @@ impl Provider for Openai {
     }
 }
 
-impl From<ChatCompletionMessageDelta> for Delta {
-    fn from(delta: ChatCompletionMessageDelta) -> Self {
-        let tool_call = delta.function_call.into_iter().next();
+async fn handle_error(error: StreamError) -> std::result::Result<types::Event, Error> {
+    Err(match error {
+        StreamError::Parsing(error) => error.into(),
+        StreamError::Stream(error) => match error {
+            reqwest_eventsource::Error::InvalidStatusCode(status_code, response) => {
+                Error::OpenaiStatusCode {
+                    status_code,
+                    response: response.text().await.unwrap_or_default(),
+                }
+            }
+            _ => Error::OpenaiEvent(Box::new(error)),
+        },
+    })
+}
 
-        Self {
-            content: delta.content,
-            reasoning: None,
-            tool_call_id: delta.tool_call_id,
-            tool_call_name: tool_call.as_ref().and_then(|call| call.name.clone()),
-            tool_call_arguments: tool_call.as_ref().and_then(|call| call.arguments.clone()),
-            tool_call_finished: false,
+fn map_response(response: types::Response) -> Result<Vec<Event>> {
+    response
+        .output
+        .into_iter()
+        .filter_map(|item| {
+            let delta = Delta::from(item);
+            if let Some(content) = delta.content {
+                return Some(Ok(Event::Content(content)));
+            }
+
+            if let Some(reasoning) = delta.reasoning {
+                return Some(Ok(Event::Reasoning(reasoning)));
+            }
+
+            if let Some(args) = delta.tool_call_arguments {
+                return Some(Ok(Event::ToolCall(ToolCallRequest {
+                    id: delta.tool_call_id.unwrap_or_default(),
+                    name: delta.tool_call_name.unwrap_or_default(),
+                    arguments: match serde_json::from_str(&args) {
+                        Ok(arguments) => arguments,
+                        Err(error) => return Some(Err(error.into())),
+                    },
+                })));
+            }
+
+            None
+        })
+        .collect::<Result<Vec<_>>>()
+}
+
+fn map_event(event: types::Event, state: &mut AccumulationState) -> Option<Result<StreamEvent>> {
+    use types::Event;
+
+    let delta: Delta = match event {
+        Event::OutputTextDelta { delta, .. } => Delta::content(delta),
+        Event::OutputItemAdded { item, .. } | Event::OutputItemDone { item, .. }
+            if matches!(item, types::OutputItem::FunctionCall(_)) =>
+        {
+            item.into()
         }
-    }
+        Event::FunctionCallArgumentsDelta { delta, .. } => Delta::tool_call("", "", delta),
+        Event::FunctionCallArgumentsDone { .. } => Delta::tool_call_finished(),
+        _ => {
+            trace!(?event, "Ignoring Openai event");
+            return None;
+        }
+    };
+
+    handle_delta(delta, state).transpose()
+}
+
+fn create_request(model: &Model, query: ChatQuery) -> Result<Request> {
+    let ChatQuery {
+        thread,
+        tools,
+        tool_choice,
+        tool_call_strict_mode,
+    } = query;
+
+    let request = Request {
+        model: types::Model::Other(model.slug.clone()),
+        input: convert_thread(thread)?,
+        store: Some(false),
+        tool_choice: Some(convert_tool_choice(tool_choice)),
+        tools: Some(convert_tools(tools, tool_call_strict_mode)),
+        temperature: model.temperature,
+        reasoning: model.reasoning.map(convert_reasoning),
+        max_output_tokens: model.max_tokens.map(Into::into),
+        truncation: Some(types::Truncation::Auto),
+        top_p: model
+            .additional_parameters
+            .get("top_p")
+            .and_then(Value::as_f64)
+            .map(
+                #[expect(clippy::cast_possible_truncation)]
+                |v| v as f32,
+            ),
+        ..Default::default()
+    };
+
+    Ok(request)
 }
 
 impl TryFrom<&llm::provider::openai::Config> for Openai {
     type Error = Error;
 
     fn try_from(config: &llm::provider::openai::Config) -> Result<Self> {
-        let base_url = env::var(&config.base_url_env).unwrap_or(config.base_url.clone());
         let api_key = env::var(&config.api_key_env)
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
-        Ok(Openai::new(api_key, base_url))
+        Ok(Openai {
+            client: Client::new(&api_key)?,
+        })
     }
 }
 
-impl From<ChatCompletionGeneric<ChatCompletionChoiceDelta>> for CompletionChunk {
-    fn from(chunk: ChatCompletionGeneric<ChatCompletionChoiceDelta>) -> Self {
-        let content = chunk
-            .choices
-            .first()
-            .and_then(|choice| choice.delta.content.as_deref().map(String::from))
-            .unwrap_or_default();
-
-        Self::Content(content)
+fn convert_tool_choice(choice: llm::ToolChoice) -> types::ToolChoice {
+    match choice {
+        llm::ToolChoice::Auto => types::ToolChoice::Auto,
+        llm::ToolChoice::None => types::ToolChoice::None,
+        llm::ToolChoice::Required => types::ToolChoice::Required,
+        llm::ToolChoice::Function(name) => types::ToolChoice::Function(name),
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize)]
-pub struct Messages(pub Vec<ChatCompletionMessage>);
+fn convert_tools(tools: Vec<jp_mcp::Tool>, strict: bool) -> Vec<types::Tool> {
+    tools
+        .into_iter()
+        .map(|tool| types::Tool::Function {
+            name: tool.name.into(),
+            parameters: Value::Object(tool.input_schema.as_ref().clone()),
+            strict,
+            description: tool.description.map(|v| v.to_string()),
+        })
+        .collect()
+}
 
-impl TryFrom<Thread> for Messages {
+fn convert_reasoning(reasoning: model::Reasoning) -> types::ReasoningConfig {
+    types::ReasoningConfig {
+        // TODO: needs "organization ID-check verification" on OpenAI platform.
+        // summary: Some(SummaryConfig::Auto),
+        summary: None,
+        effort: Some(match reasoning.effort {
+            model::ReasoningEffort::High => ReasoningEffort::High,
+            model::ReasoningEffort::Medium => ReasoningEffort::Medium,
+            model::ReasoningEffort::Low => ReasoningEffort::Low,
+        }),
+    }
+}
+
+fn convert_thread(thread: Thread) -> Result<types::Input> {
+    Inputs::try_from(thread).map(|v| types::Input::List(v.0))
+}
+
+struct Inputs(Vec<types::InputListItem>);
+
+impl TryFrom<Thread> for Inputs {
     type Error = Error;
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn try_from(thread: Thread) -> Result<Self> {
         let Thread {
             system_prompt,
@@ -165,7 +225,6 @@ impl TryFrom<Thread> for Messages {
             mut history,
             reasoning,
             message,
-            ..
         } = thread;
 
         // If the last history message is a tool call response, we need to go
@@ -181,7 +240,7 @@ impl TryFrom<Thread> for Messages {
             }
         }
 
-        let mut messages = vec![];
+        let mut items = vec![];
         let history = history
             .into_iter()
             .flat_map(message_pair_to_messages)
@@ -189,22 +248,26 @@ impl TryFrom<Thread> for Messages {
 
         // System message first, if any.
         if let Some(system_prompt) = system_prompt {
-            messages.push(ChatCompletionMessage {
-                role: ChatCompletionMessageRole::System,
-                content: Some(system_prompt),
-                ..Default::default()
-            });
+            items.push(types::InputItem::InputMessage(types::APIInputMessage {
+                role: types::Role::System,
+                content: types::ContentInput::Text(system_prompt),
+                status: None,
+            }));
         }
 
         // Historical messages second, these are static.
-        messages.extend(history);
+        items.extend(history);
 
         // Group multiple contents blocks into a single message.
-        let mut content = vec![
-            "Before we continue, here are some contextual details that will help you generate a \
-             better response."
-                .to_string(),
-        ];
+        let mut content = vec![];
+
+        if !instructions.is_empty() {
+            content.push(
+                "Before we continue, here are some contextual details that will help you generate \
+                 a better response."
+                    .to_string(),
+            );
+        }
 
         // Then instructions in XML tags.
         for instruction in &instructions {
@@ -227,20 +290,34 @@ impl TryFrom<Thread> for Messages {
         // Attach all data, and add a "fake" acknowledgement by the assistant.
         //
         // See `provider::openrouter` for more information.
-        messages.push(ChatCompletionMessage {
-            role: ChatCompletionMessageRole::User,
-            content: Some(content.join("\n\n")),
-            ..Default::default()
-        });
-        messages.push(ChatCompletionMessage {
-            role: ChatCompletionMessageRole::Assistant,
-            content: Some(
-                "Thank you for those details, I'll use them to inform my next response."
-                    .to_string(),
-            ),
-            ..Default::default()
-        });
-        messages.extend(
+        if !content.is_empty() {
+            items.push(types::InputItem::InputMessage(types::APIInputMessage {
+                role: types::Role::User,
+                content: types::ContentInput::List(
+                    content
+                        .into_iter()
+                        .map(|text| types::ContentItem::Text { text })
+                        .collect(),
+                ),
+                status: None,
+            }));
+        }
+
+        if items.last().is_some_and(|m| match m {
+            types::InputItem::InputMessage(message) => matches!(message.role, types::Role::User),
+            _ => false,
+        }) {
+            items.push(types::InputItem::InputMessage(types::APIInputMessage {
+                role: types::Role::Assistant,
+                content: types::ContentInput::Text(
+                    "Thank you for those details, I'll use them to inform my next response."
+                        .to_string(),
+                ),
+                status: None,
+            }));
+        }
+
+        items.extend(
             history_after_instructions
                 .into_iter()
                 .flat_map(message_pair_to_messages),
@@ -248,94 +325,130 @@ impl TryFrom<Thread> for Messages {
 
         // User query
         match message {
-            UserMessage::Query(query) => messages.push(ChatCompletionMessage {
-                role: ChatCompletionMessageRole::User,
-                content: Some(query),
-                ..Default::default()
-            }),
+            UserMessage::Query(text) => {
+                items.push(types::InputItem::InputMessage(types::APIInputMessage {
+                    role: types::Role::User,
+                    content: types::ContentInput::Text(text),
+                    status: None,
+                }));
+            }
             UserMessage::ToolCallResults(results) => {
-                messages.extend(results.into_iter().map(|result| ChatCompletionMessage {
-                    role: ChatCompletionMessageRole::Tool,
-                    tool_call_id: Some(result.id),
-                    content: Some(result.content),
-                    ..Default::default()
+                items.extend(results.into_iter().map(|result| {
+                    types::InputItem::FunctionCallOutput(types::FunctionCallOutput {
+                        call_id: result.id,
+                        output: result.content,
+                        id: None,
+                        status: None,
+                    })
                 }));
             }
         }
 
         // Reasoning message last, in `<thinking>` tags.
         if let Some(content) = reasoning {
-            messages.push(ChatCompletionMessage {
-                role: ChatCompletionMessageRole::Assistant,
-                content: Some(Thinking(content).try_to_xml()?),
-                ..Default::default()
-            });
+            items.push(types::InputItem::InputMessage(types::APIInputMessage {
+                role: types::Role::Assistant,
+                content: types::ContentInput::Text(Thinking(content).try_to_xml()?),
+                status: None,
+            }));
         }
 
-        Ok(Messages(messages))
+        Ok(Self(
+            items.into_iter().map(types::InputListItem::Item).collect(),
+        ))
     }
 }
 
-fn message_pair_to_messages(msg: MessagePair) -> Vec<ChatCompletionMessage> {
+fn message_pair_to_messages(msg: MessagePair) -> Vec<types::InputItem> {
     let (user, assistant) = msg.split();
 
     user_message_to_messages(user)
         .into_iter()
-        .chain(Some(assistant_message_to_message(assistant)))
+        .chain(assistant_message_to_messages(assistant))
         .collect()
 }
 
-fn user_message_to_messages(user: UserMessage) -> Vec<ChatCompletionMessage> {
+fn user_message_to_messages(user: UserMessage) -> Vec<types::InputItem> {
     match user {
-        UserMessage::Query(query) if !query.is_empty() => vec![ChatCompletionMessage {
-            role: ChatCompletionMessageRole::User,
-            content: Some(query),
-            ..Default::default()
-        }],
+        UserMessage::Query(query) if !query.is_empty() => {
+            vec![types::InputItem::InputMessage(types::APIInputMessage {
+                role: types::Role::User,
+                content: types::ContentInput::Text(query),
+                status: None,
+            })]
+        }
         UserMessage::Query(_) => vec![],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
-            .map(|result| ChatCompletionMessage {
-                role: ChatCompletionMessageRole::Tool,
-                content: Some(result.content),
-                tool_call_id: Some(result.id),
-                ..Default::default()
+            .map(|result| {
+                types::InputItem::FunctionCallOutput(types::FunctionCallOutput {
+                    call_id: result.id,
+                    output: result.content,
+                    id: None,
+                    status: None,
+                })
             })
             .collect(),
     }
 }
 
-fn assistant_message_to_message(assistant: AssistantMessage) -> ChatCompletionMessage {
+fn assistant_message_to_messages(assistant: AssistantMessage) -> Vec<types::InputItem> {
     let AssistantMessage {
         content,
         tool_calls,
         ..
     } = assistant;
 
-    let mut message = ChatCompletionMessage {
-        role: ChatCompletionMessageRole::Assistant,
-        content,
-        tool_calls: Some(
-            tool_calls
-                .into_iter()
-                .map(|call| chat::ToolCall {
-                    id: call.id,
-                    r#type: "function".to_string(),
-                    function: ToolCallFunction {
-                        name: call.name,
-                        arguments: call.arguments.to_string(),
-                    },
-                })
-                .collect(),
-        ),
-        ..Default::default()
-    };
-
-    if message.content.as_ref().is_none_or(String::is_empty)
-        && message.tool_calls.as_ref().is_none_or(Vec::is_empty)
-    {
-        message.content = Some("<no response>".to_owned());
+    let mut items = vec![];
+    if let Some(text) = content {
+        items.push(types::InputItem::InputMessage(types::APIInputMessage {
+            role: types::Role::Assistant,
+            content: types::ContentInput::Text(text),
+            status: None,
+        }));
     }
 
-    message
+    for tool_call in tool_calls {
+        items.push(types::InputItem::FunctionCall(types::FunctionCall {
+            call_id: tool_call.id,
+            name: tool_call.name,
+            arguments: tool_call.arguments.to_string(),
+            status: None,
+            id: None,
+        }));
+    }
+
+    items
+}
+
+impl From<types::OutputItem> for Delta {
+    fn from(item: types::OutputItem) -> Self {
+        match item {
+            types::OutputItem::Message(message) => Delta::content(
+                message
+                    .content
+                    .into_iter()
+                    .filter_map(|item| match item {
+                        types::OutputContent::Text { text, .. } => Some(text),
+                        types::OutputContent::Refusal { .. } => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n"),
+            ),
+            types::OutputItem::Reasoning(reasoning) => Delta::reasoning(
+                reasoning
+                    .summary
+                    .into_iter()
+                    .map(|item| match item {
+                        types::ReasoningSummary::Text { text, .. } => text,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n"),
+            ),
+            types::OutputItem::FunctionCall(call) => {
+                Delta::tool_call(call.call_id, call.name, call.arguments)
+            }
+            _ => Delta::default(),
+        }
+    }
 }
