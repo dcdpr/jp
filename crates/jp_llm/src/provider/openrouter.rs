@@ -332,12 +332,16 @@ impl TryFrom<(&Model, Thread)> for RequestMessages {
         messages.extend(history);
 
         // Group multiple contents blocks into a single message.
-        let mut content = vec![Content::Text {
-            text: "Before we continue, here are some contextual details that will help you \
-                   generate a better response."
-                .to_string(),
-            cache_control: None,
-        }];
+        let mut content = vec![];
+
+        if !instructions.is_empty() {
+            content.push(Content::Text {
+                text: "Before we continue, here are some contextual details that will help you \
+                       generate a better response."
+                    .to_string(),
+                cache_control: None,
+            });
+        }
 
         // Then instructions in XML tags.
         //
@@ -398,12 +402,17 @@ impl TryFrom<(&Model, Thread)> for RequestMessages {
         // - U: <user query>
         // - A: <tool call request>
         // - U: <tool call response>
-        messages.push(Message::default().with_content(content).user());
-        messages.push(
-            Message::default()
-                .with_text("Thank you for those details, I'll use them to inform my next response.")
-                .assistant(),
-        );
+        if !content.is_empty() {
+            messages.push(Message::default().with_content(content).user());
+            messages.push(
+                Message::default()
+                    .with_text(
+                        "Thank you for those details, I'll use them to inform my next response.",
+                    )
+                    .assistant(),
+            );
+        }
+
         messages.extend(
             history_after_instructions
                 .into_iter()
