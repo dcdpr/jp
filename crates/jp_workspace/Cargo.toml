@@ -19,7 +19,7 @@ jp_mcp = { workspace = true }
 
 directories = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order"] }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }

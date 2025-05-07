@@ -22,22 +22,36 @@ pub struct ChatCompletion {
     pub reasoning: Option<Reasoning>,
 
     /// Tool calling field.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<Tool>,
 
+    /// Tool choice field.
+    pub tool_choice: ToolChoice,
+
     /// Message transforms.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub transforms: Vec<Transform>,
 
     /// Stop words.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub stop: Vec<String>,
 
     /// Whether to return log probabilities of the output tokens or not. If
     /// true, returns the log probabilities of each output token returned in the
     /// content of message.
-    #[serde(default, skip_serializing_if = "logprobs_is_false")]
+    #[serde(skip_serializing_if = "is_false")]
     pub logprobs: bool,
+
+    /// Whether to include usage statistics in the response.
+    ///
+    /// Enabling usage accounting will add a few hundred milliseconds to the
+    /// last response as the API calculates token counts and costs. This only
+    /// affects the final message and does not impact overall streaming
+    /// performance.
+    ///
+    /// Default is `false`.
+    #[serde(skip_serializing_if = "is_false")]
+    pub usage: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Default)]
@@ -56,8 +70,8 @@ pub enum ReasoningEffort {
 }
 
 #[expect(clippy::trivially_copy_pass_by_ref)]
-fn logprobs_is_false(logprobs: &bool) -> bool {
-    !logprobs
+fn is_false(v: &bool) -> bool {
+    !v
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

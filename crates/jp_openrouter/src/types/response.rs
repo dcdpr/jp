@@ -45,7 +45,7 @@ pub struct ChatCompletion {
     pub system_fingerprint: Option<String>,
 
     /// Usage statistics for the completion request.
-    pub usage: Option<ResponseUsage>,
+    pub usage: Option<Usage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -63,19 +63,6 @@ pub enum ResponseObject {
     ChatCompletion,
     #[serde(rename = "chat.completion.chunk")]
     ChatCompletionChunk,
-}
-
-/// Usage statistics for the completion request.
-#[derive(Debug, Deserialize, Clone)]
-pub struct ResponseUsage {
-    /// Number of tokens in the prompt.
-    pub prompt_tokens: usize,
-
-    /// Number of tokens in the generated completion.
-    pub completion_tokens: usize,
-
-    /// Total number of tokens used in the request (prompt + completion).
-    pub total_tokens: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -189,9 +176,22 @@ pub struct CompletionChunk {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Usage {
-    pub prompt_tokens: u32,
     pub completion_tokens: u32,
+    pub completion_tokens_details: Option<CompletionTokensDetails>,
+    pub cost: Option<f32>,
+    pub prompt_tokens: u32,
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
     pub total_tokens: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct PromptTokensDetails {
+    pub cached_tokens: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct CompletionTokensDetails {
+    pub reasoning_tokens: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
