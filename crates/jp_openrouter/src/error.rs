@@ -16,6 +16,9 @@ pub enum Error {
 
     #[error("client config error: {0}")]
     Config(String),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 #[cfg(test)]

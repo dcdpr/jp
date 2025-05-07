@@ -45,7 +45,7 @@ pub struct Attachment {
 /// on the local file system, while a `web` handler could handle attachments
 /// that are URLs pointing to web pages.
 #[typetag::serde(tag = "type")]
-pub trait Handler: std::fmt::Debug + DynClone + DynHash {
+pub trait Handler: std::fmt::Debug + DynClone + DynHash + Sync + Send {
     /// The URI scheme of the handler.
     ///
     /// This is used to determine which handler to use for a given URI. The

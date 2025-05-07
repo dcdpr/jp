@@ -10,7 +10,7 @@ use tracing::{debug, trace};
 
 use super::{error::Result, Config};
 
-type PartialConfig = <Config as Confique>::Partial;
+pub type PartialConfig = <Config as Confique>::Partial;
 
 const APPLICATION: &str = "jp";
 const GLOBAL_CONFIG_ENV_VAR: &str = "JP_GLOBAL_CONFIG_FILE";
@@ -24,6 +24,17 @@ const VALID_CONFIG_FILE_EXTS: &[&str] = &["toml", "json", "json5", "yaml", "yml"
 /// the configuration file, before returning the final configuration.
 pub fn load(root: &Path, search: bool) -> Result<Config> {
     trace!(root = %root.display(), ?search, "Loading configuration.");
+
+    build(load_envs(load_partial(root, search, None)?)?)
+}
+
+/// Load a partial configuration for a given root directory.
+pub fn load_partial(
+    root: &Path,
+    search: bool,
+    base: Option<PartialConfig>,
+) -> Result<PartialConfig> {
+    trace!(root = %root.display(), ?search, "Loading partial configuration.");
 
     let mut inherit = search;
     let mut partials = Vec::new();
@@ -48,17 +59,24 @@ pub fn load(root: &Path, search: bool) -> Result<Config> {
     }
 
     // Merge all partials in reverse order (most general to most specific).
-    let mut merged = PartialConfig::default_values();
+    let mut merged = base.unwrap_or(PartialConfig::default_values());
     for partial in partials.into_iter().rev() {
         merged = partial.with_fallback(merged);
     }
 
-    // Load environment variables.
-    let envs = PartialConfig::from_env()?;
-    let merged = envs.with_fallback(merged);
+    Ok(merged)
+}
 
-    // Convert to final config.
-    let config = Config::from_partial(merged)?;
+/// Load environment variables into a partial configuration.
+pub fn load_envs(base: PartialConfig) -> Result<PartialConfig> {
+    trace!("Loading environment variable configuration.");
+
+    Ok(PartialConfig::from_env()?.with_fallback(base))
+}
+
+/// Build a final configuration from merged partial configurations.
+pub fn build(config: PartialConfig) -> Result<Config> {
+    let config = Config::from_partial(config)?;
     debug!(?config, "Loaded configuration.");
 
     Ok(config)

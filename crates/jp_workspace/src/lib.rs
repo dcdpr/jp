@@ -226,7 +226,7 @@ impl Workspace {
         // store it separately to ensure an active conversation always exists,
         // and cannot be removed.
         let active_conversation = conversations
-            .remove(&conversations_metadata.active_conversation_id)
+            .remove_untracked(&conversations_metadata.active_conversation_id)
             .unwrap_or_else(|| {
                 info!(
                     id = %conversations_metadata.active_conversation_id,

@@ -26,6 +26,16 @@ pub struct Config {
     pub base_url_env: String,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            api_key_env: "OPENAI_API_KEY".to_owned(),
+            base_url: "https://api.openai.com/v1".to_owned(),
+            base_url_env: "OPENAI_BASE_URL".to_owned(),
+        }
+    }
+}
+
 impl Config {
     /// Set a configuration value using a stringified key/value pair.
     pub fn set(&mut self, key: &str, value: impl Into<String>) -> Result<()> {

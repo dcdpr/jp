@@ -6,7 +6,7 @@ pub mod style;
 
 pub use config::Config;
 pub use error::Error;
-pub use parse::load;
+pub use parse::{build, load, load_envs, load_partial, PartialConfig};
 
 fn set_error(s: impl Into<String>) -> error::Result<()> {
     Err(Error::UnknownConfigKey {

@@ -4,15 +4,13 @@ use serde::Serialize;
 use crate::{
     error::{Error, Result},
     persona::Instructions,
-    Conversation, MessagePair, Model, UserMessage,
+    MessagePair, UserMessage,
 };
 
 /// A wrapper for multiple messages, with convenience methods for adding
 /// specific message types and content.
 #[derive(Debug, Default, Clone)]
 pub struct ThreadBuilder {
-    pub conversation: Conversation,
-    pub model: Option<Model>,
     pub system_prompt: Option<String>,
     pub instructions: Vec<Instructions>,
     pub attachments: Vec<Attachment>,
@@ -22,26 +20,6 @@ pub struct ThreadBuilder {
 }
 
 impl ThreadBuilder {
-    #[must_use]
-    pub fn new(conversation: Conversation) -> Self {
-        Self {
-            conversation,
-            model: None,
-            system_prompt: None,
-            instructions: vec![],
-            attachments: vec![],
-            history: vec![],
-            reasoning: None,
-            message: None,
-        }
-    }
-
-    #[must_use]
-    pub fn with_model(mut self, model: Model) -> Self {
-        self.model = Some(model);
-        self
-    }
-
     #[must_use]
     pub fn with_system_prompt(mut self, system_prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(system_prompt.into());
@@ -86,8 +64,6 @@ impl ThreadBuilder {
 
     pub fn build(self) -> Result<Thread> {
         let ThreadBuilder {
-            conversation,
-            model,
             system_prompt,
             instructions,
             attachments,
@@ -96,12 +72,9 @@ impl ThreadBuilder {
             message,
         } = self;
 
-        let model = model.ok_or(Error::Thread("Missing model".to_string()))?;
         let message = message.ok_or(Error::Thread("Missing message".to_string()))?;
 
         Ok(Thread {
-            conversation,
-            model,
             system_prompt,
             instructions,
             attachments,
@@ -114,22 +87,12 @@ impl ThreadBuilder {
 
 #[derive(Debug, Default, Clone)]
 pub struct Thread {
-    pub conversation: Conversation,
-    pub model: Model,
     pub system_prompt: Option<String>,
     pub instructions: Vec<Instructions>,
     pub attachments: Vec<Attachment>,
     pub history: Vec<MessagePair>,
     pub reasoning: Option<String>,
     pub message: UserMessage,
-}
-
-impl Thread {
-    #[must_use]
-    pub fn with_message(mut self, message: UserMessage) -> Self {
-        self.message = message;
-        self
-    }
 }
 
 /// Structure for document collection

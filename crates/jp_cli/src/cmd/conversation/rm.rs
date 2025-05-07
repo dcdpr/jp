@@ -8,10 +8,10 @@ use crate::{cmd::Success, ctx::Ctx, Output};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// Conversation ID to remove.
+    /// Conversation IDs to remove.
     ///
     /// Defaults to the active conversation if not specified.
-    id: Option<ConversationId>,
+    id: Vec<ConversationId>,
 
     /// Do not prompt for confirmation.
     #[arg(long)]
@@ -21,7 +21,22 @@ pub struct Args {
 impl Args {
     pub fn run(self, ctx: &mut Ctx) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
-        let id = self.id.unwrap_or(active_id);
+        let ids = if self.id.is_empty() {
+            &[active_id]
+        } else {
+            self.id.as_slice()
+        };
+
+        for id in ids {
+            self.remove(ctx, *id)?;
+        }
+
+        Ok(Success::Message("Conversation(s) removed.".into()))
+    }
+
+    fn remove(&self, ctx: &mut Ctx, id: ConversationId) -> Output {
+        let active_id = ctx.workspace.active_conversation_id();
+
         let Some(conversation) = ctx.workspace.get_conversation(&id).cloned() else {
             return Err(
                 format!("Conversation {} not found", id.to_string().bold().yellow()).into(),
@@ -75,6 +90,6 @@ impl Args {
             .into());
         }
 
-        Ok(Success::Message("Conversation removed.".into()))
+        Ok(().into())
     }
 }

@@ -990,6 +990,21 @@ where
         Some(v)
     }
 
+    /// Removes a key from the map, returning the value at the key if the key
+    /// was previously in the map.
+    ///
+    /// As opposed to [`remove`], this method does not mark the key as removed.
+    /// It *does* unmark the key as modified, since the key no longer exists.
+    #[inline]
+    pub fn remove_untracked<Q>(&mut self, k: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.modified.remove(k);
+        self.live.remove(k)
+    }
+
     /// Removes a key from the map, returning the stored key and value if the
     /// key was previously in the map.
     ///

@@ -31,6 +31,41 @@ pub struct MessagePair {
 }
 
 impl MessagePair {
+    /// Creates a new message pair with the current timestamp.
+    #[must_use]
+    pub fn new(message: UserMessage, reply: AssistantMessage) -> Self {
+        Self {
+            timestamp: UtcDateTime::now(),
+            message,
+            reply,
+            context: Context::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_context(mut self, context: Context) -> Self {
+        self.context = context;
+        self
+    }
+
+    #[must_use]
+    pub fn with_message(mut self, message: impl Into<UserMessage>) -> Self {
+        self.message = message.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_reasoning(mut self, reasoning: impl Into<String>) -> Self {
+        self.reply.reasoning = Some(reasoning.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_reply(mut self, reply: impl Into<AssistantMessage>) -> Self {
+        self.reply = reply.into();
+        self
+    }
+
     #[must_use]
     pub fn split(self) -> (UserMessage, AssistantMessage) {
         (self.message, self.reply)
@@ -83,43 +118,6 @@ impl From<Vec<ToolCallResult>> for UserMessage {
 impl Default for UserMessage {
     fn default() -> Self {
         Self::Query(String::new())
-    }
-}
-
-impl MessagePair {
-    /// Creates a new message pair with the current timestamp.
-    #[must_use]
-    pub fn new(message: UserMessage, reply: AssistantMessage) -> Self {
-        Self {
-            timestamp: UtcDateTime::now(),
-            message,
-            reply,
-            context: Context::default(),
-        }
-    }
-
-    #[must_use]
-    pub fn with_context(mut self, context: Context) -> Self {
-        self.context = context;
-        self
-    }
-
-    #[must_use]
-    pub fn with_message(mut self, message: impl Into<UserMessage>) -> Self {
-        self.message = message.into();
-        self
-    }
-
-    #[must_use]
-    pub fn with_reasoning(mut self, reasoning: impl Into<String>) -> Self {
-        self.reply.reasoning = Some(reasoning.into());
-        self
-    }
-
-    #[must_use]
-    pub fn with_reply(mut self, reply: impl Into<AssistantMessage>) -> Self {
-        self.reply = reply.into();
-        self
     }
 }
 

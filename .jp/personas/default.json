@@ -1,6 +1,6 @@
 {
   "name": "Default",
-  "model": "gemini-2.5-pro",
+  "model": "openrouter/gemini-2.5-pro",
   "system_prompt": "You are an AI programming assistant named \"Jean-Pierre\". You are currently plugged in to the terminal on a user's machine.",
   "instructions": [
     {

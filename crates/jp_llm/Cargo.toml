@@ -17,15 +17,23 @@ jp_config = { workspace = true }
 jp_conversation = { workspace = true }
 jp_mcp = { workspace = true }
 jp_openrouter = { workspace = true }
+jp_query = { workspace = true }
 
 async-stream = { workspace = true }
+async-trait = { workspace = true }
 futures = { workspace = true }
-openai = { workspace = true, features = ["rustls", "reqwest"] }
+openai_responses = { workspace = true, features = ["stream"] }
+reqwest = { workspace = true }
+reqwest-eventsource = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+jp_test = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt"] }
 
 [lints]
 workspace = true

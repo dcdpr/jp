@@ -203,7 +203,8 @@ async fn run_inner(cli: Cli) -> Result<Success> {
         Commands::Init(args) => args.run().map_err(Into::into),
         cmd => {
             let mut workspace = load_workspace()?;
-            let mut config = jp_config::load(&workspace.root, true)?;
+
+            let mut config = load_config(&workspace)?;
             apply_cli_configs(&cli.globals.config, &mut config)?;
 
             workspace.load()?;
@@ -218,6 +219,26 @@ async fn run_inner(cli: Cli) -> Result<Success> {
             output.map_err(Into::into)
         }
     }
+}
+
+/// Load the workspace configuration.
+fn load_config(workspace: &Workspace) -> Result<Config> {
+    let partial = if let Some(storage) = workspace.storage_path() {
+        // First look for `config.toml` in the storage directory.
+        let partial = jp_config::load_partial(&storage.join("config.toml"), false, None)?;
+
+        // Then search for a config file, starting from the workspace root.
+        jp_config::load_partial(&workspace.root, true, Some(partial))
+    } else {
+        // Search for a config file, starting from the workspace root.
+        jp_config::load_partial(&workspace.root, true, None)
+    }?;
+
+    // Load environment variables.
+    let partial = jp_config::load_envs(partial)?;
+
+    // Build the final config.
+    jp_config::build(partial).map_err(Into::into)
 }
 
 /// Find the workspace for the current directory.

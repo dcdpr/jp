@@ -52,8 +52,16 @@ impl Conversation {
 }
 
 /// ID wrapper for Conversation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ConversationId(#[serde(with = "jp_id::serde")] UtcDateTime);
+
+impl fmt::Debug for ConversationId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ConversationId")
+            .field(&self.to_string())
+            .finish()
+    }
+}
 
 impl ConversationId {
     #[must_use]

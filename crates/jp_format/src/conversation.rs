@@ -156,7 +156,7 @@ impl DetailsFmt {
 
         if let Some(private) = self.private {
             map.push((
-                "Private".to_owned(),
+                "Local (private)".to_owned(),
                 if private {
                     "Yes".bold().yellow().to_string()
                 } else {

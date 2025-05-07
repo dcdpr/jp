@@ -3,7 +3,11 @@ use std::{collections::HashMap, io, pin::Pin, time::Duration};
 use async_stream::stream;
 use backoff::{future::retry_notify, ExponentialBackoff};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, REFERER};
+use reqwest::{
+    header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, REFERER},
+    RequestBuilder,
+};
+use serde_json::Value;
 use tokio_util::{
     codec::{FramedRead, LinesCodec},
     io::StreamReader,
@@ -82,10 +86,9 @@ impl Client {
     #[must_use]
     pub fn chat_completion_stream(
         &self,
-        request: &request::ChatCompletion,
+        request: request::ChatCompletion,
     ) -> Pin<Box<dyn Stream<Item = Result<response::ChatCompletion>> + Send>> {
         let client = self.clone();
-        let request_clone = request.clone();
 
         let backoff = ExponentialBackoff {
             initial_interval: Duration::from_millis(10),
@@ -103,7 +106,7 @@ impl Client {
         let retry_stream = stream! {
             let operation = || async {
                 match client
-                    .chat_completion_stream_inner(request_clone.clone())
+                    .chat_completion_stream_inner(request.clone())
                     .await
                 {
                     Ok(stream) => Ok(stream),
@@ -132,58 +135,8 @@ impl Client {
         &self,
         request: request::ChatCompletion,
     ) -> Result<impl Stream<Item = Result<response::ChatCompletion>>> {
-        let url = format!("{}/api/v1/chat/completions", self.base_url);
-        let headers = self.build_headers()?;
-
-        let mut req_body = serde_json::to_value(request).map_err(|e| Error::Api {
-            code: 500,
-            message: format!("Request serialization error: {e}"),
-        })?;
-        req_body["stream"] = serde_json::Value::Bool(true);
-
-        let redacted_headers = headers
-            .iter()
-            .map(|(k, v)| {
-                if k.as_str() == AUTHORIZATION {
-                    return (k.to_owned(), "[REDACTED]".to_string());
-                }
-
-                (k.to_owned(), v.to_str().unwrap_or_default().to_owned())
-            })
-            .collect::<HashMap<_, _>>();
-
-        trace!(%url, headers = ?redacted_headers, "Triggering request.");
-        let response = self
-            .http_client
-            .post(&url)
-            .headers(headers)
-            .json(&req_body)
-            .send()
-            .await?;
-
-        trace!(
-            status = response.status().as_u16(),
-            content_length = response.content_length().unwrap_or_default(),
-            content_type = response
-                .headers()
-                .get(CONTENT_TYPE)
-                .map(|v| v.to_str().unwrap_or_default()),
-            "Received response."
-        );
-
-        let status = response.status();
-        if status.is_client_error() || status.is_server_error() {
-            let status = status.as_u16();
-            let body = response.text().await?;
-
-            error!(status, body, "Unexpected response.");
-
-            return Err(Error::Api {
-                code: status,
-                message: body,
-            });
-        }
-
+        let request = self.prepare_request(request, true)?;
+        let response = get(request).await?;
         let byte_stream = response.bytes_stream().map_err(io::Error::other);
         let lines = FramedRead::new(StreamReader::new(byte_stream), LinesCodec::new());
 
@@ -219,6 +172,76 @@ impl Client {
 
         Ok(chunk_stream)
     }
+
+    pub async fn chat_completion(
+        &self,
+        request: request::ChatCompletion,
+    ) -> Result<response::ChatCompletion> {
+        let request = self.prepare_request(request, false)?;
+        let text = get(request).await?.text().await?;
+        parse_chunk(&text)
+    }
+
+    fn prepare_request(
+        &self,
+        request: request::ChatCompletion,
+        stream: bool,
+    ) -> Result<RequestBuilder> {
+        let url = format!("{}/api/v1/chat/completions", self.base_url);
+        let mut body = serde_json::to_value(request).map_err(|e| Error::Api {
+            code: 500,
+            message: format!("Request serialization error: {e}"),
+        })?;
+
+        if stream {
+            body["stream"] = Value::Bool(true);
+        }
+
+        let headers = self.build_headers()?;
+        let redacted_headers = headers
+            .iter()
+            .map(|(k, v)| {
+                if k.as_str() == AUTHORIZATION {
+                    return (k.to_owned(), "[REDACTED]".to_string());
+                }
+
+                (k.to_owned(), v.to_str().unwrap_or_default().to_owned())
+            })
+            .collect::<HashMap<_, _>>();
+
+        trace!(%url, headers = ?redacted_headers, "Triggering request.");
+
+        Ok(self.http_client.post(&url).headers(headers).json(&body))
+    }
+}
+
+async fn get(request: RequestBuilder) -> Result<reqwest::Response> {
+    let response = request.send().await?;
+
+    trace!(
+        status = response.status().as_u16(),
+        content_length = response.content_length().unwrap_or_default(),
+        content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .map(|v| v.to_str().unwrap_or_default()),
+        "Received response."
+    );
+
+    let status = response.status();
+    if status.is_client_error() || status.is_server_error() {
+        let status = status.as_u16();
+        let body = response.text().await?;
+
+        error!(status, body, "Unexpected response.");
+
+        return Err(Error::Api {
+            code: status,
+            message: body,
+        });
+    }
+
+    Ok(response)
 }
 
 fn parse_chunk(chunk: &str) -> Result<response::ChatCompletion> {
@@ -265,6 +288,6 @@ fn is_transient_error(err: &Error) -> bool {
         Error::Request(req_err) => req_err.is_timeout() || req_err.is_connect(),
         Error::Api { code, .. } => matches!(code, 408 | 429 | 500 | 502 | 503 | 504),
         Error::Stream(_) => true, // Retry on stream processing errors
-        Error::Config(_) | Error::Json(_) => false,
+        Error::Config(_) | Error::Json(_) | Error::Io(_) => false,
     }
 }
