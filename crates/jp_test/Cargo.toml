@@ -1,0 +1,20 @@
+[package]
+name = "jp_test"
+
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+httpmock = { workspace = true, features = ["record"] }
+saphyr = { workspace = true, features = ["encoding"] }
+
+[lints]
+workspace = true
