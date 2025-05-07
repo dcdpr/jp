@@ -14,13 +14,13 @@ pub struct Args {
 }
 
 impl Args {
-    pub fn run(self, ctx: &mut Ctx) -> Output {
+    pub async fn run(self, ctx: &mut Ctx) -> Output {
         match self.command {
             Commands::Show(args) => args.run(ctx),
             Commands::Remove(args) => args.run(ctx),
             Commands::List(args) => args.run(ctx),
             Commands::Use(args) => args.run(ctx),
-            Commands::Edit(args) => args.run(ctx),
+            Commands::Edit(args) => args.run(ctx).await,
         }
     }
 }

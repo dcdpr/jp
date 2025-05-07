@@ -50,7 +50,7 @@ impl Commands {
             Commands::AttachmentAdd(args) => args.run(ctx),
             Commands::Persona(args) => args.run(ctx),
             Commands::Mcp(args) => args.run(ctx),
-            Commands::Conversation(args) => args.run(ctx),
+            Commands::Conversation(args) => args.run(ctx).await,
             Commands::Init(_) => unreachable!("handled before workspace initialization"),
         }
     }
@@ -346,14 +346,55 @@ impl From<jp_llm::Error> for Error {
         let metadata: HashMap<&str, Value> = match error {
             OpenRouter(error) => return error.into(),
             Conversation(error) => return error.into(),
+            Config(error) => return error.into(),
             MissingEnv(variable) => [
                 ("message", "Missing environment variable".into()),
                 ("variable", variable.into()),
             ]
             .into(),
-            InvalidChunk(error) => [
-                ("message", "Invalid response chunk received".into()),
+            InvalidResponse(error) => [
+                ("message", "Invalid response received".into()),
                 ("error", error.into()),
+            ]
+            .into(),
+            Json(error) => [
+                ("message", "Invalid JSON".into()),
+                ("error", error.to_string().into()),
+            ]
+            .into(),
+            MissingStructuredData => {
+                [("message", "Missing structured data in response".into())].into()
+            }
+            OpenaiClient(create_error) => [
+                ("message", "OpenAI client error".into()),
+                ("error", create_error.to_string().into()),
+            ]
+            .into(),
+            OpenaiEvent(stream_error) => [
+                ("message", "OpenAI stream error".into()),
+                ("error", stream_error.to_string().into()),
+            ]
+            .into(),
+            OpenaiResponse(error) => [
+                ("message", "OpenAI response error".into()),
+                ("error", error.message.into()),
+                ("code", error.code.unwrap_or_default().into()),
+                ("type", error.r#type.into()),
+                ("param", error.param.unwrap_or_default().into()),
+            ]
+            .into(),
+            Request(error) => [
+                ("message", "Request error".into()),
+                ("error", error.to_string().into()),
+            ]
+            .into(),
+            OpenaiStatusCode {
+                status_code,
+                response,
+            } => [
+                ("message", "OpenAI status code error".into()),
+                ("status_code", status_code.as_u16().to_string().into()),
+                ("response", response.into()),
             ]
             .into(),
         };
@@ -369,6 +410,7 @@ impl From<jp_openrouter::Error> for Error {
         let metadata: HashMap<&str, Value> = match error {
             Request(error) => return error.into(),
             Json(error) => return error.into(),
+            Io(error) => return error.into(),
             Stream(string) => [
                 ("message", "Error while processing stream".into()),
                 ("error", string.into()),
@@ -380,7 +422,11 @@ impl From<jp_openrouter::Error> for Error {
                 ("message", message.into()),
             ]
             .into(),
-            Config(_) => todo!(),
+            Config(message) => [
+                ("message", "Config error".into()),
+                ("error", message.into()),
+            ]
+            .into(),
         };
 
         Self::from(metadata)

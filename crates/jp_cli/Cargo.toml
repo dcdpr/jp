@@ -23,6 +23,7 @@ jp_id = { workspace = true }
 jp_llm = { workspace = true }
 jp_mcp = { workspace = true }
 jp_openrouter = { workspace = true }
+jp_query = { workspace = true }
 jp_term = { workspace = true }
 jp_workspace = { workspace = true }
 
@@ -44,7 +45,7 @@ futures = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
 path-clean = { workspace = true }
 reqwest = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order"] }
 strip-ansi-escapes = { workspace = true }
 termimad = { workspace = true }
 thiserror = { workspace = true }
