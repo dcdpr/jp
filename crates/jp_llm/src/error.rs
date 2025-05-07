@@ -11,8 +11,41 @@ pub enum Error {
     #[error("Conversation error: {0}")]
     Conversation(#[from] jp_conversation::Error),
 
-    #[error("Invalid chunk received: {0}")]
-    InvalidChunk(String),
+    #[error("Config error: {0}")]
+    Config(#[from] jp_config::Error),
+
+    #[error("Invalid response received: {0}")]
+    InvalidResponse(String),
+
+    #[error("OpenAI client error: {0}")]
+    OpenaiClient(#[from] openai_responses::CreateError),
+
+    #[error("OpenAI event error: {0}")]
+    OpenaiEvent(Box<reqwest_eventsource::Error>),
+
+    #[error("OpenAI response error: {0:?}")]
+    OpenaiResponse(openai_responses::types::response::Error),
+
+    #[error("OpenAI status code error: {:?} - {}", .status_code, .response)]
+    OpenaiStatusCode {
+        status_code: reqwest::StatusCode,
+        response: String,
+    },
+
+    #[error("Missing structured data in response")]
+    MissingStructuredData,
+
+    #[error("Invalid JSON: {0}")]
+    Json(#[from] serde_json::Error),
+
+    #[error("Request error: {0}")]
+    Request(#[from] reqwest::Error),
+}
+
+impl From<openai_responses::types::response::Error> for Error {
+    fn from(error: openai_responses::types::response::Error) -> Self {
+        Self::OpenaiResponse(error)
+    }
 }
 
 #[cfg(test)]

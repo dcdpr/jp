@@ -5,17 +5,21 @@
 pub mod openai;
 pub mod openrouter;
 
-use std::pin::Pin;
+use std::{mem, pin::Pin};
 
-use futures::Stream;
-use jp_config::llm::{self, provider};
-use jp_conversation::{message::ToolCallRequest, model::ProviderId, thread::Thread};
-use jp_mcp::Tool;
+use async_trait::async_trait;
+use futures::{Stream, StreamExt as _};
+use jp_config::llm::provider;
+use jp_conversation::{message::ToolCallRequest, model::ProviderId, Model};
+use jp_query::query::{ChatQuery, StructuredQuery};
 use openai::Openai;
 use openrouter::Openrouter;
+use serde_json::Value;
 use tracing::warn;
 
-use crate::{error::Result, Error};
+use crate::{error::Result, structured::SCHEMA_TOOL_NAME, Error};
+
+pub type EventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>;
 
 /// Represents an event yielded by the chat completion stream.
 #[derive(Debug, Clone)]
@@ -24,6 +28,19 @@ pub enum StreamEvent {
     ChatChunk(CompletionChunk),
 
     /// A request to call a tool.
+    ToolCall(ToolCallRequest),
+}
+
+/// Represents a completed event from the LLM.
+#[derive(Debug, Clone)]
+pub enum Event {
+    /// Chat response text
+    Content(String),
+
+    /// Reasoning response text
+    Reasoning(String),
+
+    /// A request to call a tool
     ToolCall(ToolCallRequest),
 }
 
@@ -37,14 +54,95 @@ pub enum CompletionChunk {
     Reasoning(String),
 }
 
-pub trait Provider {
+#[async_trait]
+pub trait Provider: std::fmt::Debug + Send + Sync {
     /// Perform a streaming chat completion.
-    fn chat_completion_stream(
-        &self,
-        config: &llm::Config,
-        thread: Thread,
-        tools: Vec<Tool>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>>;
+    fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream>;
+
+    /// Perform a non-streaming chat completion.
+    ///
+    /// Default implementation collects results from the streaming version.
+    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
+        let mut stream = self.chat_completion_stream(model, query)?;
+        let mut events = Vec::new();
+        let mut reasoning = String::new();
+        let mut content = String::new();
+
+        while let Some(event) = stream.next().await {
+            match event? {
+                StreamEvent::ChatChunk(chunk) => match chunk {
+                    CompletionChunk::Content(text) => content.push_str(&text),
+                    CompletionChunk::Reasoning(text) => reasoning.push_str(&text),
+                },
+                StreamEvent::ToolCall(call) => {
+                    // We drain the buffers when we encounter a tool call to
+                    // preserve the chronological ordering of events.
+                    if !reasoning.is_empty() {
+                        events.push(Event::Reasoning(mem::take(&mut reasoning)));
+                    }
+                    if !content.is_empty() {
+                        events.push(Event::Content(mem::take(&mut content)));
+                    }
+
+                    events.push(Event::ToolCall(call));
+                }
+            }
+        }
+
+        if !reasoning.is_empty() {
+            events.push(Event::Reasoning(reasoning));
+        }
+        if !content.is_empty() {
+            events.push(Event::Content(content));
+        }
+
+        Ok(events)
+    }
+
+    /// Perform a structured completion.
+    ///
+    /// Default implementation uses a specialized tool-call to get structured
+    /// results.
+    ///
+    /// Providers that have a dedicated structured response endpoint should
+    /// override this method.
+    async fn structured_completion(&self, model: &Model, query: StructuredQuery) -> Result<Value> {
+        let mut chat_query = ChatQuery {
+            thread: query.thread.clone(),
+            tools: vec![query.tool()],
+            tool_choice: query.tool_choice(),
+            tool_call_strict_mode: true,
+        };
+
+        let max_retries = 3;
+        for i in 1..=3 {
+            let result = self.chat_completion(model, chat_query.clone()).await;
+            let events = match result {
+                Ok(events) => events,
+                Err(error) if i >= max_retries => return Err(error),
+                Err(error) => {
+                    warn!(%error, "Error while getting structured data. Retrying in non-strict mode.");
+                    chat_query.tool_call_strict_mode = false;
+                    continue;
+                }
+            };
+
+            let data = events.into_iter().find_map(|event| match event {
+                Event::ToolCall(call) if call.name == SCHEMA_TOOL_NAME => Some(call.arguments),
+                _ => None,
+            });
+
+            match data {
+                Some(data) => return Ok(query.map(data)),
+                None if i >= max_retries => return Err(Error::MissingStructuredData),
+                None => {
+                    warn!("Failed to fetch structured data. Retrying.");
+                }
+            }
+        }
+
+        unreachable!();
+    }
 }
 
 pub fn get_provider(id: ProviderId, config: &provider::Config) -> Result<Box<dyn Provider>> {
@@ -61,6 +159,7 @@ pub fn get_provider(id: ProviderId, config: &provider::Config) -> Result<Box<dyn
     Ok(provider)
 }
 
+#[derive(Debug, Default)]
 struct Delta {
     content: Option<String>,
     reasoning: Option<String>,
@@ -70,8 +169,48 @@ struct Delta {
     tool_call_finished: bool,
 }
 
+impl Delta {
+    fn content(content: impl Into<String>) -> Self {
+        Self {
+            content: Some(content.into()),
+            ..Default::default()
+        }
+    }
+
+    fn reasoning(reasoning: impl Into<String>) -> Self {
+        Self {
+            reasoning: Some(reasoning.into()),
+            ..Default::default()
+        }
+    }
+
+    fn tool_call(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: impl Into<String>,
+    ) -> Self {
+        let id = id.into();
+        let name = name.into();
+        let arguments = arguments.into();
+
+        Self {
+            tool_call_id: (!id.is_empty()).then_some(id),
+            tool_call_name: (!name.is_empty()).then_some(name),
+            tool_call_arguments: (!arguments.is_empty()).then_some(arguments),
+            ..Default::default()
+        }
+    }
+
+    fn tool_call_finished() -> Self {
+        Self {
+            tool_call_finished: true,
+            ..Default::default()
+        }
+    }
+}
+
 // State for accumulating function calls.
-#[derive(Default)]
+#[derive(Default, Debug)]
 enum AccumulationState {
     #[default]
     Idle,
@@ -124,7 +263,7 @@ fn handle_delta(delta: Delta, state: &mut AccumulationState) -> Result<Option<St
                 };
             }
             None if tool_call_arguments.is_some() => {
-                return Err(Error::InvalidChunk(
+                return Err(Error::InvalidResponse(
                     "Received function call arguments without a function name.".into(),
                 ));
             }
@@ -156,7 +295,7 @@ fn handle_delta(delta: Delta, state: &mut AccumulationState) -> Result<Option<St
         let arguments = match serde_json::from_str(arguments_buffer) {
             Ok(arguments) => arguments,
             Err(e) => {
-                return Err(Error::InvalidChunk(format!(
+                return Err(Error::InvalidResponse(format!(
                     "Failed to parse function call arguments: {e}. Buffer was: \
                      '{arguments_buffer}'"
                 )));

@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use super::{
     chat::{self, Transform},
-    tool::{self, Tool},
+    tool::{self, Tool, ToolChoice},
 };
 
 /// Chat completion request matching the `OpenRouter` API schema.
@@ -12,7 +12,7 @@ pub struct ChatCompletion {
     pub model: String,
 
     /// The list of messages.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<RequestMessage>,
 
     /// Reasoning configuration.
