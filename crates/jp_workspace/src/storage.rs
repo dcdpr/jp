@@ -143,9 +143,12 @@ impl Storage {
                 warn!(?path, "Invalid persona filename. Skipping.");
                 continue;
             };
-            let Ok(persona) = read_json::<Persona>(&path) else {
-                warn!(?path, "Failed to read persona file. Skipping.");
-                continue;
+            let persona = match read_json::<Persona>(&path) {
+                Ok(persona) => persona,
+                Err(error) => {
+                    warn!(?path, ?error, "Failed to read persona file. Skipping.");
+                    continue;
+                }
             };
 
             personas.insert(id, persona);
@@ -436,27 +439,35 @@ fn persist_conversations_and_messages(state: &State, root: &Path, local: &Path) 
     }
 
     // Don't mark active conversation as removed.
-    let mut removed_ids = state
+    let removed_ids = state
         .workspace
         .conversations
         .removed_keys()
-        .filter(|&id| id != &state.local.conversations_metadata.active_conversation_id);
+        .filter(|&id| id != &state.local.conversations_metadata.active_conversation_id)
+        .collect::<Vec<_>>();
 
-    let mut deleted = Vec::new();
-    for entry in conversations_dir.read_dir()?.flatten() {
-        let path = entry.path();
-        let name_starts_with_id = path.file_name().is_some_and(|v| {
-            removed_ids.any(|d| v.to_string_lossy().starts_with(d.target_id().as_str()))
-        });
+    for dir in [&conversations_dir, &local_conversations_dir] {
+        let mut deleted = Vec::new();
+        for entry in dir.read_dir()?.flatten() {
+            let path = entry.path();
+            let dir_matches_id = path.file_name().is_some_and(|v| {
+                removed_ids.iter().any(|d| {
+                    let file_name = v.to_string_lossy();
+                    let removed_id = d.target_id();
 
-        if path.is_dir() && name_starts_with_id {
-            if let Ok(path) = path.strip_prefix(&conversations_dir) {
-                deleted.push(path.to_path_buf());
+                    file_name == *removed_id || file_name.starts_with(&format!("{removed_id}-"))
+                })
+            });
+
+            if path.is_dir() && dir_matches_id {
+                if let Ok(path) = path.strip_prefix(dir) {
+                    deleted.push(path.to_path_buf());
+                }
             }
         }
-    }
 
-    remove_deleted(root, &conversations_dir, deleted.into_iter())?;
+        remove_deleted(root, dir, deleted.into_iter())?;
+    }
 
     Ok(())
 }
