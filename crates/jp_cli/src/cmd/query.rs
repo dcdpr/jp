@@ -7,7 +7,7 @@ use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
     persona::Instructions,
     thread::{Thread, ThreadBuilder},
-    AssistantMessage, ContextId, Conversation, MessagePair, Model, PersonaId, UserMessage,
+    AssistantMessage, ContextId, Conversation, MessagePair, Model, ModelId, PersonaId, UserMessage,
 };
 use jp_llm::provider::{self, CompletionChunk, StreamEvent};
 use jp_mcp::{config::McpServerId, ResourceContents, Tool};
@@ -180,9 +180,16 @@ impl Args {
             .resolve_model_reference(&persona.model)?
             .clone();
 
+        // For explicit model requests, try to fetch the model configuration
+        // from the workspace, otherwise use a default model with the requested
+        // provider and model name.
         if let Some(explicit_model) = ctx.config.llm.model.clone() {
-            model.provider = explicit_model.provider;
-            model.slug = explicit_model.slug;
+            let id = ModelId::try_from((explicit_model.provider, &explicit_model.slug))?;
+            model = ctx.workspace.get_model(&id).cloned().unwrap_or(Model {
+                provider: explicit_model.provider,
+                slug: explicit_model.slug,
+                ..Default::default()
+            });
         }
 
         trace!(provider = %model.provider, slug = %model.slug, "Loaded LLM model.");
