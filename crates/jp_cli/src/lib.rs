@@ -77,6 +77,22 @@ pub struct Globals {
         help = "Disable color in the output.",
     )]
     colors: bool,
+
+    /// Persist modified state to disk.
+    ///
+    /// This is enabled by default, but can be disabled to debug certain
+    /// actions. It is also useful to send a query to the assistant, without
+    /// adding that query to the conversation history.
+    #[arg(
+        short = '!',
+        long = "no-persist",
+        alias = "no-persist",
+        global = true,
+        default_value_t = false,
+        value_parser = BoolValueParser::new().map(|v| !v),
+        help = "Disable persistence for the duration of the command."
+    )]
+    pub persist: bool,
     // TODO
     // /// The format of the output.
     // #[arg(long, global = true, value_enum, default_value_t = Format::Text)]
@@ -125,6 +141,32 @@ pub async fn run() {
 
     println!("{output}");
     std::process::exit(code);
+}
+
+async fn run_inner(cli: Cli) -> Result<Success> {
+    match cli.command {
+        Commands::Init(args) => args.run().map_err(Into::into),
+        cmd => {
+            let mut workspace = load_workspace()?;
+            if !cli.globals.persist {
+                workspace.disable_persistence();
+            }
+
+            let mut config = load_config(&workspace)?;
+            apply_cli_configs(&cli.globals.config, &mut config)?;
+
+            workspace.load()?;
+
+            let mut ctx = Ctx::new(workspace, cli.globals, config);
+            let output = cmd.run(&mut ctx).await;
+            if output.is_err() {
+                tracing::info!("Error running command. Disabling workspace persistence.");
+                ctx.workspace.disable_persistence();
+            }
+
+            output.map_err(Into::into)
+        }
+    }
 }
 
 fn output_to_string(output: Success) -> String {
@@ -196,29 +238,6 @@ fn parse_error(error: error::Error, is_tty: bool) -> (i32, String) {
     });
 
     (code.into(), error)
-}
-
-async fn run_inner(cli: Cli) -> Result<Success> {
-    match cli.command {
-        Commands::Init(args) => args.run().map_err(Into::into),
-        cmd => {
-            let mut workspace = load_workspace()?;
-
-            let mut config = load_config(&workspace)?;
-            apply_cli_configs(&cli.globals.config, &mut config)?;
-
-            workspace.load()?;
-
-            let mut ctx = Ctx::new(workspace, cli.globals, config);
-            let output = cmd.run(&mut ctx).await;
-            if output.is_err() {
-                tracing::info!("Error running command. Disabling workspace persistence.");
-                ctx.workspace.disable_persistence();
-            }
-
-            output.map_err(Into::into)
-        }
-    }
 }
 
 /// Load the workspace configuration.
