@@ -20,7 +20,7 @@ const CUT_MARKER: &[&str] = &[
 
 /// Open an editor for the user to input or edit text using a file in the workspace
 pub fn open_editor(
-    workspace_root: &Path,
+    root: &Path,
     initial_message: Option<String>,
     history: &[MessagePair],
 ) -> Result<String> {
@@ -115,14 +115,14 @@ pub fn open_editor(
 
     initial_text.reverse();
 
-    let file_path = workspace_root.join(QUERY_FILENAME);
+    let file_path = root.join(QUERY_FILENAME);
     if !file_path.exists() {
         fs::write(&file_path, initial_text.join("\n"))?;
     }
 
     // Open the editor
     let status = std::process::Command::new(&editor_cmd)
-        .current_dir(workspace_root)
+        .current_dir(root)
         .arg(&file_path)
         .status()?;
 
