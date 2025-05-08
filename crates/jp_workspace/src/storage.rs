@@ -1,9 +1,7 @@
 //! Handles the physical storage aspects, including temporary copying and persistence.
 
 use std::{
-    fs,
-    io::{BufReader, BufWriter, Write as _},
-    iter,
+    fs, iter,
     path::{Path, PathBuf},
     str::FromStr as _,
 };
@@ -14,13 +12,15 @@ use jp_conversation::{
 };
 use jp_id::Id as _;
 use jp_mcp::config::{McpServer, McpServerId};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::Serialize;
+use serde_json::Value;
 use tracing::{debug, trace, warn};
 
 use crate::{
     error::{Error, Result},
     map::TombMap,
     state::ConversationsMetadata,
+    value::{deep_merge, read_json, write_json},
     State,
 };
 
@@ -103,6 +103,12 @@ impl Storage {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.root
+    }
+
+    /// Returns the path to the local storage directory, if configured.
+    #[must_use]
+    pub fn local_path(&self) -> Option<&Path> {
+        self.local.as_deref()
     }
 
     /// Loads the conversations metadata from storage.
@@ -214,6 +220,7 @@ impl Storage {
     /// Loads all MCP Servers from the (copied) storage.
     pub(crate) fn load_mcp_servers(&self) -> Result<TombMap<McpServerId, McpServer>> {
         let mcp_path = self.root.join(MCP_SERVERS_DIR);
+        let local_mcp_path = self.local.as_ref().map(|p| p.join(MCP_SERVERS_DIR));
         trace!(path = %mcp_path.display(), "Loading MCP servers.");
 
         let mut servers = TombMap::new();
@@ -229,9 +236,24 @@ impl Storage {
             let Some(id_str) = filename.strip_suffix(".json") else {
                 continue;
             };
-            let Ok(mut server) = read_json::<McpServer>(&path) else {
-                warn!(?path, "Failed to read MCP server file. Skipping.");
-                continue;
+            let server = match read_json::<Value>(&path) {
+                Ok(value) => value,
+                Err(error) => {
+                    warn!(?path, ?error, "Failed to read MCP server file. Skipping.");
+                    continue;
+                }
+            };
+
+            // Merge local server config on top of workspace server config.
+            let mut server: McpServer = match local_mcp_path.as_ref().map(|p| p.join(filename)) {
+                Some(p) if p.is_file() => match read_json::<Value>(&p) {
+                    Err(error) => {
+                        warn!(?path, ?error, "Failed to read MCP server file. Skipping.");
+                        continue;
+                    }
+                    Ok(local) => deep_merge(server, local)?,
+                },
+                _ => serde_json::from_value(server)?,
             };
 
             let id = McpServerId::new(id_str);
@@ -601,26 +623,6 @@ fn remove_deleted(root: &Path, dir: &Path, deleted: impl Iterator<Item = PathBuf
             path = parent.to_path_buf();
         }
     }
-
-    Ok(())
-}
-
-pub(crate) fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
-    let file = fs::File::open(path)?;
-    let reader = BufReader::new(file);
-    serde_json::from_reader(reader).map_err(Into::into)
-}
-
-pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let file = fs::File::create(path)?;
-    let mut buf = BufWriter::new(file);
-    serde_json::to_writer_pretty(&mut buf, value)?;
-    buf.write_all(b"\n")?;
-    buf.flush()?;
 
     Ok(())
 }

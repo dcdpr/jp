@@ -147,7 +147,7 @@ impl Args {
 
             // If replaying, pass the last query as the text to be edited,
             // otherwise open an empty editor.
-            *query = editor::open_editor(path, initial_message, messages)?;
+            *query = editor::edit_query(path, initial_message, messages)?;
         }
 
         if let UserMessage::Query(query) = &mut message {

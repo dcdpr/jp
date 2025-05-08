@@ -24,7 +24,9 @@ pub fn details(title: Option<&str>, rows: Vec<Row>) -> String {
 
     if let Some(title) = title {
         buf.push_str(title);
-        buf.push_str("\n\n");
+        if !rows.is_empty() {
+            buf.push_str("\n\n");
+        }
     }
 
     let mut table = Table::new();

@@ -1,4 +1,7 @@
-use std::{env, fs, path::Path};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 use jp_conversation::{MessagePair, UserMessage};
 use time::{macros::format_description, UtcOffset};
@@ -18,18 +21,151 @@ const CUT_MARKER: &[&str] = &[
     "--------------------------------------->8---------------------------------------",
 ];
 
-/// Open an editor for the user to input or edit text using a file in the workspace
-pub fn open_editor(
-    root: &Path,
-    initial_message: Option<String>,
-    history: &[MessagePair],
-) -> Result<String> {
-    let editor_cmd = env::var(format!("{DEFAULT_VARIABLE_PREFIX}_EDITOR"))
+/// Options for opening an editor.
+#[derive(Debug, Default)]
+pub struct Options {
+    /// The editor command to use.
+    ///
+    /// If not specified, the `VISUAL` or `EDITOR` environment variables will be
+    /// used, in that order.
+    pub cmd: Option<String>,
+
+    /// The working directory to use.
+    pub cwd: Option<PathBuf>,
+
+    /// The initial content to use.
+    pub content: Option<String>,
+}
+
+impl Options {
+    /// Add a command to the editor options.
+    #[must_use]
+    #[expect(dead_code)]
+    pub fn with_cmd(mut self, cmd: impl Into<String>) -> Self {
+        self.cmd = Some(cmd.into());
+        self
+    }
+
+    /// Add a working directory to the editor options.
+    #[must_use]
+    pub fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
+        self.cwd = Some(cwd.into());
+        self
+    }
+
+    /// Add content to the editor options.
+    #[must_use]
+    pub fn with_content(mut self, content: impl Into<String>) -> Self {
+        self.content = Some(content.into());
+        self
+    }
+}
+
+pub struct RevertFileGuard {
+    path: Option<PathBuf>,
+    orig: String,
+    exists: bool,
+}
+
+impl RevertFileGuard {
+    pub fn disarm(&mut self) {
+        self.path.take();
+    }
+}
+
+impl Drop for RevertFileGuard {
+    fn drop(&mut self) {
+        // No path, means this guard was disarmed.
+        let Some(path) = &self.path else {
+            return;
+        };
+
+        // File did not exist, so we remove it, and any empty parent
+        // directories.
+        if !self.exists {
+            let _rm = fs::remove_file(path);
+            let mut path = path.clone();
+            loop {
+                let Some(parent) = path.parent() else {
+                    break;
+                };
+
+                let Ok(mut dir) = fs::read_dir(parent) else {
+                    break;
+                };
+
+                if dir.next().is_some() {
+                    break;
+                }
+
+                let _rm = fs::remove_dir(parent);
+                path = parent.to_owned();
+            }
+
+            return;
+        }
+
+        // File existed, so we restore the original content.
+        let _write = fs::write(path, &self.orig);
+    }
+}
+
+/// Open an editor for the given file with the given content.
+///
+/// If the file exists, it will be opened, but the content will not be modified
+/// (in other words, `content` is ignored).
+///
+/// When the editor is closed, the contents are returned.
+pub fn open(path: impl AsRef<Path>, options: Options) -> Result<(String, RevertFileGuard)> {
+    let Options { cmd, cwd, content } = options;
+
+    let path = path.as_ref();
+    let exists = path.exists();
+    let guard = RevertFileGuard {
+        path: Some(path.to_owned()),
+        orig: fs::read_to_string(path).unwrap_or_default(),
+        exists,
+    };
+
+    if !exists {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, content.unwrap_or_default())?;
+    }
+
+    let editor_cmd = cmd
+        .ok_or("Undefined")
+        .or_else(|_| env::var(format!("{DEFAULT_VARIABLE_PREFIX}_EDITOR")))
         .or_else(|_| env::var("VISUAL"))
         .or_else(|_| env::var("EDITOR"))
         .unwrap_or_else(|_| "vi".to_string()); // TODO: Check different editors
                                                // (neovim, vim, vi, emacs, ...)
 
+    // Open the editor
+    let mut cmd = std::process::Command::new(&editor_cmd);
+    cmd.arg(path);
+    if let Some(cwd) = cwd {
+        cmd.current_dir(cwd);
+    }
+
+    let status = cmd.status()?;
+    if !status.success() {
+        return Err(Error::Editor(format!("Editor exited with error: {status}")));
+    }
+
+    // Read the edited content
+    let content = fs::read_to_string(path)?;
+
+    Ok((content, guard))
+}
+
+/// Open an editor for the user to input or edit text using a file in the workspace
+pub fn edit_query(
+    root: &Path,
+    initial_message: Option<String>,
+    history: &[MessagePair],
+) -> Result<String> {
     let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
 
@@ -115,23 +251,10 @@ pub fn open_editor(
 
     initial_text.reverse();
 
-    let file_path = root.join(QUERY_FILENAME);
-    if !file_path.exists() {
-        fs::write(&file_path, initial_text.join("\n"))?;
-    }
-
-    // Open the editor
-    let status = std::process::Command::new(&editor_cmd)
-        .current_dir(root)
-        .arg(&file_path)
-        .status()?;
-
-    if !status.success() {
-        return Err(Error::Editor(format!("Editor exited with error: {status}")));
-    }
-
-    // Read the edited content
-    let mut content = fs::read_to_string(&file_path)?;
+    let options = Options::default()
+        .with_cwd(root)
+        .with_content(initial_text.join("\n"));
+    let (mut content, mut guard) = open(root.join(QUERY_FILENAME), options)?;
 
     let eof = CUT_MARKER
         .iter()
@@ -140,6 +263,9 @@ pub fn open_editor(
         .unwrap_or(content.len());
 
     content.truncate(eof);
+
+    // Disarm the guard, so the file is not reverted.
+    guard.disarm();
 
     Ok(content)
 }
