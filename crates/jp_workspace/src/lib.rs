@@ -47,6 +47,7 @@ mod map;
 pub mod query;
 mod state;
 mod storage;
+pub mod value;
 
 use std::{
     iter,
@@ -61,7 +62,7 @@ use jp_conversation::{
 };
 use jp_mcp::config::{McpServer, McpServerId};
 use state::{LocalState, State, WorkspaceState};
-use storage::{Storage, DEFAULT_STORAGE_DIR};
+use storage::{Storage, DEFAULT_STORAGE_DIR, MCP_SERVERS_DIR};
 use tracing::{debug, info, trace};
 
 const APPLICATION: &str = "jp";
@@ -192,6 +193,13 @@ impl Workspace {
     #[must_use]
     pub fn storage_path(&self) -> Option<&Path> {
         self.storage.as_ref().map(Storage::path)
+    }
+
+    /// Returns the path to the local storage directory, if persistence is
+    /// enabled, and local storage is configured.
+    #[must_use]
+    pub fn local_storage_path(&self) -> Option<&Path> {
+        self.storage.as_ref().and_then(Storage::local_path)
     }
 
     /// Load the workspace state from the persisted storage.
@@ -503,6 +511,23 @@ impl Workspace {
         self.state.workspace.mcp_servers.values()
     }
 
+    /// Returns the path to the MCP servers directory, if storage is enabled.
+    #[must_use]
+    pub fn mcp_servers_path(&self) -> Option<PathBuf> {
+        self.storage
+            .as_ref()
+            .map(|p| p.path().join(MCP_SERVERS_DIR))
+    }
+
+    /// Returns the path to the local MCP servers directory, if storage is
+    /// enabled, and local storage is configured.
+    #[must_use]
+    pub fn mcp_servers_local_path(&self) -> Option<PathBuf> {
+        self.storage
+            .as_ref()
+            .and_then(|p| p.local_path().map(|p| p.join(MCP_SERVERS_DIR)))
+    }
+
     /// Gets a reference to an MCP server by its ID.
     #[must_use]
     pub fn get_mcp_server(&self, id: &McpServerId) -> Option<&McpServer> {
@@ -559,7 +584,10 @@ mod tests {
     use time::UtcDateTime;
 
     use super::*;
-    use crate::storage::{read_json, write_json, CONVERSATIONS_DIR, METADATA_FILE, PERSONAS_DIR};
+    use crate::{
+        storage::{CONVERSATIONS_DIR, METADATA_FILE, PERSONAS_DIR},
+        value::{read_json, write_json},
+    };
 
     #[test]
     fn test_workspace_find_root() {

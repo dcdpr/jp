@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::transport::Transport;
+use crate::transport::{self, Transport};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct McpServerId(String);
@@ -25,4 +25,18 @@ pub struct McpServer {
     #[serde(skip)]
     pub id: McpServerId,
     pub transport: Transport,
+}
+
+impl McpServer {
+    #[must_use]
+    pub fn example() -> Self {
+        Self {
+            id: McpServerId::new("example"),
+            transport: Transport::Stdio(transport::Stdio {
+                command: "/bin/echo".into(),
+                args: vec!["hello".into()],
+                environment_variables: vec!["FOO".to_owned()],
+            }),
+        }
+    }
 }
