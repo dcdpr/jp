@@ -24,9 +24,9 @@ pub struct Args {
     #[arg(long)]
     full: bool,
 
-    /// Show only private conversations.
+    /// Show only local conversations.
     #[arg(long)]
-    private: bool,
+    local: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, clap::ValueEnum)]
@@ -36,7 +36,7 @@ enum Sort {
     Created,
     Activity,
     Messages,
-    Private,
+    Local,
 }
 
 struct Details {
@@ -44,7 +44,7 @@ struct Details {
     title: Option<String>,
     messages: usize,
     last_message_at: Option<UtcDateTime>,
-    private: bool,
+    local: bool,
 }
 
 impl Args {
@@ -55,14 +55,14 @@ impl Args {
         let mut conversations = ctx
             .workspace
             .conversations()
-            .filter(|(_, c)| !self.private || c.private)
+            .filter(|(_, c)| !self.local || c.local)
             .map(|(id, c)| (id, c, ctx.workspace.get_messages(id)))
             .map(|(id, c, messages)| Details {
                 id: *id,
                 title: c.title.clone(),
                 messages: messages.len(),
                 last_message_at: messages.last().map(|m| m.timestamp),
-                private: c.private,
+                local: c.local,
             })
             .collect::<Vec<_>>();
 
@@ -73,7 +73,7 @@ impl Args {
             Some(Sort::Created) => a.id.timestamp().cmp(&b.id.timestamp()),
             Some(Sort::Messages) => a.messages.cmp(&b.messages),
             Some(Sort::Activity) => a.last_message_at.cmp(&b.last_message_at),
-            Some(Sort::Private) => a.private.cmp(&b.private),
+            Some(Sort::Local) => a.local.cmp(&b.local),
             _ => a.id.cmp(&b.id),
         });
 
@@ -82,7 +82,7 @@ impl Args {
         }
 
         let conversations: Vec<_> = conversations.into_iter().skip(skip).collect();
-        let (private_column, title_column, header) = build_header_row(&conversations);
+        let (local_column, title_column, header) = build_header_row(&conversations);
 
         let mut rows = vec![];
         if count > limit {
@@ -99,7 +99,7 @@ impl Args {
             rows.push(self.build_conversation_row(
                 ctx,
                 active_conversation_id,
-                private_column,
+                local_column,
                 title_column,
                 details,
             ));
@@ -112,7 +112,7 @@ impl Args {
         &self,
         ctx: &Ctx,
         active_conversation_id: ConversationId,
-        private_column: bool,
+        local_column: bool,
         title_column: bool,
         details: Details,
     ) -> Row {
@@ -121,7 +121,7 @@ impl Args {
             title,
             messages,
             last_message_at,
-            private,
+            local,
         } = details;
 
         let mut id_fmt = if id == active_conversation_id {
@@ -161,14 +161,14 @@ impl Args {
         row.add_cell(Cell::new(id_fmt));
         row.add_cell(Cell::new(messages_fmt).set_alignment(CellAlignment::Right));
         row.add_cell(Cell::new(last_message_at_fmt).set_alignment(CellAlignment::Right));
-        if private_column {
-            let private = if private {
+        if local_column {
+            let local = if local {
                 "Y".blue().to_string()
             } else {
                 "N".to_string()
             };
 
-            row.add_cell(Cell::new(private).set_alignment(CellAlignment::Center));
+            row.add_cell(Cell::new(local).set_alignment(CellAlignment::Center));
         }
         if title_column {
             let title = title.unwrap_or_default();
@@ -185,10 +185,10 @@ fn build_header_row(conversations: &[Details]) -> (bool, bool, Row) {
     header.add_cell(Cell::new("#").set_alignment(CellAlignment::Right));
     header.add_cell(Cell::new("Activity").set_alignment(CellAlignment::Right));
 
-    // Show "private" column if any conversations are private.
-    let mut private_column = false;
-    if conversations.iter().any(|d| d.private) {
-        private_column = true;
+    // Show "local" column if any conversations are stored locally.
+    let mut local_column = false;
+    if conversations.iter().any(|d| d.local) {
+        local_column = true;
         header.add_cell(Cell::new("Local").set_alignment(CellAlignment::Right));
     }
 
@@ -198,5 +198,5 @@ fn build_header_row(conversations: &[Details]) -> (bool, bool, Row) {
         header.add_cell(Cell::new("Title").set_alignment(CellAlignment::Left));
     }
 
-    (private_column, title_column, header)
+    (local_column, title_column, header)
 }

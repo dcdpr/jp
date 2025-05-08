@@ -22,10 +22,9 @@ pub struct Conversation {
     pub title: Option<String>,
     pub context: Context,
 
-    /// Whether the conversation is private (stored locally, outside of the
-    /// workspace).
+    /// Whether the conversation is stored locally or in the workspace.
     #[serde(skip)]
-    pub private: bool,
+    pub local: bool,
 }
 
 impl Default for Conversation {
@@ -34,7 +33,7 @@ impl Default for Conversation {
             last_activated_at: UtcDateTime::now(),
             title: None,
             context: Context::default(),
-            private: false,
+            local: false,
         }
     }
 }
@@ -46,7 +45,7 @@ impl Conversation {
             last_activated_at: UtcDateTime::now(),
             title: Some(title.into()),
             context: Context::default(),
-            private: false,
+            local: false,
         }
     }
 }

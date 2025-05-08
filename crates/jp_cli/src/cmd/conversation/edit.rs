@@ -13,9 +13,14 @@ pub struct Args {
     /// Conversation ID to edit. Defaults to active conversation.
     id: Option<ConversationId>,
 
-    /// Toggle the private flag of the conversation.
+    /// Toggle the conversation between local and workspace-scoped.
+    ///
+    /// A local conversation is stored on your local machine and is not part of
+    /// the workspace storage. This means, when using a VCS, local conversations
+    /// are not stored in the VCS, but are otherwise identical to workspace
+    /// conversations.
     #[arg(long, group = "edit")]
-    private: Option<Option<bool>>,
+    local: Option<Option<bool>>,
 
     /// Edit the title of the conversation.
     #[arg(long, group = "edit", conflicts_with = "no_title")]
@@ -37,9 +42,8 @@ impl Args {
             );
         };
 
-        if let Some(private) = self.private {
-            let private = private.unwrap_or(!conversation.private);
-            conversation.private = private;
+        if let Some(local) = self.local {
+            conversation.local = local.unwrap_or(!conversation.local);
         }
 
         if let Some(title) = self.title {

@@ -272,8 +272,8 @@ impl Storage {
         Ok(contexts)
     }
 
-    /// Loads all conversations and their associated messages, including
-    /// private/local conversations.
+    /// Loads all conversations and their associated messages, including local
+    /// conversations.
     #[allow(clippy::type_complexity)]
     pub(crate) fn load_conversations_and_messages(&self) -> Result<ConversationsAndMessages> {
         let (mut conversations, mut messages) =
@@ -284,7 +284,7 @@ impl Storage {
                 load_conversations_and_messages_from_dir(local)?;
 
             for (_, conversation) in local_conversations.iter_mut_untracked() {
-                conversation.private = true;
+                conversation.local = true;
             }
 
             conversations.extend(local_conversations);
@@ -414,7 +414,7 @@ fn persist_conversations_and_messages(state: &State, root: &Path, local: &Path) 
 
     for (id, conversation) in conversations {
         let dir_name = id.to_dirname(conversation.title.as_deref())?;
-        let conv_dir = if conversation.private {
+        let conv_dir = if conversation.local {
             local_conversations_dir.join(dir_name)
         } else {
             conversations_dir.join(dir_name)

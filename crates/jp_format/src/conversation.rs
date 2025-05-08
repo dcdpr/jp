@@ -22,9 +22,8 @@ pub struct DetailsFmt {
     /// The number of messages in the conversation.
     pub message_count: usize,
 
-    /// Whether the conversation is private. If `None`, the details are not
-    /// shown.
-    pub private: Option<bool>,
+    /// Whether the conversation is local. If `None`, the details are not shown.
+    pub local: Option<bool>,
 
     /// Mark the active conversation.
     pub active_conversation: Option<ConversationId>,
@@ -59,7 +58,7 @@ impl DetailsFmt {
             title: title.clone(),
             persona_id: context.persona_id,
             message_count: messages.len(),
-            private: None,
+            local: None,
             active_conversation: None,
             last_message_at,
             last_activated_at,
@@ -77,9 +76,9 @@ impl DetailsFmt {
     }
 
     #[must_use]
-    pub fn with_private_flag(self, private: bool) -> Self {
+    pub fn with_local_flag(self, local: bool) -> Self {
         Self {
-            private: Some(private),
+            local: Some(local),
             ..self
         }
     }
@@ -154,10 +153,10 @@ impl DetailsFmt {
             ));
         }
 
-        if let Some(private) = self.private {
+        if let Some(local) = self.local {
             map.push((
-                "Local (private)".to_owned(),
-                if private {
+                "Local".to_owned(),
+                if local {
                     "Yes".bold().yellow().to_string()
                 } else {
                     "No".to_string()
