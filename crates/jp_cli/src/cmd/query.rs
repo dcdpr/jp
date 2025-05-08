@@ -48,9 +48,9 @@ pub struct Args {
     #[arg(short = 'n', long = "new")]
     pub new_conversation: bool,
 
-    /// Mark the conversation as private.
-    #[arg(short = 'P', long = "private", requires = "new_conversation")]
-    pub private: bool,
+    /// Store the conversation locally, outside of the workspace.
+    #[arg(short = 'l', long = "local", requires = "new_conversation")]
+    pub local: bool,
 
     /// Add attachment to the context.
     #[arg(short = 'a', long = "attachment")]
@@ -78,14 +78,14 @@ impl Args {
         let old_conversation_id = ctx.workspace.active_conversation_id();
         let conversation_id = if self.new_conversation {
             let mut conversation = Conversation::default();
-            if self.private {
-                conversation.private = true;
+            if self.local {
+                conversation.local = true;
             }
 
             let id = ctx.workspace.create_conversation(conversation);
             debug!(
                 id = %id,
-                private = %self.private,
+                local = %self.local,
                 "Creating new active conversation due to --new flag."
             );
 

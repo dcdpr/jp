@@ -43,9 +43,9 @@ impl Args {
             );
         };
         let messages = ctx.workspace.get_messages(&id);
-        let private = conversation.private;
+        let local = conversation.local;
         let mut details = DetailsFmt::new(id, conversation, messages)
-            .with_private_flag(private)
+            .with_local_flag(local)
             .with_active_conversation(active_id)
             .with_hyperlinks(ctx.term.args.hyperlinks)
             .with_color(ctx.term.args.colors);
