@@ -162,6 +162,9 @@ impl Args {
                     ctx.workspace.remove_conversation(&conversation_id)?;
                 }
 
+                let path = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
+                editor::cleanup_query_file(path)?;
+
                 return Ok("Query is empty, ignoring.".into());
             }
         }
