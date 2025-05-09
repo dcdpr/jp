@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use jp_conversation::{thread::ThreadBuilder, MessagePair};
 use serde_json::Value;
 
@@ -7,7 +9,7 @@ pub fn titles(
     count: usize,
     messages: Vec<MessagePair>,
     rejected: &[String],
-) -> Result<StructuredQuery, Box<dyn std::error::Error>> {
+) -> Result<StructuredQuery, Box<dyn Error + Send + Sync>> {
     let schema = schemars::json_schema!({
         "type": "object",
         "description": format!("Generate {count} concise, descriptive factual titles for this conversation."),

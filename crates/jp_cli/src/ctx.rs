@@ -2,6 +2,7 @@ use std::io::{self, IsTerminal as _};
 
 use jp_config::Config;
 use jp_mcp::config::McpServer;
+use jp_task::TaskHandler;
 use jp_workspace::Workspace;
 
 use crate::{Globals, Result};
@@ -19,6 +20,8 @@ pub struct Ctx {
 
     /// MCP client for interacting with MCP servers.
     pub mcp_client: jp_mcp::Client,
+
+    pub task_handler: jp_task::TaskHandler,
 }
 
 pub struct Term {
@@ -45,6 +48,7 @@ impl Ctx {
                 is_tty: io::stdout().is_terminal(),
             },
             mcp_client: jp_mcp::Client::default(),
+            task_handler: TaskHandler::default(),
         }
     }
 

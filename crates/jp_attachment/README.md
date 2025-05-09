@@ -6,6 +6,7 @@ A URI-based attachment trait.
 
 ```rust
 use jp_attachment::{Attachment, Handler};
+use std::error::Error;
 
 pub struct MyAttachmentHandler(Vec<Attachment>);
 
@@ -14,17 +15,17 @@ impl Handler for MyAttachmentHandler {
         "my-scheme"
     }
 
-    fn add(&mut self, uri: &Url) -> Result<(), Box<dyn std::error::Error>> {
+    fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error>> {
         let attachment = url_to_attachment(uri);
         self.0.push(attachment);
     }
 
-    fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn std::error::Error>> {
+    fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error>> {
         let attachment = url_to_attachment(uri);
         self.0.remove(&attachment);
     }
 
-    fn get(&self, cwd: &Path) -> Result<Vec<Attachment>, Box<dyn std::error::Error>> {
+    fn get(&self, cwd: &Path) -> Result<Vec<Attachment>, Box<dyn Error>> {
         self.0.clone()
     }
 }

@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeSet,
+    error::Error,
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -31,7 +32,7 @@ fn handler() -> BoxedHandler {
 pub struct BearNotes(BTreeSet<Query>);
 
 impl BearNotes {
-    fn query_to_uri(&self, query: &Query) -> Result<Url, Box<dyn std::error::Error>> {
+    fn query_to_uri(&self, query: &Query) -> Result<Url, Box<dyn std::error::Error + Send + Sync>> {
         let (host, path, query_pairs) = match query {
             Query::Get(path) => ("get", path, vec![]),
             Query::Search { query, tags } => (
@@ -92,7 +93,7 @@ struct Note {
 }
 
 impl Note {
-    pub fn try_to_xml(&self) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn try_to_xml(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
         let mut buffer = String::new();
         let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
         serializer.indent(' ', 2);
@@ -107,19 +108,19 @@ impl Handler for BearNotes {
         "bear"
     }
 
-    fn add(&mut self, uri: &Url) -> Result<(), Box<dyn std::error::Error>> {
+    fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.0.insert(uri_to_query(uri)?);
 
         Ok(())
     }
 
-    fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn std::error::Error>> {
+    fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.0.remove(&uri_to_query(uri)?);
 
         Ok(())
     }
 
-    fn list(&self) -> Result<Vec<Url>, Box<dyn std::error::Error>> {
+    fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
         let mut uris = vec![];
         for query in &self.0 {
             uris.push(self.query_to_uri(query)?);
@@ -128,7 +129,7 @@ impl Handler for BearNotes {
         Ok(uris)
     }
 
-    fn get(&self, _: &Path) -> Result<Vec<Attachment>, Box<dyn std::error::Error>> {
+    fn get(&self, _: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         let mut attachments = vec![];
         for query in &self.0 {
             for note in get_notes(query)? {
@@ -145,7 +146,7 @@ impl Handler for BearNotes {
 
 /// Decodes a percent-encoded query parameter value, handling potential UTF-8
 /// errors.
-fn percent_decode_str(encoded: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn percent_decode_str(encoded: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
     percent_encoding::percent_decode_str(encoded)
         .decode_utf8()
         .map(|s| s.to_string())
@@ -157,7 +158,7 @@ fn percent_encode_str(encoded: &str) -> String {
         .to_string()
 }
 
-fn uri_to_query(uri: &Url) -> Result<Query, Box<dyn std::error::Error>> {
+fn uri_to_query(uri: &Url) -> Result<Query, Box<dyn Error + Send + Sync>> {
     let path = uri.path().trim_start_matches('/');
     let path = percent_decode_str(path)?;
     let query_pairs = uri
@@ -182,7 +183,7 @@ fn uri_to_query(uri: &Url) -> Result<Query, Box<dyn std::error::Error>> {
 }
 
 /// Retrieves notes from the Bear database based on the query.
-fn get_notes(query: &Query) -> Result<Vec<Note>, Box<dyn std::error::Error>> {
+fn get_notes(query: &Query) -> Result<Vec<Note>, Box<dyn Error + Send + Sync>> {
     let db = get_database_path()?;
     trace!(db = %db.display(), "Connecting to Bear database.");
     let conn = Connection::open(db)?;
@@ -274,7 +275,7 @@ fn get_notes(query: &Query) -> Result<Vec<Note>, Box<dyn std::error::Error>> {
 
 /// Attempts to find the path to the Bear Sqlite database.
 /// Assumes the standard macOS location.
-fn get_database_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn get_database_path() -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
     let path = BaseDirs::new()
         .ok_or("Could not find base directories")?
         .home_dir()

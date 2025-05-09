@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{error::Error, sync::Arc};
 
 use jp_config::llm::ToolChoice;
 use jp_conversation::thread::Thread;
@@ -32,7 +32,7 @@ impl std::fmt::Debug for StructuredQuery {
 }
 
 impl StructuredQuery {
-    pub fn new(schema: Schema, thread: Thread) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(schema: Schema, thread: Thread) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let Value::Object(schema) = schema.to_value() else {
             return Err("schema must be an object".into());
         };
@@ -47,7 +47,7 @@ impl StructuredQuery {
     #[must_use]
     pub fn with_mapping(
         mut self,
-        mapping: impl Fn(&mut Value) -> Option<Value> + Send + 'static,
+        mapping: impl Fn(&mut Value) -> Option<Value> + Send + Sync + 'static,
     ) -> Self {
         self.mapping = Some(Box::new(mapping));
         self
