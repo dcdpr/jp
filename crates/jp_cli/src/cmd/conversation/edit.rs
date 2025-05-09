@@ -65,7 +65,7 @@ async fn generate_titles(
     config: llm::Config,
     messages: Vec<MessagePair>,
     mut rejected: Vec<String>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;
     let model: Model = config
         .model

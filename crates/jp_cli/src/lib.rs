@@ -7,6 +7,7 @@ use std::{
     fmt,
     io::{stdout, IsTerminal as _},
     num::NonZeroI32,
+    time::Duration,
 };
 
 use clap::{
@@ -17,7 +18,7 @@ use cmd::{Commands, Output, Success};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::Stylize as _;
 use ctx::Ctx;
-use error::Result;
+use error::{Error, Result};
 use jp_config::Config;
 use jp_workspace::Workspace;
 use serde_json::{Map, Value};
@@ -163,6 +164,13 @@ async fn run_inner(cli: Cli) -> Result<Success> {
                 tracing::info!("Error running command. Disabling workspace persistence.");
                 ctx.workspace.disable_persistence();
             }
+
+            // Wait for background tasks to complete and sync their results to
+            // the workspace.
+            ctx.task_handler
+                .sync(&mut ctx.workspace, Duration::from_secs(10))
+                .await
+                .map_err(Error::Task)?;
 
             output.map_err(Into::into)
         }

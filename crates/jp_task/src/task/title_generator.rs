@@ -1,0 +1,90 @@
+use std::error::Error;
+
+use async_trait::async_trait;
+use jp_config::Config;
+use jp_conversation::{AssistantMessage, ConversationId, MessagePair, Model};
+use jp_llm::{provider, structured_completion};
+use jp_query::structured::conversation_titles;
+use jp_workspace::Workspace;
+use tokio_util::sync::CancellationToken;
+
+use crate::Task;
+
+#[derive(Debug)]
+pub struct TitleGeneratorTask {
+    pub conversation_id: ConversationId,
+    pub model: Model,
+    pub provider_config: jp_config::llm::provider::Config,
+    pub messages: Vec<MessagePair>,
+    pub title: Option<String>,
+}
+
+impl TitleGeneratorTask {
+    #[must_use]
+    #[expect(clippy::missing_panics_doc)]
+    pub fn new(
+        conversation_id: ConversationId,
+        config: &Config,
+        workspace: &Workspace,
+        query: Option<String>,
+    ) -> Self {
+        let model: Model = config
+            .llm
+            .model
+            .clone()
+            .unwrap_or_else(|| "openai/gpt-4.1-nano".parse().unwrap())
+            .into();
+
+        let mut messages = workspace.get_messages(&conversation_id).to_vec();
+        if let Some(query) = query {
+            messages.push(MessagePair::new(query.into(), AssistantMessage::default()));
+        }
+
+        Self {
+            conversation_id,
+            model,
+            provider_config: config.llm.provider.clone(),
+            messages,
+            title: None,
+        }
+    }
+
+    async fn update_title(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let provider = provider::get_provider(self.model.provider, &self.provider_config)?;
+        let query = conversation_titles(1, self.messages.clone(), &[])?;
+        let titles: Vec<String> =
+            structured_completion(provider.as_ref(), &self.model, query).await?;
+
+        if let Some(title) = titles.into_iter().next() {
+            self.title = Some(title);
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Task for TitleGeneratorTask {
+    async fn start(
+        mut self: Box<Self>,
+        token: CancellationToken,
+    ) -> Result<Box<dyn Task>, Box<dyn Error + Send + Sync>> {
+        tokio::select! {
+            () = token.cancelled() => {}
+            v = self.update_title() => v?
+        };
+
+        Ok(self)
+    }
+
+    async fn sync(
+        self: Box<Self>,
+        ctx: &mut Workspace,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if let Some(conversation) = ctx.get_conversation_mut(&self.conversation_id) {
+            conversation.title = self.title;
+        }
+
+        Ok(())
+    }
+}

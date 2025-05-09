@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeSet,
+    error::Error,
     fs,
     path::{Path, PathBuf},
 };
@@ -35,7 +36,7 @@ impl Handler for FileContent {
         "file"
     }
 
-    fn add(&mut self, uri: &Url) -> Result<(), Box<dyn std::error::Error>> {
+    fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
         let pattern = uri_to_pattern(uri)?;
 
         if uri.query_pairs().any(|(k, _)| k == "exclude") {
@@ -49,7 +50,7 @@ impl Handler for FileContent {
         Ok(())
     }
 
-    fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn std::error::Error>> {
+    fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
         let pattern = uri_to_pattern(uri)?;
 
         self.excludes.remove(&pattern);
@@ -58,7 +59,7 @@ impl Handler for FileContent {
         Ok(())
     }
 
-    fn list(&self) -> Result<Vec<Url>, Box<dyn std::error::Error>> {
+    fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
         let mut uris = vec![];
 
         for pattern in &self.includes {
@@ -74,7 +75,7 @@ impl Handler for FileContent {
         Ok(uris)
     }
 
-    fn get(&self, cwd: &Path) -> Result<Vec<Attachment>, Box<dyn std::error::Error>> {
+    fn get(&self, cwd: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         debug!(id = self.scheme(), "Getting file attachment contents.");
 
         if self.includes.is_empty() {
@@ -162,7 +163,7 @@ impl Handler for FileContent {
 /// To manage this, we make *all* paths absolute. This is okay, because paths
 /// are always relative to the workspace root, so `path/to/file.txt` and
 /// `/path/to/file.txt` both point to `{workspace}/path/to/file.txt`.
-fn uri_to_pattern(uri: &Url) -> Result<Pattern, Box<dyn std::error::Error>> {
+fn uri_to_pattern(uri: &Url) -> Result<Pattern, Box<dyn Error + Send + Sync>> {
     let domain = uri.host_str().unwrap_or("");
     let mut path = format!("{domain}{}", uri.path());
     if !path.starts_with('/') {
@@ -172,13 +173,13 @@ fn uri_to_pattern(uri: &Url) -> Result<Pattern, Box<dyn std::error::Error>> {
     Ok(Pattern::new(&path).map_err(|e| e.to_string())?)
 }
 
-fn pattern_to_uri(pattern: &Pattern) -> Result<Url, Box<dyn std::error::Error>> {
+fn pattern_to_uri(pattern: &Pattern) -> Result<Url, Box<dyn Error + Send + Sync>> {
     let mut uri = Url::parse("file://")?;
     uri.set_path(pattern.as_str());
     Ok(uri)
 }
 
-fn files_in_dir(root: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+fn files_in_dir(root: &Path) -> Result<Vec<PathBuf>, Box<dyn Error + Send + Sync>> {
     let mut files = vec![];
 
     for entry in fs::read_dir(root)? {
@@ -231,7 +232,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_file_add_include() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_file_add_include() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
 
         // Paths are relative, so the following sets are equivalent.
@@ -256,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn test_file_add_exclude() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_file_add_exclude() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
         handler.add(&Url::parse("file://path/**/exclude.txt?exclude")?)?;
 
@@ -270,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn test_file_add_switches_include_exclude() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_file_add_switches_include_exclude() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
         let uri_include = Url::parse("file:/path/to/file.txt")?;
         let uri_exclude = Url::parse("file:/path/to/file.txt?exclude")?;
@@ -297,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn test_file_remove() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_file_remove() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
         let uri1 = Url::parse("file:/path/to/file1.txt")?;
         let uri2 = Url::parse("file:/path/to/file2.txt?exclude")?;
@@ -321,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn test_file_get() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_file_get() -> Result<(), Box<dyn Error + Send + Sync>> {
         let tmp = tempdir()?;
         let path = tmp.path().join("file.txt");
         fs::write(&path, "content")?;

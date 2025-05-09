@@ -12,6 +12,7 @@ use jp_conversation::{
 use jp_llm::provider::{self, CompletionChunk, StreamEvent};
 use jp_mcp::{config::McpServerId, ResourceContents, Tool};
 use jp_query::query::ChatQuery;
+use jp_task::task::TitleGeneratorTask;
 use jp_term::{code, osc::hyperlink, stdout};
 use termimad::FmtText;
 use tracing::{debug, info, trace};
@@ -150,6 +151,9 @@ impl Args {
             *query = editor::edit_query(path, initial_message, messages)?;
         }
 
+        // Conversation
+        let conversation = ctx.workspace.get_active_conversation();
+
         if let UserMessage::Query(query) = &mut message {
             *query = query.trim().to_string();
 
@@ -167,10 +171,17 @@ impl Args {
 
                 return Ok("Query is empty, ignoring.".into());
             }
-        }
 
-        // Conversation
-        let conversation = ctx.workspace.get_active_conversation();
+            // Generate title for new conversations.
+            if self.new_conversation {
+                ctx.task_handler.spawn(TitleGeneratorTask::new(
+                    conversation_id,
+                    &ctx.config,
+                    &ctx.workspace,
+                    Some(query.clone()),
+                ));
+            }
+        }
 
         // Persona
         let persona_id = &conversation.context.persona_id;

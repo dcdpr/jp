@@ -1842,6 +1842,7 @@ dependencies = [
  "jp_mcp",
  "jp_openrouter",
  "jp_query",
+ "jp_task",
  "jp_term",
  "jp_workspace",
  "path-clean",
@@ -1972,6 +1973,22 @@ dependencies = [
  "jp_mcp",
  "schemars 1.0.0-alpha.17",
  "serde_json",
+]
+
+[[package]]
+name = "jp_task"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "jp_config",
+ "jp_conversation",
+ "jp_llm",
+ "jp_query",
+ "jp_workspace",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

@@ -1,4 +1,5 @@
 use std::{
+    error::Error,
     hash::Hasher,
     ops::{Deref, DerefMut},
     path::Path,
@@ -45,7 +46,7 @@ pub struct Attachment {
 /// on the local file system, while a `web` handler could handle attachments
 /// that are URLs pointing to web pages.
 #[typetag::serde(tag = "type")]
-pub trait Handler: std::fmt::Debug + DynClone + DynHash + Sync + Send {
+pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     /// The URI scheme of the handler.
     ///
     /// This is used to determine which handler to use for a given URI. The
@@ -53,19 +54,19 @@ pub trait Handler: std::fmt::Debug + DynClone + DynHash + Sync + Send {
     fn scheme(&self) -> &'static str;
 
     /// Add a new attachment, using the given URL.
-    fn add(&mut self, uri: &Url) -> Result<(), Box<dyn std::error::Error>>;
+    fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     /// Remove an attachment, using the given URL.
-    fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn std::error::Error>>;
+    fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     /// List all attachment URIs handled by this handler.
-    fn list(&self) -> Result<Vec<Url>, Box<dyn std::error::Error>>;
+    fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>>;
 
     /// Return all the attachments handled by this handler.
     ///
     /// The `cwd` parameter is the current working directory, and can be used to
     /// resolve relative paths.
-    fn get(&self, cwd: &Path) -> Result<Vec<Attachment>, Box<dyn std::error::Error>>;
+    fn get(&self, cwd: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>>;
 }
 
 dyn_clone::clone_trait_object!(Handler);

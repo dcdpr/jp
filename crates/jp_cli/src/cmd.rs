@@ -161,6 +161,12 @@ impl From<Box<dyn std::error::Error>> for Error {
     }
 }
 
+impl From<Box<dyn std::error::Error + Send + Sync>> for Error {
+    fn from(error: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        Self::from(error.to_string())
+    }
+}
+
 impl From<String> for Error {
     fn from(error: String) -> Self {
         (1, error).into()
@@ -260,6 +266,11 @@ impl From<crate::error::Error> for Error {
             .into(),
             Editor(error) => [
                 ("message", "Editor error".into()),
+                ("error", error.to_string().into()),
+            ]
+            .into(),
+            Task(error) => [
+                ("message", "Task error".into()),
                 ("error", error.to_string().into()),
             ]
             .into(),
