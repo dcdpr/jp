@@ -1,5 +1,5 @@
 use crossterm::style::Stylize as _;
-use jp_config::llm;
+use jp_config::Config;
 use jp_conversation::{ConversationId, MessagePair, Model};
 use jp_llm::{provider, structured_completion};
 use jp_query::structured::conversation_titles;
@@ -49,7 +49,7 @@ impl Args {
         if let Some(title) = self.title {
             let title = match title {
                 Some(title) => title,
-                None => generate_titles(ctx.config.llm.clone(), messages, vec![]).await?,
+                None => generate_titles(&ctx.config, messages, vec![]).await?,
             };
 
             conversation.title = Some(title);
@@ -62,19 +62,13 @@ impl Args {
 }
 
 async fn generate_titles(
-    config: llm::Config,
+    config: &Config,
     messages: Vec<MessagePair>,
     mut rejected: Vec<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;
-    let model: Model = config
-        .model
-        .clone()
-        .unwrap_or_else(|| "openai/gpt-4.1-nano".parse().unwrap())
-        .into();
-
-    let provider = provider::get_provider(model.provider, &config.provider)?;
-
+    let model: Model = config.conversation.title.generate.model.clone().into();
+    let provider = provider::get_provider(model.provider, &config.llm.provider)?;
     let query = conversation_titles(count, messages.clone(), &rejected)?;
     let titles: Vec<String> = structured_completion(provider.as_ref(), &model, query).await?;
 

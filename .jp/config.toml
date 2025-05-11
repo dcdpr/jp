@@ -1,2 +1,5 @@
 [style.code]
 copy_link = "osc8"
+
+[conversation.title.generate]
+model = "openrouter/google/gemini-2.5-flash-preview"

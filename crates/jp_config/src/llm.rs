@@ -19,7 +19,7 @@ pub struct Config {
     ///
     /// If not set (default), the model will be determined by the conversation
     /// context.
-    #[config(env = "JP_LLM_MODEL", deserialize_with = deserialize_model)]
+    #[config(env = "JP_LLM_MODEL", deserialize_with = de_model)]
     pub model: Option<ProviderModelSlug>,
 
     /// How the LLM should choose tools, if any are available.
@@ -82,9 +82,7 @@ impl FromStr for ProviderModelSlug {
     }
 }
 
-pub fn deserialize_model<'de, D>(
-    deserializer: D,
-) -> std::result::Result<ProviderModelSlug, D::Error>
+pub fn de_model<'de, D>(deserializer: D) -> std::result::Result<ProviderModelSlug, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

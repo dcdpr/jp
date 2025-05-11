@@ -22,20 +22,13 @@ pub struct TitleGeneratorTask {
 
 impl TitleGeneratorTask {
     #[must_use]
-    #[expect(clippy::missing_panics_doc)]
     pub fn new(
         conversation_id: ConversationId,
         config: &Config,
         workspace: &Workspace,
         query: Option<String>,
     ) -> Self {
-        let model: Model = config
-            .llm
-            .model
-            .clone()
-            .unwrap_or_else(|| "openai/gpt-4.1-nano".parse().unwrap())
-            .into();
-
+        let model = config.conversation.title.generate.model.clone().into();
         let mut messages = workspace.get_messages(&conversation_id).to_vec();
         if let Some(query) = query {
             messages.push(MessagePair::new(query.into(), AssistantMessage::default()));
