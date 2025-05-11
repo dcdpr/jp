@@ -1,17 +1,19 @@
 [package]
 name = "jp_attachment"
+
 authors.workspace = true
 description.workspace = true
-version.workspace = true
+documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true
-repository.workspace = true
-documentation.workspace = true
 license-file.workspace = true
-readme.workspace = true
 publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 dyn-clone = { workspace = true }
 dyn-hash = { workspace = true }
 linkme = { workspace = true }

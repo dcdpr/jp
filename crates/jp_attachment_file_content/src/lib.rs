@@ -1,11 +1,8 @@
-use std::{
-    collections::BTreeSet,
-    error::Error,
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{collections::BTreeSet, error::Error, fs, path::Path};
 
+use async_trait::async_trait;
 use glob::Pattern;
+use ignore::{overrides::OverrideBuilder, WalkBuilder, WalkState};
 use jp_attachment::{
     distributed_slice, linkme, typetag, Attachment, BoxedHandler, Handler, HANDLERS,
 };
@@ -31,12 +28,13 @@ pub struct FileContent {
 }
 
 #[typetag::serde(name = "file_content")]
+#[async_trait]
 impl Handler for FileContent {
     fn scheme(&self) -> &'static str {
         "file"
     }
 
-    fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
         let pattern = uri_to_pattern(uri)?;
 
         if uri.query_pairs().any(|(k, _)| k == "exclude") {
@@ -50,7 +48,7 @@ impl Handler for FileContent {
         Ok(())
     }
 
-    fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
         let pattern = uri_to_pattern(uri)?;
 
         self.excludes.remove(&pattern);
@@ -59,7 +57,7 @@ impl Handler for FileContent {
         Ok(())
     }
 
-    fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
+    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
         let mut uris = vec![];
 
         for pattern in &self.includes {
@@ -75,7 +73,7 @@ impl Handler for FileContent {
         Ok(uris)
     }
 
-    fn get(&self, cwd: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+    async fn get(&self, cwd: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         debug!(id = self.scheme(), "Getting file attachment contents.");
 
         if self.includes.is_empty() {
@@ -83,67 +81,60 @@ impl Handler for FileContent {
             return Ok(vec![]);
         }
 
-        let mut paths = BTreeSet::new();
-        for full_path in files_in_dir(cwd)? {
-            let Ok(mut path) = full_path.strip_prefix(cwd).map(PathBuf::from) else {
-                warn!(
-                    ?full_path,
-                    "Attachment path outside of working directory, skipping."
-                );
-                continue;
-            };
-
-            // We add back the root, so that patterns such as `/target/**/*`
-            // match as expected.
-            if !path.has_root() {
-                path = PathBuf::from("/").join(path);
-            }
-
-            let opts = glob::MatchOptions {
-                case_sensitive: false,
-                require_literal_separator: true,
-                require_literal_leading_dot: true,
-            };
-
-            let excluded = self
-                .excludes
-                .iter()
-                .any(|exclude| exclude.matches_path_with(&path, opts));
-
-            // Skip if excluded.
-            if excluded {
-                continue;
-            }
-
-            let included = self
-                .includes
-                .iter()
-                .any(|include| include.matches_path_with(&path, opts));
-
-            // Skip if not included.
-            if !included {
-                continue;
-            }
-
-            paths.insert(full_path);
+        let mut builder = OverrideBuilder::new(cwd);
+        for pattern in &self.includes {
+            builder.add(pattern.as_str())?;
         }
+        for p in &self.excludes {
+            builder.add(&format!("!{p}"))?;
+        }
+        let overrides = builder.build()?;
 
-        let mut attachments = Vec::new();
-        for path in paths {
-            let Ok(content) = fs::read_to_string(&path) else {
-                continue;
-            };
-            let Ok(path) = path.strip_prefix(cwd) else {
-                continue;
-            };
+        let (tx, rx) = crossbeam_channel::unbounded();
+        WalkBuilder::new(cwd)
+            .standard_filters(false)
+            .overrides(overrides)
+            .follow_links(false)
+            .build_parallel()
+            .run(|| {
+                let tx = tx.clone();
+                Box::new(move |entry| {
+                    let Ok(entry) = entry else {
+                        return WalkState::Continue;
+                    };
+                    let path = entry.path();
+                    if path.is_dir() {
+                        return WalkState::Continue;
+                    }
 
-            attachments.push(Attachment {
-                source: path.to_string_lossy().to_string(),
-                content,
+                    let Ok(rel) = path.strip_prefix(cwd) else {
+                        warn!(
+                            path = %path.display(),
+                            "Attachment path outside of working directory, skipping."
+                        );
+
+                        return WalkState::Continue;
+                    };
+
+                    let content = match fs::read_to_string(path) {
+                        Ok(content) => content,
+                        Err(error) => {
+                            warn!(path = %rel.display(), %error, "Failed to read attachment.");
+                            return WalkState::Continue;
+                        }
+                    };
+
+                    let _result = tx.send(Attachment {
+                        source: rel.to_string_lossy().to_string(),
+                        content,
+                    });
+
+                    WalkState::Continue
+                })
             });
-        }
 
-        Ok(attachments)
+        drop(tx);
+        return Ok(rx.into_iter().collect());
     }
 }
 
@@ -177,21 +168,6 @@ fn pattern_to_uri(pattern: &Pattern) -> Result<Url, Box<dyn Error + Send + Sync>
     let mut uri = Url::parse("file://")?;
     uri.set_path(pattern.as_str());
     Ok(uri)
-}
-
-fn files_in_dir(root: &Path) -> Result<Vec<PathBuf>, Box<dyn Error + Send + Sync>> {
-    let mut files = vec![];
-
-    for entry in fs::read_dir(root)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            files.extend(files_in_dir(&path)?);
-        } else if path.is_file() {
-            files.push(path);
-        }
-    }
-
-    Ok(files)
 }
 
 mod pat {
@@ -231,35 +207,39 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_file_add_include() -> Result<(), Box<dyn Error + Send + Sync>> {
+    #[tokio::test]
+    async fn test_file_add_include() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
 
         // Paths are relative, so the following sets are equivalent.
-        handler.add(&Url::parse("file:path/to/include.txt")?)?;
-        handler.add(&Url::parse("file:/path/to/include.txt")?)?;
-        handler.add(&Url::parse("file://path/to/include.txt")?)?;
-        handler.add(&Url::parse("file:///path/to/include.txt")?)?;
+        handler.add(&Url::parse("file:path/include.txt")?).await?;
+        handler.add(&Url::parse("file:/path/include.txt")?).await?;
+        handler.add(&Url::parse("file://path/include.txt")?).await?;
+        handler
+            .add(&Url::parse("file:///path/include.txt")?)
+            .await?;
 
-        handler.add(&Url::parse("file:**/*.md")?)?;
-        handler.add(&Url::parse("file:/**/*.md")?)?;
-        handler.add(&Url::parse("file://**/*.md")?)?;
-        handler.add(&Url::parse("file:///**/*.md")?)?;
+        handler.add(&Url::parse("file:**/*.md")?).await?;
+        handler.add(&Url::parse("file:/**/*.md")?).await?;
+        handler.add(&Url::parse("file://**/*.md")?).await?;
+        handler.add(&Url::parse("file:///**/*.md")?).await?;
 
         assert_eq!(handler.includes.len(), 2);
         assert_eq!(handler.includes.iter().collect::<Vec<_>>(), vec![
             &Pattern::new("/**/*.md")?,
-            &Pattern::new("/path/to/include.txt")?
+            &Pattern::new("/path/include.txt")?
         ]);
         assert!(handler.excludes.is_empty());
 
         Ok(())
     }
 
-    #[test]
-    fn test_file_add_exclude() -> Result<(), Box<dyn Error + Send + Sync>> {
+    #[tokio::test]
+    async fn test_file_add_exclude() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
-        handler.add(&Url::parse("file://path/**/exclude.txt?exclude")?)?;
+        handler
+            .add(&Url::parse("file://path/**/exclude.txt?exclude")?)
+            .await?;
 
         assert_eq!(handler.excludes.len(), 1);
         assert_eq!(handler.excludes.iter().collect::<Vec<_>>(), vec![
@@ -270,14 +250,14 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_file_add_switches_include_exclude() -> Result<(), Box<dyn Error + Send + Sync>> {
+    #[tokio::test]
+    async fn test_file_add_switches_include_exclude() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
         let uri_include = Url::parse("file:/path/to/file.txt")?;
         let uri_exclude = Url::parse("file:/path/to/file.txt?exclude")?;
 
         // Add as include
-        handler.add(&uri_include)?;
+        handler.add(&uri_include).await?;
         assert!(handler
             .includes
             .contains(&Pattern::new("/path/to/file.txt")?));
@@ -286,7 +266,7 @@ mod tests {
             .contains(&Pattern::new("/path/to/file.txt")?));
 
         // Add same path as exclude
-        handler.add(&uri_exclude)?;
+        handler.add(&uri_exclude).await?;
         assert!(!handler
             .includes
             .contains(&Pattern::new("/path/to/file.txt")?));
@@ -297,40 +277,40 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_file_remove() -> Result<(), Box<dyn Error + Send + Sync>> {
+    #[tokio::test]
+    async fn test_file_remove() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
         let uri1 = Url::parse("file:/path/to/file1.txt")?;
         let uri2 = Url::parse("file:/path/to/file2.txt?exclude")?;
-        handler.add(&uri1)?;
-        handler.add(&uri2)?;
+        handler.add(&uri1).await?;
+        handler.add(&uri2).await?;
 
         assert_eq!(handler.includes.len(), 1);
         assert_eq!(handler.excludes.len(), 1);
 
         // Remove file1 (was include)
-        handler.remove(&uri1)?;
+        handler.remove(&uri1).await?;
         assert!(handler.includes.is_empty());
         assert_eq!(handler.excludes.len(), 1);
 
         // Remove file2 (was exclude)
-        handler.remove(&uri2)?;
+        handler.remove(&uri2).await?;
         assert!(handler.includes.is_empty());
         assert!(handler.excludes.is_empty());
 
         Ok(())
     }
 
-    #[test]
-    fn test_file_get() -> Result<(), Box<dyn Error + Send + Sync>> {
+    #[tokio::test]
+    async fn test_file_get() -> Result<(), Box<dyn Error + Send + Sync>> {
         let tmp = tempdir()?;
         let path = tmp.path().join("file.txt");
         fs::write(&path, "content")?;
 
         let mut handler = FileContent::default();
-        handler.add(&Url::parse("file:/file.txt")?)?;
+        handler.add(&Url::parse("file:/file.txt")?).await?;
 
-        let attachments = handler.get(tmp.path())?;
+        let attachments = handler.get(tmp.path()).await?;
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].source, "file.txt");
         assert_eq!(attachments[0].content, "content");

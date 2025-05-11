@@ -46,8 +46,8 @@ impl Commands {
     pub async fn run(self, ctx: &mut Ctx) -> Output {
         match self {
             Commands::Query(args) => args.run(ctx).await,
-            Commands::Attachment(args) => args.run(ctx),
-            Commands::AttachmentAdd(args) => args.run(ctx),
+            Commands::Attachment(args) => args.run(ctx).await,
+            Commands::AttachmentAdd(args) => args.run(ctx).await,
             Commands::Persona(args) => args.run(ctx),
             Commands::Mcp(args) => args.run(ctx),
             Commands::Conversation(args) => args.run(ctx).await,
