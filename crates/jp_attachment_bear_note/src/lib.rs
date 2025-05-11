@@ -5,6 +5,7 @@ use std::{
     rc::Rc,
 };
 
+use async_trait::async_trait;
 use directories::BaseDirs;
 use jp_attachment::{
     distributed_slice, linkme, typetag, Attachment, BoxedHandler, Handler, HANDLERS,
@@ -103,24 +104,25 @@ impl Note {
 }
 
 #[typetag::serde(name = "bear")]
+#[async_trait]
 impl Handler for BearNotes {
     fn scheme(&self) -> &'static str {
         "bear"
     }
 
-    fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.0.insert(uri_to_query(uri)?);
 
         Ok(())
     }
 
-    fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.0.remove(&uri_to_query(uri)?);
 
         Ok(())
     }
 
-    fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
+    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
         let mut uris = vec![];
         for query in &self.0 {
             uris.push(self.query_to_uri(query)?);
@@ -129,7 +131,7 @@ impl Handler for BearNotes {
         Ok(uris)
     }
 
-    fn get(&self, _: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+    async fn get(&self, _: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         let mut attachments = vec![];
         for query in &self.0 {
             for note in get_notes(query)? {

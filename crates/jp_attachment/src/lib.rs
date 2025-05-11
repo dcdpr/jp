@@ -5,6 +5,7 @@ use std::{
     path::Path,
 };
 
+use async_trait::async_trait;
 use dyn_clone::DynClone;
 use dyn_hash::DynHash;
 pub use linkme::{self, distributed_slice};
@@ -46,6 +47,7 @@ pub struct Attachment {
 /// on the local file system, while a `web` handler could handle attachments
 /// that are URLs pointing to web pages.
 #[typetag::serde(tag = "type")]
+#[async_trait]
 pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     /// The URI scheme of the handler.
     ///
@@ -54,19 +56,19 @@ pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     fn scheme(&self) -> &'static str;
 
     /// Add a new attachment, using the given URL.
-    fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>>;
+    async fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     /// Remove an attachment, using the given URL.
-    fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>>;
+    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     /// List all attachment URIs handled by this handler.
-    fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>>;
+    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>>;
 
     /// Return all the attachments handled by this handler.
     ///
     /// The `cwd` parameter is the current working directory, and can be used to
     /// resolve relative paths.
-    fn get(&self, cwd: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>>;
+    async fn get(&self, cwd: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>>;
 }
 
 dyn_clone::clone_trait_object!(Handler);

@@ -12,6 +12,8 @@ use tokio_util::sync::CancellationToken;
 /// the workspace upon completion.
 #[async_trait]
 pub trait Task: Send + 'static {
+    fn name(&self) -> &'static str;
+
     /// Start the task in the background.
     async fn start(
         self: Box<Self>,

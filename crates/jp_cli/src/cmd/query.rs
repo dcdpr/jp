@@ -105,7 +105,7 @@ impl Args {
 
         // Update the conversation context based on the contextual information
         // passed in through the CLI, configuration, and environment variables.
-        self.update_context(ctx)?;
+        self.update_context(ctx).await?;
 
         // Ensure we start the MCP servers attached to the conversation.
         ctx.configure_active_mcp_servers().await?;
@@ -212,7 +212,7 @@ impl Args {
         // Attachments
         let mut attachments = vec![];
         for handler in conversation.context.attachment_handlers.values() {
-            attachments.extend(handler.get(&ctx.workspace.root)?);
+            attachments.extend(handler.get(&ctx.workspace.root).await?);
         }
 
         // Messages
@@ -250,7 +250,7 @@ impl Args {
         Ok(Success::Ok)
     }
 
-    fn update_context(&self, ctx: &mut Ctx) -> Result<()> {
+    async fn update_context(&self, ctx: &mut Ctx) -> Result<()> {
         // Update context if specified
         if let Some(context) = self.context.as_ref() {
             let id = ContextId::try_from(context)?;
@@ -287,7 +287,7 @@ impl Args {
         // Add any new attachments specified in arguments
         for attachment in &self.attachments {
             let context = &mut ctx.workspace.get_active_conversation_mut().context;
-            register_attachment(attachment, context)?;
+            register_attachment(attachment, context).await?;
         }
 
         // Set exclusive MCP servers

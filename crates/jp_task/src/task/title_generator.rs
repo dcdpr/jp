@@ -7,6 +7,7 @@ use jp_llm::{provider, structured_completion};
 use jp_query::structured::conversation_titles;
 use jp_workspace::Workspace;
 use tokio_util::sync::CancellationToken;
+use tracing::{trace, warn};
 
 use crate::Task;
 
@@ -50,11 +51,13 @@ impl TitleGeneratorTask {
     }
 
     async fn update_title(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        trace!(conversation_id = %self.conversation_id, "Updating conversation title.");
         let provider = provider::get_provider(self.model.provider, &self.provider_config)?;
         let query = conversation_titles(1, self.messages.clone(), &[])?;
         let titles: Vec<String> =
             structured_completion(provider.as_ref(), &self.model, query).await?;
 
+        trace!(titles = ?titles, "Received conversation titles.");
         if let Some(title) = titles.into_iter().next() {
             self.title = Some(title);
         }
@@ -65,13 +68,26 @@ impl TitleGeneratorTask {
 
 #[async_trait]
 impl Task for TitleGeneratorTask {
+    fn name(&self) -> &'static str {
+        "title_generator"
+    }
+
     async fn start(
         mut self: Box<Self>,
         token: CancellationToken,
     ) -> Result<Box<dyn Task>, Box<dyn Error + Send + Sync>> {
+        let id = self.conversation_id;
         tokio::select! {
-            () = token.cancelled() => {}
-            v = self.update_title() => v?
+            () = token.cancelled() => {
+                trace!(conversation_id = %id, "Title generator task cancelled.");
+            }
+            result = self.update_title() => match result {
+                Ok(()) => trace!(conversation_id = %id, "Title generator task completed."),
+                Err(error) => {
+                    warn!(?error, conversation_id = %id, "Title generator task failed.");
+                    return Err(error)
+                }
+            }
         };
 
         Ok(self)

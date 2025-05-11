@@ -21,11 +21,11 @@ pub struct Args {
 }
 
 impl Args {
-    pub fn run(self, ctx: &mut Ctx) -> Output {
+    pub async fn run(self, ctx: &mut Ctx) -> Output {
         match self.command {
-            Commands::Add(args) => args.run(ctx),
-            Commands::Remove(args) => args.run(ctx),
-            Commands::List(args) => args.run(ctx),
+            Commands::Add(args) => args.run(ctx).await,
+            Commands::Remove(args) => args.run(ctx).await,
+            Commands::List(args) => args.run(ctx).await,
         }
     }
 }
@@ -45,7 +45,7 @@ enum Commands {
     List(ls::Args),
 }
 
-pub fn register_attachment(uri: &str, ctx: &mut Context) -> Result<()> {
+pub async fn register_attachment(uri: &str, ctx: &mut Context) -> Result<()> {
     trace!(uri = uri, "Registering attachment.");
 
     let uri = if let Ok(uri) = Url::parse(uri) {
@@ -78,10 +78,11 @@ pub fn register_attachment(uri: &str, ctx: &mut Context) -> Result<()> {
     debug!(%uri, "Registered URI as attachment.");
     attachment
         .add(&uri)
+        .await
         .map_err(|e| Error::Attachment(e.to_string()))
 }
 
-pub fn unregister_attachment(uri: &str, ctx: &mut Context) -> Result<()> {
+pub async fn unregister_attachment(uri: &str, ctx: &mut Context) -> Result<()> {
     let uri = if let Ok(uri) = Url::parse(uri) {
         uri
     } else {
@@ -95,6 +96,7 @@ pub fn unregister_attachment(uri: &str, ctx: &mut Context) -> Result<()> {
     if let Some(attachment) = ctx.attachment_handlers.get_mut(id) {
         attachment
             .remove(&uri)
+            .await
             .map_err(|e| Error::Attachment(e.to_string()))?;
     }
 

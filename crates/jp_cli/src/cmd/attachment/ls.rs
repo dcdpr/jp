@@ -6,8 +6,7 @@ use crate::{cmd::Success, ctx::Ctx, error::Error, Output};
 pub struct Args {}
 
 impl Args {
-    #[expect(clippy::unused_self)]
-    pub fn run(self, ctx: &mut Ctx) -> Output {
+    pub async fn run(self, ctx: &mut Ctx) -> Output {
         let context = &mut ctx.workspace.get_active_conversation_mut().context;
 
         let mut uris = vec![];
@@ -15,6 +14,7 @@ impl Args {
             uris.extend(
                 handler
                     .list()
+                    .await
                     .map_err(|e| Error::Attachment(e.to_string()))?,
             );
         }

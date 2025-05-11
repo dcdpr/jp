@@ -18,6 +18,10 @@ impl StatelessTask {
 
 #[async_trait]
 impl Task for StatelessTask {
+    fn name(&self) -> &'static str {
+        "stateless"
+    }
+
     async fn start(
         mut self: Box<Self>,
         token: CancellationToken,
