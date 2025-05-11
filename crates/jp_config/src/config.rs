@@ -1,6 +1,6 @@
 use confique::{meta::FieldKind, Config as Confique};
 
-use crate::{error::Result, llm, style};
+use crate::{conversation, error::Result, llm, style};
 
 /// Workspace Configuration.
 #[derive(Debug, Clone, Confique)]
@@ -12,6 +12,10 @@ pub struct Config {
     /// LLM-specific configuration.
     #[config(nested)]
     pub llm: llm::Config,
+
+    /// Conversation-specific configuration.
+    #[config(nested)]
+    pub conversation: conversation::Config,
 
     /// Styling configuration.
     #[config(nested)]
@@ -48,6 +52,7 @@ impl Config {
             "inherit" => self.inherit = value.into().parse()?,
             _ if key.starts_with("llm.") => self.llm.set(&key[4..], value)?,
             _ if key.starts_with("style.") => self.style.set(&key[6..], value)?,
+            _ if key.starts_with("conversation.") => self.conversation.set(&key[13..], value)?,
             _ => return crate::set_error(key),
         }
 
