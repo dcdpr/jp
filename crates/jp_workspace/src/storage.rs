@@ -14,7 +14,7 @@ use jp_id::Id as _;
 use jp_mcp::config::{McpServer, McpServerId};
 use serde::Serialize;
 use serde_json::Value;
-use tracing::{debug, trace, warn};
+use tracing::{info, trace, warn};
 
 use crate::{
     error::{Error, Result},
@@ -333,7 +333,7 @@ impl Storage {
         persist_mcp_servers(state, root_path)?;
         persist_named_contexts(state, root_path)?;
 
-        debug!(path = %self.root.display(), "Persisted state.");
+        info!(path = %self.root.display(), "Persisted state.");
 
         Ok(())
     }

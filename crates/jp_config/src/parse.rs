@@ -6,7 +6,7 @@ use std::{
 use confique::{Config as Confique, File, Partial as _};
 use directories::ProjectDirs;
 use path_clean::PathClean as _;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
 
 use super::{error::Result, Config};
 
@@ -116,7 +116,7 @@ fn open_config_file(path: &Path, stems: &[&str]) -> Result<Option<File>> {
     trace!(path = %path.display(), "Searching for configuration file.");
 
     if path.is_file() {
-        debug!(path = %path.display(), "Found configuration file.");
+        info!(path = %path.display(), "Found configuration file.");
         return File::new(path).map(Some).map_err(Into::into);
     }
 
@@ -127,7 +127,7 @@ fn open_config_file(path: &Path, stems: &[&str]) -> Result<Option<File>> {
                 continue;
             }
 
-            debug!(path = %path.display(), "Found configuration file.");
+            info!(path = %path.display(), "Found configuration file.");
             return File::new(path).map(Some).map_err(Into::into);
         }
     }
