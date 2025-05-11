@@ -286,7 +286,9 @@ fn handle_delta(delta: Delta, state: &mut AccumulationState) -> Result<Option<St
             arguments_buffer,
         } = state
         else {
-            warn!("Received tool_calls finish reason but was not accumulating a function call.");
+            // If we're not accumulating, ignore any finish reason, since some
+            // providers don't send the `tool_calls` finish reason at the end of
+            // a response, but instead send the `stop` reason.
             return Ok(None);
         };
 

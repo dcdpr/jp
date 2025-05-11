@@ -22,7 +22,7 @@ use error::{Error, Result};
 use jp_config::Config;
 use jp_workspace::Workspace;
 use serde_json::{Map, Value};
-use tracing::{debug, trace};
+use tracing::{info, trace};
 
 const DEFAULT_STORAGE_DIR: &str = ".jp";
 const DEFAULT_VARIABLE_PREFIX: &str = "JP_";
@@ -288,7 +288,7 @@ fn load_workspace() -> Result<Workspace> {
 
     let workspace = Workspace::new_with_id(root, id)
         .persisted_at(&storage)
-        .inspect(|ws| debug!(workspace = %ws.root.display(), "Using existing workspace."))?;
+        .inspect(|ws| info!(workspace = %ws.root.display(), "Using existing workspace."))?;
 
     jp_workspace::id::store(workspace.id(), &storage)?;
 
@@ -336,23 +336,35 @@ fn configure_logging(verbose: u8, quiet: bool) {
         "llm",
         "mcp",
         "openrouter",
+        "query",
+        "task",
         "term",
+        "test",
         "workspace",
     ] {
         filter.push(format!("jp_{krate}={level}"));
     }
 
-    let format = fmt::format()
-        .with_ansi(true)
-        .with_target(false)
-        .without_time()
-        .compact();
+    let format = fmt::format().with_target(false).compact();
 
-    tracing_subscriber::fmt()
-        .event_format(format)
-        .with_writer(std::io::stderr)
-        .with_env_filter(filter.join(","))
-        .init();
+    if level < LevelFilter::DEBUG {
+        tracing_subscriber::fmt()
+            .event_format(format)
+            .without_time()
+            .with_ansi(true)
+            .with_target(false)
+            .with_writer(std::io::stderr)
+            .with_env_filter(filter.join(","))
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .event_format(format)
+            .with_ansi(true)
+            .with_target(false)
+            .with_writer(std::io::stderr)
+            .with_env_filter(filter.join(","))
+            .init();
+    }
 }
 
 #[cfg(test)]
