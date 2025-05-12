@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     convert::Infallible,
     env,
     path::{Path, PathBuf},
@@ -7,9 +8,11 @@ use std::{
 use confique::{Config as Confique, File, Partial as _};
 use directories::ProjectDirs;
 use path_clean::PathClean as _;
+use serde_json::Value;
 use tracing::{debug, info, trace};
 
 use super::{error::Result, Config};
+use crate::Error;
 
 pub type PartialConfig = <Config as Confique>::Partial;
 
@@ -73,6 +76,66 @@ pub fn load_envs(base: PartialConfig) -> Result<PartialConfig> {
     trace!("Loading environment variable configuration.");
 
     Ok(PartialConfig::from_env()?.with_fallback(base))
+}
+
+pub fn file_to_key_value_pairs(path: &Path) -> Result<HashMap<String, String>> {
+    let ext = path.extension().ok_or(Error::InvalidFileExtension {
+        path: path.to_path_buf(),
+    })?;
+
+    let content = std::fs::read_to_string(path)?;
+    let value: Value = match ext.to_str().unwrap_or_default() {
+        "toml" => toml::from_str(&content)?,
+        "yaml" | "yml" => serde_yaml::from_str(&content)?,
+        "json" | "json5" => json5::from_str(&content)?,
+        _ => {
+            return Err(Error::InvalidFileExtension {
+                path: path.to_path_buf(),
+            })
+        }
+    };
+
+    let mut map = HashMap::new();
+    value_to_key_value_pairs(value, &mut map, String::new());
+
+    Ok(map)
+}
+
+fn value_to_key_value_pairs(value: Value, map: &mut HashMap<String, String>, prefix: String) {
+    match value {
+        Value::Object(obj) => {
+            for (k, v) in obj {
+                let prefix = if prefix.is_empty() {
+                    k
+                } else {
+                    format!("{prefix}.{k}")
+                };
+
+                value_to_key_value_pairs(v, map, prefix);
+            }
+        }
+
+        _ => {
+            if !prefix.is_empty() {
+                map.insert(prefix, value_to_string_key(value));
+            }
+        }
+    }
+}
+
+fn value_to_string_key(value: Value) -> String {
+    match value {
+        Value::String(v) => v,
+        Value::Number(v) => v.to_string(),
+        Value::Bool(v) => v.to_string(),
+        obj @ Value::Object(_) => obj.to_string(),
+        Value::Null => String::new(),
+        Value::Array(v) => v
+            .into_iter()
+            .map(value_to_string_key)
+            .collect::<Vec<_>>()
+            .join(","),
+    }
 }
 
 /// Build a final configuration from merged partial configurations.
@@ -542,5 +605,55 @@ mod tests {
         assert!(config.inherit); // Default from parent
         assert_eq!(config.llm.provider.openrouter.api_key_env, "PARENT_KEY"); // From parent file (not overridden by root file or env)
         assert_eq!(config.llm.provider.openrouter.app_name, "ENV_APP_FINAL"); // Env overrides root file override of parent file
+    }
+
+    #[test]
+    fn test_value_to_string_key() {
+        let cases = vec![
+            (Value::String("foo".to_string()), "foo"),
+            (Value::Number(1.into()), "1"),
+            (Value::Bool(true), "true"),
+            (
+                Value::Array(vec![
+                    Value::String("foo".to_string()),
+                    Value::String("bar".to_string()),
+                ]),
+                "foo,bar",
+            ),
+            (Value::Null, ""),
+            (serde_json::json!({ "foo": "bar" }), "{\"foo\":\"bar\"}"),
+        ];
+
+        for (value, expected) in cases {
+            assert_eq!(value_to_string_key(value), expected);
+        }
+    }
+
+    #[test]
+    fn test_value_to_key_value_pairs() {
+        let cases = vec![
+            (serde_json::json!({ "foo": "bar" }), vec![(
+                "foo".to_string(),
+                "bar".to_string(),
+            )]),
+            (serde_json::json!({ "foo": "bar", "baz": true }), vec![
+                ("foo".to_string(), "bar".to_string()),
+                ("baz".to_string(), "true".to_string()),
+            ]),
+            (serde_json::json!({ "foo": ["bar", "baz"] }), vec![(
+                "foo".to_string(),
+                "bar,baz".to_string(),
+            )]),
+            (serde_json::json!({ "foo": { "bar": "baz" } }), vec![(
+                "foo.bar".to_string(),
+                "baz".to_string(),
+            )]),
+        ];
+
+        for (value, expected) in cases {
+            let mut map = HashMap::new();
+            value_to_key_value_pairs(value, &mut map, String::new());
+            assert_eq!(map, HashMap::from_iter(expected));
+        }
     }
 }

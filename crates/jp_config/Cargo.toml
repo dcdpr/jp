@@ -18,9 +18,13 @@ jp_mcp = { workspace = true }
 
 confique = { workspace = true, features = ["toml", "yaml", "json5"] }
 directories = { workspace = true }
+json5 = { workspace = true }
 path-clean = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 thiserror = { workspace = true }
+toml = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

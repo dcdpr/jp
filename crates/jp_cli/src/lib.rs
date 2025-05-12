@@ -5,10 +5,11 @@ pub mod error;
 mod parser;
 
 use std::{
-    collections::BTreeMap,
     fmt,
     io::{stdout, IsTerminal as _},
     num::NonZeroI32,
+    path::PathBuf,
+    str::FromStr,
     time::Duration,
 };
 
@@ -21,7 +22,7 @@ use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::Stylize as _;
 use ctx::Ctx;
 use error::{Error, Result};
-use jp_config::Config;
+use jp_config::{file_to_key_value_pairs, Config};
 use jp_workspace::Workspace;
 use serde_json::{Map, Value};
 use tracing::{info, trace};
@@ -43,8 +44,8 @@ pub struct Cli {
 #[derive(Debug, clap::Args)]
 pub struct Globals {
     /// Override a configuration value for the duration of the command.
-    #[arg(short, long = "cfg", value_name = "KEY=VALUE", global = true, action = ArgAction::Append)]
-    config: Vec<String>,
+    #[arg(short, long = "cfg", value_name = "KEY=VALUE", global = true, action = ArgAction::Append, value_parser = KeyValueOrPath::from_str)]
+    config: Vec<KeyValueOrPath>,
 
     /// Increase verbosity of logging.
     ///
@@ -100,6 +101,31 @@ pub struct Globals {
     // /// The format of the output.
     // #[arg(long, global = true, value_enum, default_value_t = Format::Text)]
     // format: Format,
+}
+
+#[derive(Debug, Clone)]
+pub enum KeyValueOrPath {
+    KeyValue((String, String)),
+    Path(PathBuf),
+}
+
+impl FromStr for KeyValueOrPath {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        if let Some(s) = s.strip_prefix('@') {
+            return Ok(Self::Path(PathBuf::from(s.trim())));
+        }
+
+        s.split_once('=')
+            .ok_or(jp_config::Error::InvalidConfigValue {
+                key: s.to_string(),
+                value: s.to_string(),
+                need: vec!["<key>=<value>".to_string(), "@<path>".to_string()],
+            })
+            .map(|(key, value)| Self::KeyValue((key.to_string(), value.to_string())))
+            .map_err(Into::into)
+    }
 }
 
 // TODO
@@ -298,27 +324,31 @@ fn load_workspace() -> Result<Workspace> {
 }
 
 /// Apply CLI config overrides to the [`Config`].
-fn apply_cli_configs(overrides: &[String], config: &mut Config) -> Result<()> {
+fn apply_cli_configs(overrides: &[KeyValueOrPath], config: &mut Config) -> Result<()> {
     trace!(overrides = ?overrides, "Applying CLI config overrides.");
 
-    let mut map = BTreeMap::new();
     for field in overrides {
-        let (key, value) = field.split_once('=').unwrap_or((field, ""));
-        map.insert(key, value);
-    }
-
-    if map
-        .get("inherit")
-        .is_some_and(|v| !v.parse::<bool>().unwrap_or_default())
-    {
-        *config = Config::default();
-    }
-
-    for (key, value) in map {
-        config.set(key, key, value)?;
+        match field {
+            KeyValueOrPath::KeyValue((key, value)) => apply_cli_config(key, value, config)?,
+            KeyValueOrPath::Path(path) => {
+                for (key, value) in file_to_key_value_pairs(path)? {
+                    apply_cli_config(&key, &value, config)?;
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+fn apply_cli_config(key: &str, value: &str, config: &mut Config) -> Result<()> {
+    // Whenever an `inherit` key is set to `false`, we reset the config to
+    // its default values.
+    if key == "inherit" && !value.parse::<bool>().unwrap_or_default() {
+        *config = Config::default();
+    }
+
+    config.set(key, key, value).map_err(Into::into)
 }
 
 fn configure_logging(verbose: u8, quiet: bool) {

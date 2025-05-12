@@ -478,6 +478,26 @@ impl From<jp_config::Error> for Error {
                 ("slug", slug.into()),
             ]
             .into(),
+            InvalidFileExtension { path } => [
+                ("message", "Invalid or missing file extension".into()),
+                ("path", path.to_string_lossy().into()),
+            ]
+            .into(),
+            Toml(error) => [
+                ("message", "TOML error".into()),
+                ("error", error.to_string().into()),
+            ]
+            .into(),
+            Json5(error) => [
+                ("message", "JSON error".into()),
+                ("error", error.to_string().into()),
+            ]
+            .into(),
+            Yaml(error) => [
+                ("message", "YAML error".into()),
+                ("error", error.to_string().into()),
+            ]
+            .into(),
         };
 
         Self::from(metadata)

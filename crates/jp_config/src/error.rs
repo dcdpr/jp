@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
@@ -29,6 +31,18 @@ pub enum Error {
 
     #[error("Model slug error: {0}")]
     ModelSlug(String),
+
+    #[error("Invalid or missing file extension: {path}")]
+    InvalidFileExtension { path: PathBuf },
+
+    #[error("TOML error: {0}")]
+    Toml(#[from] toml::de::Error),
+
+    #[error("JSON error: {0}")]
+    Json5(#[from] json5::Error),
+
+    #[error("YAML error: {0}")]
+    Yaml(#[from] serde_yaml::Error),
 }
 
 #[cfg(test)]
