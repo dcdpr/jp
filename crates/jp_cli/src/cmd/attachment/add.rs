@@ -1,5 +1,8 @@
+use jp_config::try_parse_vec;
+use url::Url;
+
 use super::register_attachment;
-use crate::{ctx::Ctx, Output};
+use crate::{ctx::Ctx, parser, Output};
 
 #[derive(Debug, clap::Args)]
 #[command(arg_required_else_help(true))]
@@ -10,7 +13,8 @@ pub struct Args {
     /// added, otherwise the attachment type can be added as a prefix.
     ///
     /// For example, to add a `summary` attachment, use `summary://<path>`.
-    attachments: Vec<String>,
+    #[arg(value_parser = |s: &str| try_parse_vec(s, parser::attachment_url))]
+    attachments: Vec<Url>,
 }
 
 impl Args {

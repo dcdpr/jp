@@ -14,10 +14,10 @@ pub struct Config {
 
 impl Config {
     /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, key: &str, value: impl Into<String>) -> Result<()> {
+    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
         match key {
-            _ if key.starts_with("code.") => self.code.set(&key[5..], value)?,
-            _ => return crate::set_error(key),
+            _ if key.starts_with("code.") => self.code.set(path, &key[5..], value)?,
+            _ => return crate::set_error(path, key),
         }
 
         Ok(())

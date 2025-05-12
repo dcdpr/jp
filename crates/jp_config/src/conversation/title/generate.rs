@@ -28,11 +28,11 @@ impl Default for Config {
 
 impl Config {
     /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, key: &str, value: impl Into<String>) -> Result<()> {
+    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
         match key {
             "model" => self.model = value.into().parse()?,
             "auto" => self.auto = value.into().parse()?,
-            _ => return crate::set_error(key),
+            _ => return crate::set_error(path, key),
         }
 
         Ok(())

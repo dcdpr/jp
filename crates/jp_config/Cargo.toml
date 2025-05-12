@@ -14,6 +14,7 @@ version.workspace = true
 
 [dependencies]
 jp_conversation = { workspace = true }
+jp_mcp = { workspace = true }
 
 confique = { workspace = true, features = ["toml", "yaml", "json5"] }
 directories = { workspace = true }

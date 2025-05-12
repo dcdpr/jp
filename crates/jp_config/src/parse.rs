@@ -1,4 +1,5 @@
 use std::{
+    convert::Infallible,
     env,
     path::{Path, PathBuf},
 };
@@ -161,6 +162,25 @@ fn expand_tilde(path: impl AsRef<str>, home: Option<&str>) -> Option<PathBuf> {
     }
 
     Some(PathBuf::from(path.as_ref()))
+}
+
+#[expect(clippy::missing_panics_doc)]
+pub fn parse_vec<'a, T>(s: &'a str, parser: impl Fn(&'a str) -> T) -> Vec<T> {
+    try_parse_vec(s, |s| Ok::<_, Infallible>(parser(s))).expect("infallible parser")
+}
+
+pub fn try_parse_vec<'a, T, E>(
+    s: &'a str,
+    parser: impl Fn(&'a str) -> std::result::Result<T, E>,
+) -> std::result::Result<Vec<T>, Box<dyn std::error::Error + Send + Sync>>
+where
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    s.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| parser(s).map_err(Into::into))
+        .collect::<std::result::Result<Vec<_>, _>>()
 }
 
 #[cfg(test)]

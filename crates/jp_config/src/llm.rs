@@ -29,12 +29,12 @@ pub struct Config {
 
 impl Config {
     /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, key: &str, value: impl Into<String>) -> Result<()> {
+    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
         match key {
-            _ if key.starts_with("provider.") => self.provider.set(&key[9..], value)?,
+            _ if key.starts_with("provider.") => self.provider.set(path, &key[9..], value)?,
             "model" => self.model = Some(value.into().parse()?),
             "tool_choice" => self.tool_choice = value.into().parse()?,
-            _ => return crate::set_error(key),
+            _ => return crate::set_error(path, key),
         }
 
         Ok(())

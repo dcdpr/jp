@@ -56,13 +56,13 @@ pub struct Config {
 
 impl Config {
     /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, key: &str, value: impl Into<String>) -> Result<()> {
+    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
         match key {
             "theme" => self.theme = value.into(),
             "color" => self.color = value.into().parse()?,
             "file_link" => self.file_link = value.into().parse()?,
             "copy_link" => self.copy_link = value.into().parse()?,
-            _ => return crate::set_error(key),
+            _ => return crate::set_error(path, key),
         }
 
         Ok(())

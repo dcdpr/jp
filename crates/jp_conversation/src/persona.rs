@@ -145,7 +145,7 @@ impl Id for PersonaId {
 
 impl fmt::Display for PersonaId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.format_id(f)
+        write!(f, "{}", self.0)
     }
 }
 

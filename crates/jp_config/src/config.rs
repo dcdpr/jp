@@ -47,13 +47,15 @@ impl Config {
     }
 
     /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, key: &str, value: impl Into<String>) -> Result<()> {
+    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
         match key {
             "inherit" => self.inherit = value.into().parse()?,
-            _ if key.starts_with("llm.") => self.llm.set(&key[4..], value)?,
-            _ if key.starts_with("style.") => self.style.set(&key[6..], value)?,
-            _ if key.starts_with("conversation.") => self.conversation.set(&key[13..], value)?,
-            _ => return crate::set_error(key),
+            _ if key.starts_with("llm.") => self.llm.set(path, &key[4..], value)?,
+            _ if key.starts_with("style.") => self.style.set(path, &key[6..], value)?,
+            _ if key.starts_with("conversation.") => {
+                self.conversation.set(path, &key[13..], value)?;
+            }
+            _ => return crate::set_error(path, key),
         }
 
         Ok(())
