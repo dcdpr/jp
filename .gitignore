@@ -7,10 +7,5 @@
 /.cargo/config.toml
 /rustc-ice-*
 
-# Sandworm specific
-.sandworm
-.sandworm*.txt
-sandworm.txt
-
 # Logs
 *.log

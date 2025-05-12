@@ -16,8 +16,9 @@ to provide a flexible and powerful pair-programming experience with LLMs.
 - Define multiple _personas_ to customize the LLM's behavior.
 - Use _contexts_ to limit/expand the LLM's knowledge base per conversation.
 - Persist JP state in your VCS of choice.
+- LLM-based conversation naming + manual renaming.
+- Locally stored conversations excluded from VCS.
 - (soon) Encrypted conversation history.
-- (soon) Private (local) conversations excluded from VCS.
 - (soon) Text-to-speech integration.
 - (soon) More attachments types (e.g. header files, external apps, etc.).
 - (soon) Sync server to store data in a central local location.
