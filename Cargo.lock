@@ -1889,11 +1889,15 @@ dependencies = [
  "directories",
  "jp_conversation",
  "jp_mcp",
+ "json5",
  "path-clean",
  "serde",
+ "serde_json",
+ "serde_yaml",
  "serial_test",
  "tempfile",
  "thiserror 2.0.12",
+ "toml",
  "tracing",
 ]
 

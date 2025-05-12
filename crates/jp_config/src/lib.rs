@@ -7,7 +7,10 @@ pub mod style;
 
 pub use config::Config;
 pub use error::Error;
-pub use parse::{build, load, load_envs, load_partial, parse_vec, try_parse_vec, PartialConfig};
+pub use parse::{
+    build, file_to_key_value_pairs, load, load_envs, load_partial, parse_vec, try_parse_vec,
+    PartialConfig,
+};
 
 fn set_error(path: &str, key: impl Into<String>) -> error::Result<()> {
     let s: String = key.into();
