@@ -27,7 +27,7 @@ pub struct Config {
     pub context: Option<ContextId>,
 
     /// List of MCP servers to use for the active conversation.
-    #[config(env = "JP_CONVERSATION_MCP_SERVERS", deserialize_with = de_mcp_servers)]
+    #[config(default = [], env = "JP_CONVERSATION_MCP_SERVERS", deserialize_with = de_mcp_servers)]
     pub mcp_servers: Vec<McpServerId>,
 }
 

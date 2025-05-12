@@ -257,20 +257,6 @@ impl Args {
     }
 
     async fn update_context(&self, ctx: &mut Ctx) -> Result<()> {
-        let custom_context = ctx
-            .config
-            .conversation
-            .context
-            .as_ref()
-            .or(self.context.as_ref());
-
-        let custom_persona = ctx
-            .config
-            .conversation
-            .persona
-            .as_ref()
-            .or(self.persona.as_ref());
-
         // Update context if specified
         if let Some(id) = ctx.config.conversation.context.clone() {
             debug!(%id, "Using named context in conversation due to --context flag.");

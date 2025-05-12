@@ -5,6 +5,7 @@ pub mod error;
 mod parser;
 
 use std::{
+    collections::BTreeMap,
     fmt,
     io::{stdout, IsTerminal as _},
     num::NonZeroI32,
@@ -300,8 +301,20 @@ fn load_workspace() -> Result<Workspace> {
 fn apply_cli_configs(overrides: &[String], config: &mut Config) -> Result<()> {
     trace!(overrides = ?overrides, "Applying CLI config overrides.");
 
+    let mut map = BTreeMap::new();
     for field in overrides {
         let (key, value) = field.split_once('=').unwrap_or((field, ""));
+        map.insert(key, value);
+    }
+
+    if map
+        .get("inherit")
+        .is_some_and(|v| !v.parse::<bool>().unwrap_or_default())
+    {
+        *config = Config::default();
+    }
+
+    for (key, value) in map {
         config.set(key, key, value)?;
     }
 
