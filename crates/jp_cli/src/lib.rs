@@ -43,7 +43,7 @@ pub struct Cli {
 #[derive(Debug, clap::Args)]
 pub struct Globals {
     /// Override a configuration value for the duration of the command.
-    #[arg(short, long, value_name = "KEY=VALUE", global = true, action = ArgAction::Append)]
+    #[arg(short, long = "cfg", value_name = "KEY=VALUE", global = true, action = ArgAction::Append)]
     config: Vec<String>,
 
     /// Increase verbosity of logging.
