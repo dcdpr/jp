@@ -3,7 +3,7 @@ use confique::{meta::FieldKind, Config as Confique};
 use crate::{conversation, error::Result, llm, style};
 
 /// Workspace Configuration.
-#[derive(Debug, Clone, Confique)]
+#[derive(Debug, Clone, Default, Confique)]
 pub struct Config {
     /// Inherit from a local ancestor or global configuration file.
     #[config(default = true)]

@@ -54,6 +54,18 @@ pub struct Config {
     pub copy_link: LinkStyle,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            theme: "Monokai Extended".to_string(),
+            color: true,
+            line_numbers: false,
+            file_link: LinkStyle::Osc8,
+            copy_link: LinkStyle::Off,
+        }
+    }
+}
+
 impl Config {
     /// Set a configuration value using a stringified key/value pair.
     pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {

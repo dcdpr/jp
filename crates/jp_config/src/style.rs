@@ -5,7 +5,7 @@ use confique::Config as Confique;
 use crate::error::Result;
 
 /// Style configuration.
-#[derive(Debug, Clone, Confique)]
+#[derive(Debug, Clone, Default, Confique)]
 pub struct Config {
     /// Fenced code block style.
     #[config(nested)]
