@@ -252,8 +252,22 @@ impl Args {
     }
 
     async fn update_context(&self, ctx: &mut Ctx) -> Result<()> {
+        let custom_context = ctx
+            .config
+            .conversation
+            .context
+            .as_ref()
+            .or(self.context.as_ref());
+
+        let custom_persona = ctx
+            .config
+            .conversation
+            .persona
+            .as_ref()
+            .or(self.persona.as_ref());
+
         // Update context if specified
-        if let Some(context) = self.context.as_ref() {
+        if let Some(context) = custom_context {
             let id = ContextId::try_from(context)?;
             debug!(%id, "Using named context in conversation due to --context flag.");
 
@@ -269,7 +283,7 @@ impl Args {
         }
 
         // Update persona if specified
-        if let Some(persona) = self.persona.as_ref() {
+        if let Some(persona) = custom_persona {
             let id = PersonaId::try_from(persona)?;
             debug!(%id, "Changing persona in conversation context due to --persona flag.");
 

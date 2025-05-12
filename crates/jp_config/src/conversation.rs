@@ -10,6 +10,18 @@ pub struct Config {
     /// Title configuration.
     #[config(nested)]
     pub title: title::Config,
+
+    /// Persona to use for the active conversation.
+    ///
+    /// If unset, uses the `default` persona, if one exists.
+    #[config(env = "JP_CONVERSATION_PERSONA")]
+    pub persona: Option<String>,
+
+    /// Context to use for the active conversation.
+    ///
+    /// If unset, uses the `default` context, if one exists.
+    #[config(env = "JP_CONVERSATION_CONTEXT")]
+    pub context: Option<String>,
 }
 
 impl Config {
@@ -17,6 +29,8 @@ impl Config {
     pub fn set(&mut self, key: &str, value: impl Into<String>) -> Result<()> {
         match key {
             _ if key.starts_with("title.") => self.title.set(&key[6..], value)?,
+            "persona" => self.persona = Some(value.into()),
+            "context" => self.context = Some(value.into()),
             _ => return crate::set_error(key),
         }
 
