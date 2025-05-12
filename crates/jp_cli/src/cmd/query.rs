@@ -1,8 +1,10 @@
-use std::{collections::HashSet, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet, convert::Infallible, path::PathBuf, str::FromStr as _, time::Duration,
+};
 
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
-use jp_config::{llm::ToolChoice, style::code::LinkStyle};
+use jp_config::{llm::ToolChoice, parse_vec, style::code::LinkStyle, try_parse_vec};
 use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
     persona::Instructions,
@@ -16,13 +18,14 @@ use jp_task::task::TitleGeneratorTask;
 use jp_term::{code, osc::hyperlink, stdout};
 use termimad::FmtText;
 use tracing::{debug, info, trace};
+use url::Url;
 
 use super::{attachment::register_attachment, Output};
 use crate::{
     cmd::Success,
     editor,
     error::{Error, Result},
-    Ctx,
+    parser, Ctx,
 };
 
 // Define the delay duration
@@ -54,20 +57,20 @@ pub struct Args {
     pub local: bool,
 
     /// Add attachment to the context.
-    #[arg(short = 'a', long = "attachment")]
-    pub attachments: Vec<String>,
+    #[arg(short = 'a', long = "attachment", value_parser = |s: &str| try_parse_vec(s, parser::attachment_url))]
+    pub attachments: Vec<Url>,
 
     /// Use specific persona.
-    #[arg(short = 'p', long = "persona")]
-    pub persona: Option<String>,
+    #[arg(short = 'p', long = "persona", value_parser = PersonaId::from_str)]
+    pub persona: Option<PersonaId>,
 
     /// Use specific context.
-    #[arg(short = 'x', long = "context")]
-    pub context: Option<String>,
+    #[arg(short = 'x', long = "context", value_parser = |s: &str| ContextId::try_from(s))]
+    pub context: Option<ContextId>,
 
     /// Use specific MCP servers exclusively.
-    #[arg(short = 'm', long = "mcp")]
-    pub mcp: Vec<String>,
+    #[arg(short = 'm', long = "mcp", value_parser = |s: &str| Ok::<_, Infallible>(parse_vec(s, McpServerId::new)))]
+    pub mcp: Vec<McpServerId>,
 }
 
 impl Args {
@@ -75,6 +78,8 @@ impl Args {
     pub async fn run(self, ctx: &mut Ctx) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
+
+        self.update_config(&mut ctx.config);
 
         let old_conversation_id = ctx.workspace.active_conversation_id();
         let conversation_id = if self.new_conversation {
@@ -267,8 +272,7 @@ impl Args {
             .or(self.persona.as_ref());
 
         // Update context if specified
-        if let Some(context) = custom_context {
-            let id = ContextId::try_from(context)?;
+        if let Some(id) = ctx.config.conversation.context.clone() {
             debug!(%id, "Using named context in conversation due to --context flag.");
 
             // Get context.
@@ -283,8 +287,7 @@ impl Args {
         }
 
         // Update persona if specified
-        if let Some(persona) = custom_persona {
-            let id = PersonaId::try_from(persona)?;
+        if let Some(id) = ctx.config.conversation.persona.clone() {
             debug!(%id, "Changing persona in conversation context due to --persona flag.");
 
             // Ensure persona exists.
@@ -308,14 +311,12 @@ impl Args {
         // Set exclusive MCP servers
         let mut servers = HashSet::new();
         for id in &self.mcp {
-            let id = McpServerId::new(id);
-
             // Ensure MCP server exists.
             ctx.workspace
-                .get_mcp_server(&id)
+                .get_mcp_server(id)
                 .ok_or(Error::NotFound("MCP server", id.to_string()))?;
 
-            servers.insert(id);
+            servers.insert(id.clone());
         }
 
         if !servers.is_empty() {
@@ -335,6 +336,16 @@ impl Args {
         }
 
         Ok(())
+    }
+
+    fn update_config(&self, config: &mut jp_config::Config) {
+        if let Some(context) = self.context.as_ref() {
+            config.conversation.context = Some(context.clone());
+        }
+
+        if let Some(persona) = self.persona.as_ref() {
+            config.conversation.persona = Some(persona.clone());
+        }
     }
 }
 

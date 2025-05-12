@@ -45,22 +45,8 @@ enum Commands {
     List(ls::Args),
 }
 
-pub async fn register_attachment(uri: &str, ctx: &mut Context) -> Result<()> {
-    trace!(uri = uri, "Registering attachment.");
-
-    let uri = if let Ok(uri) = Url::parse(uri) {
-        uri
-    } else {
-        // Special case for file attachments
-        trace!("URI is not a valid URL, treating as file path.");
-        let s = if let Some(uri) = uri.strip_prefix('!') {
-            format!("file:{uri}?exclude=true")
-        } else {
-            format!("file:{uri}")
-        };
-
-        Url::parse(&s)?
-    };
+pub async fn register_attachment(uri: &Url, ctx: &mut Context) -> Result<()> {
+    trace!(uri = uri.as_str(), "Registering attachment.");
 
     let scheme = uri.scheme();
     let attachment = if let Some(attachment) = ctx.attachment_handlers.get_mut(scheme) {
@@ -77,7 +63,7 @@ pub async fn register_attachment(uri: &str, ctx: &mut Context) -> Result<()> {
 
     debug!(%uri, "Registered URI as attachment.");
     attachment
-        .add(&uri)
+        .add(uri)
         .await
         .map_err(|e| Error::Attachment(e.to_string()))
 }

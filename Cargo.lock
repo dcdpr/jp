@@ -1888,6 +1888,7 @@ dependencies = [
  "confique",
  "directories",
  "jp_conversation",
+ "jp_mcp",
  "path-clean",
  "serde",
  "serial_test",

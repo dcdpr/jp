@@ -2,6 +2,7 @@ mod cmd;
 mod ctx;
 mod editor;
 pub mod error;
+mod parser;
 
 use std::{
     fmt,
@@ -301,7 +302,7 @@ fn apply_cli_configs(overrides: &[String], config: &mut Config) -> Result<()> {
 
     for field in overrides {
         let (key, value) = field.split_once('=').unwrap_or((field, ""));
-        config.set(key, value)?;
+        config.set(key, key, value)?;
     }
 
     Ok(())

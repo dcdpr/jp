@@ -34,14 +34,14 @@ pub struct Config {
 
 impl Config {
     /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, key: &str, value: impl Into<String>) -> Result<()> {
+    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
         match key {
-            _ if key.starts_with("anthropic.") => self.anthropic.set(&key[10..], value)?,
-            _ if key.starts_with("deepseek.") => self.deepseek.set(&key[9..], value)?,
-            _ if key.starts_with("google.") => self.google.set(&key[7..], value)?,
-            _ if key.starts_with("openrouter.") => self.openrouter.set(&key[11..], value)?,
-            _ if key.starts_with("openai.") => self.openai.set(&key[7..], value)?,
-            _ => return crate::set_error(key),
+            _ if key.starts_with("anthropic.") => self.anthropic.set(path, &key[10..], value)?,
+            _ if key.starts_with("deepseek.") => self.deepseek.set(path, &key[9..], value)?,
+            _ if key.starts_with("google.") => self.google.set(path, &key[7..], value)?,
+            _ if key.starts_with("openrouter.") => self.openrouter.set(path, &key[11..], value)?,
+            _ if key.starts_with("openai.") => self.openai.set(path, &key[7..], value)?,
+            _ => return crate::set_error(path, key),
         }
 
         Ok(())

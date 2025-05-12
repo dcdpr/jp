@@ -8,6 +8,7 @@ use crate::transport::{self, Transport};
 pub struct McpServerId(String);
 
 impl McpServerId {
+    // TODO: implement `FromStr` or `TryFrom`, to reject invalid IDs.
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
