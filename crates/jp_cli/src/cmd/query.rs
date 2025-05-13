@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet, convert::Infallible, path::PathBuf, str::FromStr as _, time::Duration,
+    collections::HashSet, convert::Infallible, fs, path::PathBuf, str::FromStr as _, time::Duration,
 };
 
 use crossterm::style::{Color, Stylize as _};
@@ -9,13 +9,15 @@ use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
     persona::Instructions,
     thread::{Thread, ThreadBuilder},
-    AssistantMessage, ContextId, Conversation, MessagePair, Model, ModelId, PersonaId, UserMessage,
+    AssistantMessage, ContextId, Conversation, ConversationId, MessagePair, Model, ModelId,
+    PersonaId, UserMessage,
 };
 use jp_llm::provider::{self, CompletionChunk, StreamEvent};
 use jp_mcp::{config::McpServerId, ResourceContents, Tool};
 use jp_query::query::ChatQuery;
 use jp_task::task::TitleGeneratorTask;
 use jp_term::{code, osc::hyperlink, stdout};
+use minijinja::{Environment, UndefinedBehavior};
 use termimad::FmtText;
 use tracing::{debug, info, trace};
 use url::Url;
@@ -35,7 +37,15 @@ const TYPEWRITER_DELAY: Duration = Duration::from_millis(3);
 pub struct Args {
     /// The query to send. If not provided, uses `$JP_EDITOR`, `$VISUAL` or
     /// `$EDITOR` to open edit the query in an editor.
+    #[arg(value_parser = string_or_path)]
     pub query: Option<String>,
+
+    /// Use the query string as a Jinja2 template.
+    ///
+    /// You can provide values for template variables using the
+    /// `template.values` config key.
+    #[arg(short, long)]
+    pub template: bool,
 
     /// Replay the last message in the conversation.
     ///
@@ -74,7 +84,6 @@ pub struct Args {
 }
 
 impl Args {
-    #[expect(clippy::too_many_lines)]
     pub async fn run(self, ctx: &mut Ctx) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
@@ -115,53 +124,9 @@ impl Args {
         // Ensure we start the MCP servers attached to the conversation.
         ctx.configure_active_mcp_servers().await?;
 
-        // If replaying, remove the last message from the conversation, and use
-        // its query message to build the new query.
-        let replaying_user_message = self
-            .replay
-            .then(|| ctx.workspace.pop_message(&conversation_id))
-            .flatten()
-            .map(|m| m.message);
+        let message = self.build_message(ctx, conversation_id).await?;
 
-        let mut message = match replaying_user_message {
-            Some(msg @ UserMessage::Query(_)) => msg,
-            Some(UserMessage::ToolCallResults(_)) => {
-                let Some(response) = ctx.workspace.get_messages(&conversation_id).last() else {
-                    return Err("No assistant response found, cannot replay tool calls.".into());
-                };
-
-                let results = handle_tool_calls(ctx, response.reply.tool_calls.clone()).await?;
-                UserMessage::ToolCallResults(results)
-            }
-            None => UserMessage::Query(String::new()),
-        };
-
-        if let Some(text) = &self.query {
-            match &mut message {
-                UserMessage::Query(query) if query.is_empty() => text.clone_into(query),
-                UserMessage::Query(query) => *query = format!("{text}\n\n{query}"),
-                UserMessage::ToolCallResults(_) => {}
-            }
-        } else if let UserMessage::Query(query) = &mut message {
-            let path = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
-            let messages = ctx.workspace.get_messages(&conversation_id);
-            let initial_message = if query.is_empty() {
-                None
-            } else {
-                Some(query.to_owned())
-            };
-
-            // If replaying, pass the last query as the text to be edited,
-            // otherwise open an empty editor.
-            *query = editor::edit_query(path, initial_message, messages)?;
-        }
-
-        // Conversation
-        let conversation = ctx.workspace.get_active_conversation();
-
-        if let UserMessage::Query(query) = &mut message {
-            *query = query.trim().to_string();
-
+        if let UserMessage::Query(query) = &message {
             if query.is_empty() {
                 info!("Query is empty, exiting.");
 
@@ -188,6 +153,9 @@ impl Args {
                 ));
             }
         }
+
+        // Conversation
+        let conversation = ctx.workspace.get_active_conversation();
 
         // Persona
         let persona_id = &conversation.context.persona_id;
@@ -254,6 +222,75 @@ impl Args {
         editor::cleanup_query_file(path)?;
 
         Ok(Success::Ok)
+    }
+
+    async fn build_message(
+        &self,
+        ctx: &mut Ctx,
+        conversation_id: ConversationId,
+    ) -> Result<UserMessage> {
+        // If replaying, remove the last message from the conversation, and use
+        // its query message to build the new query.
+        let replaying_user_message = self
+            .replay
+            .then(|| ctx.workspace.pop_message(&conversation_id))
+            .flatten()
+            .map(|m| m.message);
+
+        let mut message = match replaying_user_message {
+            Some(msg @ UserMessage::Query(_)) => msg,
+            Some(UserMessage::ToolCallResults(_)) => {
+                let Some(response) = ctx.workspace.get_messages(&conversation_id).last() else {
+                    return Err(Error::Replay("No assistant response found".into()));
+                };
+
+                let results = handle_tool_calls(ctx, response.reply.tool_calls.clone()).await?;
+                UserMessage::ToolCallResults(results)
+            }
+            None => UserMessage::Query(String::new()),
+        };
+
+        if let Some(text) = &self.query {
+            match &mut message {
+                UserMessage::Query(query) if query.is_empty() => text.clone_into(query),
+                UserMessage::Query(query) => *query = format!("{text}\n\n{query}"),
+                UserMessage::ToolCallResults(_) => {}
+            }
+        } else if let UserMessage::Query(query) = &mut message {
+            let path = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
+            let messages = ctx.workspace.get_messages(&conversation_id);
+            let initial_message = if query.is_empty() {
+                None
+            } else {
+                Some(query.to_owned())
+            };
+
+            // If replaying, pass the last query as the text to be edited,
+            // otherwise open an empty editor.
+            *query = editor::edit_query(path, initial_message, messages)?;
+        }
+
+        if let UserMessage::Query(query) = &mut message {
+            if self.template {
+                let mut env = Environment::empty();
+                env.set_undefined_behavior(UndefinedBehavior::SemiStrict);
+                env.add_template("query", query)?;
+
+                let tmpl = env.get_template("query")?;
+                // TODO: supported nested variables
+                for var in tmpl.undeclared_variables(false) {
+                    if ctx.config.template.values.contains_key(&var) {
+                        continue;
+                    }
+
+                    return Err(Error::TemplateUndefinedVariable(var));
+                }
+
+                *query = tmpl.render(&ctx.config.template.values)?;
+            }
+        }
+
+        Ok(message)
     }
 
     async fn update_context(&self, ctx: &mut Ctx) -> Result<()> {
@@ -333,6 +370,14 @@ impl Args {
             config.conversation.persona = Some(persona.clone());
         }
     }
+}
+
+fn string_or_path(s: &str) -> Result<String> {
+    if let Some(s) = s.strip_prefix('@') {
+        return fs::read_to_string(PathBuf::from(s.trim())).map_err(Into::into);
+    }
+
+    Ok(s.to_owned())
 }
 
 async fn handle_stream(
@@ -768,7 +813,7 @@ impl ResponseHandler {
             .subsec_millis();
         let path = std::env::temp_dir().join(format!("code_{millis}.{ext}"));
 
-        std::fs::write(&path, code.join("\n"))?;
+        fs::write(&path, code.join("\n"))?;
 
         Ok(path)
     }

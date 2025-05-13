@@ -1867,6 +1867,7 @@ dependencies = [
  "jp_task",
  "jp_term",
  "jp_workspace",
+ "minijinja",
  "path-clean",
  "reqwest",
  "serde_json",
@@ -2247,6 +2248,15 @@ name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
+name = "minijinja"
+version = "2.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd72e8b4e42274540edabec853f607c015c73436159b06c39c7af85a20433155"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "minimad"

@@ -57,6 +57,7 @@ strip-ansi-escapes = { version = "0.2", default-features = false }
 tempfile = { version = "3", default-features = false }
 termimad = { version = "0.31", default-features = false }
 json5 = { version = "0.4", default-features = false }
+minijinja = { version = "2", default-features = false }
 serde_yaml = { version = "0.9", default-features = false }
 thiserror = { version = "2", default-features = false }
 time = { version = "0.3", default-features = false }

@@ -222,6 +222,16 @@ impl From<HashMap<&str, Value>> for Error {
     }
 }
 
+impl From<HashMap<&'static str, String>> for Error {
+    fn from(metadata: HashMap<&'static str, String>) -> Self {
+        metadata
+            .into_iter()
+            .map(|(k, v)| (k, Value::String(v)))
+            .collect::<HashMap<_, _>>()
+            .into()
+    }
+}
+
 impl From<HashMap<String, Value>> for Error {
     fn from(metadata: HashMap<String, Value>) -> Self {
         (1, Map::from_iter(metadata)).into()
@@ -243,7 +253,7 @@ impl From<crate::error::Error> for Error {
     fn from(error: crate::error::Error) -> Self {
         use crate::error::Error::*;
 
-        let metadata: HashMap<&str, Value> = match error {
+        let metadata: HashMap<&str, String> = match error {
             Command(error) => return error,
             Config(error) => return error.into(),
             Workspace(error) => return error.into(),
@@ -253,51 +263,28 @@ impl From<crate::error::Error> for Error {
             Io(error) => return error.into(),
             Url(error) => return error.into(),
             Bat(error) => return error.into(),
+            Template(error) => return error.into(),
             NotFound(target, id) => [
                 ("message", "Not found".into()),
                 ("target", target.into()),
-                ("id", id.into()),
+                ("id", id),
             ]
             .into(),
             Attachment(error) => [
                 ("message", "Attachment error".into()),
-                ("error", error.to_string().into()),
+                ("error", error.to_string()),
             ]
             .into(),
             Editor(error) => [
                 ("message", "Editor error".into()),
-                ("error", error.to_string().into()),
+                ("error", error.to_string()),
             ]
             .into(),
-            Task(error) => [
-                ("message", "Task error".into()),
-                ("error", error.to_string().into()),
-            ]
-            .into(),
-        };
-
-        Self::from(metadata)
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(error: std::io::Error) -> Self {
-        Error::from(HashMap::from([
-            ("message", "IO error".into()),
-            ("error", error.to_string().into()),
-        ]))
-    }
-}
-
-impl From<bat::error::Error> for Error {
-    fn from(error: bat::error::Error) -> Self {
-        use bat::error::Error::*;
-
-        let metadata: HashMap<&str, Value> = match error {
-            Io(error) => return error.into(),
-            error => [
-                ("message", "Error while formatting code".into()),
-                ("error", error.to_string().into()),
+            Task(error) => with_cause(error.as_ref(), "Task error"),
+            Replay(error) => [("message", "Replay error".to_owned()), ("error", error)].into(),
+            TemplateUndefinedVariable(var) => [
+                ("message", "Undefined template variable".to_owned()),
+                ("variable", var),
             ]
             .into(),
         };
@@ -306,97 +293,68 @@ impl From<bat::error::Error> for Error {
     }
 }
 
-impl From<url::ParseError> for Error {
-    fn from(error: url::ParseError) -> Self {
-        let metadata = HashMap::from([
-            ("message", "Error while parsing URL".into()),
-            ("error", error.to_string().into()),
-        ]);
+fn with_cause(
+    error: &dyn std::error::Error,
+    message: impl Into<String>,
+) -> HashMap<&'static str, String> {
+    let mut causes = vec![("message", message.into()), ("error", format!("{error:#}"))];
 
-        Self::from(metadata)
+    while let Some(cause) = error.source() {
+        causes.push(("", format!("{cause:#}")));
     }
+
+    causes.into_iter().collect()
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(error: serde_json::Error) -> Self {
-        let metadata = HashMap::from([
-            ("message", "Error while parsing JSON".into()),
-            ("error", error.to_string().into()),
-        ]);
-
-        Self::from(metadata)
-    }
+macro_rules! impl_from_error {
+    ($error:ty, $message:expr) => {
+        impl From<$error> for Error {
+            fn from(error: $error) -> Self {
+                with_cause(&error, $message).into()
+            }
+        }
+    };
 }
 
-impl From<reqwest::Error> for Error {
-    fn from(error: reqwest::Error) -> Self {
-        let metadata = HashMap::from([
-            ("message", "Error while making HTTP request".into()),
-            ("error", error.to_string().into()),
-        ]);
-
-        Self::from(metadata)
-    }
-}
-
-impl From<std::str::ParseBoolError> for Error {
-    fn from(error: std::str::ParseBoolError) -> Self {
-        let metadata = HashMap::from([
-            ("message", "Error while parsing boolean value".into()),
-            ("error", error.to_string().into()),
-        ]);
-
-        Self::from(metadata)
-    }
-}
+impl_from_error!(std::io::Error, "IO error");
+impl_from_error!(minijinja::Error, "Template error");
+impl_from_error!(bat::error::Error, "Error while formatting code");
+impl_from_error!(url::ParseError, "Error while parsing URL");
+impl_from_error!(serde_json::Error, "Error while parsing JSON");
+impl_from_error!(reqwest::Error, "Error while making HTTP request");
+impl_from_error!(std::str::ParseBoolError, "Error parsing boolean value");
 
 impl From<jp_llm::Error> for Error {
     fn from(error: jp_llm::Error) -> Self {
         use jp_llm::Error::*;
 
-        let metadata: HashMap<&str, Value> = match error {
+        let metadata: HashMap<&str, String> = match error {
             OpenRouter(error) => return error.into(),
             Conversation(error) => return error.into(),
             Config(error) => return error.into(),
+            Json(error) => return error.into(),
+            Request(error) => return error.into(),
             MissingEnv(variable) => [
                 ("message", "Missing environment variable".into()),
-                ("variable", variable.into()),
+                ("variable", variable),
             ]
             .into(),
             InvalidResponse(error) => [
                 ("message", "Invalid response received".into()),
-                ("error", error.into()),
-            ]
-            .into(),
-            Json(error) => [
-                ("message", "Invalid JSON".into()),
-                ("error", error.to_string().into()),
+                ("error", error),
             ]
             .into(),
             MissingStructuredData => {
                 [("message", "Missing structured data in response".into())].into()
             }
-            OpenaiClient(create_error) => [
-                ("message", "OpenAI client error".into()),
-                ("error", create_error.to_string().into()),
-            ]
-            .into(),
-            OpenaiEvent(stream_error) => [
-                ("message", "OpenAI stream error".into()),
-                ("error", stream_error.to_string().into()),
-            ]
-            .into(),
+            OpenaiClient(error) => with_cause(&error, "OpenAI client error"),
+            OpenaiEvent(error) => with_cause(&error, "OpenAI stream error"),
             OpenaiResponse(error) => [
                 ("message", "OpenAI response error".into()),
-                ("error", error.message.into()),
-                ("code", error.code.unwrap_or_default().into()),
-                ("type", error.r#type.into()),
-                ("param", error.param.unwrap_or_default().into()),
-            ]
-            .into(),
-            Request(error) => [
-                ("message", "Request error".into()),
-                ("error", error.to_string().into()),
+                ("error", error.message),
+                ("code", error.code.unwrap_or_default()),
+                ("type", error.r#type),
+                ("param", error.param.unwrap_or_default()),
             ]
             .into(),
             OpenaiStatusCode {
@@ -404,8 +362,8 @@ impl From<jp_llm::Error> for Error {
                 response,
             } => [
                 ("message", "OpenAI status code error".into()),
-                ("status_code", status_code.as_u16().to_string().into()),
-                ("response", response.into()),
+                ("status_code", status_code.as_u16().to_string()),
+                ("response", response),
             ]
             .into(),
         };
@@ -498,6 +456,7 @@ impl From<jp_config::Error> for Error {
                 ("error", error.to_string().into()),
             ]
             .into(),
+            Json(error) => return error.into(),
         };
 
         Self::from(metadata)

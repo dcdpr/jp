@@ -96,12 +96,16 @@ pub fn file_to_key_value_pairs(path: &Path) -> Result<HashMap<String, String>> {
     };
 
     let mut map = HashMap::new();
-    value_to_key_value_pairs(value, &mut map, String::new());
+    value_to_key_value_pairs(value, &mut map, String::new())?;
 
     Ok(map)
 }
 
-fn value_to_key_value_pairs(value: Value, map: &mut HashMap<String, String>, prefix: String) {
+fn value_to_key_value_pairs(
+    value: Value,
+    map: &mut HashMap<String, String>,
+    prefix: String,
+) -> Result<()> {
     match value {
         Value::Object(obj) => {
             for (k, v) in obj {
@@ -111,31 +115,18 @@ fn value_to_key_value_pairs(value: Value, map: &mut HashMap<String, String>, pre
                     format!("{prefix}.{k}")
                 };
 
-                value_to_key_value_pairs(v, map, prefix);
+                value_to_key_value_pairs(v, map, prefix)?;
             }
         }
 
         _ => {
             if !prefix.is_empty() {
-                map.insert(prefix, value_to_string_key(value));
+                map.insert(prefix, serde_json::to_string(&value)?);
             }
         }
     }
-}
 
-fn value_to_string_key(value: Value) -> String {
-    match value {
-        Value::String(v) => v,
-        Value::Number(v) => v.to_string(),
-        Value::Bool(v) => v.to_string(),
-        obj @ Value::Object(_) => obj.to_string(),
-        Value::Null => String::new(),
-        Value::Array(v) => v
-            .into_iter()
-            .map(value_to_string_key)
-            .collect::<Vec<_>>()
-            .join(","),
-    }
+    Ok(())
 }
 
 /// Build a final configuration from merged partial configurations.
@@ -608,28 +599,6 @@ mod tests {
     }
 
     #[test]
-    fn test_value_to_string_key() {
-        let cases = vec![
-            (Value::String("foo".to_string()), "foo"),
-            (Value::Number(1.into()), "1"),
-            (Value::Bool(true), "true"),
-            (
-                Value::Array(vec![
-                    Value::String("foo".to_string()),
-                    Value::String("bar".to_string()),
-                ]),
-                "foo,bar",
-            ),
-            (Value::Null, ""),
-            (serde_json::json!({ "foo": "bar" }), "{\"foo\":\"bar\"}"),
-        ];
-
-        for (value, expected) in cases {
-            assert_eq!(value_to_string_key(value), expected);
-        }
-    }
-
-    #[test]
     fn test_value_to_key_value_pairs() {
         let cases = vec![
             (serde_json::json!({ "foo": "bar" }), vec![(
@@ -652,7 +621,7 @@ mod tests {
 
         for (value, expected) in cases {
             let mut map = HashMap::new();
-            value_to_key_value_pairs(value, &mut map, String::new());
+            value_to_key_value_pairs(value, &mut map, String::new()).unwrap();
             assert_eq!(map, HashMap::from_iter(expected));
         }
     }
