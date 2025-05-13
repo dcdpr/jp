@@ -2,6 +2,7 @@ use std::{
     collections::HashSet, convert::Infallible, fs, path::PathBuf, str::FromStr as _, time::Duration,
 };
 
+use clap::builder::TypedValueParser as _;
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
 use jp_config::{llm::ToolChoice, parse_vec, style::code::LinkStyle, try_parse_vec};
@@ -14,7 +15,7 @@ use jp_conversation::{
 };
 use jp_llm::provider::{self, CompletionChunk, StreamEvent};
 use jp_mcp::{config::McpServerId, ResourceContents, Tool};
-use jp_query::query::ChatQuery;
+use jp_query::query::{ChatQuery, StructuredQuery};
 use jp_task::task::TitleGeneratorTask;
 use jp_term::{code, osc::hyperlink, stdout};
 use minijinja::{Environment, UndefinedBehavior};
@@ -27,7 +28,7 @@ use crate::{
     cmd::Success,
     editor,
     error::{Error, Result},
-    parser, Ctx,
+    parser, Ctx, PATH_STRING_PREFIX,
 };
 
 // Define the delay duration
@@ -46,6 +47,9 @@ pub struct Args {
     /// `template.values` config key.
     #[arg(short, long)]
     pub template: bool,
+
+    #[arg(long, value_parser = string_or_path.try_map(json_schema))]
+    pub schema: Option<schemars::Schema>,
 
     /// Replay the last message in the conversation.
     ///
@@ -84,6 +88,7 @@ pub struct Args {
 }
 
 impl Args {
+    #[expect(clippy::too_many_lines)]
     pub async fn run(self, ctx: &mut Ctx) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
@@ -197,7 +202,7 @@ impl Args {
             .with_instructions(persona.instructions.clone())
             .with_attachments(attachments)
             .with_history(messages.to_vec())
-            .with_message(message);
+            .with_message(message.clone());
 
         if !tools.is_empty() {
             let instruction = Instructions::default()
@@ -213,13 +218,52 @@ impl Args {
             thread_builder = thread_builder.with_instruction(instruction);
         }
 
-        let thread = thread_builder.build()?;
+        let mut thread = thread_builder.build()?;
+        let context = conversation.context.clone();
+        let reply = if let Some(schema) = &self.schema {
+            handle_structured_output(ctx, thread.clone(), &model, schema.clone()).await?
+        } else {
+            handle_stream(ctx, thread.clone(), &model, tools.clone()).await?
+        };
 
-        handle_stream(ctx, thread, model, tools).await?;
+        trace!(
+            conversation = %conversation_id,
+            content_size = reply.content.as_deref().unwrap_or_default().len(),
+            reasoning_size = reply.reasoning.as_deref().unwrap_or_default().len(),
+            "Storing response message in conversation."
+        );
+
+        let tool_calls = reply.tool_calls.clone();
+        let message = MessagePair::new(message.clone(), reply.clone()).with_context(context);
+
+        // Create message in the conversation.
+        thread.history.push(message.clone());
+        ctx.workspace.add_message(conversation_id, message);
+
+        // If the assistant asked for a tool call, we handle it automatically,
+        // essentially going into a "loop" until no more tool calls are requested.
+        //
+        // TODO:
+        //
+        // This should be handled differently, asking for permission to run a tool
+        // (unless whitelisted per conversation/globally), it should log the fact
+        // that a tool call is triggered, and it should guard against infinite
+        // loops.
+        if !tool_calls.is_empty() {
+            let results = handle_tool_calls(ctx, tool_calls).await?;
+            thread.message = UserMessage::ToolCallResults(results);
+            Box::pin(handle_stream(ctx, thread, &model, tools)).await?;
+        }
 
         // Clean up the query file.
         let path = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
         editor::cleanup_query_file(path)?;
+
+        if self.schema.is_some() {
+            if let Some(content) = reply.content {
+                return Ok(Success::Json(serde_json::from_str(&content)?));
+            }
+        }
 
         Ok(Success::Ok)
     }
@@ -372,8 +416,35 @@ impl Args {
     }
 }
 
+async fn handle_structured_output(
+    ctx: &mut Ctx,
+    thread: Thread,
+    model: &Model,
+    schema: schemars::Schema,
+) -> Result<AssistantMessage> {
+    let provider = provider::get_provider(model.provider, &ctx.config.llm.provider)?;
+    let query =
+        StructuredQuery::new(schema, thread).map_err(|err| Error::Schema(err.to_string()))?;
+
+    let value = provider.structured_completion(model, query).await?;
+    let content = if ctx.term.is_tty {
+        serde_json::to_string_pretty(&value)?
+    } else {
+        serde_json::to_string(&value)?
+    };
+
+    Ok(AssistantMessage::from(content))
+}
+
+#[expect(clippy::needless_pass_by_value)]
+fn json_schema(s: String) -> Result<schemars::Schema> {
+    serde_json::from_str::<serde_json::Value>(&s)?
+        .try_into()
+        .map_err(Into::into)
+}
+
 fn string_or_path(s: &str) -> Result<String> {
-    if let Some(s) = s.strip_prefix('@') {
+    if let Some(s) = s.strip_prefix(PATH_STRING_PREFIX) {
         return fs::read_to_string(PathBuf::from(s.trim())).map_err(Into::into);
     }
 
@@ -382,18 +453,18 @@ fn string_or_path(s: &str) -> Result<String> {
 
 async fn handle_stream(
     ctx: &mut Ctx,
-    mut thread: Thread,
-    model: Model,
+    thread: Thread,
+    model: &Model,
     tools: Vec<Tool>,
-) -> Result<()> {
+) -> Result<AssistantMessage> {
     let provider = provider::get_provider(model.provider, &ctx.config.llm.provider)?;
     let query = ChatQuery {
-        thread: thread.clone(),
+        thread,
         tools: tools.clone(),
         tool_choice: ToolChoice::Auto,
         ..Default::default()
     };
-    let mut stream = provider.chat_completion_stream(&model, query)?;
+    let mut stream = provider.chat_completion_stream(model, query)?;
 
     let mut content_tokens = String::new();
     let mut reasoning_tokens = String::new();
@@ -439,8 +510,6 @@ async fn handle_stream(
         handler.handle_stream("\n", ctx)?;
     }
 
-    let conversation_id = ctx.workspace.active_conversation_id();
-
     let content_tokens = content_tokens.trim().to_string();
     let content = if !content_tokens.is_empty() {
         Some(content_tokens)
@@ -462,33 +531,11 @@ async fn handle_stream(
         println!();
     }
 
-    trace!(
-        conversation = %conversation_id,
-        content_size = content.as_deref().unwrap_or_default().len(),
-        reasoning_size = reasoning.as_deref().unwrap_or_default().len(),
-        "Storing response message in conversation."
-    );
-
-    let context = ctx.workspace.get_active_conversation().context.clone();
-    let reply = AssistantMessage {
+    Ok(AssistantMessage {
         content,
         reasoning,
-        tool_calls: tool_calls.clone(),
-    };
-
-    let message = MessagePair::new(thread.message.clone(), reply).with_context(context);
-
-    // Create message in the conversation.
-    thread.history.push(message.clone());
-    ctx.workspace.add_message(conversation_id, message);
-
-    if !tool_calls.is_empty() {
-        let results = handle_tool_calls(ctx, tool_calls).await?;
-        thread.message = UserMessage::ToolCallResults(results);
-        Box::pin(handle_stream(ctx, thread, model, tools)).await?;
-    }
-
-    Ok(())
+        tool_calls,
+    })
 }
 
 async fn handle_tool_calls(

@@ -264,6 +264,7 @@ impl From<crate::error::Error> for Error {
             Url(error) => return error.into(),
             Bat(error) => return error.into(),
             Template(error) => return error.into(),
+            Json(error) => return error.into(),
             NotFound(target, id) => [
                 ("message", "Not found".into()),
                 ("target", target.into()),
@@ -285,6 +286,11 @@ impl From<crate::error::Error> for Error {
             TemplateUndefinedVariable(var) => [
                 ("message", "Undefined template variable".to_owned()),
                 ("variable", var),
+            ]
+            .into(),
+            Schema(error) => [
+                ("message", "Invalid JSON schema".to_owned()),
+                ("error", error),
             ]
             .into(),
         };

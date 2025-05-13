@@ -33,7 +33,6 @@ pub struct Term {
     /// If you pipe (|) or redirect (>) the output, stdout is connected to a
     /// pipe or a regular file, respectively. These are not managed by the TTY
     /// subsystem.
-    #[expect(dead_code)]
     pub is_tty: bool,
 }
 
