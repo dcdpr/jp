@@ -30,6 +30,9 @@ use tracing::{info, trace};
 const DEFAULT_STORAGE_DIR: &str = ".jp";
 const DEFAULT_VARIABLE_PREFIX: &str = "JP_";
 
+/// The prefix used to parse a CLI argument as a path instead of a string.
+const PATH_STRING_PREFIX: char = '@';
+
 // Jean Pierre's LLM Toolkit.
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -113,7 +116,7 @@ impl FromStr for KeyValueOrPath {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        if let Some(s) = s.strip_prefix('@') {
+        if let Some(s) = s.strip_prefix(PATH_STRING_PREFIX) {
             return Ok(Self::Path(PathBuf::from(s.trim())));
         }
 
@@ -211,7 +214,7 @@ fn output_to_string(output: Success) -> String {
         Success::Message(msg) => msg,
         Success::Table { header, rows } => jp_term::table::list(header, rows),
         Success::Details { title, rows } => jp_term::table::details(title.as_deref(), rows),
-        Success::Json(value) => value.to_string(),
+        Success::Json(value) => format!("{value:#}"),
     }
 }
 

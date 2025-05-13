@@ -54,4 +54,10 @@ pub enum Error {
 
     #[error("Replay error: {0}")]
     Replay(String),
+
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+
+    #[error("Invalid JSON schema: {0}")]
+    Schema(String),
 }
