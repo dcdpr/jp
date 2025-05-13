@@ -1738,6 +1738,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indoc"
+version = "2.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4c7245a08504955605670dbf141fceab975f15ca21570696aebe9d2e71576bd"
+
+[[package]]
 name = "inquire"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1817,11 +1823,13 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "directories",
+ "indoc",
  "jp_attachment",
  "percent-encoding",
  "quick-xml 0.37.3",
  "rusqlite",
  "serde",
+ "test-log",
  "tracing",
  "url",
 ]
