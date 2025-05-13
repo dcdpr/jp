@@ -40,6 +40,8 @@ inquire = { version = "0.7", default-features = false }
 linkme = { version = "0.3", default-features = false }
 # See: <https://github.com/m1guelpf/openai-responses-rs/pull/6>
 # openai_responses = { version = "0.1", default-features = false }
+json5 = { version = "0.4", default-features = false }
+minijinja = { version = "2", default-features = false }
 openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs", default-features = false }
 path-clean = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }
@@ -52,13 +54,12 @@ saphyr = { version = "0.0.4", default-features = false }
 schemars = { version = "1.0.0-alpha.17", default-features = false }
 serde = { version = "1", default-features = false }
 serde_json = { version = "1", default-features = false }
+serde_yaml = { version = "0.9", default-features = false }
 serial_test = { version = "3", default-features = false }
 strip-ansi-escapes = { version = "0.2", default-features = false }
 tempfile = { version = "3", default-features = false }
 termimad = { version = "0.31", default-features = false }
-json5 = { version = "0.4", default-features = false }
-minijinja = { version = "2", default-features = false }
-serde_yaml = { version = "0.9", default-features = false }
+test-log = { version = "0.2", default-features = false, features = ["trace"] }
 thiserror = { version = "2", default-features = false }
 time = { version = "0.3", default-features = false }
 timeago = { version = "0.4", default-features = false }

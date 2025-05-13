@@ -638,6 +638,7 @@ mod tests {
     use jp_conversation::{model::ProviderId, Context, ConversationId};
     use jp_mcp::transport::{self, Transport};
     use tempfile::tempdir;
+    use test_log::test;
     use time::UtcDateTime;
 
     use super::*;

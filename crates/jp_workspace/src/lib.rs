@@ -581,6 +581,7 @@ mod tests {
 
     use jp_conversation::model::ProviderId;
     use tempfile::tempdir;
+    use test_log::test;
     use time::UtcDateTime;
 
     use super::*;

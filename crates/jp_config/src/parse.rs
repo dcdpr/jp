@@ -243,6 +243,7 @@ mod tests {
 
     use serial_test::serial;
     use tempfile::tempdir;
+    use test_log::test;
 
     use super::*;
 
