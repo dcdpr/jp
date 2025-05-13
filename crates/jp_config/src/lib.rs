@@ -1,9 +1,10 @@
 mod config;
-pub mod conversation;
+mod conversation;
 pub mod error;
 pub mod llm;
 mod parse;
 pub mod style;
+mod template;
 
 pub use config::Config;
 pub use error::Error;

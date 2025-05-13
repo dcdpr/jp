@@ -41,6 +41,9 @@ pub enum Error {
     #[error("JSON error: {0}")]
     Json5(#[from] json5::Error),
 
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+
     #[error("YAML error: {0}")]
     Yaml(#[from] serde_yaml::Error),
 }

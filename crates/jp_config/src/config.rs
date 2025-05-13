@@ -1,6 +1,6 @@
 use confique::{meta::FieldKind, Config as Confique};
 
-use crate::{conversation, error::Result, llm, style};
+use crate::{conversation, error::Result, llm, style, template};
 
 /// Workspace Configuration.
 #[derive(Debug, Clone, Default, Confique)]
@@ -20,6 +20,10 @@ pub struct Config {
     /// Styling configuration.
     #[config(nested)]
     pub style: style::Config,
+
+    /// Template configuration.
+    #[config(nested)]
+    pub template: template::Config,
 }
 
 impl Config {
@@ -55,6 +59,7 @@ impl Config {
             _ if key.starts_with("conversation.") => {
                 self.conversation.set(path, &key[13..], value)?;
             }
+            _ if key.starts_with("template.") => self.template.set(path, &key[9..], value)?,
             _ => return crate::set_error(path, key),
         }
 

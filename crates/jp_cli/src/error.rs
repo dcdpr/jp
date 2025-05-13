@@ -45,4 +45,13 @@ pub enum Error {
 
     #[error("Task error: {0}")]
     Task(Box<dyn std::error::Error + Send + Sync>),
+
+    #[error("Template error: {0}")]
+    Template(#[from] minijinja::Error),
+
+    #[error("Undefined template variable: {0}")]
+    TemplateUndefinedVariable(String),
+
+    #[error("Replay error: {0}")]
+    Replay(String),
 }
