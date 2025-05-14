@@ -358,19 +358,25 @@ fn configure_logging(verbose: u8, quiet: bool) {
     use tracing::level_filters::LevelFilter;
     use tracing_subscriber::fmt;
 
-    let mut level = match verbose {
-        0 => LevelFilter::ERROR,
-        1 => LevelFilter::WARN,
-        2 => LevelFilter::INFO,
-        3 => LevelFilter::DEBUG,
-        _ => LevelFilter::TRACE,
+    let (mut level, all) = match verbose {
+        0 => (LevelFilter::ERROR, false),
+        1 => (LevelFilter::WARN, false),
+        2 => (LevelFilter::INFO, false),
+        3 => (LevelFilter::DEBUG, false),
+        4 => (LevelFilter::TRACE, false),
+        _ => (LevelFilter::TRACE, true),
     };
 
     if quiet {
         level = LevelFilter::OFF;
     }
 
-    let mut filter = vec!["off".to_owned()];
+    let mut filter = if all {
+        vec!["trace".to_owned()]
+    } else {
+        vec!["off".to_owned()]
+    };
+
     for krate in [
         "attachment",
         "attachment_bear_note",
