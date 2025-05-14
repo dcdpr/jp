@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 
 /// LLM configuration.
-#[derive(Debug, Clone, Default, Confique)]
+#[derive(Debug, Clone, Default, PartialEq, Confique)]
 pub struct Config {
     /// Provider configuration.
     #[config(nested)]

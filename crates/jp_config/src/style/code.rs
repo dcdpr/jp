@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::error::{Error, Result};
 
 /// Provider configuration.
-#[derive(Debug, Clone, Confique)]
+#[derive(Debug, Clone, PartialEq, Confique)]
 pub struct Config {
     /// Theme to use for code blocks.
     ///

@@ -6,7 +6,7 @@ use crate::{
 };
 
 /// LLM configuration.
-#[derive(Debug, Clone, Confique)]
+#[derive(Debug, Clone, PartialEq, Confique)]
 pub struct Config {
     /// Model to use for title generation.
     #[config(default = "openai/gpt-4.1-nano", env = "JP_CONVERSATION_TITLE_GENERATE_MODEL", deserialize_with = de_model)]

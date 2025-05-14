@@ -1825,6 +1825,8 @@ mod tests {
         hash::Hash,
     };
 
+    use test_log::test;
+
     use super::*;
 
     // Helper to compare HashMaps (standard library for expected state)
@@ -1879,7 +1881,6 @@ mod tests {
         }
     }
 
-    #[expect(clippy::too_many_lines)]
     #[test]
     fn tomb_map_operations_and_tracking() {
         let mut map: TombMap<&'static str, i32> = TombMap::new();

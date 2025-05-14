@@ -132,9 +132,13 @@ impl Handler for BearNotes {
     }
 
     async fn get(&self, _: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+        let db = get_database_path()?;
+        trace!(db = %db.display(), "Connecting to Bear database.");
+        let conn = Connection::open(db)?;
+
         let mut attachments = vec![];
         for query in &self.0 {
-            for note in get_notes(query)? {
+            for note in get_notes(query, &conn)? {
                 attachments.push(Attachment {
                     source: format!("{}://get/{}", self.scheme(), &note.id),
                     content: note.try_to_xml()?,
@@ -185,11 +189,8 @@ fn uri_to_query(uri: &Url) -> Result<Query, Box<dyn Error + Send + Sync>> {
 }
 
 /// Retrieves notes from the Bear database based on the query.
-fn get_notes(query: &Query) -> Result<Vec<Note>, Box<dyn Error + Send + Sync>> {
-    let db = get_database_path()?;
-    trace!(db = %db.display(), "Connecting to Bear database.");
-    let conn = Connection::open(db)?;
-    rusqlite::vtab::array::load_module(&conn)?;
+fn get_notes(query: &Query, conn: &Connection) -> Result<Vec<Note>, Box<dyn Error + Send + Sync>> {
+    rusqlite::vtab::array::load_module(conn)?;
 
     let mut notes = Vec::new();
 
@@ -288,4 +289,169 @@ fn get_database_path() -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
     }
 
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use test_log::test;
+
+    use super::*;
+
+    #[test]
+    fn test_note_try_to_xml() {
+        let note = Note {
+            id: 1.to_string(),
+            title: "Test Title".to_string(),
+            content: "Testing content in XML".to_string(),
+            tags: vec!["tag #1".to_string(), "tag #2".to_string()],
+        };
+
+        let xml = note.try_to_xml().unwrap();
+        assert_eq!(xml, indoc::indoc! {"
+            <Note>
+              <id>1</id>
+              <title>Test Title</title>
+              <content>Testing content in XML</content>
+              <tags>tag #1</tags>
+              <tags>tag #2</tags>
+            </Note>"});
+    }
+
+    #[test]
+    fn test_uri_to_query() {
+        let cases = [
+            ("bear://get/1", Ok(Query::Get("1".to_string()))),
+            (
+                "bear://get/tag%20%231",
+                Ok(Query::Get("tag #1".to_string())),
+            ),
+            (
+                "bear://search/tag%20%231",
+                Ok(Query::Search {
+                    query: "tag #1".to_string(),
+                    tags: vec![],
+                }),
+            ),
+            (
+                "bear://search/tag%20%231?tag=tag%20%232",
+                Ok(Query::Search {
+                    query: "tag #1".to_string(),
+                    tags: vec!["tag #2".to_string()],
+                }),
+            ),
+            (
+                "bear://search/tag%20%231?tag=tag%20%232&tag=tag%20%233",
+                Ok(Query::Search {
+                    query: "tag #1".to_string(),
+                    tags: vec!["tag #2".to_string(), "tag #3".to_string()],
+                }),
+            ),
+            (
+                "bear://invalid/foo",
+                Err("Invalid bear note query".to_string()),
+            ),
+        ];
+
+        for (uri, expected) in cases {
+            let uri = Url::parse(uri).unwrap();
+            let query = uri_to_query(&uri).map_err(|e| e.to_string());
+            assert_eq!(query, expected);
+        }
+    }
+
+    #[test]
+    fn test_get_notes() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(indoc::indoc! {"
+            CREATE TABLE ZSFNOTE (
+                Z_PK INTEGER PRIMARY KEY,
+                ZUNIQUEIDENTIFIER VARCHAR,
+                ZTEXT VARCHAR,
+                ZTITLE VARCHAR,
+                ZTRASHED INTEGER,
+                ZENCRYPTED INTEGER
+            );
+
+            INSERT INTO ZSFNOTE
+                (Z_PK, ZUNIQUEIDENTIFIER, ZTITLE, ZTEXT, ZTRASHED, ZENCRYPTED)
+            VALUES
+                (1, '1', 'Test Title', 'Testing content in XML', 0, 0),
+                (2, '2', 'Test Title 2', 'Testing content in XML 2', 0, 0);
+
+            CREATE TABLE Z_5TAGS (
+                Z_5NOTES INTEGER,
+                Z_13TAGS INTEGER
+            );
+
+            INSERT INTO Z_5TAGS
+                (Z_5NOTES, Z_13TAGS)
+            VALUES
+                (1, 1),
+                (2, 2);
+
+            CREATE TABLE ZSFNOTETAG (
+                Z_PK INTEGER PRIMARY KEY,
+                ZTITLE VARCHAR
+            );
+
+            INSERT INTO ZSFNOTETAG
+                (Z_PK, ZTITLE)
+            VALUES
+                (1, 'tag #1'),
+                (2, 'tag #2');
+        "})
+            .unwrap();
+
+        let notes = get_notes(&Query::Get("1".to_string()), &conn).unwrap();
+
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0], Note {
+            id: "1".to_string(),
+            title: "Test Title".to_string(),
+            content: "Testing content in XML".to_string(),
+            tags: vec!["tag #1".to_string()],
+        });
+
+        let notes = get_notes(
+            &Query::Search {
+                query: "Testing content".to_string(),
+                tags: vec![],
+            },
+            &conn,
+        )
+        .unwrap();
+
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes, vec![
+            Note {
+                id: "1".to_string(),
+                title: "Test Title".to_string(),
+                content: "Testing content in XML".to_string(),
+                tags: vec!["tag #1".to_string()],
+            },
+            Note {
+                id: "2".to_string(),
+                title: "Test Title 2".to_string(),
+                content: "Testing content in XML 2".to_string(),
+                tags: vec!["tag #2".to_string()],
+            }
+        ]);
+
+        let notes = get_notes(
+            &Query::Search {
+                query: "Testing content".to_string(),
+                tags: vec!["tag #2".to_string()],
+            },
+            &conn,
+        )
+        .unwrap();
+
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0], Note {
+            id: "2".to_string(),
+            title: "Test Title 2".to_string(),
+            content: "Testing content in XML 2".to_string(),
+            tags: vec!["tag #2".to_string()],
+        });
+    }
 }

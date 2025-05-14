@@ -67,6 +67,9 @@ tracing-subscriber = { workspace = true, features = [
 ] }
 url = { workspace = true }
 
+[dev-dependencies]
+test-log = { workspace = true }
+
 [lints]
 workspace = true
 

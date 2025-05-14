@@ -5,7 +5,7 @@ use confique::Config as Confique;
 use crate::error::Result;
 
 /// LLM configuration.
-#[derive(Debug, Clone, Default, Confique)]
+#[derive(Debug, Clone, Default, PartialEq, Confique)]
 pub struct Config {
     /// Title generation configuration.
     #[config(nested)]

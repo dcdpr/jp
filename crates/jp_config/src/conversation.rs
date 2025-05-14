@@ -8,7 +8,7 @@ use serde::Deserialize as _;
 use crate::{error::Result, parse_vec};
 
 /// LLM configuration.
-#[derive(Debug, Clone, Default, Confique)]
+#[derive(Debug, Clone, Default, PartialEq, Confique)]
 pub struct Config {
     /// Title configuration.
     #[config(nested)]

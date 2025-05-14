@@ -1738,6 +1738,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indoc"
+version = "2.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4c7245a08504955605670dbf141fceab975f15ca21570696aebe9d2e71576bd"
+
+[[package]]
 name = "inquire"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1817,11 +1823,13 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "directories",
+ "indoc",
  "jp_attachment",
  "percent-encoding",
  "quick-xml 0.37.3",
  "rusqlite",
  "serde",
+ "test-log",
  "tracing",
  "url",
 ]
@@ -1874,6 +1882,7 @@ dependencies = [
  "serde_json",
  "strip-ansi-escapes",
  "termimad",
+ "test-log",
  "thiserror 2.0.12",
  "time",
  "timeago",
@@ -1898,6 +1907,7 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tempfile",
+ "test-log",
  "thiserror 2.0.12",
  "toml",
  "tracing",
@@ -2048,6 +2058,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "test-log",
  "thiserror 2.0.12",
  "time",
  "tracing",
@@ -3620,6 +3631,27 @@ checksum = "45c6481c4829e4cc63825e62c49186a34538b7b2750b73b266581ffb612fb5ed"
 dependencies = [
  "rustix 1.0.2",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "test-log"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7f46083d221181166e5b6f6b1e5f1d499f3a76888826e6cb1d057554157cd0f"
+dependencies = [
+ "test-log-macros",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "test-log-macros"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "888d0c3c6db53c0fdab160d2ed5e12ba745383d3e85813f2ea0f2b1475ab553f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
 ]
 
 [[package]]

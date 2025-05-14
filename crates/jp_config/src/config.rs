@@ -3,7 +3,7 @@ use confique::{meta::FieldKind, Config as Confique};
 use crate::{conversation, error::Result, llm, style, template};
 
 /// Workspace Configuration.
-#[derive(Debug, Clone, Default, Confique)]
+#[derive(Debug, Clone, Default, PartialEq, Confique)]
 pub struct Config {
     /// Inherit from a local ancestor or global configuration file.
     #[config(default = true)]
@@ -64,5 +64,75 @@ impl Config {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    #[test]
+    fn test_set() {
+        let cases = [
+            ("inherit", "false", Config {
+                inherit: false,
+                ..Default::default()
+            }),
+            ("llm.provider.openrouter.api_key_env", "FOO", Config {
+                llm: llm::Config {
+                    provider: llm::provider::Config {
+                        openrouter: llm::provider::openrouter::Config {
+                            api_key_env: "FOO".to_owned(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            ("style.code.file_link", "full", Config {
+                style: style::Config {
+                    code: style::code::Config {
+                        file_link: style::code::LinkStyle::Full,
+                        ..Default::default()
+                    },
+                },
+                ..Default::default()
+            }),
+            ("conversation.title.generate.auto", "false", Config {
+                conversation: conversation::Config {
+                    title: conversation::title::Config {
+                        generate: conversation::title::generate::Config {
+                            auto: false,
+                            ..Default::default()
+                        },
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            ("template.values.name", "\"Homer\"", Config {
+                template: template::Config {
+                    values: HashMap::from([("name".to_owned(), "Homer".into())]),
+                },
+
+                ..Default::default()
+            }),
+        ];
+
+        for (key, value, expected) in cases {
+            let mut config = Config::default();
+            config.set(key, key, value).unwrap();
+            assert_eq!(config, expected);
+        }
+
+        let mut config = Config::default();
+        let err = config.set("", "invalid.key", "true").unwrap_err();
+        assert!(err
+            .to_string()
+            .starts_with("Unknown config key: invalid.key\n\nAvailable keys:\n"));
     }
 }

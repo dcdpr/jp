@@ -417,6 +417,7 @@ fn configure_logging(verbose: u8, quiet: bool) {
 #[cfg(test)]
 mod tests {
     use clap::CommandFactory;
+    use test_log::test;
 
     use super::*;
 

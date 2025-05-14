@@ -4,7 +4,7 @@ use serde::Serialize;
 use crate::error::Result;
 
 /// Openrouter API configuration.
-#[derive(Debug, Clone, Confique, Serialize)]
+#[derive(Debug, Clone, Confique, PartialEq, Serialize)]
 pub struct Config {
     /// Environment variable that contains the API key.
     #[config(
