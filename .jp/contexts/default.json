@@ -10,8 +10,11 @@
         "/**/*.toml"
       ],
       "excludes": [
+        ".clippy.toml",
+        ".rustfmt.toml",
+        ".taplo.toml",
+        ".typos.toml",
         "/**/target/**",
-        "/codecompanion-workspace.json",
         "/rust-toolchain.toml"
       ]
     }
