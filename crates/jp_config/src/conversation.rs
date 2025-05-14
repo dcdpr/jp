@@ -34,13 +34,13 @@ pub struct Config {
 impl Config {
     /// Set a configuration value using a stringified key/value pair.
     pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
+        let value: String = value.into();
+
         match key {
             _ if key.starts_with("title.") => self.title.set(path, &key[6..], value)?,
-            "persona" => self.persona = Some(value.into().parse()?),
-            "context" => self.context = Some(value.into().parse()?),
-            "mcp_servers" => {
-                self.mcp_servers = parse_vec(&value.into(), McpServerId::new);
-            }
+            "persona" => self.persona = (!value.is_empty()).then(|| value.parse()).transpose()?,
+            "context" => self.context = (!value.is_empty()).then(|| value.parse()).transpose()?,
+            "mcp_servers" => self.mcp_servers = parse_vec(&value, McpServerId::new),
             _ => return crate::set_error(path, key),
         }
 

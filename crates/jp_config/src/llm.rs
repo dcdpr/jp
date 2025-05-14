@@ -30,10 +30,12 @@ pub struct Config {
 impl Config {
     /// Set a configuration value using a stringified key/value pair.
     pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
+        let value: String = value.into();
+
         match key {
             _ if key.starts_with("provider.") => self.provider.set(path, &key[9..], value)?,
-            "model" => self.model = Some(value.into().parse()?),
-            "tool_choice" => self.tool_choice = value.into().parse()?,
+            "model" => self.model = (!value.is_empty()).then(|| value.parse()).transpose()?,
+            "tool_choice" => self.tool_choice = value.parse()?,
             _ => return crate::set_error(path, key),
         }
 

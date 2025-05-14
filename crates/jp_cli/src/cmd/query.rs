@@ -115,13 +115,6 @@ impl Args {
             ctx.workspace.active_conversation_id()
         };
 
-        // For new/empty conversations, attach the default context, if any.
-        if ctx.workspace.get_messages(&conversation_id).is_empty() {
-            if let Some(context) = ctx.workspace.get_named_context(&ContextId::default()) {
-                ctx.workspace.get_active_conversation_mut().context = context.clone();
-            }
-        }
-
         // Update the conversation context based on the contextual information
         // passed in through the CLI, configuration, and environment variables.
         self.update_context(ctx).await?;
@@ -340,7 +333,10 @@ impl Args {
     async fn update_context(&self, ctx: &mut Ctx) -> Result<()> {
         // Update context if specified
         if let Some(id) = ctx.config.conversation.context.clone() {
-            debug!(%id, "Using named context in conversation due to --context flag.");
+            debug!(
+                %id,
+                "Using named context in conversation due to conversation.context config."
+            );
 
             // Get context.
             let context = ctx
@@ -355,7 +351,10 @@ impl Args {
 
         // Update persona if specified
         if let Some(id) = ctx.config.conversation.persona.clone() {
-            debug!(%id, "Changing persona in conversation context due to --persona flag.");
+            debug!(
+                %id,
+                "Changing persona in conversation context due to conversation.persona config."
+            );
 
             // Ensure persona exists.
             ctx.workspace
