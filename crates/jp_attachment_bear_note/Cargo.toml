@@ -17,7 +17,6 @@ jp_attachment = { workspace = true }
 
 async-trait = { workspace = true }
 directories = { workspace = true }
-percent-encoding = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 rusqlite = { workspace = true, features = ["bundled", "array", "vtab"] }
 serde = { workspace = true }

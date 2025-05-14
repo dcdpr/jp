@@ -1,4 +1,3 @@
-use jp_config::try_parse_vec;
 use url::Url;
 
 use super::register_attachment;
@@ -13,7 +12,7 @@ pub struct Args {
     /// added, otherwise the attachment type can be added as a prefix.
     ///
     /// For example, to add a `summary` attachment, use `summary://<path>`.
-    #[arg(value_parser = |s: &str| try_parse_vec(s, parser::attachment_url))]
+    #[arg(value_parser = |s: &str| parser::attachment_url(s))]
     attachments: Vec<Url>,
 }
 

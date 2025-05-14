@@ -379,6 +379,7 @@ fn configure_logging(verbose: u8, quiet: bool) {
 
     for krate in [
         "attachment",
+        "attachment_cmd_output",
         "attachment_bear_note",
         "attachment_file_content",
         "cli",

@@ -122,3 +122,18 @@ impl From<Box<dyn Handler>> for BoxedHandler {
         Self(value)
     }
 }
+
+/// Decodes a percent-encoded query parameter value, handling potential UTF-8
+/// errors.
+pub fn percent_decode_str(encoded: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
+    percent_encoding::percent_decode_str(encoded)
+        .decode_utf8()
+        .map(|s| s.to_string())
+        .map_err(Into::into)
+}
+
+#[must_use]
+pub fn percent_encode_str(encoded: &str) -> String {
+    percent_encoding::percent_encode(encoded.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
+        .to_string()
+}
