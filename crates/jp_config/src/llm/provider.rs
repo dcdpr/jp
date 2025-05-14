@@ -9,7 +9,7 @@ use confique::Config as Confique;
 use crate::error::Result;
 
 /// Provider configuration.
-#[derive(Debug, Clone, Default, Confique)]
+#[derive(Debug, Clone, Default, PartialEq, Confique)]
 pub struct Config {
     /// Anthropic API configuration.
     #[config(nested)]

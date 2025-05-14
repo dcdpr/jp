@@ -3,7 +3,7 @@ use confique::Config as Confique;
 use crate::error::Result;
 
 /// Anthropic API configuration.
-#[derive(Debug, Clone, Confique)]
+#[derive(Debug, Clone, PartialEq, Confique)]
 pub struct Config {
     /// Environment variable that contains the API key.
     #[config(

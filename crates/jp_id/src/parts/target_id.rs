@@ -10,11 +10,6 @@ impl TargetId {
         Self(id.into())
     }
 
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        self.0.as_ref()
-    }
-
     /// Returns `true` if the variant is valid.
     #[must_use]
     pub fn is_valid(&self) -> bool {

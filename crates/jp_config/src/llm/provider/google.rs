@@ -3,7 +3,7 @@ use confique::Config as Confique;
 use crate::error::Result;
 
 /// Google API configuration.
-#[derive(Debug, Clone, Confique)]
+#[derive(Debug, Clone, PartialEq, Confique)]
 pub struct Config {
     /// Environment variable that contains the API key.
     #[config(default = "GEMINI_API_KEY", env = "JP_LLM_PROVIDER_GOOGLE_API_KEY_ENV")]

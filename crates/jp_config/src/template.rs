@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::error::Result;
 
 /// Template configuration.
-#[derive(Debug, Clone, Default, Confique)]
+#[derive(Debug, Clone, Default, PartialEq, Confique)]
 pub struct Config {
     /// Template variable values used to render query templates.
     #[config(default = {})]

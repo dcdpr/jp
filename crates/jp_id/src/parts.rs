@@ -81,3 +81,50 @@ impl FromStr for Parts {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parts_from_str() {
+        #[rustfmt::skip]
+        let cases = [
+            ("jp-bar-baz", Ok(("jp", 'b', "ar", "baz"))),
+            ("jp-qux-ba1z23", Ok(("jp", 'q', "ux", "ba1z23"))),
+            ("jp-boo_baa_bop-ba1z13", Ok(("jp", 'b', "oo_baa_bop", "ba1z13"))),
+            ("jp", Err("Missing prefix: jp")),
+            ("jp-", Err("Missing variant and target id")),
+            ("jp-foo", Err("Missing variant and target id")),
+            ("jp-foo-", Err("Missing global ID")),
+            ("jp-afoo-baz-qux", Err("Invalid global ID, must be [a-z]: baz-qux")),
+            ("foo-bar-baz", Err("Invalid prefix, must be jp: foo")),
+        ];
+
+        for (input, result) in cases {
+            let parts = Parts::from_str(input)
+                .map(|parts| {
+                    (
+                        parts.prefix,
+                        parts.variant.into_inner(),
+                        parts.target_id.to_string(),
+                        parts.global_id.to_string(),
+                    )
+                })
+                .map_err(|e| e.to_string());
+
+            let result = result
+                .map(|(prefix, variant, target_id, global_id)| {
+                    (
+                        prefix.to_string(),
+                        variant,
+                        target_id.to_string(),
+                        global_id.to_string(),
+                    )
+                })
+                .map_err(str::to_string);
+
+            assert_eq!(parts, result);
+        }
+    }
+}

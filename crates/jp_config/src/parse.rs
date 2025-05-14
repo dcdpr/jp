@@ -604,19 +604,19 @@ mod tests {
         let cases = vec![
             (serde_json::json!({ "foo": "bar" }), vec![(
                 "foo".to_string(),
-                "bar".to_string(),
+                "\"bar\"".to_string(),
             )]),
             (serde_json::json!({ "foo": "bar", "baz": true }), vec![
-                ("foo".to_string(), "bar".to_string()),
+                ("foo".to_string(), "\"bar\"".to_string()),
                 ("baz".to_string(), "true".to_string()),
             ]),
             (serde_json::json!({ "foo": ["bar", "baz"] }), vec![(
                 "foo".to_string(),
-                "bar,baz".to_string(),
+                "[\"bar\",\"baz\"]".to_string(),
             )]),
             (serde_json::json!({ "foo": { "bar": "baz" } }), vec![(
                 "foo.bar".to_string(),
-                "baz".to_string(),
+                "\"baz\"".to_string(),
             )]),
         ];
 
