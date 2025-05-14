@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::llm;
 use jp_conversation::{
-    message::ToolCallRequest,
     model,
     thread::{Document, Documents, Thinking, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
@@ -81,29 +80,7 @@ fn map_response(response: types::Response) -> Result<Vec<Event>> {
     response
         .output
         .into_iter()
-        .filter_map(|item| {
-            let delta = Delta::from(item);
-            if let Some(content) = delta.content {
-                return Some(Ok(Event::Content(content)));
-            }
-
-            if let Some(reasoning) = delta.reasoning {
-                return Some(Ok(Event::Reasoning(reasoning)));
-            }
-
-            if let Some(args) = delta.tool_call_arguments {
-                return Some(Ok(Event::ToolCall(ToolCallRequest {
-                    id: delta.tool_call_id.unwrap_or_default(),
-                    name: delta.tool_call_name.unwrap_or_default(),
-                    arguments: match serde_json::from_str(&args) {
-                        Ok(arguments) => arguments,
-                        Err(error) => return Some(Err(error.into())),
-                    },
-                })));
-            }
-
-            None
-        })
+        .filter_map(|item| Delta::from(item).into())
         .collect::<Result<Vec<_>>>()
 }
 

@@ -19,6 +19,7 @@ jp_mcp = { workspace = true }
 jp_openrouter = { workspace = true }
 jp_query = { workspace = true }
 
+async-anthropic = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
