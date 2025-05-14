@@ -1,12 +1,13 @@
-// pub mod anthropic;
 // pub mod deepseek;
 // pub mod google;
 // pub mod xai;
+pub mod anthropic;
 pub mod openai;
 pub mod openrouter;
 
 use std::{mem, pin::Pin};
 
+use anthropic::Anthropic;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt as _};
 use jp_config::llm::provider;
@@ -42,6 +43,31 @@ pub enum Event {
 
     /// A request to call a tool
     ToolCall(ToolCallRequest),
+}
+
+impl From<Delta> for Option<Result<Event>> {
+    fn from(delta: Delta) -> Self {
+        if let Some(content) = delta.content {
+            return Some(Ok(Event::Content(content)));
+        }
+
+        if let Some(reasoning) = delta.reasoning {
+            return Some(Ok(Event::Reasoning(reasoning)));
+        }
+
+        if let Some(args) = delta.tool_call_arguments {
+            return Some(Ok(Event::ToolCall(ToolCallRequest {
+                id: delta.tool_call_id.unwrap_or_default(),
+                name: delta.tool_call_name.unwrap_or_default(),
+                arguments: match serde_json::from_str(&args) {
+                    Ok(arguments) => arguments,
+                    Err(error) => return Some(Err(error.into())),
+                },
+            })));
+        }
+
+        None
+    }
 }
 
 /// A chunk of chat content or reasoning.
@@ -147,10 +173,10 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
 
 pub fn get_provider(id: ProviderId, config: &provider::Config) -> Result<Box<dyn Provider>> {
     let provider: Box<dyn Provider> = match id {
-        // ProviderId::Anthropic => Box::new(Anthropic::try_from(&config.anthropic)?),
         // ProviderId::Deepseek => Box::new(Deepseek::try_from(&config.deepseek)?),
         // ProviderId::Google => Box::new(Google::try_from(&config.google)?),
         // ProviderId::Xai => Box::new(Xai::try_from(&config.xai)?),
+        ProviderId::Anthropic => Box::new(Anthropic::try_from(&config.anthropic)?),
         ProviderId::Openai => Box::new(Openai::try_from(&config.openai)?),
         ProviderId::Openrouter => Box::new(Openrouter::try_from(&config.openrouter)?),
         _ => todo!(),

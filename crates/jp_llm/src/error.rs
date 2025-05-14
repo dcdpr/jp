@@ -40,6 +40,12 @@ pub enum Error {
 
     #[error("Request error: {0}")]
     Request(#[from] reqwest::Error),
+
+    #[error("Anthropic error: {0}")]
+    Anthropic(#[from] async_anthropic::errors::AnthropicError),
+
+    #[error("Anthropic request builder error: {0}")]
+    AnthropicRequestBuilder(#[from] async_anthropic::types::CreateMessagesRequestBuilderError),
 }
 
 impl From<openai_responses::types::response::Error> for Error {

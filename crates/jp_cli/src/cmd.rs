@@ -372,6 +372,16 @@ impl From<jp_llm::Error> for Error {
                 ("response", response),
             ]
             .into(),
+            Anthropic(anthropic_error) => [
+                ("message", "Anthropic error".into()),
+                ("error", anthropic_error.to_string()),
+            ]
+            .into(),
+            AnthropicRequestBuilder(error) => [
+                ("message", "Anthropic request builder error".into()),
+                ("error", error.to_string()),
+            ]
+            .into(),
         };
 
         Self::from(metadata)
