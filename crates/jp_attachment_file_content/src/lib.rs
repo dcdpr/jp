@@ -93,6 +93,7 @@ impl Handler for FileContent {
         let (tx, rx) = crossbeam_channel::unbounded();
         WalkBuilder::new(cwd)
             .standard_filters(false)
+            .hidden(true)
             .overrides(overrides)
             .follow_links(false)
             .build_parallel()
