@@ -8,7 +8,8 @@ use std::{
 use async_trait::async_trait;
 use directories::BaseDirs;
 use jp_attachment::{
-    distributed_slice, linkme, typetag, Attachment, BoxedHandler, Handler, HANDLERS,
+    distributed_slice, linkme, percent_decode_str, percent_encode_str, typetag, Attachment,
+    BoxedHandler, Handler, HANDLERS,
 };
 use rusqlite::{params, types::Value, Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
@@ -148,20 +149,6 @@ impl Handler for BearNotes {
 
         Ok(attachments)
     }
-}
-
-/// Decodes a percent-encoded query parameter value, handling potential UTF-8
-/// errors.
-fn percent_decode_str(encoded: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
-    percent_encoding::percent_decode_str(encoded)
-        .decode_utf8()
-        .map(|s| s.to_string())
-        .map_err(Into::into)
-}
-
-fn percent_encode_str(encoded: &str) -> String {
-    percent_encoding::percent_encode(encoded.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
-        .to_string()
 }
 
 fn uri_to_query(uri: &Url) -> Result<Query, Box<dyn Error + Send + Sync>> {

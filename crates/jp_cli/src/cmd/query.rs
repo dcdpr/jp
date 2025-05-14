@@ -5,7 +5,7 @@ use std::{
 use clap::builder::TypedValueParser as _;
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
-use jp_config::{llm::ToolChoice, parse_vec, style::code::LinkStyle, try_parse_vec};
+use jp_config::{llm::ToolChoice, parse_vec, style::code::LinkStyle};
 use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
     persona::Instructions,
@@ -71,7 +71,7 @@ pub struct Args {
     pub local: bool,
 
     /// Add attachment to the context.
-    #[arg(short = 'a', long = "attachment", value_parser = |s: &str| try_parse_vec(s, parser::attachment_url))]
+    #[arg(short = 'a', long = "attachment", value_parser = |s: &str| parser::attachment_url(s))]
     pub attachments: Vec<Url>,
 
     /// Use specific persona.

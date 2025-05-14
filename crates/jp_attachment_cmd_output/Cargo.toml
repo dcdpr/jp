@@ -1,5 +1,5 @@
 [package]
-name = "jp_attachment"
+name = "jp_attachment_cmd_output"
 
 authors.workspace = true
 description.workspace = true
@@ -13,14 +13,19 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+jp_attachment = { workspace = true }
+
 async-trait = { workspace = true }
-dyn-clone = { workspace = true }
-dyn-hash = { workspace = true }
-linkme = { workspace = true }
-percent-encoding = { workspace = true }
+duct = { workspace = true }
+quick-xml = { workspace = true, features = ["serialize"] }
 serde = { workspace = true }
-typetag = { workspace = true }
 url = { workspace = true }
+
+[dev-dependencies]
+indoc = { workspace = true }
+tempfile = { workspace = true }
+test-log = { workspace = true }
+tokio = { workspace = true }
 
 [lints]
 workspace = true
