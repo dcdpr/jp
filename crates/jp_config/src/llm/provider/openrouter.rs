@@ -43,11 +43,13 @@ impl Default for Config {
 impl Config {
     /// Set a configuration value using a stringified key/value pair.
     pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
+        let value: String = value.into();
+
         match key {
-            "api_key_env" => self.api_key_env = value.into(),
-            "app_name" => self.app_name = value.into(),
-            "app_referrer" => self.app_referrer = Some(value.into()),
-            "base_url" => self.base_url = value.into(),
+            "api_key_env" => self.api_key_env = value,
+            "app_name" => self.app_name = value,
+            "app_referrer" => self.app_referrer = (!value.is_empty()).then_some(value),
+            "base_url" => self.base_url = value,
             _ => return crate::set_error(path, key),
         }
 
