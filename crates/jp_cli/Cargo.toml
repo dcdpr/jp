@@ -17,6 +17,7 @@ jp_attachment = { workspace = true }
 jp_attachment_bear_note = { workspace = true }
 jp_attachment_cmd_output = { workspace = true }
 jp_attachment_file_content = { workspace = true }
+jp_attachment_mcp_resources = { workspace = true }
 jp_config = { workspace = true }
 jp_conversation = { workspace = true }
 jp_format = { workspace = true }

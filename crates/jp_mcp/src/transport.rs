@@ -19,9 +19,9 @@ impl From<Stdio> for Transport {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Stdio {
     pub command: PathBuf,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub args: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, rename = "env")]
     pub environment_variables: Vec<String>,
 }
 

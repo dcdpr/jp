@@ -1,3 +1,5 @@
+use crate::config::McpServerId;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
@@ -13,6 +15,9 @@ pub enum Error {
 
     #[error("Unknown tool: {0}")]
     UnknownTool(String),
+
+    #[error("Unknown MCP server: {0}")]
+    UnknownServer(McpServerId),
 }
 
 #[cfg(test)]

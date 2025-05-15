@@ -1,6 +1,7 @@
 use jp_attachment_bear_note as _;
 use jp_attachment_cmd_output as _;
 use jp_attachment_file_content as _;
+use jp_attachment_mcp_resources as _;
 use jp_conversation::Context;
 use tracing::{debug, trace};
 use url::Url;
@@ -49,7 +50,11 @@ enum Commands {
 pub async fn register_attachment(uri: &Url, ctx: &mut Context) -> Result<()> {
     trace!(uri = uri.as_str(), "Registering attachment.");
 
-    let scheme = uri.scheme();
+    let scheme = uri
+        .scheme()
+        .split_once('+')
+        .map_or(uri.scheme(), |(k, _)| k);
+
     let attachment = if let Some(attachment) = ctx.attachment_handlers.get_mut(scheme) {
         attachment
     } else {
