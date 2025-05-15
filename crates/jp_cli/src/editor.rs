@@ -5,7 +5,6 @@ use std::{
 
 use jp_conversation::{MessagePair, UserMessage};
 use time::{macros::format_description, UtcOffset};
-use tracing::trace;
 
 use crate::{
     error::{Error, Result},
@@ -165,7 +164,7 @@ pub fn edit_query(
     root: &Path,
     initial_message: Option<String>,
     history: &[MessagePair],
-) -> Result<String> {
+) -> Result<(String, PathBuf)> {
     let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
 
@@ -251,10 +250,12 @@ pub fn edit_query(
 
     initial_text.reverse();
 
+    let query_file_path = root.join(QUERY_FILENAME);
+
     let options = Options::default()
         .with_cwd(root)
         .with_content(initial_text.join("\n"));
-    let (mut content, mut guard) = open(root.join(QUERY_FILENAME), options)?;
+    let (mut content, mut guard) = open(&query_file_path, options)?;
 
     let eof = CUT_MARKER
         .iter()
@@ -267,16 +268,5 @@ pub fn edit_query(
     // Disarm the guard, so the file is not reverted.
     guard.disarm();
 
-    Ok(content)
-}
-
-/// Remove the query file after successful response
-pub fn cleanup_query_file(workspace_root: &Path) -> Result<()> {
-    let file_path = workspace_root.join(QUERY_FILENAME);
-    if file_path.exists() {
-        trace!(path = %file_path.display(), "Removing old query file.");
-        fs::remove_file(file_path)?;
-    }
-
-    Ok(())
+    Ok((content, query_file_path))
 }
