@@ -77,6 +77,27 @@ impl Storage {
             if !local.is_dir() {
                 return Err(Error::NotDir(local));
             }
+
+            if let Some(path) = local
+                .join("storage")
+                .read_link()
+                .ok()
+                .filter(|v| v != &self.root)
+            {
+                // TODO: Perhaps we could re-link the local storage to the new
+                // path whenever the CLI runs from a "copy" of a workspace with
+                // the same ID? This might be possible, but I'm not sure what
+                // the implications could be down the road.
+                //
+                // For now, we just warn and disable local storage. This is an
+                // edge case when someone (e.g.) clones a repository twice in
+                // different locations, and then runs `jp` from each location.
+                warn!(
+                    "Workspace with same ID already exists at {}, disabling local storage.",
+                    path.display()
+                );
+                return Ok(self);
+            }
         } else {
             fs::create_dir_all(&local)?;
             trace!(path = %local.display(), "Created local storage directory.");
@@ -93,6 +114,13 @@ impl Storage {
             std::os::unix::fs::symlink(&self.root, local.join("storage"))?;
             #[cfg(windows)]
             std::os::windows::fs::symlink_dir(&self.root, local.join("storage"))?;
+            #[cfg(not(any(unix, windows)))]
+            {
+                tracing::error!(
+                    "Unsupported platform, cannot create symlink. Disabling local storage."
+                );
+                return Ok(self);
+            }
         }
 
         self.local = Some(local);
