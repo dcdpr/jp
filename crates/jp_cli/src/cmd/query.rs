@@ -1,11 +1,12 @@
 use std::{
-    collections::HashSet, convert::Infallible, fs, path::PathBuf, str::FromStr as _, time::Duration,
+    collections::HashSet, convert::Infallible, env, fs, path::PathBuf, str::FromStr as _,
+    time::Duration,
 };
 
 use clap::builder::TypedValueParser as _;
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
-use jp_config::{llm::ToolChoice, parse_vec, style::code::LinkStyle};
+use jp_config::{expand_tilde, llm::ToolChoice, parse_vec, style::code::LinkStyle};
 use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
     persona::Instructions,
@@ -485,8 +486,11 @@ fn json_schema(s: String) -> Result<schemars::Schema> {
 }
 
 fn string_or_path(s: &str) -> Result<String> {
-    if let Some(s) = s.strip_prefix(PATH_STRING_PREFIX) {
-        return fs::read_to_string(PathBuf::from(s.trim())).map_err(Into::into);
+    if let Some(s) = s
+        .strip_prefix(PATH_STRING_PREFIX)
+        .and_then(|s| expand_tilde(s, env::var("HOME").ok()))
+    {
+        return fs::read_to_string(s).map_err(Into::into);
     }
 
     Ok(s.to_owned())

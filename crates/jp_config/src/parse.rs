@@ -210,9 +210,9 @@ fn open_global_config_file(home: Option<&str>) -> Result<Option<File>> {
 ///
 /// If no tilde is found, returns `Some` with the original path. If a tilde is
 /// found, but no home directory is set, returns `None`.
-fn expand_tilde(path: impl AsRef<str>, home: Option<&str>) -> Option<PathBuf> {
+pub fn expand_tilde<T: AsRef<str>>(path: impl AsRef<str>, home: Option<T>) -> Option<PathBuf> {
     if path.as_ref().starts_with('~') {
-        return home.map(|home| PathBuf::from(path.as_ref().replacen('~', home, 1)));
+        return home.map(|home| PathBuf::from(path.as_ref().replacen('~', home.as_ref(), 1)));
     }
 
     Some(PathBuf::from(path.as_ref()))
@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn test_expand_tilde_missing_home() {
         let path = "~/no_home";
-        assert_eq!(expand_tilde(path, None), None);
+        assert_eq!(expand_tilde(path, None::<&str>), None);
     }
 
     #[test]
