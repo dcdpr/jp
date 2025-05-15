@@ -11,7 +11,7 @@ use jp_conversation::{
     persona::Instructions,
     thread::{Thread, ThreadBuilder},
     AssistantMessage, ContextId, Conversation, ConversationId, MessagePair, Model, ModelId,
-    PersonaId, UserMessage,
+    Persona, PersonaId, UserMessage,
 };
 use jp_llm::provider::{self, CompletionChunk, StreamEvent};
 use jp_mcp::{config::McpServerId, ResourceContents, Tool};
@@ -88,54 +88,36 @@ pub struct Args {
 }
 
 impl Args {
-    #[expect(clippy::too_many_lines)]
     pub async fn run(self, ctx: &mut Ctx) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
 
         self.update_config(&mut ctx.config);
 
-        let old_conversation_id = ctx.workspace.active_conversation_id();
-        let conversation_id = if self.new_conversation {
-            let mut conversation = Conversation::default();
-            if self.local {
-                conversation.local = true;
-            }
+        let last_active_conversation_id = ctx.workspace.active_conversation_id();
+        let conversation_id = self.get_conversation_id(ctx)?;
 
-            let id = ctx.workspace.create_conversation(conversation);
-            debug!(
-                id = %id,
-                local = %self.local,
-                "Creating new active conversation due to --new flag."
-            );
-
-            ctx.workspace.set_active_conversation_id(id)?;
-            id
-        } else {
-            ctx.workspace.active_conversation_id()
-        };
-
-        // Update the conversation context based on the contextual information
-        // passed in through the CLI, configuration, and environment variables.
         self.update_context(ctx).await?;
 
         // Ensure we start the MCP servers attached to the conversation.
         ctx.configure_active_mcp_servers().await?;
 
-        let message = self.build_message(ctx, conversation_id).await?;
+        let (message, query_file_path) = self.build_message(ctx, conversation_id).await?;
 
         if let UserMessage::Query(query) = &message {
+            // Clean up after empty queries.
             if query.is_empty() {
                 info!("Query is empty, exiting.");
 
-                if old_conversation_id != conversation_id {
+                if last_active_conversation_id != conversation_id {
                     ctx.workspace
-                        .set_active_conversation_id(old_conversation_id)?;
+                        .set_active_conversation_id(last_active_conversation_id)?;
                     ctx.workspace.remove_conversation(&conversation_id)?;
                 }
 
-                let path = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
-                editor::cleanup_query_file(path)?;
+                if let Some(path) = query_file_path {
+                    fs::remove_file(path)?;
+                }
 
                 return Ok("Query is empty, ignoring.".into());
             }
@@ -152,66 +134,29 @@ impl Args {
             }
         }
 
-        // Conversation
         let conversation = ctx.workspace.get_active_conversation();
-
-        // Persona
         let persona_id = &conversation.context.persona_id;
-        let Some(persona) = ctx.workspace.get_persona(persona_id) else {
-            return Err(Error::NotFound("Persona", persona_id.to_string()).into());
-        };
-
-        // Model
-        let mut model = ctx
+        let persona = ctx
             .workspace
-            .resolve_model_reference(&persona.model)?
-            .clone();
+            .get_persona(persona_id)
+            .ok_or(Error::NotFound("Persona", persona_id.to_string()))?;
+        let model = get_model(ctx, persona)?;
+        let tools = ctx.mcp_client.list_tools().await?;
 
-        // For explicit model requests, try to fetch the model configuration
-        // from the workspace, otherwise use a default model with the requested
-        // provider and model name.
-        if let Some(explicit_model) = ctx.config.llm.model.clone() {
-            let id = ModelId::try_from((explicit_model.provider, &explicit_model.slug))?;
-            model = ctx.workspace.get_model(&id).cloned().unwrap_or(Model {
-                provider: explicit_model.provider,
-                slug: explicit_model.slug,
-                ..Default::default()
-            });
-        }
-
-        trace!(provider = %model.provider, slug = %model.slug, "Loaded LLM model.");
-
-        // Attachments
         let mut attachments = vec![];
         for handler in conversation.context.attachment_handlers.values() {
             attachments.extend(handler.get(&ctx.workspace.root).await?);
         }
 
-        // Messages
-        let messages = ctx.workspace.get_messages(&conversation_id);
-        let tools = ctx.mcp_client.list_tools().await?;
-        let mut thread_builder = ThreadBuilder::default()
-            .with_system_prompt(persona.system_prompt.clone())
-            .with_instructions(persona.instructions.clone())
-            .with_attachments(attachments)
-            .with_history(messages.to_vec())
-            .with_message(message.clone());
+        let mut thread = build_thread(
+            ctx,
+            conversation_id,
+            attachments,
+            persona,
+            message.clone(),
+            !tools.is_empty(),
+        )?;
 
-        if !tools.is_empty() {
-            let instruction = Instructions::default()
-                .with_title("Tool Usage")
-                .with_description("How to leverage the tools available to you.".to_string())
-                .with_item("Use all the tools available to you to give the best possible answer.")
-                .with_item("Verify the tool name, description and parameters are correct.")
-                .with_item(
-                    "Even if you've reasoned yourself towards a solution, use any available tool \
-                     to verify your answer.",
-                );
-
-            thread_builder = thread_builder.with_instruction(instruction);
-        }
-
-        let mut thread = thread_builder.build()?;
         let context = conversation.context.clone();
         let reply = if let Some(schema) = &self.schema {
             handle_structured_output(ctx, thread.clone(), &model, schema.clone()).await?
@@ -230,27 +175,37 @@ impl Args {
         let message = MessagePair::new(message.clone(), reply.clone()).with_context(context);
 
         // Create message in the conversation.
-        thread.history.push(message.clone());
-        ctx.workspace.add_message(conversation_id, message);
+        ctx.workspace.add_message(conversation_id, message.clone());
 
         // If the assistant asked for a tool call, we handle it automatically,
-        // essentially going into a "loop" until no more tool calls are requested.
+        // essentially going into a "loop" until no more tool calls are
+        // requested.
         //
         // TODO:
         //
-        // This should be handled differently, asking for permission to run a tool
-        // (unless whitelisted per conversation/globally), it should log the fact
-        // that a tool call is triggered, and it should guard against infinite
-        // loops.
+        // This should be handled differently, asking for permission to run a
+        // tool (unless whitelisted per conversation/globally), it should log
+        // the fact that a tool call is triggered, and it should guard against
+        // infinite loops.
+        //
+        // FIXME:
+        //
+        // Recent changes have made this *no longer loop*. This currently
+        // triggers *only once* when a tool call is requested, but after that it
+        // exits the query. This is because this was previously handled inside
+        // [`handle_stream`], which made it recursive, but it was moved here,
+        // breaking the recursion.
         if !tool_calls.is_empty() {
+            thread.history.push(message.clone());
             let results = handle_tool_calls(ctx, tool_calls).await?;
             thread.message = UserMessage::ToolCallResults(results);
             Box::pin(handle_stream(ctx, thread, &model, tools)).await?;
         }
 
         // Clean up the query file.
-        let path = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
-        editor::cleanup_query_file(path)?;
+        if let Some(path) = query_file_path {
+            fs::remove_file(path)?;
+        }
 
         if self.schema.is_some() {
             if let Some(content) = reply.content {
@@ -265,7 +220,9 @@ impl Args {
         &self,
         ctx: &mut Ctx,
         conversation_id: ConversationId,
-    ) -> Result<UserMessage> {
+    ) -> Result<(UserMessage, Option<PathBuf>)> {
+        let mut query_file_path = None;
+
         // If replaying, remove the last message from the conversation, and use
         // its query message to build the new query.
         let replaying_user_message = self
@@ -304,7 +261,8 @@ impl Args {
 
             // If replaying, pass the last query as the text to be edited,
             // otherwise open an empty editor.
-            *query = editor::edit_query(path, initial_message, messages)?;
+            (*query, query_file_path) =
+                editor::edit_query(path, initial_message, messages).map(|(q, p)| (q, Some(p)))?;
         }
 
         if let UserMessage::Query(query) = &mut message {
@@ -327,9 +285,11 @@ impl Args {
             }
         }
 
-        Ok(message)
+        Ok((message, query_file_path))
     }
 
+    /// Update the conversation context based on the contextual information
+    /// passed in through the CLI, configuration, and environment variables.
     async fn update_context(&self, ctx: &mut Ctx) -> Result<()> {
         // Update context if specified
         if let Some(id) = ctx.config.conversation.context.clone() {
@@ -404,6 +364,12 @@ impl Args {
         Ok(())
     }
 
+    /// Update the config based on overrides from the CLI.
+    ///
+    /// The `--cfg` global flag is handled separately, this is specifically for
+    /// "convenience" flags such as `--persona` or `--context`, which are
+    /// equivalent to `--cfg conversation.persona` and `--cfg
+    /// conversation.context`.
     fn update_config(&self, config: &mut jp_config::Config) {
         if let Some(context) = self.context.as_ref() {
             config.conversation.context = Some(context.clone());
@@ -413,6 +379,82 @@ impl Args {
             config.conversation.persona = Some(persona.clone());
         }
     }
+
+    fn get_conversation_id(&self, ctx: &mut Ctx) -> Result<ConversationId> {
+        if !self.new_conversation {
+            return Ok(ctx.workspace.active_conversation_id());
+        }
+
+        let id = ctx.workspace.create_conversation(Conversation {
+            local: self.local,
+            ..Default::default()
+        });
+
+        debug!(
+            %id,
+            local = %self.local,
+            "Creating new active conversation due to --new flag."
+        );
+
+        ctx.workspace.set_active_conversation_id(id)?;
+
+        Ok(id)
+    }
+}
+
+fn build_thread(
+    ctx: &Ctx,
+    conversation_id: ConversationId,
+    attachments: Vec<jp_attachment::Attachment>,
+    persona: &Persona,
+    message: UserMessage,
+    has_tools: bool,
+) -> Result<Thread> {
+    let mut thread_builder = ThreadBuilder::default()
+        .with_system_prompt(persona.system_prompt.clone())
+        .with_instructions(persona.instructions.clone())
+        .with_attachments(attachments)
+        .with_history(ctx.workspace.get_messages(&conversation_id).to_vec())
+        .with_message(message);
+
+    if has_tools {
+        let instruction = Instructions::default()
+            .with_title("Tool Usage")
+            .with_description("How to leverage the tools available to you.".to_string())
+            .with_item("Use all the tools available to you to give the best possible answer.")
+            .with_item("Verify the tool name, description and parameters are correct.")
+            .with_item(
+                "Even if you've reasoned yourself towards a solution, use any available tool to \
+                 verify your answer.",
+            );
+
+        thread_builder = thread_builder.with_instruction(instruction);
+    }
+
+    Ok(thread_builder.build()?)
+}
+
+fn get_model(ctx: &Ctx, persona: &Persona) -> Result<Model> {
+    let mut model = ctx
+        .workspace
+        .resolve_model_reference(&persona.model)?
+        .clone();
+
+    // For explicit model requests, try to fetch the model configuration
+    // from the workspace, otherwise use a default model with the requested
+    // provider and model name.
+    if let Some(explicit_model) = ctx.config.llm.model.clone() {
+        let id = ModelId::try_from((explicit_model.provider, &explicit_model.slug))?;
+        model = ctx.workspace.get_model(&id).cloned().unwrap_or(Model {
+            provider: explicit_model.provider,
+            slug: explicit_model.slug,
+            ..Default::default()
+        });
+    }
+
+    trace!(provider = %model.provider, slug = %model.slug, "Loaded LLM model.");
+
+    Ok(model)
 }
 
 async fn handle_structured_output(
