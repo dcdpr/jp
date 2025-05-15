@@ -1,0 +1,64 @@
+{
+  "type": "object",
+  "description": "Generate a semantic commit message, using the \"conventional commit\" 1.0 specification, based on the git diff.",
+  "required": [
+    "type",
+    "subject"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "type": "string",
+      "description": "The type of the commit.",
+      "enum": [
+        "build",
+        "ci",
+        "docs",
+        "feat",
+        "fix",
+        "perf",
+        "refactor",
+        "test"
+      ]
+    },
+    "scopes": {
+      "type": "array",
+      "description": "Commit Scope: any crate name without the `jp` prefix, e.g. `cli`, `config`, `conversation`, etc. If the crate scope is insufficient, add more scopes to the list. A scope may be omitted if changes are cross-crates or not related to any crate.",
+      "items": {
+        "type": "string",
+        "description": "A scope of the commit, e.g. core, cli, etc."
+      }
+    },
+    "breaking_change": {
+      "type": "object",
+      "description": "Details about a breaking change.",
+      "required": [
+        "subject",
+        "description"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "subject": {
+          "type": "string",
+          "description": "A brief single-line summary of the breaking change."
+        },
+        "description": {
+          "type": "string",
+          "description": "A detailed description of the breaking change that also includes migration instructions."
+        }
+      }
+    },
+    "subject": {
+      "type": "string",
+      "description": "Single-line summary in present tense. Capitalized. No period at the end. Limit to 50 characters. Use backticks (``) to format code or crate references. A properly formed <subject line> should always be able to complete the following sentence: If applied, this commit will <subject line>."
+    },
+    "body": {
+      "type": "string",
+      "description": "The body is mandatory for all commits except for those of type \"docs\". When the body is present it must be at least 20 characters long and must conform to the Commit Message Body format."
+    },
+    "footer": {
+      "type": "string",
+      "description": "The footer can contain information about breaking changes and deprecations and is also the place to reference GitHub issues and other PRs that this commit closes or is related to."
+    }
+  }
+}

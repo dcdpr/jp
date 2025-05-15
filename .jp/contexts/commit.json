@@ -1,0 +1,17 @@
+{
+  "persona_id": "commit",
+  "attachments": {
+    "cmd": {
+      "type": "cmd",
+      "value": [
+        {
+          "cmd": "git",
+          "args": [
+            "diff",
+            "--cached"
+          ]
+        }
+      ]
+    }
+  }
+}
