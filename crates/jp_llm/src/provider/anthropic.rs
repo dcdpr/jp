@@ -1,19 +1,24 @@
 use std::env;
 
-use async_anthropic::{types, Client};
+use async_anthropic::{
+    types::{self, ListModelsResponse},
+    Client,
+};
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::llm;
 use jp_conversation::{
+    model::ProviderId,
     thread::{Document, Documents, Thinking, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
 use jp_query::query::ChatQuery;
 use serde_json::Value;
-use tracing::trace;
+use time::macros::date;
+use tracing::{trace, warn};
 
-use super::{Event, EventStream, Provider, StreamEvent};
+use super::{Event, EventStream, ModelDetails, Provider, StreamEvent};
 use crate::{
     error::{Error, Result},
     provider::{handle_delta, AccumulationState, Delta},
@@ -26,6 +31,28 @@ pub struct Anthropic {
 
 #[async_trait]
 impl Provider for Anthropic {
+    async fn models(&self) -> Result<Vec<ModelDetails>> {
+        let (mut after_id, mut models) = self
+            .client
+            .models()
+            .list()
+            .await
+            .map(|list| (list.has_more.then_some(list.last_id).flatten(), list.data))?;
+
+        while let Some(id) = &after_id {
+            let (id, data) = self
+                .client
+                .get::<ListModelsResponse>(&format!("/v1/models?after_id={id}"))
+                .await
+                .map(|list| (list.has_more.then_some(list.last_id).flatten(), list.data))?;
+
+            models.extend(data);
+            after_id = id;
+        }
+
+        Ok(models.into_iter().map(map_model).collect())
+    }
+
     async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
         let client = self.client.clone();
         let request = create_request(model, query)?;
@@ -56,6 +83,65 @@ impl Provider for Anthropic {
         });
 
         Ok(stream)
+    }
+}
+
+fn map_model(model: types::Model) -> ModelDetails {
+    match model.id.as_str() {
+        "claude-3-7-sonnet-latest" | "claude-3-7-sonnet-20250219" => ModelDetails {
+            provider: ProviderId::Openrouter,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(64_000),
+            reasoning: Some(true),
+            knowledge_cutoff: Some(date!(2024 - 11 - 1)),
+        },
+        "claude-3-5-haiku-latest" | "claude-3-5-haiku-20241022" => ModelDetails {
+            provider: ProviderId::Openrouter,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(8_192),
+            reasoning: Some(false),
+            knowledge_cutoff: Some(date!(2024 - 7 - 1)),
+        },
+        "claude-3-5-sonnet-latest"
+        | "claude-3-5-sonnet-20241022"
+        | "claude-3-5-sonnet-20240620" => ModelDetails {
+            provider: ProviderId::Openrouter,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(8_192),
+            reasoning: Some(false),
+            knowledge_cutoff: Some(date!(2024 - 4 - 1)),
+        },
+        "claude-3-opus-latest" | "claude-3-opus-20240229" => ModelDetails {
+            provider: ProviderId::Openrouter,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(4_096),
+            reasoning: Some(false),
+            knowledge_cutoff: Some(date!(2023 - 8 - 1)),
+        },
+        "claude-3-haiku-20240307" => ModelDetails {
+            provider: ProviderId::Openrouter,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(4_096),
+            reasoning: Some(false),
+            knowledge_cutoff: Some(date!(2024 - 8 - 1)),
+        },
+        id => {
+            warn!(model = id, ?model, "Missing model details.");
+
+            ModelDetails {
+                provider: ProviderId::Openrouter,
+                slug: model.id,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: None,
+                knowledge_cutoff: None,
+            }
+        }
     }
 }
 
@@ -173,7 +259,16 @@ impl TryFrom<&llm::provider::anthropic::Config> for Anthropic {
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
         Ok(Anthropic {
-            client: Client::from_api_key(api_key),
+            client: Client::builder()
+                .api_key(api_key)
+                .base_url(config.base_url.clone())
+                .version("2023-06-01")
+                .build()
+                .map_err(|e| {
+                    Error::Anthropic(async_anthropic::errors::AnthropicError::Unknown(
+                        e.to_string(),
+                    ))
+                })?,
         })
     }
 }
@@ -420,5 +515,54 @@ impl From<types::MessageContent> for Delta {
                 Delta::default()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use jp_test::{function_name, mock::Vcr};
+    use test_log::test;
+    use time::macros::date;
+
+    use super::*;
+
+    #[test(tokio::test)]
+    async fn test_anthropic_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = llm::Config::default();
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+
+        let mut vcr = Vcr::new("https://api.anthropic.com", fixtures);
+        vcr.set_recording(env::var("RECORD").is_ok());
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
+                });
+            },
+            |_recording, url| async move {
+                config.provider.anthropic.base_url = url;
+                let model = Anthropic::try_from(&config.provider.anthropic)
+                    .unwrap()
+                    .models()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|m| m.slug == "claude-3-7-sonnet-20250219")
+                    .unwrap();
+
+                assert_eq!(model, ModelDetails {
+                    provider: ProviderId::Openrouter,
+                    slug: "claude-3-7-sonnet-20250219".to_owned(),
+                    context_window: Some(200_000),
+                    max_output_tokens: Some(64_000),
+                    reasoning: Some(true),
+                    knowledge_cutoff: Some(date!(2024 - 11 - 01))
+                });
+            },
+        )
+        .await
     }
 }

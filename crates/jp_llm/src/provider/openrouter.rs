@@ -6,7 +6,7 @@ use futures::{StreamExt, TryStreamExt as _};
 use jp_config::llm::{self, provider::openrouter};
 use jp_conversation::{
     message::ToolCallRequest,
-    model::ReasoningEffort,
+    model::{ProviderId, ReasoningEffort},
     thread::{Document, Documents, Thinking, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
@@ -15,7 +15,8 @@ use jp_openrouter::{
         chat::{CacheControl, Content, Message},
         request::{self, RequestMessage},
         response::{
-            ChatCompletion as OpenRouterChunk, Choice, ErrorResponse, FinishReason, StreamingDelta,
+            self, ChatCompletion as OpenRouterChunk, Choice, ErrorResponse, FinishReason,
+            StreamingDelta,
         },
         tool::{self, FunctionCall, Tool, ToolCall, ToolChoice, ToolFunction},
     },
@@ -26,7 +27,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tracing::{debug, trace, warn};
 
-use super::{CompletionChunk, Delta, Event, EventStream, StreamEvent};
+use super::{CompletionChunk, Delta, Event, EventStream, ModelDetails, StreamEvent};
 use crate::{
     error::Result,
     provider::{handle_delta, AccumulationState, Provider},
@@ -112,6 +113,17 @@ impl Openrouter {
 
 #[async_trait]
 impl Provider for Openrouter {
+    async fn models(&self) -> Result<Vec<ModelDetails>> {
+        Ok(self
+            .client
+            .models()
+            .await?
+            .data
+            .into_iter()
+            .map(map_model)
+            .collect())
+    }
+
     fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
         debug!(
             model = model.slug,
@@ -212,6 +224,18 @@ impl Provider for Openrouter {
         }
 
         Ok(events)
+    }
+}
+
+// TODO: Manually add a bunch of often-used models.
+fn map_model(model: response::Model) -> ModelDetails {
+    ModelDetails {
+        provider: ProviderId::Openrouter,
+        slug: model.id,
+        context_window: Some(model.context_length),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(model.created.date()),
     }
 }
 
@@ -522,4 +546,53 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> RequestMessage {
     }
 
     message.assistant()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use jp_test::{function_name, mock::Vcr};
+    use test_log::test;
+    use time::macros::date;
+
+    use super::*;
+
+    #[test(tokio::test)]
+    async fn test_openrouter_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = llm::Config::default();
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+
+        let mut vcr = Vcr::new("https://openrouter.ai", fixtures);
+        vcr.set_recording(env::var("RECORD").is_ok());
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
+                });
+            },
+            |_recording, url| async move {
+                config.provider.openrouter.base_url = url;
+                let model = Openrouter::try_from(&config.provider.openrouter)
+                    .unwrap()
+                    .models()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|m| m.slug == "openai/gpt-4o-mini")
+                    .unwrap();
+
+                assert_eq!(model, ModelDetails {
+                    provider: ProviderId::Openrouter,
+                    slug: "openai/gpt-4o-mini".to_owned(),
+                    context_window: Some(128_000),
+                    max_output_tokens: None,
+                    reasoning: None,
+                    knowledge_cutoff: Some(date!(2024 - 07 - 18)),
+                });
+            },
+        )
+        .await
+    }
 }

@@ -5,19 +5,22 @@ use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::llm;
 use jp_conversation::{
-    model,
+    model::{self, ProviderId},
     thread::{Document, Documents, Thinking, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
 use jp_query::query::ChatQuery;
 use openai_responses::{
     types::{self, ReasoningEffort, Request},
-    Client, StreamError,
+    Client, CreateError, StreamError,
 };
+use reqwest::header::{self, HeaderMap, HeaderValue};
+use serde::Deserialize;
 use serde_json::Value;
-use tracing::trace;
+use time::{macros::date, OffsetDateTime};
+use tracing::{trace, warn};
 
-use super::{handle_delta, Delta, Event, EventStream, Provider, StreamEvent};
+use super::{handle_delta, Delta, Event, EventStream, ModelDetails, Provider, StreamEvent};
 use crate::{
     error::{Error, Result},
     provider::AccumulationState,
@@ -25,11 +28,28 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Openai {
+    reqwest_client: reqwest::Client,
     client: Client,
+    base_url: String,
 }
 
 #[async_trait]
 impl Provider for Openai {
+    async fn models(&self) -> Result<Vec<ModelDetails>> {
+        Ok(self
+            .reqwest_client
+            .get(format!("{}/v1/models", self.base_url))
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<ModelListResponse>()
+            .await?
+            .data
+            .into_iter()
+            .map(map_model)
+            .collect())
+    }
+
     async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
         let client = self.client.clone();
         let request = create_request(model, query)?;
@@ -58,6 +78,137 @@ impl Provider for Openai {
         });
 
         Ok(stream)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[expect(dead_code)]
+struct ModelListResponse {
+    object: String,
+    data: Vec<ModelResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+#[expect(dead_code)]
+struct ModelResponse {
+    id: String,
+    object: String,
+    #[serde(with = "time::serde::timestamp")]
+    created: OffsetDateTime,
+    owned_by: String,
+}
+
+#[expect(clippy::too_many_lines)]
+fn map_model(model: ModelResponse) -> ModelDetails {
+    match model.id.as_str() {
+        "o4-mini" | "o4-mini-2025-04-16" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            reasoning: Some(true),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+        },
+        "o3-mini" | "o3-mini-2025-01-31" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            reasoning: Some(true),
+            knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+        },
+        "o1-mini" | "o1-mini-2024-09-12" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(128_000),
+            max_output_tokens: Some(65_536),
+            reasoning: Some(true),
+            knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+        },
+        "o3" | "o3-2025-04-16" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            reasoning: Some(true),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+        },
+        "o1" | "o1-2024-12-17" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            reasoning: Some(true),
+            knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+        },
+        "o1-pro" | "o1-pro-2025-03-19" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            reasoning: Some(true),
+            knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+        },
+        "gpt-4.1" | "gpt-4.1-2025-04-14" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(1_047_576),
+            max_output_tokens: Some(32_768),
+            reasoning: Some(false),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+        },
+        "gpt-4o" | "gpt-4o-2024-08-06" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(128_000),
+            max_output_tokens: Some(16_384),
+            reasoning: Some(false),
+            knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+        },
+        "chatgpt-4o" | "chatgpt-4o-latest" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(128_000),
+            max_output_tokens: Some(16_384),
+            reasoning: Some(false),
+            knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+        },
+        "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(1_047_576),
+            max_output_tokens: Some(32_768),
+            reasoning: Some(false),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+        },
+        "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(128_000),
+            max_output_tokens: Some(16_384),
+            reasoning: Some(false),
+            knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+        },
+        "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(1_047_576),
+            max_output_tokens: Some(32_768),
+            reasoning: Some(false),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+        },
+        id => {
+            warn!(model = id, ?model, "Missing model details.");
+
+            ModelDetails {
+                provider: ProviderId::Openai,
+                slug: model.id,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: None,
+                knowledge_cutoff: None,
+            }
+        }
     }
 }
 
@@ -144,8 +295,20 @@ impl TryFrom<&llm::provider::openai::Config> for Openai {
         let api_key = env::var(&config.api_key_env)
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
+        let reqwest_client = reqwest::Client::builder()
+            .default_headers(HeaderMap::from_iter([(
+                header::AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {api_key}"))
+                    .map_err(|_| CreateError::InvalidApiKey)?,
+            )]))
+            .build()?;
+
+        let client = Client::new(&api_key)?.with_base_url(config.base_url.clone());
+
         Ok(Openai {
-            client: Client::new(&api_key)?,
+            reqwest_client,
+            client,
+            base_url: config.base_url.clone(),
         })
     }
 }
@@ -427,5 +590,55 @@ impl From<types::OutputItem> for Delta {
             }
             _ => Delta::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use jp_test::{function_name, mock::Vcr};
+    use test_log::test;
+    use time::macros::date;
+
+    use super::*;
+
+    #[test(tokio::test)]
+    async fn test_openai_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = llm::Config::default();
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+
+        let mut vcr = Vcr::new("https://api.openai.com/v1", fixtures);
+        vcr.set_recording(env::var("RECORD").is_ok());
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
+                });
+            },
+            |_recording, url| async move {
+                config.provider.openai.base_url = url;
+                let model = Openai::try_from(&config.provider.openai)
+                    .unwrap()
+                    .models()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .inspect(|m| println!("{m:?}"))
+                    .find(|m| m.slug == "o4-mini")
+                    .unwrap();
+
+                assert_eq!(model, ModelDetails {
+                    provider: ProviderId::Openai,
+                    slug: "o4-mini".to_owned(),
+                    context_window: Some(200_000),
+                    max_output_tokens: Some(100_000),
+                    reasoning: Some(true),
+                    knowledge_cutoff: Some(date!(2024 - 06 - 01))
+                });
+            },
+        )
+        .await
     }
 }
