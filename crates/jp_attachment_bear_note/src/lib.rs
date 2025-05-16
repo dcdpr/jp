@@ -11,6 +11,7 @@ use jp_attachment::{
     distributed_slice, linkme, percent_decode_str, percent_encode_str, typetag, Attachment,
     BoxedHandler, Handler, HANDLERS,
 };
+use jp_mcp::Client;
 use rusqlite::{params, types::Value, Connection, OptionalExtension as _};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
@@ -132,7 +133,11 @@ impl Handler for BearNotes {
         Ok(uris)
     }
 
-    async fn get(&self, _: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+    async fn get(
+        &self,
+        _: &Path,
+        _: Client,
+    ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         let db = get_database_path()?;
         trace!(db = %db.display(), "Connecting to Bear database.");
         let conn = Connection::open(db)?;

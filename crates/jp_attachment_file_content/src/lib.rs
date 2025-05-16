@@ -6,6 +6,7 @@ use ignore::{overrides::OverrideBuilder, WalkBuilder, WalkState};
 use jp_attachment::{
     distributed_slice, linkme, typetag, Attachment, BoxedHandler, Handler, HANDLERS,
 };
+use jp_mcp::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
 use url::Url;
@@ -73,7 +74,11 @@ impl Handler for FileContent {
         Ok(uris)
     }
 
-    async fn get(&self, cwd: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+    async fn get(
+        &self,
+        cwd: &Path,
+        _: Client,
+    ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         debug!(id = self.scheme(), "Getting file attachment contents.");
 
         if self.includes.is_empty() {
@@ -311,7 +316,8 @@ mod tests {
         let mut handler = FileContent::default();
         handler.add(&Url::parse("file:/file.txt")?).await?;
 
-        let attachments = handler.get(tmp.path()).await?;
+        let client = Client::default();
+        let attachments = handler.get(tmp.path(), client).await?;
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].source, "file.txt");
         assert_eq!(attachments[0].content, "content");

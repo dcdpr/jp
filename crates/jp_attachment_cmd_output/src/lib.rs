@@ -5,6 +5,7 @@ use jp_attachment::{
     distributed_slice, linkme, percent_decode_str, percent_encode_str, typetag, Attachment,
     BoxedHandler, Handler, HANDLERS,
 };
+use jp_mcp::Client;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -96,7 +97,11 @@ impl Handler for Commands {
         Ok(commands)
     }
 
-    async fn get(&self, root: &Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+    async fn get(
+        &self,
+        root: &Path,
+        _: Client,
+    ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         let mut attachments = vec![];
         for command in &self.0 {
             let output = duct::cmd(command.cmd.as_str(), command.args.as_slice())
@@ -236,7 +241,8 @@ mod tests {
         std::fs::write(path.join("file1"), "").unwrap();
         std::fs::write(path.join("file2"), "").unwrap();
 
-        let attachments = commands.get(path).await.unwrap();
+        let client = Client::default();
+        let attachments = commands.get(path, client).await.unwrap();
         assert_eq!(attachments, vec![
             Attachment {
                 source: "cmd://false".to_string(),

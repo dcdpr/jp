@@ -6,7 +6,7 @@ use std::{
 use clap::builder::TypedValueParser as _;
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
-use jp_config::{expand_tilde, llm::ToolChoice, parse_vec, style::code::LinkStyle};
+use jp_config::{expand_tilde, llm::ToolChoice, style::code::LinkStyle};
 use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
     persona::Instructions,
@@ -84,7 +84,7 @@ pub struct Args {
     pub context: Option<ContextId>,
 
     /// Use specific MCP servers exclusively.
-    #[arg(short = 'm', long = "mcp", value_parser = |s: &str| Ok::<_, Infallible>(parse_vec(s, McpServerId::new)))]
+    #[arg(short = 'm', long = "mcp", value_parser = |s: &str| Ok::<_, Infallible>(McpServerId::new(s)))]
     pub mcp: Vec<McpServerId>,
 }
 
@@ -146,7 +146,11 @@ impl Args {
 
         let mut attachments = vec![];
         for handler in conversation.context.attachment_handlers.values() {
-            attachments.extend(handler.get(&ctx.workspace.root).await?);
+            attachments.extend(
+                handler
+                    .get(&ctx.workspace.root, ctx.mcp_client.clone())
+                    .await?,
+            );
         }
 
         let mut thread = build_thread(

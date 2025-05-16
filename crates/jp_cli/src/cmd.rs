@@ -496,6 +496,11 @@ impl From<jp_mcp::Error> for Error {
             .into(),
             UnknownTool(tool) => [("message", "Unknown tool".into()), ("tool", tool.into())].into(),
             Io(error) => return error.into(),
+            UnknownServer(mcp_server_id) => [
+                ("message", "Unknown MCP server".into()),
+                ("id", mcp_server_id.to_string().into()),
+            ]
+            .into(),
         };
 
         Self::from(metadata)

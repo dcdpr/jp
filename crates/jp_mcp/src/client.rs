@@ -1,25 +1,33 @@
-use std::{collections::HashMap, env, process::Stdio, time::Duration};
+use std::{collections::HashMap, env, process::Stdio, sync::Arc, time::Duration};
 
 use rmcp::{
-    model::{CallToolRequestParam, CallToolResult, Tool},
+    model::{
+        CallToolRequestParam, CallToolResult, ReadResourceRequestParam, Resource, ResourceContents,
+        Tool,
+    },
     service::{RoleClient, RunningService, ServiceExt},
     transport::TokioChildProcess,
 };
-use tokio::process::Command;
+use tokio::{process::Command, sync::Mutex};
 use tracing::trace;
 
-use crate::{config::McpServer, error::Result, transport::Transport, Error};
+use crate::{
+    config::{McpServer, McpServerId},
+    error::Result,
+    transport::Transport,
+    Error,
+};
 
 /// Manages multiple MCP clients and delegates operations to them
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Client {
-    clients: HashMap<String, RunningService<RoleClient, ()>>,
+    clients: Arc<Mutex<HashMap<McpServerId, RunningService<RoleClient, ()>>>>,
 }
 
 impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client")
-            .field("clients", &self.clients.keys())
+            .field("clients", &self.clients.blocking_lock().keys())
             .finish()
     }
 }
@@ -31,17 +39,19 @@ impl Client {
 
         for server in servers {
             let client = Self::create_client(server).await?;
-            clients.insert(server.id.to_string(), client);
+            clients.insert(server.id.clone(), client);
         }
 
-        Ok(Self { clients })
+        Ok(Self {
+            clients: Arc::new(Mutex::new(clients)),
+        })
     }
 
     /// Get all available tools from all connected MCP servers
     pub async fn list_tools(&self) -> Result<Vec<Tool>> {
         let mut tools = vec![];
 
-        for client in self.clients.values() {
+        for client in self.clients.lock().await.values() {
             tools.extend(client.peer().list_all_tools().await?);
         }
 
@@ -54,7 +64,7 @@ impl Client {
         tool_name: &str,
         params: serde_json::Value,
     ) -> Result<CallToolResult> {
-        for client in self.clients.values() {
+        for client in self.clients.lock().await.values() {
             let tools = client.peer().list_all_tools().await?;
             if !tools.iter().any(|t| t.name == tool_name) {
                 continue;
@@ -73,32 +83,62 @@ impl Client {
         Err(Error::UnknownTool(tool_name.to_string()))
     }
 
+    /// Get all available resources from a specific MCP server.
+    ///
+    /// This does not return the contents of the resources, but instead returns
+    /// a list of URIs which can be sent to [`Self::get_resource`] to retrieve
+    /// the contents.
+    pub async fn list_resources(&self, id: &McpServerId) -> Result<Vec<Resource>> {
+        let clients = self.clients.lock().await;
+        let client = clients.get(id).ok_or(Error::UnknownServer(id.clone()))?;
+
+        Ok(client.peer().list_all_resources().await?)
+    }
+
+    /// Get the contents of a resource from a specific MCP server.
+    ///
+    /// TODO: Make an `mcp_resource` attachment handler, so that you can embed
+    /// attachments from MCP servers that support querying for resources
+    pub async fn get_resource_contents(
+        &self,
+        id: &McpServerId,
+        uri: impl Into<String>,
+    ) -> Result<Vec<ResourceContents>> {
+        let clients = self.clients.lock().await;
+        let client = clients.get(id).ok_or(Error::UnknownServer(id.clone()))?;
+
+        Ok(client
+            .peer()
+            .read_resource(ReadResourceRequestParam { uri: uri.into() })
+            .await?
+            .contents)
+    }
+
     pub async fn handle_servers(&mut self, configs: &[McpServer]) -> Result<()> {
-        let servers_to_stop: Vec<String> = self
-            .clients
+        let mut clients = self.clients.lock().await;
+        let servers_to_stop: Vec<_> = clients
             .keys()
-            .filter(|&name| configs.iter().all(|s| &s.id.to_string() != name))
+            .filter(|&name| configs.iter().all(|s| &s.id != name))
             .cloned()
             .collect();
 
         // Stop servers that are no longer needed
         for id in &servers_to_stop {
-            trace!(id, "Stopping MCP server.");
-            self.clients.remove(id);
+            trace!(id = %id, "Stopping MCP server.");
+            clients.remove(id);
         }
 
-        // Determine which servers to start (in configs but not currently active)
-        let servers_to_start: Vec<&McpServer> = configs
-            .iter()
-            .filter(|server| !self.clients.contains_key(&server.id.to_string()))
-            .collect();
+        for server in configs {
+            // Determine which servers to start (in configs but not currently
+            // active)
+            if clients.contains_key(&server.id) {
+                continue;
+            }
 
-        // Start new servers
-        for server in servers_to_start {
             trace!(id = %server.id, "Starting MCP server.");
 
             let client = Self::create_client(server).await?;
-            self.clients.insert(server.id.to_string(), client);
+            clients.insert(server.id.clone(), client);
         }
 
         Ok(())

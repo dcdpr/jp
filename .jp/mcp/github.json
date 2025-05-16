@@ -1,0 +1,15 @@
+{
+  "transport": {
+    "type": "Stdio",
+    "command": "github-mcp-server",
+    "args": [
+      "stdio",
+      "--read-only",
+      "--toolsets",
+      "issues,pull_requests"
+    ],
+    "env": [
+      "GITHUB_PERSONAL_ACCESS_TOKEN"
+    ]
+  }
+}
