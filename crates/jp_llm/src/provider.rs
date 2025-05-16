@@ -16,11 +16,34 @@ use jp_query::query::{ChatQuery, StructuredQuery};
 use openai::Openai;
 use openrouter::Openrouter;
 use serde_json::Value;
+use time::Date;
 use tracing::warn;
 
 use crate::{error::Result, structured::SCHEMA_TOOL_NAME, Error};
 
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>;
+
+/// Details about a model for a given provider.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelDetails {
+    /// The provider of the model.
+    pub provider: ProviderId,
+
+    /// The slug of the model.
+    pub slug: String,
+
+    /// The context window size in tokens, if known.
+    pub context_window: Option<u32>,
+
+    /// The maximum output tokens, if known.
+    pub max_output_tokens: Option<u32>,
+
+    /// Whether the model supports reasoning, if known.
+    pub reasoning: Option<bool>,
+
+    /// The knowledge cutoff date, if known.
+    pub knowledge_cutoff: Option<Date>,
+}
 
 /// Represents an event yielded by the chat completion stream.
 #[derive(Debug, Clone)]
@@ -82,6 +105,9 @@ pub enum CompletionChunk {
 
 #[async_trait]
 pub trait Provider: std::fmt::Debug + Send + Sync {
+    /// Get a list of available models.
+    async fn models(&self) -> Result<Vec<ModelDetails>>;
+
     /// Perform a streaming chat completion.
     fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream>;
 

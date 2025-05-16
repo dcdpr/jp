@@ -83,6 +83,17 @@ impl Client {
         Ok(headers)
     }
 
+    pub async fn models(&self) -> Result<response::ModelsResponse> {
+        let url = format!("{}/api/v1/models", self.base_url);
+        let headers = self.build_headers()?;
+        let request = self.http_client.get(url).headers(headers);
+
+        Ok(get(request)
+            .await?
+            .json::<response::ModelsResponse>()
+            .await?)
+    }
+
     #[must_use]
     pub fn chat_completion_stream(
         &self,

@@ -2069,7 +2069,9 @@ dependencies = [
  "reqwest-eventsource",
  "serde",
  "serde_json",
+ "test-log",
  "thiserror 2.0.12",
+ "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2522,7 +2524,7 @@ dependencies = [
 [[package]]
 name = "openai_responses"
 version = "0.1.6"
-source = "git+https://github.com/JeanMertz/openai-responses-rs#0b8294e9a6c428375b1d12eb009b06721872c502"
+source = "git+https://github.com/JeanMertz/openai-responses-rs#90aad63f4586b5e6e9a049227e01216299d548ce"
 dependencies = [
  "async-fn-stream",
  "chrono",
@@ -4445,7 +4447,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

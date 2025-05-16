@@ -11,12 +11,20 @@ pub struct Config {
         env = "JP_LLM_PROVIDER_ANTHROPIC_API_KEY_ENV"
     )]
     pub api_key_env: String,
+
+    /// The base URL to use for API requests.
+    #[config(
+        default = "https://api.anthropic.com",
+        env = "JP_LLM_PROVIDER_ANTHROPIC_BASE_URL"
+    )]
+    pub base_url: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             api_key_env: "ANTHROPIC_API_KEY".to_owned(),
+            base_url: "https://api.anthropic.com".to_owned(),
         }
     }
 }

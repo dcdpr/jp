@@ -385,7 +385,8 @@ impl Workspace {
     }
 
     /// Resolves an `LlmModelReference` to a concrete `LlmModel`.
-    /// Returns `None` if the reference is an ID that doesn't exist.
+    ///
+    /// Returns an error if the reference is an ID that doesn't exist.
     pub fn resolve_model_reference<'a>(
         &'a self,
         reference: &'a ModelReference,

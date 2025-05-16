@@ -270,3 +270,17 @@ impl From<usize> for ErrorCode {
         }
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ModelsResponse {
+    pub data: Vec<Model>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Model {
+    pub id: String,
+    pub name: String,
+    #[serde(with = "time::serde::timestamp")]
+    pub created: OffsetDateTime,
+    pub context_length: u32,
+}
