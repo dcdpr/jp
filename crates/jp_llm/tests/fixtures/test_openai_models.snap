@@ -1,0 +1,24 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    [
+        ModelDetails {
+            provider: Openai,
+            slug: "gpt-4o-realtime-preview-2024-12-17",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Openai,
+            slug: "gpt-4o-audio-preview-2024-12-17",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+    ],
+)

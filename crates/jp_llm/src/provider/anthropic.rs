@@ -89,7 +89,7 @@ impl Provider for Anthropic {
 fn map_model(model: types::Model) -> ModelDetails {
     match model.id.as_str() {
         "claude-3-7-sonnet-latest" | "claude-3-7-sonnet-20250219" => ModelDetails {
-            provider: ProviderId::Openrouter,
+            provider: ProviderId::Anthropic,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
@@ -97,7 +97,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             knowledge_cutoff: Some(date!(2024 - 11 - 1)),
         },
         "claude-3-5-haiku-latest" | "claude-3-5-haiku-20241022" => ModelDetails {
-            provider: ProviderId::Openrouter,
+            provider: ProviderId::Anthropic,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
@@ -107,7 +107,7 @@ fn map_model(model: types::Model) -> ModelDetails {
         "claude-3-5-sonnet-latest"
         | "claude-3-5-sonnet-20241022"
         | "claude-3-5-sonnet-20240620" => ModelDetails {
-            provider: ProviderId::Openrouter,
+            provider: ProviderId::Anthropic,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
@@ -115,7 +115,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             knowledge_cutoff: Some(date!(2024 - 4 - 1)),
         },
         "claude-3-opus-latest" | "claude-3-opus-20240229" => ModelDetails {
-            provider: ProviderId::Openrouter,
+            provider: ProviderId::Anthropic,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
@@ -123,7 +123,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             knowledge_cutoff: Some(date!(2023 - 8 - 1)),
         },
         "claude-3-haiku-20240307" => ModelDetails {
-            provider: ProviderId::Openrouter,
+            provider: ProviderId::Anthropic,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
@@ -134,7 +134,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             warn!(model = id, ?model, "Missing model details.");
 
             ModelDetails {
-                provider: ProviderId::Openrouter,
+                provider: ProviderId::Anthropic,
                 slug: model.id,
                 context_window: None,
                 max_output_tokens: None,
@@ -522,19 +522,21 @@ impl From<types::MessageContent> for Delta {
 mod tests {
     use std::path::PathBuf;
 
+    use jp_config::llm::ProviderModelSlug;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
-    use time::macros::date;
 
     use super::*;
 
+    fn vcr() -> Vcr {
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        Vcr::new("https://api.anthropic.com", fixtures)
+    }
+
     #[test(tokio::test)]
     async fn test_anthropic_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default();
-        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-
-        let mut vcr = Vcr::new("https://api.anthropic.com", fixtures);
-        vcr.set_recording(env::var("RECORD").is_ok());
+        let mut config = llm::Config::default().provider.anthropic;
+        let vcr = vcr();
         vcr.cassette(
             function_name!(),
             |rule| {
@@ -542,25 +544,62 @@ mod tests {
                     when.any_request();
                 });
             },
-            |_recording, url| async move {
-                config.provider.anthropic.base_url = url;
-                let model = Anthropic::try_from(&config.provider.anthropic)
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Anthropic::try_from(&config)
                     .unwrap()
                     .models()
                     .await
-                    .unwrap()
-                    .into_iter()
-                    .find(|m| m.slug == "claude-3-7-sonnet-20250219")
-                    .unwrap();
+                    .map(|mut v| {
+                        v.truncate(2);
+                        v
+                    })
+            },
+        )
+        .await
+    }
 
-                assert_eq!(model, ModelDetails {
-                    provider: ProviderId::Openrouter,
-                    slug: "claude-3-7-sonnet-20250219".to_owned(),
-                    context_window: Some(200_000),
-                    max_output_tokens: Some(64_000),
-                    reasoning: Some(true),
-                    knowledge_cutoff: Some(date!(2024 - 11 - 01))
+    #[test(tokio::test)]
+    async fn test_anthropic_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let mut config = llm::Config::default().provider.anthropic;
+        let model: ProviderModelSlug = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
+        let query = ChatQuery {
+            thread: Thread {
+                message: "Test message".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let vcr = vcr();
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
                 });
+            },
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Anthropic::try_from(&config)
+                    .unwrap()
+                    .chat_completion(&model.into(), query)
+                    .await
+                    .map(|mut v| {
+                        v.truncate(10);
+                        v
+                    })
             },
         )
         .await

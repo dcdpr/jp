@@ -1822,6 +1822,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "insta"
+version = "1.43.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "154934ea70c58054b556dd430b99a98c2a7ff5309ac9891597e339b5c28f4371"
+dependencies = [
+ "console",
+ "once_cell",
+ "similar",
+]
+
+[[package]]
 name = "instant"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2058,6 +2069,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "futures",
+ "insta",
  "jp_config",
  "jp_conversation",
  "jp_mcp",
@@ -2148,6 +2160,7 @@ name = "jp_test"
 version = "0.1.0"
 dependencies = [
  "httpmock",
+ "insta",
  "saphyr",
 ]
 
@@ -2524,7 +2537,7 @@ dependencies = [
 [[package]]
 name = "openai_responses"
 version = "0.1.6"
-source = "git+https://github.com/JeanMertz/openai-responses-rs#90aad63f4586b5e6e9a049227e01216299d548ce"
+source = "git+https://github.com/JeanMertz/openai-responses-rs#7c7f47842e00e6716568f822d294ca8355985fac"
 dependencies = [
  "async-fn-stream",
  "chrono",
@@ -4447,7 +4460,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

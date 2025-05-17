@@ -597,19 +597,21 @@ impl From<types::OutputItem> for Delta {
 mod tests {
     use std::path::PathBuf;
 
+    use jp_config::llm::ProviderModelSlug;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
-    use time::macros::date;
 
     use super::*;
 
+    fn vcr() -> Vcr {
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        Vcr::new("https://api.openai.com", fixtures)
+    }
+
     #[test(tokio::test)]
     async fn test_openai_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default();
-        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-
-        let mut vcr = Vcr::new("https://api.openai.com/v1", fixtures);
-        vcr.set_recording(env::var("RECORD").is_ok());
+        let mut config = llm::Config::default().provider.openai;
+        let vcr = vcr();
         vcr.cassette(
             function_name!(),
             |rule| {
@@ -617,26 +619,57 @@ mod tests {
                     when.any_request();
                 });
             },
-            |_recording, url| async move {
-                config.provider.openai.base_url = url;
-                let model = Openai::try_from(&config.provider.openai)
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Openai::try_from(&config)
                     .unwrap()
                     .models()
                     .await
-                    .unwrap()
-                    .into_iter()
-                    .inspect(|m| println!("{m:?}"))
-                    .find(|m| m.slug == "o4-mini")
-                    .unwrap();
+                    .map(|mut v| {
+                        v.truncate(2);
+                        v
+                    })
+            },
+        )
+        .await
+    }
 
-                assert_eq!(model, ModelDetails {
-                    provider: ProviderId::Openai,
-                    slug: "o4-mini".to_owned(),
-                    context_window: Some(200_000),
-                    max_output_tokens: Some(100_000),
-                    reasoning: Some(true),
-                    knowledge_cutoff: Some(date!(2024 - 06 - 01))
+    #[test(tokio::test)]
+    async fn test_openai_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = llm::Config::default().provider.openai;
+        let model: ProviderModelSlug = "openai/o4-mini".parse().unwrap();
+        let query = ChatQuery {
+            thread: Thread {
+                message: "Test message".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let vcr = vcr();
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
                 });
+            },
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Openai::try_from(&config)
+                    .unwrap()
+                    .chat_completion(&model.into(), query)
+                    .await
             },
         )
         .await

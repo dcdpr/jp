@@ -1,0 +1,42 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    ChatCompletion {
+        id: "gen-1747515689-zxAFPHfE9OxmskIbVhIk",
+        provider: "Anthropic",
+        choices: [
+            NonStreaming(
+                NonStreamingChoice {
+                    finish_reason: Stop,
+                    native_finish_reason: "stop",
+                    message: NonStreamingMessage {
+                        role: "assistant",
+                        content: Some(
+                            "Here is a haiku for your test:\n\nFocused mind, clear\nPen glides, words take their form\nTriumph awaits soon",
+                        ),
+                        reasoning: None,
+                        tool_calls: [],
+                    },
+                    error: None,
+                    index: 0,
+                },
+            ),
+        ],
+        created: 2025-05-17 21:01:29.0 +00:00:00,
+        model: "anthropic/claude-3-haiku",
+        object: ChatCompletion,
+        system_fingerprint: None,
+        usage: Some(
+            Usage {
+                completion_tokens: 35,
+                completion_tokens_details: None,
+                cost: None,
+                prompt_tokens: 17,
+                prompt_tokens_details: None,
+                total_tokens: 52,
+            },
+        ),
+    },
+)
