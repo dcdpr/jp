@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -19,7 +19,7 @@ impl Vcr {
         Self {
             forward_to: forward_to.into(),
             fixtures: fixtures.into(),
-            recording: false,
+            recording: env::var("RECORD").is_ok(),
         }
     }
 
@@ -39,7 +39,7 @@ impl Vcr {
     }
 
     /// Record a test cassette.
-    pub async fn cassette<R, F, Fut>(
+    pub async fn cassette<R, F, Fut, O>(
         &self,
         name: &str,
         rule_builder: R,
@@ -48,7 +48,8 @@ impl Vcr {
     where
         R: FnOnce(RecordingRuleBuilder),
         F: FnOnce(bool, String) -> Fut,
-        Fut: Future<Output = ()>,
+        Fut: Future<Output = O>,
+        O: std::fmt::Debug,
     {
         let fixture = self.fixtures.join(format!("{name}.yml"));
         let server = MockServer::start_async().await;
@@ -64,7 +65,8 @@ impl Vcr {
 
             let recording = server.record_async(rule_builder).await;
 
-            test_fn(true, server.base_url()).await;
+            let out = test_fn(true, server.base_url()).await;
+            self.verify(name, out);
 
             let temp_path = recording.save_to_async(&self.fixtures, name).await?;
 
@@ -75,12 +77,19 @@ impl Vcr {
             modify_fixture(&fixture)?;
         } else if fixture.exists() {
             server.playback_async(&fixture).await;
-            test_fn(false, server.base_url()).await;
+            let out = test_fn(false, server.base_url()).await;
+            self.verify(name, out);
         } else {
             return Err(format!("Recording not found at {}", fixture.display()).into());
         }
 
         Ok(())
+    }
+
+    fn verify<T: std::fmt::Debug>(&self, name: &str, expr: T) {
+        insta::with_settings!({ snapshot_path => &self.fixtures, prepend_module_to_snapshot => false }, {
+            insta::assert_debug_snapshot!(name, expr);
+        });
     }
 }
 

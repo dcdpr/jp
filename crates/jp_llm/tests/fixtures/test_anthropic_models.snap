@@ -1,0 +1,40 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    [
+        ModelDetails {
+            provider: Anthropic,
+            slug: "claude-3-7-sonnet-20250219",
+            context_window: Some(
+                200000,
+            ),
+            max_output_tokens: Some(
+                64000,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: Some(
+                2024-11-01,
+            ),
+        },
+        ModelDetails {
+            provider: Anthropic,
+            slug: "claude-3-5-sonnet-20241022",
+            context_window: Some(
+                200000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: Some(
+                false,
+            ),
+            knowledge_cutoff: Some(
+                2024-04-01,
+            ),
+        },
+    ],
+)

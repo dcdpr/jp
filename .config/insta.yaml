@@ -1,0 +1,7 @@
+behavior:
+  update: "always"
+test:
+  runner: "nextest"
+  test_runner_fallback: true
+  auto_review: false
+  auto_accept_unseen: true

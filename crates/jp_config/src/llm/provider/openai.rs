@@ -13,7 +13,7 @@ pub struct Config {
     ///
     /// Used if `OPENAI_BASE_URL` is not set.
     #[config(
-        default = "https://api.openai.com/v1",
+        default = "https://api.openai.com",
         env = "JP_LLM_PROVIDER_OPENAI_BASE_URL"
     )]
     pub base_url: String,
@@ -30,7 +30,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             api_key_env: "OPENAI_API_KEY".to_owned(),
-            base_url: "https://api.openai.com/v1".to_owned(),
+            base_url: "https://api.openai.com".to_owned(),
             base_url_env: "OPENAI_BASE_URL".to_owned(),
         }
     }

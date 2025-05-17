@@ -1,0 +1,11 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    [
+        "Test Message Interaction",
+        "Assistant Chat Response",
+        "Simple Conversational Exchange",
+    ],
+)

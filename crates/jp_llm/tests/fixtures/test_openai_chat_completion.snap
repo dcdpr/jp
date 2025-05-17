@@ -1,0 +1,14 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    [
+        Reasoning(
+            "",
+        ),
+        Content(
+            "Test message received! How can I assist you today?",
+        ),
+    ],
+)

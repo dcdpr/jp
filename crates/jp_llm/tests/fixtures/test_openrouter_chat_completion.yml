@@ -1,0 +1,10 @@
+when:
+  path: /api/v1/chat/completions
+  method: POST
+  body: "{\"model\":\"openai/o4-mini\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Test message\"}]}],\"tool_choice\":\"none\"}"
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/json
+  body: "\n         \n\n         \n\n         \n{\"id\":\"gen-1747515689-TSAnn4YsjqG72TfHMXMv\",\"provider\":\"OpenAI\",\"model\":\"openai/o4-mini\",\"object\":\"chat.completion\",\"created\":1747515689,\"choices\":[{\"logprobs\":null,\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Test message received. How can I help you today?\",\"refusal\":null,\"reasoning\":null}}],\"system_fingerprint\":null,\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":93,\"total_tokens\":101,\"prompt_tokens_details\":{\"cached_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":64}}}"

@@ -14,6 +14,7 @@ version.workspace = true
 
 [dependencies]
 httpmock = { workspace = true, features = ["record"] }
+insta = { workspace = true, features = ["colors"] }
 saphyr = { workspace = true, features = ["encoding"] }
 
 [lints]

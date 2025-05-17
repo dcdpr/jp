@@ -45,6 +45,7 @@ linkme = { version = "0.3", default-features = false }
 # See: <https://github.com/m1guelpf/openai-responses-rs/pull/6>
 # openai_responses = { version = "0.1", default-features = false }
 indoc = { version = "2", default-features = false }
+insta = { version = "1", default-features = false }
 json5 = { version = "0.4", default-features = false }
 minijinja = { version = "2", default-features = false }
 openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs", default-features = false }

@@ -1,0 +1,10 @@
+when:
+  path: /v1/messages
+  method: POST
+  body: "{\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Test message\"}]}],\"model\":\"claude-3-5-haiku-latest\",\"max_tokens\":2048,\"stream\":false}"
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/json
+  body: "{\"id\":\"msg_01KsA2unN2gic62dMyqSv5Gk\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-5-haiku-latest\",\"content\":[{\"type\":\"text\",\"text\":\"Hello! I'm here and ready to help. What can I assist you with today?\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":9,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":21}}"

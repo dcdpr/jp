@@ -6,21 +6,23 @@ use jp_llm::{provider::openrouter::Openrouter, structured_completion};
 use jp_query::structured::conversation_titles;
 use jp_test::{function_name, mock::Vcr};
 
+fn vcr() -> Vcr {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    Vcr::new("https://openrouter.ai", fixtures)
+}
+
 #[tokio::test]
 async fn test_conversation_titles() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     // Create test data
     let model: ProviderModelSlug = "openrouter/openai/o3-mini-high".parse().unwrap();
-    let mut config = llm::Config::default();
+    let mut config = llm::Config::default().provider.openrouter;
 
     let message = UserMessage::Query("Test message".to_string());
     let history = vec![MessagePair::new(message, AssistantMessage::default())];
-    let recording = env::var("RECORD").is_ok();
-    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let mut vcr = Vcr::new("https://openrouter.ai", fixtures);
-    vcr.set_recording(recording);
 
+    let vcr = vcr();
     vcr.cassette(
         function_name!(),
         |rule| {
@@ -28,15 +30,16 @@ async fn test_conversation_titles() -> Result<(), Box<dyn std::error::Error>> {
                 when.any_request();
             });
         },
-        |_recording, url| async move {
-            config.provider.openrouter.base_url = url;
-            let provider = Openrouter::try_from(&config.provider.openrouter).unwrap();
-            let query = conversation_titles(3, history, &[]).unwrap();
-            let titles: Vec<String> = structured_completion(&provider, &model.into(), query)
-                .await
-                .unwrap();
+        |recording, url| async move {
+            config.base_url = url;
+            if !recording {
+                // dummy api key value when replaying a cassette
+                config.api_key_env = "USER".to_owned();
+            }
 
-            assert_eq!(titles.len(), 3);
+            let provider = Openrouter::try_from(&config).unwrap();
+            let query = conversation_titles(3, history, &[]).unwrap();
+            structured_completion::<Vec<String>>(&provider, &model.into(), query).await
         },
     )
     .await

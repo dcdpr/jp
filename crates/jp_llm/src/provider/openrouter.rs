@@ -552,19 +552,21 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> RequestMessage {
 mod tests {
     use std::path::PathBuf;
 
+    use jp_config::llm::ProviderModelSlug;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
-    use time::macros::date;
 
     use super::*;
 
+    fn vcr() -> Vcr {
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        Vcr::new("https://openrouter.ai", fixtures)
+    }
+
     #[test(tokio::test)]
     async fn test_openrouter_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default();
-        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-
-        let mut vcr = Vcr::new("https://openrouter.ai", fixtures);
-        vcr.set_recording(env::var("RECORD").is_ok());
+        let mut config = llm::Config::default().provider.openrouter;
+        let vcr = vcr();
         vcr.cassette(
             function_name!(),
             |rule| {
@@ -572,25 +574,58 @@ mod tests {
                     when.any_request();
                 });
             },
-            |_recording, url| async move {
-                config.provider.openrouter.base_url = url;
-                let model = Openrouter::try_from(&config.provider.openrouter)
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Openrouter::try_from(&config)
                     .unwrap()
                     .models()
                     .await
-                    .unwrap()
-                    .into_iter()
-                    .find(|m| m.slug == "openai/gpt-4o-mini")
-                    .unwrap();
+                    .map(|mut v| {
+                        v.truncate(2);
+                        v
+                    })
+            },
+        )
+        .await
+    }
 
-                assert_eq!(model, ModelDetails {
-                    provider: ProviderId::Openrouter,
-                    slug: "openai/gpt-4o-mini".to_owned(),
-                    context_window: Some(128_000),
-                    max_output_tokens: None,
-                    reasoning: None,
-                    knowledge_cutoff: Some(date!(2024 - 07 - 18)),
+    #[test(tokio::test)]
+    async fn test_openrouter_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let mut config = llm::Config::default().provider.openrouter;
+        let model: ProviderModelSlug = "openrouter/openai/o4-mini".parse().unwrap();
+        let query = ChatQuery {
+            thread: Thread {
+                message: "Test message".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let vcr = vcr();
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
                 });
+            },
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Openrouter::try_from(&config)
+                    .unwrap()
+                    .chat_completion(&model.into(), query)
+                    .await
             },
         )
         .await

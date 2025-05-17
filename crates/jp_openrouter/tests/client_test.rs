@@ -11,6 +11,11 @@ use jp_openrouter::{
 };
 use jp_test::{function_name, mock::Vcr};
 
+fn vcr() -> Vcr {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    Vcr::new("https://openrouter.ai", fixtures)
+}
+
 #[tokio::test]
 async fn test_chat_completion_stream() {
     let sample_request = request::ChatCompletion {
@@ -21,11 +26,7 @@ async fn test_chat_completion_stream() {
         ..Default::default()
     };
 
-    let recording = env::var("RECORD").is_ok();
-    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let mut vcr = Vcr::new("https://openrouter.ai", fixtures);
-    vcr.set_recording(recording);
-
+    let vcr = vcr();
     vcr.cassette(
         function_name!(),
         |rule| {
@@ -50,17 +51,15 @@ async fn test_chat_completion_stream() {
 
             while let Some(result) = stream.next().await {
                 match result {
-                    Ok(chunk) => {
+                    Ok(chunk) if collected_chunks.len() < 10 => {
                         collected_chunks.push(chunk);
                     }
+                    Ok(_) => {}
                     Err(e) => panic!("Stream error during test: {e}"),
                 }
             }
 
-            assert!(
-                !collected_chunks.is_empty(),
-                "Should receive at least one chunk"
-            );
+            collected_chunks
         },
     )
     .await
@@ -77,11 +76,7 @@ async fn test_chat_completion() {
         ..Default::default()
     };
 
-    let recording = env::var("RECORD").is_ok();
-    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let mut vcr = Vcr::new("https://openrouter.ai", fixtures);
-    vcr.set_recording(recording);
-
+    let vcr = vcr();
     vcr.cassette(
         function_name!(),
         |rule| {
@@ -96,13 +91,10 @@ async fn test_chat_completion() {
                 .unwrap_or_default();
 
             // Make the request
-            let completion = Client::new(api_key, None, None)
+            Client::new(api_key, None, None)
                 .with_base_url(url)
                 .chat_completion(sample_request)
                 .await
-                .unwrap();
-
-            assert!(!completion.choices.is_empty());
         },
     )
     .await

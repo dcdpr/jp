@@ -56,7 +56,7 @@ pub enum StreamEvent {
 }
 
 /// Represents a completed event from the LLM.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// Chat response text
     Content(String),

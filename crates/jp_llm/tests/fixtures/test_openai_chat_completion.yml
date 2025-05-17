@@ -1,0 +1,10 @@
+when:
+  path: /v1/responses
+  method: POST
+  body: "{\"model\":\"o4-mini\",\"input\":[{\"type\":\"message\",\"role\":\"user\",\"content\":\"Test message\",\"status\":null}],\"include\":null,\"instructions\":null,\"max_output_tokens\":null,\"metadata\":null,\"parallel_tool_calls\":null,\"previous_response_id\":null,\"reasoning\":null,\"service_tier\":null,\"store\":false,\"stream\":false,\"temperature\":null,\"text\":null,\"tool_choice\":\"auto\",\"tools\":[],\"top_p\":null,\"truncation\":\"auto\",\"user\":null}"
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/json
+  body: "{\n  \"id\": \"resp_6828f929edec81918aa215bf1f74ed0602aa5757dbee0d47\",\n  \"object\": \"response\",\n  \"created_at\": 1747515689,\n  \"status\": \"completed\",\n  \"error\": null,\n  \"incomplete_details\": null,\n  \"instructions\": null,\n  \"max_output_tokens\": null,\n  \"model\": \"o4-mini-2025-04-16\",\n  \"output\": [\n    {\n      \"id\": \"rs_6828f92a3ecc8191acdca8bfa226a12602aa5757dbee0d47\",\n      \"type\": \"reasoning\",\n      \"summary\": []\n    },\n    {\n      \"id\": \"msg_6828f92b9708819186457b90d8253e5f02aa5757dbee0d47\",\n      \"type\": \"message\",\n      \"status\": \"completed\",\n      \"content\": [\n        {\n          \"type\": \"output_text\",\n          \"annotations\": [],\n          \"text\": \"Test message received! How can I assist you today?\"\n        }\n      ],\n      \"role\": \"assistant\"\n    }\n  ],\n  \"parallel_tool_calls\": true,\n  \"previous_response_id\": null,\n  \"reasoning\": {\n    \"effort\": \"medium\",\n    \"summary\": null\n  },\n  \"service_tier\": \"default\",\n  \"store\": false,\n  \"temperature\": 1.0,\n  \"text\": {\n    \"format\": {\n      \"type\": \"text\"\n    }\n  },\n  \"tool_choice\": \"auto\",\n  \"tools\": [],\n  \"top_p\": 1.0,\n  \"truncation\": \"auto\",\n  \"usage\": {\n    \"input_tokens\": 8,\n    \"input_tokens_details\": {\n      \"cached_tokens\": 0\n    },\n    \"output_tokens\": 81,\n    \"output_tokens_details\": {\n      \"reasoning_tokens\": 64\n    },\n    \"total_tokens\": 89\n  },\n  \"user\": null,\n  \"metadata\": {}\n}"
