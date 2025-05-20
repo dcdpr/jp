@@ -12,13 +12,13 @@ use serde::{Deserialize, Serialize};
 /// state.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub(crate) struct State {
-    pub workspace: WorkspaceState,
     pub local: LocalState,
+    pub user: UserState,
 }
 
 /// Represents the entire in-memory workspace state.
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub(crate) struct WorkspaceState {
+pub(crate) struct LocalState {
     /// The active conversation.
     ///
     /// This is stored separately, to guarantee that an active conversation
@@ -47,7 +47,7 @@ pub(crate) struct WorkspaceState {
 
 /// Represents the entire in-memory local state.
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub(crate) struct LocalState {
+pub(crate) struct UserState {
     pub conversations_metadata: ConversationsMetadata,
 }
 
