@@ -22,10 +22,10 @@ jp_test = { path = "crates/jp_test" }
 jp_tombmap = { path = "crates/jp_tombmap" }
 jp_workspace = { path = "crates/jp_workspace" }
 
-async-anthropic = { version = "0.6", default-features = false }
+async-anthropic = { git = "https://github.com/JeanMertz/async-anthropic", default-features = false }
 async-stream = { version = "0.3", default-features = false }
 async-trait = { version = "0.1", default-features = false }
-backoff = { version = "0.4", default-features = false }
+backon = { version = "1", default-features = false }
 bat = { version = "0.25", default-features = false }
 clap = { version = "4", default-features = false }
 comfy-table = { version = "7", default-features = false }
@@ -41,14 +41,14 @@ futures = { version = "0.3", default-features = false }
 glob = { version = "0.3", default-features = false }
 httpmock = { git = "https://github.com/alexliesenfeld/httpmock", default-features = false }
 ignore = { version = "0.4", default-features = false }
-inquire = { version = "0.7", default-features = false }
-linkme = { version = "0.3", default-features = false }
-# See: <https://github.com/m1guelpf/openai-responses-rs/pull/6>
-# openai_responses = { version = "0.1", default-features = false }
 indoc = { version = "2", default-features = false }
+inquire = { version = "0.7", default-features = false }
 insta = { version = "1", default-features = false }
 json5 = { version = "0.4", default-features = false }
+linkme = { version = "0.3", default-features = false }
 minijinja = { version = "2", default-features = false }
+# See: <https://github.com/m1guelpf/openai-responses-rs/pull/6>
+# openai_responses = { version = "0.1", default-features = false }
 openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs", default-features = false }
 path-clean = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }
