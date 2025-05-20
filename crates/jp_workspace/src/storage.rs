@@ -12,13 +12,13 @@ use jp_conversation::{
 };
 use jp_id::Id as _;
 use jp_mcp::config::{McpServer, McpServerId};
+use jp_tombmap::TombMap;
 use serde::Serialize;
 use serde_json::Value;
 use tracing::{info, trace, warn};
 
 use crate::{
     error::{Error, Result},
-    map::TombMap,
     state::ConversationsMetadata,
     value::{deep_merge, read_json, write_json},
     State,

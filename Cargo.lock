@@ -2165,6 +2165,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp_tombmap"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "test-log",
+]
+
+[[package]]
 name = "jp_workspace"
 version = "0.1.0"
 dependencies = [
@@ -2172,6 +2180,7 @@ dependencies = [
  "jp_conversation",
  "jp_id",
  "jp_mcp",
+ "jp_tombmap",
  "serde",
  "serde_json",
  "tempfile",
