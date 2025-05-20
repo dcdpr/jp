@@ -49,17 +49,13 @@ pub fn load_partial(
     }
 
     // Start with local configs by walking up the directory tree.
-    if inherit {
-        if let Some(root) = root.parent() {
-            inherit = search_config_file(root, &mut partials)?;
-        }
+    if inherit && let Some(root) = root.parent() {
+        inherit = search_config_file(root, &mut partials)?;
     }
 
     // Add global config if inheritance is allowed, and file is found.
-    if inherit {
-        if let Some(file) = open_global_config_file(env::var("HOME").ok().as_deref())? {
-            partials.push(file.load::<PartialConfig>()?);
-        }
+    if inherit && let Some(file) = open_global_config_file(env::var("HOME").ok().as_deref())? {
+        partials.push(file.load::<PartialConfig>()?);
     }
 
     // Merge all partials in reverse order (most general to most specific).

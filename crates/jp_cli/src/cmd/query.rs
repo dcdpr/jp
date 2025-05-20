@@ -215,10 +215,10 @@ impl Args {
             fs::remove_file(path)?;
         }
 
-        if self.schema.is_some() {
-            if let Some(content) = reply.content {
-                return Ok(Success::Json(serde_json::from_str(&content)?));
-            }
+        if self.schema.is_some()
+            && let Some(content) = reply.content
+        {
+            return Ok(Success::Json(serde_json::from_str(&content)?));
         }
 
         Ok(Success::Ok)
@@ -273,24 +273,24 @@ impl Args {
                 editor::edit_query(path, initial_message, messages).map(|(q, p)| (q, Some(p)))?;
         }
 
-        if let UserMessage::Query(query) = &mut message {
-            if self.template {
-                let mut env = Environment::empty();
-                env.set_undefined_behavior(UndefinedBehavior::SemiStrict);
-                env.add_template("query", query)?;
+        if let UserMessage::Query(query) = &mut message
+            && self.template
+        {
+            let mut env = Environment::empty();
+            env.set_undefined_behavior(UndefinedBehavior::SemiStrict);
+            env.add_template("query", query)?;
 
-                let tmpl = env.get_template("query")?;
-                // TODO: supported nested variables
-                for var in tmpl.undeclared_variables(false) {
-                    if ctx.config.template.values.contains_key(&var) {
-                        continue;
-                    }
-
-                    return Err(Error::TemplateUndefinedVariable(var));
+            let tmpl = env.get_template("query")?;
+            // TODO: supported nested variables
+            for var in tmpl.undeclared_variables(false) {
+                if ctx.config.template.values.contains_key(&var) {
+                    continue;
                 }
 
-                *query = tmpl.render(&ctx.config.template.values)?;
+                return Err(Error::TemplateUndefinedVariable(var));
             }
+
+            *query = tmpl.render(&ctx.config.template.values)?;
         }
 
         Ok((message, query_file_path))
