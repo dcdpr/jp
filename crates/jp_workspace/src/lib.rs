@@ -61,7 +61,7 @@ use jp_conversation::{
     Persona, PersonaId,
 };
 use jp_mcp::config::{McpServer, McpServerId};
-use state::{LocalState, State, WorkspaceState};
+use state::{LocalState, State, UserState};
 use storage::{Storage, DEFAULT_STORAGE_DIR, MCP_SERVERS_DIR};
 use tracing::{debug, info, trace};
 
@@ -241,7 +241,7 @@ impl Workspace {
             });
 
         self.state = State {
-            workspace: WorkspaceState {
+            local: LocalState {
                 active_conversation,
                 named_contexts,
                 conversations,
@@ -250,7 +250,7 @@ impl Workspace {
                 models,
                 mcp_servers,
             },
-            local: LocalState {
+            user: UserState {
                 conversations_metadata,
             },
         };
@@ -275,7 +275,7 @@ impl Workspace {
     #[must_use]
     pub fn active_conversation_id(&self) -> ConversationId {
         self.state
-            .local
+            .user
             .conversations_metadata
             .active_conversation_id
     }
@@ -286,14 +286,14 @@ impl Workspace {
         // returning an error if it doesn't exist.
         let new_active_conversation = self
             .state
-            .workspace
+            .local
             .conversations
             .remove(&id)
             .ok_or(Error::not_found("Conversation", &id))?;
 
         // Replace the active conversation with the new one.
         let old_active_conversation = std::mem::replace(
-            &mut self.state.workspace.active_conversation,
+            &mut self.state.local.active_conversation,
             new_active_conversation,
         );
 
@@ -301,7 +301,7 @@ impl Workspace {
         let old_active_conversation_id = std::mem::replace(
             &mut self
                 .state
-                .local
+                .user
                 .conversations_metadata
                 .active_conversation_id,
             id,
@@ -311,13 +311,13 @@ impl Workspace {
         // conversations, but only if it has any messages attached.
         if self
             .state
-            .workspace
+            .local
             .messages
             .get(&old_active_conversation_id)
             .is_some_and(|v| !v.is_empty())
         {
             self.state
-                .workspace
+                .local
                 .conversations
                 .insert(old_active_conversation_id, old_active_conversation);
         }
@@ -327,13 +327,13 @@ impl Workspace {
 
     /// Returns an iterator over all personas.
     pub fn personas(&self) -> impl Iterator<Item = (&PersonaId, &Persona)> {
-        self.state.workspace.personas.iter()
+        self.state.local.personas.iter()
     }
 
     /// Gets a reference to a persona by its ID.
     #[must_use]
     pub fn get_persona(&self, id: &PersonaId) -> Option<&Persona> {
-        self.state.workspace.personas.get(id)
+        self.state.local.personas.get(id)
     }
 
     /// Create a new persona.
@@ -350,7 +350,7 @@ impl Workspace {
     pub fn create_persona_with_id(&mut self, id: PersonaId, persona: Persona) -> Result<PersonaId> {
         use jp_tombmap::Entry::*;
 
-        let id = match self.state.workspace.personas.entry(id) {
+        let id = match self.state.local.personas.entry(id) {
             Occupied(entry) => return Err(Error::exists("Persona", entry.key())),
             Vacant(entry) => entry.insert_entry(persona).key().clone(),
         };
@@ -366,18 +366,18 @@ impl Workspace {
             return None;
         }
 
-        self.state.workspace.personas.remove(id)
+        self.state.local.personas.remove(id)
     }
 
     /// Returns an iterator over all defined LLM models.
     pub fn models(&self) -> impl Iterator<Item = (&ModelId, &Model)> {
-        self.state.workspace.models.iter()
+        self.state.local.models.iter()
     }
 
     /// Gets a reference to an LLM model by its ID.
     #[must_use]
     pub fn get_model(&self, id: &ModelId) -> Option<&Model> {
-        self.state.workspace.models.get(id)
+        self.state.local.models.get(id)
     }
 
     /// Resolves an `LlmModelReference` to a concrete `LlmModel`.
@@ -405,11 +405,11 @@ impl Workspace {
     ///
     /// Returns an error if a model with that ID already exists.
     pub fn create_model_with_id(&mut self, id: ModelId, model: Model) -> Result<ModelId> {
-        if self.state.workspace.models.contains_key(&id) {
+        if self.state.local.models.contains_key(&id) {
             return Err(Error::exists("Model", &id));
         }
 
-        self.state.workspace.models.insert(id.clone(), model);
+        self.state.local.models.insert(id.clone(), model);
         Ok(id)
     }
 
@@ -417,7 +417,7 @@ impl Workspace {
     ///
     /// Returns the removed model if it existed.
     pub fn remove_model(&mut self, id: &ModelId) -> Option<Model> {
-        self.state.workspace.models.remove(id)
+        self.state.local.models.remove(id)
     }
 
     /// Returns an iterator over all conversations.
@@ -436,18 +436,18 @@ impl Workspace {
     #[must_use]
     pub fn get_conversation_mut(&mut self, id: &ConversationId) -> Option<&mut Conversation> {
         if id == &self.active_conversation_id() {
-            return Some(&mut self.state.workspace.active_conversation);
+            return Some(&mut self.state.local.active_conversation);
         }
 
-        self.state.workspace.conversations.get_mut(id)
+        self.state.local.conversations.get_mut(id)
     }
 
     /// Creates a new conversation.
     pub fn create_conversation(&mut self, conversation: Conversation) -> ConversationId {
         let id = ConversationId::default();
 
-        self.state.workspace.conversations.insert(id, conversation);
-        self.state.workspace.messages.entry(id).or_default();
+        self.state.local.conversations.insert(id, conversation);
+        self.state.local.messages.entry(id).or_default();
         id
     }
 
@@ -461,7 +461,7 @@ impl Workspace {
             return Err(Error::CannotRemoveActiveConversation(active_id));
         }
 
-        Ok(self.state.workspace.conversations.remove(id))
+        Ok(self.state.local.conversations.remove(id))
     }
 
     /// Gets a reference to the currently active conversation.
@@ -469,20 +469,20 @@ impl Workspace {
     /// Creates a new conversation if none exists.
     #[must_use]
     pub fn get_active_conversation(&self) -> &Conversation {
-        &self.state.workspace.active_conversation
+        &self.state.local.active_conversation
     }
 
     /// Gets a mutable reference to the currently active conversation.
     #[must_use]
     pub fn get_active_conversation_mut(&mut self) -> &mut Conversation {
-        &mut self.state.workspace.active_conversation
+        &mut self.state.local.active_conversation
     }
 
     /// Gets the messages for a specific conversation. Returns an empty slice if not found.
     #[must_use]
     pub fn get_messages(&self, id: &ConversationId) -> &[MessagePair] {
         self.state
-            .workspace
+            .local
             .messages
             .get(id)
             .map_or(&[], |v| v.as_slice())
@@ -490,13 +490,13 @@ impl Workspace {
 
     /// Removes the last message from a conversation.
     pub fn pop_message(&mut self, id: &ConversationId) -> Option<MessagePair> {
-        self.state.workspace.messages.get_mut(id).and_then(Vec::pop)
+        self.state.local.messages.get_mut(id).and_then(Vec::pop)
     }
 
     /// Adds a message to a conversation.
     pub fn add_message(&mut self, id: ConversationId, message: MessagePair) {
         self.state
-            .workspace
+            .local
             .messages
             .entry(id)
             .or_default()
@@ -505,7 +505,7 @@ impl Workspace {
 
     /// Returns an iterator over all configured MCP servers.
     pub fn mcp_servers(&self) -> impl Iterator<Item = &McpServer> {
-        self.state.workspace.mcp_servers.values()
+        self.state.local.mcp_servers.values()
     }
 
     /// Returns the path to the MCP servers directory, if storage is enabled.
@@ -528,40 +528,40 @@ impl Workspace {
     /// Gets a reference to an MCP server by its ID.
     #[must_use]
     pub fn get_mcp_server(&self, id: &McpServerId) -> Option<&McpServer> {
-        self.state.workspace.mcp_servers.get(id)
+        self.state.local.mcp_servers.get(id)
     }
 
     /// Adds an MCP Server configuration.
     pub fn create_mcp_server(&mut self, server: McpServer) -> Option<McpServer> {
         let id = server.id.clone();
-        self.state.workspace.mcp_servers.insert(id, server)
+        self.state.local.mcp_servers.insert(id, server)
     }
 
     /// Removes an MCP server configuration by ID.
     pub fn remove_mcp_server(&mut self, id: &McpServerId) -> Option<McpServer> {
-        self.state.workspace.mcp_servers.remove(id)
+        self.state.local.mcp_servers.remove(id)
     }
 
     /// Returns an iterator over all named contexts.
     pub fn named_contexts(&self) -> impl Iterator<Item = (&ContextId, &Context)> {
-        self.state.workspace.named_contexts.iter()
+        self.state.local.named_contexts.iter()
     }
 
     /// Gets a reference to a named context by its ID.
     #[must_use]
     pub fn get_named_context(&self, id: &ContextId) -> Option<&Context> {
-        self.state.workspace.named_contexts.get(id)
+        self.state.local.named_contexts.get(id)
     }
 
     /// Returns an iterator over all conversations, including the active one.
     fn all_conversations(&self) -> impl Iterator<Item = (&ConversationId, &Conversation)> {
-        self.state.workspace.conversations.iter().chain(iter::once((
+        self.state.local.conversations.iter().chain(iter::once((
             &self
                 .state
-                .local
+                .user
                 .conversations_metadata
                 .active_conversation_id,
-            &self.state.workspace.active_conversation,
+            &self.state.local.active_conversation,
         )))
     }
 
@@ -748,7 +748,7 @@ mod tests {
 
         let id = PersonaId::try_from("p1").unwrap();
         let persona = Persona::new("p1");
-        workspace.state.workspace.personas.insert(id, persona);
+        workspace.state.local.personas.insert(id, persona);
         assert_eq!(workspace.personas().count(), 1);
     }
 
@@ -763,7 +763,7 @@ mod tests {
         let persona = Persona::new("p1");
         workspace
             .state
-            .workspace
+            .local
             .personas
             .insert(id.clone(), persona.clone());
         assert_eq!(workspace.get_persona(&id), Some(&persona));
@@ -774,7 +774,7 @@ mod tests {
         jp_id::global::set("foo".to_owned());
 
         let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.workspace.personas.is_empty());
+        assert!(workspace.state.local.personas.is_empty());
 
         let persona = Persona::new("p1");
         let id = workspace.create_persona(persona.clone()).unwrap();
@@ -786,15 +786,15 @@ mod tests {
         jp_id::global::set("foo".to_owned());
 
         let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.workspace.personas.is_empty());
+        assert!(workspace.state.local.personas.is_empty());
 
         let persona = Persona::new("p1");
         let id = workspace.create_persona(persona.clone()).unwrap();
-        assert_eq!(workspace.state.workspace.personas.get(&id), Some(&persona));
+        assert_eq!(workspace.state.local.personas.get(&id), Some(&persona));
 
         let error = workspace.create_persona(persona).unwrap_err();
         assert_eq!(error, Error::exists("Persona", &id));
-        assert_eq!(workspace.state.workspace.personas.len(), 1);
+        assert_eq!(workspace.state.local.personas.len(), 1);
     }
 
     #[test]
@@ -802,19 +802,19 @@ mod tests {
         jp_id::global::set("foo".to_owned());
 
         let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.workspace.personas.is_empty());
+        assert!(workspace.state.local.personas.is_empty());
 
         let id = PersonaId::try_from("p1").unwrap();
         let persona = Persona::new("p1");
         workspace
             .state
-            .workspace
+            .local
             .personas
             .insert(id.clone(), persona.clone());
 
         let removed_persona = workspace.remove_persona(&id).unwrap();
         assert_eq!(removed_persona, persona);
-        assert!(workspace.state.workspace.personas.is_empty());
+        assert!(workspace.state.local.personas.is_empty());
     }
 
     #[test]
@@ -822,19 +822,19 @@ mod tests {
         jp_id::global::set("foo".to_owned());
 
         let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.workspace.personas.is_empty());
+        assert!(workspace.state.local.personas.is_empty());
 
         let id = PersonaId::try_from("default").unwrap();
         let persona = Persona::default();
         workspace
             .state
-            .workspace
+            .local
             .personas
             .insert(id.clone(), persona.clone());
 
         let removed_persona = workspace.remove_persona(&id);
         assert!(removed_persona.is_none());
-        assert_eq!(workspace.state.workspace.personas.len(), 1);
+        assert_eq!(workspace.state.local.personas.len(), 1);
     }
 
     #[test]
@@ -846,7 +846,7 @@ mod tests {
 
         let id = ModelId::try_from("openrouter/p1").unwrap();
         let model = Model::new(ProviderId::Openrouter, "p1");
-        workspace.state.workspace.models.insert(id, model);
+        workspace.state.local.models.insert(id, model);
         assert_eq!(workspace.models().count(), 1);
     }
 
@@ -861,7 +861,7 @@ mod tests {
         let model = Model::new(ProviderId::Openrouter, "p1");
         workspace
             .state
-            .workspace
+            .local
             .models
             .insert(id.clone(), model.clone());
         assert_eq!(workspace.get_model(&id), Some(&model));
@@ -872,11 +872,11 @@ mod tests {
         jp_id::global::set("foo".to_owned());
 
         let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.workspace.models.is_empty());
+        assert!(workspace.state.local.models.is_empty());
 
         let model = Model::new(ProviderId::Openrouter, "p1");
         let id = workspace.create_model(model.clone()).unwrap();
-        assert_eq!(workspace.state.workspace.models.get(&id), Some(&model));
+        assert_eq!(workspace.state.local.models.get(&id), Some(&model));
     }
 
     #[test]
@@ -884,33 +884,33 @@ mod tests {
         jp_id::global::set("foo".to_owned());
 
         let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.workspace.models.is_empty());
+        assert!(workspace.state.local.models.is_empty());
 
         let model = Model::new(ProviderId::Openrouter, "p1");
         let id = workspace.create_model(model.clone()).unwrap();
-        assert_eq!(workspace.state.workspace.models.get(&id), Some(&model));
+        assert_eq!(workspace.state.local.models.get(&id), Some(&model));
 
         let error = workspace.create_model(model).unwrap_err();
         assert_eq!(error, Error::exists("Model", &id));
-        assert_eq!(workspace.state.workspace.models.len(), 1);
+        assert_eq!(workspace.state.local.models.len(), 1);
     }
 
     #[test]
     fn test_workspace_remove_model() {
         let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.workspace.models.is_empty());
+        assert!(workspace.state.local.models.is_empty());
 
         let id = ModelId::try_from("openrouter/p1").unwrap();
         let model = Model::new(ProviderId::Openrouter, "p1");
         workspace
             .state
-            .workspace
+            .local
             .models
             .insert(id.clone(), model.clone());
 
         let removed_model = workspace.remove_model(&id).unwrap();
         assert_eq!(removed_model, model);
-        assert!(workspace.state.workspace.models.is_empty());
+        assert!(workspace.state.local.models.is_empty());
     }
 
     #[test]
@@ -920,18 +920,14 @@ mod tests {
 
         let id = ConversationId::default();
         let conversation = Conversation::default();
-        workspace
-            .state
-            .workspace
-            .conversations
-            .insert(id, conversation);
+        workspace.state.local.conversations.insert(id, conversation);
         assert_eq!(workspace.conversations().count(), 2);
     }
 
     #[test]
     fn test_workspace_get_conversation() {
         let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.workspace.conversations.is_empty());
+        assert!(workspace.state.local.conversations.is_empty());
 
         let id = ConversationId::try_from(UtcDateTime::now() - Duration::from_secs(1)).unwrap();
         assert_eq!(workspace.get_conversation(&id), None);
@@ -939,7 +935,7 @@ mod tests {
         let conversation = Conversation::default();
         workspace
             .state
-            .workspace
+            .local
             .conversations
             .insert(id, conversation.clone());
         assert_eq!(workspace.get_conversation(&id), Some(&conversation));
@@ -948,12 +944,12 @@ mod tests {
     #[test]
     fn test_workspace_create_conversation() {
         let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.workspace.conversations.is_empty());
+        assert!(workspace.state.local.conversations.is_empty());
 
         let conversation = Conversation::default();
         let id = workspace.create_conversation(conversation.clone());
         assert_eq!(
-            workspace.state.workspace.conversations.get(&id),
+            workspace.state.local.conversations.get(&id),
             Some(&conversation)
         );
     }
@@ -961,37 +957,37 @@ mod tests {
     #[test]
     fn test_workspace_remove_conversation() {
         let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.workspace.conversations.is_empty());
+        assert!(workspace.state.local.conversations.is_empty());
 
         let id = ConversationId::try_from(UtcDateTime::now() - Duration::from_secs(1)).unwrap();
         let conversation = Conversation::default();
         workspace
             .state
-            .workspace
+            .local
             .conversations
             .insert(id, conversation.clone());
 
         assert_ne!(workspace.active_conversation_id(), id);
         let removed_conversation = workspace.remove_conversation(&id).unwrap().unwrap();
         assert_eq!(removed_conversation, conversation);
-        assert!(workspace.state.workspace.conversations.is_empty());
+        assert!(workspace.state.local.conversations.is_empty());
     }
 
     #[test]
     fn test_workspace_cannot_remove_active_conversation() {
         let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.workspace.conversations.is_empty());
+        assert!(workspace.state.local.conversations.is_empty());
 
         let active_id = workspace
             .state
-            .local
+            .user
             .conversations_metadata
             .active_conversation_id;
-        let active_conversation = workspace.state.workspace.active_conversation.clone();
+        let active_conversation = workspace.state.local.active_conversation.clone();
 
         assert!(workspace.remove_conversation(&active_id).is_err());
         assert_eq!(
-            workspace.state.workspace.active_conversation,
+            workspace.state.local.active_conversation,
             active_conversation
         );
     }

@@ -431,7 +431,7 @@ fn persist_named_contexts(state: &State, root: &Path) -> Result<()> {
     persist_inner(
         root,
         &contexts_dir,
-        &state.workspace.named_contexts,
+        &state.local.named_contexts,
         ContextId::to_path_buf,
     )
 }
@@ -440,7 +440,7 @@ fn persist_mcp_servers(state: &State, root: &Path) -> Result<()> {
     let mcp_servers_dir = root.join(MCP_SERVERS_DIR);
     trace!(path = %mcp_servers_dir.display(), "Persisting MCP servers.");
 
-    persist_inner(root, &mcp_servers_dir, &state.workspace.mcp_servers, |id| {
+    persist_inner(root, &mcp_servers_dir, &state.local.mcp_servers, |id| {
         format!("{id}.json").into()
     })
 }
@@ -457,9 +457,9 @@ fn persist_conversations_and_messages(state: &State, root: &Path, local: &Path) 
 
     // Append the active conversation to the list of conversations to
     // persist.
-    let conversations = state.workspace.conversations.iter().chain(iter::once((
-        &state.local.conversations_metadata.active_conversation_id,
-        &state.workspace.active_conversation,
+    let conversations = state.local.conversations.iter().chain(iter::once((
+        &state.user.conversations_metadata.active_conversation_id,
+        &state.local.active_conversation,
     )));
 
     for (id, conversation) in conversations {
@@ -483,17 +483,17 @@ fn persist_conversations_and_messages(state: &State, root: &Path, local: &Path) 
         let meta_path = conv_dir.join(METADATA_FILE);
         write_json(&meta_path, conversation)?;
 
-        let messages = state.workspace.messages.get(id).map_or(vec![], Vec::clone);
+        let messages = state.local.messages.get(id).map_or(vec![], Vec::clone);
         let messages_path = conv_dir.join(MESSAGES_FILE);
         write_json(&messages_path, &messages)?;
     }
 
     // Don't mark active conversation as removed.
     let removed_ids = state
-        .workspace
+        .local
         .conversations
         .removed_keys()
-        .filter(|&id| id != &state.local.conversations_metadata.active_conversation_id)
+        .filter(|&id| id != &state.user.conversations_metadata.active_conversation_id)
         .collect::<Vec<_>>();
 
     for dir in [&conversations_dir, &local_conversations_dir] {
@@ -568,19 +568,14 @@ fn persist_models(state: &State, root: &Path) -> Result<()> {
     let models_dir = root.join(MODELS_DIR);
     trace!(path = %models_dir.display(), "Persisting models.");
 
-    persist_inner(
-        root,
-        &models_dir,
-        &state.workspace.models,
-        ModelId::to_path_buf,
-    )
+    persist_inner(root, &models_dir, &state.local.models, ModelId::to_path_buf)
 }
 
 fn persist_conversations_metadata(state: &State, root: &Path) -> Result<()> {
     let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
     trace!(path = %metadata_path.display(), "Persisting local conversations metadata.");
 
-    write_json(&metadata_path, &state.local.conversations_metadata)?;
+    write_json(&metadata_path, &state.user.conversations_metadata)?;
 
     Ok(())
 }
@@ -592,7 +587,7 @@ fn persist_personas(state: &State, root: &Path) -> Result<()> {
     persist_inner(
         root,
         &personas_dir,
-        &state.workspace.personas,
+        &state.local.personas,
         PersonaId::to_path_buf,
     )
 }
@@ -670,7 +665,7 @@ mod tests {
     use time::UtcDateTime;
 
     use super::*;
-    use crate::state::WorkspaceState;
+    use crate::state::LocalState;
 
     #[test]
     fn test_storage_handles_missing_src() {
@@ -748,7 +743,7 @@ mod tests {
             persist_result.err()
         );
 
-        let active_conversation_id = state.local.conversations_metadata.active_conversation_id;
+        let active_conversation_id = state.user.conversations_metadata.active_conversation_id;
 
         assert!(original_path.exists() && original_path.is_dir());
         let final_meta_path = original_path
@@ -757,7 +752,7 @@ mod tests {
             .join(METADATA_FILE);
         assert!(final_meta_path.exists());
         let final_meta: Conversation = read_json(&final_meta_path).unwrap();
-        assert_eq!(final_meta, state.workspace.active_conversation);
+        assert_eq!(final_meta, state.local.active_conversation);
     }
 
     #[test]
@@ -980,15 +975,15 @@ mod tests {
             ..Default::default()
         });
         let mut new_state = State {
-            workspace: WorkspaceState {
+            local: LocalState {
                 models: new_models,
                 ..Default::default()
             },
             ..Default::default()
         };
 
-        new_state.workspace.models.remove(&id_stale);
-        new_state.workspace.models.get_mut(&id_m1).unwrap().slug = "updated".into();
+        new_state.local.models.remove(&id_stale);
+        new_state.local.models.get_mut(&id_m1).unwrap().slug = "updated".into();
 
         storage.persist(&new_state).unwrap();
 
@@ -1118,7 +1113,7 @@ mod tests {
             }),
         };
         let state = State {
-            workspace: WorkspaceState {
+            local: LocalState {
                 mcp_servers: TombMap::from([(id.clone(), server.clone())]),
                 ..Default::default()
             },
@@ -1169,7 +1164,7 @@ mod tests {
         let id = ContextId::try_from("ctx-gamma").unwrap();
         let ctx = Context::new(PersonaId::try_from("default").unwrap());
         let state = State {
-            workspace: WorkspaceState {
+            local: LocalState {
                 named_contexts: TombMap::from([(id.clone(), ctx.clone())]),
                 ..Default::default()
             },
