@@ -117,10 +117,10 @@ impl ConversationId {
         }
 
         let mut title = format!("{ts}-{title}");
-        if len > 60 {
-            if let Some(i) = title.rfind('-') {
-                title.truncate(i);
-            }
+        if len > 60
+            && let Some(i) = title.rfind('-')
+        {
+            title.truncate(i);
         }
 
         Ok(title)
@@ -175,5 +175,30 @@ impl FromStr for ConversationId {
 impl Default for ConversationId {
     fn default() -> Self {
         Self::try_from(UtcDateTime::now()).expect("valid timestamp")
+    }
+}
+
+/// Holds metadata about all conversations, like the current active
+/// conversation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConversationsMetadata {
+    /// The ID of the currently active conversation.
+    ///
+    /// If no active conversation exists, one is created.
+    pub active_conversation_id: ConversationId,
+}
+
+impl ConversationsMetadata {
+    #[must_use]
+    pub fn new(active_conversation_id: ConversationId) -> Self {
+        Self {
+            active_conversation_id,
+        }
+    }
+}
+
+impl Default for ConversationsMetadata {
+    fn default() -> Self {
+        Self::new(ConversationId::default())
     }
 }

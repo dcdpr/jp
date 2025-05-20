@@ -513,17 +513,9 @@ impl From<jp_workspace::Error> for Error {
 
         let metadata: HashMap<&str, Value> = match error {
             Conversation(error) => return error.into(),
-            Io(error) => return error.into(),
-            Json(error) => return error.into(),
-
+            Storage(error) => return error.into(),
             NotDir(path) => [
                 ("message", "Path is not a directory.".into()),
-                ("path", path.to_string_lossy().into()),
-            ]
-            .into(),
-
-            NotSymlink(path) => [
-                ("message", "Path is not a symlink.".into()),
                 ("path", path.to_string_lossy().into()),
             ]
             .into(),
@@ -539,13 +531,6 @@ impl From<jp_workspace::Error> for Error {
                 ("message", "Exists".into()),
                 ("target", target.into()),
                 ("id", id.into()),
-            ]
-            .into(),
-            AtomicReplaceFailed { src, dst, error } => [
-                ("message", "Atomic replace failed".into()),
-                ("src", src.to_string_lossy().into()),
-                ("dst", dst.to_string_lossy().into()),
-                ("error", error.to_string().into()),
             ]
             .into(),
             CannotRemoveActiveConversation(conversation_id) => [
@@ -600,6 +585,30 @@ impl From<jp_conversation::Error> for Error {
             .into(),
 
             Id(error) => return error.into(),
+        };
+
+        Self::from(metadata)
+    }
+}
+
+impl From<jp_storage::Error> for Error {
+    fn from(error: jp_storage::Error) -> Self {
+        use jp_storage::Error;
+
+        let metadata: HashMap<&str, Value> = match error {
+            Error::Conversation(error) => return error.into(),
+            Error::Io(error) => return error.into(),
+            Error::Json(error) => return error.into(),
+            Error::NotDir(path) => [
+                ("message", "Path is not a directory.".into()),
+                ("path", path.to_string_lossy().into()),
+            ]
+            .into(),
+            Error::NotSymlink(path) => [
+                ("message", "Path is not a symlink.".into()),
+                ("path", path.to_string_lossy().into()),
+            ]
+            .into(),
         };
 
         Self::from(metadata)

@@ -1,4 +1,5 @@
-//! Handles the physical storage aspects, including temporary copying and persistence.
+pub mod error;
+pub mod value;
 
 use std::{
     fs, iter,
@@ -6,22 +7,21 @@ use std::{
     str::FromStr as _,
 };
 
+pub use error::Error;
 use jp_conversation::{
-    model::ProviderId, Context, ContextId, Conversation, ConversationId, MessagePair, Model,
-    ModelId, Persona, PersonaId,
+    model::ProviderId, Context, ContextId, Conversation, ConversationId, ConversationsMetadata,
+    MessagePair, Model, ModelId, Persona, PersonaId,
 };
 use jp_id::Id as _;
 use jp_mcp::config::{McpServer, McpServerId};
 use jp_tombmap::TombMap;
 use serde::Serialize;
 use serde_json::Value;
-use tracing::{info, trace, warn};
+use tracing::{trace, warn};
 
 use crate::{
-    error::{Error, Result},
-    state::ConversationsMetadata,
+    error::Result,
     value::{deep_merge, read_json, write_json},
-    State,
 };
 
 type ConversationsAndMessages = (
@@ -30,16 +30,16 @@ type ConversationsAndMessages = (
 );
 
 pub const DEFAULT_STORAGE_DIR: &str = ".jp";
-pub(crate) const METADATA_FILE: &str = "metadata.json";
+pub const METADATA_FILE: &str = "metadata.json";
 const MESSAGES_FILE: &str = "messages.json";
 const CONTEXTS_DIR: &str = "contexts";
-pub(crate) const PERSONAS_DIR: &str = "personas";
-pub(crate) const MODELS_DIR: &str = "models";
-pub(crate) const CONVERSATIONS_DIR: &str = "conversations";
-pub(crate) const MCP_SERVERS_DIR: &str = "mcp";
+pub const PERSONAS_DIR: &str = "personas";
+pub const MODELS_DIR: &str = "models";
+pub const CONVERSATIONS_DIR: &str = "conversations";
+pub const MCP_SERVERS_DIR: &str = "mcp";
 
 #[derive(Debug)]
-pub(crate) struct Storage {
+pub struct Storage {
     /// The path to the original storage directory.
     root: PathBuf,
 
@@ -54,7 +54,7 @@ pub(crate) struct Storage {
 impl Storage {
     /// Creates a new Storage instance by creating a temporary directory and
     /// copying the contents of `root` into it.
-    pub(crate) fn new(root: impl Into<PathBuf>) -> Result<Self> {
+    pub fn new(root: impl Into<PathBuf>) -> Result<Self> {
         // Create root storage directory, if needed.
         let root: PathBuf = root.into();
         if root.exists() {
@@ -145,7 +145,7 @@ impl Storage {
     /// workspace storage is used.
     ///
     /// If the file does not exist, return default conversations metadata.
-    pub(crate) fn load_conversations_metadata(&self) -> Result<ConversationsMetadata> {
+    pub fn load_conversations_metadata(&self) -> Result<ConversationsMetadata> {
         let root = self.local.as_deref().unwrap_or(self.root.as_path());
         let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
         trace!(path = %metadata_path.display(), "Loading local conversations metadata.");
@@ -158,7 +158,7 @@ impl Storage {
     }
 
     /// Loads all personas from the (copied) storage.
-    pub(crate) fn load_personas(&self) -> Result<TombMap<PersonaId, Persona>> {
+    pub fn load_personas(&self) -> Result<TombMap<PersonaId, Persona>> {
         let personas_path = self.root.join(PERSONAS_DIR);
         trace!(path = %personas_path.display(), "Loading personas.");
 
@@ -197,7 +197,7 @@ impl Storage {
     }
 
     /// Loads all LLM models from the (copied) storage.
-    pub(crate) fn load_models(&self) -> Result<TombMap<ModelId, Model>> {
+    pub fn load_models(&self) -> Result<TombMap<ModelId, Model>> {
         let models_path = self.root.join(MODELS_DIR);
         trace!(path = %models_path.display(), "Loading models.");
 
@@ -246,7 +246,7 @@ impl Storage {
     }
 
     /// Loads all MCP Servers from the (copied) storage.
-    pub(crate) fn load_mcp_servers(&self) -> Result<TombMap<McpServerId, McpServer>> {
+    pub fn load_mcp_servers(&self) -> Result<TombMap<McpServerId, McpServer>> {
         let mcp_path = self.root.join(MCP_SERVERS_DIR);
         let local_mcp_path = self.local.as_ref().map(|p| p.join(MCP_SERVERS_DIR));
         trace!(path = %mcp_path.display(), "Loading MCP servers.");
@@ -293,7 +293,7 @@ impl Storage {
     }
 
     /// Loads all Named Contexts from the (copied) storage.
-    pub(crate) fn load_named_contexts(&self) -> Result<TombMap<ContextId, Context>> {
+    pub fn load_named_contexts(&self) -> Result<TombMap<ContextId, Context>> {
         let contexts_path = self.root.join(CONTEXTS_DIR);
         trace!(path = %contexts_path.display(), "Loading named contexts.");
 
@@ -324,8 +324,7 @@ impl Storage {
 
     /// Loads all conversations and their associated messages, including local
     /// conversations.
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn load_conversations_and_messages(&self) -> Result<ConversationsAndMessages> {
+    pub fn load_conversations_and_messages(&self) -> Result<ConversationsAndMessages> {
         let (mut conversations, mut messages) =
             load_conversations_and_messages_from_dir(&self.root)?;
 
@@ -344,26 +343,135 @@ impl Storage {
         Ok((conversations, messages))
     }
 
-    /// Persists the entire storage state to disk atomically.
-    pub(crate) fn persist(&mut self, state: &State) -> Result<()> {
-        trace!("Persisting state.");
+    pub fn persist_named_contexts(&mut self, contexts: &TombMap<ContextId, Context>) -> Result<()> {
+        let root = self.root.as_path();
+        let contexts_dir = root.join(CONTEXTS_DIR);
+        trace!(path = %contexts_dir.display(), "Persisting named contexts.");
 
-        // Some data is stored locally, if configured, otherwise it is stored
-        // in the workspace storage.
-        let root_path = self.root.as_path();
-        let local_or_root_path = self.local.as_deref().unwrap_or(root_path);
+        persist_inner(root, &contexts_dir, contexts, ContextId::to_path_buf)
+    }
 
-        // Step 1: Write state to local or temp dir
-        persist_conversations_metadata(state, local_or_root_path)?;
-        persist_personas(state, root_path)?;
-        persist_models(state, root_path)?;
-        persist_conversations_and_messages(state, root_path, local_or_root_path)?;
-        persist_mcp_servers(state, root_path)?;
-        persist_named_contexts(state, root_path)?;
+    pub fn persist_mcp_servers(&mut self, servers: &TombMap<McpServerId, McpServer>) -> Result<()> {
+        let root = self.root.as_path();
+        let mcp_servers_dir = root.join(MCP_SERVERS_DIR);
+        trace!(path = %mcp_servers_dir.display(), "Persisting MCP servers.");
 
-        info!(path = %self.root.display(), "Persisted state.");
+        persist_inner(root, &mcp_servers_dir, servers, |id| {
+            format!("{id}.json").into()
+        })
+    }
+
+    pub fn persist_conversations_and_messages(
+        &mut self,
+        conversations: &TombMap<ConversationId, Conversation>,
+        messages: &TombMap<ConversationId, Vec<MessagePair>>,
+        active_conversation_id: &ConversationId,
+        active_conversation: &Conversation,
+    ) -> Result<()> {
+        let root = self.root.as_path();
+        let local = self.local.as_deref().unwrap_or(root);
+
+        let conversations_dir = root.join(CONVERSATIONS_DIR);
+        let local_conversations_dir = local.join(CONVERSATIONS_DIR);
+
+        trace!(
+            global = %conversations_dir.display(),
+            local = %local_conversations_dir.display(),
+            "Persisting conversations."
+        );
+
+        // Append the active conversation to the list of conversations to
+        // persist.
+        let all_conversations = conversations
+            .iter()
+            .chain(iter::once((active_conversation_id, active_conversation)));
+
+        for (id, conversation) in all_conversations {
+            let dir_name = id.to_dirname(conversation.title.as_deref())?;
+            let conv_dir = if conversation.local {
+                local_conversations_dir.join(dir_name)
+            } else {
+                conversations_dir.join(dir_name)
+            };
+
+            remove_unused_conversation_dirs(
+                id,
+                &conv_dir,
+                &conversations_dir,
+                &local_conversations_dir,
+            )?;
+
+            fs::create_dir_all(&conv_dir)?;
+
+            // Write conversation metadata
+            let meta_path = conv_dir.join(METADATA_FILE);
+            write_json(&meta_path, conversation)?;
+
+            let messages = messages.get(id).map_or(vec![], Vec::clone);
+            let messages_path = conv_dir.join(MESSAGES_FILE);
+            write_json(&messages_path, &messages)?;
+        }
+
+        // Don't mark active conversation as removed.
+        let removed_ids = conversations
+            .removed_keys()
+            .filter(|&id| id != active_conversation_id)
+            .collect::<Vec<_>>();
+
+        for dir in [&conversations_dir, &local_conversations_dir] {
+            let mut deleted = Vec::new();
+            for entry in dir.read_dir()?.flatten() {
+                let path = entry.path();
+                let dir_matches_id = path.file_name().is_some_and(|v| {
+                    removed_ids.iter().any(|d| {
+                        let file_name = v.to_string_lossy();
+                        let removed_id = d.target_id();
+
+                        file_name == *removed_id || file_name.starts_with(&format!("{removed_id}-"))
+                    })
+                });
+
+                if path.is_dir()
+                    && dir_matches_id
+                    && let Ok(path) = path.strip_prefix(dir)
+                {
+                    deleted.push(path.to_path_buf());
+                }
+            }
+
+            remove_deleted(root, dir, deleted.into_iter())?;
+        }
 
         Ok(())
+    }
+
+    pub fn persist_models(&mut self, models: &TombMap<ModelId, Model>) -> Result<()> {
+        let root = self.root.as_path();
+        let models_dir = root.join(MODELS_DIR);
+        trace!(path = %models_dir.display(), "Persisting models.");
+
+        persist_inner(root, &models_dir, models, ModelId::to_path_buf)
+    }
+
+    pub fn persist_conversations_metadata(
+        &mut self,
+        metadata: &ConversationsMetadata,
+    ) -> Result<()> {
+        let root = self.local.as_deref().unwrap_or(self.root.as_path());
+        let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
+        trace!(path = %metadata_path.display(), "Persisting local conversations metadata.");
+
+        write_json(&metadata_path, metadata)?;
+
+        Ok(())
+    }
+
+    pub fn persist_personas(&mut self, personas: &TombMap<PersonaId, Persona>) -> Result<()> {
+        let root = self.root.as_path();
+        let personas_dir = root.join(PERSONAS_DIR);
+        trace!(path = %personas_dir.display(), "Persisting personas.");
+
+        persist_inner(root, &personas_dir, personas, PersonaId::to_path_buf)
     }
 }
 
@@ -424,104 +532,6 @@ fn load_conversations_and_messages_from_dir(path: &Path) -> Result<Conversations
     Ok((conversations, messages))
 }
 
-fn persist_named_contexts(state: &State, root: &Path) -> Result<()> {
-    let contexts_dir = root.join(CONTEXTS_DIR);
-    trace!(path = %contexts_dir.display(), "Persisting named contexts.");
-
-    persist_inner(
-        root,
-        &contexts_dir,
-        &state.local.named_contexts,
-        ContextId::to_path_buf,
-    )
-}
-
-fn persist_mcp_servers(state: &State, root: &Path) -> Result<()> {
-    let mcp_servers_dir = root.join(MCP_SERVERS_DIR);
-    trace!(path = %mcp_servers_dir.display(), "Persisting MCP servers.");
-
-    persist_inner(root, &mcp_servers_dir, &state.local.mcp_servers, |id| {
-        format!("{id}.json").into()
-    })
-}
-
-fn persist_conversations_and_messages(state: &State, root: &Path, local: &Path) -> Result<()> {
-    let conversations_dir = root.join(CONVERSATIONS_DIR);
-    let local_conversations_dir = local.join(CONVERSATIONS_DIR);
-
-    trace!(
-        global = %conversations_dir.display(),
-        local = %local_conversations_dir.display(),
-        "Persisting conversations."
-    );
-
-    // Append the active conversation to the list of conversations to
-    // persist.
-    let conversations = state.local.conversations.iter().chain(iter::once((
-        &state.user.conversations_metadata.active_conversation_id,
-        &state.local.active_conversation,
-    )));
-
-    for (id, conversation) in conversations {
-        let dir_name = id.to_dirname(conversation.title.as_deref())?;
-        let conv_dir = if conversation.local {
-            local_conversations_dir.join(dir_name)
-        } else {
-            conversations_dir.join(dir_name)
-        };
-
-        remove_unused_conversation_dirs(
-            id,
-            &conv_dir,
-            &conversations_dir,
-            &local_conversations_dir,
-        )?;
-
-        fs::create_dir_all(&conv_dir)?;
-
-        // Write conversation metadata
-        let meta_path = conv_dir.join(METADATA_FILE);
-        write_json(&meta_path, conversation)?;
-
-        let messages = state.local.messages.get(id).map_or(vec![], Vec::clone);
-        let messages_path = conv_dir.join(MESSAGES_FILE);
-        write_json(&messages_path, &messages)?;
-    }
-
-    // Don't mark active conversation as removed.
-    let removed_ids = state
-        .local
-        .conversations
-        .removed_keys()
-        .filter(|&id| id != &state.user.conversations_metadata.active_conversation_id)
-        .collect::<Vec<_>>();
-
-    for dir in [&conversations_dir, &local_conversations_dir] {
-        let mut deleted = Vec::new();
-        for entry in dir.read_dir()?.flatten() {
-            let path = entry.path();
-            let dir_matches_id = path.file_name().is_some_and(|v| {
-                removed_ids.iter().any(|d| {
-                    let file_name = v.to_string_lossy();
-                    let removed_id = d.target_id();
-
-                    file_name == *removed_id || file_name.starts_with(&format!("{removed_id}-"))
-                })
-            });
-
-            if path.is_dir() && dir_matches_id {
-                if let Ok(path) = path.strip_prefix(dir) {
-                    deleted.push(path.to_path_buf());
-                }
-            }
-        }
-
-        remove_deleted(root, dir, deleted.into_iter())?;
-    }
-
-    Ok(())
-}
-
 fn remove_unused_conversation_dirs(
     id: &ConversationId,
     conversation_dir: &Path,
@@ -562,34 +572,6 @@ fn remove_unused_conversation_dirs(
     }
 
     Ok(())
-}
-
-fn persist_models(state: &State, root: &Path) -> Result<()> {
-    let models_dir = root.join(MODELS_DIR);
-    trace!(path = %models_dir.display(), "Persisting models.");
-
-    persist_inner(root, &models_dir, &state.local.models, ModelId::to_path_buf)
-}
-
-fn persist_conversations_metadata(state: &State, root: &Path) -> Result<()> {
-    let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
-    trace!(path = %metadata_path.display(), "Persisting local conversations metadata.");
-
-    write_json(&metadata_path, &state.user.conversations_metadata)?;
-
-    Ok(())
-}
-
-fn persist_personas(state: &State, root: &Path) -> Result<()> {
-    let personas_dir = root.join(PERSONAS_DIR);
-    trace!(path = %personas_dir.display(), "Persisting personas.");
-
-    persist_inner(
-        root,
-        &personas_dir,
-        &state.local.personas,
-        PersonaId::to_path_buf,
-    )
 }
 
 fn persist_inner<'a, K, V>(
@@ -665,7 +647,6 @@ mod tests {
     use time::UtcDateTime;
 
     use super::*;
-    use crate::state::LocalState;
 
     #[test]
     fn test_storage_handles_missing_src() {
@@ -726,33 +707,6 @@ mod tests {
             loaded_meta.active_conversation_id,
             default_meta.active_conversation_id
         );
-    }
-
-    #[test]
-    fn test_persist_atomic_replace_init_case() {
-        let base_dir = tempdir().unwrap();
-        let original_path = base_dir.path().join("persist_init_orig");
-
-        // original_path does not exist initially
-        let mut storage = Storage::new(&original_path).unwrap();
-        let state = State::default();
-        let persist_result = storage.persist(&state);
-        assert!(
-            persist_result.is_ok(),
-            "Persist failed: {:?}",
-            persist_result.err()
-        );
-
-        let active_conversation_id = state.user.conversations_metadata.active_conversation_id;
-
-        assert!(original_path.exists() && original_path.is_dir());
-        let final_meta_path = original_path
-            .join(CONVERSATIONS_DIR)
-            .join(active_conversation_id.to_dirname(None).unwrap())
-            .join(METADATA_FILE);
-        assert!(final_meta_path.exists());
-        let final_meta: Conversation = read_json(&final_meta_path).unwrap();
-        assert_eq!(final_meta, state.local.active_conversation);
     }
 
     #[test]
@@ -974,18 +928,11 @@ mod tests {
             slug: "new".into(),
             ..Default::default()
         });
-        let mut new_state = State {
-            local: LocalState {
-                models: new_models,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
 
-        new_state.local.models.remove(&id_stale);
-        new_state.local.models.get_mut(&id_m1).unwrap().slug = "updated".into();
+        new_models.remove(&id_stale);
+        new_models.get_mut(&id_m1).unwrap().slug = "updated".into();
 
-        storage.persist(&new_state).unwrap();
+        storage.persist_models(&new_models).unwrap();
 
         assert!(provider_path.join(id_m1.to_path_buf()).exists());
         assert!(provider_path.join(id_m2.to_path_buf()).exists());
@@ -1112,14 +1059,10 @@ mod tests {
                 environment_variables: vec![],
             }),
         };
-        let state = State {
-            local: LocalState {
-                mcp_servers: TombMap::from([(id.clone(), server.clone())]),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        storage.persist(&state).unwrap();
+
+        storage
+            .persist_mcp_servers(&TombMap::from([(id.clone(), server.clone())]))
+            .unwrap();
 
         let servers_path = root.join(MCP_SERVERS_DIR);
         assert!(servers_path.is_dir());
@@ -1163,14 +1106,10 @@ mod tests {
 
         let id = ContextId::try_from("ctx-gamma").unwrap();
         let ctx = Context::new(PersonaId::try_from("default").unwrap());
-        let state = State {
-            local: LocalState {
-                named_contexts: TombMap::from([(id.clone(), ctx.clone())]),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        storage.persist(&state).unwrap();
+
+        storage
+            .persist_named_contexts(&TombMap::from([(id.clone(), ctx.clone())]))
+            .unwrap();
 
         let contexts_path = root.join(CONTEXTS_DIR);
         assert!(contexts_path.is_dir());

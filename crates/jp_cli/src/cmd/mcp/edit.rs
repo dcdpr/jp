@@ -1,7 +1,7 @@
 use std::fs;
 
 use jp_mcp::config::McpServer;
-use jp_workspace::value::deep_merge;
+use jp_storage::value::deep_merge;
 use serde_json::Value;
 
 use crate::{ctx::Ctx, editor, Output};
