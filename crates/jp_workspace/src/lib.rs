@@ -45,8 +45,6 @@ mod error;
 mod id;
 pub mod query;
 mod state;
-mod storage;
-pub mod value;
 
 use std::{
     iter,
@@ -61,8 +59,8 @@ use jp_conversation::{
     Persona, PersonaId,
 };
 use jp_mcp::config::{McpServer, McpServerId};
+use jp_storage::{Storage, DEFAULT_STORAGE_DIR, MCP_SERVERS_DIR};
 use state::{LocalState, State, UserState};
-use storage::{Storage, DEFAULT_STORAGE_DIR, MCP_SERVERS_DIR};
 use tracing::{debug, info, trace};
 
 const APPLICATION: &str = "jp";
@@ -265,10 +263,28 @@ impl Workspace {
             return Ok(());
         }
 
-        self.storage
-            .as_mut()
-            .ok_or(Error::MissingStorage)?
-            .persist(&self.state)
+        trace!("Persisting state.");
+
+        let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
+
+        storage.persist_conversations_metadata(&self.state.user.conversations_metadata)?;
+        storage.persist_personas(&self.state.local.personas)?;
+        storage.persist_models(&self.state.local.models)?;
+        storage.persist_conversations_and_messages(
+            &self.state.local.conversations,
+            &self.state.local.messages,
+            &self
+                .state
+                .user
+                .conversations_metadata
+                .active_conversation_id,
+            &self.state.local.active_conversation,
+        )?;
+        storage.persist_mcp_servers(&self.state.local.mcp_servers)?;
+        storage.persist_named_contexts(&self.state.local.named_contexts)?;
+
+        info!(path = %self.root.display(), "Persisted state.");
+        Ok(())
     }
 
     /// Gets the ID of the active conversation.
@@ -584,15 +600,15 @@ mod tests {
     use std::{collections::HashMap, fs, time::Duration};
 
     use jp_conversation::model::ProviderId;
+    use jp_storage::{
+        value::{read_json, write_json},
+        CONVERSATIONS_DIR, METADATA_FILE, PERSONAS_DIR,
+    };
     use tempfile::tempdir;
     use test_log::test;
     use time::UtcDateTime;
 
     use super::*;
-    use crate::{
-        storage::{CONVERSATIONS_DIR, METADATA_FILE, PERSONAS_DIR},
-        value::{read_json, write_json},
-    };
 
     #[test]
     fn test_workspace_find_root() {

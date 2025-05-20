@@ -1970,6 +1970,7 @@ dependencies = [
  "jp_mcp",
  "jp_openrouter",
  "jp_query",
+ "jp_storage",
  "jp_task",
  "jp_term",
  "jp_workspace",
@@ -2117,6 +2118,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp_storage"
+version = "0.1.0"
+dependencies = [
+ "jp_conversation",
+ "jp_id",
+ "jp_mcp",
+ "jp_tombmap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "test-log",
+ "thiserror 2.0.12",
+ "time",
+ "tracing",
+]
+
+[[package]]
 name = "jp_task"
 version = "0.1.0"
 dependencies = [
@@ -2166,6 +2184,7 @@ dependencies = [
  "jp_conversation",
  "jp_id",
  "jp_mcp",
+ "jp_storage",
  "jp_tombmap",
  "serde",
  "serde_json",

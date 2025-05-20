@@ -9,6 +9,9 @@ pub enum Error {
     #[error("Invalid workspace ID: {0}")]
     Id(String),
 
+    #[error("Storage error: {0}")]
+    Storage(#[from] jp_storage::Error),
+
     #[error("Cannot persist workspace without storage")]
     MissingStorage,
 
@@ -17,9 +20,6 @@ pub enum Error {
 
     #[error("Path is not a directory: {0}")]
     NotDir(PathBuf),
-
-    #[error("Path is not a symlink: {0}")]
-    NotSymlink(PathBuf),
 
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
@@ -30,22 +30,8 @@ pub enum Error {
     #[error("{target} already exists: {id}")]
     Exists { target: &'static str, id: String },
 
-    #[error("Failed to persist storage: {src} -> {dst}: {error}")]
-    AtomicReplaceFailed {
-        src: PathBuf,
-        dst: PathBuf,
-        #[source]
-        error: std::io::Error,
-    },
-
     #[error("Conversation error: {0}")]
     Conversation(#[from] jp_conversation::Error),
-
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
 }
 
 impl Error {
