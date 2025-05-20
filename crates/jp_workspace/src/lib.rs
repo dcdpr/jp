@@ -43,7 +43,6 @@
 
 mod error;
 mod id;
-mod map;
 pub mod query;
 mod state;
 mod storage;
@@ -349,7 +348,7 @@ impl Workspace {
     ///
     /// Returns an error if a persona with that ID already exists.
     pub fn create_persona_with_id(&mut self, id: PersonaId, persona: Persona) -> Result<PersonaId> {
-        use map::Entry::*;
+        use jp_tombmap::Entry::*;
 
         let id = match self.state.workspace.personas.entry(id) {
             Occupied(entry) => return Err(Error::exists("Persona", entry.key())),

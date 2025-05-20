@@ -5,9 +5,8 @@ use jp_conversation::{
     Persona, PersonaId,
 };
 use jp_mcp::config::{McpServer, McpServerId};
+use jp_tombmap::TombMap;
 use serde::{Deserialize, Serialize};
-
-use crate::map::TombMap;
 
 /// Represents the entire in-memory state, both for the workspace and user-local
 /// state.

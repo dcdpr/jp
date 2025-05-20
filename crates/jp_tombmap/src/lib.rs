@@ -339,7 +339,10 @@ impl<K, V, S> TombMap<K, V, S> {
     ///
     /// In the current implementation, iterating over map takes O(capacity) time
     /// instead of O(len) because it internally visits empty buckets too.
-    #[expect(clippy::unused_self)]
+    ///
+    /// # Panics
+    ///
+    /// This function is not yet implemented and panics at runtime.
     pub fn iter_mut(&mut self) -> hash_map::IterMut<'_, K, V> {
         // FIXME: This does **NOT** have change detection.
         //

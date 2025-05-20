@@ -19,6 +19,7 @@ jp_query = { path = "crates/jp_query" }
 jp_task = { path = "crates/jp_task" }
 jp_term = { path = "crates/jp_term" }
 jp_test = { path = "crates/jp_test" }
+jp_tombmap = { path = "crates/jp_tombmap" }
 jp_workspace = { path = "crates/jp_workspace" }
 
 async-anthropic = { version = "0.6", default-features = false }
