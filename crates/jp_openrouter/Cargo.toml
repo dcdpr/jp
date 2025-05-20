@@ -14,7 +14,7 @@ version.workspace = true
 
 [dependencies]
 async-stream = { workspace = true }
-backoff = { workspace = true, features = ["tokio"] }
+backon = { workspace = true, features = ["tokio", "tokio-sleep"] }
 futures = { workspace = true }
 reqwest = { workspace = true, features = [
     "charset",

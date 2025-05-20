@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io, pin::Pin, time::Duration};
 
 use async_stream::stream;
-use backoff::{future::retry_notify, ExponentialBackoff};
+use backon::{ExponentialBuilder, Retryable as _};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use reqwest::{
     header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, REFERER},
@@ -101,41 +101,29 @@ impl Client {
     ) -> Pin<Box<dyn Stream<Item = Result<response::ChatCompletion>> + Send>> {
         let client = self.clone();
 
-        let backoff = ExponentialBackoff {
-            initial_interval: Duration::from_millis(10),
-            max_interval: Duration::from_secs(5),
-            max_elapsed_time: Some(Duration::from_secs(10)),
-            ..Default::default()
-        };
-        trace!(
-            initial_interval = backoff.initial_interval.as_millis(),
-            max_interval = backoff.max_interval.as_millis(),
-            max_elapsed_time = backoff.max_elapsed_time.map(|v| v.as_millis()),
-            "Request retry configured."
-        );
+        let backoff = ExponentialBuilder::default()
+            .with_min_delay(Duration::from_millis(10))
+            .with_max_delay(Duration::from_secs(5))
+            .with_total_delay(Some(Duration::from_secs(10)));
+
+        trace!("Request retry configured.");
 
         let retry_stream = stream! {
             let operation = || async {
-                match client
+                client
                     .chat_completion_stream_inner(request.clone())
                     .await
-                {
-                    Ok(stream) => Ok(stream),
-                    Err(error) if is_transient_error(&error) => Err(backoff::Error::transient(error)),
-                    Err(error) => Err(backoff::Error::permanent(error)),
-                }
             };
 
-            let notify = |error, backoff| warn!(?error, ?backoff, "Request failed. Retrying.");
+            let stream = operation
+                .retry(backoff)
+                .when(is_transient_error)
+                .notify(|error, backoff| warn!(?error, ?backoff, "Request failed. Retrying."))
+                .await?;
 
-            match retry_notify(backoff, operation, notify).await {
-                Ok(stream) => {
-                    tokio::pin!(stream);
-                    while let Some(item) = stream.next().await {
-                        yield item;
-                    }
-                },
-                Err(error) => yield Err(error),
+            tokio::pin!(stream);
+            while let Some(item) = stream.next().await {
+                yield item;
             }
         };
 
