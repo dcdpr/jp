@@ -553,6 +553,11 @@ impl From<jp_workspace::Error> for Error {
                 ("conversation_id", conversation_id.to_string().into()),
             ]
             .into(),
+            Id(error) => [
+                ("message", "Invalid workspace ID".into()),
+                ("error", error.to_string().into()),
+            ]
+            .into(),
         };
 
         Self::from(metadata)

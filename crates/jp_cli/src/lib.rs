@@ -100,6 +100,12 @@ pub struct Globals {
         help = "Disable persistence for the duration of the command."
     )]
     pub persist: bool,
+
+    /// The workspace to use for the command.
+    ///
+    /// This can be either a path to a workspace directory, or a workspace ID.
+    #[arg(short, long, global = true, value_parser = WorkspaceIdOrPath::from_str)]
+    pub workspace: Option<WorkspaceIdOrPath>,
     // TODO
     // /// The format of the output.
     // #[arg(long, global = true, value_enum, default_value_t = Format::Text)]
@@ -128,6 +134,24 @@ impl FromStr for KeyValueOrPath {
             })
             .map(|(key, value)| Self::KeyValue((key.to_string(), value.to_string())))
             .map_err(Into::into)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum WorkspaceIdOrPath {
+    Id(jp_workspace::Id),
+    Path(PathBuf),
+}
+
+impl FromStr for WorkspaceIdOrPath {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        if PathBuf::from(s).exists() {
+            return Ok(Self::Path(PathBuf::from(s)));
+        }
+
+        Ok(Self::Id(jp_workspace::Id::from_str(s)?))
     }
 }
 
@@ -179,7 +203,7 @@ async fn run_inner(cli: Cli) -> Result<Success> {
     match cli.command {
         Commands::Init(args) => args.run().map_err(Into::into),
         cmd => {
-            let mut workspace = load_workspace()?;
+            let mut workspace = load_workspace(cli.globals.workspace.as_ref())?;
             if !cli.globals.persist {
                 workspace.disable_persistence();
             }
@@ -300,8 +324,26 @@ fn load_config(workspace: &Workspace) -> Result<Config> {
 }
 
 /// Find the workspace for the current directory.
-fn load_workspace() -> Result<Workspace> {
-    let cwd = std::env::current_dir()?;
+fn load_workspace(workspace: Option<&WorkspaceIdOrPath>) -> Result<Workspace> {
+    let cwd = match workspace {
+        None => std::env::current_dir()?,
+        Some(WorkspaceIdOrPath::Path(path)) => path.clone(),
+
+        // TODO: Centralize this in a new `UserStorage` struct.
+        Some(WorkspaceIdOrPath::Id(id)) => jp_workspace::user_data_dir()?
+            .read_dir()?
+            .map(|dir| dir.ok().map(|dir| dir.path().clone()))
+            .find_map(|path| {
+                path.filter(|dir| {
+                    dir.file_name()
+                        .and_then(|v| v.to_str())
+                        .is_some_and(|v| v.ends_with(&id.to_string()))
+                })
+            })
+            .ok_or(jp_workspace::Error::MissingStorage)?
+            .join("storage")
+            .canonicalize()?,
+    };
     trace!(cwd = %cwd.display(), "Finding workspace.");
 
     let root = Workspace::find_root(cwd, DEFAULT_STORAGE_DIR).ok_or(cmd::Error::from(format!(
@@ -313,15 +355,20 @@ fn load_workspace() -> Result<Workspace> {
     let storage = root.join(DEFAULT_STORAGE_DIR);
     trace!(storage = %storage.display(), "Initializing workspace storage.");
 
-    let id = jp_workspace::id::load(&storage).unwrap_or_else(jp_workspace::id::new);
-    jp_id::global::set(id.clone());
-    trace!(id, "Loaded unique workspace ID.");
+    let id = jp_workspace::Id::load(&storage)
+        .transpose()
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+
+    jp_id::global::set(id.to_string());
+    trace!(%id, "Loaded unique workspace ID.");
 
     let workspace = Workspace::new_with_id(root, id)
         .persisted_at(&storage)
         .inspect(|ws| info!(workspace = %ws.root.display(), "Using existing workspace."))?;
 
-    jp_workspace::id::store(workspace.id(), &storage)?;
+    workspace.id().store(&storage)?;
 
     workspace.with_local_storage().map_err(Into::into)
 }

@@ -27,13 +27,13 @@ impl Args {
         fs::create_dir_all(&root)?;
 
         let storage = root.join(DEFAULT_STORAGE_DIR);
-        let id = jp_workspace::id::new();
-        jp_id::global::set(id.clone());
+        let id = jp_workspace::Id::new();
+        jp_id::global::set(id.to_string());
 
         let mut workspace =
             Workspace::new_with_id(root.clone(), id.clone()).persisted_at(&storage)?;
 
-        jp_workspace::id::store(&id, &storage)?;
+        id.store(&storage)?;
 
         workspace = workspace.with_local_storage()?;
 
