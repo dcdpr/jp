@@ -124,7 +124,10 @@ impl Args {
             }
 
             // Generate title for new conversations.
-            if self.new_conversation && ctx.config.conversation.title.generate.auto {
+            if ctx.term.args.persist
+                && self.new_conversation
+                && ctx.config.conversation.title.generate.auto
+            {
                 debug!("Generating title for new conversation");
                 ctx.task_handler.spawn(TitleGeneratorTask::new(
                     conversation_id,
