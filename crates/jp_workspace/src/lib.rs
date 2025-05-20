@@ -42,7 +42,7 @@
 //! ```
 
 mod error;
-pub mod id;
+mod id;
 mod map;
 pub mod query;
 mod state;
@@ -56,6 +56,7 @@ use std::{
 
 pub use error::Error;
 use error::Result;
+pub use id::Id;
 use jp_conversation::{
     Context, ContextId, Conversation, ConversationId, MessagePair, Model, ModelId, ModelReference,
     Persona, PersonaId,
@@ -75,7 +76,7 @@ pub struct Workspace {
     pub root: PathBuf,
 
     /// The globally unique ID of the workspace.
-    id: String,
+    id: id::Id,
 
     /// The (optional) storage for the workspace.
     ///
@@ -119,14 +120,13 @@ impl Workspace {
 
     /// Creates a new workspace with the given root directory.
     pub fn new(root: impl AsRef<Path>) -> Self {
-        Self::new_with_id(root, id::new())
+        Self::new_with_id(root, id::Id::new())
     }
 
     /// Creates a new workspace with the given root directory and ID.
-    pub fn new_with_id(root: impl AsRef<Path>, id: impl Into<String>) -> Self {
-        let id = id.into();
+    pub fn new_with_id(root: impl AsRef<Path>, id: id::Id) -> Self {
         let root = root.as_ref().to_path_buf();
-        trace!(root = %root.display(), id, "Initializing Workspace.");
+        trace!(root = %root.display(), id = %id, "Initializing Workspace.");
 
         Self {
             root,
@@ -164,17 +164,14 @@ impl Workspace {
         let storage = self.storage.take().ok_or(Error::MissingStorage)?;
 
         // Create unique local storage path based on (hashed) workspace path.
-        let local = directories::ProjectDirs::from("", "", APPLICATION)
-            .ok_or(Error::MissingHome)?
-            .data_local_dir()
-            .join(format!(
-                "{}-{}",
-                self.root
-                    .file_name()
-                    .ok_or_else(|| Error::NotDir(self.root.clone()))?
-                    .to_string_lossy(),
-                &self.id,
-            ));
+        let local = user_data_dir()?.join(format!(
+            "{}-{}",
+            self.root
+                .file_name()
+                .ok_or_else(|| Error::NotDir(self.root.clone()))?
+                .to_string_lossy(),
+            &self.id,
+        ));
 
         self.storage = Some(storage.with_local(local)?);
         Ok(self)
@@ -571,9 +568,16 @@ impl Workspace {
 
     /// Returns the globally unique ID of the workspace.
     #[must_use]
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &Id {
         &self.id
     }
+}
+
+pub fn user_data_dir() -> Result<PathBuf> {
+    Ok(directories::ProjectDirs::from("", "", APPLICATION)
+        .ok_or(Error::MissingHome)?
+        .data_local_dir()
+        .to_path_buf())
 }
 
 #[cfg(test)]

@@ -6,6 +6,9 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Invalid workspace ID: {0}")]
+    Id(String),
+
     #[error("Cannot persist workspace without storage")]
     MissingStorage,
 
