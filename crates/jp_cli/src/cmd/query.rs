@@ -1,6 +1,5 @@
 use std::{
-    collections::HashSet, convert::Infallible, env, fs, path::PathBuf, str::FromStr as _,
-    time::Duration,
+    collections::HashSet, convert::Infallible, env, fs, path::PathBuf, str::FromStr, time::Duration,
 };
 
 use clap::builder::TypedValueParser as _;
@@ -27,7 +26,7 @@ use url::Url;
 use super::{attachment::register_attachment, Output};
 use crate::{
     cmd::Success,
-    editor,
+    editor::{self, Editor},
     error::{Error, Result},
     parser, Ctx, PATH_STRING_PREFIX,
 };
@@ -86,6 +85,14 @@ pub struct Args {
     /// Use specific MCP servers exclusively.
     #[arg(short = 'm', long = "mcp", value_parser = |s: &str| Ok::<_, Infallible>(McpServerId::new(s)))]
     pub mcp: Vec<McpServerId>,
+
+    /// Whether and how to edit the query.
+    #[arg(short, long, conflicts_with = "no_edit")]
+    pub edit: Option<Option<Editor>>,
+
+    /// Do not edit the query.
+    #[arg(long, conflicts_with = "edit")]
+    pub no_edit: bool,
 }
 
 impl Args {
@@ -229,49 +236,37 @@ impl Args {
         ctx: &mut Ctx,
         conversation_id: ConversationId,
     ) -> Result<(UserMessage, Option<PathBuf>)> {
-        let mut query_file_path = None;
-
         // If replaying, remove the last message from the conversation, and use
         // its query message to build the new query.
-        let replaying_user_message = self
+        let mut message = self
             .replay
             .then(|| ctx.workspace.pop_message(&conversation_id))
             .flatten()
-            .map(|m| m.message);
+            .map_or(UserMessage::Query(String::new()), |m| m.message);
 
-        let mut message = match replaying_user_message {
-            Some(msg @ UserMessage::Query(_)) => msg,
-            Some(UserMessage::ToolCallResults(_)) => {
-                let Some(response) = ctx.workspace.get_messages(&conversation_id).last() else {
-                    return Err(Error::Replay("No assistant response found".into()));
-                };
+        // If replaying a tool call, re-run the requested tool(s) and return the
+        // new results.
+        if let UserMessage::ToolCallResults(_) = &mut message {
+            let Some(response) = ctx.workspace.get_messages(&conversation_id).last() else {
+                return Err(Error::Replay("No assistant response found".into()));
+            };
 
-                let results = handle_tool_calls(ctx, response.reply.tool_calls.clone()).await?;
-                UserMessage::ToolCallResults(results)
-            }
-            None => UserMessage::Query(String::new()),
-        };
+            let results = handle_tool_calls(ctx, response.reply.tool_calls.clone()).await?;
+            message = UserMessage::ToolCallResults(results);
+        }
 
+        // If a query is provided, prepend it to the existing message. This is
+        // only relevant for replays, otherwise the existing message is empty,
+        // and we replace it with the provided query.
         if let Some(text) = &self.query {
             match &mut message {
                 UserMessage::Query(query) if query.is_empty() => text.clone_into(query),
                 UserMessage::Query(query) => *query = format!("{text}\n\n{query}"),
                 UserMessage::ToolCallResults(_) => {}
             }
-        } else if let UserMessage::Query(query) = &mut message {
-            let path = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
-            let messages = ctx.workspace.get_messages(&conversation_id);
-            let initial_message = if query.is_empty() {
-                None
-            } else {
-                Some(query.to_owned())
-            };
-
-            // If replaying, pass the last query as the text to be edited,
-            // otherwise open an empty editor.
-            (*query, query_file_path) =
-                editor::edit_query(path, initial_message, messages).map(|(q, p)| (q, Some(p)))?;
         }
+
+        let query_file_path = self.edit_message(&mut message, ctx, conversation_id)?;
 
         if let UserMessage::Query(query) = &mut message
             && self.template
@@ -407,6 +402,58 @@ impl Args {
         ctx.workspace.set_active_conversation_id(id)?;
 
         Ok(id)
+    }
+
+    // Open the editor for the query, if requested.
+    fn edit_message(
+        &self,
+        message: &mut UserMessage,
+        ctx: &mut Ctx,
+        conversation_id: ConversationId,
+    ) -> Result<Option<PathBuf>> {
+        let UserMessage::Query(query) = message else {
+            return Ok(None);
+        };
+
+        let mut editor = Editor::from_cli_or_config(self.edit.clone(), ctx.config.editor.clone());
+
+        // Explicitly disable editing if the `--no-edit` flag is set.
+        if self.no_edit || self.query.as_ref().is_some_and(|_| self.edit.is_none()) {
+            editor = Some(Editor::Disabled);
+        }
+
+        let editor = match editor {
+            None => return Ok(None),
+            Some(Editor::Default) => unreachable!("handled in `from_cli_or_config`"),
+            // If editing is disabled, we set the query as a single whitespace,
+            // which allows the query to pass through to the assistant.
+            Some(Editor::Disabled) => {
+                if query.is_empty() {
+                    " ".clone_into(query);
+                }
+                return Ok(None);
+            }
+            Some(cmd @ Editor::Command(_)) => match cmd.command() {
+                Some(cmd) => cmd,
+                None => return Ok(None),
+            },
+        };
+
+        let path = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
+        let messages = ctx.workspace.get_messages(&conversation_id);
+        let initial_message = if query.is_empty() {
+            None
+        } else {
+            Some(query.to_owned())
+        };
+
+        // If replaying, pass the last query as the text to be edited,
+        // otherwise open an empty editor.
+        let query_file_path;
+        (*query, query_file_path) = editor::edit_query(path, initial_message, messages, editor)
+            .map(|(q, p)| (q, Some(p)))?;
+
+        Ok(query_file_path)
     }
 }
 

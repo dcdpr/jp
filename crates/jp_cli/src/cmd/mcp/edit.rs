@@ -1,10 +1,16 @@
 use std::fs;
 
+use duct::Expression;
 use jp_mcp::config::McpServer;
 use jp_storage::value::deep_merge;
 use serde_json::Value;
 
-use crate::{ctx::Ctx, editor, Output};
+use crate::{
+    ctx::Ctx,
+    editor::{self, Editor},
+    error::Error,
+    Output,
+};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -14,28 +20,40 @@ pub struct Args {
     /// Edit a local MCP server configuration
     #[arg(short = 'l', long = "local")]
     pub local: bool,
+
+    /// How to edit the MCP server configuration.
+    #[arg(short, long)]
+    pub edit: Option<Option<Editor>>,
 }
 
 impl Args {
     pub fn run(self, ctx: &mut Ctx) -> Output {
+        let Some(cmd) = Editor::from_cli_or_config(self.edit.clone(), ctx.config.editor.clone())
+            .and_then(|e| e.command())
+        else {
+            return Err(Error::Editor(
+                "No editor configured. Use `--edit` to set the editor to use.".to_owned(),
+            ))?;
+        };
+
         if self.local {
-            self.edit_local_file(ctx)
+            self.edit_local_file(ctx, cmd)
         } else {
-            self.edit_workspace_file(ctx)
+            self.edit_workspace_file(ctx, cmd)
         }
     }
 
-    fn edit_workspace_file(&self, ctx: &mut Ctx) -> Output {
+    fn edit_workspace_file(&self, ctx: &mut Ctx, cmd: Expression) -> Output {
         let workspace_file = ctx
             .workspace
             .mcp_servers_path()
             .ok_or("Workspace storage not enabled")?
             .join(format!("{}.json", self.name));
 
-        let options = editor::Options::default()
+        let options = editor::Options::new(cmd)
             .with_content(serde_json::to_string_pretty(&McpServer::example())?);
 
-        let (content, mut guard) = editor::open(&workspace_file, options)?;
+        let (content, mut guard) = editor::open(workspace_file.clone(), options)?;
 
         serde_json::from_str::<McpServer>(&content)
             .map_err(|err| format!("Failed to parse MCP server configuration: {err}"))?;
@@ -50,7 +68,7 @@ impl Args {
         .into())
     }
 
-    fn edit_local_file(&self, ctx: &mut Ctx) -> Output {
+    fn edit_local_file(&self, ctx: &mut Ctx, cmd: Expression) -> Output {
         let workspace_file = ctx
             .workspace
             .mcp_servers_path()
@@ -72,9 +90,9 @@ impl Args {
             .map(|p| p.join(format!("{}.json", self.name)))?;
 
         let workspace_value: Value = serde_json::from_reader(fs::File::open(&workspace_file)?)?;
-        let options = editor::Options::default()
-            .with_content(serde_json::to_string_pretty(&workspace_value)?);
-        let (content, mut guard) = editor::open(&local_file, options)?;
+        let options =
+            editor::Options::new(cmd).with_content(serde_json::to_string_pretty(&workspace_value)?);
+        let (content, mut guard) = editor::open(local_file, options)?;
         let new_value: Value = serde_json::from_str(&content)?;
 
         deep_merge::<McpServer>(workspace_value, new_value)

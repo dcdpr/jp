@@ -293,6 +293,7 @@ impl From<crate::error::Error> for Error {
                 ("error", error),
             ]
             .into(),
+            MissingEditor => [("message", "Missing editor".to_owned())].into(),
         };
 
         Self::from(metadata)

@@ -1,5 +1,6 @@
 mod config;
 mod conversation;
+pub mod editor;
 pub mod error;
 pub mod llm;
 mod parse;
