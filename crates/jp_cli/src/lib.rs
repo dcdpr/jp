@@ -28,6 +28,8 @@ use serde_json::{Map, Value};
 use tracing::{info, trace};
 
 const DEFAULT_STORAGE_DIR: &str = ".jp";
+
+#[expect(dead_code)]
 const DEFAULT_VARIABLE_PREFIX: &str = "JP_";
 
 /// The prefix used to parse a CLI argument as a path instead of a string.

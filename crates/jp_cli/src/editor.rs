@@ -1,15 +1,15 @@
 use std::{
     env, fs,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
+use duct::Expression;
+use jp_config::editor;
 use jp_conversation::{MessagePair, UserMessage};
 use time::{macros::format_description, UtcOffset};
 
-use crate::{
-    error::{Error, Result},
-    DEFAULT_VARIABLE_PREFIX,
-};
+use crate::error::{Error, Result};
 
 /// The name of the file used to store the current query message.
 const QUERY_FILENAME: &str = "QUERY_MESSAGE.md";
@@ -20,14 +20,86 @@ const CUT_MARKER: &[&str] = &[
     "--------------------------------------->8---------------------------------------",
 ];
 
+/// How to edit the query.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Editor {
+    /// Use whatever editor is configured.
+    #[default]
+    Default,
+
+    /// Use the given command.
+    Command(String),
+
+    /// Do not edit the query.
+    Disabled,
+}
+
+impl Editor {
+    /// Get the editor from the CLI, or the config, or `None`.
+    pub fn from_cli_or_config(
+        cli: Option<Option<Self>>,
+        config: jp_config::editor::Config,
+    ) -> Option<Self> {
+        // If no CLI editor is configured, use the config editor, if any.
+        let Some(editor) = cli else {
+            return config.try_into().ok();
+        };
+
+        // `--edit` equals `None` in this case, which we treat as `Default`.
+        match editor.unwrap_or_default() {
+            // For the default editor, use the config editor, if any.
+            Editor::Default => config.try_into().ok(),
+
+            // Otherwise, use whatever is configured.
+            editor => Some(editor),
+        }
+    }
+
+    pub fn command(&self) -> Option<Expression> {
+        let cmd = match self {
+            Editor::Disabled | Editor::Default => return None,
+            Editor::Command(cmd) => cmd,
+        };
+
+        let (cmd, args) = cmd.split_once(' ').unwrap_or((cmd, ""));
+        let args = if args.is_empty() {
+            vec![]
+        } else {
+            args.split(' ').collect::<Vec<_>>()
+        };
+
+        Some(duct::cmd(cmd, &args))
+    }
+}
+
+impl TryFrom<editor::Config> for Editor {
+    type Error = Error;
+
+    fn try_from(editor: editor::Config) -> Result<Self> {
+        editor
+            .cmd
+            .or_else(|| editor.env_vars.iter().find_map(|var| env::var(var).ok()))
+            .map(Editor::Command)
+            .ok_or(Error::MissingEditor)
+    }
+}
+
+impl FromStr for Editor {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "true" => Ok(Self::Default),
+            "false" => Ok(Self::Disabled),
+            s => Ok(Self::Command(s.to_owned())),
+        }
+    }
+}
+
 /// Options for opening an editor.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Options {
-    /// The editor command to use.
-    ///
-    /// If not specified, the `VISUAL` or `EDITOR` environment variables will be
-    /// used, in that order.
-    pub cmd: Option<String>,
+    pub cmd: Expression,
 
     /// The working directory to use.
     pub cwd: Option<PathBuf>,
@@ -37,12 +109,12 @@ pub struct Options {
 }
 
 impl Options {
-    /// Add a command to the editor options.
-    #[must_use]
-    #[expect(dead_code)]
-    pub fn with_cmd(mut self, cmd: impl Into<String>) -> Self {
-        self.cmd = Some(cmd.into());
-        self
+    pub fn new(cmd: Expression) -> Self {
+        Self {
+            cmd,
+            cwd: None,
+            content: None,
+        }
     }
 
     /// Add a working directory to the editor options.
@@ -115,14 +187,13 @@ impl Drop for RevertFileGuard {
 /// (in other words, `content` is ignored).
 ///
 /// When the editor is closed, the contents are returned.
-pub fn open(path: impl AsRef<Path>, options: Options) -> Result<(String, RevertFileGuard)> {
+pub fn open(path: PathBuf, options: Options) -> Result<(String, RevertFileGuard)> {
     let Options { cmd, cwd, content } = options;
 
-    let path = path.as_ref();
     let exists = path.exists();
     let guard = RevertFileGuard {
-        path: Some(path.to_owned()),
-        orig: fs::read_to_string(path).unwrap_or_default(),
+        path: Some(path.clone()),
+        orig: fs::read_to_string(&path).unwrap_or_default(),
         exists,
     };
 
@@ -130,25 +201,27 @@ pub fn open(path: impl AsRef<Path>, options: Options) -> Result<(String, RevertF
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(path, content.unwrap_or_default())?;
+        fs::write(&path, content.unwrap_or_default())?;
     }
-
-    let editor_cmd = cmd
-        .ok_or("Undefined")
-        .or_else(|_| env::var(format!("{DEFAULT_VARIABLE_PREFIX}_EDITOR")))
-        .or_else(|_| env::var("VISUAL"))
-        .or_else(|_| env::var("EDITOR"))
-        .unwrap_or_else(|_| "vi".to_string()); // TODO: Check different editors
-                                               // (neovim, vim, vi, emacs, ...)
 
     // Open the editor
-    let mut cmd = std::process::Command::new(&editor_cmd);
-    cmd.arg(path);
-    if let Some(cwd) = cwd {
-        cmd.current_dir(cwd);
-    }
+    let output = cmd
+        .before_spawn({
+            let path = path.clone();
+            move |cmd| {
+                cmd.arg(path.clone());
 
-    let status = cmd.status()?;
+                if let Some(cwd) = &cwd {
+                    cmd.current_dir(cwd);
+                }
+
+                Ok(())
+            }
+        })
+        .unchecked()
+        .run()?;
+
+    let status = output.status;
     if !status.success() {
         return Err(Error::Editor(format!("Editor exited with error: {status}")));
     }
@@ -164,6 +237,7 @@ pub fn edit_query(
     root: &Path,
     initial_message: Option<String>,
     history: &[MessagePair],
+    cmd: Expression,
 ) -> Result<(String, PathBuf)> {
     let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
@@ -252,10 +326,10 @@ pub fn edit_query(
 
     let query_file_path = root.join(QUERY_FILENAME);
 
-    let options = Options::default()
+    let options = Options::new(cmd)
         .with_cwd(root)
         .with_content(initial_text.join("\n"));
-    let (mut content, mut guard) = open(&query_file_path, options)?;
+    let (mut content, mut guard) = open(query_file_path.clone(), options)?;
 
     let eof = CUT_MARKER
         .iter()

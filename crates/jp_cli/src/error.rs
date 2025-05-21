@@ -43,6 +43,9 @@ pub enum Error {
     #[error("Editor error: {0}")]
     Editor(String),
 
+    #[error("Editor error")]
+    MissingEditor,
+
     #[error("Task error: {0}")]
     Task(Box<dyn std::error::Error + Send + Sync>),
 

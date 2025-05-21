@@ -1955,6 +1955,7 @@ dependencies = [
  "comfy-table",
  "comrak",
  "crossterm 0.29.0",
+ "duct",
  "futures",
  "inquire",
  "jp_attachment",
