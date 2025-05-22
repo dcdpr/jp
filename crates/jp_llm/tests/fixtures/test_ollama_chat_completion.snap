@@ -5,7 +5,7 @@ expression: expr
 Ok(
     [
         Content(
-            "I'm here! You sent a test message, and I responded. What's next? Do you have a specific question or topic you'd like to discuss?",
+            "It looks like you're just sending a test message! That's perfectly fine. If you're ready to start our conversation, I'm here to chat and help with any questions or topics you'd like to discuss. What's on your mind?",
         ),
     ],
 )

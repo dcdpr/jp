@@ -17,6 +17,7 @@ jp_config = { workspace = true }
 jp_conversation = { workspace = true }
 jp_mcp = { workspace = true }
 
+indoc = { workspace = true }
 schemars = { workspace = true, features = ["derive", "preserve_order", "std"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
 

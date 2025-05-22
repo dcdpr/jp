@@ -4,8 +4,8 @@ expression: expr
 ---
 Ok(
     Array [
-        String("Conversation Assistant Response"),
-        String("Helpful Dialogue Platform"),
-        String("AI-Powered Support Tool"),
+        String("Conversation Assistant"),
+        String("Helpful Dialogue"),
+        String("User Support"),
     ],
 )

@@ -48,9 +48,9 @@ pub fn titles(
         },
     });
 
-    let mut message = format!(
+    let mut message = indoc::formatdoc!(
         "Generate {count} concise, descriptive, factual titles for this conversation. Try to keep \
-         them short and to the point, no more than 50 characters.\n\n
+         them short and to the point, no more than 50 characters.
 
          DO NOT generate titles about the request to generate titles!"
     );
