@@ -150,6 +150,17 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest>
         options = options.num_ctx(max_tokens.into());
     }
 
+    // TODO: Remove this once the parameters logic is refactored.
+    //
+    // See: <https://github.com/dcdpr/jp/issues/46>
+    if let Some(max_tokens) = model
+        .additional_parameters
+        .get("max_tokens")
+        .and_then(Value::as_u64)
+    {
+        options = options.num_ctx(max_tokens);
+    }
+
     #[expect(clippy::cast_possible_truncation)]
     if let Some(top_p) = model
         .additional_parameters

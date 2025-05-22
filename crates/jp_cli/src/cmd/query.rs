@@ -2,10 +2,14 @@ use std::{
     collections::HashSet, convert::Infallible, env, fs, path::PathBuf, str::FromStr, time::Duration,
 };
 
-use clap::builder::TypedValueParser as _;
+use clap::{builder::TypedValueParser as _, ArgAction};
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
-use jp_config::{expand_tilde, llm::ToolChoice, style::code::LinkStyle};
+use jp_config::{
+    expand_tilde,
+    llm::{ProviderModelSlug, ToolChoice},
+    style::code::LinkStyle,
+};
 use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
     persona::Instructions,
@@ -28,7 +32,7 @@ use crate::{
     cmd::Success,
     editor::{self, Editor},
     error::{Error, Result},
-    parser, Ctx, PATH_STRING_PREFIX,
+    parser, Ctx, KeyValue, PATH_STRING_PREFIX,
 };
 
 // Define the delay duration
@@ -56,7 +60,7 @@ pub struct Args {
     /// If a query is provided, it will be appended to the end of the previous
     /// message. If no query is provided, $EDITOR will open with the last
     /// message in the conversation.
-    #[arg(short = 'r', long = "replay", conflicts_with = "new_conversation")]
+    #[arg(long = "replay", conflicts_with = "new_conversation")]
     pub replay: bool,
 
     /// Start a new conversation without any message history.
@@ -87,12 +91,20 @@ pub struct Args {
     pub mcp: Vec<McpServerId>,
 
     /// Whether and how to edit the query.
-    #[arg(short, long, conflicts_with = "no_edit")]
+    #[arg(short = 'e', long = "edit", conflicts_with = "no_edit")]
     pub edit: Option<Option<Editor>>,
 
     /// Do not edit the query.
-    #[arg(long, conflicts_with = "edit")]
+    #[arg(long = "no-edit", conflicts_with = "edit")]
     pub no_edit: bool,
+
+    /// The model to use.
+    #[arg(short = 'o', long = "model", value_parser = ProviderModelSlug::from_str)]
+    pub model: Option<ProviderModelSlug>,
+
+    /// The model parameters to use.
+    #[arg(short = 'r', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KeyValue::from_str)]
+    pub parameters: Vec<KeyValue>,
 }
 
 impl Args {
@@ -100,7 +112,7 @@ impl Args {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
 
-        self.update_config(&mut ctx.config);
+        self.update_config(&mut ctx.config)?;
 
         let last_active_conversation_id = ctx.workspace.active_conversation_id();
         let conversation_id = self.get_conversation_id(ctx)?;
@@ -373,7 +385,7 @@ impl Args {
     /// "convenience" flags such as `--persona` or `--context`, which are
     /// equivalent to `--cfg conversation.persona` and `--cfg
     /// conversation.context`.
-    fn update_config(&self, config: &mut jp_config::Config) {
+    fn update_config(&self, config: &mut jp_config::Config) -> Result<()> {
         if let Some(context) = self.context.as_ref() {
             config.conversation.context = Some(context.clone());
         }
@@ -381,6 +393,20 @@ impl Args {
         if let Some(persona) = self.persona.as_ref() {
             config.conversation.persona = Some(persona.clone());
         }
+
+        if let Some(model) = self.model.as_ref() {
+            config.llm.model.slug = Some(model.clone());
+        }
+
+        for KeyValue(key, value) in &self.parameters {
+            config
+                .llm
+                .model
+                .parameters
+                .insert(key.clone(), serde_json::from_str(value)?);
+        }
+
+        Ok(())
     }
 
     fn get_conversation_id(&self, ctx: &mut Ctx) -> Result<ConversationId> {
@@ -498,7 +524,7 @@ fn get_model(ctx: &Ctx, persona: &Persona) -> Result<Model> {
     // For explicit model requests, try to fetch the model configuration
     // from the workspace, otherwise use a default model with the requested
     // provider and model name.
-    if let Some(explicit_model) = ctx.config.llm.model.clone() {
+    if let Some(explicit_model) = ctx.config.llm.model.slug.clone() {
         let id = ModelId::try_from((explicit_model.provider, &explicit_model.slug))?;
         model = ctx.workspace.get_model(&id).cloned().unwrap_or(Model {
             provider: explicit_model.provider,
@@ -506,6 +532,10 @@ fn get_model(ctx: &Ctx, persona: &Persona) -> Result<Model> {
             ..Default::default()
         });
     }
+
+    model
+        .additional_parameters
+        .extend(ctx.config.llm.model.parameters.clone());
 
     trace!(provider = %model.provider, slug = %model.slug, "Loaded LLM model.");
 

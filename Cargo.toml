@@ -106,6 +106,7 @@ unused = { level = "warn", priority = -1 }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+assigning_clones = "allow"
 enum_glob_use = "allow"
 format_push_string = "allow"
 missing_errors_doc = "allow" # Temporary

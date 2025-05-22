@@ -1,9 +1,10 @@
+pub mod model;
 pub mod provider;
 
 use std::str::FromStr;
 
 use confique::Config as Confique;
-use jp_conversation::{model::ProviderId, Model, ModelId};
+pub use model::ProviderModelSlug;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
@@ -15,12 +16,9 @@ pub struct Config {
     #[config(nested)]
     pub provider: provider::Config,
 
-    /// Model to use, regardless of the conversation context.
-    ///
-    /// If not set (default), the model will be determined by the conversation
-    /// context.
-    #[config(env = "JP_LLM_MODEL", deserialize_with = de_model)]
-    pub model: Option<ProviderModelSlug>,
+    /// Model configuration.
+    #[config(nested)]
+    pub model: model::Config,
 
     /// How the LLM should choose tools, if any are available.
     #[config(default = "auto", env = "JP_LLM_TOOL_CHOICE", deserialize_with = de_tool_choice)]
@@ -34,62 +32,13 @@ impl Config {
 
         match key {
             _ if key.starts_with("provider.") => self.provider.set(path, &key[9..], value)?,
-            "model" => self.model = (!value.is_empty()).then(|| value.parse()).transpose()?,
+            _ if key.starts_with("model.") => self.model.set(path, &key[6..], value)?,
             "tool_choice" => self.tool_choice = value.parse()?,
             _ => return crate::set_error(path, key),
         }
 
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ProviderModelSlug {
-    pub provider: ProviderId,
-    pub slug: String,
-}
-
-impl From<ProviderModelSlug> for Model {
-    fn from(slug: ProviderModelSlug) -> Self {
-        Self::new(slug.provider, slug.slug)
-    }
-}
-
-impl TryFrom<ProviderModelSlug> for ModelId {
-    type Error = Error;
-
-    fn try_from(slug: ProviderModelSlug) -> Result<Self> {
-        Self::try_from((slug.provider, slug.slug)).map_err(Into::into)
-    }
-}
-
-impl FromStr for ProviderModelSlug {
-    type Err = Error;
-
-    fn from_str(slug: &str) -> Result<Self> {
-        let (provider, model) = slug.split_once('/').ok_or(Error::ModelSlug(
-            "format must be '<provider>/<model>'".to_owned(),
-        ))?;
-
-        if model.is_empty() {
-            return Err(Error::ModelSlug(
-                "format must be '<provider>/<model>'".to_string(),
-            ));
-        }
-
-        Ok(Self {
-            provider: ProviderId::from_str(provider)?,
-            slug: model.to_string(),
-        })
-    }
-}
-
-pub fn de_model<'de, D>(deserializer: D) -> std::result::Result<ProviderModelSlug, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let string: String = String::deserialize(deserializer)?;
-    ProviderModelSlug::from_str(&string).map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
