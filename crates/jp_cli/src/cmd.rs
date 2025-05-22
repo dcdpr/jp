@@ -341,6 +341,7 @@ impl From<jp_llm::Error> for Error {
             Config(error) => return error.into(),
             Json(error) => return error.into(),
             Request(error) => return error.into(),
+            Url(error) => return error.into(),
             MissingEnv(variable) => [
                 ("message", "Missing environment variable".into()),
                 ("variable", variable),
@@ -380,6 +381,11 @@ impl From<jp_llm::Error> for Error {
             .into(),
             AnthropicRequestBuilder(error) => [
                 ("message", "Anthropic request builder error".into()),
+                ("error", error.to_string()),
+            ]
+            .into(),
+            Ollama(error) => [
+                ("message", "Ollama error".into()),
                 ("error", error.to_string()),
             ]
             .into(),

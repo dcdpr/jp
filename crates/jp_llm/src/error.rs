@@ -5,6 +5,9 @@ pub enum Error {
     #[error("Missing environment variable: {0}")]
     MissingEnv(String),
 
+    #[error("Invalid URL: {0}")]
+    Url(#[from] url::ParseError),
+
     #[error("OpenRouter error: {0}")]
     OpenRouter(#[from] jp_openrouter::Error),
 
@@ -31,6 +34,9 @@ pub enum Error {
         status_code: reqwest::StatusCode,
         response: String,
     },
+
+    #[error("Ollama error: {0}")]
+    Ollama(#[from] ollama_rs::error::OllamaError),
 
     #[error("Missing structured data in response")]
     MissingStructuredData,

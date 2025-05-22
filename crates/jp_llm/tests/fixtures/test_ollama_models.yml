@@ -1,0 +1,9 @@
+when:
+  path: /api/tags
+  method: GET
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/json; charset=utf-8
+  body: "{\"models\":[{\"name\":\"llama3:latest\",\"model\":\"llama3:latest\",\"modified_at\":\"2025-05-21T15:13:53.158103649+02:00\",\"size\":4661224676,\"digest\":\"365c0bd3c000a25d28ddbf732fe1c6add414de7275464c4e4d1c3b5fcb5d8ad1\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"llama\",\"families\":[\"llama\"],\"parameter_size\":\"8.0B\",\"quantization_level\":\"Q4_0\"}},{\"name\":\"mistral:latest\",\"model\":\"mistral:latest\",\"modified_at\":\"2024-01-29T13:53:53.983383004+01:00\",\"size\":4109865159,\"digest\":\"61e88e884507ba5e06c49b40e6226884b2a16e872382c2b44a42f2d119d804a5\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"llama\",\"families\":[\"llama\"],\"parameter_size\":\"7B\",\"quantization_level\":\"Q4_0\"}},{\"name\":\"codellama:latest\",\"model\":\"codellama:latest\",\"modified_at\":\"2024-01-29T13:52:30.224754571+01:00\",\"size\":3825910662,\"digest\":\"8fdf8f752f6e80de33e82f381aba784c025982752cd1ae9377add66449d2225f\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"llama\",\"families\":null,\"parameter_size\":\"7B\",\"quantization_level\":\"Q4_0\"}},{\"name\":\"llama2:latest\",\"model\":\"llama2:latest\",\"modified_at\":\"2024-01-16T07:09:39.020198699+01:00\",\"size\":3826793677,\"digest\":\"78e26419b4469263f75331927a00a0284ef6544c1975b826b15abdaef17bb962\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"llama\",\"families\":[\"llama\"],\"parameter_size\":\"7B\",\"quantization_level\":\"Q4_0\"}}]}"

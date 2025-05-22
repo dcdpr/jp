@@ -2,20 +2,13 @@ use confique::Config as Confique;
 
 use crate::error::Result;
 
-/// Anthropic API configuration.
+/// Ollama API configuration.
 #[derive(Debug, Clone, PartialEq, Confique)]
 pub struct Config {
-    /// Environment variable that contains the API key.
-    #[config(
-        default = "ANTHROPIC_API_KEY",
-        env = "JP_LLM_PROVIDER_ANTHROPIC_API_KEY_ENV"
-    )]
-    pub api_key_env: String,
-
     /// The base URL to use for API requests.
     #[config(
-        default = "https://api.anthropic.com",
-        env = "JP_LLM_PROVIDER_ANTHROPIC_BASE_URL"
+        default = "http://localhost:11434",
+        env = "JP_LLM_PROVIDER_OLLAMA_BASE_URL"
     )]
     pub base_url: String,
 }
@@ -23,8 +16,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            api_key_env: "ANTHROPIC_API_KEY".to_owned(),
-            base_url: "https://api.anthropic.com".to_owned(),
+            base_url: "http://localhost:11434".to_owned(),
         }
     }
 }
@@ -33,7 +25,6 @@ impl Config {
     /// Set a configuration value using a stringified key/value pair.
     pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
         match key {
-            "api_key_env" => self.api_key_env = value.into(),
             "base_url" => self.base_url = value.into(),
             _ => return crate::set_error(path, key),
         }
