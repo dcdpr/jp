@@ -4,13 +4,12 @@ pub mod value;
 use std::{
     fs, iter,
     path::{Path, PathBuf},
-    str::FromStr as _,
 };
 
 pub use error::Error;
 use jp_conversation::{
-    model::ProviderId, Context, ContextId, Conversation, ConversationId, ConversationsMetadata,
-    MessagePair, Model, ModelId, Persona, PersonaId,
+    Context, ContextId, Conversation, ConversationId, ConversationsMetadata, MessagePair, Persona,
+    PersonaId,
 };
 use jp_id::Id as _;
 use jp_mcp::config::{McpServer, McpServerId};
@@ -34,7 +33,6 @@ pub const METADATA_FILE: &str = "metadata.json";
 const MESSAGES_FILE: &str = "messages.json";
 const CONTEXTS_DIR: &str = "contexts";
 pub const PERSONAS_DIR: &str = "personas";
-pub const MODELS_DIR: &str = "models";
 pub const CONVERSATIONS_DIR: &str = "conversations";
 pub const MCP_SERVERS_DIR: &str = "mcp";
 
@@ -194,55 +192,6 @@ impl Storage {
         }
 
         Ok(personas)
-    }
-
-    /// Loads all LLM models from the (copied) storage.
-    pub fn load_models(&self) -> Result<TombMap<ModelId, Model>> {
-        let models_path = self.root.join(MODELS_DIR);
-        trace!(path = %models_path.display(), "Loading models.");
-
-        let mut models = TombMap::new();
-
-        for entry in fs::read_dir(&models_path).ok().into_iter().flatten() {
-            let path = entry?.path();
-
-            if !path.is_dir() {
-                continue;
-            }
-            let Some(provider) = path.file_name().and_then(|v| v.to_str()) else {
-                warn!(?path, "Invalid model directory name. Skipping.");
-                continue;
-            };
-            let Ok(provider) = ProviderId::from_str(provider) else {
-                warn!(%provider, "Invalid model provider. Skipping.");
-                continue;
-            };
-
-            for entry in fs::read_dir(&path).ok().into_iter().flatten() {
-                let path = entry?.path();
-                if !path.is_file() || path.extension().is_some_and(|ext| ext != "json") {
-                    warn!(?path, "Invalid model file type. Skipping.");
-                    continue;
-                }
-                let Some(id) = path.file_name().and_then(|v| v.to_str()) else {
-                    warn!(?path, "Invalid model file name. Skipping.");
-                    continue;
-                };
-                let Ok(mut model) = read_json::<Model>(&path) else {
-                    warn!(?path, "Failed to read model file. Skipping.");
-                    continue;
-                };
-
-                model.provider = provider;
-                models.insert(ModelId::from_path(&format!("{provider}/{id}"))?, model);
-            }
-        }
-
-        if models.is_empty() {
-            models.insert(ModelId::default(), Model::default());
-        }
-
-        Ok(models)
     }
 
     /// Loads all MCP Servers from the (copied) storage.
@@ -445,14 +394,6 @@ impl Storage {
         Ok(())
     }
 
-    pub fn persist_models(&mut self, models: &TombMap<ModelId, Model>) -> Result<()> {
-        let root = self.root.as_path();
-        let models_dir = root.join(MODELS_DIR);
-        trace!(path = %models_dir.display(), "Persisting models.");
-
-        persist_inner(root, &models_dir, models, ModelId::to_path_buf)
-    }
-
     pub fn persist_conversations_metadata(
         &mut self,
         metadata: &ConversationsMetadata,
@@ -640,7 +581,7 @@ mod tests {
         time::Duration,
     };
 
-    use jp_conversation::{model::ProviderId, Context, ConversationId};
+    use jp_conversation::{Context, ConversationId};
     use jp_mcp::transport::{self, Transport};
     use tempfile::tempdir;
     use test_log::test;
@@ -821,124 +762,6 @@ mod tests {
         assert!(loaded.contains_key(&id_good));
         assert!(loaded.contains_key(&PersonaId::try_from("default").unwrap()));
         assert!(!loaded.contains_key(&id_bad));
-    }
-
-    #[test]
-    fn test_load_models_reads_existing() {
-        let tmp = tempdir().unwrap();
-        let models_path = tmp.path().join(MODELS_DIR);
-        fs::create_dir(&models_path).unwrap();
-
-        let model1 = Model {
-            slug: "model-1".into(),
-            provider: ProviderId::Openrouter,
-            ..Default::default()
-        };
-        let model2 = Model {
-            slug: "model-2".into(),
-            provider: ProviderId::Openrouter,
-            ..Default::default()
-        };
-        let id1 = ModelId::try_from("openrouter/m1").unwrap();
-        let id2 = ModelId::try_from("openrouter/m2").unwrap();
-
-        write_json(&models_path.join(id1.to_path_buf()), &model1).unwrap();
-        write_json(&models_path.join(id2.to_path_buf()), &model2).unwrap();
-        fs::write(models_path.join("readme.txt"), "ignore me").unwrap();
-
-        jp_id::global::set("foo".to_owned());
-        let storage = Storage::new(tmp.path()).unwrap();
-        let loaded_models = storage.load_models().unwrap();
-
-        assert_eq!(loaded_models.len(), 2);
-        assert_eq!(loaded_models.get(&id1).unwrap().slug, "model-1");
-        assert_eq!(loaded_models.get(&id2).unwrap().slug, "model-2");
-    }
-
-    #[test]
-    fn test_load_models_has_default_if_dir_missing() {
-        let original_dir = tempdir().unwrap(); // MODELS_DIR doesn't exist
-        let storage = Storage::new(original_dir.path()).unwrap();
-        let loaded_models = storage.load_models().unwrap();
-
-        assert_eq!(loaded_models.len(), 1); // default
-    }
-
-    #[test]
-    fn test_load_models_invalid_provider() {
-        let tmp = tempdir().unwrap();
-        let models_path = tmp.path().join(MODELS_DIR);
-        fs::create_dir_all(models_path.join("openrouter")).unwrap();
-
-        let model1 = Model {
-            slug: "model-1".into(),
-            ..Default::default()
-        };
-        let id1 = ModelId::try_from("openrouter/m1").unwrap();
-
-        write_json(
-            &models_path.join("invalid_provider").join(id1.to_path_buf()),
-            &model1,
-        )
-        .unwrap();
-
-        let storage = Storage::new(tmp.path()).unwrap();
-        let loaded_models = storage.load_models().unwrap();
-
-        assert_eq!(loaded_models.len(), 1); // default
-        assert!(!loaded_models.contains_key(&id1));
-    }
-
-    #[test]
-    fn test_persist_writes_models_and_deletes_stale() {
-        let tmp = tempdir().unwrap();
-
-        let path = tmp.path();
-        let provider_path = path.join(MODELS_DIR);
-        fs::create_dir(&provider_path).unwrap();
-
-        let id_m1 = ModelId::try_from("openrouter/m1").unwrap();
-        let id_stale = ModelId::try_from("openrouter/m_stale").unwrap();
-
-        write_json(&provider_path.join(id_m1.to_path_buf()), &Model {
-            slug: "old".into(),
-            ..Default::default()
-        })
-        .unwrap();
-        write_json(&provider_path.join(id_stale.to_path_buf()), &Model {
-            slug: "stale".into(),
-            ..Default::default()
-        })
-        .unwrap();
-
-        let mut storage = Storage::new(path).unwrap();
-
-        // Prepare new state: m1 (updated) and m2 (new)
-        let id_m2 = ModelId::try_from("openrouter/m2").unwrap();
-        let mut new_models = TombMap::new();
-        new_models.insert(id_stale.clone(), Model {
-            slug: "stale".into(),
-            ..Default::default()
-        });
-        new_models.insert(id_m1.clone(), Model {
-            slug: "old".into(),
-            ..Default::default()
-        });
-        new_models.insert(id_m2.clone(), Model {
-            slug: "new".into(),
-            ..Default::default()
-        });
-
-        new_models.remove(&id_stale);
-        new_models.get_mut(&id_m1).unwrap().slug = "updated".into();
-
-        storage.persist_models(&new_models).unwrap();
-
-        assert!(provider_path.join(id_m1.to_path_buf()).exists());
-        assert!(provider_path.join(id_m2.to_path_buf()).exists());
-        assert!(!provider_path.join(id_stale.to_path_buf()).exists());
-        let m1_final: Model = read_json(&provider_path.join(id_m1.to_path_buf())).unwrap();
-        assert_eq!(m1_final.slug, "updated");
     }
 
     #[test]

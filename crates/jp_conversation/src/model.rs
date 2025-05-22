@@ -1,109 +1,26 @@
-use std::{collections::HashMap, fmt, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, fmt, str::FromStr};
 
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::error::{Error, Result};
 
-const DEFAULT_SLUG: &str = "anthropic/claude-3.7-sonnet";
-
-/// Structured representation of LLM model configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Model {
-    #[serde(skip)]
-    pub provider: ProviderId,
-
-    pub slug: String,
-
-    /// Maximum number of tokens to generate.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<u32>,
-
-    /// Reasoning configuration.
-    ///
-    /// Should be `None` if the model does not support reasoning.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<Reasoning>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
-
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub stop_words: Vec<String>,
-
-    // Parameters specific to certain providers/models
-    #[serde(default, flatten, skip_serializing_if = "HashMap::is_empty")]
-    pub additional_parameters: HashMap<String, serde_json::Value>,
+    pub id: ModelId,
+    pub parameters: HashMap<String, Value>,
 }
 
-impl Model {
-    #[must_use]
-    pub fn new(provider: ProviderId, slug: impl Into<String>) -> Self {
+impl From<ModelId> for Model {
+    fn from(id: ModelId) -> Self {
         Self {
-            provider,
-            slug: slug.into(),
-            ..Default::default()
+            id,
+            parameters: HashMap::new(),
         }
-    }
-}
-
-impl Default for Model {
-    fn default() -> Self {
-        Self {
-            provider: ProviderId::default(),
-            slug: DEFAULT_SLUG.to_string(),
-            max_tokens: None,
-            reasoning: None,
-            temperature: None,
-            stop_words: vec![],
-            additional_parameters: HashMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
-pub struct Reasoning {
-    /// Effort to use for reasoning.
-    #[serde(default)]
-    pub effort: ReasoningEffort,
-
-    /// Whether to exclude reasoning tokens from the response. The model will
-    /// still generate reasoning tokens, but they will not be included in the
-    /// response.
-    #[serde(default)]
-    pub exclude: bool,
-}
-
-/// Effort to use for reasoning.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ReasoningEffort {
-    /// Allocates a large portion of tokens for reasoning (approximately 80% of
-    /// `max_tokens`)
-    High,
-    /// Allocates a moderate portion of tokens (approximately 50% of
-    /// `max_tokens`)
-    #[default]
-    Medium,
-    /// Allocates a smaller portion of tokens (approximately 20% of
-    /// `max_tokens`)
-    Low,
-}
-
-/// Reference to an LLM model, either inline or by ID.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ModelReference {
-    Inline(Model),
-    Ref(ModelId),
-}
-
-impl Default for ModelReference {
-    fn default() -> Self {
-        Self::Inline(Model::default())
     }
 }
 
@@ -114,25 +31,21 @@ impl Default for ModelReference {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ModelId {
-    provider: Option<ProviderId>,
-    name: String,
+    provider: ProviderId,
+    slug: String,
 }
 
 impl ModelId {
+    /// The provider of the model.
     #[must_use]
-    pub fn to_path_buf(&self) -> PathBuf {
-        let mut path = PathBuf::new();
-        if let Some(provider) = &self.provider {
-            path.push(provider.target_id());
-        }
-
-        path.join(format!("{}.json", self.name))
+    pub fn provider(&self) -> ProviderId {
+        self.provider
     }
 
-    pub fn from_path(path: &str) -> Result<Self> {
-        path.strip_suffix(".json")
-            .ok_or_else(|| Error::InvalidIdFormat(format!("Invalid model path: {path}")))
-            .and_then(ModelId::try_from)
+    /// The slug of the model.
+    #[must_use]
+    pub fn slug(&self) -> &str {
+        &self.slug
     }
 }
 
@@ -154,25 +67,9 @@ impl Id for ModelId {
     }
 }
 
-impl Default for ModelId {
-    fn default() -> Self {
-        let (provider, name) = DEFAULT_SLUG.split_once('/').unwrap_or(("", DEFAULT_SLUG));
-
-        Self {
-            provider: ProviderId::from_str(provider).ok(),
-            name: name.to_owned(),
-        }
-    }
-}
-
 impl fmt::Display for ModelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let prefix = self
-            .provider
-            .map(|p| format!("{}-", p.target_id()))
-            .unwrap_or_default();
-
-        write!(f, "{}{}", prefix, self.name)
+        write!(f, "{}-{}", self.provider.target_id(), self.slug)
     }
 }
 
@@ -202,25 +99,7 @@ impl TryFrom<String> for ModelId {
     type Error = Error;
 
     fn try_from(s: String) -> Result<Self> {
-        let (provider, name) = s.split_once('/').unwrap_or(("", s.as_str()));
-
-        if name.chars().any(|c| {
-            !(c.is_numeric()
-                || (c.is_ascii_alphabetic() && c.is_ascii_lowercase())
-                || c == '-'
-                || c == '_'
-                || c == '.'
-                || c == ':')
-        }) {
-            return Err(Error::InvalidIdFormat(
-                "Model ID must be [a-z0-9_-.:]".to_string(),
-            ));
-        }
-
-        Ok(Self {
-            provider: Some(ProviderId::from_str(provider)?),
-            name: name.to_owned(),
-        })
+        Self::from_str(s.as_str())
     }
 }
 
@@ -252,13 +131,24 @@ impl FromStr for ModelId {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        jp_id::parse::<Self>(s).map_err(Into::into).and_then(|p| {
-            let (provider, name) = p.target_id.split_once('/').unwrap_or(("", &p.target_id));
+        let (provider, name) = s.split_once('/').unwrap_or(("", s));
 
-            Ok(Self {
-                provider: Some(ProviderId::from_str(provider)?),
-                name: name.to_owned(),
-            })
+        if name.chars().any(|c| {
+            !(c.is_numeric()
+                || (c.is_ascii_alphabetic() && c.is_ascii_lowercase())
+                || c == '-'
+                || c == '_'
+                || c == '.'
+                || c == ':')
+        }) {
+            return Err(Error::InvalidIdFormat(
+                "Model ID must be [a-z0-9_-.:]".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            provider: ProviderId::from_str(provider)?,
+            slug: name.to_owned(),
         })
     }
 }

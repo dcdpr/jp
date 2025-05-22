@@ -1,9 +1,0 @@
-{
-  "slug": "o4-mini",
-  "max_tokens": 200000,
-  "reasoning": {
-    "effort": "high",
-    "exclude": false
-  },
-  "temperature": 1.0
-}

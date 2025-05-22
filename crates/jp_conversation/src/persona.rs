@@ -1,14 +1,15 @@
-use std::{fmt, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, fmt, path::PathBuf, str::FromStr};
 
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::{
     error::{Error, Result},
-    ModelReference,
+    ModelId,
 };
 
 /// Configuration specifying how the LLM should behave.
@@ -24,8 +25,24 @@ pub struct Persona {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub instructions: Vec<Instructions>,
 
+    /// The model ID to use for the persona.
+    ///
+    /// If not set, either the default configured model is used, or one has to
+    /// be specified on a per-conversation basis by the user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelId>,
+
+    /// Whether to inherit the model parameters from the global config.
+    #[serde(default = "inherit_parameters_default")]
+    pub inherit_parameters: bool,
+
+    /// A list of model parameters to set.
     #[serde(default)]
-    pub model: ModelReference,
+    pub parameters: HashMap<String, Value>,
+}
+
+fn inherit_parameters_default() -> bool {
+    true
 }
 
 impl Persona {
@@ -43,7 +60,9 @@ impl Default for Persona {
             name: "Default".to_string(),
             system_prompt: "You are a helpful assistant.".to_string(),
             instructions: Vec::new(),
-            model: ModelReference::default(),
+            model: Some("openai/gpt-4.1-2025-04-14".parse().unwrap()),
+            inherit_parameters: true,
+            parameters: HashMap::from([("reasoning".to_owned(), "no".into())]),
         }
     }
 }

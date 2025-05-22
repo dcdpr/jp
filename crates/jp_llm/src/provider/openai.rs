@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::llm;
 use jp_conversation::{
-    model::{self, ProviderId},
+    model::ProviderId,
     thread::{Document, Documents, Thinking, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
@@ -265,23 +265,30 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<Request> {
     } = query;
 
     let request = Request {
-        model: types::Model::Other(model.slug.clone()),
+        model: types::Model::Other(model.id.slug().to_owned()),
         input: convert_thread(thread)?,
         store: Some(false),
         tool_choice: Some(convert_tool_choice(tool_choice)),
         tools: Some(convert_tools(tools, tool_call_strict_mode)),
-        temperature: model.temperature,
-        reasoning: model.reasoning.map(convert_reasoning),
-        max_output_tokens: model.max_tokens.map(Into::into),
-        truncation: Some(types::Truncation::Auto),
-        top_p: model
-            .additional_parameters
-            .get("top_p")
+        temperature: model
+            .parameters
+            .get("temperature")
             .and_then(Value::as_f64)
             .map(
                 #[expect(clippy::cast_possible_truncation)]
                 |v| v as f32,
             ),
+        reasoning: model
+            .parameters
+            .get("reasoning")
+            .and_then(Value::as_str)
+            .map(convert_reasoning),
+        max_output_tokens: model.parameters.get("max_tokens").and_then(Value::as_u64),
+        truncation: Some(types::Truncation::Auto),
+        top_p: model.parameters.get("top_p").and_then(Value::as_f64).map(
+            #[expect(clippy::cast_possible_truncation)]
+            |v| v as f32,
+        ),
         ..Default::default()
     };
 
@@ -334,16 +341,17 @@ fn convert_tools(tools: Vec<jp_mcp::Tool>, strict: bool) -> Vec<types::Tool> {
         .collect()
 }
 
-fn convert_reasoning(reasoning: model::Reasoning) -> types::ReasoningConfig {
+fn convert_reasoning(reasoning: &str) -> types::ReasoningConfig {
     types::ReasoningConfig {
         // TODO: needs "organization ID-check verification" on OpenAI platform.
         // summary: Some(SummaryConfig::Auto),
         summary: None,
-        effort: Some(match reasoning.effort {
-            model::ReasoningEffort::High => ReasoningEffort::High,
-            model::ReasoningEffort::Medium => ReasoningEffort::Medium,
-            model::ReasoningEffort::Low => ReasoningEffort::Low,
-        }),
+        effort: match reasoning {
+            "high" => Some(ReasoningEffort::High),
+            "medium" => Some(ReasoningEffort::Medium),
+            "low" => Some(ReasoningEffort::Low),
+            _ => None,
+        },
     }
 }
 
@@ -597,7 +605,7 @@ impl From<types::OutputItem> for Delta {
 mod tests {
     use std::path::PathBuf;
 
-    use jp_config::llm::ProviderModelSlug;
+    use jp_conversation::ModelId;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -642,7 +650,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_openai_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = llm::Config::default().provider.openai;
-        let model: ProviderModelSlug = "openai/o4-mini".parse().unwrap();
+        let model: ModelId = "openai/o4-mini".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),

@@ -10,5 +10,5 @@ pub use context::{Context, ContextId};
 pub use conversation::{Conversation, ConversationId, ConversationsMetadata};
 pub use error::Error;
 pub use message::{AssistantMessage, MessageId, MessagePair, UserMessage};
-pub use model::{Model, ModelId, ModelReference};
+pub use model::{Model, ModelId};
 pub use persona::{Persona, PersonaId};

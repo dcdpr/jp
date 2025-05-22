@@ -46,6 +46,9 @@ pub enum Error {
     #[error("Editor error")]
     MissingEditor,
 
+    #[error("No model configured. Use `--model` to specify a model.")]
+    UndefinedModel,
+
     #[error("Task error: {0}")]
     Task(Box<dyn std::error::Error + Send + Sync>),
 

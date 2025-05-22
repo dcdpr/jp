@@ -207,7 +207,7 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<types::CreateMessag
     let system_prompt = thread.system_prompt.clone();
 
     builder
-        .model(model.slug.clone())
+        .model(model.id.slug())
         .messages(convert_thread(thread)?);
 
     if let Some(system_prompt) = system_prompt {
@@ -221,29 +221,22 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<types::CreateMessag
             .tool_choice(convert_tool_choice(tool_choice));
     }
 
-    if let Some(temperature) = model.temperature {
-        builder.temperature(temperature);
+    if let Some(temperature) = model.parameters.get("temperature").and_then(Value::as_f64) {
+        #[expect(clippy::cast_possible_truncation)]
+        builder.temperature(temperature as f32);
     }
 
-    if let Some(max_tokens) = model.max_tokens {
-        #[expect(clippy::cast_possible_wrap)]
+    if let Some(max_tokens) = model.parameters.get("max_tokens").and_then(Value::as_u64) {
+        #[expect(clippy::cast_possible_truncation)]
         builder.max_tokens(max_tokens as i32);
     }
 
-    if let Some(top_p) = model
-        .additional_parameters
-        .get("top_p")
-        .and_then(Value::as_f64)
-    {
+    if let Some(top_p) = model.parameters.get("top_p").and_then(Value::as_f64) {
         #[expect(clippy::cast_possible_truncation)]
         builder.top_p(top_p as f32);
     }
 
-    if let Some(top_k) = model
-        .additional_parameters
-        .get("top_k")
-        .and_then(Value::as_u64)
-    {
+    if let Some(top_k) = model.parameters.get("top_k").and_then(Value::as_u64) {
         #[expect(clippy::cast_possible_truncation)]
         builder.top_k(top_k as u32);
     }
@@ -522,7 +515,7 @@ impl From<types::MessageContent> for Delta {
 mod tests {
     use std::path::PathBuf;
 
-    use jp_config::llm::ProviderModelSlug;
+    use jp_conversation::ModelId;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -568,7 +561,7 @@ mod tests {
     async fn test_anthropic_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
     {
         let mut config = llm::Config::default().provider.anthropic;
-        let model: ProviderModelSlug = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
+        let model: ModelId = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),

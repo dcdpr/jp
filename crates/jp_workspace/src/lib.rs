@@ -55,8 +55,7 @@ pub use error::Error;
 use error::Result;
 pub use id::Id;
 use jp_conversation::{
-    Context, ContextId, Conversation, ConversationId, MessagePair, Model, ModelId, ModelReference,
-    Persona, PersonaId,
+    Context, ContextId, Conversation, ConversationId, MessagePair, Persona, PersonaId,
 };
 use jp_mcp::config::{McpServer, McpServerId};
 use jp_storage::{Storage, DEFAULT_STORAGE_DIR, MCP_SERVERS_DIR};
@@ -206,7 +205,6 @@ impl Workspace {
 
         // Workspace state
         let personas = storage.load_personas()?;
-        let models = storage.load_models()?;
         let mcp_servers = storage.load_mcp_servers()?;
         let named_contexts = storage.load_named_contexts()?;
         let (mut conversations, messages) = storage.load_conversations_and_messages()?;
@@ -218,7 +216,6 @@ impl Workspace {
             contexts = %named_contexts.len(),
             conversations = %conversations.len(),
             personas = %personas.len(),
-            models = %models.len(),
             mcp_servers = %mcp_servers.len(),
             active_conversation_id = %conversations_metadata.active_conversation_id,
             "Loaded workspace state."
@@ -245,7 +242,6 @@ impl Workspace {
                 conversations,
                 messages,
                 personas,
-                models,
                 mcp_servers,
             },
             user: UserState {
@@ -269,7 +265,6 @@ impl Workspace {
 
         storage.persist_conversations_metadata(&self.state.user.conversations_metadata)?;
         storage.persist_personas(&self.state.local.personas)?;
-        storage.persist_models(&self.state.local.models)?;
         storage.persist_conversations_and_messages(
             &self.state.local.conversations,
             &self.state.local.messages,
@@ -383,57 +378,6 @@ impl Workspace {
         }
 
         self.state.local.personas.remove(id)
-    }
-
-    /// Returns an iterator over all defined LLM models.
-    pub fn models(&self) -> impl Iterator<Item = (&ModelId, &Model)> {
-        self.state.local.models.iter()
-    }
-
-    /// Gets a reference to an LLM model by its ID.
-    #[must_use]
-    pub fn get_model(&self, id: &ModelId) -> Option<&Model> {
-        self.state.local.models.get(id)
-    }
-
-    /// Resolves an `LlmModelReference` to a concrete `LlmModel`.
-    ///
-    /// Returns an error if the reference is an ID that doesn't exist.
-    pub fn resolve_model_reference<'a>(
-        &'a self,
-        reference: &'a ModelReference,
-    ) -> Result<&'a Model> {
-        match reference {
-            ModelReference::Inline(model) => Ok(model),
-            ModelReference::Ref(id) => self.get_model(id).ok_or(Error::not_found("Model", id)),
-        }
-    }
-
-    /// Creates a new model.
-    ///
-    /// Returns an error if a model with that ID already exists.
-    pub fn create_model(&mut self, model: Model) -> Result<ModelId> {
-        let id = ModelId::try_from((model.provider, model.slug.as_str()))?;
-        self.create_model_with_id(id, model)
-    }
-
-    /// Creates a new model.
-    ///
-    /// Returns an error if a model with that ID already exists.
-    pub fn create_model_with_id(&mut self, id: ModelId, model: Model) -> Result<ModelId> {
-        if self.state.local.models.contains_key(&id) {
-            return Err(Error::exists("Model", &id));
-        }
-
-        self.state.local.models.insert(id.clone(), model);
-        Ok(id)
-    }
-
-    /// Removes an LLM model by its ID.
-    ///
-    /// Returns the removed model if it existed.
-    pub fn remove_model(&mut self, id: &ModelId) -> Option<Model> {
-        self.state.local.models.remove(id)
     }
 
     /// Returns an iterator over all conversations.
@@ -599,7 +543,6 @@ pub fn user_data_dir() -> Result<PathBuf> {
 mod tests {
     use std::{collections::HashMap, fs, time::Duration};
 
-    use jp_conversation::model::ProviderId;
     use jp_storage::{
         value::{read_json, write_json},
         CONVERSATIONS_DIR, METADATA_FILE, PERSONAS_DIR,
@@ -851,82 +794,6 @@ mod tests {
         let removed_persona = workspace.remove_persona(&id);
         assert!(removed_persona.is_none());
         assert_eq!(workspace.state.local.personas.len(), 1);
-    }
-
-    #[test]
-    fn test_workspace_models() {
-        jp_id::global::set("foo".to_owned());
-
-        let mut workspace = Workspace::new(PathBuf::new());
-        assert_eq!(workspace.models().count(), 0);
-
-        let id = ModelId::try_from("openrouter/p1").unwrap();
-        let model = Model::new(ProviderId::Openrouter, "p1");
-        workspace.state.local.models.insert(id, model);
-        assert_eq!(workspace.models().count(), 1);
-    }
-
-    #[test]
-    fn test_workspace_get_model() {
-        jp_id::global::set("foo".to_owned());
-
-        let mut workspace = Workspace::new(PathBuf::new());
-        let id = ModelId::try_from("openrouter/p1").unwrap();
-        assert_eq!(workspace.get_model(&id), None);
-
-        let model = Model::new(ProviderId::Openrouter, "p1");
-        workspace
-            .state
-            .local
-            .models
-            .insert(id.clone(), model.clone());
-        assert_eq!(workspace.get_model(&id), Some(&model));
-    }
-
-    #[test]
-    fn test_workspace_create_model() {
-        jp_id::global::set("foo".to_owned());
-
-        let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.local.models.is_empty());
-
-        let model = Model::new(ProviderId::Openrouter, "p1");
-        let id = workspace.create_model(model.clone()).unwrap();
-        assert_eq!(workspace.state.local.models.get(&id), Some(&model));
-    }
-
-    #[test]
-    fn test_workspace_create_model_duplicate() {
-        jp_id::global::set("foo".to_owned());
-
-        let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.local.models.is_empty());
-
-        let model = Model::new(ProviderId::Openrouter, "p1");
-        let id = workspace.create_model(model.clone()).unwrap();
-        assert_eq!(workspace.state.local.models.get(&id), Some(&model));
-
-        let error = workspace.create_model(model).unwrap_err();
-        assert_eq!(error, Error::exists("Model", &id));
-        assert_eq!(workspace.state.local.models.len(), 1);
-    }
-
-    #[test]
-    fn test_workspace_remove_model() {
-        let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.local.models.is_empty());
-
-        let id = ModelId::try_from("openrouter/p1").unwrap();
-        let model = Model::new(ProviderId::Openrouter, "p1");
-        workspace
-            .state
-            .local
-            .models
-            .insert(id.clone(), model.clone());
-
-        let removed_model = workspace.remove_model(&id).unwrap();
-        assert_eq!(removed_model, model);
-        assert!(workspace.state.local.models.is_empty());
     }
 
     #[test]

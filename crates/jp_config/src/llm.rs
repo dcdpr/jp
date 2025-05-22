@@ -4,7 +4,6 @@ pub mod provider;
 use std::str::FromStr;
 
 use confique::Config as Confique;
-pub use model::ProviderModelSlug;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};

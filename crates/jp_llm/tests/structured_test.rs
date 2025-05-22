@@ -1,7 +1,7 @@
 use std::{env, path::PathBuf};
 
-use jp_config::llm::{self, ProviderModelSlug};
-use jp_conversation::{AssistantMessage, MessagePair, UserMessage};
+use jp_config::llm;
+use jp_conversation::{AssistantMessage, MessagePair, ModelId, UserMessage};
 use jp_llm::{provider::openrouter::Openrouter, structured_completion};
 use jp_query::structured::conversation_titles;
 use jp_test::{function_name, mock::Vcr};
@@ -16,7 +16,7 @@ async fn test_conversation_titles() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     // Create test data
-    let model: ProviderModelSlug = "openrouter/openai/o3-mini-high".parse().unwrap();
+    let model: ModelId = "openrouter/openai/o3-mini-high".parse().unwrap();
     let mut config = llm::Config::default().provider.openrouter;
 
     let message = UserMessage::Query("Test message".to_string());

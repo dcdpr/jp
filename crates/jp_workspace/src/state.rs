@@ -2,7 +2,7 @@
 
 use jp_conversation::{
     message::MessagePair, Context, ContextId, Conversation, ConversationId, ConversationsMetadata,
-    Model, ModelId, Persona, PersonaId,
+    Persona, PersonaId,
 };
 use jp_mcp::config::{McpServer, McpServerId};
 use jp_tombmap::TombMap;
@@ -37,9 +37,6 @@ pub(crate) struct LocalState {
 
     #[serde(skip_serializing_if = "TombMap::is_empty")]
     pub personas: TombMap<PersonaId, Persona>,
-
-    #[serde(skip_serializing_if = "TombMap::is_empty")]
-    pub models: TombMap<ModelId, Model>,
 
     #[serde(skip_serializing_if = "TombMap::is_empty")]
     pub mcp_servers: TombMap<McpServerId, McpServer>,
