@@ -1,0 +1,11 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    Array [
+        String("Conversation Assistant Response"),
+        String("Helpful Dialogue Platform"),
+        String("AI-Powered Support Tool"),
+    ],
+)

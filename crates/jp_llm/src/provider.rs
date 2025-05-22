@@ -2,6 +2,7 @@
 // pub mod google;
 // pub mod xai;
 pub mod anthropic;
+pub mod ollama;
 pub mod openai;
 pub mod openrouter;
 
@@ -13,6 +14,7 @@ use futures::{Stream, StreamExt as _};
 use jp_config::llm::provider;
 use jp_conversation::{message::ToolCallRequest, model::ProviderId, Model};
 use jp_query::query::{ChatQuery, StructuredQuery};
+use ollama::Ollama;
 use openai::Openai;
 use openrouter::Openrouter;
 use serde_json::Value;
@@ -23,7 +25,7 @@ use crate::{error::Result, structured::SCHEMA_TOOL_NAME, Error};
 
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>;
 
-/// Details about a model for a given provider.
+/// Details about a model for a given provider, as specified by the provider.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelDetails {
     /// The provider of the model.
@@ -53,6 +55,16 @@ pub enum StreamEvent {
 
     /// A request to call a tool.
     ToolCall(ToolCallRequest),
+}
+
+impl StreamEvent {
+    #[must_use]
+    pub fn into_chat_chunk(self) -> Option<CompletionChunk> {
+        match self {
+            Self::ChatChunk(chunk) => Some(chunk),
+            Self::ToolCall(_) => None,
+        }
+    }
 }
 
 /// Represents a completed event from the LLM.
@@ -101,6 +113,24 @@ pub enum CompletionChunk {
 
     /// Reasoning content.
     Reasoning(String),
+}
+
+impl CompletionChunk {
+    #[must_use]
+    pub fn into_content(self) -> Option<String> {
+        match self {
+            Self::Content(content) => Some(content),
+            Self::Reasoning(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn into_reasoning(self) -> Option<String> {
+        match self {
+            Self::Reasoning(reasoning) => Some(reasoning),
+            Self::Content(_) => None,
+        }
+    }
 }
 
 #[async_trait]
@@ -202,6 +232,7 @@ pub fn get_provider(id: ProviderId, config: &provider::Config) -> Result<Box<dyn
         // ProviderId::Deepseek => Box::new(Deepseek::try_from(&config.deepseek)?),
         // ProviderId::Google => Box::new(Google::try_from(&config.google)?),
         // ProviderId::Xai => Box::new(Xai::try_from(&config.xai)?),
+        ProviderId::Ollama => Box::new(Ollama::try_from(&config.ollama)?),
         ProviderId::Anthropic => Box::new(Anthropic::try_from(&config.anthropic)?),
         ProviderId::Openai => Box::new(Openai::try_from(&config.openai)?),
         ProviderId::Openrouter => Box::new(Openrouter::try_from(&config.openrouter)?),
@@ -251,6 +282,12 @@ impl Delta {
             tool_call_arguments: (!arguments.is_empty()).then_some(arguments),
             ..Default::default()
         }
+    }
+
+    #[must_use]
+    fn finished(mut self) -> Self {
+        self.tool_call_finished = true;
+        self
     }
 
     fn tool_call_finished() -> Self {

@@ -23,6 +23,7 @@ async-anthropic = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
+ollama-rs = { workspace = true, features = ["rustls", "stream"] }
 openai_responses = { workspace = true, features = ["stream"] }
 reqwest = { workspace = true }
 reqwest-eventsource = { workspace = true }
@@ -32,6 +33,7 @@ thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["colors"] }

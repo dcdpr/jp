@@ -1,6 +1,7 @@
 pub mod anthropic;
 pub mod deepseek;
 pub mod google;
+pub mod ollama;
 pub mod openai;
 pub mod openrouter;
 
@@ -30,6 +31,10 @@ pub struct Config {
     /// Openai API configuration.
     #[config(nested)]
     pub openai: openai::Config,
+
+    /// Ollama API configuration.
+    #[config(nested)]
+    pub ollama: ollama::Config,
 }
 
 impl Config {

@@ -1,0 +1,10 @@
+when:
+  path: /api/chat
+  method: POST
+  body: "{\"model\":\"llama3:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"Test message\",\"tool_calls\":[]}],\"stream\":false}"
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/json; charset=utf-8
+  body: "{\"model\":\"llama3:latest\",\"created_at\":\"2025-05-21T14:36:49.475723Z\",\"message\":{\"role\":\"assistant\",\"content\":\"I'm here! You sent a test message, and I responded. What's next? Do you have a specific question or topic you'd like to discuss?\"},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":3381660917,\"load_duration\":2489164959,\"prompt_eval_count\":12,\"prompt_eval_duration\":319152292,\"eval_count\":33,\"eval_duration\":572729833}"

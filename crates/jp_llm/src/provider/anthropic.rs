@@ -459,7 +459,7 @@ fn user_message_to_messages(user: UserMessage) -> Vec<types::Message> {
         UserMessage::ToolCallResults(results) => results
             .into_iter()
             .map(|result| types::Message {
-                role: types::MessageRole::Assistant,
+                role: types::MessageRole::User,
                 content: types::MessageContentList(vec![types::MessageContent::ToolResult(
                     types::ToolResult {
                         tool_use_id: result.id,

@@ -1,0 +1,24 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    [
+        ModelDetails {
+            provider: Ollama,
+            slug: "llama3:latest",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Ollama,
+            slug: "mistral:latest",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+    ],
+)

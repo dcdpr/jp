@@ -1,0 +1,11 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    [
+        Content(
+            "I'm here! You sent a test message, and I responded. What's next? Do you have a specific question or topic you'd like to discuss?",
+        ),
+    ],
+)

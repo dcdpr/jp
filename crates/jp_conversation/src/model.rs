@@ -209,10 +209,11 @@ impl TryFrom<String> for ModelId {
                 || (c.is_ascii_alphabetic() && c.is_ascii_lowercase())
                 || c == '-'
                 || c == '_'
-                || c == '.')
+                || c == '.'
+                || c == ':')
         }) {
             return Err(Error::InvalidIdFormat(
-                "Model ID must be [a-z0-9_-]".to_string(),
+                "Model ID must be [a-z0-9_-.:]".to_string(),
             ));
         }
 
@@ -268,6 +269,7 @@ pub enum ProviderId {
     Anthropic,
     Deepseek,
     Google,
+    Ollama,
     Openai,
     #[default]
     Openrouter,
@@ -299,6 +301,7 @@ impl fmt::Display for ProviderId {
             Self::Google => f.write_str("google"),
             Self::Openai => f.write_str("openai"),
             Self::Openrouter => f.write_str("openrouter"),
+            Self::Ollama => f.write_str("ollama"),
         }
     }
 }
@@ -313,6 +316,7 @@ impl FromStr for ProviderId {
             "google" => Ok(Self::Google),
             "openai" => Ok(Self::Openai),
             "openrouter" => Ok(Self::Openrouter),
+            "ollama" => Ok(Self::Ollama),
             _ => Err(Error::InvalidProviderId(s.to_owned())),
         }
     }
