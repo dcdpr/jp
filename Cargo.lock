@@ -2130,6 +2130,7 @@ dependencies = [
 name = "jp_query"
 version = "0.1.0"
 dependencies = [
+ "indoc",
  "jp_config",
  "jp_conversation",
  "jp_mcp",
