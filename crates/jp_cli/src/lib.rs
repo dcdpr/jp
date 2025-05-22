@@ -115,8 +115,38 @@ pub struct Globals {
 }
 
 #[derive(Debug, Clone)]
+pub struct KeyValue(String, String);
+
+impl KeyValue {
+    #[must_use]
+    pub fn key(&self) -> &str {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn value(&self) -> &str {
+        &self.1
+    }
+}
+
+impl FromStr for KeyValue {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        s.split_once('=')
+            .ok_or(jp_config::Error::InvalidConfigValue {
+                key: s.to_string(),
+                value: s.to_string(),
+                need: vec!["<key>=<value>".to_string(), "@<path>".to_string()],
+            })
+            .map(|(key, value)| Self(key.to_string(), value.to_string()))
+            .map_err(Into::into)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum KeyValueOrPath {
-    KeyValue((String, String)),
+    KeyValue(KeyValue),
     Path(PathBuf),
 }
 
@@ -128,14 +158,7 @@ impl FromStr for KeyValueOrPath {
             return Ok(Self::Path(PathBuf::from(s.trim())));
         }
 
-        s.split_once('=')
-            .ok_or(jp_config::Error::InvalidConfigValue {
-                key: s.to_string(),
-                value: s.to_string(),
-                need: vec!["<key>=<value>".to_string(), "@<path>".to_string()],
-            })
-            .map(|(key, value)| Self::KeyValue((key.to_string(), value.to_string())))
-            .map_err(Into::into)
+        s.parse().map(Self::KeyValue)
     }
 }
 
@@ -381,7 +404,7 @@ fn apply_cli_configs(overrides: &[KeyValueOrPath], config: &mut Config) -> Resul
 
     for field in overrides {
         match field {
-            KeyValueOrPath::KeyValue((key, value)) => apply_cli_config(key, value, config)?,
+            KeyValueOrPath::KeyValue(KeyValue(key, value)) => apply_cli_config(key, value, config)?,
             KeyValueOrPath::Path(path) => {
                 for (key, value) in file_to_key_value_pairs(path)? {
                     apply_cli_config(&key, &value, config)?;

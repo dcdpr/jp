@@ -13,6 +13,7 @@ use serde_json::{Map, Value};
 use crate::Ctx;
 
 #[derive(Debug, clap::Subcommand)]
+#[expect(clippy::large_enum_variant)]
 pub enum Commands {
     /// Initialize a new workspace.
     Init(init::Args),

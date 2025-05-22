@@ -28,7 +28,9 @@ impl TitleGeneratorTask {
         workspace: &Workspace,
         query: Option<String>,
     ) -> Self {
-        let model = config.conversation.title.generate.model.clone().into();
+        let mut model: Model = config.conversation.title.generate.model.slug.clone().into();
+        model.additional_parameters = config.conversation.title.generate.model.parameters.clone();
+
         let mut messages = workspace.get_messages(&conversation_id).to_vec();
         if let Some(query) = query {
             messages.push(MessagePair::new(query.into(), AssistantMessage::default()));
