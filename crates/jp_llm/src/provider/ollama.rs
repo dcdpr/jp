@@ -146,16 +146,25 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest>
         options = options.temperature(temperature);
     }
 
-    if let Some(max_tokens) = model.parameters.max_tokens {
-        options = options.num_ctx(max_tokens);
-    }
-
     if let Some(top_p) = model.parameters.top_p {
         options = options.top_p(top_p);
     }
 
     if let Some(top_k) = model.parameters.top_k {
         options = options.top_k(top_k);
+    }
+
+    // Set the context window for the model.
+    //
+    // This can be used to force Ollama to use a larger context window then the
+    // one determined based on the machine's resources.
+    if let Some(context_window) = model
+        .parameters
+        .other
+        .get("context_window")
+        .and_then(Value::as_u64)
+    {
+        options = options.num_ctx(context_window);
     }
 
     if let Some(keep_alive) = model
