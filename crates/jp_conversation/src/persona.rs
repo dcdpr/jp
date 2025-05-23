@@ -60,7 +60,7 @@ impl Default for Persona {
             name: "Default".to_string(),
             system_prompt: "You are a helpful assistant.".to_string(),
             instructions: Vec::new(),
-            model: Some("openai/gpt-4.1-2025-04-14".parse().unwrap()),
+            model: None,
             inherit_parameters: true,
             parameters: Parameters::default(),
         }
