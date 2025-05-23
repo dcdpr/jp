@@ -403,7 +403,8 @@ impl Args {
                 .llm
                 .model
                 .parameters
-                .insert(key.clone(), serde_json::from_str(value)?);
+                .get_or_insert_default()
+                .set(key, value.to_owned())?;
         }
 
         Ok(())
@@ -524,9 +525,9 @@ fn get_model(ctx: &Ctx, persona: &Persona) -> Result<Model> {
         return Err(Error::UndefinedModel);
     };
 
-    let mut parameters = ctx.config.llm.model.parameters.clone();
+    let mut parameters = ctx.config.llm.model.parameters.clone().unwrap_or_default();
     if persona.inherit_parameters {
-        parameters.extend(persona.parameters.clone());
+        parameters.merge(persona.parameters.clone());
     } else {
         parameters = persona.parameters.clone();
     }

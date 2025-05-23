@@ -266,6 +266,7 @@ impl From<crate::error::Error> for Error {
             Bat(error) => return error.into(),
             Template(error) => return error.into(),
             Json(error) => return error.into(),
+            Parameter(error) => return error.into(),
             NotFound(target, id) => [
                 ("message", "Not found".into()),
                 ("target", target.into()),
@@ -336,6 +337,10 @@ impl_from_error!(url::ParseError, "Error while parsing URL");
 impl_from_error!(serde_json::Error, "Error while parsing JSON");
 impl_from_error!(reqwest::Error, "Error while making HTTP request");
 impl_from_error!(std::str::ParseBoolError, "Error parsing boolean value");
+impl_from_error!(
+    jp_conversation::model::SetParameterError,
+    "Error setting model parameter"
+);
 
 impl From<jp_llm::Error> for Error {
     fn from(error: jp_llm::Error) -> Self {
@@ -439,6 +444,7 @@ impl From<jp_config::Error> for Error {
             ParseBool(error) => return error.into(),
             Conversation(error) => return error.into(),
             Io(error) => return error.into(),
+            Parameters(error) => return error.into(),
             Confique(error) => [
                 ("message", "Config error".into()),
                 ("error", error.to_string().into()),

@@ -6,7 +6,7 @@ use futures::{StreamExt, TryStreamExt as _};
 use jp_config::llm::{self, provider::openrouter};
 use jp_conversation::{
     message::ToolCallRequest,
-    model::ProviderId,
+    model::{ProviderId, ReasoningEffort},
     thread::{Document, Documents, Thinking, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
@@ -62,7 +62,7 @@ impl Openrouter {
         } = query;
 
         let slug = model.id.slug().to_owned();
-        let reasoning = model.parameters.get("reasoning").and_then(Value::as_str);
+        let reasoning = model.parameters.reasoning;
         let messages: RequestMessages = (model, thread).try_into()?;
         let tools = tools
             .into_iter()
@@ -96,17 +96,13 @@ impl Openrouter {
         Ok(request::ChatCompletion {
             model: slug,
             messages: messages.0,
-            reasoning: reasoning.and_then(|r| {
-                Some(request::Reasoning {
-                    // TODO: support "exclude"?
-                    exclude: false,
-                    effort: match r {
-                        "high" => request::ReasoningEffort::High,
-                        "medium" => request::ReasoningEffort::Medium,
-                        "low" => request::ReasoningEffort::Low,
-                        _ => return None,
-                    },
-                })
+            reasoning: reasoning.map(|r| request::Reasoning {
+                exclude: r.exclude,
+                effort: match r.effort {
+                    ReasoningEffort::High => request::ReasoningEffort::High,
+                    ReasoningEffort::Medium => request::ReasoningEffort::Medium,
+                    ReasoningEffort::Low => request::ReasoningEffort::Low,
+                },
             }),
             tools,
             tool_choice,

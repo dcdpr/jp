@@ -1,14 +1,14 @@
-use std::{collections::HashMap, fmt, path::PathBuf, str::FromStr};
+use std::{fmt, path::PathBuf, str::FromStr};
 
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::{
     error::{Error, Result},
+    model::Parameters,
     ModelId,
 };
 
@@ -38,7 +38,7 @@ pub struct Persona {
 
     /// A list of model parameters to set.
     #[serde(default)]
-    pub parameters: HashMap<String, Value>,
+    pub parameters: Parameters,
 }
 
 fn inherit_parameters_default() -> bool {
@@ -62,7 +62,7 @@ impl Default for Persona {
             instructions: Vec::new(),
             model: Some("openai/gpt-4.1-2025-04-14".parse().unwrap()),
             inherit_parameters: true,
-            parameters: HashMap::from([("reasoning".to_owned(), "no".into())]),
+            parameters: Parameters::default(),
         }
     }
 }

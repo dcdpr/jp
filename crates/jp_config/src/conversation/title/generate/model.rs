@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-
 use confique::Config as Confique;
-use jp_conversation::ModelId;
+use jp_conversation::{model::Parameters, ModelId};
 
 use crate::{error::Result, llm::model::de_model_id};
 
@@ -13,8 +11,8 @@ pub struct Config {
     pub id: ModelId,
 
     /// The parameters to use for the model.
-    #[config(default = {}, env = "JP_CONVERSATION_TITLE_GENERATE_MODEL_PARAMETERS")]
-    pub parameters: HashMap<String, serde_json::Value>,
+    #[config(env = "JP_CONVERSATION_TITLE_GENERATE_MODEL_PARAMETERS")]
+    pub parameters: Option<Parameters>,
 }
 
 impl Config {
@@ -25,7 +23,8 @@ impl Config {
         match key {
             _ if key.starts_with("parameters.") => {
                 self.parameters
-                    .insert(key[11..].to_owned(), serde_json::from_str(&value)?);
+                    .get_or_insert_default()
+                    .set(&key[11..], value)?;
             }
             "id" => self.id = value.parse()?,
             _ => return crate::set_error(path, key),
@@ -39,7 +38,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             id: "openai/gpt-4.1-nano".parse().unwrap(),
-            parameters: HashMap::new(),
+            parameters: None,
         }
     }
 }

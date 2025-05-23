@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use jp_conversation::model::SetParameterError;
+
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
@@ -15,6 +17,9 @@ pub enum Error {
 
     #[error("Bool parse error: {0}")]
     ParseBool(#[from] std::str::ParseBoolError),
+
+    #[error("Model parameter error: {0}")]
+    Parameters(#[from] SetParameterError),
 
     #[error("Unknown config key: {key}\n\nAvailable keys:\n  - {}", available_keys.join("\n  - "))]
     UnknownConfigKey {

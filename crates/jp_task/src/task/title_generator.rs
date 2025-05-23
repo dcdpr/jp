@@ -29,7 +29,15 @@ impl TitleGeneratorTask {
         query: Option<String>,
     ) -> Self {
         let id = config.conversation.title.generate.model.id.clone();
-        let parameters = config.conversation.title.generate.model.parameters.clone();
+        let parameters = config
+            .conversation
+            .title
+            .generate
+            .model
+            .parameters
+            .clone()
+            .unwrap_or_default();
+
         let model = Model { id, parameters };
 
         let mut messages = workspace.get_messages(&conversation_id).to_vec();

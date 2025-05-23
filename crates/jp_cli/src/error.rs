@@ -49,6 +49,9 @@ pub enum Error {
     #[error("No model configured. Use `--model` to specify a model.")]
     UndefinedModel,
 
+    #[error("Model parameter error: {0}")]
+    Parameter(#[from] jp_conversation::model::SetParameterError),
+
     #[error("Task error: {0}")]
     Task(Box<dyn std::error::Error + Send + Sync>),
 

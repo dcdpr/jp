@@ -12,14 +12,178 @@ use crate::error::{Error, Result};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
     pub id: ModelId,
-    pub parameters: HashMap<String, Value>,
+    pub parameters: Parameters,
 }
 
 impl From<ModelId> for Model {
     fn from(id: ModelId) -> Self {
         Self {
             id,
-            parameters: HashMap::new(),
+            parameters: Parameters::default(),
+        }
+    }
+}
+
+/// Configuration for a model.
+///
+/// Note that not all models support all configuration options. Unsupported
+/// options will be ignored.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Parameters {
+    /// Maximum number of tokens to generate.
+    ///
+    /// This can usually be left unset, in which case the model will be allowed
+    /// to generate as many tokens as it supports. However, some providers,
+    /// especially local ones such as `Ollama`, may set a very low token limit
+    /// based on the local machine's resources, in such cases, it might be
+    /// necessary to set a higher limit if your conversation is long or has more
+    /// context attached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u64>,
+
+    /// Reasoning configuration.
+    ///
+    /// Should be `None` if the model does not support reasoning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<Reasoning>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+
+    /// Control the randomness and diversity of the generated text. Also
+    /// known as *nucleus sampling*.
+    ///
+    /// For example, if `top_p` is set to 0.8, the model will consider the top
+    /// tokens whose cumulative probability just exceeds 0.8. This means the
+    /// model will focus on the most probable options, making the output more
+    /// controlled and less random.
+    ///
+    /// As opposed to `top_k`, this is a dynamic approach that considers tokens
+    /// until their cumulative probability reaches a threshold P.
+    pub top_p: Option<f32>,
+
+    /// Control the diversity and focus of the model's output. It determines how
+    /// many of the most likely tokens (words or subwords) the model should
+    /// consider when generating a response.
+    ///
+    /// As opposed to `top_p`, it is a fixed-size approach that considers the
+    /// top K most probable tokens, discarding the rest.
+    pub top_k: Option<u32>,
+
+    /// The `stop_words` parameter can be set to specific sequences, such as a
+    /// period or specific word, to stop the model from generating text when it
+    /// encounters these sequences.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stop_words: Vec<String>,
+
+    // Other non-typed parameters that some models might support.
+    #[serde(default, flatten, skip_serializing_if = "HashMap::is_empty")]
+    pub other: HashMap<String, Value>,
+}
+impl Parameters {
+    /// Merge `other` into `self`.
+    pub fn merge(&mut self, mut other: Self) {
+        self.max_tokens = other.max_tokens.or(self.max_tokens);
+        self.reasoning = other.reasoning.or(self.reasoning);
+        self.temperature = other.temperature.or(self.temperature);
+        self.top_p = other.top_p.or(self.top_p);
+        self.top_k = other.top_k.or(self.top_k);
+        self.stop_words.append(&mut other.stop_words);
+        self.other.extend(other.other);
+    }
+
+    /// Untyped setter for a parameter.
+    pub fn set(&mut self, key: &str, value: String) -> std::result::Result<(), SetParameterError> {
+        let error = SetParameterError::new(key, &value);
+        match key {
+            "max_tokens" => self.max_tokens = Some(value.parse().map_err(|e| error.with(e))?),
+            "reasoning.effort" => {
+                self.reasoning.get_or_insert_default().effort =
+                    value.parse().map_err(|e| error.with(e))?;
+            }
+            "reasoning.exclude" => {
+                self.reasoning.get_or_insert_default().exclude =
+                    value.parse().map_err(|e| error.with(e))?;
+            }
+            "temperature" => self.temperature = Some(value.parse().map_err(|e| error.with(e))?),
+            "top_p" => self.top_p = Some(value.parse().map_err(|e| error.with(e))?),
+            "top_k" => self.top_k = Some(value.parse().map_err(|e| error.with(e))?),
+            "stop_words" => self.stop_words = value.split(',').map(ToOwned::to_owned).collect(),
+            _ => {
+                self.other.insert(key.to_owned(), value.into());
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to set parameter `{key}` to `{value}`")]
+pub struct SetParameterError {
+    key: String,
+    value: String,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl SetParameterError {
+    #[must_use]
+    fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            value: value.into(),
+            source: None,
+        }
+    }
+
+    #[must_use]
+    fn with(mut self, error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+        self.source = Some(error.into());
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct Reasoning {
+    /// Effort to use for reasoning.
+    #[serde(default)]
+    pub effort: ReasoningEffort,
+
+    /// Whether to exclude reasoning tokens from the response. The model will
+    /// still generate reasoning tokens, but they will not be included in the
+    /// response.
+    #[serde(default)]
+    pub exclude: bool,
+}
+
+/// Effort to use for reasoning.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    /// Allocates a large portion of tokens for reasoning (approximately 80% of
+    /// `max_tokens`)
+    High,
+    /// Allocates a moderate portion of tokens (approximately 50% of
+    /// `max_tokens`)
+    #[default]
+    Medium,
+    /// Allocates a smaller portion of tokens (approximately 20% of
+    /// `max_tokens`)
+    Low,
+}
+
+impl FromStr for ReasoningEffort {
+    type Err = Box<dyn std::error::Error + Send + Sync>;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "high" => Ok(Self::High),
+            "medium" => Ok(Self::Medium),
+            "low" => Ok(Self::Low),
+            _ => Err(
+                format!("Invalid reasoning effort: {s}, must be one of high, medium, or low")
+                    .into(),
+            ),
         }
     }
 }
