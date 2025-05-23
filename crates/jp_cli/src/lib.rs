@@ -24,7 +24,7 @@ use ctx::Ctx;
 use error::{Error, Result};
 use jp_config::{file_to_key_value_pairs, Config};
 use jp_workspace::Workspace;
-use serde_json::{Map, Value};
+use serde_json::Value;
 use tracing::{info, trace};
 
 const DEFAULT_STORAGE_DIR: &str = ".jp";
@@ -285,7 +285,7 @@ fn parse_error(error: error::Error, is_tty: bool) -> (i32, String) {
         _ => (
             NonZeroI32::new(1).unwrap(),
             Some(strip_ansi_escapes::strip_str(error.to_string())),
-            Map::new(),
+            vec![],
         ),
     };
 
@@ -299,7 +299,13 @@ fn parse_error(error: error::Error, is_tty: bool) -> (i32, String) {
                     .map(|(k, v)| {
                         let mut row = Row::new();
                         row.add_cell(Cell::new(k).set_alignment(CellAlignment::Right))
-                            .add_cell(Cell::new(v).set_alignment(CellAlignment::Left));
+                            .add_cell(
+                                Cell::new(match v {
+                                    Value::String(s) => s,
+                                    v => v.to_string(),
+                                })
+                                .set_alignment(CellAlignment::Left),
+                            );
                         row
                     })
                     .collect::<Vec<_>>(),
@@ -314,7 +320,7 @@ fn parse_error(error: error::Error, is_tty: bool) -> (i32, String) {
     });
 
     let error = serde_json::to_string(&error).unwrap_or_else(|err| {
-        metadata.insert("source".to_owned(), Value::String(error.to_string()));
+        metadata.push(("source".to_owned(), Value::String(error.to_string())));
 
         let error = serde_json::json!({
             "message": err.to_string(),

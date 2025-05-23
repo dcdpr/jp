@@ -5,10 +5,10 @@ mod mcp;
 mod persona;
 mod query;
 
-use std::{borrow::Cow, collections::HashMap, fmt, num::NonZeroI32};
+use std::{borrow::Cow, fmt, num::NonZeroI32};
 
 use comfy_table::Row;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::Ctx;
 
@@ -137,7 +137,7 @@ pub struct Error {
     ///
     /// This is hidden from the user in TTY mode, unless the `--verbose` flag is
     /// set.
-    pub metadata: Map<String, Value>,
+    pub metadata: Vec<(String, Value)>,
 }
 
 impl fmt::Display for Error {
@@ -151,7 +151,7 @@ impl From<i32> for Error {
         Self {
             code: code.try_into().unwrap_or(NonZeroI32::new(1).unwrap()),
             message: None,
-            metadata: Map::new(),
+            metadata: vec![],
         }
     }
 }
@@ -182,7 +182,7 @@ impl From<&str> for Error {
 
 impl From<(i32, String)> for Error {
     fn from((code, message): (i32, String)) -> Self {
-        (code, message, Map::new()).into()
+        (code, message, vec![]).into()
     }
 }
 
@@ -192,58 +192,54 @@ impl From<(i32, &str)> for Error {
     }
 }
 
-impl From<(i32, String, Map<String, Value>)> for Error {
-    fn from((code, message, metadata): (i32, String, Map<String, Value>)) -> Self {
+impl From<(i32, String, Vec<(String, Value)>)> for Error {
+    fn from((code, message, metadata): (i32, String, Vec<(String, Value)>)) -> Self {
         Self {
             code: code.try_into().unwrap_or(NonZeroI32::new(1).unwrap()),
             message: Some(message),
-            metadata,
+            metadata: metadata.into_iter().collect(),
         }
     }
 }
-impl From<(i32, &str, Map<String, Value>)> for Error {
-    fn from((code, message, metadata): (i32, &str, Map<String, Value>)) -> Self {
+
+impl From<(i32, &str, Vec<(String, Value)>)> for Error {
+    fn from((code, message, metadata): (i32, &str, Vec<(String, Value)>)) -> Self {
         (code, message.to_string(), metadata).into()
     }
 }
 
-impl From<Map<String, Value>> for Error {
-    fn from(metadata: Map<String, Value>) -> Self {
+impl From<Vec<(String, Value)>> for Error {
+    fn from(metadata: Vec<(String, Value)>) -> Self {
         (1, metadata).into()
     }
 }
 
-impl From<HashMap<&str, Value>> for Error {
-    fn from(metadata: HashMap<&str, Value>) -> Self {
+impl From<Vec<(&str, Value)>> for Error {
+    fn from(metadata: Vec<(&str, Value)>) -> Self {
         metadata
             .into_iter()
             .map(|(k, v)| (k.to_owned(), v))
-            .collect::<HashMap<_, _>>()
+            .collect::<Vec<_>>()
             .into()
     }
 }
 
-impl From<HashMap<&'static str, String>> for Error {
-    fn from(metadata: HashMap<&'static str, String>) -> Self {
+impl From<Vec<(&'static str, String)>> for Error {
+    fn from(metadata: Vec<(&'static str, String)>) -> Self {
         metadata
             .into_iter()
             .map(|(k, v)| (k, Value::String(v)))
-            .collect::<HashMap<_, _>>()
+            .collect::<Vec<_>>()
             .into()
     }
 }
 
-impl From<HashMap<String, Value>> for Error {
-    fn from(metadata: HashMap<String, Value>) -> Self {
-        (1, Map::from_iter(metadata)).into()
-    }
-}
-
-impl From<(i32, Map<String, Value>)> for Error {
-    fn from((code, mut metadata): (i32, Map<String, Value>)) -> Self {
+impl From<(i32, Vec<(String, Value)>)> for Error {
+    fn from((code, mut metadata): (i32, Vec<(String, Value)>)) -> Self {
         let message = metadata
-            .remove("message")
-            .and_then(|v| v.as_str().map(ToString::to_string))
+            .iter()
+            .position(|(k, _)| k == "message")
+            .and_then(|i| metadata.remove(i).1.as_str().map(ToString::to_string))
             .unwrap_or_else(|| "Application error".to_owned());
 
         (code, message, metadata).into()
@@ -254,7 +250,7 @@ impl From<crate::error::Error> for Error {
     fn from(error: crate::error::Error) -> Self {
         use crate::error::Error::*;
 
-        let metadata: HashMap<&str, String> = match error {
+        let metadata: Vec<(&str, String)> = match error {
             Command(error) => return error,
             Config(error) => return error.into(),
             Workspace(error) => return error.into(),
@@ -308,13 +304,13 @@ impl From<crate::error::Error> for Error {
 }
 
 fn with_cause(
-    error: &dyn std::error::Error,
+    mut error: &dyn std::error::Error,
     message: impl Into<String>,
-) -> HashMap<&'static str, String> {
-    let mut causes = vec![("message", message.into()), ("error", format!("{error:#}"))];
-
+) -> Vec<(&'static str, String)> {
+    let mut causes = vec![("message", message.into()), ("", format!("{error:#}"))];
     while let Some(cause) = error.source() {
-        causes.push(("", format!("{cause:#}")));
+        error = cause;
+        causes.push(("", format!("{error:#}")));
     }
 
     causes.into_iter().collect()
@@ -346,7 +342,7 @@ impl From<jp_llm::Error> for Error {
     fn from(error: jp_llm::Error) -> Self {
         use jp_llm::Error::*;
 
-        let metadata: HashMap<&str, String> = match error {
+        let metadata: Vec<(&str, String)> = match error {
             OpenRouter(error) => return error.into(),
             Conversation(error) => return error.into(),
             Config(error) => return error.into(),
@@ -410,7 +406,7 @@ impl From<jp_openrouter::Error> for Error {
     fn from(error: jp_openrouter::Error) -> Self {
         use jp_openrouter::Error::*;
 
-        let metadata: HashMap<&str, Value> = match error {
+        let metadata: Vec<(&str, Value)> = match error {
             Request(error) => return error.into(),
             Json(error) => return error.into(),
             Io(error) => return error.into(),
@@ -440,7 +436,7 @@ impl From<jp_config::Error> for Error {
     fn from(error: jp_config::Error) -> Self {
         use jp_config::Error::*;
 
-        let metadata: HashMap<&str, Value> = match error {
+        let metadata: Vec<(&str, Value)> = match error {
             ParseBool(error) => return error.into(),
             Conversation(error) => return error.into(),
             Io(error) => return error.into(),
@@ -502,7 +498,7 @@ impl From<jp_mcp::Error> for Error {
     fn from(error: jp_mcp::Error) -> Self {
         use jp_mcp::Error::*;
 
-        let metadata: HashMap<&str, Value> = match error {
+        let metadata: Vec<(&str, Value)> = match error {
             Service(service_error) => [
                 ("message", "MCP service error".into()),
                 ("error", service_error.to_string().into()),
@@ -530,7 +526,7 @@ impl From<jp_workspace::Error> for Error {
     fn from(error: jp_workspace::Error) -> Self {
         use jp_workspace::Error::*;
 
-        let metadata: HashMap<&str, Value> = match error {
+        let metadata: Vec<(&str, Value)> = match error {
             Conversation(error) => return error.into(),
             Storage(error) => return error.into(),
             NotDir(path) => [
@@ -572,7 +568,7 @@ impl From<jp_conversation::Error> for Error {
     fn from(error: jp_conversation::Error) -> Self {
         use jp_conversation::Error::*;
 
-        let metadata: HashMap<&str, Value> = match error {
+        let metadata: Vec<(&str, Value)> = match error {
             XmlSerialization(se_error) => [
                 ("message", "XML serialization error".into()),
                 ("error", se_error.to_string().into()),
@@ -614,7 +610,7 @@ impl From<jp_storage::Error> for Error {
     fn from(error: jp_storage::Error) -> Self {
         use jp_storage::Error;
 
-        let metadata: HashMap<&str, Value> = match error {
+        let metadata: Vec<(&str, Value)> = match error {
             Error::Conversation(error) => return error.into(),
             Error::Io(error) => return error.into(),
             Error::Json(error) => return error.into(),
@@ -638,7 +634,7 @@ impl From<jp_id::Error> for Error {
     fn from(error: jp_id::Error) -> Self {
         use jp_id::Error::*;
 
-        let metadata: HashMap<&str, Value> = match error {
+        let metadata: Vec<(&str, Value)> = match error {
             MissingPrefix(prefix) => [
                 ("message", "Missing prefix".into()),
                 ("prefix", prefix.into()),
