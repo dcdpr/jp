@@ -605,13 +605,14 @@ async fn handle_stream(
 
                     data
                 }
-                CompletionChunk::Content(data) if !data.is_empty() => {
+                CompletionChunk::Content(mut data) if !data.is_empty() => {
+                    let reasoning_ended = !reasoning_tokens.is_empty() && content_tokens.is_empty();
                     content_tokens.push_str(&data);
 
                     // If the response includes reasoning, we add two newlines
                     // after the reasoning, but before the content.
-                    if !reasoning_tokens.is_empty() && content_tokens.is_empty() {
-                        print!("\n\n");
+                    if reasoning_ended {
+                        data = format!("\n\n{data}");
                     }
 
                     data
@@ -903,8 +904,8 @@ impl ResponseHandler {
 
                 // `termimad` removes empty lines at the start or end, but we
                 // want to keep them as we will have more lines to print.
-                let has_empty_line_start = lines.first().is_some_and(String::is_empty);
-                let has_empty_line_end = lines.last().is_some_and(String::is_empty);
+                let empty_lines_start_count = lines.iter().take_while(|s| s.is_empty()).count();
+                let empty_lines_end_count = lines.iter().rev().take_while(|s| s.is_empty()).count();
 
                 let options = comrak::Options {
                     render: comrak::RenderOptions {
@@ -921,15 +922,17 @@ impl ResponseHandler {
                 let mut formatted =
                     FmtText::from(&termimad::MadSkin::default(), &formatted, Some(100)).to_string();
 
-                if has_empty_line_start {
+                for _ in 0..empty_lines_start_count {
                     formatted.insert(0, '\n');
                 }
 
-                // Only add an extra newlien if we have more than one line,
+                // Only add an extra newline if we have more than one line,
                 // otherwise a single empty line will be interpreted as both a
                 // missing start and end newline.
-                if has_empty_line_end && lines.len() > 1 {
-                    formatted.push('\n');
+                if lines.iter().any(|s| !s.is_empty()) {
+                    for _ in 0..empty_lines_end_count {
+                        formatted.push('\n');
+                    }
                 }
 
                 let lines = formatted
