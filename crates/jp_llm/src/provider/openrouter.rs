@@ -53,13 +53,23 @@ impl Openrouter {
     }
 
     /// Build request for Openrouter API.
-    fn build_request(query: ChatQuery, model: &Model) -> Result<request::ChatCompletion> {
+    async fn build_request(
+        &self,
+        query: ChatQuery,
+        model: &Model,
+    ) -> Result<request::ChatCompletion> {
         let ChatQuery {
             thread,
             tools,
             tool_choice,
             tool_call_strict_mode,
         } = query;
+
+        let model_details = self
+            .models()
+            .await?
+            .into_iter()
+            .find(|m| m.slug == model.id.slug());
 
         let slug = model.id.slug().to_owned();
         let reasoning = model.parameters.reasoning;
@@ -98,10 +108,17 @@ impl Openrouter {
             messages: messages.0,
             reasoning: reasoning.map(|r| request::Reasoning {
                 exclude: r.exclude,
-                effort: match r.effort {
+                effort: match r
+                    .effort
+                    .abs_to_rel(model_details.and_then(|d| d.max_output_tokens))
+                {
                     ReasoningEffort::High => request::ReasoningEffort::High,
                     ReasoningEffort::Medium => request::ReasoningEffort::Medium,
                     ReasoningEffort::Low => request::ReasoningEffort::Low,
+                    ReasoningEffort::Absolute(_) => {
+                        debug_assert!(false, "Reasoning effort must be relative.");
+                        request::ReasoningEffort::Medium
+                    }
                 },
             }),
             tools,
@@ -124,13 +141,13 @@ impl Provider for Openrouter {
             .collect())
     }
 
-    fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
+    async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
         debug!(
             model = model.id.slug(),
             "Starting OpenRouter chat completion stream."
         );
 
-        let request = Self::build_request(query, model)?;
+        let request = self.build_request(query, model).await?;
         let inner_stream = self
             .client
             .chat_completion_stream(request)
@@ -182,7 +199,7 @@ impl Provider for Openrouter {
     }
 
     async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
-        let request = Self::build_request(query, model)?;
+        let request = self.build_request(query, model).await?;
         let completion =
             self.client.chat_completion(request).await.inspect_err(
                 |error| warn!(%error, "Error receiving completion from OpenRouter."),

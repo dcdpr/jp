@@ -6,6 +6,38 @@ Ok(
     [
         ModelDetails {
             provider: Anthropic,
+            slug: "claude-opus-4-20250514",
+            context_window: Some(
+                200000,
+            ),
+            max_output_tokens: Some(
+                32000,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: Some(
+                2025-03-01,
+            ),
+        },
+        ModelDetails {
+            provider: Anthropic,
+            slug: "claude-sonnet-4-20250514",
+            context_window: Some(
+                200000,
+            ),
+            max_output_tokens: Some(
+                64000,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: Some(
+                2025-03-01,
+            ),
+        },
+        ModelDetails {
+            provider: Anthropic,
             slug: "claude-3-7-sonnet-20250219",
             context_window: Some(
                 200000,
@@ -35,6 +67,94 @@ Ok(
             knowledge_cutoff: Some(
                 2024-04-01,
             ),
+        },
+        ModelDetails {
+            provider: Anthropic,
+            slug: "claude-3-5-haiku-20241022",
+            context_window: Some(
+                200000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: Some(
+                false,
+            ),
+            knowledge_cutoff: Some(
+                2024-07-01,
+            ),
+        },
+        ModelDetails {
+            provider: Anthropic,
+            slug: "claude-3-5-sonnet-20240620",
+            context_window: Some(
+                200000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: Some(
+                false,
+            ),
+            knowledge_cutoff: Some(
+                2024-04-01,
+            ),
+        },
+        ModelDetails {
+            provider: Anthropic,
+            slug: "claude-3-haiku-20240307",
+            context_window: Some(
+                200000,
+            ),
+            max_output_tokens: Some(
+                4096,
+            ),
+            reasoning: Some(
+                false,
+            ),
+            knowledge_cutoff: Some(
+                2024-08-01,
+            ),
+        },
+        ModelDetails {
+            provider: Anthropic,
+            slug: "claude-3-opus-20240229",
+            context_window: Some(
+                200000,
+            ),
+            max_output_tokens: Some(
+                4096,
+            ),
+            reasoning: Some(
+                false,
+            ),
+            knowledge_cutoff: Some(
+                2023-08-01,
+            ),
+        },
+        ModelDetails {
+            provider: Anthropic,
+            slug: "claude-3-sonnet-20240229",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Anthropic,
+            slug: "claude-2.1",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Anthropic,
+            slug: "claude-2.0",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
         },
     ],
 )

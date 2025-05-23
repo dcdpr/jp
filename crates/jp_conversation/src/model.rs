@@ -39,7 +39,7 @@ pub struct Parameters {
     /// necessary to set a higher limit if your conversation is long or has more
     /// context attached.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<u64>,
+    pub max_tokens: Option<u32>,
 
     /// Reasoning configuration.
     ///
@@ -170,6 +170,28 @@ pub enum ReasoningEffort {
     /// Allocates a smaller portion of tokens (approximately 20% of
     /// `max_tokens`)
     Low,
+
+    /// Allocate a specific number of tokens for reasoning.
+    Absolute(u32),
+}
+
+impl ReasoningEffort {
+    #[must_use]
+    pub fn abs_to_rel(&self, max_tokens: Option<u32>) -> Self {
+        match (self, max_tokens) {
+            (Self::Absolute(tokens), Some(max)) => {
+                if *tokens > (max * 80) / 100 {
+                    Self::High
+                } else if *tokens > (max * 50) / 100 {
+                    Self::Medium
+                } else {
+                    Self::Low
+                }
+            }
+            (Self::Absolute(_), None) => Self::Medium,
+            (_, _) => *self,
+        }
+    }
 }
 
 impl FromStr for ReasoningEffort {
@@ -180,10 +202,11 @@ impl FromStr for ReasoningEffort {
             "high" => Ok(Self::High),
             "medium" => Ok(Self::Medium),
             "low" => Ok(Self::Low),
-            _ => Err(
-                format!("Invalid reasoning effort: {s}, must be one of high, medium, or low")
-                    .into(),
-            ),
+            _ => Ok(Self::Absolute(s.parse().map_err(|_| {
+                format!(
+                    "Invalid reasoning effort: {s}, must be one of high, medium, low, or a number"
+                )
+            })?)),
         }
     }
 }

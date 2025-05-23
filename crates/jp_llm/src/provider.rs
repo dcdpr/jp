@@ -139,13 +139,13 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     async fn models(&self) -> Result<Vec<ModelDetails>>;
 
     /// Perform a streaming chat completion.
-    fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream>;
+    async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream>;
 
     /// Perform a non-streaming chat completion.
     ///
     /// Default implementation collects results from the streaming version.
     async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
-        let mut stream = self.chat_completion_stream(model, query)?;
+        let mut stream = self.chat_completion_stream(model, query).await?;
         let mut events = Vec::new();
         let mut reasoning = String::new();
         let mut content = String::new();

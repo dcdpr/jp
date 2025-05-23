@@ -33,6 +33,42 @@ pub struct Openai {
     base_url: String,
 }
 
+impl Openai {
+    async fn create_request(&self, model: &Model, query: ChatQuery) -> Result<Request> {
+        let ChatQuery {
+            thread,
+            tools,
+            tool_choice,
+            tool_call_strict_mode,
+        } = query;
+
+        let model_details = self
+            .models()
+            .await?
+            .into_iter()
+            .find(|m| m.slug == model.id.slug());
+
+        let request = Request {
+            model: types::Model::Other(model.id.slug().to_owned()),
+            input: convert_thread(thread)?,
+            store: Some(false),
+            tool_choice: Some(convert_tool_choice(tool_choice)),
+            tools: Some(convert_tools(tools, tool_call_strict_mode)),
+            temperature: model.parameters.temperature,
+            reasoning: model
+                .parameters
+                .reasoning
+                .map(|r| convert_reasoning(r, model_details.and_then(|d| d.max_output_tokens))),
+            max_output_tokens: model.parameters.max_tokens.map(Into::into),
+            truncation: Some(types::Truncation::Auto),
+            top_p: model.parameters.top_p,
+            ..Default::default()
+        };
+
+        Ok(request)
+    }
+}
+
 #[async_trait]
 impl Provider for Openai {
     async fn models(&self) -> Result<Vec<ModelDetails>> {
@@ -52,7 +88,7 @@ impl Provider for Openai {
 
     async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
         let client = self.client.clone();
-        let request = create_request(model, query)?;
+        let request = self.create_request(model, query).await?;
         client
             .create(request)
             .await?
@@ -60,9 +96,9 @@ impl Provider for Openai {
             .and_then(map_response)
     }
 
-    fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
+    async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = create_request(model, query)?;
+        let request = self.create_request(model, query).await?;
         let stream = Box::pin(stream! {
             let mut current_state = AccumulationState::default();
             let stream = client
@@ -256,31 +292,6 @@ fn map_event(event: types::Event, state: &mut AccumulationState) -> Option<Resul
     handle_delta(delta, state).transpose()
 }
 
-fn create_request(model: &Model, query: ChatQuery) -> Result<Request> {
-    let ChatQuery {
-        thread,
-        tools,
-        tool_choice,
-        tool_call_strict_mode,
-    } = query;
-
-    let request = Request {
-        model: types::Model::Other(model.id.slug().to_owned()),
-        input: convert_thread(thread)?,
-        store: Some(false),
-        tool_choice: Some(convert_tool_choice(tool_choice)),
-        tools: Some(convert_tools(tools, tool_call_strict_mode)),
-        temperature: model.parameters.temperature,
-        reasoning: model.parameters.reasoning.map(convert_reasoning),
-        max_output_tokens: model.parameters.max_tokens,
-        truncation: Some(types::Truncation::Auto),
-        top_p: model.parameters.top_p,
-        ..Default::default()
-    };
-
-    Ok(request)
-}
-
 impl TryFrom<&llm::provider::openai::Config> for Openai {
     type Error = Error;
 
@@ -327,17 +338,21 @@ fn convert_tools(tools: Vec<jp_mcp::Tool>, strict: bool) -> Vec<types::Tool> {
         .collect()
 }
 
-fn convert_reasoning(reasoning: Reasoning) -> types::ReasoningConfig {
+fn convert_reasoning(reasoning: Reasoning, max_tokens: Option<u32>) -> types::ReasoningConfig {
     types::ReasoningConfig {
         summary: if reasoning.exclude {
             None
         } else {
             Some(SummaryConfig::Auto)
         },
-        effort: match reasoning.effort {
+        effort: match reasoning.effort.abs_to_rel(max_tokens) {
             ReasoningEffort::High => Some(types::ReasoningEffort::High),
             ReasoningEffort::Medium => Some(types::ReasoningEffort::Medium),
             ReasoningEffort::Low => Some(types::ReasoningEffort::Low),
+            ReasoningEffort::Absolute(_) => {
+                debug_assert!(false, "Reasoning effort must be relative.");
+                None
+            }
         },
     }
 }
