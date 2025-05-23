@@ -5,13 +5,13 @@ use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::llm;
 use jp_conversation::{
-    model::ProviderId,
+    model::{ProviderId, Reasoning, ReasoningEffort},
     thread::{Document, Documents, Thinking, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
 use jp_query::query::ChatQuery;
 use openai_responses::{
-    types::{self, ReasoningEffort, Request},
+    types::{self, Request, SummaryConfig},
     Client, CreateError, StreamError,
 };
 use reqwest::header::{self, HeaderMap, HeaderValue};
@@ -270,25 +270,11 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<Request> {
         store: Some(false),
         tool_choice: Some(convert_tool_choice(tool_choice)),
         tools: Some(convert_tools(tools, tool_call_strict_mode)),
-        temperature: model
-            .parameters
-            .get("temperature")
-            .and_then(Value::as_f64)
-            .map(
-                #[expect(clippy::cast_possible_truncation)]
-                |v| v as f32,
-            ),
-        reasoning: model
-            .parameters
-            .get("reasoning")
-            .and_then(Value::as_str)
-            .map(convert_reasoning),
-        max_output_tokens: model.parameters.get("max_tokens").and_then(Value::as_u64),
+        temperature: model.parameters.temperature,
+        reasoning: model.parameters.reasoning.map(convert_reasoning),
+        max_output_tokens: model.parameters.max_tokens,
         truncation: Some(types::Truncation::Auto),
-        top_p: model.parameters.get("top_p").and_then(Value::as_f64).map(
-            #[expect(clippy::cast_possible_truncation)]
-            |v| v as f32,
-        ),
+        top_p: model.parameters.top_p,
         ..Default::default()
     };
 
@@ -341,16 +327,17 @@ fn convert_tools(tools: Vec<jp_mcp::Tool>, strict: bool) -> Vec<types::Tool> {
         .collect()
 }
 
-fn convert_reasoning(reasoning: &str) -> types::ReasoningConfig {
+fn convert_reasoning(reasoning: Reasoning) -> types::ReasoningConfig {
     types::ReasoningConfig {
-        // TODO: needs "organization ID-check verification" on OpenAI platform.
-        // summary: Some(SummaryConfig::Auto),
-        summary: None,
-        effort: match reasoning {
-            "high" => Some(ReasoningEffort::High),
-            "medium" => Some(ReasoningEffort::Medium),
-            "low" => Some(ReasoningEffort::Low),
-            _ => None,
+        summary: if reasoning.exclude {
+            None
+        } else {
+            Some(SummaryConfig::Auto)
+        },
+        effort: match reasoning.effort {
+            ReasoningEffort::High => Some(types::ReasoningEffort::High),
+            ReasoningEffort::Medium => Some(types::ReasoningEffort::Medium),
+            ReasoningEffort::Low => Some(types::ReasoningEffort::Low),
         },
     }
 }

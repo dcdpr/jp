@@ -142,26 +142,28 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest>
 
     let mut options = ModelOptions::default();
 
-    #[expect(clippy::cast_possible_truncation)]
-    if let Some(temperature) = model.parameters.get("temperature").and_then(Value::as_f64) {
-        options = options.temperature(temperature as f32);
+    if let Some(temperature) = model.parameters.temperature {
+        options = options.temperature(temperature);
     }
 
-    if let Some(max_tokens) = model.parameters.get("max_tokens").and_then(Value::as_u64) {
+    if let Some(max_tokens) = model.parameters.max_tokens {
         options = options.num_ctx(max_tokens);
     }
 
-    #[expect(clippy::cast_possible_truncation)]
-    if let Some(top_p) = model.parameters.get("top_p").and_then(Value::as_f64) {
-        options = options.top_p(top_p as f32);
+    if let Some(top_p) = model.parameters.top_p {
+        options = options.top_p(top_p);
     }
 
-    #[expect(clippy::cast_possible_truncation)]
-    if let Some(top_k) = model.parameters.get("top_k").and_then(Value::as_u64) {
-        options = options.top_k(top_k as u32);
+    if let Some(top_k) = model.parameters.top_k {
+        options = options.top_k(top_k);
     }
 
-    if let Some(keep_alive) = model.parameters.get("keep_alive").and_then(Value::as_str) {
+    if let Some(keep_alive) = model
+        .parameters
+        .other
+        .get("keep_alive")
+        .and_then(Value::as_str)
+    {
         let unit = keep_alive
             .chars()
             .last()

@@ -221,24 +221,21 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<types::CreateMessag
             .tool_choice(convert_tool_choice(tool_choice));
     }
 
-    if let Some(temperature) = model.parameters.get("temperature").and_then(Value::as_f64) {
-        #[expect(clippy::cast_possible_truncation)]
-        builder.temperature(temperature as f32);
+    if let Some(temperature) = model.parameters.temperature {
+        builder.temperature(temperature);
     }
 
-    if let Some(max_tokens) = model.parameters.get("max_tokens").and_then(Value::as_u64) {
+    if let Some(max_tokens) = model.parameters.max_tokens {
         #[expect(clippy::cast_possible_truncation)]
         builder.max_tokens(max_tokens as i32);
     }
 
-    if let Some(top_p) = model.parameters.get("top_p").and_then(Value::as_f64) {
-        #[expect(clippy::cast_possible_truncation)]
-        builder.top_p(top_p as f32);
+    if let Some(top_p) = model.parameters.top_p {
+        builder.top_p(top_p);
     }
 
-    if let Some(top_k) = model.parameters.get("top_k").and_then(Value::as_u64) {
-        #[expect(clippy::cast_possible_truncation)]
-        builder.top_k(top_k as u32);
+    if let Some(top_k) = model.parameters.top_k {
+        builder.top_k(top_k);
     }
 
     builder.build().map_err(Into::into)

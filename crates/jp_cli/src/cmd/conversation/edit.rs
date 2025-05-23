@@ -68,7 +68,14 @@ async fn generate_titles(
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;
     let id = config.conversation.title.generate.model.id.clone();
-    let parameters = config.conversation.title.generate.model.parameters.clone();
+    let parameters = config
+        .conversation
+        .title
+        .generate
+        .model
+        .parameters
+        .clone()
+        .unwrap_or_default();
 
     let model = Model { id, parameters };
 

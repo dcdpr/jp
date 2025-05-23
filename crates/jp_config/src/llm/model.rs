@@ -1,7 +1,7 @@
-use std::{collections::HashMap, str::FromStr};
+use std::str::FromStr;
 
 use confique::Config as Confique;
-use jp_conversation::ModelId;
+use jp_conversation::{model::Parameters, ModelId};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
@@ -17,8 +17,8 @@ pub struct Config {
     pub id: Option<ModelId>,
 
     /// The parameters to use for the model.
-    #[config(default = {}, env = "JP_LLM_MODEL_PARAMETERS")]
-    pub parameters: HashMap<String, serde_json::Value>,
+    #[config(env = "JP_LLM_MODEL_PARAMETERS")]
+    pub parameters: Option<Parameters>,
 }
 
 impl Config {
@@ -29,7 +29,8 @@ impl Config {
         match key {
             _ if key.starts_with("parameters.") => {
                 self.parameters
-                    .insert(key[11..].to_owned(), serde_json::from_str(&value)?);
+                    .get_or_insert_default()
+                    .set(&key[11..], value)?;
             }
             "id" => self.id = (!value.is_empty()).then(|| value.parse()).transpose()?,
             _ => return crate::set_error(path, key),
@@ -37,14 +38,6 @@ impl Config {
 
         Ok(())
     }
-}
-
-pub fn de_model_id<'de, D>(deserializer: D) -> std::result::Result<ModelId, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let string: String = String::deserialize(deserializer)?;
-    ModelId::from_str(&string).map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -78,4 +71,12 @@ impl FromStr for ToolChoice {
             }),
         }
     }
+}
+
+pub fn de_model_id<'de, D>(deserializer: D) -> std::result::Result<ModelId, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let string: String = String::deserialize(deserializer)?;
+    ModelId::from_str(&string).map_err(serde::de::Error::custom)
 }
