@@ -52,7 +52,7 @@ impl Provider for Ollama {
             .and_then(map_response)
     }
 
-    fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
+    async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
         let client = self.client.clone();
         let request = create_request(model, query)?;
         let stream = Box::pin(stream! {
@@ -546,6 +546,7 @@ mod tests {
                 Ollama::try_from(&config)
                     .unwrap()
                     .chat_completion_stream(&model.into(), query)
+                    .await
                     .unwrap()
                     .filter_map(
                         |r| async move { r.unwrap().into_chat_chunk().unwrap().into_content() },

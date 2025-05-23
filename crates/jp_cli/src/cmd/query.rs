@@ -590,7 +590,7 @@ async fn handle_stream(
         tool_choice: ToolChoice::Auto,
         ..Default::default()
     };
-    let mut stream = provider.chat_completion_stream(model, query)?;
+    let mut stream = provider.chat_completion_stream(model, query).await?;
 
     let mut content_tokens = String::new();
     let mut reasoning_tokens = String::new();

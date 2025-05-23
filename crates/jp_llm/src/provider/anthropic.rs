@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::llm;
 use jp_conversation::{
-    model::ProviderId,
+    model::{ProviderId, ReasoningEffort},
     thread::{Document, Documents, Thinking, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
@@ -27,6 +27,87 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Anthropic {
     client: Client,
+}
+
+impl Anthropic {
+    async fn create_request(
+        &self,
+        model: &Model,
+        query: ChatQuery,
+    ) -> Result<types::CreateMessagesRequest> {
+        let ChatQuery {
+            thread,
+            tools,
+            tool_choice,
+            tool_call_strict_mode,
+        } = query;
+
+        let details = self
+            .models()
+            .await?
+            .into_iter()
+            .find(|m| m.slug == model.id.slug());
+
+        let mut builder = types::CreateMessagesRequestBuilder::default();
+        let system_prompt = thread.system_prompt.clone();
+
+        builder
+            .model(model.id.slug())
+            .messages(convert_thread(thread)?);
+
+        if let Some(system_prompt) = system_prompt {
+            builder.system(system_prompt);
+        }
+
+        let tools = convert_tools(tools, tool_call_strict_mode);
+        if !tools.is_empty() {
+            builder
+                .tools(tools)
+                .tool_choice(convert_tool_choice(tool_choice));
+        }
+
+        if let Some(thinking) = model.parameters.reasoning {
+            let max = model.parameters.max_tokens.unwrap_or_else(|| {
+                details
+                    .as_ref()
+                    .and_then(|d| d.max_output_tokens)
+                    .unwrap_or(32_000)
+            });
+
+            builder.thinking(types::ExtendedThinking {
+                kind: "enabled".to_string(),
+                budget_tokens: match thinking.effort {
+                    ReasoningEffort::High => (max * 80) / 100,
+                    ReasoningEffort::Medium => (max * 50) / 100,
+                    ReasoningEffort::Low => (max * 20) / 100,
+                    ReasoningEffort::Absolute(tokens) => tokens,
+                },
+            });
+        }
+
+        if let Some(temperature) = model.parameters.temperature {
+            builder.temperature(temperature);
+        }
+
+        if let Some(max_tokens) = model
+            .parameters
+            .max_tokens
+            .or_else(|| details.as_ref().and_then(|d| d.max_output_tokens))
+        {
+            #[expect(clippy::cast_possible_wrap)]
+            builder.max_tokens(max_tokens as i32);
+        }
+
+        if let Some(top_p) = model.parameters.top_p {
+            builder.top_p(top_p);
+        }
+
+        if let Some(top_k) = model.parameters.top_k {
+            builder.top_k(top_k);
+        }
+
+        builder.build().map_err(Into::into)
+    }
 }
 
 #[async_trait]
@@ -54,9 +135,8 @@ impl Provider for Anthropic {
     }
 
     async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
-        let client = self.client.clone();
-        let request = create_request(model, query)?;
-        client
+        let request = self.create_request(model, query).await?;
+        self.client
             .messages()
             .create(request)
             .await
@@ -64,9 +144,10 @@ impl Provider for Anthropic {
             .and_then(map_response)
     }
 
-    fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
+    async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = create_request(model, query)?;
+        let request = self.create_request(model, query).await?;
+
         let stream = Box::pin(stream! {
             let mut current_state = AccumulationState::default();
             let stream = client
@@ -88,6 +169,22 @@ impl Provider for Anthropic {
 
 fn map_model(model: types::Model) -> ModelDetails {
     match model.id.as_str() {
+        "claude-opus-4-0" | "claude-opus-4-20250514" => ModelDetails {
+            provider: ProviderId::Anthropic,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(32_000),
+            reasoning: Some(true),
+            knowledge_cutoff: Some(date!(2025 - 3 - 1)),
+        },
+        "claude-sonnet-4-0" | "claude-sonnet-4-20250514" => ModelDetails {
+            provider: ProviderId::Anthropic,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(64_000),
+            reasoning: Some(true),
+            knowledge_cutoff: Some(date!(2025 - 3 - 1)),
+        },
         "claude-3-7-sonnet-latest" | "claude-3-7-sonnet-20250219" => ModelDetails {
             provider: ProviderId::Anthropic,
             slug: model.id,
@@ -176,6 +273,11 @@ fn map_event(
                 .transpose()
                 .into_iter()
                 .collect(),
+            ThinkingDelta { thinking } => handle_delta(Delta::reasoning(thinking), state)
+                .transpose()
+                .into_iter()
+                .collect(),
+            SignatureDelta { signature: _ } => vec![],
             InputJsonDelta { partial_json } => {
                 handle_delta(Delta::tool_call("", "", partial_json), state)
                     .transpose()
@@ -195,52 +297,6 @@ fn map_event(
     }
 }
 
-fn create_request(model: &Model, query: ChatQuery) -> Result<types::CreateMessagesRequest> {
-    let ChatQuery {
-        thread,
-        tools,
-        tool_choice,
-        tool_call_strict_mode,
-    } = query;
-
-    let mut builder = types::CreateMessagesRequestBuilder::default();
-    let system_prompt = thread.system_prompt.clone();
-
-    builder
-        .model(model.id.slug())
-        .messages(convert_thread(thread)?);
-
-    if let Some(system_prompt) = system_prompt {
-        builder.system(system_prompt);
-    }
-
-    let tools = convert_tools(tools, tool_call_strict_mode);
-    if !tools.is_empty() {
-        builder
-            .tools(tools)
-            .tool_choice(convert_tool_choice(tool_choice));
-    }
-
-    if let Some(temperature) = model.parameters.temperature {
-        builder.temperature(temperature);
-    }
-
-    if let Some(max_tokens) = model.parameters.max_tokens {
-        #[expect(clippy::cast_possible_truncation)]
-        builder.max_tokens(max_tokens as i32);
-    }
-
-    if let Some(top_p) = model.parameters.top_p {
-        builder.top_p(top_p);
-    }
-
-    if let Some(top_k) = model.parameters.top_k {
-        builder.top_k(top_k);
-    }
-
-    builder.build().map_err(Into::into)
-}
-
 impl TryFrom<&llm::provider::anthropic::Config> for Anthropic {
     type Error = Error;
 
@@ -252,6 +308,7 @@ impl TryFrom<&llm::provider::anthropic::Config> for Anthropic {
             client: Client::builder()
                 .api_key(api_key)
                 .base_url(config.base_url.clone())
+                .beta("interleaved-thinking-2025-05-14,extended-cache-ttl-2025-04-11")
                 .version("2023-06-01")
                 .build()
                 .map_err(|e| {
@@ -497,6 +554,7 @@ impl From<types::MessageContent> for Delta {
     fn from(item: types::MessageContent) -> Self {
         match item {
             types::MessageContent::Text(text) => Delta::content(text.text),
+            types::MessageContent::Thinking(thinking) => Delta::reasoning(thinking.thinking),
             types::MessageContent::ToolUse(tool_use) => {
                 Delta::tool_call(tool_use.id, tool_use.name, tool_use.input.to_string())
             }
@@ -541,14 +599,7 @@ mod tests {
                     config.api_key_env = "USER".to_owned();
                 }
 
-                Anthropic::try_from(&config)
-                    .unwrap()
-                    .models()
-                    .await
-                    .map(|mut v| {
-                        v.truncate(2);
-                        v
-                    })
+                Anthropic::try_from(&config).unwrap().models().await
             },
         )
         .await
