@@ -103,6 +103,7 @@ mod tests {
                         file_link: style::code::LinkStyle::Full,
                         ..Default::default()
                     },
+                    ..Default::default()
                 },
                 ..Default::default()
             }),

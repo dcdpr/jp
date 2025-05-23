@@ -603,10 +603,17 @@ async fn handle_stream(
                 CompletionChunk::Reasoning(data) if !data.is_empty() => {
                     reasoning_tokens.push_str(&data);
 
+                    if !ctx.config.style.reasoning.show {
+                        continue;
+                    }
+
                     data
                 }
                 CompletionChunk::Content(mut data) if !data.is_empty() => {
-                    let reasoning_ended = !reasoning_tokens.is_empty() && content_tokens.is_empty();
+                    let reasoning_ended = !reasoning_tokens.is_empty()
+                        && ctx.config.style.reasoning.show
+                        && content_tokens.is_empty();
+
                     content_tokens.push_str(&data);
 
                     // If the response includes reasoning, we add two newlines
