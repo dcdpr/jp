@@ -28,8 +28,9 @@ impl TitleGeneratorTask {
         workspace: &Workspace,
         query: Option<String>,
     ) -> Self {
-        let mut model: Model = config.conversation.title.generate.model.slug.clone().into();
-        model.additional_parameters = config.conversation.title.generate.model.parameters.clone();
+        let id = config.conversation.title.generate.model.id.clone();
+        let parameters = config.conversation.title.generate.model.parameters.clone();
+        let model = Model { id, parameters };
 
         let mut messages = workspace.get_messages(&conversation_id).to_vec();
         if let Some(query) = query {
@@ -47,7 +48,7 @@ impl TitleGeneratorTask {
 
     async fn update_title(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!(conversation_id = %self.conversation_id, "Updating conversation title.");
-        let provider = provider::get_provider(self.model.provider, &self.provider_config)?;
+        let provider = provider::get_provider(self.model.id.provider(), &self.provider_config)?;
         let query = conversation_titles(1, self.messages.clone(), &[])?;
         let titles: Vec<String> =
             structured_completion(provider.as_ref(), &self.model, query).await?;

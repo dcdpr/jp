@@ -67,12 +67,12 @@ async fn generate_titles(
     mut rejected: Vec<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;
-    let mut model: Model = config.conversation.title.generate.model.slug.clone().into();
-    model
-        .additional_parameters
-        .extend(config.conversation.title.generate.model.parameters.clone());
+    let id = config.conversation.title.generate.model.id.clone();
+    let parameters = config.conversation.title.generate.model.parameters.clone();
 
-    let provider = provider::get_provider(model.provider, &config.llm.provider)?;
+    let model = Model { id, parameters };
+
+    let provider = provider::get_provider(model.id.provider(), &config.llm.provider)?;
     let query = conversation_titles(count, messages.clone(), &rejected)?;
     let titles: Vec<String> = structured_completion(provider.as_ref(), &model, query).await?;
 

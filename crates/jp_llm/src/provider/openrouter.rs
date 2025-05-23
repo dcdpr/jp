@@ -6,7 +6,7 @@ use futures::{StreamExt, TryStreamExt as _};
 use jp_config::llm::{self, provider::openrouter};
 use jp_conversation::{
     message::ToolCallRequest,
-    model::{ProviderId, ReasoningEffort},
+    model::ProviderId,
     thread::{Document, Documents, Thinking, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
@@ -61,8 +61,8 @@ impl Openrouter {
             tool_call_strict_mode,
         } = query;
 
-        let slug = model.slug.clone();
-        let reasoning = model.reasoning;
+        let slug = model.id.slug().to_owned();
+        let reasoning = model.parameters.get("reasoning").and_then(Value::as_str);
         let messages: RequestMessages = (model, thread).try_into()?;
         let tools = tools
             .into_iter()
@@ -96,13 +96,17 @@ impl Openrouter {
         Ok(request::ChatCompletion {
             model: slug,
             messages: messages.0,
-            reasoning: reasoning.map(|r| request::Reasoning {
-                exclude: r.exclude,
-                effort: match r.effort {
-                    ReasoningEffort::High => request::ReasoningEffort::High,
-                    ReasoningEffort::Medium => request::ReasoningEffort::Medium,
-                    ReasoningEffort::Low => request::ReasoningEffort::Low,
-                },
+            reasoning: reasoning.and_then(|r| {
+                Some(request::Reasoning {
+                    // TODO: support "exclude"?
+                    exclude: false,
+                    effort: match r {
+                        "high" => request::ReasoningEffort::High,
+                        "medium" => request::ReasoningEffort::Medium,
+                        "low" => request::ReasoningEffort::Low,
+                        _ => return None,
+                    },
+                })
             }),
             tools,
             tool_choice,
@@ -126,7 +130,7 @@ impl Provider for Openrouter {
 
     fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
         debug!(
-            model = model.slug,
+            model = model.id.slug(),
             "Starting OpenRouter chat completion stream."
         );
 
@@ -469,9 +473,9 @@ impl TryFrom<(&Model, Thread)> for RequestMessages {
         }
 
         // Only Anthropic and Google models support explicit caching.
-        if !model.slug.starts_with("anthropic") && !model.slug.starts_with("google") {
+        if !model.id.slug().starts_with("anthropic") && !model.id.slug().starts_with("google") {
             trace!(
-                slug = model.slug,
+                slug = model.id.slug(),
                 "Model does not support caching directives, disabling cache."
             );
 
@@ -552,7 +556,7 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> RequestMessage {
 mod tests {
     use std::path::PathBuf;
 
-    use jp_config::llm::ProviderModelSlug;
+    use jp_conversation::ModelId;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -598,7 +602,7 @@ mod tests {
     async fn test_openrouter_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
     {
         let mut config = llm::Config::default().provider.openrouter;
-        let model: ProviderModelSlug = "openrouter/openai/o4-mini".parse().unwrap();
+        let model: ModelId = "openrouter/openai/o4-mini".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),

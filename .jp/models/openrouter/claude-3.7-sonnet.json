@@ -1,9 +1,0 @@
-{
-  "slug": "anthropic/claude-3.7-sonnet",
-  "max_tokens": 200000,
-  "reasoning": {
-    "effort": "high",
-    "exclude": false
-  },
-  "temperature": 1.0
-}

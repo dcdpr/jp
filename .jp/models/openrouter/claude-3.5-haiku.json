@@ -1,5 +1,0 @@
-{
-  "slug": "anthropic/claude-3.5-haiku",
-  "temperature": 0.7,
-  "exclude_reasoning_tokens": false
-}

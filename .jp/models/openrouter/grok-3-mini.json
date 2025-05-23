@@ -1,9 +1,0 @@
-{
-  "slug": "x-ai/grok-3-mini-beta",
-  "max_tokens": 131000,
-  "reasoning": {
-    "effort": "high",
-    "exclude": false
-  },
-  "temperature": 1.0
-}

@@ -5,11 +5,7 @@ use std::{
 use clap::{builder::TypedValueParser as _, ArgAction};
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
-use jp_config::{
-    expand_tilde,
-    llm::{ProviderModelSlug, ToolChoice},
-    style::code::LinkStyle,
-};
+use jp_config::{expand_tilde, llm::ToolChoice, style::code::LinkStyle};
 use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
     persona::Instructions,
@@ -99,8 +95,8 @@ pub struct Args {
     pub no_edit: bool,
 
     /// The model to use.
-    #[arg(short = 'o', long = "model", value_parser = ProviderModelSlug::from_str)]
-    pub model: Option<ProviderModelSlug>,
+    #[arg(short = 'o', long = "model", value_parser = ModelId::from_str)]
+    pub model: Option<ModelId>,
 
     /// The model parameters to use.
     #[arg(short = 'r', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KeyValue::from_str)]
@@ -386,18 +382,22 @@ impl Args {
     /// equivalent to `--cfg conversation.persona` and `--cfg
     /// conversation.context`.
     fn update_config(&self, config: &mut jp_config::Config) -> Result<()> {
+        // Update the conversation context.
         if let Some(context) = self.context.as_ref() {
             config.conversation.context = Some(context.clone());
         }
 
+        // Update the persona.
         if let Some(persona) = self.persona.as_ref() {
             config.conversation.persona = Some(persona.clone());
         }
 
+        // Update the model.
         if let Some(model) = self.model.as_ref() {
-            config.llm.model.slug = Some(model.clone());
+            config.llm.model.id = Some(model.clone());
         }
 
+        // Update the model parameters.
         for KeyValue(key, value) in &self.parameters {
             config
                 .llm
@@ -516,28 +516,24 @@ fn build_thread(
 }
 
 fn get_model(ctx: &Ctx, persona: &Persona) -> Result<Model> {
-    let mut model = ctx
-        .workspace
-        .resolve_model_reference(&persona.model)?
-        .clone();
+    let Some(id) = persona
+        .model
+        .clone()
+        .or_else(|| ctx.config.llm.model.id.clone())
+    else {
+        return Err(Error::UndefinedModel);
+    };
 
-    // For explicit model requests, try to fetch the model configuration
-    // from the workspace, otherwise use a default model with the requested
-    // provider and model name.
-    if let Some(explicit_model) = ctx.config.llm.model.slug.clone() {
-        let id = ModelId::try_from((explicit_model.provider, &explicit_model.slug))?;
-        model = ctx.workspace.get_model(&id).cloned().unwrap_or(Model {
-            provider: explicit_model.provider,
-            slug: explicit_model.slug,
-            ..Default::default()
-        });
+    let mut parameters = ctx.config.llm.model.parameters.clone();
+    if persona.inherit_parameters {
+        parameters.extend(persona.parameters.clone());
+    } else {
+        parameters = persona.parameters.clone();
     }
 
-    model
-        .additional_parameters
-        .extend(ctx.config.llm.model.parameters.clone());
+    let model = Model { id, parameters };
 
-    trace!(provider = %model.provider, slug = %model.slug, "Loaded LLM model.");
+    trace!(provider = %model.id.provider(), slug = %model.id.slug(), "Loaded LLM model.");
 
     Ok(model)
 }
@@ -548,7 +544,7 @@ async fn handle_structured_output(
     model: &Model,
     schema: schemars::Schema,
 ) -> Result<AssistantMessage> {
-    let provider = provider::get_provider(model.provider, &ctx.config.llm.provider)?;
+    let provider = provider::get_provider(model.id.provider(), &ctx.config.llm.provider)?;
     let query =
         StructuredQuery::new(schema, thread).map_err(|err| Error::Schema(err.to_string()))?;
 
@@ -586,7 +582,7 @@ async fn handle_stream(
     model: &Model,
     tools: Vec<Tool>,
 ) -> Result<AssistantMessage> {
-    let provider = provider::get_provider(model.provider, &ctx.config.llm.provider)?;
+    let provider = provider::get_provider(model.id.provider(), &ctx.config.llm.provider)?;
     let query = ChatQuery {
         thread,
         tools: tools.clone(),

@@ -295,6 +295,11 @@ impl From<crate::error::Error> for Error {
             ]
             .into(),
             MissingEditor => [("message", "Missing editor".to_owned())].into(),
+            UndefinedModel => [(
+                "message",
+                "Undefined model. Use `--model` to specify a model.".to_owned(),
+            )]
+            .into(),
         };
 
         Self::from(metadata)

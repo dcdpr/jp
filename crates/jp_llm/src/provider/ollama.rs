@@ -133,7 +133,7 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest>
         tool_call_strict_mode,
     } = query;
 
-    let mut request = ChatMessageRequest::new(model.slug.clone(), convert_thread(thread)?);
+    let mut request = ChatMessageRequest::new(model.id.slug().to_owned(), convert_thread(thread)?);
 
     let tools = convert_tools(tools, tool_call_strict_mode)?;
     if !tools.is_empty() {
@@ -142,48 +142,26 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest>
 
     let mut options = ModelOptions::default();
 
-    if let Some(temperature) = model.temperature {
-        options = options.temperature(temperature);
+    #[expect(clippy::cast_possible_truncation)]
+    if let Some(temperature) = model.parameters.get("temperature").and_then(Value::as_f64) {
+        options = options.temperature(temperature as f32);
     }
 
-    if let Some(max_tokens) = model.max_tokens {
-        options = options.num_ctx(max_tokens.into());
-    }
-
-    // TODO: Remove this once the parameters logic is refactored.
-    //
-    // See: <https://github.com/dcdpr/jp/issues/46>
-    if let Some(max_tokens) = model
-        .additional_parameters
-        .get("max_tokens")
-        .and_then(Value::as_u64)
-    {
+    if let Some(max_tokens) = model.parameters.get("max_tokens").and_then(Value::as_u64) {
         options = options.num_ctx(max_tokens);
     }
 
     #[expect(clippy::cast_possible_truncation)]
-    if let Some(top_p) = model
-        .additional_parameters
-        .get("top_p")
-        .and_then(Value::as_f64)
-    {
+    if let Some(top_p) = model.parameters.get("top_p").and_then(Value::as_f64) {
         options = options.top_p(top_p as f32);
     }
 
     #[expect(clippy::cast_possible_truncation)]
-    if let Some(top_k) = model
-        .additional_parameters
-        .get("top_k")
-        .and_then(Value::as_u64)
-    {
+    if let Some(top_k) = model.parameters.get("top_k").and_then(Value::as_u64) {
         options = options.top_k(top_k as u32);
     }
 
-    if let Some(keep_alive) = model
-        .additional_parameters
-        .get("keep_alive")
-        .and_then(Value::as_str)
-    {
+    if let Some(keep_alive) = model.parameters.get("keep_alive").and_then(Value::as_str) {
         let unit = keep_alive
             .chars()
             .last()
@@ -465,7 +443,7 @@ impl From<ToolCall> for Delta {
 mod tests {
     use std::{path::PathBuf, result::Result};
 
-    use jp_config::llm::ProviderModelSlug;
+    use jp_conversation::ModelId;
     use jp_query::structured::conversation_titles;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
@@ -507,7 +485,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_ollama_chat_completion() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = llm::Config::default().provider.ollama;
-        let model: ProviderModelSlug = "ollama/llama3:latest".parse().unwrap();
+        let model: ModelId = "ollama/llama3:latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -543,7 +521,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_ollama_chat_completion_stream() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = llm::Config::default().provider.ollama;
-        let model: ProviderModelSlug = "ollama/llama3:latest".parse().unwrap();
+        let model: ModelId = "ollama/llama3:latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -580,7 +558,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_ollama_structured_completion() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = llm::Config::default().provider.ollama;
-        let model: ProviderModelSlug = "ollama/llama3.1:8b".parse().unwrap();
+        let model: ModelId = "ollama/llama3.1:8b".parse().unwrap();
 
         let message = UserMessage::Query("Test message".to_string());
         let history = vec![MessagePair::new(message, AssistantMessage::default())];
