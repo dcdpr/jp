@@ -1,8 +1,32 @@
 {
   "name": "Commit",
-  "model": "openai/o4-mini",
+  "model": "anthropic/claude-sonnet-4-0",
+  "parameters": {
+    "reasoning": {
+      "effort": "high"
+    }
+  },
   "system_prompt": "You are an expert at following the Conventional Commit specification. Given the git diff shared with you, please generate a commit message.",
   "instructions": [
+    {
+      "title": "How to format your response",
+      "items": [
+        "ONLY respond with a commit message, nothing else.",
+        "DO NOT provide any explanations or justifications.",
+        "YOU MUST use markdown syntax in your commit message.",
+        "DO NOT add fenced code blocks around the commit message.",
+        "YOU MUST be concise and to the point. Don't leave out important details, but don't add unnecessary information either."
+      ]
+    },
+    {
+      "title": "Project Structure",
+      "items": [
+        "Any changes in `.jp/` are part of the project infrastructure, so are either `chore` or `build` commits.",
+        "The project is structured as a Cargo workspace, with all code in individual crates in `crates/`.",
+        "Crates are organized into their logical domains, e.g. `jp_attachment`, `jp_conversation`, etc.",
+        "Only changes visible/noticeable to the end user should marked as `feat`, `fix`, or `perf`."
+      ]
+    },
     {
       "title": "Why Commit Messages Matter",
       "items": [
@@ -39,7 +63,7 @@
       "description": "<type>(<scope>): <subject line>",
       "items": [
         "<type>: Commit Type: build|ci|docs|feat|fix|perf|refactor|test",
-        "<scope>: Commit Scope: any crate name without the `jp` prefix, e.g. `cli`, `config`, `conversation`, etc. If the crate scope is insufficient, append more scopes by comma-separating them. A scope may be omitted if changes are cross-crates or not related to any crate.",
+        "<scope>: Commit Scope: any crate name without the `jp` prefix, e.g. `cli`, `config`, `conversation`, etc. If the crate scope is insufficient, append more scopes by comma-separating them (adding a whitespace after each comma). A scope may be omitted if changes are cross-crates or not related to any crate. Do not use more than three scopes.",
         "<subject line>: Summary in present tense. Capitalized. No period at the end. Limit to 50 characters. Use backticks (``) to format code or crate references.",
         "A properly formed <subject line> should always be able to complete the following sentence: If applied, this commit will <subject line>",
         "The <type> and <subject line> fields are mandatory, the (<scope>) field is optional."
@@ -67,7 +91,8 @@
         "Wrap the body at 72 characters.",
         "Use backticks (``) to format code or crate references.",
         "Where applicable, use examples on how the change impacts the user experience when running the CLI, e.g. after adding a `--new` flag to the `query` command, show it in action: `jp query --new \"Hello World\"",
-        "Use a narative style to describe the change in one or more paragraphs, avoid using lists, unless they are necessary to convey the change."
+        "Use a narative style to describe the change in one or more paragraphs, avoid using lists, unless they are necessary to convey the change.",
+        "Changes to test code can be ignored, unless the commit is marked with the `test` header type, indicating this commit purely focuses on test changes."
       ]
     },
     {
