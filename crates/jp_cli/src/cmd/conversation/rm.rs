@@ -11,7 +11,13 @@ pub struct Args {
     /// Conversation IDs to remove.
     ///
     /// Defaults to the active conversation if not specified.
+    #[arg(conflicts_with = "from")]
     id: Vec<ConversationId>,
+
+    /// Remove all conversations *starting from* the specified conversation,
+    /// based on creation date.
+    #[arg(long, conflicts_with = "id")]
+    from: Option<ConversationId>,
 
     /// Do not prompt for confirmation.
     #[arg(long)]
@@ -21,14 +27,20 @@ pub struct Args {
 impl Args {
     pub fn run(self, ctx: &mut Ctx) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
-        let ids = if self.id.is_empty() {
-            &[active_id]
+        let ids = if let Some(from) = &self.from {
+            ctx.workspace
+                .conversations()
+                .map(|(id, _)| *id)
+                .filter(|id| id >= from)
+                .collect::<Vec<_>>()
+        } else if self.id.is_empty() {
+            vec![active_id]
         } else {
-            self.id.as_slice()
+            self.id.clone()
         };
 
         for id in ids {
-            self.remove(ctx, *id)?;
+            self.remove(ctx, id)?;
         }
 
         Ok(Success::Message("Conversation(s) removed.".into()))
