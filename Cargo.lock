@@ -150,7 +150,7 @@ dependencies = [
 [[package]]
 name = "async-anthropic"
 version = "0.6.0"
-source = "git+https://github.com/JeanMertz/async-anthropic#c50064bf6f9fb9064afcaac5bcda358439ec7162"
+source = "git+https://github.com/JeanMertz/async-anthropic#99f7c9ac1fa2e45bcd868ba9c08271b0683c6288"
 dependencies = [
  "backon",
  "derive_builder",
@@ -4521,7 +4521,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

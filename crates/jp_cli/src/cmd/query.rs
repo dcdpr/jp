@@ -159,7 +159,7 @@ impl Args {
             .workspace
             .get_persona(persona_id)
             .ok_or(Error::NotFound("Persona", persona_id.to_string()))?;
-        let model = get_model(ctx, persona)?;
+        let model = self.get_model(ctx, persona)?;
         let tools = ctx.mcp_client.list_tools().await?;
 
         let mut attachments = vec![];
@@ -392,11 +392,6 @@ impl Args {
             config.conversation.persona = Some(persona.clone());
         }
 
-        // Update the model.
-        if let Some(model) = self.model.as_ref() {
-            config.llm.model.id = Some(model.clone());
-        }
-
         // Update the model parameters.
         for KeyValue(key, value) in &self.parameters {
             config
@@ -482,6 +477,30 @@ impl Args {
 
         Ok(query_file_path)
     }
+
+    fn get_model(&self, ctx: &Ctx, persona: &Persona) -> Result<Model> {
+        let Some(id) = self
+            .model
+            .clone()
+            .or_else(|| persona.model.clone())
+            .or_else(|| ctx.config.llm.model.id.clone())
+        else {
+            return Err(Error::UndefinedModel);
+        };
+
+        let mut parameters = ctx.config.llm.model.parameters.clone().unwrap_or_default();
+        if persona.inherit_parameters {
+            parameters.merge(persona.parameters.clone());
+        } else {
+            parameters = persona.parameters.clone();
+        }
+
+        let model = Model { id, parameters };
+
+        trace!(provider = %model.id.provider(), slug = %model.id.slug(), "Loaded LLM model.");
+
+        Ok(model)
+    }
 }
 
 fn build_thread(
@@ -514,29 +533,6 @@ fn build_thread(
     }
 
     Ok(thread_builder.build()?)
-}
-
-fn get_model(ctx: &Ctx, persona: &Persona) -> Result<Model> {
-    let Some(id) = persona
-        .model
-        .clone()
-        .or_else(|| ctx.config.llm.model.id.clone())
-    else {
-        return Err(Error::UndefinedModel);
-    };
-
-    let mut parameters = ctx.config.llm.model.parameters.clone().unwrap_or_default();
-    if persona.inherit_parameters {
-        parameters.merge(persona.parameters.clone());
-    } else {
-        parameters = persona.parameters.clone();
-    }
-
-    let model = Model { id, parameters };
-
-    trace!(provider = %model.id.provider(), slug = %model.id.slug(), "Loaded LLM model.");
-
-    Ok(model)
 }
 
 async fn handle_structured_output(
