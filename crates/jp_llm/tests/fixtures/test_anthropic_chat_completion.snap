@@ -5,7 +5,7 @@ expression: expr
 Ok(
     [
         Content(
-            "Hello! I'm here and ready to help. What can I assist you with today?",
+            "I'm here and ready to help! What can I assist you with today?",
         ),
     ],
 )

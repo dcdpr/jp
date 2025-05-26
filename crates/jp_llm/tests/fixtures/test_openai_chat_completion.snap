@@ -8,7 +8,7 @@ Ok(
             "",
         ),
         Content(
-            "Test message received! How can I assist you today?",
+            "Hello! I’m here and ready to help. What can I do for you today?",
         ),
     ],
 )
