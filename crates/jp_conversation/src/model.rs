@@ -326,10 +326,11 @@ impl FromStr for ModelId {
                 || c == '-'
                 || c == '_'
                 || c == '.'
-                || c == ':')
+                || c == ':'
+                || c == '/')
         }) {
             return Err(Error::InvalidIdFormat(
-                "Model ID must be [a-z0-9_-.:]".to_string(),
+                "Model ID must be [a-z0-9_-.:/]".to_string(),
             ));
         }
 
