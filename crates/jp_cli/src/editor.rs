@@ -285,13 +285,20 @@ pub fn edit_query(
         buf.push_str("## ASSISTANT\n\n");
         if let Some(reasoning) = &message.reply.reasoning {
             buf.push_str(&comrak::markdown_to_commonmark(
-                &format!("> **reasoning**\n> {reasoning}\n\n"),
+                &format!("### reasoning\n\n{reasoning}\n\n"),
                 &options,
             ));
         }
         if let Some(content) = &message.reply.content {
             buf.push_str(&comrak::markdown_to_commonmark(
-                &format!("{content}\n\n"),
+                &format!(
+                    "{}{content}\n\n",
+                    if message.reply.reasoning.is_some() {
+                        "### response\n\n"
+                    } else {
+                        ""
+                    }
+                ),
                 &options,
             ));
         }
