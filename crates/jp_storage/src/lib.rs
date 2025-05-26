@@ -34,7 +34,7 @@ const MESSAGES_FILE: &str = "messages.json";
 const CONTEXTS_DIR: &str = "contexts";
 pub const PERSONAS_DIR: &str = "personas";
 pub const CONVERSATIONS_DIR: &str = "conversations";
-pub const MCP_SERVERS_DIR: &str = "mcp";
+pub const MCP_SERVERS_DIR: &str = "mcp/servers";
 
 #[derive(Debug)]
 pub struct Storage {
@@ -849,7 +849,7 @@ mod tests {
         let original_dir = tempdir().unwrap();
         let storage = Storage::new(original_dir.path()).unwrap();
         let mcp_path = storage.root.join(MCP_SERVERS_DIR);
-        fs::create_dir(&mcp_path).unwrap();
+        fs::create_dir_all(&mcp_path).unwrap();
 
         let id1 = McpServerId::new("server1");
         let server1 = McpServer {
