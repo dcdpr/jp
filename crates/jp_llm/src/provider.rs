@@ -369,36 +369,34 @@ fn handle_delta(delta: Delta, state: &mut AccumulationState) -> Result<Option<St
 
     // Check for function call completion.
     if tool_call_finished {
-        let AccumulationState::AccumulatingFunctionCall {
+        // If we're not accumulating, ignore any finish reason, since some
+        // providers don't send the `tool_calls` finish reason at the end of
+        // a response, but instead send the `stop` reason.
+        if let AccumulationState::AccumulatingFunctionCall {
             id,
             name,
             arguments_buffer,
         } = state
-        else {
-            // If we're not accumulating, ignore any finish reason, since some
-            // providers don't send the `tool_calls` finish reason at the end of
-            // a response, but instead send the `stop` reason.
-            return Ok(None);
-        };
+        {
+            let id = id.clone();
+            let name = name.clone();
+            let arguments = match serde_json::from_str(arguments_buffer) {
+                Ok(arguments) => arguments,
+                Err(e) => {
+                    return Err(Error::InvalidResponse(format!(
+                        "Failed to parse function call arguments: {e}. Buffer was: \
+                         '{arguments_buffer}'"
+                    )));
+                }
+            };
 
-        let id = id.clone();
-        let name = name.clone();
-        let arguments = match serde_json::from_str(arguments_buffer) {
-            Ok(arguments) => arguments,
-            Err(e) => {
-                return Err(Error::InvalidResponse(format!(
-                    "Failed to parse function call arguments: {e}. Buffer was: \
-                     '{arguments_buffer}'"
-                )));
-            }
-        };
-
-        *state = AccumulationState::default();
-        return Ok(Some(StreamEvent::ToolCall(ToolCallRequest {
-            id,
-            name,
-            arguments,
-        })));
+            *state = AccumulationState::default();
+            return Ok(Some(StreamEvent::ToolCall(ToolCallRequest {
+                id,
+                name,
+                arguments,
+            })));
+        }
     }
 
     // Handle reasoning.
