@@ -4,8 +4,8 @@ expression: expr
 ---
 Ok(
     [
-        "Test Message Interaction",
-        "Brief Chat Example",
-        "Minimal Conversation Exchange",
+        "Test Message Received",
+        "Minimal User Interaction",
+        "Basic Conversation Entry",
     ],
 )
