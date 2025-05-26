@@ -5,7 +5,7 @@ use std::{
 use clap::{builder::TypedValueParser as _, ArgAction};
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
-use jp_config::{expand_tilde, llm::ToolChoice, style::code::LinkStyle};
+use jp_config::{expand_tilde, style::code::LinkStyle};
 use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
     persona::Instructions,
@@ -14,7 +14,7 @@ use jp_conversation::{
     Persona, PersonaId, UserMessage,
 };
 use jp_llm::provider::{self, CompletionChunk, StreamEvent};
-use jp_mcp::{config::McpServerId, ResourceContents, Tool};
+use jp_mcp::{config::McpServerId, tool::ToolChoice, ResourceContents, Tool};
 use jp_query::query::{ChatQuery, StructuredQuery};
 use jp_task::task::TitleGeneratorTask;
 use jp_term::{code, osc::hyperlink, stdout};
@@ -45,7 +45,7 @@ pub struct Args {
     ///
     /// You can provide values for template variables using the
     /// `template.values` config key.
-    #[arg(short, long)]
+    #[arg(long)]
     pub template: bool,
 
     #[arg(long, value_parser = string_or_path.try_map(json_schema))]
@@ -101,6 +101,16 @@ pub struct Args {
     /// The model parameters to use.
     #[arg(short = 'r', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KeyValue::from_str)]
     pub parameters: Vec<KeyValue>,
+
+    /// The tool to use.
+    ///
+    /// If a value is provided, the tool matching the value will be used.
+    ///
+    /// Note that this setting is *not* persisted across queries. To persist
+    /// tool choice behavior, use a named context with the `tool_choice` field,
+    /// or set `llm.tool_choice` in the config file.
+    #[arg(short = 't', long = "tool")]
+    pub tool_choice: Option<Option<String>>,
 }
 
 impl Args {
@@ -184,7 +194,15 @@ impl Args {
         let reply = if let Some(schema) = &self.schema {
             handle_structured_output(ctx, thread.clone(), &model, schema.clone()).await?
         } else {
-            handle_stream(ctx, thread.clone(), &model, tools.clone()).await?
+            let tool_choice = tools
+                .is_empty()
+                .then_some(ToolChoice::None)
+                .or_else(|| self.parsed_tool_choice())
+                .or_else(|| context.tool_choice.clone())
+                .or_else(|| ctx.config.llm.tool_choice.clone())
+                .unwrap_or(ToolChoice::Auto);
+
+            handle_stream(ctx, thread.clone(), &model, tools.clone(), tool_choice).await?
         };
 
         trace!(
@@ -222,7 +240,7 @@ impl Args {
             thread.history.push(message.clone());
             let results = handle_tool_calls(ctx, tool_calls).await?;
             thread.message = UserMessage::ToolCallResults(results);
-            Box::pin(handle_stream(ctx, thread, &model, tools)).await?;
+            Box::pin(handle_stream(ctx, thread, &model, tools, ToolChoice::Auto)).await?;
         }
 
         // Clean up the query file.
@@ -501,6 +519,16 @@ impl Args {
 
         Ok(model)
     }
+
+    fn parsed_tool_choice(&self) -> Option<ToolChoice> {
+        self.tool_choice.as_ref().map(|v| match v.as_deref() {
+            None | Some("true") => ToolChoice::Required,
+            Some(v) => match v {
+                "false" => ToolChoice::None,
+                _ => ToolChoice::Function(v.to_owned()),
+            },
+        })
+    }
 }
 
 fn build_thread(
@@ -578,12 +606,13 @@ async fn handle_stream(
     thread: Thread,
     model: &Model,
     tools: Vec<Tool>,
+    tool_choice: ToolChoice,
 ) -> Result<AssistantMessage> {
     let provider = provider::get_provider(model.id.provider(), &ctx.config.llm.provider)?;
     let query = ChatQuery {
         thread,
         tools: tools.clone(),
-        tool_choice: ToolChoice::Auto,
+        tool_choice,
         ..Default::default()
     };
     let mut stream = provider.chat_completion_stream(model, query).await?;
@@ -681,7 +710,10 @@ async fn handle_tool_calls(
 }
 
 async fn handle_tool_call(ctx: &Ctx, call: ToolCallRequest) -> Result<ToolCallResult> {
+    info!(tool = %call.name, arguments = %call.arguments, "Calling tool.");
+
     let result = ctx.mcp_client.call_tool(&call.name, call.arguments).await?;
+    trace!(result = ?result, "Tool call completed.");
 
     Ok(ToolCallResult {
         id: call.id,

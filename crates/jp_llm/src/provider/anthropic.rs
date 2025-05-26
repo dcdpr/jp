@@ -13,6 +13,7 @@ use jp_conversation::{
     thread::{Document, Documents, Thinking, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
+use jp_mcp::tool;
 use jp_query::query::ChatQuery;
 use serde_json::Value;
 use time::macros::date;
@@ -320,11 +321,11 @@ impl TryFrom<&llm::provider::anthropic::Config> for Anthropic {
     }
 }
 
-fn convert_tool_choice(choice: llm::ToolChoice) -> types::ToolChoice {
+fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolChoice {
     match choice {
-        llm::ToolChoice::Auto | llm::ToolChoice::None => types::ToolChoice::Auto,
-        llm::ToolChoice::Required => types::ToolChoice::Any,
-        llm::ToolChoice::Function(name) => types::ToolChoice::Tool(name),
+        tool::ToolChoice::Auto | tool::ToolChoice::None => types::ToolChoice::Auto,
+        tool::ToolChoice::Required => types::ToolChoice::Any,
+        tool::ToolChoice::Function(name) => types::ToolChoice::Tool(name),
     }
 }
 

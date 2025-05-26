@@ -1,6 +1,5 @@
-use jp_config::llm::ToolChoice;
 use jp_conversation::thread::Thread;
-use jp_mcp::Tool;
+use jp_mcp::{tool::ToolChoice, Tool};
 
 #[derive(Debug, Clone, Default)]
 pub struct ChatQuery {
