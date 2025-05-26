@@ -2,9 +2,9 @@ use std::str::FromStr;
 
 use confique::Config as Confique;
 use jp_conversation::{model::Parameters, ModelId};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 /// Model configuration.
 #[derive(Debug, Clone, Default, PartialEq, Confique)]
@@ -37,39 +37,6 @@ impl Config {
         }
 
         Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(untagged, rename_all = "snake_case")]
-pub enum ToolChoice {
-    #[default]
-    Auto,
-    None,
-    Required,
-    Function(String),
-}
-
-impl FromStr for ToolChoice {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        match s {
-            "auto" => Ok(Self::Auto),
-            "none" => Ok(Self::None),
-            "required" => Ok(Self::Required),
-            _ if s.starts_with("fn:") && s.len() > 3 => Ok(Self::Function(s[3..].to_owned())),
-            _ => Err(Error::InvalidConfigValue {
-                key: s.to_string(),
-                value: s.to_string(),
-                need: vec![
-                    "auto".to_owned(),
-                    "none".to_owned(),
-                    "required".to_owned(),
-                    "fn:<name>".to_owned(),
-                ],
-            }),
-        }
     }
 }
 

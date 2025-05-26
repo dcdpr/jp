@@ -11,7 +11,7 @@ use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id,
 };
-use jp_mcp::config::McpServerId;
+use jp_mcp::{config::McpServerId, tool::ToolChoice};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -37,6 +37,10 @@ pub struct Context {
         skip_serializing_if = "HashMap::is_empty"
     )]
     pub attachment_handlers: HashMap<String, jp_attachment::BoxedHandler>,
+
+    /// How the assistant should choose tools, if any are available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
 }
 
 impl Context {

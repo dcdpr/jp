@@ -438,6 +438,7 @@ impl From<jp_config::Error> for Error {
 
         let metadata: Vec<(&str, Value)> = match error {
             ParseBool(error) => return error.into(),
+            Mcp(error) => return error.into(),
             Conversation(error) => return error.into(),
             Io(error) => return error.into(),
             Parameters(error) => return error.into(),
@@ -514,6 +515,12 @@ impl From<jp_mcp::Error> for Error {
             UnknownServer(mcp_server_id) => [
                 ("message", "Unknown MCP server".into()),
                 ("id", mcp_server_id.to_string().into()),
+            ]
+            .into(),
+            UnknownToolChoice(choice) => [
+                ("message", "Unknown tool choice".into()),
+                ("choice", choice.into()),
+                ("expected", ["false", "true", "<function_name>"].into()),
             ]
             .into(),
         };

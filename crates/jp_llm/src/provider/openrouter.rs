@@ -3,7 +3,7 @@ use std::env;
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt as _};
-use jp_config::llm::{self, provider::openrouter};
+use jp_config::llm::provider::openrouter;
 use jp_conversation::{
     message::ToolCallRequest,
     model::{ProviderId, ReasoningEffort},
@@ -89,10 +89,10 @@ impl Openrouter {
             ToolChoice::None
         } else {
             match tool_choice {
-                llm::ToolChoice::Auto => ToolChoice::Auto,
-                llm::ToolChoice::None => ToolChoice::None,
-                llm::ToolChoice::Required => ToolChoice::Required,
-                llm::ToolChoice::Function(name) => ToolChoice::function(name),
+                jp_mcp::tool::ToolChoice::Auto => ToolChoice::Auto,
+                jp_mcp::tool::ToolChoice::None => ToolChoice::None,
+                jp_mcp::tool::ToolChoice::Required => ToolChoice::Required,
+                jp_mcp::tool::ToolChoice::Function(name) => ToolChoice::function(name),
             }
         };
 
@@ -569,6 +569,7 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> RequestMessage {
 mod tests {
     use std::path::PathBuf;
 
+    use jp_config::llm;
     use jp_conversation::ModelId;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;

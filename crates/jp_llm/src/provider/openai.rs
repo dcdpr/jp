@@ -9,6 +9,7 @@ use jp_conversation::{
     thread::{Document, Documents, Thinking, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
+use jp_mcp::tool;
 use jp_query::query::ChatQuery;
 use openai_responses::{
     types::{self, Request, SummaryConfig},
@@ -317,12 +318,12 @@ impl TryFrom<&llm::provider::openai::Config> for Openai {
     }
 }
 
-fn convert_tool_choice(choice: llm::ToolChoice) -> types::ToolChoice {
+fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolChoice {
     match choice {
-        llm::ToolChoice::Auto => types::ToolChoice::Auto,
-        llm::ToolChoice::None => types::ToolChoice::None,
-        llm::ToolChoice::Required => types::ToolChoice::Required,
-        llm::ToolChoice::Function(name) => types::ToolChoice::Function(name),
+        tool::ToolChoice::Auto => types::ToolChoice::Auto,
+        tool::ToolChoice::None => types::ToolChoice::None,
+        tool::ToolChoice::Required => types::ToolChoice::Required,
+        tool::ToolChoice::Function(name) => types::ToolChoice::Function(name),
     }
 }
 

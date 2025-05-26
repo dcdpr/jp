@@ -1,6 +1,7 @@
 mod client;
 pub mod config;
 pub mod error;
+pub mod tool;
 pub mod transport;
 
 pub use client::Client;

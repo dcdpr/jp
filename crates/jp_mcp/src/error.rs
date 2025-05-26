@@ -18,6 +18,9 @@ pub enum Error {
 
     #[error("Unknown MCP server: {0}")]
     UnknownServer(McpServerId),
+
+    #[error("Invalid tool choice: {0}, must be one of [auto, none, required, fn:<name>]")]
+    UnknownToolChoice(String),
 }
 
 #[cfg(test)]

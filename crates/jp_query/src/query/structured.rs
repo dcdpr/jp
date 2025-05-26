@@ -1,8 +1,7 @@
 use std::{error::Error, sync::Arc};
 
-use jp_config::llm::ToolChoice;
 use jp_conversation::thread::Thread;
-use jp_mcp::Tool;
+use jp_mcp::{tool::ToolChoice, Tool};
 use schemars::Schema;
 use serde_json::{Map, Value};
 

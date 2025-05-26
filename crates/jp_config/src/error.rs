@@ -9,6 +9,9 @@ pub enum Error {
     #[error("Conversation error: {0}")]
     Conversation(#[from] jp_conversation::error::Error),
 
+    #[error("MCP error: {0}")]
+    Mcp(#[from] jp_mcp::Error),
+
     #[error("Confique error: {0}")]
     Confique(#[from] confique::Error),
 
