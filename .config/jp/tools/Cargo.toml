@@ -8,10 +8,21 @@ version = "0.1.0"
 [workspace]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 duct = { version = "1", default-features = false }
 indoc = { version = "2", default-features = false }
 mcp-attr = { git = "https://github.com/frozenlib/mcp-attr" }
+octocrab = { version = "0.44", default-features = false, features = [
+    "default-client",
+    "follow-redirect",
+    "retry",
+    "rustls",
+    "rustls-ring",
+    "timeout",
+] }
 quick-xml = { version = "0.37", default-features = false, features = ["encoding", "serialize"] }
+schemars = { version = "0.8" }
 serde = { version = "1", default-features = false, features = ["std", "derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["std", "preserve_order", "alloc"] }
 tokio = { version = "1", default-features = false, features = ["full"] }
+url = { version = "2", default-features = false, features = ["serde", "std"] }
