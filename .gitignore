@@ -3,7 +3,7 @@
 !/.jp/conversations/17462040864/
 
 # Rust specific
-/target
+**/target
 /.cargo/config.toml
 /rustc-ice-*
 

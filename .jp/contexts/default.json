@@ -1,5 +1,8 @@
 {
   "persona_id": "default",
+  "mcp_servers": [
+    "local"
+  ],
   "attachments": {
     "file_content": {
       "type": "file_content",
