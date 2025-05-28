@@ -15,8 +15,8 @@ use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
     persona::Instructions,
     thread::{Thread, ThreadBuilder},
-    AssistantMessage, ContextId, Conversation, ConversationId, MessagePair, Model, ModelId,
-    Persona, PersonaId, UserMessage,
+    AssistantMessage, Context, ContextId, Conversation, ConversationId, MessagePair, Model,
+    ModelId, Persona, PersonaId, UserMessage,
 };
 use jp_llm::provider::{self, CompletionChunk, StreamEvent};
 use jp_mcp::{config::McpServerId, tool::ToolChoice, ResourceContents, Tool};
@@ -119,6 +119,7 @@ pub struct Args {
 }
 
 impl Args {
+    #[expect(clippy::too_many_lines)]
     pub async fn run(self, ctx: &mut Ctx) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
@@ -186,66 +187,51 @@ impl Args {
             );
         }
 
-        let mut thread = build_thread(
+        let thread = build_thread(
             ctx,
             conversation_id,
             attachments,
             persona,
             message.clone(),
-            !tools.is_empty(),
+            &tools,
         )?;
 
         let context = conversation.context.clone();
-        let reply = if let Some(schema) = &self.schema {
-            handle_structured_output(ctx, thread.clone(), &model, schema.clone()).await?
+        let mut messages = vec![];
+        if let Some(schema) = self.schema.clone() {
+            messages.push(handle_structured_output(ctx, context, thread, &model, schema).await?);
         } else {
-            let tool_choice = tools
-                .is_empty()
-                .then_some(ToolChoice::None)
-                .or_else(|| self.parsed_tool_choice())
-                .or_else(|| context.tool_choice.clone())
-                .or_else(|| ctx.config.llm.tool_choice.clone())
-                .unwrap_or(ToolChoice::Auto);
+            handle_stream(
+                ctx,
+                context,
+                thread,
+                &model,
+                tools.clone(),
+                self.tool_choice(ctx, &tools),
+                &mut messages,
+            )
+            .await?;
+        }
 
-            handle_stream(ctx, thread.clone(), &model, tools.clone(), tool_choice).await?
-        };
+        let mut reply = String::new();
+        for message in messages {
+            trace!(
+                conversation = %conversation_id,
+                content_size = message.reply.content.as_deref().unwrap_or_default().len(),
+                reasoning_size = message
+                    .reply
+                    .reasoning
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default()
+                    .len(),
+                "Storing response message in conversation."
+            );
 
-        trace!(
-            conversation = %conversation_id,
-            content_size = reply.content.as_deref().unwrap_or_default().len(),
-            reasoning_size = reply.reasoning.as_deref().unwrap_or_default().len(),
-            "Storing response message in conversation."
-        );
-
-        let tool_calls = reply.tool_calls.clone();
-        let message = MessagePair::new(message.clone(), reply.clone()).with_context(context);
-
-        // Create message in the conversation.
-        ctx.workspace.add_message(conversation_id, message.clone());
-
-        // If the assistant asked for a tool call, we handle it automatically,
-        // essentially going into a "loop" until no more tool calls are
-        // requested.
-        //
-        // TODO:
-        //
-        // This should be handled differently, asking for permission to run a
-        // tool (unless whitelisted per conversation/globally), it should log
-        // the fact that a tool call is triggered, and it should guard against
-        // infinite loops.
-        //
-        // FIXME:
-        //
-        // Recent changes have made this *no longer loop*. This currently
-        // triggers *only once* when a tool call is requested, but after that it
-        // exits the query. This is because this was previously handled inside
-        // [`handle_stream`], which made it recursive, but it was moved here,
-        // breaking the recursion.
-        if !tool_calls.is_empty() {
-            thread.history.push(message.clone());
-            let results = handle_tool_calls(ctx, tool_calls).await?;
-            thread.message = UserMessage::ToolCallResults(results);
-            Box::pin(handle_stream(ctx, thread, &model, tools, ToolChoice::Auto)).await?;
+            if let Some(content) = &message.reply.content {
+                reply.push_str(content);
+            }
+            ctx.workspace.add_message(conversation_id, message.clone());
         }
 
         // Clean up the query file.
@@ -253,10 +239,8 @@ impl Args {
             fs::remove_file(path)?;
         }
 
-        if self.schema.is_some()
-            && let Some(content) = reply.content
-        {
-            return Ok(Success::Json(serde_json::from_str(&content)?));
+        if self.schema.is_some() && !reply.is_empty() {
+            return Ok(Success::Json(serde_json::from_str(&reply)?));
         }
 
         Ok(Success::Ok)
@@ -525,14 +509,28 @@ impl Args {
         Ok(model)
     }
 
-    fn parsed_tool_choice(&self) -> Option<ToolChoice> {
-        self.tool_choice.as_ref().map(|v| match v.as_deref() {
-            None | Some("true") => ToolChoice::Required,
-            Some(v) => match v {
-                "false" => ToolChoice::None,
-                _ => ToolChoice::Function(v.to_owned()),
-            },
-        })
+    fn tool_choice(&self, ctx: &Ctx, tools: &[Tool]) -> ToolChoice {
+        tools
+            .is_empty()
+            .then_some(ToolChoice::None)
+            .or_else(|| {
+                self.tool_choice.as_ref().map(|v| match v.as_deref() {
+                    None | Some("true") => ToolChoice::Required,
+                    Some(v) => match v {
+                        "false" => ToolChoice::None,
+                        _ => ToolChoice::Function(v.to_owned()),
+                    },
+                })
+            })
+            .or_else(|| {
+                ctx.workspace
+                    .get_active_conversation()
+                    .context
+                    .tool_choice
+                    .clone()
+            })
+            .or_else(|| ctx.config.llm.tool_choice.clone())
+            .unwrap_or(ToolChoice::Auto)
     }
 }
 
@@ -542,7 +540,7 @@ fn build_thread(
     attachments: Vec<jp_attachment::Attachment>,
     persona: &Persona,
     message: UserMessage,
-    has_tools: bool,
+    tools: &[Tool],
 ) -> Result<Thread> {
     let mut thread_builder = ThreadBuilder::default()
         .with_system_prompt(persona.system_prompt.clone())
@@ -551,7 +549,7 @@ fn build_thread(
         .with_history(ctx.workspace.get_messages(&conversation_id).to_vec())
         .with_message(message);
 
-    if has_tools {
+    if !tools.is_empty() {
         let instruction = Instructions::default()
             .with_title("Tool Usage")
             .with_description("How to leverage the tools available to you.".to_string())
@@ -570,11 +568,13 @@ fn build_thread(
 
 async fn handle_structured_output(
     ctx: &mut Ctx,
+    context: Context,
     thread: Thread,
     model: &Model,
     schema: schemars::Schema,
-) -> Result<AssistantMessage> {
+) -> Result<MessagePair> {
     let provider = provider::get_provider(model.id.provider(), &ctx.config.llm.provider)?;
+    let message = thread.message.clone();
     let query =
         StructuredQuery::new(schema, thread).map_err(|err| Error::Schema(err.to_string()))?;
 
@@ -585,7 +585,7 @@ async fn handle_structured_output(
         serde_json::to_string(&value)?
     };
 
-    Ok(AssistantMessage::from(content))
+    Ok(MessagePair::new(message, AssistantMessage::from(content)).with_context(context))
 }
 
 #[expect(clippy::needless_pass_by_value)]
@@ -608,14 +608,17 @@ fn string_or_path(s: &str) -> Result<String> {
 
 async fn handle_stream(
     ctx: &mut Ctx,
-    thread: Thread,
+    context: Context,
+    mut thread: Thread,
     model: &Model,
     tools: Vec<Tool>,
     tool_choice: ToolChoice,
-) -> Result<AssistantMessage> {
+    messages: &mut Vec<MessagePair>,
+) -> Result<()> {
     let provider = provider::get_provider(model.id.provider(), &ctx.config.llm.provider)?;
+    let message = thread.message.clone();
     let query = ChatQuery {
-        thread,
+        thread: thread.clone(),
         tools: tools.clone(),
         tool_choice,
         ..Default::default()
@@ -700,11 +703,45 @@ async fn handle_stream(
         println!();
     }
 
-    Ok(AssistantMessage {
+    let message = MessagePair::new(message, AssistantMessage {
+        metadata,
         content,
         reasoning,
-        tool_calls,
+        tool_calls: tool_calls.clone(),
     })
+    .with_context(context.clone());
+    messages.push(message.clone());
+
+    // If the assistant asked for a tool call, we handle it automatically,
+    // essentially going into a "loop" until no more tool calls are
+    // requested.
+    //
+    // TODO:
+    //
+    // This should be handled differently, asking for permission to run a
+    // tool (unless whitelisted per conversation/globally), it should log
+    // the fact that a tool call is triggered, and it should guard against
+    // infinite loops.
+    if !tool_calls.is_empty() {
+        thread.history.push(message);
+        let results = handle_tool_calls(ctx, tool_calls).await?;
+        thread.message = UserMessage::ToolCallResults(results);
+
+        Box::pin(handle_stream(
+            ctx,
+            context,
+            thread,
+            model,
+            tools,
+            // After the first tool call, we revert back to letting the LLM
+            // decide if/which tool to use.
+            ToolChoice::Auto,
+            messages,
+        ))
+        .await?;
+    }
+
+    Ok(())
 }
 
 async fn handle_tool_calls(
