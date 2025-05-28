@@ -7,7 +7,7 @@ pub struct Message {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content: Vec<Content>,
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing)]
     pub reasoning: Option<String>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

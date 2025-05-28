@@ -10,7 +10,7 @@ use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::llm;
 use jp_conversation::{
     model::{ProviderId, ReasoningEffort},
-    thread::{Document, Documents, Thinking, Thread},
+    thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
 use jp_mcp::tool;
@@ -361,7 +361,6 @@ impl TryFrom<Thread> for Messages {
             instructions,
             attachments,
             mut history,
-            reasoning,
             message,
             ..
         } = thread;
@@ -472,16 +471,6 @@ impl TryFrom<Thread> for Messages {
                     )]),
                 }));
             }
-        }
-
-        // Reasoning message last, in `<thinking>` tags.
-        if let Some(content) = reasoning {
-            items.push(types::Message {
-                role: types::MessageRole::Assistant,
-                content: types::MessageContentList(vec![types::MessageContent::Text(
-                    Thinking(content).try_to_xml()?.into(),
-                )]),
-            });
         }
 
         Ok(Self(items))

@@ -2591,7 +2591,7 @@ dependencies = [
 [[package]]
 name = "openai_responses"
 version = "0.1.6"
-source = "git+https://github.com/JeanMertz/openai-responses-rs#7c7f47842e00e6716568f822d294ca8355985fac"
+source = "git+https://github.com/JeanMertz/openai-responses-rs#639ed18c57ae3132c7b66baf798010884b475a55"
 dependencies = [
  "async-fn-stream",
  "chrono",

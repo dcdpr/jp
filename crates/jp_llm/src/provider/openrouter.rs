@@ -7,7 +7,7 @@ use jp_config::llm::provider::openrouter;
 use jp_conversation::{
     message::ToolCallRequest,
     model::{ProviderId, ReasoningEffort},
-    thread::{Document, Documents, Thinking, Thread},
+    thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
 use jp_openrouter::{
@@ -329,7 +329,6 @@ impl TryFrom<(&Model, Thread)> for RequestMessages {
             instructions,
             attachments,
             mut history,
-            reasoning,
             message,
         } = thread;
 
@@ -476,15 +475,6 @@ impl TryFrom<(&Model, Thread)> for RequestMessages {
             }
         }
 
-        // Reasoning message last, in `<thinking>` tags.
-        if let Some(content) = reasoning {
-            messages.push(
-                Message::default()
-                    .with_text(Thinking(content).try_to_xml()?)
-                    .assistant(),
-            );
-        }
-
         // Only Anthropic and Google models support explicit caching.
         if !model.id.slug().starts_with("anthropic") && !model.id.slug().starts_with("google") {
             trace!(
@@ -531,6 +521,7 @@ fn user_message_to_messages(user: UserMessage) -> Vec<RequestMessage> {
 
 fn assistant_message_to_message(assistant: AssistantMessage) -> RequestMessage {
     let AssistantMessage {
+        metadata: _,
         reasoning,
         content,
         tool_calls,

@@ -30,9 +30,9 @@ impl McpServer for ToolsServer {
         /// If unspecified, a list of all issues will be returned, without the
         /// issue contents. You can re-run the tool with the correct issue
         /// number to get more details about an issue.
-        number: Option<u64>,
+        number: Option<i32>,
     ) -> Result<String> {
-        crate::github::issues(number).await
+        crate::github::issues(number.map(|v| v as u64)).await
     }
 
     #[tool]
@@ -44,10 +44,10 @@ impl McpServer for ToolsServer {
         /// If unspecified, a list of all pull requests will be returned, without the
         /// pull request contents. You can re-run the tool with the correct pull request
         /// number to get more details about a pull request.
-        number: Option<u64>,
+        number: Option<i32>,
 
         state: Option<State>,
     ) -> Result<String> {
-        crate::github::pulls(number, state).await
+        crate::github::pulls(number.map(|v| v as u64), state).await
     }
 }

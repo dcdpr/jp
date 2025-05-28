@@ -15,7 +15,6 @@ pub struct ThreadBuilder {
     pub instructions: Vec<Instructions>,
     pub attachments: Vec<Attachment>,
     pub history: Vec<MessagePair>,
-    pub reasoning: Option<String>,
     pub message: Option<UserMessage>,
 }
 
@@ -51,12 +50,6 @@ impl ThreadBuilder {
     }
 
     #[must_use]
-    pub fn with_reasoning(mut self, reasoning: impl Into<String>) -> Self {
-        self.reasoning = Some(reasoning.into());
-        self
-    }
-
-    #[must_use]
     pub fn with_message(mut self, message: impl Into<UserMessage>) -> Self {
         self.message = Some(message.into());
         self
@@ -68,7 +61,6 @@ impl ThreadBuilder {
             instructions,
             attachments,
             history,
-            reasoning,
             message,
         } = self;
 
@@ -79,7 +71,6 @@ impl ThreadBuilder {
             instructions,
             attachments,
             history,
-            reasoning,
             message,
         })
     }
@@ -91,7 +82,6 @@ pub struct Thread {
     pub instructions: Vec<Instructions>,
     pub attachments: Vec<Attachment>,
     pub history: Vec<MessagePair>,
-    pub reasoning: Option<String>,
     pub message: UserMessage,
 }
 
@@ -123,19 +113,6 @@ pub struct Document {
     index: usize,
     source: String,
     content: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Thinking(pub String);
-
-impl Thinking {
-    pub fn try_to_xml(&self) -> Result<String> {
-        let mut buffer = String::new();
-        let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
-        serializer.indent(' ', 2);
-        self.serialize(serializer)?;
-        Ok(buffer)
-    }
 }
 
 impl From<(usize, Attachment)> for Document {

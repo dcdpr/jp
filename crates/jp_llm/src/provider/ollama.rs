@@ -6,7 +6,7 @@ use futures::StreamExt as _;
 use jp_config::llm;
 use jp_conversation::{
     model::ProviderId,
-    thread::{Document, Documents, Thinking, Thread},
+    thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
 use jp_query::query::ChatQuery;
@@ -98,6 +98,7 @@ fn map_response(response: ChatMessageResponse) -> Result<Vec<Event>> {
                     CompletionChunk::Reasoning(s) => Event::Reasoning(s),
                 },
                 StreamEvent::ToolCall(request) => Event::ToolCall(request),
+                StreamEvent::Metadata(key, metadata) => Event::Metadata(key, metadata),
             })
         })
         .collect::<Result<Vec<_>>>()
@@ -246,7 +247,6 @@ impl TryFrom<Thread> for Messages {
             instructions,
             attachments,
             mut history,
-            reasoning,
             message,
         } = thread;
 
@@ -360,16 +360,6 @@ impl TryFrom<Thread> for Messages {
                     images: None,
                 }));
             }
-        }
-
-        // Reasoning message last, in `<thinking>` tags.
-        if let Some(content) = reasoning {
-            items.push(ChatMessage {
-                role: MessageRole::Assistant,
-                content: Thinking(content).try_to_xml()?,
-                tool_calls: vec![],
-                images: None,
-            });
         }
 
         Ok(Self(items))
