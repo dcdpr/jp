@@ -6,20 +6,20 @@ use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::llm;
 use jp_conversation::{
     model::{ProviderId, Reasoning, ReasoningEffort},
-    thread::{Document, Documents, Thinking, Thread},
+    thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
 use jp_mcp::tool;
 use jp_query::query::ChatQuery;
 use openai_responses::{
-    types::{self, Request, SummaryConfig},
+    types::{self, Include, Request, SummaryConfig},
     Client, CreateError, StreamError,
 };
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde_json::Value;
 use time::{macros::date, OffsetDateTime};
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 use super::{handle_delta, Delta, Event, EventStream, ModelDetails, Provider, StreamEvent};
 use crate::{
@@ -49,9 +49,14 @@ impl Openai {
             .into_iter()
             .find(|m| m.slug == model.id.slug());
 
+        let supports_reasoning = model_details
+            .as_ref()
+            .is_some_and(|d| d.reasoning.is_some_and(|v| v));
+
         let request = Request {
             model: types::Model::Other(model.id.slug().to_owned()),
-            input: convert_thread(thread)?,
+            input: convert_thread(thread, supports_reasoning)?,
+            include: supports_reasoning.then_some(vec![Include::ReasoningEncryptedContent]),
             store: Some(false),
             tool_choice: Some(convert_tool_choice(tool_choice)),
             tools: Some(convert_tools(tools, tool_call_strict_mode)),
@@ -284,6 +289,16 @@ fn map_event(event: types::Event, state: &mut AccumulationState) -> Option<Resul
         }
         Event::FunctionCallArgumentsDelta { delta, .. } => Delta::tool_call("", "", delta),
         Event::FunctionCallArgumentsDone { .. } => Delta::tool_call_finished(),
+        Event::ReasoningSummaryTextDelta { delta, .. } => Delta::reasoning(delta),
+        Event::OutputItemDone {
+            item: types::OutputItem::Reasoning(reasoning),
+            ..
+        } => {
+            return match serde_json::to_value(reasoning) {
+                Ok(value) => Some(Ok(StreamEvent::Metadata("reasoning".to_owned(), value))),
+                Err(error) => Some(Err(error.into())),
+            }
+        }
         _ => {
             trace!(?event, "Ignoring Openai event");
             return None;
@@ -344,7 +359,7 @@ fn convert_reasoning(reasoning: Reasoning, max_tokens: Option<u32>) -> types::Re
         summary: if reasoning.exclude {
             None
         } else {
-            Some(SummaryConfig::Auto)
+            Some(SummaryConfig::Detailed)
         },
         effort: match reasoning.effort.abs_to_rel(max_tokens) {
             ReasoningEffort::High => Some(types::ReasoningEffort::High),
@@ -358,23 +373,22 @@ fn convert_reasoning(reasoning: Reasoning, max_tokens: Option<u32>) -> types::Re
     }
 }
 
-fn convert_thread(thread: Thread) -> Result<types::Input> {
-    Inputs::try_from(thread).map(|v| types::Input::List(v.0))
+fn convert_thread(thread: Thread, supports_reasoning: bool) -> Result<types::Input> {
+    Inputs::try_from((thread, supports_reasoning)).map(|v| types::Input::List(v.0))
 }
 
 struct Inputs(Vec<types::InputListItem>);
 
-impl TryFrom<Thread> for Inputs {
+impl TryFrom<(Thread, bool)> for Inputs {
     type Error = Error;
 
     #[expect(clippy::too_many_lines)]
-    fn try_from(thread: Thread) -> Result<Self> {
+    fn try_from((thread, supports_reasoning): (Thread, bool)) -> Result<Self> {
         let Thread {
             system_prompt,
             instructions,
             attachments,
             mut history,
-            reasoning,
             message,
         } = thread;
 
@@ -394,7 +408,7 @@ impl TryFrom<Thread> for Inputs {
         let mut items = vec![];
         let history = history
             .into_iter()
-            .flat_map(message_pair_to_messages)
+            .flat_map(|v| message_pair_to_messages(v, supports_reasoning))
             .collect::<Vec<_>>();
 
         // System message first, if any.
@@ -471,7 +485,7 @@ impl TryFrom<Thread> for Inputs {
         items.extend(
             history_after_instructions
                 .into_iter()
-                .flat_map(message_pair_to_messages),
+                .flat_map(|v| message_pair_to_messages(v, supports_reasoning)),
         );
 
         // User query
@@ -495,27 +509,18 @@ impl TryFrom<Thread> for Inputs {
             }
         }
 
-        // Reasoning message last, in `<thinking>` tags.
-        if let Some(content) = reasoning {
-            items.push(types::InputItem::InputMessage(types::APIInputMessage {
-                role: types::Role::Assistant,
-                content: types::ContentInput::Text(Thinking(content).try_to_xml()?),
-                status: None,
-            }));
-        }
-
         Ok(Self(
             items.into_iter().map(types::InputListItem::Item).collect(),
         ))
     }
 }
 
-fn message_pair_to_messages(msg: MessagePair) -> Vec<types::InputItem> {
+fn message_pair_to_messages(msg: MessagePair, reasoning: bool) -> Vec<types::InputItem> {
     let (user, assistant) = msg.split();
 
     user_message_to_messages(user)
         .into_iter()
-        .chain(assistant_message_to_messages(assistant))
+        .chain(assistant_message_to_messages(assistant, reasoning))
         .collect()
 }
 
@@ -543,14 +548,37 @@ fn user_message_to_messages(user: UserMessage) -> Vec<types::InputItem> {
     }
 }
 
-fn assistant_message_to_messages(assistant: AssistantMessage) -> Vec<types::InputItem> {
+fn assistant_message_to_messages(
+    assistant: AssistantMessage,
+    supports_reasoning: bool,
+) -> Vec<types::InputItem> {
     let AssistantMessage {
+        metadata,
+        reasoning: _,
         content,
         tool_calls,
-        ..
     } = assistant;
 
     let mut items = vec![];
+    if supports_reasoning && let Some(value) = metadata.get("reasoning").cloned() {
+        match serde_json::from_value::<types::Reasoning>(value) {
+            // If we don't have encrypted content, it means the initial request
+            // was made without the `reasoning.encrypted_content` include. Since
+            // we don't enable persistent sessions, we can't return the
+            // reasoning data without the encrypted content section, or the
+            // OpenAI API will return an error.
+            //
+            // This should normally never happen, since we always ask for this
+            // data to be included in the OpenAI responses.
+            Ok(reasoning) if reasoning.encrypted_content.is_none() => {
+                debug!(?reasoning, "Reasoning missing encrypted content. Ignoring.");
+            }
+
+            Ok(reasoning) => items.push(types::InputItem::Reasoning(reasoning)),
+            Err(error) => warn!(?error, "Failed to parse OpenAI reasoning data. Ignoring."),
+        }
+    }
+
     if let Some(text) = content {
         items.push(types::InputItem::InputMessage(types::APIInputMessage {
             role: types::Role::Assistant,

@@ -1,5 +1,10 @@
 use std::{
-    collections::HashSet, convert::Infallible, env, fs, path::PathBuf, str::FromStr, time::Duration,
+    collections::{BTreeMap, HashSet},
+    convert::Infallible,
+    env, fs,
+    path::PathBuf,
+    str::FromStr,
+    time::Duration,
 };
 
 use clap::{builder::TypedValueParser as _, ArgAction};
@@ -620,6 +625,7 @@ async fn handle_stream(
     let mut content_tokens = String::new();
     let mut reasoning_tokens = String::new();
     let mut handler = ResponseHandler::default();
+    let mut metadata = BTreeMap::new();
     let mut tool_calls = Vec::new();
 
     while let Some(event) = stream.next().await {
@@ -657,6 +663,10 @@ async fn handle_stream(
             // LLMs understanding, but we do not print it to the terminal.
             StreamEvent::ToolCall(call) => {
                 tool_calls.push(call);
+                continue;
+            }
+            StreamEvent::Metadata(key, data) => {
+                metadata.insert(key, data);
                 continue;
             }
         };

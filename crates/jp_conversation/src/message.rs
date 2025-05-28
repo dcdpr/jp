@@ -1,12 +1,13 @@
 //! Defines the Message structure.
 
-use std::{fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id, NANOSECONDS_PER_DECISECOND,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use time::UtcDateTime;
 
 use crate::{
@@ -57,6 +58,12 @@ impl MessagePair {
     #[must_use]
     pub fn with_reasoning(mut self, reasoning: impl Into<String>) -> Self {
         self.reply.reasoning = Some(reasoning.into());
+        self
+    }
+
+    #[must_use]
+    pub fn attach_metadata(mut self, key: impl Into<String>, metadata: impl Into<Value>) -> Self {
+        self.reply.metadata.insert(key.into(), metadata.into());
         self
     }
 
@@ -123,6 +130,34 @@ impl Default for UserMessage {
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct AssistantMessage {
+    /// Opaque provider-specific metadata.
+    ///
+    /// The shape of this data depends on the provider and model.
+    ///
+    /// For example, for Openai , we use this to store the opaque reasoning data
+    /// which is a JSON object in the shape of:
+    ///
+    /// ```json
+    /// {
+    ///   "id": "...",
+    ///   "summary": [
+    ///     {
+    ///       "text": "...",
+    ///       "type": "summary_text"
+    ///     }
+    ///   ],
+    ///   "type": "reasoning",
+    ///   "encrypted_content": "...",
+    ///   "status": "..."
+    /// }
+    /// ```
+    ///
+    /// For Openai, this data is expected to be returned as-is when generating a
+    /// request to the API. For other providers, the behavior might be
+    /// different.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, Value>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
 
@@ -136,6 +171,7 @@ pub struct AssistantMessage {
 impl<T: Into<String>> From<T> for AssistantMessage {
     fn from(message: T) -> Self {
         Self {
+            metadata: BTreeMap::default(),
             reasoning: None,
             content: Some(message.into()),
             tool_calls: vec![],

@@ -55,6 +55,9 @@ pub enum StreamEvent {
 
     /// A request to call a tool.
     ToolCall(ToolCallRequest),
+
+    /// Opaque provider-specific metadata.
+    Metadata(String, Value),
 }
 
 impl StreamEvent {
@@ -62,7 +65,7 @@ impl StreamEvent {
     pub fn into_chat_chunk(self) -> Option<CompletionChunk> {
         match self {
             Self::ChatChunk(chunk) => Some(chunk),
-            Self::ToolCall(_) => None,
+            _ => None,
         }
     }
 }
@@ -78,6 +81,9 @@ pub enum Event {
 
     /// A request to call a tool
     ToolCall(ToolCallRequest),
+
+    /// Opaque provider-specific metadata.
+    Metadata(String, Value),
 }
 
 impl From<Delta> for Option<Result<Event>> {
@@ -168,6 +174,7 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
 
                     events.push(Event::ToolCall(call));
                 }
+                StreamEvent::Metadata(key, metadata) => events.push(Event::Metadata(key, metadata)),
             }
         }
 
