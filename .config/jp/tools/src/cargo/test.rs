@@ -3,10 +3,12 @@ use std::path::PathBuf;
 // FIXME: clippy diagnostics not showing up in here?
 use duct::cmd;
 use indoc::formatdoc;
-use mcp_attr::{server::RequestContext, Result};
+use mcp_attr::server::RequestContext;
 use serde_json::{from_str, Value};
 
 use crate::to_xml;
+
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
 pub(crate) async fn cargo_test(
     package: Option<String>,

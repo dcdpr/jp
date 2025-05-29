@@ -1,6 +1,4 @@
 use chrono::{DateTime, Utc};
-use mcp_attr::Result;
-use octocrab::models;
 use url::Url;
 
 use super::auth;
@@ -8,6 +6,8 @@ use crate::{
     github::{ORG, REPO},
     to_xml,
 };
+
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
 pub(crate) async fn github_issues(number: Option<u64>) -> Result<String> {
     auth().await?;
@@ -65,37 +65,28 @@ async fn get_issues() -> Result<String> {
         linked_pull_request: Option<Url>,
     }
 
-    let mut issues = vec![];
-    let mut page = octocrab::instance()
+    let page = octocrab::instance()
         .issues(ORG, REPO)
         .list()
         .per_page(100)
         .send()
         .await?;
 
-    loop {
-        let next = page.next.clone();
-        for issue in page {
-            issues.push(Issue {
-                number: issue.number,
-                title: issue.title,
-                url: issue.html_url,
-                labels: issue.labels.into_iter().map(|label| label.name).collect(),
-                author: issue.user.login,
-                created_at: issue.created_at,
-                closed_at: issue.closed_at,
-                linked_pull_request: issue.pull_request.map(|pr| pr.html_url),
-            });
-        }
+    let issue = octocrab::instance()
+        .all_pages(page)
+        .await?
+        .into_iter()
+        .map(|issue| Issue {
+            number: issue.number,
+            title: issue.title,
+            url: issue.html_url,
+            labels: issue.labels.into_iter().map(|label| label.name).collect(),
+            author: issue.user.login,
+            created_at: issue.created_at,
+            closed_at: issue.closed_at,
+            linked_pull_request: issue.pull_request.map(|pr| pr.html_url),
+        })
+        .collect();
 
-        page = match octocrab::instance()
-            .get_page::<models::issues::Issue>(&next)
-            .await?
-        {
-            Some(next_page) => next_page,
-            None => break,
-        }
-    }
-
-    Ok(to_xml(Issues { issue: issues }))
+    Ok(to_xml(Issues { issue }))
 }

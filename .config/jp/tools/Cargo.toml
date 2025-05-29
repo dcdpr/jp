@@ -8,6 +8,7 @@ version = "0.1.0"
 [workspace]
 
 [dependencies]
+base64 = { version = "0.22", default-features = false, features = ["std"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 duct = { version = "1", default-features = false }
 indoc = { version = "2", default-features = false }
