@@ -1,4 +1,4 @@
-use std::str::FromStr as _;
+use std::{mem, str::FromStr as _};
 
 use async_stream::stream;
 use async_trait::async_trait;
@@ -57,6 +57,8 @@ impl Provider for Ollama {
         let request = create_request(model, query)?;
         let stream = Box::pin(stream! {
             let mut current_state = AccumulationState::default();
+            let mut extractor = ReasoningExtractor::default();
+
             let stream = client
                 .send_chat_messages_stream(request.clone()).await
                 .map_err(Error::from)?;
@@ -64,12 +66,17 @@ impl Provider for Ollama {
             tokio::pin!(stream);
             while let Some(event) = stream.next().await {
                 let events = event
-                    .map(|event| map_event(event, &mut current_state))
+                    .map(|event| map_event(event, &mut current_state, &mut extractor))
                     .unwrap_or_default();
 
                 for event in events {
                     yield event;
                 }
+            }
+
+            extractor.finalize();
+            for event in map_content("", &mut current_state, &mut extractor) {
+                yield event;
             }
         });
 
@@ -89,24 +96,29 @@ fn map_model(model: LocalModel) -> ModelDetails {
 }
 
 fn map_response(response: ChatMessageResponse) -> Result<Vec<Event>> {
-    map_event(response, &mut AccumulationState::default())
-        .into_iter()
-        .map(|v| {
-            v.map(|e| match e {
-                StreamEvent::ChatChunk(content) => match content {
-                    CompletionChunk::Content(s) => Event::Content(s),
-                    CompletionChunk::Reasoning(s) => Event::Reasoning(s),
-                },
-                StreamEvent::ToolCall(request) => Event::ToolCall(request),
-                StreamEvent::Metadata(key, metadata) => Event::Metadata(key, metadata),
-            })
+    map_event(
+        response,
+        &mut AccumulationState::default(),
+        &mut ReasoningExtractor::default(),
+    )
+    .into_iter()
+    .map(|v| {
+        v.map(|e| match e {
+            StreamEvent::ChatChunk(content) => match content {
+                CompletionChunk::Content(s) => Event::Content(s),
+                CompletionChunk::Reasoning(s) => Event::Reasoning(s),
+            },
+            StreamEvent::ToolCall(request) => Event::ToolCall(request),
+            StreamEvent::Metadata(key, metadata) => Event::Metadata(key, metadata),
         })
-        .collect::<Result<Vec<_>>>()
+    })
+    .collect::<Result<Vec<_>>>()
 }
 
 fn map_event(
     event: ChatMessageResponse,
     state: &mut AccumulationState,
+    extractor: &mut ReasoningExtractor,
 ) -> Vec<Result<StreamEvent>> {
     let mut events = vec![];
 
@@ -121,7 +133,27 @@ fn map_event(
         events.extend(handle_delta(delta, state).transpose());
     }
 
-    events.extend(handle_delta(Delta::content(event.message.content), state).transpose());
+    events.extend(map_content(&event.message.content, state, extractor));
+    events
+}
+
+fn map_content(
+    content: &str,
+    state: &mut AccumulationState,
+    extractor: &mut ReasoningExtractor,
+) -> Vec<Result<StreamEvent>> {
+    let mut events = Vec::new();
+    extractor.handle(content);
+
+    if !extractor.reasoning.is_empty() {
+        let reasoning = mem::take(&mut extractor.reasoning);
+        events.extend(handle_delta(Delta::reasoning(reasoning), state).transpose());
+    }
+
+    if !extractor.other.is_empty() {
+        let content = mem::take(&mut extractor.other);
+        events.extend(handle_delta(Delta::content(content), state).transpose());
+    }
 
     events
 }
@@ -440,6 +472,115 @@ impl From<ToolCall> for Delta {
     }
 }
 
+#[derive(Default, Debug)]
+/// A parser that segments a stream of text into 'reasoning' and 'other' buckets.
+/// It handles streams with or without a <think> block.
+pub struct ReasoningExtractor {
+    pub other: String,
+    pub reasoning: String,
+    buffer: String,
+    state: ReasoningState,
+}
+
+#[derive(Default, PartialEq, Debug)]
+enum ReasoningState {
+    #[default]
+    /// The default state. Processing 'other' text while looking for `<think>\n`.
+    Idle,
+    /// Found `<think>\n`. Processing 'reasoning' text while looking for `</think>\n`.
+    Accumulating,
+    /// Found `</think>\n`. All subsequent text is 'other'.
+    Finished,
+}
+
+impl ReasoningExtractor {
+    /// Processes a chunk of the incoming text stream.
+    pub fn handle(&mut self, text: &str) {
+        self.buffer.push_str(text);
+
+        loop {
+            match self.state {
+                ReasoningState::Idle => {
+                    if let Some(tag_start_index) = self.buffer.find("<think>\n") {
+                        // Tag found. Text before it is 'other'.
+                        self.other.push_str(&self.buffer[..tag_start_index]);
+
+                        // Drain the processed 'other' text and the tag itself.
+                        let tag_end_offset = tag_start_index + "<think>\n".len();
+                        self.buffer.drain(..tag_end_offset);
+
+                        // Transition state and re-process the rest of the buffer.
+                        self.state = ReasoningState::Accumulating;
+                    } else {
+                        // No tag found. We can safely move most of the buffer to `other`,
+                        // but must keep a small tail in case a tag is split across chunks.
+                        let tail_len = self.buffer.len().min("<think>\n".len() - 1);
+                        let drain_to = self.buffer.len() - tail_len;
+
+                        if drain_to > 0 {
+                            self.other.push_str(&self.buffer[..drain_to]);
+                            self.buffer.drain(..drain_to);
+                        }
+
+                        // Wait for more data.
+                        return;
+                    }
+                }
+                ReasoningState::Accumulating => {
+                    if let Some(tag_start_index) = self.buffer.find("</think>\n") {
+                        // Closing tag found. Text before it is 'thinking'.
+                        self.reasoning.push_str(&self.buffer[..tag_start_index]);
+
+                        // Drain the 'reasoning' text and the tag.
+                        let tag_end_offset = tag_start_index + "</think>\n".len();
+                        self.buffer.drain(..tag_end_offset);
+
+                        // Transition state and re-process.
+                        self.state = ReasoningState::Finished;
+                    } else {
+                        // No closing tag found yet. Move "safe" part of the buffer to `reasoning`.
+                        let tail_len = self.buffer.len().min("</think>\n".len() - 1);
+                        let drain_to = self.buffer.len() - tail_len;
+
+                        if drain_to > 0 {
+                            self.reasoning.push_str(&self.buffer[..drain_to]);
+                            self.buffer.drain(..drain_to);
+                        }
+
+                        // Wait for more data.
+                        return;
+                    }
+                }
+                ReasoningState::Finished => {
+                    // Everything from now on is 'other'. No need for complex buffering.
+                    self.other.push_str(&self.buffer);
+                    self.buffer.clear();
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Call this after the stream has finished to process any remaining data.
+    pub fn finalize(&mut self) {
+        match self.state {
+            ReasoningState::Accumulating => {
+                let (reasoning, other) = self
+                    .buffer
+                    .split_once("</think>")
+                    .unwrap_or((self.buffer.as_str(), ""));
+
+                self.reasoning.push_str(reasoning);
+                self.other.push_str(other);
+            }
+            _ => {
+                self.other.push_str(&self.buffer);
+            }
+        }
+        self.buffer.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{path::PathBuf, result::Result};
@@ -584,5 +725,66 @@ mod tests {
             },
         )
         .await
+    }
+
+    mod chunk_parser {
+        use test_log::test;
+
+        use super::*;
+
+        #[test]
+        fn test_no_think_tag_at_all() {
+            let mut parser = ReasoningExtractor::default();
+            parser.handle("some other text");
+            parser.finalize();
+            assert_eq!(parser.other, "some other text");
+            assert_eq!(parser.reasoning, "");
+        }
+
+        #[test]
+        fn test_standard_case_with_newline() {
+            let mut parser = ReasoningExtractor::default();
+            parser.handle("prefix\n<think>\nthoughts\n</think>\nsuffix");
+            parser.finalize();
+            assert_eq!(parser.reasoning, "thoughts\n");
+            assert_eq!(parser.other, "prefix\nsuffix");
+        }
+
+        #[test]
+        fn test_suffix_only() {
+            let mut parser = ReasoningExtractor::default();
+            parser.handle("<think>\nthoughts\n</think>\n\nsuffix text here");
+            parser.finalize();
+            assert_eq!(parser.reasoning, "thoughts\n");
+            assert_eq!(parser.other, "\nsuffix text here");
+        }
+
+        #[test]
+        fn test_ends_with_closing_tag_no_newline() {
+            let mut parser = ReasoningExtractor::default();
+            parser.handle("<think>\nfinal thoughts\n");
+            parser.handle("</think>");
+            parser.finalize();
+            assert_eq!(parser.reasoning, "final thoughts\n");
+            assert_eq!(parser.other, "");
+        }
+
+        #[test]
+        fn test_less_than_symbol_in_reasoning_content_is_not_stripped() {
+            let mut parser = ReasoningExtractor::default();
+            parser.handle("<think>\na < b is a true statement\n</think>");
+            parser.finalize();
+            // The last '<' is part of "</think>", so "a < b is a true statement" is kept.
+            assert_eq!(parser.reasoning, "a < b is a true statement\n");
+        }
+
+        #[test]
+        fn test_less_than_symbol_not_part_of_tag_is_kept() {
+            let mut parser = ReasoningExtractor::default();
+            parser.handle("<think>\nhere is a random < symbol");
+            parser.finalize();
+            // The final '<' is not a prefix of '</think>', so it's kept.
+            assert_eq!(parser.reasoning, "here is a random < symbol");
+        }
     }
 }
