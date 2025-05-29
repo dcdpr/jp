@@ -9,6 +9,7 @@ use jp_conversation::{
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
+use jp_mcp::tool::ToolChoice;
 use jp_query::query::ChatQuery;
 use ollama_rs::{
     generation::{
@@ -162,11 +163,14 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest>
     let ChatQuery {
         thread,
         tools,
-        tool_choice: _,
+        tool_choice,
         tool_call_strict_mode,
     } = query;
 
-    let mut request = ChatMessageRequest::new(model.id.slug().to_owned(), convert_thread(thread)?);
+    let mut request = ChatMessageRequest::new(
+        model.id.slug().to_owned(),
+        convert_thread(thread, tool_choice)?,
+    );
 
     let tools = convert_tools(tools, tool_call_strict_mode)?;
     if !tools.is_empty() {
@@ -264,16 +268,16 @@ fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Result<Vec<ToolInfo
         .collect::<Result<Vec<_>>>()
 }
 //
-fn convert_thread(thread: Thread) -> Result<Vec<ChatMessage>> {
-    Messages::try_from(thread).map(|v| v.0)
+fn convert_thread(thread: Thread, tool_choice: ToolChoice) -> Result<Vec<ChatMessage>> {
+    Messages::try_from((thread, tool_choice)).map(|v| v.0)
 }
 struct Messages(Vec<ChatMessage>);
 
-impl TryFrom<Thread> for Messages {
+impl TryFrom<(Thread, ToolChoice)> for Messages {
     type Error = Error;
 
     #[expect(clippy::too_many_lines)]
-    fn try_from(thread: Thread) -> Result<Self> {
+    fn try_from((thread, tool_choice): (Thread, ToolChoice)) -> Result<Self> {
         let Thread {
             system_prompt,
             instructions,
@@ -318,6 +322,31 @@ impl TryFrom<Thread> for Messages {
         let mut content = vec![];
 
         if !instructions.is_empty() {
+            // TODO: Poor-man's version of API-based tool choice. Needed until
+            // Ollama has first-class support for tool choice.
+            match tool_choice {
+                // For `auto`, we leave it up to the model to decide.
+                // For `none`, we already remove all tools from the request, so
+                // there is no need to instruct the model any further.
+                ToolChoice::Auto | ToolChoice::None => {}
+                ToolChoice::Required => {
+                    content.push(
+                        // sigh.. Shouting seems to be a tad bit more effective.
+                        "IMPORTANT: You MUST use one or more functions or tools available to you. \
+                         DO NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR \
+                         DETAILS. JUST RUN IT."
+                            .to_string(),
+                    );
+                }
+                ToolChoice::Function(name) => {
+                    content.push(format!(
+                        "IMPORTANT: You MUST use the function or tool named '{name}' available to \
+                         you. DO NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR \
+                         DETAILS. JUST RUN IT."
+                    ));
+                }
+            }
+
             content.push(
                 "Before we continue, here are some contextual details that will help you generate \
                  a better response."

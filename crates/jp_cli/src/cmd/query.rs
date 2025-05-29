@@ -116,6 +116,10 @@ pub struct Args {
     /// or set `llm.tool_choice` in the config file.
     #[arg(short = 't', long = "tool")]
     pub tool_choice: Option<Option<String>>,
+
+    /// Disable tool use by the assistant.
+    #[arg(short = 'T', long = "no-tool")]
+    pub no_tool_choice: bool,
 }
 
 impl Args {
@@ -176,6 +180,7 @@ impl Args {
             .get_persona(persona_id)
             .ok_or(Error::NotFound("Persona", persona_id.to_string()))?;
         let model = self.get_model(ctx, persona)?;
+        let tool_choice = self.tool_choice(ctx);
         let tools = ctx.mcp_client.list_tools().await?;
 
         let mut attachments = vec![];
@@ -207,7 +212,7 @@ impl Args {
                 thread,
                 &model,
                 tools.clone(),
-                self.tool_choice(ctx, &tools),
+                tool_choice,
                 &mut messages,
             )
             .await?;
@@ -509,9 +514,8 @@ impl Args {
         Ok(model)
     }
 
-    fn tool_choice(&self, ctx: &Ctx, tools: &[Tool]) -> ToolChoice {
-        tools
-            .is_empty()
+    fn tool_choice(&self, ctx: &Ctx) -> ToolChoice {
+        self.no_tool_choice
             .then_some(ToolChoice::None)
             .or_else(|| {
                 self.tool_choice.as_ref().map(|v| match v.as_deref() {
@@ -606,6 +610,7 @@ fn string_or_path(s: &str) -> Result<String> {
     Ok(s.to_owned())
 }
 
+#[expect(clippy::too_many_lines)]
 async fn handle_stream(
     ctx: &mut Ctx,
     context: Context,
@@ -619,7 +624,17 @@ async fn handle_stream(
     let message = thread.message.clone();
     let query = ChatQuery {
         thread: thread.clone(),
-        tools: tools.clone(),
+
+        // Limit the tools to the ones that are relevant to the tool choice.
+        tools: match &tool_choice {
+            ToolChoice::None => vec![],
+            ToolChoice::Auto | ToolChoice::Required => tools.clone(),
+            ToolChoice::Function(name) => tools
+                .clone()
+                .into_iter()
+                .filter(|v| &v.name == name)
+                .collect(),
+        },
         tool_choice,
         ..Default::default()
     };
@@ -630,6 +645,7 @@ async fn handle_stream(
     let mut handler = ResponseHandler::default();
     let mut metadata = BTreeMap::new();
     let mut tool_calls = Vec::new();
+    let mut tool_call_results = Vec::new();
 
     while let Some(event) = stream.next().await {
         let data = match event? {
@@ -665,8 +681,26 @@ async fn handle_stream(
             // We do add a history of the call to the content tokens for the
             // LLMs understanding, but we do not print it to the terminal.
             StreamEvent::ToolCall(call) => {
-                tool_calls.push(call);
-                continue;
+                tool_calls.push(call.clone());
+                let result = handle_tool_call(ctx, call.clone()).await?;
+                tool_call_results.push(result.clone());
+
+                indoc::formatdoc! {"
+                    ---
+                    running: **{}**
+
+                    arguments:
+                    ```json
+                    {}
+                    ```
+
+                    result:
+
+                    ```
+                    {}
+                    ```
+                    ---
+                ", call.name, call.arguments, result.content}
             }
             StreamEvent::Metadata(key, data) => {
                 metadata.insert(key, data);
@@ -722,10 +756,9 @@ async fn handle_stream(
     // tool (unless whitelisted per conversation/globally), it should log
     // the fact that a tool call is triggered, and it should guard against
     // infinite loops.
-    if !tool_calls.is_empty() {
+    if !tool_call_results.is_empty() {
         thread.history.push(message);
-        let results = handle_tool_calls(ctx, tool_calls).await?;
-        thread.message = UserMessage::ToolCallResults(results);
+        thread.message = UserMessage::ToolCallResults(tool_call_results);
 
         Box::pin(handle_stream(
             ctx,

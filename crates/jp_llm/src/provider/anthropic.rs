@@ -148,7 +148,6 @@ impl Provider for Anthropic {
     async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
         let client = self.client.clone();
         let request = self.create_request(model, query).await?;
-
         let stream = Box::pin(stream! {
             let mut current_state = AccumulationState::default();
             let stream = client
@@ -323,9 +322,10 @@ impl TryFrom<&llm::provider::anthropic::Config> for Anthropic {
 
 fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolChoice {
     match choice {
-        tool::ToolChoice::Auto | tool::ToolChoice::None => types::ToolChoice::Auto,
-        tool::ToolChoice::Required => types::ToolChoice::Any,
-        tool::ToolChoice::Function(name) => types::ToolChoice::Tool(name),
+        tool::ToolChoice::None => types::ToolChoice::none(),
+        tool::ToolChoice::Auto => types::ToolChoice::auto(),
+        tool::ToolChoice::Required => types::ToolChoice::any(),
+        tool::ToolChoice::Function(name) => types::ToolChoice::tool(name),
     }
 }
 
@@ -355,7 +355,6 @@ struct Messages(Vec<types::Message>);
 impl TryFrom<Thread> for Messages {
     type Error = Error;
 
-    #[expect(clippy::too_many_lines)]
     fn try_from(thread: Thread) -> Result<Self> {
         let Thread {
             instructions,
@@ -461,7 +460,7 @@ impl TryFrom<Thread> for Messages {
             }
             UserMessage::ToolCallResults(results) => {
                 items.extend(results.into_iter().map(|result| types::Message {
-                    role: types::MessageRole::Assistant,
+                    role: types::MessageRole::User,
                     content: types::MessageContentList(vec![types::MessageContent::ToolResult(
                         types::ToolResult {
                             tool_use_id: result.id,
@@ -480,64 +479,57 @@ impl TryFrom<Thread> for Messages {
 fn message_pair_to_messages(msg: MessagePair) -> Vec<types::Message> {
     let (user, assistant) = msg.split();
 
-    user_message_to_messages(user)
-        .into_iter()
-        .chain(assistant_message_to_messages(assistant))
-        .collect()
+    vec![
+        user_message_to_message(user),
+        assistant_message_to_message(assistant),
+    ]
 }
 
-fn user_message_to_messages(user: UserMessage) -> Vec<types::Message> {
-    match user {
-        UserMessage::Query(query) if !query.is_empty() => vec![types::Message {
-            role: types::MessageRole::User,
-            content: types::MessageContentList(vec![types::MessageContent::Text(query.into())]),
-        }],
-        UserMessage::Query(_) => vec![],
+fn user_message_to_message(user: UserMessage) -> types::Message {
+    let list = match user {
+        UserMessage::Query(query) => vec![types::MessageContent::Text(query.into())],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
-            .map(|result| types::Message {
-                role: types::MessageRole::User,
-                content: types::MessageContentList(vec![types::MessageContent::ToolResult(
-                    types::ToolResult {
-                        tool_use_id: result.id,
-                        content: Some(result.content),
-                        is_error: result.error,
-                    },
-                )]),
+            .map(|result| {
+                types::MessageContent::ToolResult(types::ToolResult {
+                    tool_use_id: result.id,
+                    content: Some(result.content),
+                    is_error: result.error,
+                })
             })
             .collect(),
+    };
+
+    types::Message {
+        role: types::MessageRole::User,
+        content: types::MessageContentList(list),
     }
 }
 
-fn assistant_message_to_messages(assistant: AssistantMessage) -> Vec<types::Message> {
+fn assistant_message_to_message(assistant: AssistantMessage) -> types::Message {
     let AssistantMessage {
         content,
         tool_calls,
         ..
     } = assistant;
 
-    let mut items = vec![];
+    let mut list = vec![];
     if let Some(text) = content {
-        items.push(types::Message {
-            role: types::MessageRole::Assistant,
-            content: types::MessageContentList(vec![types::MessageContent::Text(text.into())]),
-        });
+        list.push(types::MessageContent::Text(text.into()));
     }
 
     for tool_call in tool_calls {
-        items.push(types::Message {
-            role: types::MessageRole::Assistant,
-            content: types::MessageContentList(vec![types::MessageContent::ToolUse(
-                types::ToolUse {
-                    id: tool_call.id,
-                    input: tool_call.arguments,
-                    name: tool_call.name,
-                },
-            )]),
-        });
+        list.push(types::MessageContent::ToolUse(types::ToolUse {
+            id: tool_call.id,
+            input: tool_call.arguments,
+            name: tool_call.name,
+        }));
     }
 
-    items
+    types::Message {
+        role: types::MessageRole::Assistant,
+        content: types::MessageContentList(list),
+    }
 }
 
 impl From<types::MessageContent> for Delta {
@@ -546,7 +538,10 @@ impl From<types::MessageContent> for Delta {
             types::MessageContent::Text(text) => Delta::content(text.text),
             types::MessageContent::Thinking(thinking) => Delta::reasoning(thinking.thinking),
             types::MessageContent::ToolUse(tool_use) => {
-                Delta::tool_call(tool_use.id, tool_use.name, tool_use.input.to_string())
+                Delta::tool_call(tool_use.id, tool_use.name, match &tool_use.input {
+                    Value::Object(map) if !map.is_empty() => tool_use.input.to_string(),
+                    _ => String::new(),
+                })
             }
             types::MessageContent::ToolResult(_) => {
                 debug_assert!(false, "Unexpected message content: {item:?}");
