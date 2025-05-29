@@ -107,6 +107,13 @@ pub struct Args {
     #[arg(short = 'r', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KeyValue::from_str)]
     pub parameters: Vec<KeyValue>,
 
+    /// Do not display the reasoning content.
+    ///
+    /// This does not stop the assistant from generating reasoning tokens to
+    /// help with its accuracy, but it does not display them in the output.
+    #[arg(long = "hide-reasoning")]
+    pub hide_reasoning: bool,
+
     /// The tool to use.
     ///
     /// If a value is provided, the tool matching the value will be used.
@@ -394,6 +401,11 @@ impl Args {
     /// equivalent to `--cfg conversation.persona` and `--cfg
     /// conversation.context`.
     fn update_config(&self, config: &mut jp_config::Config) -> Result<()> {
+        // Hide reasoning.
+        if self.hide_reasoning {
+            config.style.reasoning.show = false;
+        }
+
         // Update the conversation context.
         if let Some(context) = self.context.as_ref() {
             config.conversation.context = Some(context.clone());
