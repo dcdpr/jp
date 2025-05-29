@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
-use mcp_attr::Result;
-use octocrab::{models, params};
+use octocrab::params;
 use schemars::JsonSchema;
 use url::Url;
 
@@ -9,6 +8,8 @@ use crate::{
     github::{ORG, REPO},
     to_xml,
 };
+
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
 /// The status of a issue or pull request.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, JsonSchema)]
@@ -87,14 +88,13 @@ async fn list(state: Option<State>) -> Result<String> {
         merge_commit_sha: Option<String>,
     }
 
-    let mut pulls = vec![];
     let state = match state {
         Some(State::Open) => params::State::Open,
         Some(State::Closed) => params::State::Closed,
         None => params::State::All,
     };
 
-    let mut page = octocrab::instance()
+    let page = octocrab::instance()
         .pulls(ORG, REPO)
         .list()
         .state(state)
@@ -102,35 +102,27 @@ async fn list(state: Option<State>) -> Result<String> {
         .send()
         .await?;
 
-    loop {
-        let next = page.next.clone();
-        for pull in page {
-            pulls.push(Pull {
-                number: pull.number,
-                title: pull.title,
-                url: pull.html_url,
-                labels: pull
-                    .labels
-                    .into_iter()
-                    .flatten()
-                    .map(|label| label.name)
-                    .collect(),
-                author: pull.user.map(|user| user.login),
-                created_at: pull.created_at,
-                closed_at: pull.closed_at,
-                merged_at: pull.merged_at,
-                merge_commit_sha: pull.merge_commit_sha,
-            });
-        }
+    let pull = octocrab::instance()
+        .all_pages(page)
+        .await?
+        .into_iter()
+        .map(|pull| Pull {
+            number: pull.number,
+            title: pull.title,
+            url: pull.html_url,
+            labels: pull
+                .labels
+                .into_iter()
+                .flatten()
+                .map(|label| label.name)
+                .collect(),
+            author: pull.user.map(|user| user.login),
+            created_at: pull.created_at,
+            closed_at: pull.closed_at,
+            merged_at: pull.merged_at,
+            merge_commit_sha: pull.merge_commit_sha,
+        })
+        .collect();
 
-        page = match octocrab::instance()
-            .get_page::<models::pulls::PullRequest>(&next)
-            .await?
-        {
-            Some(next_page) => next_page,
-            None => break,
-        }
-    }
-
-    Ok(to_xml(Pulls { pull: pulls }))
+    Ok(to_xml(Pulls { pull }))
 }
