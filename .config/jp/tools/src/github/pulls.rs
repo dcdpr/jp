@@ -1,18 +1,15 @@
-use chrono::{DateTime, Utc};
 use octocrab::params;
-use schemars::JsonSchema;
+use time::OffsetDateTime;
 use url::Url;
 
 use super::auth;
 use crate::{
-    github::{ORG, REPO},
-    to_xml,
+    github::{handle_404, ORG, REPO},
+    to_xml, Result,
 };
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
-
 /// The status of a issue or pull request.
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum State {
     Open,
@@ -37,16 +34,23 @@ async fn get(number: u64) -> Result<String> {
         url: Option<Url>,
         labels: Vec<String>,
         author: Option<String>,
-        created_at: Option<DateTime<Utc>>,
-        closed_at: Option<DateTime<Utc>>,
-        merged_at: Option<DateTime<Utc>>,
+        #[serde(with = "time::serde::rfc3339::option")]
+        created_at: Option<OffsetDateTime>,
+        #[serde(with = "time::serde::rfc3339::option")]
+        closed_at: Option<OffsetDateTime>,
+        #[serde(with = "time::serde::rfc3339::option")]
+        merged_at: Option<OffsetDateTime>,
         merge_commit_sha: Option<String>,
         diff: String,
     }
 
-    let pull = octocrab::instance().pulls(ORG, REPO).get(number).await?;
+    let pull = octocrab::instance()
+        .pulls(ORG, REPO)
+        .get(number)
+        .await
+        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {ORG}/{REPO}")))?;
 
-    Ok(to_xml(Pull {
+    to_xml(Pull {
         number,
         title: pull.title,
         body: pull.body,
@@ -58,15 +62,24 @@ async fn get(number: u64) -> Result<String> {
             .map(|label| label.name)
             .collect(),
         author: pull.user.map(|user| user.login),
-        created_at: pull.created_at,
-        closed_at: pull.closed_at,
-        merged_at: pull.merged_at,
+        created_at: pull
+            .created_at
+            .map(|v| OffsetDateTime::from_unix_timestamp(v.timestamp()))
+            .transpose()?,
+        closed_at: pull
+            .closed_at
+            .map(|v| OffsetDateTime::from_unix_timestamp(v.timestamp()))
+            .transpose()?,
+        merged_at: pull
+            .merged_at
+            .map(|v| OffsetDateTime::from_unix_timestamp(v.timestamp()))
+            .transpose()?,
         merge_commit_sha: pull.merge_commit_sha,
         diff: octocrab::instance()
             .pulls(ORG, REPO)
             .get_diff(number)
             .await?,
-    }))
+    })
 }
 
 async fn list(state: Option<State>) -> Result<String> {
@@ -82,9 +95,12 @@ async fn list(state: Option<State>) -> Result<String> {
         url: Option<Url>,
         labels: Vec<String>,
         author: Option<String>,
-        created_at: Option<DateTime<Utc>>,
-        closed_at: Option<DateTime<Utc>>,
-        merged_at: Option<DateTime<Utc>>,
+        #[serde(with = "time::serde::rfc3339::option")]
+        created_at: Option<OffsetDateTime>,
+        #[serde(with = "time::serde::rfc3339::option")]
+        closed_at: Option<OffsetDateTime>,
+        #[serde(with = "time::serde::rfc3339::option")]
+        merged_at: Option<OffsetDateTime>,
         merge_commit_sha: Option<String>,
     }
 
@@ -106,23 +122,34 @@ async fn list(state: Option<State>) -> Result<String> {
         .all_pages(page)
         .await?
         .into_iter()
-        .map(|pull| Pull {
-            number: pull.number,
-            title: pull.title,
-            url: pull.html_url,
-            labels: pull
-                .labels
-                .into_iter()
-                .flatten()
-                .map(|label| label.name)
-                .collect(),
-            author: pull.user.map(|user| user.login),
-            created_at: pull.created_at,
-            closed_at: pull.closed_at,
-            merged_at: pull.merged_at,
-            merge_commit_sha: pull.merge_commit_sha,
+        .map(|pull| {
+            Ok(Pull {
+                number: pull.number,
+                title: pull.title,
+                url: pull.html_url,
+                labels: pull
+                    .labels
+                    .into_iter()
+                    .flatten()
+                    .map(|label| label.name)
+                    .collect(),
+                author: pull.user.map(|user| user.login),
+                created_at: pull
+                    .created_at
+                    .map(|v| OffsetDateTime::from_unix_timestamp(v.timestamp()))
+                    .transpose()?,
+                closed_at: pull
+                    .closed_at
+                    .map(|v| OffsetDateTime::from_unix_timestamp(v.timestamp()))
+                    .transpose()?,
+                merged_at: pull
+                    .merged_at
+                    .map(|v| OffsetDateTime::from_unix_timestamp(v.timestamp()))
+                    .transpose()?,
+                merge_commit_sha: pull.merge_commit_sha,
+            })
         })
-        .collect();
+        .collect::<Result<_>>()?;
 
-    Ok(to_xml(Pulls { pull }))
+    to_xml(Pulls { pull })
 }

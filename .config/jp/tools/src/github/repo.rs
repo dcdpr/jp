@@ -3,12 +3,10 @@ use base64::{prelude::BASE64_STANDARD, Engine as _};
 use super::auth;
 use crate::{
     github::{ORG, REPO},
-    to_xml,
+    to_xml, Result,
 };
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
-
-pub(crate) async fn github_search_code(
+pub(crate) async fn github_code_search(
     repository: Option<String>,
     query: String,
 ) -> Result<String> {
@@ -37,9 +35,6 @@ pub(crate) async fn github_search_code(
         .all_pages(page)
         .await?
         .into_iter()
-        .inspect(|v| {
-            dbg!(v);
-        })
         .map(|code| CodeMatch {
             path: code.path,
             sha: code.sha,
@@ -47,13 +42,10 @@ pub(crate) async fn github_search_code(
         })
         .collect();
 
-    Ok(to_xml(CodeMatches { matches }))
+    to_xml(CodeMatches { matches })
 }
 
-pub(crate) async fn github_file_contents(
-    repository: Option<String>,
-    path: String,
-) -> Result<String> {
+pub(crate) async fn github_read_file(repository: Option<String>, path: String) -> Result<String> {
     #[derive(serde::Serialize)]
     struct Files {
         files: Vec<File>,
@@ -107,5 +99,5 @@ pub(crate) async fn github_file_contents(
         })
         .collect();
 
-    Ok(to_xml(Files { files }))
+    to_xml(Files { files })
 }

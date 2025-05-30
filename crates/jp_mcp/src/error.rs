@@ -7,6 +7,9 @@ pub enum Error {
     #[error("Service error: {0}")]
     Service(#[from] rmcp::ServiceError),
 
+    #[error("MCP error: {0}")]
+    Mcp(#[from] rmcp::Error),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

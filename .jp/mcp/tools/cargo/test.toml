@@ -1,0 +1,12 @@
+inherit = "cargo"
+description = "Execute all unit and integration tests and build examples of the project."
+
+[[properties]]
+name = "package"
+description = "Package to run tests for, if unspecified, all workspace packages will be tested."
+type = "string"
+
+[[properties]]
+name = "testname"
+description = "If specified, only run tests containing this string in their names."
+type = "string"

@@ -1,47 +1,27 @@
-use std::path::PathBuf;
-
-// FIXME: clippy diagnostics not showing up in here?
 use duct::cmd;
 use indoc::formatdoc;
-use mcp_attr::server::RequestContext;
 use serde_json::{from_str, Value};
 
-use crate::to_xml;
+use crate::{to_xml, Result, Workspace};
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
+#[derive(serde::Serialize)]
+struct TestResult {
+    failure: Vec<TestFailure>,
+}
+
+#[derive(serde::Serialize)]
+struct TestFailure {
+    #[serde(rename = "crate")]
+    krate: String,
+    path: String,
+    output: String,
+}
 
 pub(crate) async fn cargo_test(
+    workspace: &Workspace,
     package: Option<String>,
     testname: Option<String>,
-    ctx: &RequestContext,
 ) -> Result<String> {
-    #[derive(serde::Serialize)]
-    struct TestResult {
-        total_tests: usize,
-        failures: Vec<TestFailure>,
-    }
-
-    #[derive(serde::Serialize)]
-    struct TestFailure {
-        #[serde(rename = "crate")]
-        krate: String,
-        path: String,
-        stdout: String,
-    }
-
-    let root = ctx
-        .roots_list()
-        .await?
-        .iter()
-        .find_map(|v| {
-            v.name
-                .as_ref()
-                .is_some_and(|v| v.as_str() == "project")
-                .then(|| v.to_file_path())
-                .flatten()
-        })
-        .unwrap_or(PathBuf::from("."));
-
     let test_name = testname.unwrap_or_default();
     let package = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
     let result = cmd!(
@@ -62,23 +42,30 @@ pub(crate) async fn cargo_test(
         "--message-format=libtest-json-plus",
         test_name
     )
-    .dir(root)
+    .dir(&workspace.path)
     .env("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1")
     .env("RUST_BACKTRACE", "1")
     .unchecked()
     .read()?;
 
     let mut total_tests = 0;
-    let mut failures = vec![];
+    let mut ran_tests = 0;
+    let mut failure = vec![];
     for l in result.lines().filter_map(|s| from_str::<Value>(s).ok()) {
-        if l.get("type").and_then(Value::as_str) == Some("test") {
-            total_tests += 1;
-        } else {
+        let kind = l.get("type").and_then(Value::as_str).unwrap_or_default();
+        let event = l.get("event").and_then(Value::as_str).unwrap_or_default();
+
+        if kind != "test" {
             continue;
         }
-        if l.get("event").and_then(Value::as_str) != Some("failed") {
+        total_tests += 1;
+        if event != "ignored" {
+            ran_tests += 1;
+        }
+        if event != "failed" {
             continue;
         }
+
         let Some(name) = l.get("name").and_then(Value::as_str) else {
             continue;
         };
@@ -86,22 +73,27 @@ pub(crate) async fn cargo_test(
             continue;
         };
 
-        let (krate, path) = name.split_once("$").unwrap_or(("", name));
+        let (krate, path) = name.split_once('$').unwrap_or(("", name));
         let krate = krate.split_once("::").unwrap_or((krate, "")).0;
 
-        failures.push(TestFailure {
+        failure.push(TestFailure {
             krate: krate.to_owned(),
             path: path.to_owned(),
-            stdout: stdout.to_owned(),
+            output: stdout.to_owned(),
         });
     }
 
-    Ok(formatdoc! {"
-            The test run was completed successfully:
+    let failed_tests = failure.len();
 
-            {}
-        ", to_xml(TestResult {
-        total_tests,
-        failures,
-    })})
+    if ran_tests == 0 {
+        return Err("Unable to run any tests. Are the package and test name correct?")?;
+    }
+
+    Ok(formatdoc! {"
+        Ran {ran_tests}/{total_tests} tests, of which {failed_tests} failed.
+
+        What follows is an XML representation of the failed tests:
+
+        {}", to_xml(TestResult { failure })?
+    })
 }

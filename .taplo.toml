@@ -47,6 +47,6 @@ keys = [
 #
 # All crates inside `src`, `tests` must use `workspace = true` instead.
 [[rule]]
-exclude = ["**/fuzz/Cargo.toml", ".config/jp/tools/Cargo.toml"]
+exclude = ["**/fuzz/Cargo.toml"]
 include = ["Cargo.toml", "**/Cargo.toml"]
 schema = { path = ".config/workspace-schema.json" }

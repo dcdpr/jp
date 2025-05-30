@@ -1,10 +1,8 @@
-mod issues;
-mod pulls;
-mod repo;
+use crate::Error;
 
-pub(crate) use issues::github_issues as issues;
-pub(crate) use pulls::{github_pulls as pulls, State};
-pub(crate) use repo::{github_file_contents as file_contents, github_search_code as search_code};
+pub(crate) mod issues;
+pub(crate) mod pulls;
+pub(crate) mod repo;
 
 const ORG: &str = "dcdpr";
 const REPO: &str = "jp";
@@ -21,4 +19,13 @@ async fn auth() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
 
     octocrab::initialise(octocrab);
     Ok(())
+}
+
+fn handle_404(error: octocrab::Error, msg: impl Into<String>) -> Error {
+    match error {
+        octocrab::Error::GitHub { source, .. } if source.status_code.as_u16() == 404 => {
+            msg.into().into()
+        }
+        _ => Box::new(error) as Error,
+    }
 }

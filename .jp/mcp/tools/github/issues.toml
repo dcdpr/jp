@@ -1,0 +1,13 @@
+inherit = "cargo"
+description = "Find one or more issues in the project's GitHub repository."
+
+[[properties]]
+name = "number"
+type = "integer"
+description = """
+Issue number to get information about.
+
+If unspecified, a list of all issues will be returned, without the
+issue contents. You can re-run the tool with the correct issue
+number to get more details about an issue.
+"""
