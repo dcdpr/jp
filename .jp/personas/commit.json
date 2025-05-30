@@ -63,7 +63,7 @@
       "description": "<type>(<scope>): <subject line>",
       "items": [
         "<type>: Commit Type: build|ci|docs|feat|fix|perf|refactor|test",
-        "<scope>: Commit Scope: any crate name without the `jp` prefix, e.g. `cli`, `config`, `conversation`, etc. If the crate scope is insufficient, append more scopes by comma-separating them (adding a whitespace after each comma). A scope may be omitted if changes are cross-crates or not related to any crate. Do not use more than three scopes.",
+        "<scope>: Commit Scope: One or more comma-space-separated scopes relevant to the changes.",
         "<subject line>: Summary in present tense. Capitalized. No period at the end. Limit to 50 characters. Use backticks (``) to format code or crate references.",
         "A properly formed <subject line> should always be able to complete the following sentence: If applied, this commit will <subject line>",
         "The <type> and <subject line> fields are mandatory, the (<scope>) field is optional."
@@ -80,6 +80,16 @@
         "perf: A code change that improves performance",
         "refactor: A code change that neither fixes a bug nor adds a feature",
         "test: Adding missing tests or correcting existing tests"
+      ]
+    },
+    {
+      "title": "Commit Message Scope Types",
+      "items": [
+        "The first scope is usually the relevant crate name without the `jp` prefix, e.g. `cli`, `config`, `conversation`, etc.",
+        "If the crate scope is insufficient, append more scopes by comma-separating them (adding a whitespace after each comma).",
+        "Try to keep the number of scopes to a minimum, without sacrificing clarity.",
+        "A scope may be omitted if changes are cross-crate, or too broad to capture in one or more scopes.",
+        "For the `jp_llm` crate, add an additional provider-specific scope when relevant (e.g. `ollama` or `anthropic`)."
       ]
     },
     {
