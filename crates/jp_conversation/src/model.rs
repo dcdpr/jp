@@ -177,6 +177,16 @@ pub enum ReasoningEffort {
 
 impl ReasoningEffort {
     #[must_use]
+    pub fn to_tokens(self, max_tokens: u32) -> u32 {
+        match self {
+            Self::High => (max_tokens * 80) / 100,
+            Self::Medium => (max_tokens * 50) / 100,
+            Self::Low => (max_tokens * 20) / 100,
+            Self::Absolute(tokens) => tokens,
+        }
+    }
+
+    #[must_use]
     pub fn abs_to_rel(&self, max_tokens: Option<u32>) -> Self {
         match (self, max_tokens) {
             (Self::Absolute(tokens), Some(max)) => {

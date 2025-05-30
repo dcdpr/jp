@@ -1,7 +1,7 @@
 use std::env;
 
 use async_anthropic::{
-    types::{self, ListModelsResponse},
+    types::{self, ListModelsResponse, Thinking},
     Client,
 };
 use async_stream::stream;
@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::llm;
 use jp_conversation::{
-    model::{ProviderId, ReasoningEffort},
+    model::ProviderId,
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, Model, UserMessage,
 };
@@ -67,22 +67,15 @@ impl Anthropic {
                 .tool_choice(convert_tool_choice(tool_choice));
         }
 
-        if let Some(thinking) = model.parameters.reasoning {
-            let max = model.parameters.max_tokens.unwrap_or_else(|| {
-                details
-                    .as_ref()
-                    .and_then(|d| d.max_output_tokens)
-                    .unwrap_or(32_000)
-            });
+        let max_tokens = model
+            .parameters
+            .max_tokens
+            .or_else(|| details.as_ref().and_then(|d| d.max_output_tokens));
 
+        if let Some(thinking) = model.parameters.reasoning {
             builder.thinking(types::ExtendedThinking {
                 kind: "enabled".to_string(),
-                budget_tokens: match thinking.effort {
-                    ReasoningEffort::High => (max * 80) / 100,
-                    ReasoningEffort::Medium => (max * 50) / 100,
-                    ReasoningEffort::Low => (max * 20) / 100,
-                    ReasoningEffort::Absolute(tokens) => tokens,
-                },
+                budget_tokens: thinking.effort.to_tokens(max_tokens.unwrap_or(32_000)),
             });
         }
 
@@ -90,11 +83,7 @@ impl Anthropic {
             builder.temperature(temperature);
         }
 
-        if let Some(max_tokens) = model
-            .parameters
-            .max_tokens
-            .or_else(|| details.as_ref().and_then(|d| d.max_output_tokens))
-        {
+        if let Some(max_tokens) = max_tokens {
             #[expect(clippy::cast_possible_wrap)]
             builder.max_tokens(max_tokens as i32);
         }
@@ -247,8 +236,20 @@ fn map_response(response: types::CreateMessagesResponse) -> Result<Vec<Event>> {
         .content
         .into_iter()
         .flatten()
-        .filter_map(|item| Delta::from(item).into())
-        .collect::<Result<Vec<_>>>()
+        .filter_map(|item| {
+            let signature = match &item {
+                types::MessageContent::Thinking(Thinking { signature, .. }) => signature.clone(),
+                _ => None,
+            };
+            let v: Option<Result<Event>> = Delta::from(item).into();
+            v.map(|v| (v, signature))
+        })
+        .flat_map(|item| match item {
+            (v, _) if v.is_err() => vec![v],
+            (v, None) => vec![v],
+            (v, Some(signature)) => vec![v, Ok(Event::metadata("signature", signature))],
+        })
+        .collect::<Result<_>>()
 }
 
 fn map_event(
@@ -277,13 +278,19 @@ fn map_event(
                 .transpose()
                 .into_iter()
                 .collect(),
-            SignatureDelta { signature: _ } => vec![],
             InputJsonDelta { partial_json } => {
                 handle_delta(Delta::tool_call("", "", partial_json), state)
                     .transpose()
                     .into_iter()
                     .collect()
             }
+
+            // This is only used for thinking blocks, and we need to store this
+            // signature to pass it back to the assistant in the message
+            // history.
+            //
+            // See: <https://docs.anthropic.com/en/docs/build-with-claude/streaming#thinking-delta>
+            SignatureDelta { signature } => vec![Ok(StreamEvent::metadata("signature", signature))],
         },
         MessageDelta { delta, .. }
             if delta.stop_reason.as_ref().is_some_and(|v| v == "tool_use") =>
@@ -508,12 +515,25 @@ fn user_message_to_message(user: UserMessage) -> types::Message {
 
 fn assistant_message_to_message(assistant: AssistantMessage) -> types::Message {
     let AssistantMessage {
+        reasoning,
         content,
         tool_calls,
-        ..
+        metadata,
     } = assistant;
 
     let mut list = vec![];
+    if let Some(thinking) = reasoning {
+        let thinking = Thinking {
+            thinking,
+            signature: metadata
+                .get("signature")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        };
+
+        list.push(types::MessageContent::Thinking(thinking));
+    }
+
     if let Some(text) = content {
         list.push(types::MessageContent::Text(text.into()));
     }
