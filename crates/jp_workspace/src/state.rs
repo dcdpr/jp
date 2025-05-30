@@ -4,7 +4,10 @@ use jp_conversation::{
     message::MessagePair, Context, ContextId, Conversation, ConversationId, ConversationsMetadata,
     Persona, PersonaId,
 };
-use jp_mcp::config::{McpServer, McpServerId};
+use jp_mcp::{
+    config::{McpServer, McpServerId},
+    tool::{McpTool, McpToolId},
+};
 use jp_tombmap::TombMap;
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +43,9 @@ pub(crate) struct LocalState {
 
     #[serde(skip_serializing_if = "TombMap::is_empty")]
     pub mcp_servers: TombMap<McpServerId, McpServer>,
+
+    #[serde(skip_serializing_if = "TombMap::is_empty")]
+    pub mcp_tools: TombMap<McpToolId, McpTool>,
 }
 
 /// Represents the entire in-memory local state.

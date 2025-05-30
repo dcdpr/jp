@@ -1,8 +1,48 @@
-use std::str::FromStr;
+use std::{collections::HashMap, fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::Error;
+
+/// Identifier for an MCP tool.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub struct McpToolId(String);
+
+impl McpToolId {
+    // TODO: implement `FromStr` or `TryFrom`, to reject invalid IDs.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+}
+
+impl fmt::Display for McpToolId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Metadata for all MCP tools.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpToolsMetadata {
+    pub templates: HashMap<String, McpToolTemplate>,
+}
+
+/// Configuration for an MCP tool.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct McpTool {
+    #[serde(skip)]
+    pub id: McpToolId,
+    pub description: String,
+    pub command: Vec<String>,
+    pub properties: Vec<Map<String, Value>>,
+}
+
+/// Template for an MCP tool.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct McpToolTemplate {
+    pub command: Vec<String>,
+}
 
 macro_rules! named_unit_variant {
     ($variant:ident) => {

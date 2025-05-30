@@ -14,6 +14,7 @@ use tracing::trace;
 use crate::{
     config::{McpServer, McpServerId},
     error::Result,
+    server::embedded::EmbeddedServer,
     transport::Transport,
     Error,
 };
@@ -22,34 +23,32 @@ use crate::{
 #[derive(Default, Clone)]
 pub struct Client {
     clients: Arc<Mutex<HashMap<McpServerId, RunningService<RoleClient, ()>>>>,
+    embedded_server: Option<Arc<EmbeddedServer>>,
 }
 
 impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client")
             .field("clients", &self.clients.blocking_lock().keys())
+            .field("embedded_server", &self.embedded_server)
             .finish()
     }
 }
 
 impl Client {
-    /// Create a new MCP manager and connect to all configured servers
-    pub async fn new(servers: &[&McpServer]) -> Result<Self> {
-        let mut clients = HashMap::new();
-
-        for server in servers {
-            let client = Self::create_client(server).await?;
-            clients.insert(server.id.clone(), client);
-        }
-
-        Ok(Self {
-            clients: Arc::new(Mutex::new(clients)),
-        })
+    #[must_use]
+    pub fn with_embedded_server(mut self, server: EmbeddedServer) -> Self {
+        self.embedded_server = Some(Arc::new(server));
+        self
     }
 
     /// Get all available tools from all connected MCP servers
     pub async fn list_tools(&self) -> Result<Vec<Tool>> {
         let mut tools = vec![];
+
+        if let Some(server) = self.embedded_server.as_ref() {
+            tools.extend(server.list_all_tools().await?);
+        }
 
         for client in self.clients.lock().await.values() {
             tools.extend(client.peer().list_all_tools().await?);
@@ -64,6 +63,19 @@ impl Client {
         tool_name: &str,
         params: serde_json::Value,
     ) -> Result<CallToolResult> {
+        if let Some(server) = self.embedded_server.as_ref() {
+            let tools = server.list_all_tools().await?;
+            if tools.iter().any(|t| t.name == tool_name) {
+                return server
+                    .run_tool(CallToolRequestParam {
+                        name: tool_name.to_owned().into(),
+                        arguments: params.as_object().cloned(),
+                    })
+                    .await
+                    .map_err(Into::into);
+            }
+        }
+
         for client in self.clients.lock().await.values() {
             let tools = client.peer().list_all_tools().await?;
             if !tools.iter().any(|t| t.name == tool_name) {

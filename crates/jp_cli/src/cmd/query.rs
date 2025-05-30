@@ -694,25 +694,39 @@ async fn handle_stream(
             // LLMs understanding, but we do not print it to the terminal.
             StreamEvent::ToolCall(call) => {
                 tool_calls.push(call.clone());
-                let result = handle_tool_call(ctx, call.clone()).await?;
-                tool_call_results.push(result.clone());
 
-                indoc::formatdoc! {"
+                let data = indoc::formatdoc!(
+                    "
                     ---
-                    running: **{}**
+                    executing tool: **{}**
 
                     arguments:
                     ```json
-                    {}
+                    {:#}
                     ```
 
+                ",
+                    call.name,
+                    call.arguments
+                );
+
+                handler.handle_stream(&data, ctx)?;
+                let result = handle_tool_call(ctx, call.clone()).await?;
+                tool_call_results.push(result.clone());
+
+                let content = if result.content.starts_with("```") {
+                    result.content
+                } else {
+                    format!("```\n{}\n```", result.content)
+                };
+
+                indoc::formatdoc! {"
                     result:
 
-                    ```
-                    {}
-                    ```
+                    {content}
                     ---
-                ", call.name, call.arguments, result.content}
+                    "
+                }
             }
             StreamEvent::Metadata(key, data) => {
                 metadata.insert(key, data);

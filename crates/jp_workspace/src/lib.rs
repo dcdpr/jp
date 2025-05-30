@@ -57,7 +57,10 @@ pub use id::Id;
 use jp_conversation::{
     Context, ContextId, Conversation, ConversationId, MessagePair, Persona, PersonaId,
 };
-use jp_mcp::config::{McpServer, McpServerId};
+use jp_mcp::{
+    config::{McpServer, McpServerId},
+    tool::McpTool,
+};
 use jp_storage::{Storage, DEFAULT_STORAGE_DIR, MCP_SERVERS_DIR};
 use state::{LocalState, State, UserState};
 use tracing::{debug, info, trace};
@@ -206,6 +209,7 @@ impl Workspace {
         // Workspace state
         let personas = storage.load_personas()?;
         let mcp_servers = storage.load_mcp_servers()?;
+        let mcp_tools = storage.load_mcp_tools()?;
         let named_contexts = storage.load_named_contexts()?;
         let (mut conversations, messages) = storage.load_conversations_and_messages()?;
 
@@ -217,6 +221,7 @@ impl Workspace {
             conversations = %conversations.len(),
             personas = %personas.len(),
             mcp_servers = %mcp_servers.len(),
+            mcp_tools = %mcp_tools.len(),
             active_conversation_id = %conversations_metadata.active_conversation_id,
             "Loaded workspace state."
         );
@@ -243,6 +248,7 @@ impl Workspace {
                 messages,
                 personas,
                 mcp_servers,
+                mcp_tools,
             },
             user: UserState {
                 conversations_metadata,
@@ -461,6 +467,11 @@ impl Workspace {
             .entry(id)
             .or_default()
             .push(message);
+    }
+
+    /// Returns an iterator over all configured MCP tools.
+    pub fn mcp_tools(&self) -> impl Iterator<Item = &McpTool> {
+        self.state.local.mcp_tools.values()
     }
 
     /// Returns an iterator over all configured MCP servers.

@@ -2,6 +2,7 @@ pub mod error;
 pub mod value;
 
 use std::{
+    ffi::OsStr,
     fs, iter,
     path::{Path, PathBuf},
 };
@@ -12,7 +13,10 @@ use jp_conversation::{
     PersonaId,
 };
 use jp_id::Id as _;
-use jp_mcp::config::{McpServer, McpServerId};
+use jp_mcp::{
+    config::{McpServer, McpServerId},
+    tool::{McpTool, McpToolId, McpToolsMetadata},
+};
 use jp_tombmap::TombMap;
 use serde::Serialize;
 use serde_json::Value;
@@ -35,6 +39,7 @@ const CONTEXTS_DIR: &str = "contexts";
 pub const PERSONAS_DIR: &str = "personas";
 pub const CONVERSATIONS_DIR: &str = "conversations";
 pub const MCP_SERVERS_DIR: &str = "mcp/servers";
+pub const MCP_TOOLS_DIR: &str = "mcp/tools";
 
 #[derive(Debug)]
 pub struct Storage {
@@ -241,6 +246,19 @@ impl Storage {
         Ok(servers)
     }
 
+    /// Loads all MCP tools from the storage.
+    pub fn load_mcp_tools(&self) -> Result<TombMap<McpToolId, McpTool>> {
+        let tools_path = self.root.join(MCP_TOOLS_DIR);
+        trace!(path = %tools_path.display(), "Loading MCP tools.");
+
+        let mut tools = TombMap::new();
+        for entry in fs::read_dir(&tools_path).ok().into_iter().flatten() {
+            recurse_mcp_tools_dirs(&tools_path, &entry?.path(), &mut tools)?;
+        }
+
+        Ok(tools)
+    }
+
     /// Loads all Named Contexts from the (copied) storage.
     pub fn load_named_contexts(&self) -> Result<TombMap<ContextId, Context>> {
         let contexts_path = self.root.join(CONTEXTS_DIR);
@@ -414,6 +432,74 @@ impl Storage {
 
         persist_inner(root, &personas_dir, personas, PersonaId::to_path_buf)
     }
+}
+
+fn recurse_mcp_tools_dirs(
+    root: &Path,
+    path: &Path,
+    tools: &mut TombMap<McpToolId, McpTool>,
+) -> Result<()> {
+    let metadata = read_json::<McpToolsMetadata>(&root.join(METADATA_FILE))?;
+    for entry in fs::read_dir(path).ok().into_iter().flatten() {
+        let path = entry?.path();
+        if path.is_dir() {
+            return recurse_mcp_tools_dirs(root, &path, tools);
+        }
+        if path.extension().is_none_or(|ext| ext != "toml") {
+            continue;
+        }
+        let Some(filename) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(name) = filename.strip_suffix(".toml") else {
+            continue;
+        };
+
+        let name = path
+            .parent()
+            .unwrap_or(&path)
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .join(name)
+            .iter()
+            .filter_map(OsStr::to_str)
+            .collect::<Vec<_>>()
+            .join("_");
+
+        let contents = fs::read_to_string(path)?;
+        let mut contents: toml::Table = toml::from_str(&contents)?;
+
+        let command = contents
+            .get("command")
+            .and_then(toml::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str());
+
+        if let Some(template) = contents
+            .get("inherit")
+            .and_then(toml::Value::as_str)
+            .and_then(|s| metadata.templates.get(s))
+        {
+            contents.insert(
+                "command".to_owned(),
+                template
+                    .command
+                    .iter()
+                    .map(String::as_str)
+                    .chain(command)
+                    .collect::<Vec<_>>()
+                    .into(),
+            );
+        }
+
+        let mut tool: McpTool = contents.try_into()?;
+        tool.id = McpToolId::new(name.clone());
+
+        tools.insert(McpToolId::new(name), tool);
+    }
+
+    Ok(())
 }
 
 fn load_conversations_and_messages_from_dir(path: &Path) -> Result<ConversationsAndMessages> {

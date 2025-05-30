@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", ".config/jp/tools/"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -51,6 +51,8 @@ minijinja = { version = "2", default-features = false }
 ollama-rs = { version = "0.3", default-features = false }
 # See: <https://github.com/m1guelpf/openai-responses-rs/pull/6>
 # openai_responses = { version = "0.1", default-features = false }
+base64 = { version = "0.22", default-features = false }
+octocrab = { version = "0.44", default-features = false }
 openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs", default-features = false }
 path-clean = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }

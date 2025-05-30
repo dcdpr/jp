@@ -331,8 +331,10 @@ impl_from_error!(minijinja::Error, "Template error");
 impl_from_error!(bat::error::Error, "Error while formatting code");
 impl_from_error!(url::ParseError, "Error while parsing URL");
 impl_from_error!(serde_json::Error, "Error while parsing JSON");
+impl_from_error!(toml::de::Error, "Error while parsing TOML");
 impl_from_error!(reqwest::Error, "Error while making HTTP request");
 impl_from_error!(std::str::ParseBoolError, "Error parsing boolean value");
+impl_from_error!(jp_mcp::Error, "MCP error");
 impl_from_error!(
     jp_conversation::model::SetParameterError,
     "Error setting model parameter"
@@ -495,40 +497,6 @@ impl From<jp_config::Error> for Error {
     }
 }
 
-impl From<jp_mcp::Error> for Error {
-    fn from(error: jp_mcp::Error) -> Self {
-        use jp_mcp::Error::*;
-
-        let metadata: Vec<(&str, Value)> = match error {
-            Service(service_error) => [
-                ("message", "MCP service error".into()),
-                ("error", service_error.to_string().into()),
-            ]
-            .into(),
-            Timeout(elapsed) => [
-                ("message", "MCP request timeout".into()),
-                ("error", elapsed.to_string().into()),
-            ]
-            .into(),
-            UnknownTool(tool) => [("message", "Unknown tool".into()), ("tool", tool.into())].into(),
-            Io(error) => return error.into(),
-            UnknownServer(mcp_server_id) => [
-                ("message", "Unknown MCP server".into()),
-                ("id", mcp_server_id.to_string().into()),
-            ]
-            .into(),
-            UnknownToolChoice(choice) => [
-                ("message", "Unknown tool choice".into()),
-                ("choice", choice.into()),
-                ("expected", ["false", "true", "<function_name>"].into()),
-            ]
-            .into(),
-        };
-
-        Self::from(metadata)
-    }
-}
-
 impl From<jp_workspace::Error> for Error {
     fn from(error: jp_workspace::Error) -> Self {
         use jp_workspace::Error::*;
@@ -621,6 +589,7 @@ impl From<jp_storage::Error> for Error {
             Error::Conversation(error) => return error.into(),
             Error::Io(error) => return error.into(),
             Error::Json(error) => return error.into(),
+            Error::Toml(error) => return error.into(),
             Error::NotDir(path) => [
                 ("message", "Path is not a directory.".into()),
                 ("path", path.to_string_lossy().into()),

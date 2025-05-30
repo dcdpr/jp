@@ -1,7 +1,7 @@
 use std::io::{self, IsTerminal as _};
 
 use jp_config::Config;
-use jp_mcp::config::McpServer;
+use jp_mcp::{config::McpServer, server::embedded::EmbeddedServer};
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
 
@@ -39,6 +39,14 @@ pub struct Term {
 impl Ctx {
     /// Create a new context with the given workspace
     pub fn new(workspace: Workspace, args: Globals, config: Config) -> Self {
+        let tools = workspace
+            .mcp_tools()
+            .cloned()
+            .map(|v| (v.id.clone(), v))
+            .collect();
+
+        let server = EmbeddedServer::new(tools, workspace.root.clone());
+
         Self {
             workspace,
             config,
@@ -46,7 +54,7 @@ impl Ctx {
                 args,
                 is_tty: io::stdout().is_terminal(),
             },
-            mcp_client: jp_mcp::Client::default(),
+            mcp_client: jp_mcp::Client::default().with_embedded_server(server),
             task_handler: TaskHandler::default(),
         }
     }

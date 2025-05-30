@@ -1,0 +1,24 @@
+inherit = "cargo"
+description = "Find one or more pull requests in the project's GitHub repository."
+
+[[properties]]
+name = "number"
+type = "integer"
+description = """
+Pull request number to get information about.
+
+If unspecified, a list of all pull requests will be returned, without the
+pull request contents. You can re-run the tool with the correct pull request
+number to get more details about a pull request.
+"""
+
+[[properties]]
+name = "state"
+type = "string"
+enum = ["open", "closed"]
+description = """
+Filter pull requests by their state.
+
+If unspecified, all pull requests will be returned.
+"""
+choices = ["open", "closed"]
