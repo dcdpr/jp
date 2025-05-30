@@ -62,6 +62,11 @@ pub enum StreamEvent {
 
 impl StreamEvent {
     #[must_use]
+    pub fn metadata(key: impl Into<String>, value: impl Into<Value>) -> Self {
+        Self::Metadata(key.into(), value.into())
+    }
+
+    #[must_use]
     pub fn into_chat_chunk(self) -> Option<CompletionChunk> {
         match self {
             Self::ChatChunk(chunk) => Some(chunk),
@@ -84,6 +89,13 @@ pub enum Event {
 
     /// Opaque provider-specific metadata.
     Metadata(String, Value),
+}
+
+impl Event {
+    #[must_use]
+    pub fn metadata(key: impl Into<String>, value: impl Into<Value>) -> Self {
+        Self::Metadata(key.into(), value.into())
+    }
 }
 
 impl From<Delta> for Option<Result<Event>> {

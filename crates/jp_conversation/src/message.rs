@@ -130,6 +130,15 @@ impl Default for UserMessage {
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct AssistantMessage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCallRequest>,
+
     /// Opaque provider-specific metadata.
     ///
     /// The shape of this data depends on the provider and model.
@@ -157,15 +166,6 @@ pub struct AssistantMessage {
     /// different.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, Value>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_calls: Vec<ToolCallRequest>,
 }
 
 impl<T: Into<String>> From<T> for AssistantMessage {
