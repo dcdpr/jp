@@ -1,5 +1,6 @@
 pub mod code;
 pub mod reasoning;
+pub mod typewriter;
 
 use confique::Config as Confique;
 
@@ -15,6 +16,10 @@ pub struct Config {
     /// Reasoning content style.
     #[config(nested)]
     pub reasoning: reasoning::Config,
+
+    // Typewriter style.
+    #[config(nested)]
+    pub typewriter: typewriter::Config,
 }
 
 impl Config {

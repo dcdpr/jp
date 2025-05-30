@@ -54,6 +54,9 @@ pub enum Error {
 
     #[error("YAML error: {0}")]
     Yaml(#[from] serde_yaml::Error),
+
+    #[error("Deserialization error: {0}")]
+    Deserialize(#[from] serde::de::value::Error),
 }
 
 #[cfg(test)]

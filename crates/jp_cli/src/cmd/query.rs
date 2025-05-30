@@ -4,7 +4,6 @@ use std::{
     env, fs,
     path::PathBuf,
     str::FromStr,
-    time::Duration,
 };
 
 use clap::{builder::TypedValueParser as _, ArgAction};
@@ -35,9 +34,6 @@ use crate::{
     error::{Error, Result},
     parser, Ctx, KeyValue, PATH_STRING_PREFIX,
 };
-
-// Define the delay duration
-const TYPEWRITER_DELAY: Duration = Duration::from_millis(3);
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -909,8 +905,13 @@ impl ResponseHandler {
         while let Some(Line { content, variant }) = self.get_line() {
             self.streamed.push(content);
 
+            let delay = match variant {
+                LineVariant::Code => ctx.config.style.typewriter.code_delay,
+                _ => ctx.config.style.typewriter.text_delay,
+            };
+
             let lines = self.handle_line(&variant, ctx)?;
-            stdout::typewriter(&lines, TYPEWRITER_DELAY)?;
+            stdout::typewriter(&lines, delay)?;
             self.printed.extend(lines);
         }
 
