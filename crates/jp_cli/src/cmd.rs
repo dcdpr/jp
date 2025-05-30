@@ -331,6 +331,7 @@ impl_from_error!(minijinja::Error, "Template error");
 impl_from_error!(bat::error::Error, "Error while formatting code");
 impl_from_error!(url::ParseError, "Error while parsing URL");
 impl_from_error!(serde_json::Error, "Error while parsing JSON");
+impl_from_error!(serde::de::value::Error, "Deserialization error");
 impl_from_error!(toml::de::Error, "Error while parsing TOML");
 impl_from_error!(reqwest::Error, "Error while making HTTP request");
 impl_from_error!(std::str::ParseBoolError, "Error parsing boolean value");
@@ -444,6 +445,8 @@ impl From<jp_config::Error> for Error {
             Conversation(error) => return error.into(),
             Io(error) => return error.into(),
             Parameters(error) => return error.into(),
+            Json(error) => return error.into(),
+            Deserialize(error) => return error.into(),
             Confique(error) => [
                 ("message", "Config error".into()),
                 ("error", error.to_string().into()),
@@ -490,7 +493,6 @@ impl From<jp_config::Error> for Error {
                 ("error", error.to_string().into()),
             ]
             .into(),
-            Json(error) => return error.into(),
         };
 
         Self::from(metadata)

@@ -2026,6 +2026,7 @@ dependencies = [
  "path-clean",
  "reqwest",
  "schemars 1.0.0-alpha.17",
+ "serde",
  "serde_json",
  "strip-ansi-escapes",
  "termimad",
