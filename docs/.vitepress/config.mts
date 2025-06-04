@@ -4,6 +4,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
     lang: 'en-US',
+    base: '/jp/',
     title: "Jean-Pierre",
     description: "An LLM-based Programming Assistant",
     cleanUrls: true,
@@ -26,17 +27,19 @@ export default defineConfig({
             {
                 text: 'Getting Started', link: '/getting-started', items: [
                     { text: 'Installation', link: '/installation' },
+                    { text: 'Configuration', link: '/configuration' },
                     { text: 'Usage', link: '/usage' },
                     { text: 'Case Studies', link: '/case-studies' },
                 ],
             },
             {
-                text: 'Configuration', link: '/configuration', items: [
-                    { text: 'Features', link: '/features' },
-                    { text: 'Attachments', link: '/attachment' },
-                    { text: 'Personas', link: '/persona' },
-                    { text: 'Contexts', link: '/context' },
-                    { text: 'Embedded Tools', link: '/tools' },
+                text: 'Features', link: '/features', items: [
+                    { text: 'Personas', link: '/features/personas' },
+                    { text: 'Named Contexts', link: '/features/contexts' },
+                    { text: 'Attachments', link: '/features/attachments' },
+                    { text: 'Workspace Tools', link: '/features/tools' },
+                    { text: 'Model Context Protocol', link: '/features/mcp' },
+                    { text: 'Structured Output', link: '/features/structured-output' },
                 ]
             }
         ],
