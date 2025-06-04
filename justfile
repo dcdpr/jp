@@ -5,13 +5,17 @@ commit args="Give me a commit message": _install-jp
         echo "$message" | sed -e 's/\x1b\[[0-9;]*[mGKHF]//g' | git commit --edit --file=-
     fi
 
-# Preview the statically built documentation.
-[group('docs')]
-preview-docs: (_docs "preview")
-
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
 develop-docs: (_docs "dev" "--open")
+
+# Build the statically built documentation.
+[group('docs')]
+build-docs: (_docs "build")
+
+# Preview the statically built documentation.
+[group('docs')]
+preview-docs: (_docs "preview")
 
 # Live-check the code, using Clippy and Bacon.
 check: (_install "bacon@^3.15")
