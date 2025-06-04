@@ -8,7 +8,7 @@ on:
       - main
 defaults:
   run:
-    working-directory: /docs
+    working-directory: ./docs
 jobs:
   build:
     runs-on: ubuntu-latest
