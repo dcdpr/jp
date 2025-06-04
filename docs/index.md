@@ -13,7 +13,7 @@ hero:
       link: /getting-started
     - theme: alt
       text: Case Studies
-      link: /use-cases
+      link: /case-studies
 features:
   - icon: 🛠️
     title: Your Workflow

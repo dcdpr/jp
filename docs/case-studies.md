@@ -197,7 +197,7 @@ useful if you have a need for a more formal "commit message AST" to work with.
 [structured output]: ./features.md#structured-output
 [command attachments]: ./features.md#command-attachments
 [attachment-feature]: ./features.md#attachments
-[attachments]: ./features/attachment.md
-[persona]: ./features/persona.md
-[context]: ./features/context.md
+[attachments]: ./features/attachments.md
+[persona]: ./features/personas.md
+[context]: ./features/contexts.md
 [config-reasoning]: ./configuration.md#reasoning
