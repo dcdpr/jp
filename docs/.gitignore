@@ -1,0 +1,6 @@
+.pnp.*.json
+.pnp.cjs
+.pnp.loader.mjs
+.vitepress/cache
+.vitepress/dist
+.yarn/*
