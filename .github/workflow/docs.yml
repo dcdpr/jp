@@ -5,7 +5,7 @@ on:
     tags:
       - '*'
     branches:
-      - master
+      - main
 defaults:
   run:
     working-directory: /docs
