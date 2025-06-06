@@ -3,9 +3,11 @@ source: crates/jp_test/src/mock.rs
 expression: expr
 ---
 Ok(
-    [
-        Content(
-            "I'm here and ready to help! What can I assist you with today?",
-        ),
-    ],
+    Reply(
+        [
+            Content(
+                "I'm here and ready to help! What can I assist you with today?",
+            ),
+        ],
+    ),
 )

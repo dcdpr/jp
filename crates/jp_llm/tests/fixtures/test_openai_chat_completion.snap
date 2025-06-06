@@ -3,12 +3,14 @@ source: crates/jp_test/src/mock.rs
 expression: expr
 ---
 Ok(
-    [
-        Reasoning(
-            "",
-        ),
-        Content(
-            "Hello! I’ve received your test message. How can I help you today?",
-        ),
-    ],
+    Reply(
+        [
+            Reasoning(
+                "",
+            ),
+            Content(
+                "Hello! I’ve received your test message. How can I help you today?",
+            ),
+        ],
+    ),
 )

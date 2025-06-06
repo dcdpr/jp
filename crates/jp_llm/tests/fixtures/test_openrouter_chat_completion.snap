@@ -3,9 +3,11 @@ source: crates/jp_test/src/mock.rs
 expression: expr
 ---
 Ok(
-    [
-        Content(
-            "Received your test message! How can I assist you today?",
-        ),
-    ],
+    Reply(
+        [
+            Content(
+                "Received your test message! How can I assist you today?",
+            ),
+        ],
+    ),
 )

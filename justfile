@@ -23,7 +23,7 @@ check: (_install "bacon@^3.15")
 
 # Run all ci tasks.
 [group('ci')]
-ci: build-ci lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci
+ci: build-ci lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci
 
 # Build the code on CI.
 [group('ci')]
@@ -59,8 +59,15 @@ coverage-ci: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@
     cargo llvm-cov --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info
 
+# Check for security vulnerabilities on CI.
+[group('ci')]
 deny-ci: (_install "cargo-deny@^0.18") _install_ci_matchers
     cargo deny check -A index-failure --hide-inclusion-graph
+
+# Validate insta snapshots on CI.
+[group('ci')]
+insta-ci: (_install "cargo-nextest@^0.9 cargo-insta@^1.43")
+    cargo insta test --check --unreferenced=auto
 
 @_install_ci_matchers:
     echo "::add-matcher::.github/matchers.json"
