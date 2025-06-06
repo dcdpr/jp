@@ -2,4 +2,4 @@
 source: crates/jp_test/src/mock.rs
 expression: expr
 ---
-"This appears to be a test message. I'm here and ready to assist you with any questions or topics you'd like to discuss!"
+"This is a test message. I'm receiving it just fine!"

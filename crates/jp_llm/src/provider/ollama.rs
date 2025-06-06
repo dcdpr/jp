@@ -68,7 +68,10 @@ impl Provider for Ollama {
             tokio::pin!(stream);
             while let Some(event) = stream.next().await {
                 let events = event
-                    .map(|event| map_event(event, &mut current_state, &mut extractor))
+                    .map(|event| {
+                        extractor.handle(&event.message.content);
+                        map_event(event, &mut current_state, &mut extractor)
+                    })
                     .unwrap_or_default();
 
                 for event in events {
@@ -77,7 +80,7 @@ impl Provider for Ollama {
             }
 
             extractor.finalize();
-            for event in map_content("", &mut current_state, &mut extractor) {
+            for event in map_content(&mut current_state, &mut extractor) {
                 yield event;
             }
         });
@@ -98,23 +101,23 @@ fn map_model(model: LocalModel) -> ModelDetails {
 }
 
 fn map_response(response: ChatMessageResponse) -> Result<Vec<Event>> {
-    map_event(
-        response,
-        &mut AccumulationState::default(),
-        &mut ReasoningExtractor::default(),
-    )
-    .into_iter()
-    .map(|v| {
-        v.map(|e| match e {
-            StreamEvent::ChatChunk(content) => match content {
-                CompletionChunk::Content(s) => Event::Content(s),
-                CompletionChunk::Reasoning(s) => Event::Reasoning(s),
-            },
-            StreamEvent::ToolCall(request) => Event::ToolCall(request),
-            StreamEvent::Metadata(key, metadata) => Event::Metadata(key, metadata),
+    let mut extractor = ReasoningExtractor::default();
+    extractor.handle(&response.message.content);
+    extractor.finalize();
+
+    map_event(response, &mut AccumulationState::default(), &mut extractor)
+        .into_iter()
+        .map(|v| {
+            v.map(|e| match e {
+                StreamEvent::ChatChunk(content) => match content {
+                    CompletionChunk::Content(s) => Event::Content(s),
+                    CompletionChunk::Reasoning(s) => Event::Reasoning(s),
+                },
+                StreamEvent::ToolCall(request) => Event::ToolCall(request),
+                StreamEvent::Metadata(key, metadata) => Event::Metadata(key, metadata),
+            })
         })
-    })
-    .collect::<Result<Vec<_>>>()
+        .collect::<Result<Vec<_>>>()
 }
 
 fn map_event(
@@ -135,18 +138,15 @@ fn map_event(
         events.extend(handle_delta(delta, state).transpose());
     }
 
-    events.extend(map_content(&event.message.content, state, extractor));
+    events.extend(map_content(state, extractor));
     events
 }
 
 fn map_content(
-    content: &str,
     state: &mut AccumulationState,
     extractor: &mut ReasoningExtractor,
 ) -> Vec<Result<StreamEvent>> {
     let mut events = Vec::new();
-    extractor.handle(content);
-
     if !extractor.reasoning.is_empty() {
         let reasoning = mem::take(&mut extractor.reasoning);
         events.extend(handle_delta(Delta::reasoning(reasoning), state).transpose());
@@ -504,7 +504,7 @@ impl From<ToolCall> for Delta {
 
 #[derive(Default, Debug)]
 /// A parser that segments a stream of text into 'reasoning' and 'other' buckets.
-/// It handles streams with or without a <think> block.
+/// It handles streams with or without a `<think>` block.
 pub struct ReasoningExtractor {
     pub other: String,
     pub reasoning: String,
@@ -681,10 +681,6 @@ mod tests {
                     .unwrap()
                     .chat_completion(&model.into(), query)
                     .await
-                    .map(|mut v| {
-                        v.truncate(10);
-                        v
-                    })
             },
         )
         .await
