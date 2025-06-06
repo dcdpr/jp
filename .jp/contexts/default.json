@@ -10,7 +10,8 @@
         "/**/*.json",
         "/**/*.md",
         "/**/*.rs",
-        "/**/*.toml"
+        "/**/*.toml",
+        "/.jp"
       ],
       "excludes": [
         ".clippy.toml",
@@ -18,6 +19,7 @@
         ".taplo.toml",
         ".typos.toml",
         "/**/target/**",
+        "/.jp/conversations",
         "/rust-toolchain.toml"
       ]
     }
