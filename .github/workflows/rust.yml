@@ -8,16 +8,58 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
+      - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      - run: just build
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
+      - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      - run: just lint
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
+      - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      - run: just fmt
   test:
     runs-on: ubuntu-latest
     steps:
+      - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
       - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      - run: just test
+  docs:
+    runs-on: ubuntu-latest
+    steps:
       - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
-      - run: echo "::add-matcher::.github/matchers.json"
-      - run: just ci
-    # - uses: codecov/codecov-action@78f372e97e6e2f82dc51b004c5fb646501ee30ae # v5
-    #   env:
-    #     CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-    #   with:
-    #     files: lcov.info
+      - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      - run: just docs
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
+      - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      - run: just coverage
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
+      - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      - run: just deny
+
+# - uses: codecov/codecov-action@78f372e97e6e2f82dc51b004c5fb646501ee30ae # v5
+#   env:
+#     CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+#   with:
+#     files: lcov.info
