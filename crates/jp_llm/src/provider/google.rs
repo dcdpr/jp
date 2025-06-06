@@ -539,8 +539,12 @@ mod tests {
                     when.any_request();
                 });
             },
-            |_, url| async move {
+            |recording, url| async move {
                 config.base_url = format!("{url}/v1beta");
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
 
                 Google::try_from(&config)
                     .unwrap()

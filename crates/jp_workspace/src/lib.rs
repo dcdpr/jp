@@ -3,43 +3,6 @@
 //! This crate provides data models and storage operations for the JP workspace,
 //! a CLI tool for managing LLM-assisted code conversations with fine-grained
 //! control over context and behavior.
-//!
-//! # Core Concepts
-//!
-//! - [`Workspace`]: Top-level container for all JP data
-//! - [`Persona`]: Configuration specifying how the LLM should behave
-//! - [`Conversation`]: A sequence of messages between user and LLM
-//! - [`Attachment`]: Reference to contextual information for the LLM
-//! - [`Message`]: Single exchange between user and LLM
-//!
-//! # Usage Example
-//!
-//! ```ignore
-//! use std::path::PathBuf;
-//!
-//! use jp_workspace::{Attachment, Context, Workspace};
-//!
-//! // Initialize a workspace
-//! let workspace = Workspace::new(PathBuf::from(".jp"));
-//! workspace.init().expect("Failed to initialize workspace");
-//!
-//! // Create a new conversation
-//! let attachments = vec![Attachment::File {
-//!     includes: vec!["src/**/*.rs".to_string()],
-//!     excludes: vec!["src/**/*.generated.rs".to_string()],
-//! }];
-//!
-//! let context = Context {
-//!     persona: "software-developer".into(),
-//!     attachments,
-//! };
-//!
-//! let conversation = workspace
-//!     .create_conversation(Some("Rust code review".to_string()), context)
-//!     .expect("Failed to create conversation");
-//!
-//! println!("Created conversation: {}", conversation.id);
-//! ```
 
 mod error;
 mod id;

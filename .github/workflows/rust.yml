@@ -1,0 +1,23 @@
+name: Rust CI
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
+      - run: echo "::add-matcher::.github/matchers.json"
+      - run: just ci
+    # - uses: codecov/codecov-action@78f372e97e6e2f82dc51b004c5fb646501ee30ae # v5
+    #   env:
+    #     CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    #   with:
+    #     files: lcov.info

@@ -6,6 +6,7 @@
 **/target
 /.cargo/config.toml
 /rustc-ice-*
+lcov.info
 
 # Logs
 *.log

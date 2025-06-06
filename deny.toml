@@ -27,6 +27,7 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
     "https://github.com/alexliesenfeld/httpmock",
     "https://github.com/JeanMertz/async-anthropic",
+    "https://github.com/JeanMertz/gemini-client",
     "https://github.com/JeanMertz/openai-responses-rs",
     "https://github.com/modelcontextprotocol/rust-sdk",
 ]

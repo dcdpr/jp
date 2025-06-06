@@ -30,7 +30,7 @@ impl Id {
     ///
     /// Generating a new ID **DOES NOT**:
     ///
-    /// - persist it to disk. Use [`store`].
+    /// - persist it to disk. Use [`Id::store`].
     /// - set it as the global ID. Use [`jp_id::global::set`].
     #[must_use]
     pub fn new() -> Self {

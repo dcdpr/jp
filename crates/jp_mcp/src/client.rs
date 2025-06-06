@@ -98,8 +98,8 @@ impl Client {
     /// Get all available resources from a specific MCP server.
     ///
     /// This does not return the contents of the resources, but instead returns
-    /// a list of URIs which can be sent to [`Self::get_resource`] to retrieve
-    /// the contents.
+    /// a list of URIs which can be sent to [`Self::get_resource_contents`] to
+    /// retrieve the contents.
     pub async fn list_resources(&self, id: &McpServerId) -> Result<Vec<Resource>> {
         let clients = self.clients.lock().await;
         let client = clients.get(id).ok_or(Error::UnknownServer(id.clone()))?;
