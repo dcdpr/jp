@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        task: [build, lint, fmt, test, docs, coverage, deny]
+        task: [build, lint, fmt, test, docs, coverage, deny, insta]
     name: ${{ matrix.task }}
     steps:
       - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
