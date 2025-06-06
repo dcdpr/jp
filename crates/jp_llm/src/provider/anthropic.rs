@@ -262,17 +262,22 @@ fn map_response(response: types::CreateMessagesResponse) -> Result<Vec<Event>> {
         .into_iter()
         .flatten()
         .filter_map(|item| {
-            let signature = match &item {
-                types::MessageContent::Thinking(Thinking { signature, .. }) => signature.clone(),
+            let metadata = match &item {
+                types::MessageContent::Thinking(Thinking { signature, .. }) => {
+                    signature.clone().map(|v| ("signature", v))
+                }
+                types::MessageContent::RedactedThinking { data } => {
+                    Some(("redacted_thinking", data.clone()))
+                }
                 _ => None,
             };
             let v: Option<Result<Event>> = Delta::from(item).into();
-            v.map(|v| (v, signature))
+            v.map(|v| (v, metadata))
         })
         .flat_map(|item| match item {
             (v, _) if v.is_err() => vec![v],
             (v, None) => vec![v],
-            (v, Some(signature)) => vec![v, Ok(Event::metadata("signature", signature))],
+            (v, Some((key, value))) => vec![v, Ok(Event::metadata(key, value))],
         })
         .collect::<Result<_>>()
 }
@@ -547,7 +552,13 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> types::Message {
     } = assistant;
 
     let mut list = vec![];
-    if let Some(thinking) = reasoning {
+    if let Some(data) = metadata
+        .get("redacted_thinking")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    {
+        list.push(types::MessageContent::RedactedThinking { data });
+    } else if let Some(thinking) = reasoning {
         let thinking = Thinking {
             thinking,
             signature: metadata
@@ -582,6 +593,7 @@ impl From<types::MessageContent> for Delta {
         match item {
             types::MessageContent::Text(text) => Delta::content(text.text),
             types::MessageContent::Thinking(thinking) => Delta::reasoning(thinking.thinking),
+            types::MessageContent::RedactedThinking { .. } => Delta::reasoning(String::new()),
             types::MessageContent::ToolUse(tool_use) => {
                 Delta::tool_call(tool_use.id, tool_use.name, match &tool_use.input {
                     Value::Object(map) if !map.is_empty() => tool_use.input.to_string(),
@@ -600,7 +612,10 @@ impl From<types::MessageContent> for Delta {
 mod tests {
     use std::path::PathBuf;
 
-    use jp_conversation::ModelId;
+    use jp_conversation::{
+        model::{Reasoning, ReasoningEffort},
+        ModelId,
+    };
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -667,10 +682,58 @@ mod tests {
                     .unwrap()
                     .chat_completion(&model.into(), query)
                     .await
-                    .map(|mut v| {
-                        v.truncate(10);
-                        v
-                    })
+            },
+        )
+        .await
+    }
+
+    #[test(tokio::test)]
+    async fn test_anthropic_redacted_thinking(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = llm::Config::default().provider.anthropic;
+        let model: ModelId = "anthropic/claude-3-7-sonnet-latest".parse().unwrap();
+        let query = ChatQuery {
+            thread: Thread {
+                // See: <https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#thinking-redaction>
+                message: "ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let vcr = vcr();
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
+                });
+            },
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                let mut model: Model = model.into();
+                model.parameters.reasoning = Some(Reasoning {
+                    effort: ReasoningEffort::Medium,
+                    exclude: false,
+                });
+
+                let events = Anthropic::try_from(&config)
+                    .unwrap()
+                    .chat_completion(&model, query.clone())
+                    .await
+                    .unwrap()
+                    .into_inner();
+
+                assert!(events.iter().any(
+                    |event| matches!(event, Event::Metadata(k, _) if k == "redacted_thinking")
+                ));
+
+                events
             },
         )
         .await
