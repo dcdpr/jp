@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use futures::{Stream, StreamExt as _};
 use google::Google;
 use jp_config::llm::provider;
-use jp_conversation::{message::ToolCallRequest, model::ProviderId, Model};
+use jp_conversation::{message::ToolCallRequest, model::ProviderId, AssistantMessage, Model};
 use jp_query::query::{ChatQuery, StructuredQuery};
 use ollama::Ollama;
 use openai::Openai;
@@ -117,6 +117,56 @@ impl StreamEvent {
     }
 }
 
+/// A collection of events in a single reply.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Reply(Vec<Event>);
+
+impl Reply {
+    /// Returns the list of events in the reply.
+    #[must_use]
+    pub fn into_inner(self) -> Vec<Event> {
+        self.0
+    }
+}
+
+impl std::ops::Deref for Reply {
+    type Target = Vec<Event>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Reply {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl From<Reply> for AssistantMessage {
+    fn from(reply: Reply) -> Self {
+        let mut message = AssistantMessage::default();
+
+        for event in reply.0 {
+            match event {
+                Event::Content(content) => {
+                    message.content.get_or_insert_default().push_str(&content);
+                }
+                Event::Reasoning(reasoning) => message
+                    .reasoning
+                    .get_or_insert_default()
+                    .push_str(&reasoning),
+                Event::ToolCall(call) => message.tool_calls.push(call),
+                Event::Metadata(key, metadata) => {
+                    message.metadata.insert(key, metadata);
+                }
+            }
+        }
+
+        message
+    }
+}
+
 /// Represents a completed event from the LLM.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
@@ -217,7 +267,7 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     /// Perform a non-streaming chat completion.
     ///
     /// Default implementation collects results from the streaming version.
-    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
+    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Reply> {
         let mut stream = self.chat_completion_stream(model, query).await?;
         let mut events = Vec::new();
         let mut reasoning = String::new();
@@ -252,7 +302,7 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
             events.push(Event::Content(content));
         }
 
-        Ok(events)
+        Ok(Reply(events))
     }
 
     /// Perform a structured completion.
@@ -283,10 +333,13 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
                 }
             };
 
-            let data = events.into_iter().find_map(|event| match event {
-                Event::ToolCall(call) if call.name == SCHEMA_TOOL_NAME => Some(call.arguments),
-                _ => None,
-            });
+            let data = events
+                .into_inner()
+                .into_iter()
+                .find_map(|event| match event {
+                    Event::ToolCall(call) if call.name == SCHEMA_TOOL_NAME => Some(call.arguments),
+                    _ => None,
+                });
 
             match data {
                 Some(data) => return Ok(query.map(data)),
