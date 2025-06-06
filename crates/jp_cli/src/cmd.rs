@@ -399,6 +399,11 @@ impl From<jp_llm::Error> for Error {
                 ("error", error.to_string()),
             ]
             .into(),
+            Gemini(error) => [
+                ("message", "Gemini error".into()),
+                ("error", error.to_string()),
+            ]
+            .into(),
         };
 
         Self::from(metadata)

@@ -19,7 +19,7 @@ use serde_json::Value;
 use time::macros::date;
 use tracing::{trace, warn};
 
-use super::{Event, EventStream, ModelDetails, Provider, StreamEvent};
+use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, StreamEvent};
 use crate::{
     error::{Error, Result},
     provider::{handle_delta, AccumulationState, Delta},
@@ -163,7 +163,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
-            reasoning: Some(true),
+            reasoning: Some(ReasoningDetails::default()),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
         },
         "claude-sonnet-4-0" | "claude-sonnet-4-20250514" => ModelDetails {
@@ -171,7 +171,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
-            reasoning: Some(true),
+            reasoning: Some(ReasoningDetails::default()),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
         },
         "claude-3-7-sonnet-latest" | "claude-3-7-sonnet-20250219" => ModelDetails {
@@ -179,7 +179,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
-            reasoning: Some(true),
+            reasoning: Some(ReasoningDetails::default()),
             knowledge_cutoff: Some(date!(2024 - 11 - 1)),
         },
         "claude-3-5-haiku-latest" | "claude-3-5-haiku-20241022" => ModelDetails {
@@ -187,7 +187,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
-            reasoning: Some(false),
+            reasoning: None,
             knowledge_cutoff: Some(date!(2024 - 7 - 1)),
         },
         "claude-3-5-sonnet-latest"
@@ -197,7 +197,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
-            reasoning: Some(false),
+            reasoning: None,
             knowledge_cutoff: Some(date!(2024 - 4 - 1)),
         },
         "claude-3-opus-latest" | "claude-3-opus-20240229" => ModelDetails {
@@ -205,7 +205,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
-            reasoning: Some(false),
+            reasoning: None,
             knowledge_cutoff: Some(date!(2023 - 8 - 1)),
         },
         "claude-3-haiku-20240307" => ModelDetails {
@@ -213,7 +213,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
-            reasoning: Some(false),
+            reasoning: None,
             knowledge_cutoff: Some(date!(2024 - 8 - 1)),
         },
         id => {

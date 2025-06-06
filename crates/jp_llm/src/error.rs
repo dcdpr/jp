@@ -35,6 +35,9 @@ pub enum Error {
         response: String,
     },
 
+    #[error("Gemini error: {0}")]
+    Gemini(#[from] gemini_client_rs::GeminiError),
+
     #[error("Ollama error: {0}")]
     Ollama(#[from] ollama_rs::error::OllamaError),
 
