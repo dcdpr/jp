@@ -1,6 +1,7 @@
 use std::env;
 
 use async_anthropic::{
+    messages::DEFAULT_MAX_TOKENS,
     types::{self, ListModelsResponse, Thinking},
     Client,
 };
@@ -70,23 +71,47 @@ impl Anthropic {
         let max_tokens = model
             .parameters
             .max_tokens
-            .or_else(|| details.as_ref().and_then(|d| d.max_output_tokens));
+            .or_else(|| details.as_ref().and_then(|d| d.max_output_tokens))
+            .unwrap_or(DEFAULT_MAX_TOKENS as u32);
 
         if let Some(thinking) = model.parameters.reasoning {
-            builder.thinking(types::ExtendedThinking {
-                kind: "enabled".to_string(),
-                budget_tokens: thinking.effort.to_tokens(max_tokens.unwrap_or(32_000)),
-            });
+            let (supported, min_supported, max_supported) =
+                if let Some(details) = details.as_ref().and_then(|d| d.reasoning) {
+                    (details.supported, details.min_tokens, details.max_tokens)
+                } else {
+                    warn!(
+                        %model.id,
+                        "Model reasoning support unknown, but the request requested it. This may \
+                    result in unexpected behavior"
+                    );
+
+                    (true, 0, None)
+                };
+
+            if supported {
+                builder.thinking(types::ExtendedThinking {
+                    kind: "enabled".to_string(),
+                    budget_tokens: thinking
+                        .effort
+                        .to_tokens(max_tokens)
+                        .max(min_supported)
+                        .min(max_supported.unwrap_or(u32::MAX)),
+                });
+            } else {
+                warn!(
+                    %model.id,
+                    "Model does not support reasoning, but the request requested it. Reasnoning \
+                     disabled."
+                );
+            }
         }
 
         if let Some(temperature) = model.parameters.temperature {
             builder.temperature(temperature);
         }
 
-        if let Some(max_tokens) = max_tokens {
-            #[expect(clippy::cast_possible_wrap)]
-            builder.max_tokens(max_tokens as i32);
-        }
+        #[expect(clippy::cast_possible_wrap)]
+        builder.max_tokens(max_tokens as i32);
 
         if let Some(top_p) = model.parameters.top_p {
             builder.top_p(top_p);
@@ -163,7 +188,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
-            reasoning: Some(ReasoningDetails::default()),
+            reasoning: Some(ReasoningDetails::supported()),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
         },
         "claude-sonnet-4-0" | "claude-sonnet-4-20250514" => ModelDetails {
@@ -171,7 +196,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::default()),
+            reasoning: Some(ReasoningDetails::supported()),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
         },
         "claude-3-7-sonnet-latest" | "claude-3-7-sonnet-20250219" => ModelDetails {
@@ -179,7 +204,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::default()),
+            reasoning: Some(ReasoningDetails::supported()),
             knowledge_cutoff: Some(date!(2024 - 11 - 1)),
         },
         "claude-3-5-haiku-latest" | "claude-3-5-haiku-20241022" => ModelDetails {
@@ -187,7 +212,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
-            reasoning: None,
+            reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 7 - 1)),
         },
         "claude-3-5-sonnet-latest"
@@ -197,7 +222,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
-            reasoning: None,
+            reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 4 - 1)),
         },
         "claude-3-opus-latest" | "claude-3-opus-20240229" => ModelDetails {
@@ -205,7 +230,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
-            reasoning: None,
+            reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2023 - 8 - 1)),
         },
         "claude-3-haiku-20240307" => ModelDetails {
@@ -213,7 +238,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
-            reasoning: None,
+            reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 8 - 1)),
         },
         id => {

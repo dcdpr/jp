@@ -50,10 +50,43 @@ pub struct ModelDetails {
 }
 
 /// Details about the reasoning capabilities of a model.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReasoningDetails {
+    pub supported: bool,
     pub min_tokens: u32,
     pub max_tokens: Option<u32>,
+}
+
+impl ReasoningDetails {
+    #[must_use]
+    pub fn supported() -> Self {
+        Self {
+            supported: true,
+            min_tokens: 0,
+            max_tokens: None,
+        }
+    }
+
+    #[must_use]
+    pub fn unsupported() -> Self {
+        Self {
+            supported: true,
+            min_tokens: 0,
+            max_tokens: None,
+        }
+    }
+
+    #[must_use]
+    pub fn min_tokens(mut self, min_tokens: u32) -> Self {
+        self.min_tokens = min_tokens;
+        self
+    }
+
+    #[must_use]
+    pub fn max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = Some(max_tokens);
+        self
+    }
 }
 
 /// Represents an event yielded by the chat completion stream.

@@ -6,7 +6,7 @@ Ok(
     [
         ModelDetails {
             provider: Openai,
-            slug: "gpt-4o-realtime-preview-2024-12-17",
+            slug: "gpt-4-0613",
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
@@ -14,7 +14,83 @@ Ok(
         },
         ModelDetails {
             provider: Openai,
-            slug: "gpt-4o-audio-preview-2024-12-17",
+            slug: "gpt-4",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Openai,
+            slug: "gpt-3.5-turbo",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Openai,
+            slug: "gpt-4o-audio-preview-2025-06-03",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Openai,
+            slug: "gpt-4.1-nano",
+            context_window: Some(
+                1047576,
+            ),
+            max_output_tokens: Some(
+                32768,
+            ),
+            reasoning: Some(
+                ReasoningDetails {
+                    supported: true,
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+            ),
+            knowledge_cutoff: Some(
+                2024-06-01,
+            ),
+        },
+        ModelDetails {
+            provider: Openai,
+            slug: "gpt-image-1",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Openai,
+            slug: "codex-mini-latest",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Openai,
+            slug: "gpt-4o-realtime-preview-2025-06-03",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Openai,
+            slug: "davinci-002",
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Openai,
+            slug: "babbage-002",
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
