@@ -54,7 +54,7 @@ docs-ci:
 
 # Generate code coverage on CI.
 [group('ci')]
-coverage-ci: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@^0.6")
+coverage-ci: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@^0.6 cargo-nextest@^0.9")
     cargo llvm-cov --no-report nextest
     cargo llvm-cov --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info
