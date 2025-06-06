@@ -111,7 +111,6 @@ impl Provider for Google {
 
     async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
         let request = self.create_request(model, query).await?;
-        println!("{}", serde_json::to_string_pretty(&request).unwrap());
 
         self.client
             .generate_content(model.id.slug(), &request)
@@ -123,7 +122,6 @@ impl Provider for Google {
     async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
         let client = self.client.clone();
         let request = self.create_request(model, query).await?;
-        println!("{}", serde_json::to_string_pretty(&request).unwrap());
         let slug = model.id.slug().to_owned();
         let stream = Box::pin(stream! {
             let stream = client
@@ -154,6 +152,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             .base_model_id
             .starts_with("gemini-2.5-pro")
             .then_some(ReasoningDetails {
+                supported: true,
                 min_tokens: 128,
                 max_tokens: Some(32768),
             })
@@ -162,6 +161,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                     .base_model_id
                     .starts_with("gemini-2.5-flash")
                     .then_some(ReasoningDetails {
+                        supported: true,
                         min_tokens: 0,
                         max_tokens: Some(32768),
                     })

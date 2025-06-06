@@ -150,7 +150,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::default()),
+            reasoning: Some(ReasoningDetails::supported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "o3-mini" | "o3-mini-2025-01-31" => ModelDetails {
@@ -158,7 +158,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::default()),
+            reasoning: Some(ReasoningDetails::supported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "o1-mini" | "o1-mini-2024-09-12" => ModelDetails {
@@ -166,7 +166,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(128_000),
             max_output_tokens: Some(65_536),
-            reasoning: Some(ReasoningDetails::default()),
+            reasoning: Some(ReasoningDetails::supported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "o3" | "o3-2025-04-16" => ModelDetails {
@@ -174,7 +174,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::default()),
+            reasoning: Some(ReasoningDetails::supported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "o1" | "o1-2024-12-17" => ModelDetails {
@@ -182,7 +182,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::default()),
+            reasoning: Some(ReasoningDetails::supported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "o1-pro" | "o1-pro-2025-03-19" => ModelDetails {
@@ -190,7 +190,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::default()),
+            reasoning: Some(ReasoningDetails::supported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "gpt-4.1" | "gpt-4.1-2025-04-14" => ModelDetails {
@@ -198,7 +198,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
-            reasoning: None,
+            reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "gpt-4o" | "gpt-4o-2024-08-06" => ModelDetails {
@@ -206,7 +206,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
-            reasoning: None,
+            reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "chatgpt-4o" | "chatgpt-4o-latest" => ModelDetails {
@@ -214,7 +214,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
-            reasoning: None,
+            reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => ModelDetails {
@@ -222,7 +222,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
-            reasoning: None,
+            reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => ModelDetails {
@@ -230,7 +230,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
-            reasoning: None,
+            reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => ModelDetails {
@@ -238,7 +238,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             slug: model.id,
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
-            reasoning: None,
+            reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         id => {
@@ -672,7 +672,7 @@ mod tests {
                     .models()
                     .await
                     .map(|mut v| {
-                        v.truncate(2);
+                        v.truncate(10);
                         v
                     })
             },
