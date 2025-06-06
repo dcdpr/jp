@@ -20,7 +20,7 @@ use serde_json::Value;
 use time::macros::date;
 use tracing::{trace, warn};
 
-use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, StreamEvent};
+use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply, StreamEvent};
 use crate::{
     error::{Error, Result},
     provider::{handle_delta, AccumulationState, Delta},
@@ -149,7 +149,7 @@ impl Provider for Anthropic {
         Ok(models.into_iter().map(map_model).collect())
     }
 
-    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
+    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Reply> {
         let request = self.create_request(model, query).await?;
         self.client
             .messages()
@@ -157,6 +157,7 @@ impl Provider for Anthropic {
             .await
             .map_err(Into::into)
             .and_then(map_response)
+            .map(Reply)
     }
 
     async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {

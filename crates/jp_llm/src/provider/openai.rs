@@ -22,7 +22,8 @@ use time::{macros::date, OffsetDateTime};
 use tracing::{debug, trace, warn};
 
 use super::{
-    handle_delta, Delta, Event, EventStream, ModelDetails, Provider, ReasoningDetails, StreamEvent,
+    handle_delta, Delta, Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply,
+    StreamEvent,
 };
 use crate::{
     error::{Error, Result},
@@ -94,7 +95,7 @@ impl Provider for Openai {
             .collect())
     }
 
-    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
+    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Reply> {
         let client = self.client.clone();
         let request = self.create_request(model, query).await?;
         client
@@ -102,6 +103,7 @@ impl Provider for Openai {
             .await?
             .map_err(Into::into)
             .and_then(map_response)
+            .map(Reply)
     }
 
     async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {

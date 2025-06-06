@@ -27,7 +27,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tracing::{debug, trace, warn};
 
-use super::{CompletionChunk, Delta, Event, EventStream, ModelDetails, StreamEvent};
+use super::{CompletionChunk, Delta, Event, EventStream, ModelDetails, Reply, StreamEvent};
 use crate::{
     error::Result,
     provider::{handle_delta, AccumulationState, Provider},
@@ -198,7 +198,7 @@ impl Provider for Openrouter {
         Ok(stream)
     }
 
-    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
+    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Reply> {
         let request = self.build_request(query, model).await?;
         let completion =
             self.client.chat_completion(request).await.inspect_err(
@@ -210,12 +210,12 @@ impl Provider for Openrouter {
         let choice_data = completion.choices.into_iter().next();
         let Some(choice) = choice_data else {
             trace!("OpenRouter delta had no choices, skipping.");
-            return Ok(vec![]);
+            return Ok(Reply::default());
         };
 
         let Choice::NonStreaming(choice) = choice else {
             warn!("Received streaming choice in non-streaming context, ignoring.");
-            return Ok(vec![]);
+            return Ok(Reply::default());
         };
 
         if let Some(ErrorResponse { code, message, .. }) = choice.error {
@@ -240,7 +240,7 @@ impl Provider for Openrouter {
             }));
         }
 
-        Ok(events)
+        Ok(Reply(events))
     }
 }
 

@@ -24,7 +24,7 @@ use serde_json::Value;
 use tracing::trace;
 use url::Url;
 
-use super::{handle_delta, Event, EventStream, ModelDetails, Provider, StreamEvent};
+use super::{handle_delta, Event, EventStream, ModelDetails, Provider, Reply, StreamEvent};
 use crate::{
     error::{Error, Result},
     provider::{AccumulationState, Delta},
@@ -44,13 +44,14 @@ impl Provider for Ollama {
         Ok(models.into_iter().map(map_model).collect())
     }
 
-    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
+    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Reply> {
         let request = create_request(model, query)?;
         self.client
             .send_chat_messages(request)
             .await
             .map_err(Into::into)
             .and_then(map_response)
+            .map(Reply)
     }
 
     async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {

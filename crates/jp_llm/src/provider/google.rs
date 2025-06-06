@@ -15,7 +15,7 @@ use jp_query::query::ChatQuery;
 use serde_json::Value;
 use tracing::trace;
 
-use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails};
+use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply};
 use crate::{
     error::{Error, Result},
     provider::Delta,
@@ -109,7 +109,7 @@ impl Provider for Google {
             .collect())
     }
 
-    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Vec<Event>> {
+    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Reply> {
         let request = self.create_request(model, query).await?;
 
         self.client
@@ -117,6 +117,7 @@ impl Provider for Google {
             .await
             .map_err(Into::into)
             .and_then(map_response)
+            .map(Reply)
     }
 
     async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
