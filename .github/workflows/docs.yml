@@ -2,24 +2,20 @@ name: Deploy documentation to Github Pages
 on:
   # Allow to run this workflow manually from the Actions tab
   workflow_dispatch:
-
   push:
     tags: ['*']
     branches: [main]
-
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
-
 # Allow only one concurrent deployment, skipping runs queued between the run
 # in-progress and latest queued. However, do NOT cancel in-progress runs as we
 # want to allow these production deployments to complete.
 concurrency:
   group: pages
   cancel-in-progress: false
-
 # Confine `run` steps to the `docs` directory.
 defaults:
   run:
@@ -28,15 +24,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
         with:
           fetch-depth: 0 # Not needed if lastUpdated is not enabled
-      - uses: extractions/setup-just@v2
-      - uses: actions/setup-node@v4
-      - uses: actions/configure-pages@v4
+      - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/configure-pages@d5606572c479bee637007364c6b4800ac4fc8573 # v5
       - run: corepack enable
       - run: just build-docs
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@2d163be3ddce01512f3eea7ac5b7023b5d643ce1 # v3
         with:
           path: docs/.vitepress/dist
   deploy:

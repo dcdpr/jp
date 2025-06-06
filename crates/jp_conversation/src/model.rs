@@ -224,7 +224,7 @@ impl FromStr for ReasoningEffort {
 /// ID wrapper for LLM Model
 ///
 /// This is used for storage and display purposes, it is **NOT** the same as
-/// [`Model::slug`].
+/// [`Model::id`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ModelId {

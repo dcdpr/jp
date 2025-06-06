@@ -934,7 +934,7 @@ where
     /// types that can be `==` without being identical. See the [module-level
     /// documentation] for more.
     ///
-    /// [module-level documentation]: crate::collections#insert-and-complex-keys
+    /// [module-level documentation]: std::collections#insert-and-complex-keys
     ///
     /// # Examples
     ///
@@ -996,8 +996,9 @@ where
     /// Removes a key from the map, returning the value at the key if the key
     /// was previously in the map.
     ///
-    /// As opposed to [`remove`], this method does not mark the key as removed.
-    /// It *does* unmark the key as modified, since the key no longer exists.
+    /// As opposed to [`TombMap::remove`], this method does not mark the key as
+    /// removed. It *does* unmark the key as modified, since the key no longer
+    /// exists.
     #[inline]
     pub fn remove_untracked<Q>(&mut self, k: &Q) -> Option<V>
     where

@@ -2,4 +2,4 @@
 source: crates/jp_test/src/mock.rs
 expression: expr
 ---
-"Understood. I received \"Test message.\"\n\nHow can I help you today?"
+"Received. How can I help you today?"

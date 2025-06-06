@@ -21,10 +21,10 @@ then:
 when:
   path: "/v1beta/models/gemini-2.5-flash-preview-05-20:streamGenerateContent"
   method: POST
-  body: "{\"contents\":[{\"parts\":[{\"thought\":false,\"text\":\"Test message\"}],\"role\":\"user\"}],\"generationConfig\":{\"maxOutputTokens\":65536}}"
+  body: "{\"contents\":[{\"parts\":[{\"text\":\"Test message\"}],\"role\":\"user\"}],\"generationConfig\":{\"maxOutputTokens\":65536}}"
 then:
   status: 200
   header:
     - name: content-type
       value: text/event-stream
-  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"Understood. I received \\\"Test message.\\\"\\n\\nHow can I help you today?\"}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 3,\"candidatesTokenCount\": 17,\"totalTokenCount\": 57,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 3}],\"thoughtsTokenCount\": 37},\"modelVersion\": \"models/gemini-2.5-flash-preview-05-20\",\"responseId\": \"eOtBaLWeBuqExs0Prcag2A0\"}\r\n\r\n"
+  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"Received. How can I help you today?\"}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 3,\"candidatesTokenCount\": 9,\"totalTokenCount\": 56,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 3}],\"thoughtsTokenCount\": 44},\"modelVersion\": \"models/gemini-2.5-flash-preview-05-20\",\"responseId\": \"vvJCaJWYC860nsEPqr7D6Ak\"}\r\n\r\n"
