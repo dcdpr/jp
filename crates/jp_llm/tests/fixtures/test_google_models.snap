@@ -1,0 +1,704 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    [
+        ModelDetails {
+            provider: Google,
+            slug: "embedding-gecko-001",
+            context_window: Some(
+                1024,
+            ),
+            max_output_tokens: Some(
+                1,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.0-pro-vision-latest",
+            context_window: Some(
+                12288,
+            ),
+            max_output_tokens: Some(
+                4096,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-pro-vision",
+            context_window: Some(
+                12288,
+            ),
+            max_output_tokens: Some(
+                4096,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-pro-latest",
+            context_window: Some(
+                2000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-pro-001",
+            context_window: Some(
+                2000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-pro-002",
+            context_window: Some(
+                2000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-pro",
+            context_window: Some(
+                2000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-flash-latest",
+            context_window: Some(
+                1000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-flash-001",
+            context_window: Some(
+                1000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-flash-001-tuning",
+            context_window: Some(
+                16384,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-flash",
+            context_window: Some(
+                1000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-flash-002",
+            context_window: Some(
+                1000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-flash-8b",
+            context_window: Some(
+                1000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-flash-8b-001",
+            context_window: Some(
+                1000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-flash-8b-latest",
+            context_window: Some(
+                1000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-flash-8b-exp-0827",
+            context_window: Some(
+                1000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-1.5-flash-8b-exp-0924",
+            context_window: Some(
+                1000000,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-pro-exp-03-25",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-pro-preview-03-25",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-flash-preview-04-17",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-flash-preview-05-20",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-flash-preview-04-17-thinking",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-pro-preview-05-06",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-pro-preview-06-05",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-flash-exp",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-flash",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-flash-001",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-flash-lite-001",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-flash-lite",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-flash-lite-preview-02-05",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-flash-lite-preview",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-pro-exp",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-pro-exp-02-05",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-exp-1206",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-flash-thinking-exp-01-21",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-flash-thinking-exp",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-flash-thinking-exp-1219",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-flash-preview-tts",
+            context_window: Some(
+                32768,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-pro-preview-tts",
+            context_window: Some(
+                65536,
+            ),
+            max_output_tokens: Some(
+                65536,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "learnlm-2.0-flash-experimental",
+            context_window: Some(
+                1048576,
+            ),
+            max_output_tokens: Some(
+                32768,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemma-3-1b-it",
+            context_window: Some(
+                32768,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemma-3-4b-it",
+            context_window: Some(
+                32768,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemma-3-12b-it",
+            context_window: Some(
+                32768,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemma-3-27b-it",
+            context_window: Some(
+                131072,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemma-3n-e4b-it",
+            context_window: Some(
+                8192,
+            ),
+            max_output_tokens: Some(
+                2048,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "embedding-001",
+            context_window: Some(
+                2048,
+            ),
+            max_output_tokens: Some(
+                1,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "text-embedding-004",
+            context_window: Some(
+                2048,
+            ),
+            max_output_tokens: Some(
+                1,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-embedding-exp-03-07",
+            context_window: Some(
+                8192,
+            ),
+            max_output_tokens: Some(
+                1,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-embedding-exp",
+            context_window: Some(
+                8192,
+            ),
+            max_output_tokens: Some(
+                1,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "aqa",
+            context_window: Some(
+                7168,
+            ),
+            max_output_tokens: Some(
+                1024,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "imagen-3.0-generate-002",
+            context_window: Some(
+                480,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "veo-2.0-generate-001",
+            context_window: Some(
+                480,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-flash-preview-native-audio-dialog",
+            context_window: Some(
+                131072,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-flash-preview-native-audio-dialog-rai-v3",
+            context_window: Some(
+                131072,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-flash-exp-native-audio-thinking-dialog",
+            context_window: Some(
+                131072,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: Some(
+                true,
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.0-flash-live-001",
+            context_window: Some(
+                131072,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: None,
+            knowledge_cutoff: None,
+        },
+    ],
+)

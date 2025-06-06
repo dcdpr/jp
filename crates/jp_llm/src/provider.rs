@@ -1,5 +1,5 @@
 // pub mod deepseek;
-// pub mod google;
+pub mod google;
 // pub mod xai;
 pub mod anthropic;
 pub mod ollama;
@@ -11,6 +11,7 @@ use std::{mem, pin::Pin};
 use anthropic::Anthropic;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt as _};
+use google::Google;
 use jp_config::llm::provider;
 use jp_conversation::{message::ToolCallRequest, model::ProviderId, Model};
 use jp_query::query::{ChatQuery, StructuredQuery};
@@ -40,11 +41,19 @@ pub struct ModelDetails {
     /// The maximum output tokens, if known.
     pub max_output_tokens: Option<u32>,
 
-    /// Whether the model supports reasoning, if known.
-    pub reasoning: Option<bool>,
+    /// Whether the model supports reasoning, if unknown, it is assumed to not
+    /// be supported.
+    pub reasoning: Option<ReasoningDetails>,
 
     /// The knowledge cutoff date, if known.
     pub knowledge_cutoff: Option<Date>,
+}
+
+/// Details about the reasoning capabilities of a model.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ReasoningDetails {
+    pub min_tokens: u32,
+    pub max_tokens: Option<u32>,
 }
 
 /// Represents an event yielded by the chat completion stream.
@@ -95,6 +104,19 @@ impl Event {
     #[must_use]
     pub fn metadata(key: impl Into<String>, value: impl Into<Value>) -> Self {
         Self::Metadata(key.into(), value.into())
+    }
+}
+
+impl From<Event> for StreamEvent {
+    fn from(event: Event) -> Self {
+        match event {
+            Event::Content(content) => StreamEvent::ChatChunk(CompletionChunk::Content(content)),
+            Event::Reasoning(reasoning) => {
+                StreamEvent::ChatChunk(CompletionChunk::Reasoning(reasoning))
+            }
+            Event::ToolCall(call) => StreamEvent::ToolCall(call),
+            Event::Metadata(key, metadata) => StreamEvent::Metadata(key, metadata),
+        }
     }
 }
 
@@ -248,14 +270,13 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
 
 pub fn get_provider(id: ProviderId, config: &provider::Config) -> Result<Box<dyn Provider>> {
     let provider: Box<dyn Provider> = match id {
-        // ProviderId::Deepseek => Box::new(Deepseek::try_from(&config.deepseek)?),
-        // ProviderId::Google => Box::new(Google::try_from(&config.google)?),
-        // ProviderId::Xai => Box::new(Xai::try_from(&config.xai)?),
-        ProviderId::Ollama => Box::new(Ollama::try_from(&config.ollama)?),
         ProviderId::Anthropic => Box::new(Anthropic::try_from(&config.anthropic)?),
+        ProviderId::Deepseek => todo!(),
+        ProviderId::Google => Box::new(Google::try_from(&config.google)?),
+        ProviderId::Ollama => Box::new(Ollama::try_from(&config.ollama)?),
         ProviderId::Openai => Box::new(Openai::try_from(&config.openai)?),
         ProviderId::Openrouter => Box::new(Openrouter::try_from(&config.openrouter)?),
-        _ => todo!(),
+        ProviderId::Xai => todo!(),
     };
 
     Ok(provider)

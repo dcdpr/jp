@@ -1345,6 +1345,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gemini_client_rs"
+version = "0.4.0"
+source = "git+https://github.com/JeanMertz/gemini-client#d7a392cff6d7ddbd831c077a215e38721a73f30b"
+dependencies = [
+ "async-stream",
+ "futures-util",
+ "reqwest",
+ "reqwest-eventsource",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+ "tokio",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2106,6 +2121,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "futures",
+ "gemini_client_rs",
  "insta",
  "jp_config",
  "jp_conversation",
