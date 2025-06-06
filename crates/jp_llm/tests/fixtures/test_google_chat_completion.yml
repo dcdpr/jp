@@ -21,10 +21,10 @@ then:
 when:
   path: "/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent"
   method: POST
-  body: "{\"contents\":[{\"parts\":[{\"thought\":false,\"text\":\"Test message\"}],\"role\":\"user\"}],\"generationConfig\":{\"maxOutputTokens\":65536}}"
+  body: "{\"contents\":[{\"parts\":[{\"text\":\"Test message\"}],\"role\":\"user\"}],\"generationConfig\":{\"maxOutputTokens\":65536}}"
 then:
   status: 200
   header:
     - name: content-type
       value: application/json; charset=UTF-8
-  body: "{\n  \"candidates\": [\n    {\n      \"content\": {\n        \"parts\": [\n          {\n            \"text\": \"Message received. How can I assist you today?\"\n          }\n        ],\n        \"role\": \"model\"\n      },\n      \"finishReason\": \"STOP\",\n      \"index\": 0\n    }\n  ],\n  \"usageMetadata\": {\n    \"promptTokenCount\": 3,\n    \"candidatesTokenCount\": 10,\n    \"totalTokenCount\": 584,\n    \"promptTokensDetails\": [\n      {\n        \"modality\": \"TEXT\",\n        \"tokenCount\": 3\n      }\n    ],\n    \"thoughtsTokenCount\": 571\n  },\n  \"modelVersion\": \"models/gemini-2.5-flash-preview-05-20\",\n  \"responseId\": \"e-tBaL3MEIiZvdIPxMjl4Qc\"\n}\n"
+  body: "{\n  \"candidates\": [\n    {\n      \"content\": {\n        \"parts\": [\n          {\n            \"text\": \"Hello! I received your message. How can I help you today?\"\n          }\n        ],\n        \"role\": \"model\"\n      },\n      \"finishReason\": \"STOP\",\n      \"index\": 0\n    }\n  ],\n  \"usageMetadata\": {\n    \"promptTokenCount\": 3,\n    \"candidatesTokenCount\": 14,\n    \"totalTokenCount\": 477,\n    \"promptTokensDetails\": [\n      {\n        \"modality\": \"TEXT\",\n        \"tokenCount\": 3\n      }\n    ],\n    \"thoughtsTokenCount\": 460\n  },\n  \"modelVersion\": \"models/gemini-2.5-flash-preview-05-20\",\n  \"responseId\": \"kz1DaPX9Ccm0kdUPnJPmoQ8\"\n}\n"
