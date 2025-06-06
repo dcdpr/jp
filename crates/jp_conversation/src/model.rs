@@ -361,6 +361,7 @@ pub enum ProviderId {
     Openai,
     #[default]
     Openrouter,
+    Xai,
 }
 
 impl Id for ProviderId {
@@ -390,6 +391,7 @@ impl fmt::Display for ProviderId {
             Self::Openai => f.write_str("openai"),
             Self::Openrouter => f.write_str("openrouter"),
             Self::Ollama => f.write_str("ollama"),
+            Self::Xai => f.write_str("xai"),
         }
     }
 }
