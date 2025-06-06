@@ -156,7 +156,7 @@ dependencies = [
 [[package]]
 name = "async-anthropic"
 version = "0.6.0"
-source = "git+https://github.com/JeanMertz/async-anthropic#3d829639ebaf9c72b1807121b1d5e567f1d7722a"
+source = "git+https://github.com/JeanMertz/async-anthropic#6e5ff9bc8d2fd0e147bd6e6fc631d736cd458207"
 dependencies = [
  "backon",
  "derive_builder",

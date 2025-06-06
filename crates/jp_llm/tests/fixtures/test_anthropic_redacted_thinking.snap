@@ -1,0 +1,16 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+[
+    Reasoning(
+        "",
+    ),
+    Metadata(
+        "redacted_thinking",
+        String("Ev8FCkYIBBgCKkDkT/uTim/ZnCUeTADgYm7GgmIxEaXcHMwUu746p7nzITQUF17phRWpxN9lpkwgIvdwlQ++AeKb4T7J6IiwF8bjEgx13p38aF0F0VCbLzUaDBg/7tTfG8jO9WsxaCIw4pb/Y6cisxkRX9bhry17VzQBHown4kEfqTLAodcycIN2p4HO+NSO89R3TU67cY47KuYEoWnWii66sgBGBnDGldMm6HMjEu2Xy/Etk2xws9mOo17Sxh13r/JYaF8Qg7fFVRt8LHYgd/y0GtHXtT5zDIxVdMYn2fK+aIkl4SLey8IeBHG+E3ADU6+e0EHMGHMDNLsjqtFtb31f3z7iJ2w1IBnDxdGKfBL/juSohJQ3Us6/rWvejV8QJ4kYmdoJ0ZzikAGfo1MXoI2Z73UgvmYw5a0BAbIPu4RR3DtSVgYUUYk1w6m2HNL0Aoc+QAwwK+rkB0znGphFGN6FVrbp/vFGWu+yPWrR0Ut1ofeY4RTUBh5VGw6V90sMvSlS6qdneMIqE3d/5snTjiAp0KoelmRt6yJLnfhfWYLHTpPtGNy5MbWYCB6dTc7AN9oZHALeNpSXKljY6ejgFQeOhnwZ+KbSASM2k5qjjQwr/Itv/t7/iDbQhWljVDatee4/C5C1LL9JPkgKMSSzxJaZpUciiuLRnVQUeWcaudMEr4uoGdcZDfMlivTVsLS6Pt8M5f5Kar3CSeaH5EX5LWP/KRBdN95N7yIAcB+KnGUGtd9TP1gbdS6LIRRb/PKahinHJyRTghPKRKPrQQCCrV7qTP4XOKsMsFFoDTIQH6pz+QHnHIHTJIDBKwipJb7HfDvUnC+sdOBs7cDr+YXW2w7Wna1nc0o4nIwHIvN2RdwIzFfyIjxJVNK8oEnckumYAkxrM91Ore0sv7tQJuq1kLYcPlVnWbO47AtLr4/N/B2NoNWZTbIFlVM2QCoao059//cEJKLngd0paZyU8MGnJe/6JtPMqzV0o5P6ADcMHLUxGaWjqBpH75nUijdOH4jj/L4YAQ=="),
+    ),
+    Content(
+        "I notice you've sent what appears to be some kind of command or trigger string. However, I don't have any special hidden thinking process or redacted content to reveal. My responses are generated directly to be helpful, harmless and honest.\n\nIs there something specific you'd like help with today? I'm happy to assist with questions, provide information, or have a conversation about topics you're interested in.",
+    ),
+]

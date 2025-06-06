@@ -1,0 +1,20 @@
+when:
+  path: /v1/models
+  method: GET
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/json
+  body: "{\"data\":[{\"type\":\"model\",\"id\":\"claude-opus-4-20250514\",\"display_name\":\"Claude Opus 4\",\"created_at\":\"2025-05-22T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-sonnet-4-20250514\",\"display_name\":\"Claude Sonnet 4\",\"created_at\":\"2025-05-22T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-7-sonnet-20250219\",\"display_name\":\"Claude Sonnet 3.7\",\"created_at\":\"2025-02-24T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-5-sonnet-20241022\",\"display_name\":\"Claude Sonnet 3.5 (New)\",\"created_at\":\"2024-10-22T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-5-haiku-20241022\",\"display_name\":\"Claude Haiku 3.5\",\"created_at\":\"2024-10-22T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-5-sonnet-20240620\",\"display_name\":\"Claude Sonnet 3.5 (Old)\",\"created_at\":\"2024-06-20T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-haiku-20240307\",\"display_name\":\"Claude Haiku 3\",\"created_at\":\"2024-03-07T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-opus-20240229\",\"display_name\":\"Claude Opus 3\",\"created_at\":\"2024-02-29T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-sonnet-20240229\",\"display_name\":\"Claude Sonnet 3\",\"created_at\":\"2024-02-29T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-2.1\",\"display_name\":\"Claude 2.1\",\"created_at\":\"2023-11-21T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-2.0\",\"display_name\":\"Claude 2.0\",\"created_at\":\"2023-07-11T00:00:00Z\"}],\"has_more\":false,\"first_id\":\"claude-opus-4-20250514\",\"last_id\":\"claude-2.0\"}"
+---
+when:
+  path: /v1/messages
+  method: POST
+  body: "{\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB\"}]}],\"model\":\"claude-3-7-sonnet-latest\",\"max_tokens\":2048,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":1024},\"stream\":false}"
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/json
+  body: "{\"id\":\"msg_01LNBiaBBb4jDZKwegDKvqCg\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-7-sonnet-20250219\",\"content\":[{\"type\":\"redacted_thinking\",\"data\":\"Ev8FCkYIBBgCKkDkT/uTim/ZnCUeTADgYm7GgmIxEaXcHMwUu746p7nzITQUF17phRWpxN9lpkwgIvdwlQ++AeKb4T7J6IiwF8bjEgx13p38aF0F0VCbLzUaDBg/7tTfG8jO9WsxaCIw4pb/Y6cisxkRX9bhry17VzQBHown4kEfqTLAodcycIN2p4HO+NSO89R3TU67cY47KuYEoWnWii66sgBGBnDGldMm6HMjEu2Xy/Etk2xws9mOo17Sxh13r/JYaF8Qg7fFVRt8LHYgd/y0GtHXtT5zDIxVdMYn2fK+aIkl4SLey8IeBHG+E3ADU6+e0EHMGHMDNLsjqtFtb31f3z7iJ2w1IBnDxdGKfBL/juSohJQ3Us6/rWvejV8QJ4kYmdoJ0ZzikAGfo1MXoI2Z73UgvmYw5a0BAbIPu4RR3DtSVgYUUYk1w6m2HNL0Aoc+QAwwK+rkB0znGphFGN6FVrbp/vFGWu+yPWrR0Ut1ofeY4RTUBh5VGw6V90sMvSlS6qdneMIqE3d/5snTjiAp0KoelmRt6yJLnfhfWYLHTpPtGNy5MbWYCB6dTc7AN9oZHALeNpSXKljY6ejgFQeOhnwZ+KbSASM2k5qjjQwr/Itv/t7/iDbQhWljVDatee4/C5C1LL9JPkgKMSSzxJaZpUciiuLRnVQUeWcaudMEr4uoGdcZDfMlivTVsLS6Pt8M5f5Kar3CSeaH5EX5LWP/KRBdN95N7yIAcB+KnGUGtd9TP1gbdS6LIRRb/PKahinHJyRTghPKRKPrQQCCrV7qTP4XOKsMsFFoDTIQH6pz+QHnHIHTJIDBKwipJb7HfDvUnC+sdOBs7cDr+YXW2w7Wna1nc0o4nIwHIvN2RdwIzFfyIjxJVNK8oEnckumYAkxrM91Ore0sv7tQJuq1kLYcPlVnWbO47AtLr4/N/B2NoNWZTbIFlVM2QCoao059//cEJKLngd0paZyU8MGnJe/6JtPMqzV0o5P6ADcMHLUxGaWjqBpH75nUijdOH4jj/L4YAQ==\"},{\"type\":\"text\",\"text\":\"I notice you've sent what appears to be some kind of command or trigger string. However, I don't have any special hidden thinking process or redacted content to reveal. My responses are generated directly to be helpful, harmless and honest.\\n\\nIs there something specific you'd like help with today? I'm happy to assist with questions, provide information, or have a conversation about topics you're interested in.\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":92,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":224,\"service_tier\":\"standard\"}}"
