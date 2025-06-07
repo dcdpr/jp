@@ -5,6 +5,10 @@ commit args="Give me a commit message": _install-jp
         echo "$message" | sed -e 's/\x1b\[[0-9;]*[mGKHF]//g' | git commit --edit --file=-
     fi
 
+# Generate changelog for the project.
+build-changelog: (_install "jilu")
+    @jilu
+
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
 develop-docs: (_docs "dev" "--open")
