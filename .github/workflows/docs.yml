@@ -31,6 +31,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       - uses: actions/configure-pages@d5606572c479bee637007364c6b4800ac4fc8573 # v5
       - run: corepack enable
+      - run: just build-changelog > docs/change-log.md
       - run: just build-docs
       - uses: actions/upload-pages-artifact@2d163be3ddce01512f3eea7ac5b7023b5d643ce1 # v3
         with:
