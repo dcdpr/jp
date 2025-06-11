@@ -1,15 +1,14 @@
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-    str::FromStr,
-};
+use std::{env, fs, path::PathBuf, str::FromStr};
 
 use duct::Expression;
 use jp_config::editor;
-use jp_conversation::{MessagePair, UserMessage};
+use jp_conversation::{ConversationId, Model, UserMessage};
 use time::{macros::format_description, UtcOffset};
 
-use crate::error::{Error, Result};
+use crate::{
+    ctx::Ctx,
+    error::{Error, Result},
+};
 
 /// The name of the file used to store the current query message.
 const QUERY_FILENAME: &str = "QUERY_MESSAGE.md";
@@ -233,12 +232,17 @@ pub fn open(path: PathBuf, options: Options) -> Result<(String, RevertFileGuard)
 }
 
 /// Open an editor for the user to input or edit text using a file in the workspace
+#[expect(clippy::too_many_lines)]
 pub fn edit_query(
-    root: &Path,
+    ctx: &Ctx,
+    conversation_id: ConversationId,
+    model: &Model,
     initial_message: Option<String>,
-    history: &[MessagePair],
     cmd: Expression,
 ) -> Result<(String, PathBuf)> {
+    let root = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
+    let history = ctx.workspace.get_messages(&conversation_id);
+
     let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
 
@@ -316,6 +320,11 @@ pub fn edit_query(
 
         initial_text.push(buf);
     }
+
+    if let Some(persona) = ctx.config.conversation.persona.as_ref() {
+        initial_text.push(format!("persona: {persona}\n"));
+    }
+    initial_text.push(format!("model: {}\n", model.id));
 
     if !initial_text.is_empty() {
         let mut intro = String::new();

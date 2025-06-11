@@ -176,7 +176,8 @@ impl Args {
         // Ensure we start the MCP servers attached to the conversation.
         ctx.configure_active_mcp_servers().await?;
 
-        let (message, query_file_path) = self.build_message(ctx, conversation_id).await?;
+        let model = self.get_model(ctx)?;
+        let (message, query_file_path) = self.build_message(ctx, conversation_id, &model).await?;
 
         if let UserMessage::Query(query) = &message {
             // Clean up after empty queries.
@@ -217,7 +218,7 @@ impl Args {
             .workspace
             .get_persona(persona_id)
             .ok_or(Error::NotFound("Persona", persona_id.to_string()))?;
-        let model = self.get_model(ctx)?;
+
         let tool_choice = self.tool_choice(ctx);
         let tools = ctx.mcp_client.list_tools().await?;
 
@@ -298,6 +299,7 @@ impl Args {
         &self,
         ctx: &mut Ctx,
         conversation_id: ConversationId,
+        model: &Model,
     ) -> Result<(UserMessage, Option<PathBuf>)> {
         // If replaying, remove the last message from the conversation, and use
         // its query message to build the new query.
@@ -329,7 +331,7 @@ impl Args {
             }
         }
 
-        let query_file_path = self.edit_message(&mut message, ctx, conversation_id)?;
+        let query_file_path = self.edit_message(&mut message, ctx, conversation_id, model)?;
 
         if let UserMessage::Query(query) = &mut message
             && self.template
@@ -492,6 +494,7 @@ impl Args {
         message: &mut UserMessage,
         ctx: &mut Ctx,
         conversation_id: ConversationId,
+        model: &Model,
     ) -> Result<Option<PathBuf>> {
         let UserMessage::Query(query) = message else {
             return Ok(None);
@@ -521,8 +524,6 @@ impl Args {
             },
         };
 
-        let path = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
-        let messages = ctx.workspace.get_messages(&conversation_id);
         let initial_message = if query.is_empty() {
             None
         } else {
@@ -532,8 +533,9 @@ impl Args {
         // If replaying, pass the last query as the text to be edited,
         // otherwise open an empty editor.
         let query_file_path;
-        (*query, query_file_path) = editor::edit_query(path, initial_message, messages, editor)
-            .map(|(q, p)| (q, Some(p)))?;
+        (*query, query_file_path) =
+            editor::edit_query(ctx, conversation_id, model, initial_message, editor)
+                .map(|(q, p)| (q, Some(p)))?;
 
         Ok(query_file_path)
     }
