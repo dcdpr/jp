@@ -5,6 +5,12 @@ on:
   push:
     tags: ['*']
     branches: [main]
+env:
+  CARGO_TERM_COLOR: always
+  JUST_TIMESTAMP: "true"
+  JUST_COLOR: "always"
+  JUST_EXPLAIN: "true"
+  JUST_VERBOSE: "4"
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
