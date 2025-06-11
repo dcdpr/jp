@@ -60,6 +60,7 @@ pub struct Parameters {
     ///
     /// As opposed to `top_k`, this is a dynamic approach that considers tokens
     /// until their cumulative probability reaches a threshold P.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
 
     /// Control the diversity and focus of the model's output. It determines how
@@ -68,6 +69,7 @@ pub struct Parameters {
     ///
     /// As opposed to `top_p`, it is a fixed-size approach that considers the
     /// top K most probable tokens, discarding the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub top_k: Option<u32>,
 
     /// The `stop_words` parameter can be set to specific sequences, such as a
