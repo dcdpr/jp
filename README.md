@@ -1,9 +1,10 @@
 # Jean-Pierre, An LLM-based Programming Assistant
 
-Jean-Pierre is a command-line toolkit to support you in your daily work as a
-software programmer. It is built to integrate into your existing workflow, uses
-powerful concepts such as _workspaces_, _contexts_, _attachments_ and _personas_
-to provide a flexible and powerful pair-programming experience with LLMs.
+> A command-line toolkit to support you in your daily work as a software
+> programmer. Built to integrate into your existing workflows, providing a
+> powerful and flexible pair-programming experience with LLMs.
+
+Visit [**jp.computer**] for more information.
 
 ## Features
 
@@ -20,22 +21,17 @@ to provide a flexible and powerful pair-programming experience with LLMs.
 - Locally stored conversations excluded from VCS.
 - (soon) Encrypted conversation history.
 - (soon) Text-to-speech integration.
-- (soon) More attachments types (e.g. header files, external apps, etc.).
 - (soon) Sync server to store data in a central local location.
 - (soon) API server to expose data to other devices.
 - (soon) Mobile web app to continue conversations on mobile devices.
 - (soon) Agentic workflows with budget constraints and milestones.
 - (soon) Directly integrate into your VCS, allowing LLM to edit files.
 
-## Command Line Interface
+## Getting Started
 
-```sh
-jp init .
-jp <...> <-h|--help>
----
-jp <q|query>        ...
-jp <p|persona>      ...
-jp <c|conversation> ...
-jp <a|attachment>   ...
-jp <m|mcp>          ...
-```
+1. [install] JP on your computer.
+2. Run `jp init` to initialize a new workspace.
+3. See `jp --help` for all available commands.
+
+[**jp.computer**]: https://jp.computer
+[install]: https://jp.computer/installation
