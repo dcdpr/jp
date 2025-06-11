@@ -92,7 +92,7 @@ pub struct Args {
     pub edit: Option<Option<Editor>>,
 
     /// Do not edit the query.
-    #[arg(long = "no-edit", conflicts_with = "edit")]
+    #[arg(short = 'E', long = "no-edit", conflicts_with = "edit")]
     pub no_edit: bool,
 
     /// The model to use.

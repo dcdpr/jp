@@ -69,6 +69,7 @@ pub struct Globals {
     /// Use OCI-compliant terminal links.
     #[arg(
         long = "no-hyperlinks",
+        short = 'H',
         global = true,
         default_value_t = false,
         value_parser = BoolValueParser::new().map(|v| !v),
@@ -80,6 +81,7 @@ pub struct Globals {
     #[arg(
         long = "no-color",
         alias = "no-colors",
+        short = 'C',
         global = true,
         default_value_t = false,
         value_parser = BoolValueParser::new().map(|v| !v),
@@ -95,7 +97,7 @@ pub struct Globals {
     #[arg(
         short = '!',
         long = "no-persist",
-        alias = "no-persist",
+        visible_short_alias = 'P',
         global = true,
         default_value_t = false,
         value_parser = BoolValueParser::new().map(|v| !v),
