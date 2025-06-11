@@ -110,6 +110,20 @@ pub struct Args {
     #[arg(long = "hide-reasoning")]
     pub hide_reasoning: bool,
 
+    /// Stream the assistant's response as it is generated.
+    ///
+    /// This is the default behaviour for TTY sessions, but can be forced for
+    /// non-TTY sessions by setting this flag.
+    #[arg(short = 's', long = "stream", conflicts_with = "no_stream")]
+    pub stream: bool,
+
+    /// Disable streaming the assistant's response.
+    ///
+    /// This is the default behaviour for non-TTY sessions, or for structured
+    /// responses, but can be forced by setting this flag.
+    #[arg(short = 'S', long = "no-stream", conflicts_with = "stream")]
+    pub no_stream: bool,
+
     /// The tool to use.
     ///
     /// If a value is provided, the tool matching the value will be used.
@@ -125,6 +139,19 @@ pub struct Args {
     pub no_tool_choice: bool,
 }
 
+/// The stream mode to use for the assistant's response.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum StreamMode {
+    /// Use the default stream mode, depending on whether the output is a TTY,
+    /// and if a structured response is requested.
+    #[default]
+    Auto,
+
+    /// Disable contextual streaming mode, forcing the assistant's response to
+    /// either be streamed or buffered.
+    Forced(bool),
+}
+
 impl Args {
     #[expect(clippy::too_many_lines)]
     pub async fn run(self, ctx: &mut Ctx) -> Output {
@@ -135,6 +162,14 @@ impl Args {
 
         let last_active_conversation_id = ctx.workspace.active_conversation_id();
         let conversation_id = self.get_conversation_id(ctx)?;
+
+        let stream_mode = if self.stream {
+            StreamMode::Forced(true)
+        } else if self.no_stream {
+            StreamMode::Forced(false)
+        } else {
+            StreamMode::Auto
+        };
 
         self.update_context(ctx).await?;
 
@@ -217,6 +252,7 @@ impl Args {
                 tools.clone(),
                 tool_choice,
                 &mut messages,
+                stream_mode,
             )
             .await?;
         }
@@ -248,7 +284,11 @@ impl Args {
         }
 
         if self.schema.is_some() && !reply.is_empty() {
-            return Ok(Success::Json(serde_json::from_str(&reply)?));
+            if let StreamMode::Forced(true) = stream_mode {
+                stdout::typewriter(&reply, ctx.config.style.typewriter.code_delay)?;
+            } else {
+                return Ok(Success::Json(serde_json::from_str(&reply)?));
+            }
         }
 
         Ok(Success::Ok)
@@ -627,6 +667,7 @@ async fn handle_stream(
     tools: Vec<Tool>,
     tool_choice: ToolChoice,
     messages: &mut Vec<MessagePair>,
+    stream_mode: StreamMode,
 ) -> Result<()> {
     let provider = provider::get_provider(model.id.provider(), &ctx.config.llm.provider)?;
     let message = thread.message.clone();
@@ -650,7 +691,7 @@ async fn handle_stream(
 
     let mut content_tokens = String::new();
     let mut reasoning_tokens = String::new();
-    let mut handler = ResponseHandler::default();
+    let mut handler = ResponseHandler::new(stream_mode);
     let mut metadata = BTreeMap::new();
     let mut tool_calls = Vec::new();
     let mut tool_call_results = Vec::new();
@@ -706,7 +747,7 @@ async fn handle_stream(
                     call.arguments
                 );
 
-                handler.handle_stream(&data, ctx)?;
+                handler.handle(&data, ctx)?;
                 let result = handle_tool_call(ctx, call.clone()).await?;
                 tool_call_results.push(result.clone());
 
@@ -730,12 +771,12 @@ async fn handle_stream(
             }
         };
 
-        handler.handle_stream(&data, ctx)?;
+        handler.handle(&data, ctx)?;
     }
 
     // Ensure we handle the last line of the stream.
     if !handler.buffer.is_empty() {
-        handler.handle_stream("\n", ctx)?;
+        handler.handle("\n", ctx)?;
     }
 
     let content_tokens = content_tokens.trim().to_string();
@@ -754,8 +795,10 @@ async fn handle_stream(
         Some(reasoning_tokens)
     };
 
-    // Final newline.
-    if content.is_some() || reasoning.is_some() {
+    if let StreamMode::Forced(false) = handler.mode {
+        println!("{}", handler.parsed.join("\n"));
+    } else if content.is_some() || reasoning.is_some() {
+        // Final newline.
         println!();
     }
 
@@ -792,6 +835,7 @@ async fn handle_stream(
             // decide if/which tool to use.
             ToolChoice::Auto,
             messages,
+            stream_mode,
         ))
         .await?;
     }
@@ -883,11 +927,22 @@ impl Line {
 
 #[derive(Debug, Default)]
 struct ResponseHandler {
-    // The streamed, unprocessed lines received from the LLM.
-    streamed: Vec<String>,
-    // The lines that have been printed so far.
-    printed: Vec<String>,
+    /// Whether the response should be streamed.
+    mode: StreamMode,
+
+    /// The streamed, unprocessed lines received from the LLM.
+    received: Vec<String>,
+
+    /// The lines that have been parsed so far.
+    ///
+    /// If `should_stream` is `true`, these lines have been printed to the
+    /// terminal. Otherwise they will be printed when the response handler is
+    /// finished.
+    parsed: Vec<String>,
+
+    /// A temporary buffer of data received from the LLM.
     buffer: String,
+
     in_fenced_code_block: bool,
     // (language, code)
     code_buffer: (Option<String>, Vec<String>),
@@ -899,11 +954,18 @@ struct ResponseHandler {
 }
 
 impl ResponseHandler {
-    fn handle_stream(&mut self, data: &str, ctx: &Ctx) -> Result<()> {
+    fn new(mode: StreamMode) -> Self {
+        Self {
+            mode,
+            ..Default::default()
+        }
+    }
+
+    fn handle(&mut self, data: &str, ctx: &Ctx) -> Result<()> {
         self.buffer.push_str(data);
 
         while let Some(Line { content, variant }) = self.get_line() {
-            self.streamed.push(content);
+            self.received.push(content);
 
             let delay = match variant {
                 LineVariant::Code => ctx.config.style.typewriter.code_delay,
@@ -911,8 +973,12 @@ impl ResponseHandler {
             };
 
             let lines = self.handle_line(&variant, ctx)?;
-            stdout::typewriter(&lines, delay)?;
-            self.printed.extend(lines);
+
+            if !matches!(self.mode, StreamMode::Forced(false)) {
+                stdout::typewriter(&lines.join("\n"), delay)?;
+            }
+
+            self.parsed.extend(lines);
         }
 
         Ok(())
@@ -920,7 +986,7 @@ impl ResponseHandler {
 
     #[expect(clippy::too_many_lines)]
     fn handle_line(&mut self, variant: &LineVariant, ctx: &Ctx) -> Result<Vec<String>> {
-        let Some(content) = self.streamed.last().map(String::as_str) else {
+        let Some(content) = self.received.last().map(String::as_str) else {
             return Ok(vec![]);
         };
 
@@ -969,7 +1035,7 @@ impl ResponseHandler {
                 Ok(vec![content.with(Color::AnsiValue(238)).to_string()])
             }
             LineVariant::FencedCodeBlockEnd { indent } => {
-                self.last_fenced_code_block_end = (self.streamed.len(), self.printed.len() + 2);
+                self.last_fenced_code_block_end = (self.received.len(), self.parsed.len() + 2);
 
                 let path = self.persist_code_block()?;
                 let mut links = vec![];
@@ -1038,7 +1104,7 @@ impl ResponseHandler {
                 // it impossible to correctly find the non-printed lines based
                 // on wrapped vs non-wrapped lines.
                 let lines = self
-                    .streamed
+                    .received
                     .iter()
                     .skip(self.last_fenced_code_block_end.0)
                     .cloned()
@@ -1079,7 +1145,7 @@ impl ResponseHandler {
 
                 let lines = formatted
                     .lines()
-                    .skip(self.printed.len() - self.last_fenced_code_block_end.1)
+                    .skip(self.parsed.len() - self.last_fenced_code_block_end.1)
                     .map(ToOwned::to_owned)
                     .collect::<Vec<_>>();
 

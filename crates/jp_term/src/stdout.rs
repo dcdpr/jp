@@ -96,10 +96,8 @@ impl Iterator for VisibleCharsIterator<'_> {
 
 /// Print a sequence of characters to stdout, one character at a time, with a
 /// delay between each character.
-pub fn typewriter(lines: &[String], delay: Duration) -> Result<(), io::Error> {
-    let s = lines.join("\n");
-
-    for (c, visible) in VisibleCharsIterator::new(&s) {
+pub fn typewriter(buffer: &str, delay: Duration) -> Result<(), io::Error> {
+    for (c, visible) in VisibleCharsIterator::new(buffer) {
         print!("{c}");
         io::stdout().flush()?;
 
@@ -108,7 +106,7 @@ pub fn typewriter(lines: &[String], delay: Duration) -> Result<(), io::Error> {
         }
     }
 
-    if !s.ends_with('\n') {
+    if !buffer.ends_with('\n') {
         println!();
     }
 

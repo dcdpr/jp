@@ -30,7 +30,7 @@ pub struct Config {
     /// - `1u` for 1 microsecond
     /// - `0` to disable
     #[config(
-        default = "100u",
+        default = "500u",
         env = "JP_STYLE_TYPEWRITER_CODE_DELAY",
         deserialize_with = de_delay
     )]
@@ -41,7 +41,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             text_delay: Duration::from_millis(3),
-            code_delay: Duration::from_micros(100),
+            code_delay: Duration::from_micros(500),
         }
     }
 }
