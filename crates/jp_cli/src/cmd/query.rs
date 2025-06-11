@@ -217,7 +217,7 @@ impl Args {
             .workspace
             .get_persona(persona_id)
             .ok_or(Error::NotFound("Persona", persona_id.to_string()))?;
-        let model = self.get_model(ctx, persona)?;
+        let model = self.get_model(ctx)?;
         let tool_choice = self.tool_choice(ctx);
         let tools = ctx.mcp_client.list_tools().await?;
 
@@ -538,7 +538,20 @@ impl Args {
         Ok(query_file_path)
     }
 
-    fn get_model(&self, ctx: &Ctx, persona: &Persona) -> Result<Model> {
+    /// Get the model to use for the current query.
+    ///
+    /// 1. If the `model` CLI flag is set, use that.
+    /// 2. If the current persona has a model, use that.
+    /// 3. If a model is configured in a configuration file or environment
+    ///    variable, use that.
+    /// 4. Otherwise return an error.
+    fn get_model(&self, ctx: &Ctx) -> Result<Model> {
+        let persona_id = &ctx.workspace.get_active_conversation().context.persona_id;
+        let persona = ctx
+            .workspace
+            .get_persona(persona_id)
+            .ok_or(Error::NotFound("Persona", persona_id.to_string()))?;
+
         let Some(id) = self
             .model
             .clone()
