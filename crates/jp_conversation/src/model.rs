@@ -266,7 +266,7 @@ impl Id for ModelId {
 
 impl fmt::Display for ModelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}-{}", self.provider.target_id(), self.slug)
+        write!(f, "{}/{}", self.provider.target_id(), self.slug)
     }
 }
 
