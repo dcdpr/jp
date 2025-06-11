@@ -18,7 +18,7 @@ use jp_mcp::tool;
 use jp_query::query::ChatQuery;
 use serde_json::Value;
 use time::macros::date;
-use tracing::{trace, warn};
+use tracing::{info, trace, warn};
 
 use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply, StreamEvent};
 use crate::{
@@ -62,10 +62,10 @@ impl Anthropic {
         }
 
         let tools = convert_tools(tools, tool_call_strict_mode);
+        let tool_choice_function = matches!(tool_choice, jp_mcp::tool::ToolChoice::Function(_));
+        let tool_choice = convert_tool_choice(tool_choice);
         if !tools.is_empty() {
-            builder
-                .tools(tools)
-                .tool_choice(convert_tool_choice(tool_choice));
+            builder.tools(tools).tool_choice(tool_choice);
         }
 
         let max_tokens = model
@@ -75,18 +75,23 @@ impl Anthropic {
             .unwrap_or(DEFAULT_MAX_TOKENS as u32);
 
         if let Some(thinking) = model.parameters.reasoning {
-            let (supported, min_supported, max_supported) =
-                if let Some(details) = details.as_ref().and_then(|d| d.reasoning) {
-                    (details.supported, details.min_tokens, details.max_tokens)
-                } else {
-                    warn!(
-                        %model.id,
-                        "Model reasoning support unknown, but the request requested it. This may \
-                    result in unexpected behavior"
-                    );
+            let (supported, min_supported, max_supported) = if tool_choice_function {
+                info!(
+                    "Anthropic API does not support reasoning when tool_choice forces tool use. \
+                     Disabling reasoning."
+                );
+                (false, 0, None)
+            } else if let Some(details) = details.as_ref().and_then(|d| d.reasoning) {
+                (details.supported, details.min_tokens, details.max_tokens)
+            } else {
+                warn!(
+                    %model.id,
+                    "Model reasoning support unknown, but the request requested it. This may \
+                result in unexpected behavior"
+                );
 
-                    (true, 0, None)
-                };
+                (true, 0, None)
+            };
 
             if supported {
                 builder.thinking(types::ExtendedThinking {
