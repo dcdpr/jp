@@ -33,14 +33,17 @@ jobs:
       - run: |
           cat /home/runner/.cargo/.crates2.json || true
           ls -lah /home/runner/.cargo/bin/
+          echo "$STATE_RUST_CACHE_CONFIG"
       - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
       - run: |
           cat /home/runner/.cargo/.crates2.json || true
           ls -lah /home/runner/.cargo/bin/
+          echo "$STATE_RUST_CACHE_CONFIG"
       - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
       - run: |
           cat /home/runner/.cargo/.crates2.json || true
           ls -lah /home/runner/.cargo/bin/
+          echo "$STATE_RUST_CACHE_CONFIG"
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
         with:
           key: ${{ matrix.task }}
@@ -48,10 +51,12 @@ jobs:
       - run: |
           cat /home/runner/.cargo/.crates2.json || true
           ls -lah /home/runner/.cargo/bin/
+          echo "$STATE_RUST_CACHE_CONFIG"
       - run: just ${{ matrix.task }}-ci
       - run: |
           cat /home/runner/.cargo/.crates2.json || true
           ls -lah /home/runner/.cargo/bin/
+          echo "$STATE_RUST_CACHE_CONFIG"
       - if: ${{ matrix.task == 'coverage' }}
         uses: coverallsapp/github-action@648a8eb78e6d50909eff900e4ec85cab4524a45b # v2
         with:
@@ -59,6 +64,7 @@ jobs:
       - run: |
           cat /home/runner/.cargo/.crates2.json || true
           ls -lah /home/runner/.cargo/bin/
+          echo "$STATE_RUST_CACHE_CONFIG"
       - # if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@36f1e144e1c8edb0a652766b484448563d8baf46 # v4
         with:
@@ -67,3 +73,4 @@ jobs:
       - run: |
           cat /home/runner/.cargo/.crates2.json || true
           ls -lah /home/runner/.cargo/bin/
+          echo "$STATE_RUST_CACHE_CONFIG"
