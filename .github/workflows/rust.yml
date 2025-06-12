@@ -44,7 +44,7 @@ jobs:
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
         with:
           key: ${{ matrix.task }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: |
           cat /home/runner/.cargo/.crates2.json || true
           ls -lah /home/runner/.cargo/bin/
@@ -56,8 +56,14 @@ jobs:
         uses: coverallsapp/github-action@648a8eb78e6d50909eff900e4ec85cab4524a45b # v2
         with:
           file: lcov.info
-      - if: ${{ github.ref == 'refs/heads/main' }}
+      - run: |
+          cat /home/runner/.cargo/.crates2.json || true
+          ls -lah /home/runner/.cargo/bin/
+      - # if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@36f1e144e1c8edb0a652766b484448563d8baf46 # v4
         with:
           path: ~/.rustup
           key: ${{ steps.cache.outputs.cache-primary-key }}
+      - run: |
+          cat /home/runner/.cargo/.crates2.json || true
+          ls -lah /home/runner/.cargo/bin/
