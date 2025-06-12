@@ -70,3 +70,13 @@ pub enum Error {
     #[error("Invalid JSON schema: {0}")]
     Schema(String),
 }
+
+impl Error {
+    pub fn not_found(target: &'static str, id: &dyn ToString) -> Self {
+        Self::NotFound(target, id.to_string())
+    }
+
+    pub fn persona_not_found(id: &dyn ToString) -> Self {
+        Self::not_found("Persona", id)
+    }
+}

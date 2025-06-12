@@ -20,7 +20,7 @@ pub enum Commands {
 
     /// Query the assistant.
     #[command(visible_alias = "q")]
-    Query(query::Args),
+    Query(query::Query),
 
     /// Manage attachments.
     #[command(visible_alias = "a", alias = "attachments")]
