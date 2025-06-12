@@ -6,7 +6,10 @@ use std::{
     str::FromStr,
 };
 
-use clap::{builder::TypedValueParser as _, ArgAction};
+use clap::{
+    builder::{BoolishValueParser, TypedValueParser as _},
+    ArgAction,
+};
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
 use jp_config::{expand_tilde, style::code::LinkStyle};
@@ -114,15 +117,17 @@ pub struct Args {
     ///
     /// This is the default behaviour for TTY sessions, but can be forced for
     /// non-TTY sessions by setting this flag.
-    #[arg(short = 's', long = "stream", conflicts_with = "no_stream")]
-    pub stream: bool,
+    #[arg(short = 's', long = "stream", conflicts_with = "no_stream", value_parser = BoolishValueParser::new()
+        .map(|b| if b { StreamMode::Forced(true) } else { StreamMode::Auto }))]
+    pub stream: StreamMode,
 
     /// Disable streaming the assistant's response.
     ///
     /// This is the default behaviour for non-TTY sessions, or for structured
     /// responses, but can be forced by setting this flag.
-    #[arg(short = 'S', long = "no-stream", conflicts_with = "stream")]
-    pub no_stream: bool,
+    #[arg(short = 'S', long = "no-stream", conflicts_with = "stream", value_parser = BoolishValueParser::new()
+        .map(|b| if b { StreamMode::Forced(false) } else { StreamMode::Auto }))]
+    pub no_stream: StreamMode,
 
     /// The tool to use.
     ///
@@ -141,7 +146,7 @@ pub struct Args {
 
 /// The stream mode to use for the assistant's response.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-enum StreamMode {
+pub(crate) enum StreamMode {
     /// Use the default stream mode, depending on whether the output is a TTY,
     /// and if a structured response is requested.
     #[default]
@@ -162,14 +167,6 @@ impl Args {
 
         let last_active_conversation_id = ctx.workspace.active_conversation_id();
         let conversation_id = self.get_conversation_id(ctx)?;
-
-        let stream_mode = if self.stream {
-            StreamMode::Forced(true)
-        } else if self.no_stream {
-            StreamMode::Forced(false)
-        } else {
-            StreamMode::Auto
-        };
 
         self.update_context(ctx).await?;
 
@@ -253,7 +250,7 @@ impl Args {
                 tools.clone(),
                 tool_choice,
                 &mut messages,
-                stream_mode,
+                self.stream,
             )
             .await?;
         }
@@ -285,7 +282,7 @@ impl Args {
         }
 
         if self.schema.is_some() && !reply.is_empty() {
-            if let StreamMode::Forced(true) = stream_mode {
+            if let StreamMode::Forced(true) = self.stream {
                 stdout::typewriter(&reply, ctx.config.style.typewriter.code_delay)?;
             } else {
                 return Ok(Success::Json(serde_json::from_str(&reply)?));
