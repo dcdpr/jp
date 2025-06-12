@@ -22,31 +22,16 @@ jobs:
         task: [build, lint, fmt, test, docs, coverage, deny, insta]
     name: ${{ matrix.task }}
     steps:
-      - run: ls -lah /home/runner/.cargo/bin/
       - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
           path: ~/.rustup
           key: toolchain-${{ matrix.task }}
-      - run: ls -lah /home/runner/.cargo/bin/
       - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
-      - run: ls -lah /home/runner/.cargo/bin/
       - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
-      - run: ls -lah /home/runner/.cargo/bin/
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
         with:
           key: ${{ matrix.task }}
-          # save-if: ${{ github.ref == 'refs/heads/main' }}
-      - if: ${{ matrix.task == 'insta' }}
-        run: |
-          ls -lah /home/runner/.cargo/bin/
-          cargo binstall -V
-          cargo insta --version
       - run: just ${{ matrix.task }}-ci
-      - if: ${{ matrix.task == 'insta' }}
-        run: |
-          ls -lah /home/runner/.cargo/bin/
-          cargo binstall -V
-          cargo insta --version
       - if: ${{ matrix.task == 'coverage' }}
         uses: coverallsapp/github-action@648a8eb78e6d50909eff900e4ec85cab4524a45b # v2
         with:

@@ -4,7 +4,7 @@ deny_version     := "0.18.3"
 insta_version    := "1.43.1"
 jilu_version     := "0.13.1"
 llvm_cov_version := "0.6.16"
-nextest_version  := "0.9.98"
+nextest_version  := "0.9.97"
 
 # Open a commit message in the editor, using Jean-Pierre.
 commit args="Give me a commit message": _install-jp
@@ -88,18 +88,18 @@ insta-ci: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta
 @_docs CMD="dev" *FLAGS: _docs-install
     yarn vitepress {{CMD}} {{FLAGS}}
 
-_install +CRATES: _install-binstall
+@_install +CRATES: _install-binstall
     cargo binstall --locked --disable-telemetry --no-confirm --only-signed {{CRATES}}
 
-_install-jp *args:
+@_install-jp *args:
     cargo install --locked --path crates/jp_cli {{args}}
 
-_install-binstall:
+@_install-binstall:
     cargo install --locked --version {{binstall_version}} cargo-binstall
 
 [working-directory: 'docs']
 @_docs-install:
     yarn install --immutable
 
-_rustup_component +COMPONENTS:
+@_rustup_component +COMPONENTS:
     rustup component add {{COMPONENTS}}
