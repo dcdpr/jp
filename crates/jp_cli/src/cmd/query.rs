@@ -2,14 +2,11 @@ use std::{
     collections::{BTreeMap, HashSet},
     convert::Infallible,
     env, fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
 };
 
-use clap::{
-    builder::{BoolishValueParser, TypedValueParser as _},
-    ArgAction,
-};
+use clap::{builder::TypedValueParser as _, ArgAction};
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
 use jp_config::{expand_tilde, style::code::LinkStyle};
@@ -18,10 +15,10 @@ use jp_conversation::{
     persona::Instructions,
     thread::{Thread, ThreadBuilder},
     AssistantMessage, Context, ContextId, Conversation, ConversationId, MessagePair, Model,
-    ModelId, Persona, PersonaId, UserMessage,
+    ModelId, PersonaId, UserMessage,
 };
 use jp_llm::provider::{self, CompletionChunk, StreamEvent};
-use jp_mcp::{config::McpServerId, tool::ToolChoice, ResourceContents, Tool};
+use jp_mcp::{config::McpServerId, tool::ToolChoice, ResourceContents};
 use jp_query::query::{ChatQuery, StructuredQuery};
 use jp_task::task::TitleGeneratorTask;
 use jp_term::{code, osc::hyperlink, stdout};
@@ -39,7 +36,7 @@ use crate::{
 };
 
 #[derive(Debug, clap::Args)]
-pub struct Args {
+pub struct Query {
     /// The query to send. If not provided, uses `$JP_EDITOR`, `$VISUAL` or
     /// `$EDITOR` to open edit the query in an editor.
     #[arg(value_parser = string_or_path)]
@@ -117,17 +114,15 @@ pub struct Args {
     ///
     /// This is the default behaviour for TTY sessions, but can be forced for
     /// non-TTY sessions by setting this flag.
-    #[arg(short = 's', long = "stream", conflicts_with = "no_stream", value_parser = BoolishValueParser::new()
-        .map(|b| if b { StreamMode::Forced(true) } else { StreamMode::Auto }))]
-    pub stream: StreamMode,
+    #[arg(short = 's', long = "stream", conflicts_with = "no_stream")]
+    pub stream: bool,
 
     /// Disable streaming the assistant's response.
     ///
     /// This is the default behaviour for non-TTY sessions, or for structured
     /// responses, but can be forced by setting this flag.
-    #[arg(short = 'S', long = "no-stream", conflicts_with = "stream", value_parser = BoolishValueParser::new()
-        .map(|b| if b { StreamMode::Forced(false) } else { StreamMode::Auto }))]
-    pub no_stream: StreamMode,
+    #[arg(short = 'S', long = "no-stream", conflicts_with = "stream")]
+    pub no_stream: bool,
 
     /// The tool to use.
     ///
@@ -144,54 +139,38 @@ pub struct Args {
     pub no_tool_choice: bool,
 }
 
-/// The stream mode to use for the assistant's response.
+/// How to render the response to the user.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StreamMode {
-    /// Use the default stream mode, depending on whether the output is a TTY,
+pub(crate) enum RenderMode {
+    /// Use the default render mode, depending on whether the output is a TTY,
     /// and if a structured response is requested.
     #[default]
     Auto,
 
-    /// Disable contextual streaming mode, forcing the assistant's response to
-    /// either be streamed or buffered.
-    Forced(bool),
+    /// Render the response as a stream of tokens.
+    Streamed,
+
+    /// Render the response as a buffered string.
+    Buffered,
 }
 
-impl Args {
-    #[expect(clippy::too_many_lines)]
+impl Query {
     pub async fn run(self, ctx: &mut Ctx) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
 
+        let previous_id = self.update_active_conversation(ctx)?;
+
         self.update_config(&mut ctx.config)?;
-
-        let last_active_conversation_id = ctx.workspace.active_conversation_id();
-        let conversation_id = self.get_conversation_id(ctx)?;
-
         self.update_context(ctx).await?;
-
-        // Ensure we start the MCP servers attached to the conversation.
         ctx.configure_active_mcp_servers().await?;
-
         let model = self.get_model(ctx)?;
-        let (message, query_file_path) = self.build_message(ctx, conversation_id, &model).await?;
+
+        let (message, query_file) = self.build_message(ctx, &model).await?;
 
         if let UserMessage::Query(query) = &message {
-            // Clean up after empty queries.
             if query.is_empty() {
-                info!("Query is empty, exiting.");
-
-                if last_active_conversation_id != conversation_id {
-                    ctx.workspace
-                        .set_active_conversation_id(last_active_conversation_id)?;
-                    ctx.workspace.remove_conversation(&conversation_id)?;
-                }
-
-                if let Some(path) = query_file_path {
-                    fs::remove_file(path)?;
-                }
-
-                return Ok("Query is empty, ignoring.".into());
+                return cleanup(ctx, previous_id, query_file.as_deref()).map_err(Into::into);
             }
 
             // Generate title for new conversations.
@@ -201,7 +180,7 @@ impl Args {
             {
                 debug!("Generating title for new conversation");
                 ctx.task_handler.spawn(TitleGeneratorTask::new(
-                    conversation_id,
+                    ctx.workspace.active_conversation_id(),
                     &ctx.config,
                     &ctx.workspace,
                     Some(query.clone()),
@@ -210,53 +189,27 @@ impl Args {
         }
 
         let conversation = ctx.workspace.get_active_conversation();
-        let persona_id = &conversation.context.persona_id;
-        let persona = ctx
-            .workspace
-            .get_persona(persona_id)
-            .ok_or(Error::NotFound("Persona", persona_id.to_string()))?;
-
-        let tool_choice = self.tool_choice(ctx);
-        let tools = ctx.mcp_client.list_tools().await?;
-
-        let mut attachments = vec![];
-        for handler in conversation.context.attachment_handlers.values() {
-            attachments.extend(
-                handler
-                    .get(&ctx.workspace.root, ctx.mcp_client.clone())
-                    .await?,
-            );
-        }
-
-        let thread = build_thread(
-            ctx,
-            conversation_id,
-            attachments,
-            persona,
-            message.clone(),
-            &tools,
-        )?;
+        let thread = self.build_thread(ctx, message.clone()).await?;
 
         let context = conversation.context.clone();
         let mut messages = vec![];
         if let Some(schema) = self.schema.clone() {
             messages.push(handle_structured_output(ctx, context, thread, &model, schema).await?);
         } else {
-            handle_stream(
+            self.handle_stream(
                 ctx,
                 context,
                 thread,
                 &model,
-                tools.clone(),
-                tool_choice,
+                self.tool_choice(ctx),
                 &mut messages,
-                self.stream,
             )
             .await?;
         }
 
         let mut reply = String::new();
         for message in messages {
+            let conversation_id = ctx.workspace.active_conversation_id();
             trace!(
                 conversation = %conversation_id,
                 content_size = message.reply.content.as_deref().unwrap_or_default().len(),
@@ -277,12 +230,12 @@ impl Args {
         }
 
         // Clean up the query file.
-        if let Some(path) = query_file_path {
+        if let Some(path) = query_file {
             fs::remove_file(path)?;
         }
 
         if self.schema.is_some() && !reply.is_empty() {
-            if let StreamMode::Forced(true) = self.stream {
+            if let RenderMode::Streamed = self.render_mode() {
                 stdout::typewriter(&reply, ctx.config.style.typewriter.code_delay)?;
             } else {
                 return Ok(Success::Json(serde_json::from_str(&reply)?));
@@ -295,9 +248,10 @@ impl Args {
     async fn build_message(
         &self,
         ctx: &mut Ctx,
-        conversation_id: ConversationId,
         model: &Model,
     ) -> Result<(UserMessage, Option<PathBuf>)> {
+        let conversation_id = ctx.workspace.active_conversation_id();
+
         // If replaying, remove the last message from the conversation, and use
         // its query message to build the new query.
         let mut message = self
@@ -464,9 +418,11 @@ impl Args {
         Ok(())
     }
 
-    fn get_conversation_id(&self, ctx: &mut Ctx) -> Result<ConversationId> {
+    fn update_active_conversation(&self, ctx: &mut Ctx) -> Result<ConversationId> {
+        let last_active_conversation_id = ctx.workspace.active_conversation_id();
+
         if !self.new_conversation {
-            return Ok(ctx.workspace.active_conversation_id());
+            return Ok(last_active_conversation_id);
         }
 
         let id = ctx.workspace.create_conversation(Conversation {
@@ -481,8 +437,7 @@ impl Args {
         );
 
         ctx.workspace.set_active_conversation_id(id)?;
-
-        Ok(id)
+        Ok(last_active_conversation_id)
     }
 
     // Open the editor for the query, if requested.
@@ -596,38 +551,265 @@ impl Args {
             .or_else(|| ctx.config.llm.tool_choice.clone())
             .unwrap_or(ToolChoice::Auto)
     }
-}
 
-fn build_thread(
-    ctx: &Ctx,
-    conversation_id: ConversationId,
-    attachments: Vec<jp_attachment::Attachment>,
-    persona: &Persona,
-    message: UserMessage,
-    tools: &[Tool],
-) -> Result<Thread> {
-    let mut thread_builder = ThreadBuilder::default()
-        .with_system_prompt(persona.system_prompt.clone())
-        .with_instructions(persona.instructions.clone())
-        .with_attachments(attachments)
-        .with_history(ctx.workspace.get_messages(&conversation_id).to_vec())
-        .with_message(message);
+    async fn build_thread(&self, ctx: &Ctx, message: UserMessage) -> Result<Thread> {
+        let conversation_id = ctx.workspace.active_conversation_id();
+        let conversation = ctx.workspace.get_active_conversation();
+        let persona_id = &conversation.context.persona_id;
+        let persona = ctx
+            .workspace
+            .get_persona(persona_id)
+            .ok_or(Error::persona_not_found(persona_id))?;
 
-    if !tools.is_empty() {
-        let instruction = Instructions::default()
-            .with_title("Tool Usage")
-            .with_description("How to leverage the tools available to you.".to_string())
-            .with_item("Use all the tools available to you to give the best possible answer.")
-            .with_item("Verify the tool name, description and parameters are correct.")
-            .with_item(
-                "Even if you've reasoned yourself towards a solution, use any available tool to \
-                 verify your answer.",
+        let tools = ctx.mcp_client.list_tools().await?;
+        let mut attachments = vec![];
+        for handler in conversation.context.attachment_handlers.values() {
+            attachments.extend(
+                handler
+                    .get(&ctx.workspace.root, ctx.mcp_client.clone())
+                    .await
+                    .map_err(|e| Error::Attachment(e.to_string()))?,
             );
+        }
 
-        thread_builder = thread_builder.with_instruction(instruction);
+        let mut thread_builder = ThreadBuilder::default()
+            .with_system_prompt(persona.system_prompt.clone())
+            .with_instructions(persona.instructions.clone())
+            .with_attachments(attachments)
+            .with_history(ctx.workspace.get_messages(&conversation_id).to_vec())
+            .with_message(message);
+
+        if !tools.is_empty() {
+            let instruction = Instructions::default()
+                .with_title("Tool Usage")
+                .with_description("How to leverage the tools available to you.".to_string())
+                .with_item("Use all the tools available to you to give the best possible answer.")
+                .with_item("Verify the tool name, description and parameters are correct.")
+                .with_item(
+                    "Even if you've reasoned yourself towards a solution, use any available tool \
+                     to verify your answer.",
+                );
+
+            thread_builder = thread_builder.with_instruction(instruction);
+        }
+
+        Ok(thread_builder.build()?)
     }
 
-    Ok(thread_builder.build()?)
+    #[expect(clippy::too_many_lines)]
+    async fn handle_stream(
+        &self,
+        ctx: &mut Ctx,
+        context: Context,
+        mut thread: Thread,
+        model: &Model,
+        tool_choice: ToolChoice,
+        messages: &mut Vec<MessagePair>,
+    ) -> Result<()> {
+        let tools = ctx.mcp_client.list_tools().await?;
+        let provider = provider::get_provider(model.id.provider(), &ctx.config.llm.provider)?;
+        let message = thread.message.clone();
+        let query = ChatQuery {
+            thread: thread.clone(),
+
+            // Limit the tools to the ones that are relevant to the tool choice.
+            tools: match &tool_choice {
+                ToolChoice::None => vec![],
+                ToolChoice::Auto | ToolChoice::Required => tools.clone(),
+                ToolChoice::Function(name) => tools
+                    .clone()
+                    .into_iter()
+                    .filter(|v| &v.name == name)
+                    .collect(),
+            },
+            tool_choice,
+            ..Default::default()
+        };
+        let mut stream = provider.chat_completion_stream(model, query).await?;
+
+        let mut content_tokens = String::new();
+        let mut reasoning_tokens = String::new();
+        let mut handler = ResponseHandler::new(self.render_mode());
+        let mut metadata = BTreeMap::new();
+        let mut tool_calls = Vec::new();
+        let mut tool_call_results = Vec::new();
+
+        while let Some(event) = stream.next().await {
+            let data = match event? {
+                StreamEvent::ChatChunk(chunk) => match chunk {
+                    CompletionChunk::Reasoning(data) if !data.is_empty() => {
+                        reasoning_tokens.push_str(&data);
+
+                        if !ctx.config.style.reasoning.show {
+                            continue;
+                        }
+
+                        data
+                    }
+                    CompletionChunk::Content(mut data) if !data.is_empty() => {
+                        let reasoning_ended = !reasoning_tokens.is_empty()
+                            && ctx.config.style.reasoning.show
+                            && content_tokens.is_empty();
+
+                        content_tokens.push_str(&data);
+
+                        // If the response includes reasoning, we add two newlines
+                        // after the reasoning, but before the content.
+                        if reasoning_ended {
+                            data = format!("\n\n{data}");
+                        }
+
+                        data
+                    }
+                    _ => continue,
+                },
+                // Tool calls are handled after the stream is finished.
+                //
+                // We do add a history of the call to the content tokens for the
+                // LLMs understanding, but we do not print it to the terminal.
+                StreamEvent::ToolCall(call) => {
+                    tool_calls.push(call.clone());
+
+                    let data = indoc::formatdoc!(
+                        "
+                    ---
+                    executing tool: **{}**
+
+                    arguments:
+                    ```json
+                    {:#}
+                    ```
+
+                ",
+                        call.name,
+                        call.arguments
+                    );
+
+                    handler.handle(&data, ctx)?;
+                    let result = handle_tool_call(ctx, call.clone()).await?;
+                    tool_call_results.push(result.clone());
+
+                    let content = if result.content.starts_with("```") {
+                        result.content
+                    } else {
+                        format!("```\n{}\n```", result.content)
+                    };
+
+                    indoc::formatdoc! {"
+                    result:
+
+                    {content}
+                    ---
+                    "
+                    }
+                }
+                StreamEvent::Metadata(key, data) => {
+                    metadata.insert(key, data);
+                    continue;
+                }
+            };
+
+            handler.handle(&data, ctx)?;
+        }
+
+        // Ensure we handle the last line of the stream.
+        if !handler.buffer.is_empty() {
+            handler.handle("\n", ctx)?;
+        }
+
+        let content_tokens = content_tokens.trim().to_string();
+        let content = if !content_tokens.is_empty() {
+            Some(content_tokens)
+        } else if content_tokens.is_empty() && tool_calls.is_empty() {
+            Some("<no reply>".to_string())
+        } else {
+            None
+        };
+
+        let reasoning_tokens = reasoning_tokens.trim().to_string();
+        let reasoning = if reasoning_tokens.is_empty() {
+            None
+        } else {
+            Some(reasoning_tokens)
+        };
+
+        if let RenderMode::Buffered = handler.render_mode {
+            println!("{}", handler.parsed.join("\n"));
+        } else if content.is_some() || reasoning.is_some() {
+            // Final newline.
+            println!();
+        }
+
+        let message = MessagePair::new(message, AssistantMessage {
+            metadata,
+            content,
+            reasoning,
+            tool_calls: tool_calls.clone(),
+        })
+        .with_context(context.clone());
+        messages.push(message.clone());
+
+        // If the assistant asked for a tool call, we handle it automatically,
+        // essentially going into a "loop" until no more tool calls are
+        // requested.
+        //
+        // TODO:
+        //
+        // This should be handled differently, asking for permission to run a
+        // tool (unless whitelisted per conversation/globally), it should log
+        // the fact that a tool call is triggered, and it should guard against
+        // infinite loops.
+        if !tool_call_results.is_empty() {
+            thread.history.push(message);
+            thread.message = UserMessage::ToolCallResults(tool_call_results);
+
+            Box::pin(self.handle_stream(
+                ctx,
+                context,
+                thread,
+                model,
+                // After the first tool call, we revert back to letting the LLM
+                // decide if/which tool to use.
+                ToolChoice::Auto,
+                messages,
+            ))
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    fn render_mode(&self) -> RenderMode {
+        if self.no_stream {
+            return RenderMode::Buffered;
+        } else if self.stream {
+            return RenderMode::Streamed;
+        }
+
+        RenderMode::Auto
+    }
+}
+
+/// Clean up empty queries.
+fn cleanup(
+    ctx: &mut Ctx,
+    last_active_conversation_id: ConversationId,
+    query_file_path: Option<&Path>,
+) -> Result<Success> {
+    let conversation_id = ctx.workspace.active_conversation_id();
+
+    info!("Query is empty, exiting.");
+    if last_active_conversation_id != conversation_id {
+        ctx.workspace
+            .set_active_conversation_id(last_active_conversation_id)?;
+        ctx.workspace.remove_conversation(&conversation_id)?;
+    }
+
+    if let Some(path) = query_file_path {
+        fs::remove_file(path)?;
+    }
+
+    Ok("Query is empty, ignoring.".into())
 }
 
 async fn handle_structured_output(
@@ -668,191 +850,6 @@ fn string_or_path(s: &str) -> Result<String> {
     }
 
     Ok(s.to_owned())
-}
-
-#[expect(clippy::too_many_lines)]
-async fn handle_stream(
-    ctx: &mut Ctx,
-    context: Context,
-    mut thread: Thread,
-    model: &Model,
-    tools: Vec<Tool>,
-    tool_choice: ToolChoice,
-    messages: &mut Vec<MessagePair>,
-    stream_mode: StreamMode,
-) -> Result<()> {
-    let provider = provider::get_provider(model.id.provider(), &ctx.config.llm.provider)?;
-    let message = thread.message.clone();
-    let query = ChatQuery {
-        thread: thread.clone(),
-
-        // Limit the tools to the ones that are relevant to the tool choice.
-        tools: match &tool_choice {
-            ToolChoice::None => vec![],
-            ToolChoice::Auto | ToolChoice::Required => tools.clone(),
-            ToolChoice::Function(name) => tools
-                .clone()
-                .into_iter()
-                .filter(|v| &v.name == name)
-                .collect(),
-        },
-        tool_choice,
-        ..Default::default()
-    };
-    let mut stream = provider.chat_completion_stream(model, query).await?;
-
-    let mut content_tokens = String::new();
-    let mut reasoning_tokens = String::new();
-    let mut handler = ResponseHandler::new(stream_mode);
-    let mut metadata = BTreeMap::new();
-    let mut tool_calls = Vec::new();
-    let mut tool_call_results = Vec::new();
-
-    while let Some(event) = stream.next().await {
-        let data = match event? {
-            StreamEvent::ChatChunk(chunk) => match chunk {
-                CompletionChunk::Reasoning(data) if !data.is_empty() => {
-                    reasoning_tokens.push_str(&data);
-
-                    if !ctx.config.style.reasoning.show {
-                        continue;
-                    }
-
-                    data
-                }
-                CompletionChunk::Content(mut data) if !data.is_empty() => {
-                    let reasoning_ended = !reasoning_tokens.is_empty()
-                        && ctx.config.style.reasoning.show
-                        && content_tokens.is_empty();
-
-                    content_tokens.push_str(&data);
-
-                    // If the response includes reasoning, we add two newlines
-                    // after the reasoning, but before the content.
-                    if reasoning_ended {
-                        data = format!("\n\n{data}");
-                    }
-
-                    data
-                }
-                _ => continue,
-            },
-            // Tool calls are handled after the stream is finished.
-            //
-            // We do add a history of the call to the content tokens for the
-            // LLMs understanding, but we do not print it to the terminal.
-            StreamEvent::ToolCall(call) => {
-                tool_calls.push(call.clone());
-
-                let data = indoc::formatdoc!(
-                    "
-                    ---
-                    executing tool: **{}**
-
-                    arguments:
-                    ```json
-                    {:#}
-                    ```
-
-                ",
-                    call.name,
-                    call.arguments
-                );
-
-                handler.handle(&data, ctx)?;
-                let result = handle_tool_call(ctx, call.clone()).await?;
-                tool_call_results.push(result.clone());
-
-                let content = if result.content.starts_with("```") {
-                    result.content
-                } else {
-                    format!("```\n{}\n```", result.content)
-                };
-
-                indoc::formatdoc! {"
-                    result:
-
-                    {content}
-                    ---
-                    "
-                }
-            }
-            StreamEvent::Metadata(key, data) => {
-                metadata.insert(key, data);
-                continue;
-            }
-        };
-
-        handler.handle(&data, ctx)?;
-    }
-
-    // Ensure we handle the last line of the stream.
-    if !handler.buffer.is_empty() {
-        handler.handle("\n", ctx)?;
-    }
-
-    let content_tokens = content_tokens.trim().to_string();
-    let content = if !content_tokens.is_empty() {
-        Some(content_tokens)
-    } else if content_tokens.is_empty() && tool_calls.is_empty() {
-        Some("<no reply>".to_string())
-    } else {
-        None
-    };
-
-    let reasoning_tokens = reasoning_tokens.trim().to_string();
-    let reasoning = if reasoning_tokens.is_empty() {
-        None
-    } else {
-        Some(reasoning_tokens)
-    };
-
-    if let StreamMode::Forced(false) = handler.mode {
-        println!("{}", handler.parsed.join("\n"));
-    } else if content.is_some() || reasoning.is_some() {
-        // Final newline.
-        println!();
-    }
-
-    let message = MessagePair::new(message, AssistantMessage {
-        metadata,
-        content,
-        reasoning,
-        tool_calls: tool_calls.clone(),
-    })
-    .with_context(context.clone());
-    messages.push(message.clone());
-
-    // If the assistant asked for a tool call, we handle it automatically,
-    // essentially going into a "loop" until no more tool calls are
-    // requested.
-    //
-    // TODO:
-    //
-    // This should be handled differently, asking for permission to run a
-    // tool (unless whitelisted per conversation/globally), it should log
-    // the fact that a tool call is triggered, and it should guard against
-    // infinite loops.
-    if !tool_call_results.is_empty() {
-        thread.history.push(message);
-        thread.message = UserMessage::ToolCallResults(tool_call_results);
-
-        Box::pin(handle_stream(
-            ctx,
-            context,
-            thread,
-            model,
-            tools,
-            // After the first tool call, we revert back to letting the LLM
-            // decide if/which tool to use.
-            ToolChoice::Auto,
-            messages,
-            stream_mode,
-        ))
-        .await?;
-    }
-
-    Ok(())
 }
 
 async fn handle_tool_calls(
@@ -939,8 +936,8 @@ impl Line {
 
 #[derive(Debug, Default)]
 struct ResponseHandler {
-    /// Whether the response should be streamed.
-    mode: StreamMode,
+    /// How to render the response.
+    render_mode: RenderMode,
 
     /// The streamed, unprocessed lines received from the LLM.
     received: Vec<String>,
@@ -966,9 +963,9 @@ struct ResponseHandler {
 }
 
 impl ResponseHandler {
-    fn new(mode: StreamMode) -> Self {
+    fn new(render_mode: RenderMode) -> Self {
         Self {
-            mode,
+            render_mode,
             ..Default::default()
         }
     }
@@ -986,7 +983,7 @@ impl ResponseHandler {
 
             let lines = self.handle_line(&variant, ctx)?;
 
-            if !matches!(self.mode, StreamMode::Forced(false)) {
+            if !matches!(self.render_mode, RenderMode::Buffered) {
                 stdout::typewriter(&lines.join("\n"), delay)?;
             }
 

@@ -59,6 +59,8 @@ impl Ctx {
         }
     }
 
+    /// Activate and deactivate MCP servers based on the active conversation
+    /// context.
     pub async fn configure_active_mcp_servers(&mut self) -> Result<()> {
         let conversation = self.workspace.get_active_conversation();
 

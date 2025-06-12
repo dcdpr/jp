@@ -168,6 +168,12 @@ impl fmt::Display for PersonaId {
     }
 }
 
+impl From<PersonaId> for String {
+    fn from(id: PersonaId) -> Self {
+        id.to_string()
+    }
+}
+
 impl TryFrom<&str> for PersonaId {
     type Error = Error;
 
