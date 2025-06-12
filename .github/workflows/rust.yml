@@ -7,10 +7,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
-  JUST_TIMESTAMP: "true"
+  JUST_TIMESTAMP: true
   JUST_COLOR: "always"
-  JUST_EXPLAIN: "true"
-  JUST_VERBOSE: "4"
+  JUST_EXPLAIN: true
+  JUST_VERBOSE: 4
+  ACTIONS_RUNNER_DEBUG: true
+  ACTIONS_STEP_DEBUG: true
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
