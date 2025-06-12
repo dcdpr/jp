@@ -12,7 +12,6 @@ use jp_conversation::{
 };
 use jp_mcp::tool;
 use jp_query::query::ChatQuery;
-use serde_json::Value;
 use tracing::trace;
 
 use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply};
@@ -210,6 +209,33 @@ fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolConfig {
 }
 
 fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
+    let supported_properties = [
+        "type",
+        "properties",
+        "required",
+        "format",
+        "title",
+        "description",
+        "nullable",
+        "enum",
+        "maxItems",
+        "minItems",
+        "properties",
+        "required",
+        "minProperties",
+        "maxProperties",
+        "minLength",
+        "maxLength",
+        "pattern",
+        "example",
+        "anyOf",
+        "propertyOrdering",
+        "default",
+        "items",
+        "minimum",
+        "maximum",
+    ];
+
     tools
         .into_iter()
         .map(|tool| {
@@ -217,7 +243,14 @@ fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
                 function_declarations: vec![types::FunctionDeclaration {
                     name: tool.name.to_string(),
                     description: tool.description.unwrap_or_default().to_string(),
-                    parameters: Some(Value::Object(tool.input_schema.as_ref().clone())),
+                    parameters: Some(
+                        tool.input_schema
+                            .as_ref()
+                            .clone()
+                            .into_iter()
+                            .filter(|(k, _)| supported_properties.contains(&k.as_str()))
+                            .collect(),
+                    ),
                     response: None,
                 }],
             })
