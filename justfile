@@ -1,6 +1,6 @@
 bacon_version    := "3.15.0"
 binstall_version := "1.12.7"
-deny_version     := "0.18.3"
+deny_version     := "0.18.2"
 insta_version    := "1.43.1"
 jilu_version     := "0.13.1"
 llvm_cov_version := "0.6.16"
