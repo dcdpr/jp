@@ -6,6 +6,8 @@ jilu_version     := "0.13.1"
 llvm_cov_version := "0.6.16"
 nextest_version  := "0.9.97"
 
+quiet_flag := if env_var_or_default("CI", "") == "true" { "--quiet" } else { "" }
+
 # Open a commit message in the editor, using Jean-Pierre.
 commit args="Give me a commit message": _install-jp
     #!/usr/bin/env sh
@@ -89,13 +91,13 @@ insta-ci: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta
     yarn vitepress {{CMD}} {{FLAGS}}
 
 @_install +CRATES: _install-binstall
-    cargo binstall --locked --disable-telemetry --no-confirm --only-signed {{CRATES}}
+    cargo binstall {{quiet_flag}} --locked --disable-telemetry --no-confirm --only-signed {{CRATES}}
 
 @_install-jp *args:
-    cargo install --locked --path crates/jp_cli {{args}}
+    cargo install {{quiet_flag}} --locked --path crates/jp_cli {{args}}
 
 @_install-binstall:
-    cargo install --locked --version {{binstall_version}} cargo-binstall
+    cargo install {{quiet_flag}} --locked --version {{binstall_version}} cargo-binstall
 
 [working-directory: 'docs']
 @_docs-install:
