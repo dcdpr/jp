@@ -1,3 +1,11 @@
+bacon_version    := "3.15.0"
+binstall_version := "1.12.7"
+deny_version     := "0.18.3"
+insta_version    := "1.43.1"
+jilu_version     := "0.13.1"
+llvm_cov_version := "0.6.16"
+nextest_version  := "0.9.98"
+
 # Open a commit message in the editor, using Jean-Pierre.
 commit args="Give me a commit message": _install-jp
     #!/usr/bin/env sh
@@ -6,7 +14,7 @@ commit args="Give me a commit message": _install-jp
     fi
 
 # Generate changelog for the project.
-build-changelog: (_install "jilu")
+build-changelog: (_install "jilu@{{jilu_version}}")
     @jilu
 
 # Locally develop the documentation, with hot-reloading.
@@ -22,7 +30,7 @@ build-docs: (_docs "build")
 preview-docs: (_docs "preview")
 
 # Live-check the code, using Clippy and Bacon.
-check: (_install "bacon@^3.15")
+check: (_install "bacon@{{bacon_version}}")
     @bacon
 
 # Run all ci tasks.
@@ -46,7 +54,7 @@ fmt-ci: (_rustup_component "rustfmt") _install_ci_matchers
 
 # Test the code on CI.
 [group('ci')]
-test-ci: (_install "cargo-nextest@^0.9") _install_ci_matchers
+test-ci: (_install "cargo-nextest@{{nextest_version}}") _install_ci_matchers
     cargo nextest run --workspace --all-targets --no-fail-fast
 
 # Generate documentation on CI.
@@ -58,19 +66,19 @@ docs-ci: _install_ci_matchers
 
 # Generate code coverage on CI.
 [group('ci')]
-coverage-ci: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@^0.6 cargo-nextest@^0.9") _install_ci_matchers
+coverage-ci: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@{{llvm_cov_version}} cargo-nextest@{{nextest_version}}") _install_ci_matchers
     cargo llvm-cov --no-report nextest
     cargo llvm-cov --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info
 
 # Check for security vulnerabilities on CI.
 [group('ci')]
-deny-ci: (_install "cargo-deny@^0.18") _install_ci_matchers
+deny-ci: (_install "cargo-deny@{{deny_version}}") _install_ci_matchers
     cargo deny check -A index-failure --hide-inclusion-graph
 
 # Validate insta snapshots on CI.
 [group('ci')]
-insta-ci: (_install "cargo-nextest@^0.9 cargo-insta@^1.43")
+insta-ci: (_install "cargo-nextest@{{nextest_version}} cargo-insta@{{insta_version}}")
     cargo insta test --check --unreferenced=auto
 
 @_install_ci_matchers:
@@ -87,7 +95,7 @@ _install-jp *args:
     cargo install --locked --path crates/jp_cli {{args}}
 
 _install-binstall:
-    cargo install --locked --version ^1.12 cargo-binstall
+    cargo install --locked --version {{binstall_version}} cargo-binstall
 
 [working-directory: 'docs']
 @_docs-install:
