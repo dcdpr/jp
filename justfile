@@ -80,18 +80,18 @@ insta-ci: (_install "cargo-nextest@^0.9 cargo-insta@^1.43")
 @_docs CMD="dev" *FLAGS: _docs-install
     yarn vitepress {{CMD}} {{FLAGS}}
 
-@_install +CRATES: _install-binstall
-    cargo binstall --locked --quiet --disable-telemetry --no-confirm --only-signed {{CRATES}}
+_install +CRATES: _install-binstall
+    cargo binstall --locked --disable-telemetry --no-confirm --only-signed {{CRATES}}
 
-@_install-jp *args:
+_install-jp *args:
     cargo install --locked --path crates/jp_cli {{args}}
 
-@_install-binstall:
-    cargo install --locked --quiet --version ^1.12 cargo-binstall
+_install-binstall:
+    cargo install --locked --version ^1.12 cargo-binstall
 
 [working-directory: 'docs']
 @_docs-install:
     yarn install --immutable
 
-@_rustup_component +COMPONENTS:
+_rustup_component +COMPONENTS:
     rustup component add {{COMPONENTS}}
