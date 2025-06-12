@@ -36,14 +36,16 @@ jobs:
         with:
           key: ${{ matrix.task }}
           # save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: |
+      - if: ${{ matrix.task == 'insta' }}
+        run: |
           ls -lah /home/runner/.cargo/bin/
           cargo binstall -V
           cargo insta --version
           which binstall
           which cargo-insta
       - run: just ${{ matrix.task }}-ci
-      - run: |
+      - if: ${{ matrix.task == 'insta' }}
+        run: |
           ls -lah /home/runner/.cargo/bin/
           cargo binstall -V
           cargo insta --version
