@@ -6,7 +6,7 @@ jilu_version     := "0.13.1"
 llvm_cov_version := "0.6.16"
 nextest_version  := "0.9.97"
 
-quiet_flag := if env_var_or_default("CI", "") == "true" { "--quiet" } else { "" }
+quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
 # Open a commit message in the editor, using Jean-Pierre.
 commit args="Give me a commit message": _install-jp
