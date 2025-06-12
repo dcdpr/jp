@@ -41,4 +41,5 @@ jobs:
       - if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@36f1e144e1c8edb0a652766b484448563d8baf46 # v4
         with:
+          path: ~/.rustup
           key: ${{ steps.cache.outputs.cache-primary-key }}
