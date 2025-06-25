@@ -30,4 +30,5 @@ allow-git = [
     "https://github.com/JeanMertz/gemini-client",
     "https://github.com/JeanMertz/openai-responses-rs",
     "https://github.com/modelcontextprotocol/rust-sdk",
+    "git+https://github.com/aschey/confique?branch=feat/partial-attrs",
 ]

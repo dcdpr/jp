@@ -11,10 +11,7 @@ use serde::{Deserialize, Serialize};
 pub use crate::error::Error;
 use crate::error::Result;
 
-/// ID wrapper for LLM Model
-///
-/// This is used for storage and display purposes, it is **NOT** the same as
-/// [`Model::id`].
+/// The ID of a model, composed of a provider and a slug.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ModelId {

@@ -7,7 +7,6 @@ config_load_paths = ['.jp/config.d']
 
 [assistant]
 system_prompt = 'You are a helpful assistant.'
-
 [assistant.provider.anthropic]
 api_key_env = 'ANTHROPIC_API_KEY'
 
