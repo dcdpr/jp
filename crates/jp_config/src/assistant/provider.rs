@@ -1,6 +1,7 @@
 pub mod anthropic;
 pub mod deepseek;
 pub mod google;
+pub mod llamacpp;
 pub mod ollama;
 pub mod openai;
 pub mod openrouter;
@@ -30,6 +31,10 @@ pub struct Provider {
     #[config(nested)]
     pub google: google::Google,
 
+    /// Llamacpp API configuration.
+    #[config(nested)]
+    pub llamacpp: llamacpp::Llamacpp,
+
     /// Openrouter API configuration.
     #[config(nested)]
     pub openrouter: openrouter::Openrouter,
@@ -49,6 +54,7 @@ impl AssignKeyValue for <Provider as Confique>::Partial {
         match k.as_str() {
             _ if kv.trim_prefix("anthropic") => self.anthropic.assign(kv)?,
             _ if kv.trim_prefix("deepseek") => self.deepseek.assign(kv)?,
+            _ if kv.trim_prefix("llamacpp") => self.llamacpp.assign(kv)?,
             _ if kv.trim_prefix("google") => self.google.assign(kv)?,
             _ if kv.trim_prefix("openrouter") => self.openrouter.assign(kv)?,
             _ if kv.trim_prefix("openai") => self.openai.assign(kv)?,

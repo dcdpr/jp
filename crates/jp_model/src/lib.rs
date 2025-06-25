@@ -144,6 +144,7 @@ pub enum ProviderId {
     Anthropic,
     Deepseek,
     Google,
+    Llamacpp,
     Ollama,
     Openai,
     #[default]
@@ -175,6 +176,7 @@ impl fmt::Display for ProviderId {
             Self::Anthropic => f.write_str("anthropic"),
             Self::Deepseek => f.write_str("deepseek"),
             Self::Google => f.write_str("google"),
+            Self::Llamacpp => f.write_str("llamacpp"),
             Self::Openai => f.write_str("openai"),
             Self::Openrouter => f.write_str("openrouter"),
             Self::Ollama => f.write_str("ollama"),
@@ -191,6 +193,7 @@ impl FromStr for ProviderId {
             "anthropic" => Ok(Self::Anthropic),
             "deepseek" => Ok(Self::Deepseek),
             "google" => Ok(Self::Google),
+            "llamacpp" => Ok(Self::Llamacpp),
             "openai" => Ok(Self::Openai),
             "openrouter" => Ok(Self::Openrouter),
             "ollama" => Ok(Self::Ollama),
