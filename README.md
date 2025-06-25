@@ -11,11 +11,12 @@ Visit [**jp.computer**] for more information.
 - Single `jp` command for all interactions, no installation required.
 - Use multiple LLM _providers_ (support for local LLMs coming soon).
 - Integrate existing Model-Context-Protocol servers using _mcp_ configurations.
+- _Embedded mcp server_ to run custom scripts and tools.
 - Switch between different _conversations_ during your work.
 - Attach files or notes to conversations using _attachments_.
 - Use _models_ to use specific providers, models and parameters.
-- Define multiple _personas_ to customize the LLM's behavior.
-- Use _contexts_ to limit/expand the LLM's knowledge base per conversation.
+- Highly customizable _layered configuration_ system for maximum flexibility.
+- Switch between custom _assistants_ with different _personas_ and _contexts_.
 - Persist JP state in your VCS of choice.
 - LLM-based conversation naming + manual renaming.
 - Locally stored conversations excluded from VCS.

@@ -1,7 +1,10 @@
 use std::{env, path::PathBuf};
 
-use jp_config::llm;
-use jp_conversation::{AssistantMessage, MessagePair, ModelId, UserMessage};
+use jp_config::{
+    assistant, model::parameters::Parameters, Config, Configurable as _, Partial as _,
+    PartialConfig,
+};
+use jp_conversation::{AssistantMessage, MessagePair, UserMessage};
 use jp_llm::{provider::openrouter::Openrouter, structured_completion};
 use jp_query::structured::conversation_titles;
 use jp_test::{function_name, mock::Vcr};
@@ -16,11 +19,19 @@ async fn test_conversation_titles() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     // Create test data
-    let model: ModelId = "openrouter/openai/o3-mini-high".parse().unwrap();
-    let mut config = llm::Config::default().provider.openrouter;
+    let model_id = "openrouter/openai/o3-mini-high".parse().unwrap();
+    let mut config =
+        assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+            .unwrap()
+            .provider
+            .openrouter;
 
     let message = UserMessage::Query("Test message".to_string());
-    let history = vec![MessagePair::new(message, AssistantMessage::default())];
+    let history = vec![MessagePair::new(
+        message,
+        AssistantMessage::default(),
+        Config::from_partial(PartialConfig::default_values()).unwrap(),
+    )];
 
     let vcr = vcr();
     vcr.cassette(
@@ -39,7 +50,14 @@ async fn test_conversation_titles() -> Result<(), Box<dyn std::error::Error>> {
 
             let provider = Openrouter::try_from(&config).unwrap();
             let query = conversation_titles(3, history, &[]).unwrap();
-            structured_completion::<Vec<String>>(&provider, &model.into(), query).await
+            structured_completion::<Vec<String>>(
+                &provider,
+                &model_id,
+                &Parameters::default(),
+                query,
+            )
+            .await
+            .unwrap();
         },
     )
     .await

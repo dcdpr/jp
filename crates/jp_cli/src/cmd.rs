@@ -2,21 +2,22 @@ mod attachment;
 mod conversation;
 mod init;
 mod mcp;
-mod persona;
 mod query;
 
 use std::{borrow::Cow, fmt, num::NonZeroI32};
 
 use comfy_table::Row;
+use jp_config::PartialConfig;
+use jp_workspace::Workspace;
 use serde_json::Value;
 
-use crate::Ctx;
+use crate::{ctx::IntoPartialConfig, Ctx};
 
 #[derive(Debug, clap::Subcommand)]
 #[expect(clippy::large_enum_variant)]
-pub enum Commands {
+pub(crate) enum Commands {
     /// Initialize a new workspace.
-    Init(init::Args),
+    Init(init::Init),
 
     /// Query the assistant.
     #[command(visible_alias = "q")]
@@ -24,47 +25,56 @@ pub enum Commands {
 
     /// Manage attachments.
     #[command(visible_alias = "a", alias = "attachments")]
-    Attachment(attachment::Args),
+    Attachment(attachment::Attachment),
 
     // TODO: Remove once we have proper customizable "command aliases".
     #[command(name = "aa", hide = true)]
-    AttachmentAdd(attachment::add::Args),
-
-    /// Manage personas.
-    #[command(visible_alias = "p", alias = "personas")]
-    Persona(persona::Args),
+    AttachmentAdd(attachment::add::Add),
 
     /// Manage MCP servers.
     #[command(visible_alias = "m")]
-    Mcp(mcp::Args),
+    Mcp(mcp::Mcp),
 
     /// Manage conversations.
     #[command(visible_alias = "c", alias = "conversations")]
-    Conversation(conversation::Args),
+    Conversation(conversation::Conversation),
 }
 
 impl Commands {
-    pub async fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         match self {
             Commands::Query(args) => args.run(ctx).await,
-            Commands::Attachment(args) => args.run(ctx).await,
-            Commands::AttachmentAdd(args) => args.run(ctx).await,
-            Commands::Persona(args) => args.run(ctx),
+            Commands::Attachment(args) => args.run(ctx),
+            Commands::AttachmentAdd(args) => args.run(ctx),
             Commands::Mcp(args) => args.run(ctx),
             Commands::Conversation(args) => args.run(ctx).await,
             Commands::Init(_) => unreachable!("handled before workspace initialization"),
         }
     }
 
-    pub fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Commands::Query(_) => "query",
             Commands::Attachment(_) => "attachment",
             Commands::AttachmentAdd(_) => "attachment-add",
-            Commands::Persona(_) => "persona",
             Commands::Mcp(_) => "mcp",
             Commands::Init(_) => "init",
             Commands::Conversation(_) => "conversation",
+        }
+    }
+}
+
+impl IntoPartialConfig for Commands {
+    fn apply_cli_config(
+        &self,
+        workspace: Option<&Workspace>,
+        partial: PartialConfig,
+    ) -> Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        match self {
+            Commands::Query(args) => args.apply_cli_config(workspace, partial),
+            Commands::Attachment(args) => args.apply_cli_config(workspace, partial),
+            Commands::AttachmentAdd(args) => args.apply_cli_config(workspace, partial),
+            _ => Ok(partial),
         }
     }
 }
@@ -73,7 +83,7 @@ pub(crate) type Output = std::result::Result<Success, Error>;
 
 /// The type of output that should be printed to the screen.
 #[derive(Debug)]
-pub enum Success {
+pub(crate) enum Success {
     /// The command was successful.
     Ok,
 
@@ -124,20 +134,20 @@ impl From<Value> for Success {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub struct Error {
+pub(crate) struct Error {
     /// The error code.
     ///
     /// Used to exit the CLI with a specific exit code. This is usually `1`.
-    pub code: NonZeroI32,
+    pub(super) code: NonZeroI32,
 
     /// The optional error message to be displayed to the user.
-    pub message: Option<String>,
+    pub(super) message: Option<String>,
 
     /// Metadata to be displayed to the user.
     ///
     /// This is hidden from the user in TTY mode, unless the `--verbose` flag is
     /// set.
-    pub metadata: Vec<(String, Value)>,
+    pub(super) metadata: Vec<(String, Value)>,
 }
 
 impl fmt::Display for Error {
@@ -255,6 +265,7 @@ impl From<crate::error::Error> for Error {
             Config(error) => return error.into(),
             Workspace(error) => return error.into(),
             Conversation(error) => return error.into(),
+            Model(error) => return error.into(),
             Mcp(error) => return error.into(),
             Llm(error) => return error.into(),
             Io(error) => return error.into(),
@@ -262,7 +273,6 @@ impl From<crate::error::Error> for Error {
             Bat(error) => return error.into(),
             Template(error) => return error.into(),
             Json(error) => return error.into(),
-            Parameter(error) => return error.into(),
             NotFound(target, id) => [
                 ("message", "Not found".into()),
                 ("target", target.into()),
@@ -297,6 +307,9 @@ impl From<crate::error::Error> for Error {
                 "Undefined model. Use `--model` to specify a model.".to_owned(),
             )]
             .into(),
+            CliConfig(error) => {
+                [("message", "CLI Config error".to_owned()), ("error", error)].into()
+            }
         };
 
         Self::from(metadata)
@@ -333,13 +346,14 @@ impl_from_error!(url::ParseError, "Error while parsing URL");
 impl_from_error!(serde_json::Error, "Error while parsing JSON");
 impl_from_error!(serde::de::value::Error, "Deserialization error");
 impl_from_error!(toml::de::Error, "Error while parsing TOML");
+impl_from_error!(toml::ser::Error, "Error while serializing TOML");
 impl_from_error!(reqwest::Error, "Error while making HTTP request");
 impl_from_error!(std::str::ParseBoolError, "Error parsing boolean value");
+impl_from_error!(std::num::ParseIntError, "Error parsing integer value");
 impl_from_error!(jp_mcp::Error, "MCP error");
-impl_from_error!(
-    jp_conversation::model::SetParameterError,
-    "Error setting model parameter"
-);
+impl_from_error!(jp_model::Error, "Model error");
+impl_from_error!(jp_config::Error, "Config error");
+impl_from_error!(jp_conversation::Error, "Conversation error");
 
 impl From<jp_llm::Error> for Error {
     fn from(error: jp_llm::Error) -> Self {
@@ -440,70 +454,6 @@ impl From<jp_openrouter::Error> for Error {
     }
 }
 
-impl From<jp_config::Error> for Error {
-    fn from(error: jp_config::Error) -> Self {
-        use jp_config::Error::*;
-
-        let metadata: Vec<(&str, Value)> = match error {
-            ParseBool(error) => return error.into(),
-            Mcp(error) => return error.into(),
-            Conversation(error) => return error.into(),
-            Io(error) => return error.into(),
-            Parameters(error) => return error.into(),
-            Json(error) => return error.into(),
-            Deserialize(error) => return error.into(),
-            Confique(error) => [
-                ("message", "Config error".into()),
-                ("error", error.to_string().into()),
-            ]
-            .into(),
-            UnknownConfigKey {
-                key,
-                available_keys,
-            } => [
-                ("message", "Unknown config key".into()),
-                ("key", key.into()),
-                ("available_keys", available_keys.into()),
-            ]
-            .into(),
-            InvalidConfigValue { key, value, need } => [
-                ("message", "Invalid config value".into()),
-                ("key", key.into()),
-                ("value", value.into()),
-                ("need", need.into()),
-            ]
-            .into(),
-            ModelSlug(slug) => [
-                ("message", "Invalid model slug".into()),
-                ("slug", slug.into()),
-            ]
-            .into(),
-            InvalidFileExtension { path } => [
-                ("message", "Invalid or missing file extension".into()),
-                ("path", path.to_string_lossy().into()),
-            ]
-            .into(),
-            Toml(error) => [
-                ("message", "TOML error".into()),
-                ("error", error.to_string().into()),
-            ]
-            .into(),
-            Json5(error) => [
-                ("message", "JSON error".into()),
-                ("error", error.to_string().into()),
-            ]
-            .into(),
-            Yaml(error) => [
-                ("message", "YAML error".into()),
-                ("error", error.to_string().into()),
-            ]
-            .into(),
-        };
-
-        Self::from(metadata)
-    }
-}
-
 impl From<jp_workspace::Error> for Error {
     fn from(error: jp_workspace::Error) -> Self {
         use jp_workspace::Error::*;
@@ -511,6 +461,7 @@ impl From<jp_workspace::Error> for Error {
         let metadata: Vec<(&str, Value)> = match error {
             Conversation(error) => return error.into(),
             Storage(error) => return error.into(),
+            Config(error) => return error.into(),
             NotDir(path) => [
                 ("message", "Path is not a directory.".into()),
                 ("path", path.to_string_lossy().into()),
@@ -546,48 +497,6 @@ impl From<jp_workspace::Error> for Error {
     }
 }
 
-impl From<jp_conversation::Error> for Error {
-    fn from(error: jp_conversation::Error) -> Self {
-        use jp_conversation::Error::*;
-
-        let metadata: Vec<(&str, Value)> = match error {
-            XmlSerialization(se_error) => [
-                ("message", "XML serialization error".into()),
-                ("error", se_error.to_string().into()),
-            ]
-            .into(),
-
-            Io(error) => [
-                ("message", "IO error".into()),
-                ("error", error.to_string().into()),
-            ]
-            .into(),
-
-            Thread(error) => [
-                ("message", "Invalid thread".into()),
-                ("error", error.to_string().into()),
-            ]
-            .into(),
-
-            InvalidIdFormat(error) => [
-                ("message", "Invalid ID format".into()),
-                ("error", error.to_string().into()),
-            ]
-            .into(),
-
-            InvalidProviderId(error) => [
-                ("message", "Invalid provider ID".into()),
-                ("error", error.to_string().into()),
-            ]
-            .into(),
-
-            Id(error) => return error.into(),
-        };
-
-        Self::from(metadata)
-    }
-}
-
 impl From<jp_storage::Error> for Error {
     fn from(error: jp_storage::Error) -> Self {
         use jp_storage::Error;
@@ -597,6 +506,7 @@ impl From<jp_storage::Error> for Error {
             Error::Io(error) => return error.into(),
             Error::Json(error) => return error.into(),
             Error::Toml(error) => return error.into(),
+            Error::Config(error) => return error.into(),
             Error::NotDir(path) => [
                 ("message", "Path is not a directory.".into()),
                 ("path", path.to_string_lossy().into()),

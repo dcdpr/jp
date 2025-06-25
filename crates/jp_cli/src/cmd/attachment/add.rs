@@ -1,29 +1,48 @@
+use jp_config::PartialConfig;
+use jp_workspace::Workspace;
 use url::Url;
 
-use super::register_attachment;
-use crate::{ctx::Ctx, parser, Output};
+use super::validate_attachment;
+use crate::{ctx::Ctx, parser, IntoPartialConfig, Output};
 
 #[derive(Debug, clap::Args)]
 #[command(arg_required_else_help(true))]
-pub struct Args {
+pub(crate) struct Add {
     /// One or more attachments to add to the context.
     ///
     /// If the attachment is pointing to a file, then a file attachment is
     /// added, otherwise the attachment type can be added as a prefix.
     ///
     /// For example, to add a `summary` attachment, use `summary://<path>`.
-    #[arg(value_parser = |s: &str| parser::attachment_url(s))]
+    #[arg(value_parser = parser::attachment_url)]
     attachments: Vec<Url>,
 }
 
-impl Args {
-    pub async fn run(self, ctx: &mut Ctx) -> Output {
-        let context = &mut ctx.workspace.get_active_conversation_mut().context;
-
-        for uri in &self.attachments {
-            register_attachment(uri, context).await?;
-        }
+impl Add {
+    #[expect(clippy::unused_self, clippy::unnecessary_wraps)]
+    pub(crate) fn run(self, _: &mut Ctx) -> Output {
+        // See `apply_cli_config` for implementation.
 
         Ok(().into())
+    }
+}
+
+impl IntoPartialConfig for Add {
+    fn apply_cli_config(
+        &self,
+        _: Option<&Workspace>,
+        mut partial: PartialConfig,
+    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        for uri in &self.attachments {
+            validate_attachment(uri)?;
+
+            partial
+                .conversation
+                .attachments
+                .get_or_insert_default()
+                .push(uri.clone());
+        }
+
+        Ok(partial)
     }
 }

@@ -2,14 +2,16 @@ use jp_attachment_bear_note as _;
 use jp_attachment_cmd_output as _;
 use jp_attachment_file_content as _;
 use jp_attachment_mcp_resources as _;
-use jp_conversation::Context;
-use tracing::{debug, trace};
+use jp_config::PartialConfig;
+use jp_workspace::Workspace;
+use tracing::trace;
 use url::Url;
 
 use super::Output;
 use crate::{
     ctx::Ctx,
     error::{Error, Result},
+    IntoPartialConfig,
 };
 
 pub(super) mod add;
@@ -17,17 +19,31 @@ mod ls;
 mod rm;
 
 #[derive(Debug, clap::Args)]
-pub struct Args {
+pub(crate) struct Attachment {
     #[command(subcommand)]
     command: Commands,
 }
 
-impl Args {
-    pub async fn run(self, ctx: &mut Ctx) -> Output {
+impl Attachment {
+    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         match self.command {
-            Commands::Add(args) => args.run(ctx).await,
-            Commands::Remove(args) => args.run(ctx).await,
-            Commands::List(args) => args.run(ctx).await,
+            Commands::Add(args) => args.run(ctx),
+            Commands::Remove(args) => args.run(ctx),
+            Commands::List(args) => args.run(ctx),
+        }
+    }
+}
+
+impl IntoPartialConfig for Attachment {
+    fn apply_cli_config(
+        &self,
+        workspace: Option<&Workspace>,
+        partial: PartialConfig,
+    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        match &self.command {
+            Commands::Add(args) => args.apply_cli_config(workspace, partial),
+            Commands::Remove(args) => args.apply_cli_config(workspace, partial),
+            Commands::List(_) => Ok(partial),
         }
     }
 }
@@ -36,18 +52,37 @@ impl Args {
 enum Commands {
     /// Add attachment to context.
     #[command(name = "add", alias = "a")]
-    Add(add::Args),
+    Add(add::Add),
 
     /// Remove attachment from context
     #[command(name = "rm", alias = "r")]
-    Remove(rm::Args),
+    Remove(rm::Rm),
 
     /// List attachments in context.
     #[command(name = "ls", alias = "l")]
-    List(ls::Args),
+    List(ls::Ls),
 }
 
-pub async fn register_attachment(uri: &Url, ctx: &mut Context) -> Result<()> {
+pub(crate) fn validate_attachment(uri: &Url) -> Result<()> {
+    trace!(%uri, "Validating attachment.");
+
+    let scheme = uri
+        .scheme()
+        .split_once('+')
+        .map_or(uri.scheme(), |(k, _)| k);
+
+    if jp_attachment::find_handler_by_scheme(scheme).is_none() {
+        return Err(Error::NotFound("Attachment handler", scheme.to_string()));
+    }
+
+    Ok(())
+}
+
+pub(crate) async fn register_attachment(
+    ctx: &Ctx,
+    uri: &Url,
+    attachments: &mut Vec<jp_attachment::Attachment>,
+) -> Result<()> {
     trace!(uri = uri.as_str(), "Registering attachment.");
 
     let scheme = uri
@@ -55,42 +90,21 @@ pub async fn register_attachment(uri: &Url, ctx: &mut Context) -> Result<()> {
         .split_once('+')
         .map_or(uri.scheme(), |(k, _)| k);
 
-    let attachment = if let Some(attachment) = ctx.attachment_handlers.get_mut(scheme) {
-        attachment
-    } else {
-        let Some(handler) = jp_attachment::find_handler_by_scheme(scheme) else {
-            return Err(Error::NotFound("Attachment handler", scheme.to_string()));
-        };
-
-        ctx.attachment_handlers
-            .entry(scheme.to_string())
-            .or_insert(handler)
+    let Some(mut handler) = jp_attachment::find_handler_by_scheme(scheme) else {
+        return Err(Error::NotFound("Attachment handler", scheme.to_string()));
     };
 
-    debug!(%uri, "Registered URI as attachment.");
-    attachment
+    handler
         .add(uri)
         .await
-        .map_err(|e| Error::Attachment(e.to_string()))
-}
+        .map_err(|e| Error::Attachment(e.to_string()))?;
 
-pub async fn unregister_attachment(uri: &str, ctx: &mut Context) -> Result<()> {
-    let uri = if let Ok(uri) = Url::parse(uri) {
-        uri
-    } else {
-        // Special case for file attachments
-        trace!("URI is not a valid URL, treating as file path.");
-        Url::parse(&format!("file:{uri}"))?
-    };
-
-    let id = uri.scheme();
-
-    if let Some(attachment) = ctx.attachment_handlers.get_mut(id) {
-        attachment
-            .remove(&uri)
+    attachments.extend(
+        handler
+            .get(&ctx.workspace.root, ctx.mcp_client.clone())
             .await
-            .map_err(|e| Error::Attachment(e.to_string()))?;
-    }
+            .map_err(|e| Error::Attachment(e.to_string()))?,
+    );
 
     Ok(())
 }

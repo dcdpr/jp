@@ -1,23 +1,14 @@
 use comfy_table::{Cell, Row};
 
-use crate::{cmd::Success, ctx::Ctx, error::Error, Output};
+use crate::{cmd::Success, ctx::Ctx, Output};
 
 #[derive(Debug, clap::Args)]
-pub struct Args {}
+pub(crate) struct Ls {}
 
-impl Args {
-    pub async fn run(self, ctx: &mut Ctx) -> Output {
-        let context = &mut ctx.workspace.get_active_conversation_mut().context;
-
-        let mut uris = vec![];
-        for handler in context.attachment_handlers.values() {
-            uris.extend(
-                handler
-                    .list()
-                    .await
-                    .map_err(|e| Error::Attachment(e.to_string()))?,
-            );
-        }
+impl Ls {
+    #[expect(clippy::unused_self, clippy::unnecessary_wraps)]
+    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
+        let uris = &ctx.config.conversation.attachments;
 
         if uris.is_empty() {
             return Ok("No attachments in current context.".into());

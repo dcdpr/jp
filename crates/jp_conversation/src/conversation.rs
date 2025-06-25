@@ -2,6 +2,7 @@
 
 use std::{fmt, str::FromStr};
 
+use jp_config::{Partial, PartialConfig};
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id, NANOSECONDS_PER_DECISECOND,
@@ -9,19 +10,23 @@ use jp_id::{
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 
-use crate::{
-    context::Context,
-    error::{Error, Result},
-};
+use crate::error::{Error, Result};
 
 /// A sequence of messages between the user and LLM.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Conversation {
-    pub last_activated_at: UtcDateTime,
+    /// The optional title of the conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    pub context: Context,
 
+    /// The last time the conversation was activated.
+    pub last_activated_at: UtcDateTime,
+
+    /// The partial configuration persisted for this conversation.
+    pub config: PartialConfig,
+
+    // /// The configuration for this conversation.
+    // pub config: Config,
     /// Whether the conversation is stored locally or in the workspace.
     #[serde(skip)]
     pub local: bool,
@@ -32,7 +37,7 @@ impl Default for Conversation {
         Self {
             last_activated_at: UtcDateTime::now(),
             title: None,
-            context: Context::default(),
+            config: PartialConfig::default_values(),
             local: false,
         }
     }
@@ -42,10 +47,8 @@ impl Conversation {
     #[must_use]
     pub fn new(title: impl Into<String>) -> Self {
         Self {
-            last_activated_at: UtcDateTime::now(),
             title: Some(title.into()),
-            context: Context::default(),
-            local: false,
+            ..Default::default()
         }
     }
 }

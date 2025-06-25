@@ -1,38 +1,45 @@
-use std::str::FromStr as _;
-
-use jp_conversation::ConversationId;
+use jp_config::PartialConfig;
 use jp_mcp::config::McpServerId;
+use jp_workspace::Workspace;
 
-use crate::{ctx::Ctx, error::Error, Output};
+use crate::{
+    ctx::{Ctx, IntoPartialConfig},
+    Output,
+};
 
 #[derive(Debug, clap::Args)]
 #[command(arg_required_else_help(true))]
-pub struct Args {
+pub(crate) struct Detach {
     /// Names of MCP servers to detach
-    pub names: Vec<String>,
+    names: Vec<String>,
 
     /// ID of the conversation to detach the servers from. Defaults to the
     /// active conversation.
     #[arg(long = "id")]
-    pub conversation_id: Option<String>,
+    conversation_id: Option<String>,
 }
 
-impl Args {
-    pub fn run(self, ctx: &mut Ctx) -> Output {
-        let id = self.conversation_id.map_or_else(
-            || Ok(ctx.workspace.active_conversation_id()),
-            |v| ConversationId::from_str(&v).map_err(Error::from),
-        )?;
+impl Detach {
+    #[expect(clippy::unnecessary_wraps)]
+    pub(crate) fn run(self, _ctx: &mut Ctx) -> Output {
+        Ok(format!("Detached MCP servers: {}", self.names.join(", ")).into())
+    }
+}
 
-        let conversation = ctx
-            .workspace
-            .get_conversation_mut(&id)
-            .ok_or(Error::NotFound("conversation", id.to_string()))?;
-
+impl IntoPartialConfig for Detach {
+    fn apply_cli_config(
+        &self,
+        _workspace: Option<&Workspace>,
+        mut partial: PartialConfig,
+    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
         for id in self.names.iter().map(McpServerId::new) {
-            conversation.context.mcp_server_ids.remove(&id);
+            partial
+                .conversation
+                .mcp_servers
+                .get_or_insert_default()
+                .retain(|v| *v != id);
         }
 
-        Ok(format!("Detached MCP servers: {}", self.names.join(", ")).into())
+        Ok(partial)
     }
 }

@@ -25,6 +25,7 @@ jp_format = { workspace = true }
 jp_id = { workspace = true }
 jp_llm = { workspace = true }
 jp_mcp = { workspace = true }
+jp_model = { workspace = true }
 jp_openrouter = { workspace = true }
 jp_query = { workspace = true }
 jp_storage = { workspace = true }
@@ -76,6 +77,7 @@ tracing-subscriber = { workspace = true, features = [
 url = { workspace = true }
 
 [dev-dependencies]
+insta = { workspace = true, features = ["toml"] }
 test-log = { workspace = true }
 
 [lints]

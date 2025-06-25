@@ -7,7 +7,7 @@ use jp_workspace::query::ConversationQuery;
 use crate::{cmd::Success, ctx::Ctx, Output};
 
 #[derive(Debug, clap::Args)]
-pub struct Args {
+pub(crate) struct Rm {
     /// Conversation IDs to remove.
     ///
     /// Defaults to the active conversation if not specified.
@@ -24,8 +24,8 @@ pub struct Args {
     yes: bool,
 }
 
-impl Args {
-    pub fn run(self, ctx: &mut Ctx) -> Output {
+impl Rm {
+    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
         let ids = if let Some(from) = &self.from {
             ctx.workspace

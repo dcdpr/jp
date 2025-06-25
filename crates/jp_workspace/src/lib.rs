@@ -17,9 +17,7 @@ use std::{
 pub use error::Error;
 use error::Result;
 pub use id::Id;
-use jp_conversation::{
-    Context, ContextId, Conversation, ConversationId, MessagePair, Persona, PersonaId,
-};
+use jp_conversation::{Conversation, ConversationId, MessagePair};
 use jp_mcp::{
     config::{McpServer, McpServerId},
     tool::McpTool,
@@ -170,19 +168,15 @@ impl Workspace {
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
         // Workspace state
-        let personas = storage.load_personas()?;
         let mcp_servers = storage.load_mcp_servers()?;
         let mcp_tools = storage.load_mcp_tools()?;
-        let named_contexts = storage.load_named_contexts()?;
         let (mut conversations, messages) = storage.load_conversations_and_messages()?;
 
         // Local state
         let conversations_metadata = storage.load_conversations_metadata()?;
 
         debug!(
-            contexts = %named_contexts.len(),
             conversations = %conversations.len(),
-            personas = %personas.len(),
             mcp_servers = %mcp_servers.len(),
             mcp_tools = %mcp_tools.len(),
             active_conversation_id = %conversations_metadata.active_conversation_id,
@@ -206,10 +200,8 @@ impl Workspace {
         self.state = State {
             local: LocalState {
                 active_conversation,
-                named_contexts,
                 conversations,
                 messages,
-                personas,
                 mcp_servers,
                 mcp_tools,
             },
@@ -233,7 +225,6 @@ impl Workspace {
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
         storage.persist_conversations_metadata(&self.state.user.conversations_metadata)?;
-        storage.persist_personas(&self.state.local.personas)?;
         storage.persist_conversations_and_messages(
             &self.state.local.conversations,
             &self.state.local.messages,
@@ -245,7 +236,6 @@ impl Workspace {
             &self.state.local.active_conversation,
         )?;
         storage.persist_mcp_servers(&self.state.local.mcp_servers)?;
-        storage.persist_named_contexts(&self.state.local.named_contexts)?;
 
         info!(path = %self.root.display(), "Persisted state.");
         Ok(())
@@ -303,50 +293,6 @@ impl Workspace {
         }
 
         Ok(())
-    }
-
-    /// Returns an iterator over all personas.
-    pub fn personas(&self) -> impl Iterator<Item = (&PersonaId, &Persona)> {
-        self.state.local.personas.iter()
-    }
-
-    /// Gets a reference to a persona by its ID.
-    #[must_use]
-    pub fn get_persona(&self, id: &PersonaId) -> Option<&Persona> {
-        self.state.local.personas.get(id)
-    }
-
-    /// Create a new persona.
-    ///
-    /// Returns an error if a persona with that ID already exists.
-    pub fn create_persona(&mut self, persona: Persona) -> Result<PersonaId> {
-        let id = PersonaId::try_from(&persona.name)?;
-        self.create_persona_with_id(id, persona)
-    }
-
-    /// Create a new persona with the given ID.
-    ///
-    /// Returns an error if a persona with that ID already exists.
-    pub fn create_persona_with_id(&mut self, id: PersonaId, persona: Persona) -> Result<PersonaId> {
-        use jp_tombmap::Entry::*;
-
-        let id = match self.state.local.personas.entry(id) {
-            Occupied(entry) => return Err(Error::exists("Persona", entry.key())),
-            Vacant(entry) => entry.insert_entry(persona).key().clone(),
-        };
-
-        Ok(id)
-    }
-
-    /// Removes a persona by its ID.
-    ///
-    /// Returns the removed persona if it existed.
-    pub fn remove_persona(&mut self, id: &PersonaId) -> Option<Persona> {
-        if id == &PersonaId::default() {
-            return None;
-        }
-
-        self.state.local.personas.remove(id)
     }
 
     /// Returns an iterator over all conversations.
@@ -476,17 +422,6 @@ impl Workspace {
         self.state.local.mcp_servers.remove(id)
     }
 
-    /// Returns an iterator over all named contexts.
-    pub fn named_contexts(&self) -> impl Iterator<Item = (&ContextId, &Context)> {
-        self.state.local.named_contexts.iter()
-    }
-
-    /// Gets a reference to a named context by its ID.
-    #[must_use]
-    pub fn get_named_context(&self, id: &ContextId) -> Option<&Context> {
-        self.state.local.named_contexts.get(id)
-    }
-
     /// Returns an iterator over all conversations, including the active one.
     fn all_conversations(&self) -> impl Iterator<Item = (&ConversationId, &Conversation)> {
         self.state.local.conversations.iter().chain(iter::once((
@@ -517,10 +452,7 @@ pub fn user_data_dir() -> Result<PathBuf> {
 mod tests {
     use std::{collections::HashMap, fs, time::Duration};
 
-    use jp_storage::{
-        value::{read_json, write_json},
-        CONVERSATIONS_DIR, METADATA_FILE, PERSONAS_DIR,
-    };
+    use jp_storage::{value::read_json, CONVERSATIONS_DIR, METADATA_FILE};
     use tempfile::tempdir;
     use test_log::test;
     use time::UtcDateTime;
@@ -646,128 +578,6 @@ mod tests {
         assert!(metadata_file.is_file());
 
         let _metadata: Conversation = read_json(&metadata_file).unwrap();
-    }
-
-    #[test]
-    fn test_workspace_load_loads_persisted_state() {
-        jp_id::global::set("foo".to_owned());
-
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let storage = root.join("storage");
-
-        let personas_path = storage.join(PERSONAS_DIR);
-        fs::create_dir_all(&personas_path).unwrap();
-
-        let id = PersonaId::try_from("p1").unwrap();
-        let persona = Persona {
-            name: "p1".into(),
-            ..Default::default()
-        };
-        write_json(&personas_path.join(id.to_path_buf()), &persona).unwrap();
-
-        let mut workspace = Workspace::new(root).persisted_at(&storage).unwrap();
-        workspace.load().unwrap();
-
-        assert_eq!(workspace.get_persona(&id), Some(&persona));
-    }
-
-    #[test]
-    fn test_workspace_personas() {
-        jp_id::global::set("foo".to_owned());
-
-        let mut workspace = Workspace::new(PathBuf::new());
-        assert_eq!(workspace.personas().count(), 0);
-
-        let id = PersonaId::try_from("p1").unwrap();
-        let persona = Persona::new("p1");
-        workspace.state.local.personas.insert(id, persona);
-        assert_eq!(workspace.personas().count(), 1);
-    }
-
-    #[test]
-    fn test_workspace_get_persona() {
-        jp_id::global::set("foo".to_owned());
-
-        let mut workspace = Workspace::new(PathBuf::new());
-        let id = PersonaId::try_from("p1").unwrap();
-        assert_eq!(workspace.get_persona(&id), None);
-
-        let persona = Persona::new("p1");
-        workspace
-            .state
-            .local
-            .personas
-            .insert(id.clone(), persona.clone());
-        assert_eq!(workspace.get_persona(&id), Some(&persona));
-    }
-
-    #[test]
-    fn test_workspace_create_persona() {
-        jp_id::global::set("foo".to_owned());
-
-        let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.local.personas.is_empty());
-
-        let persona = Persona::new("p1");
-        let id = workspace.create_persona(persona.clone()).unwrap();
-        assert_eq!(workspace.get_persona(&id), Some(&persona));
-    }
-
-    #[test]
-    fn test_workspace_create_persona_duplicate() {
-        jp_id::global::set("foo".to_owned());
-
-        let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.local.personas.is_empty());
-
-        let persona = Persona::new("p1");
-        let id = workspace.create_persona(persona.clone()).unwrap();
-        assert_eq!(workspace.state.local.personas.get(&id), Some(&persona));
-
-        let error = workspace.create_persona(persona).unwrap_err();
-        assert_eq!(error, Error::exists("Persona", &id));
-        assert_eq!(workspace.state.local.personas.len(), 1);
-    }
-
-    #[test]
-    fn test_workspace_remove_persona() {
-        jp_id::global::set("foo".to_owned());
-
-        let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.local.personas.is_empty());
-
-        let id = PersonaId::try_from("p1").unwrap();
-        let persona = Persona::new("p1");
-        workspace
-            .state
-            .local
-            .personas
-            .insert(id.clone(), persona.clone());
-
-        let removed_persona = workspace.remove_persona(&id).unwrap();
-        assert_eq!(removed_persona, persona);
-        assert!(workspace.state.local.personas.is_empty());
-    }
-
-    #[test]
-    fn test_workspace_remove_persona_ignores_default() {
-        jp_id::global::set("foo".to_owned());
-
-        let mut workspace = Workspace::new(PathBuf::new());
-        assert!(workspace.state.local.personas.is_empty());
-
-        let id = PersonaId::try_from("default").unwrap();
-        let persona = Persona::default();
-        workspace
-            .state
-            .local
-            .personas
-            .insert(id.clone(), persona.clone());
-
-        let removed_persona = workspace.remove_persona(&id);
-        assert!(removed_persona.is_none());
-        assert_eq!(workspace.state.local.personas.len(), 1);
     }
 
     #[test]

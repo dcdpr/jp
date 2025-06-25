@@ -1,9 +1,10 @@
 use std::error::Error;
 
 use async_trait::async_trait;
-use jp_config::Config;
-use jp_conversation::{AssistantMessage, ConversationId, MessagePair, Model};
+use jp_config::{assistant::Assistant, Config};
+use jp_conversation::{AssistantMessage, ConversationId, MessagePair};
 use jp_llm::{provider, structured_completion};
+use jp_model::ModelId;
 use jp_query::structured::conversation_titles;
 use jp_workspace::Workspace;
 use tokio_util::sync::CancellationToken;
@@ -14,52 +15,56 @@ use crate::Task;
 #[derive(Debug)]
 pub struct TitleGeneratorTask {
     pub conversation_id: ConversationId,
-    pub model: Model,
-    pub provider_config: jp_config::llm::provider::Config,
+    pub model_id: ModelId,
+    pub assistant: Assistant,
     pub messages: Vec<MessagePair>,
     pub title: Option<String>,
 }
 
 impl TitleGeneratorTask {
-    #[must_use]
     pub fn new(
         conversation_id: ConversationId,
         config: &Config,
         workspace: &Workspace,
         query: Option<String>,
-    ) -> Self {
-        let id = config.conversation.title.generate.model.id.clone();
-        let parameters = config
-            .conversation
-            .title
-            .generate
-            .model
-            .parameters
-            .clone()
-            .unwrap_or_default();
-
-        let model = Model { id, parameters };
-
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let mut messages = workspace.get_messages(&conversation_id).to_vec();
         if let Some(query) = query {
-            messages.push(MessagePair::new(query.into(), AssistantMessage::default()));
+            messages.push(MessagePair::new(
+                query.into(),
+                AssistantMessage::default(),
+                config.clone(),
+            ));
         }
 
-        Self {
+        let model_id = config
+            .assistant
+            .model
+            .id
+            .clone()
+            .ok_or(jp_model::Error::MissingId)?;
+
+        Ok(Self {
             conversation_id,
-            model,
-            provider_config: config.llm.provider.clone(),
+            model_id,
+            assistant: config.assistant.clone(),
             messages,
             title: None,
-        }
+        })
     }
 
     async fn update_title(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!(conversation_id = %self.conversation_id, "Updating conversation title.");
-        let provider = provider::get_provider(self.model.id.provider(), &self.provider_config)?;
+
+        let parameters = &self.assistant.model.parameters;
+        let provider_config = &self.assistant.provider;
+        let model_id = &self.model_id;
+        let provider_id = model_id.provider();
+
+        let provider = provider::get_provider(provider_id, provider_config)?;
         let query = conversation_titles(1, self.messages.clone(), &[])?;
         let titles: Vec<String> =
-            structured_completion(provider.as_ref(), &self.model, query).await?;
+            structured_completion(provider.as_ref(), model_id, parameters, query).await?;
 
         trace!(titles = ?titles, "Received conversation titles.");
         if let Some(title) = titles.into_iter().next() {

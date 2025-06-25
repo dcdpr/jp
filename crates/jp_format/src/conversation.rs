@@ -2,9 +2,7 @@ use std::fmt;
 
 use comfy_table::{Cell, CellAlignment, Row, Table};
 use crossterm::style::Stylize as _;
-use jp_conversation::{Conversation, ConversationId, MessagePair, PersonaId};
-use jp_id::Id as _;
-use jp_term::osc::hyperlink;
+use jp_conversation::{Conversation, ConversationId, MessagePair};
 use time::UtcDateTime;
 
 use crate::datetime::DateTimeFmt;
@@ -13,11 +11,11 @@ pub struct DetailsFmt {
     /// The ID of the conversation.
     pub id: ConversationId,
 
+    /// The name of the assistant, if any.
+    pub assistant_name: Option<String>,
+
     /// The conversation title.
     pub title: Option<String>,
-
-    /// The ID of the persona used in the conversation.
-    pub persona_id: PersonaId,
 
     /// The number of messages in the conversation.
     pub message_count: usize,
@@ -47,7 +45,6 @@ impl DetailsFmt {
         let Conversation {
             title,
             last_activated_at,
-            context,
             ..
         } = conversation;
 
@@ -55,8 +52,8 @@ impl DetailsFmt {
 
         Self {
             id,
+            assistant_name: conversation.config.assistant.name.clone(),
             title: title.clone(),
-            persona_id: context.persona_id,
             message_count: messages.len(),
             local: None,
             active_conversation: None,
@@ -116,22 +113,9 @@ impl DetailsFmt {
         let mut map = vec![];
 
         map.push(("ID".to_owned(), self.id.to_string()));
-
-        map.push((
-            "Persona".to_owned(),
-            if self.hyperlinks {
-                hyperlink(
-                    format!("jp://show-metadata/{}", self.persona_id),
-                    if self.color {
-                        self.persona_id.target_id().blue().to_string()
-                    } else {
-                        self.persona_id.target_id().to_string()
-                    },
-                )
-            } else {
-                self.persona_id.target_id().to_string()
-            },
-        ));
+        if let Some(name) = self.assistant_name.clone() {
+            map.push(("Assistant".to_owned(), name));
+        }
 
         if let Some(last_message_at) = self.last_message_at {
             map.push((

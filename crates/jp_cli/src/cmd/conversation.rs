@@ -8,13 +8,13 @@ mod show;
 mod use_;
 
 #[derive(Debug, clap::Args)]
-pub struct Args {
+pub(crate) struct Conversation {
     #[command(subcommand)]
     command: Commands,
 }
 
-impl Args {
-    pub async fn run(self, ctx: &mut Ctx) -> Output {
+impl Conversation {
+    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         match self.command {
             Commands::Show(args) => args.run(ctx),
             Commands::Remove(args) => args.run(ctx),
@@ -29,21 +29,21 @@ impl Args {
 enum Commands {
     /// Remove conversations.
     #[command(name = "rm")]
-    Remove(rm::Args),
+    Remove(rm::Rm),
 
     /// List conversations.
     #[command(name = "ls")]
-    List(ls::Args),
+    List(ls::Ls),
 
     /// Show conversation details.
     #[command(name = "show")]
-    Show(show::Args),
+    Show(show::Show),
 
     /// Set the active conversation.
     #[command(name = "use")]
-    Use(use_::Args),
+    Use(use_::Use),
 
     /// Edit conversation details.
     #[command(name = "edit")]
-    Edit(edit::Args),
+    Edit(edit::Edit),
 }

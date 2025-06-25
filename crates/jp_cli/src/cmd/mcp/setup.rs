@@ -5,21 +5,21 @@ use jp_mcp::config::{McpServer, McpServerId};
 use crate::{ctx::Ctx, Output};
 
 #[derive(Debug, clap::Args)]
-pub struct Args {
+pub(crate) struct Setup {
     /// Name for the MCP server
-    pub name: String,
+    name: String,
 
     /// Command to execute
-    pub command: String,
+    command: String,
 
     /// Environment variables to expose (in format NAME=VALUE)
     #[arg(short = 'e', long = "env", value_delimiter = ',')]
-    pub environment_variables: Vec<String>,
+    environment_variables: Vec<String>,
 }
 
-impl Args {
+impl Setup {
     #[expect(clippy::unnecessary_wraps)]
-    pub fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let (command, args) = self.command.split_once(' ').unwrap_or((&self.command, ""));
 
         let transport = jp_mcp::transport::Stdio {

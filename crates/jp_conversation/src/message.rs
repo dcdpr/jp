@@ -2,6 +2,7 @@
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
+use jp_config::Config;
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id, NANOSECONDS_PER_DECISECOND,
@@ -10,10 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::UtcDateTime;
 
-use crate::{
-    context::Context,
-    error::{Error, Result},
-};
+use crate::error::{Error, Result};
 
 /// A single exchange between user and LLM.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -28,25 +26,19 @@ pub struct MessagePair {
     pub reply: AssistantMessage,
 
     /// The context that was active when this message pair was generated.
-    pub context: Context,
+    pub config: Config,
 }
 
 impl MessagePair {
     /// Creates a new message pair with the current timestamp.
     #[must_use]
-    pub fn new(message: UserMessage, reply: AssistantMessage) -> Self {
+    pub fn new(message: UserMessage, reply: AssistantMessage, config: Config) -> Self {
         Self {
             timestamp: UtcDateTime::now(),
             message,
             reply,
-            context: Context::default(),
+            config,
         }
-    }
-
-    #[must_use]
-    pub fn with_context(mut self, context: Context) -> Self {
-        self.context = context;
-        self
     }
 
     #[must_use]

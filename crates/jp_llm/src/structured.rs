@@ -1,6 +1,7 @@
 //! Tools for requesting structured data from LLMs using tool calls.
 
-use jp_conversation::Model;
+use jp_config::model::parameters::Parameters;
+use jp_model::ModelId;
 use jp_query::query::StructuredQuery;
 use serde::de::DeserializeOwned;
 
@@ -20,9 +21,13 @@ pub(crate) const SCHEMA_TOOL_NAME: &str = "generate_structured_data";
 /// response object into the final shape of `T`.
 pub async fn completion<T: DeserializeOwned>(
     provider: &dyn Provider,
-    model: &Model,
+    model_id: &ModelId,
+    parameters: &Parameters,
     query: StructuredQuery,
 ) -> Result<T> {
-    let value = provider.structured_completion(model, query).await?;
+    let value = provider
+        .structured_completion(model_id, parameters, query)
+        .await?;
+
     serde_json::from_value(value).map_err(Into::into)
 }

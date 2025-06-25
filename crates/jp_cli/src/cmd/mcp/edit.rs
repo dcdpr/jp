@@ -13,21 +13,21 @@ use crate::{
 };
 
 #[derive(Debug, clap::Args)]
-pub struct Args {
+pub(crate) struct Edit {
     /// Name for the MCP server
-    pub name: String,
+    name: String,
 
     /// Edit a local MCP server configuration
     #[arg(short = 'l', long = "local")]
-    pub local: bool,
+    local: bool,
 
     /// How to edit the MCP server configuration.
     #[arg(short, long)]
-    pub edit: Option<Option<Editor>>,
+    edit: Option<Option<Editor>>,
 }
 
-impl Args {
-    pub fn run(self, ctx: &mut Ctx) -> Output {
+impl Edit {
+    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let Some(cmd) = Editor::from_cli_or_config(self.edit.clone(), ctx.config.editor.clone())
             .and_then(|e| e.command())
         else {

@@ -1,6 +1,6 @@
 use crossterm::style::Stylize as _;
 use jp_config::Config;
-use jp_conversation::{ConversationId, MessagePair, Model};
+use jp_conversation::{ConversationId, MessagePair};
 use jp_llm::{provider, structured_completion};
 use jp_query::structured::conversation_titles;
 
@@ -9,7 +9,7 @@ use crate::{cmd::Success, ctx::Ctx, Output};
 #[derive(Debug, clap::Args)]
 #[group(required = true, id = "edit")]
 #[command(arg_required_else_help = true)]
-pub struct Args {
+pub(crate) struct Edit {
     /// Conversation ID to edit. Defaults to active conversation.
     id: Option<ConversationId>,
 
@@ -31,8 +31,8 @@ pub struct Args {
     no_title: bool,
 }
 
-impl Args {
-    pub async fn run(self, ctx: &mut Ctx) -> Output {
+impl Edit {
+    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
         let id = self.id.unwrap_or(active_id);
         let messages = ctx.workspace.get_messages(&id).to_vec();
@@ -67,21 +67,20 @@ async fn generate_titles(
     mut rejected: Vec<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;
-    let id = config.conversation.title.generate.model.id.clone();
-    let parameters = config
+    let parameters = &config.conversation.title.generate.model.parameters;
+    let model_id = &config
         .conversation
         .title
         .generate
         .model
-        .parameters
+        .id
         .clone()
-        .unwrap_or_default();
+        .ok_or(jp_model::Error::MissingId)?;
 
-    let model = Model { id, parameters };
-
-    let provider = provider::get_provider(model.id.provider(), &config.llm.provider)?;
+    let provider = provider::get_provider(model_id.provider(), &config.assistant.provider)?;
     let query = conversation_titles(count, messages.clone(), &rejected)?;
-    let titles: Vec<String> = structured_completion(provider.as_ref(), &model, query).await?;
+    let titles: Vec<String> =
+        structured_completion(provider.as_ref(), model_id, parameters, query).await?;
 
     let mut choices = titles.clone();
     choices.extend(rejected.clone());

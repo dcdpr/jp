@@ -466,7 +466,7 @@ dependencies = [
  "syntect",
  "terminal-colorsaurus",
  "thiserror 1.0.69",
- "toml",
+ "toml 0.8.20",
  "unicode-width 0.1.14",
  "walkdir",
 ]
@@ -698,21 +698,19 @@ dependencies = [
 [[package]]
 name = "confique"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d011f79ecb68498e94453e133c67cc5c35ab847684c59fa58b9ce0698e272e7b"
+source = "git+https://github.com/aschey/confique?branch=feat%2Fpartial-attrs#12d551c3448364813f51d7639e314b590409222c"
 dependencies = [
  "confique-macro",
  "json5",
  "serde",
  "serde_yaml",
- "toml",
+ "toml 0.8.20",
 ]
 
 [[package]]
 name = "confique-macro"
 version = "0.0.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df20583fae327154743356c4896906bda1aa9b7df30c5aed73a54cf27fede9de"
+source = "git+https://github.com/aschey/confique?branch=feat%2Fpartial-attrs#12d551c3448364813f51d7639e314b590409222c"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -1875,7 +1873,9 @@ checksum = "154934ea70c58054b556dd430b99a98c2a7ff5309ac9891597e339b5c28f4371"
 dependencies = [
  "console",
  "once_cell",
+ "serde",
  "similar",
+ "toml 0.5.11",
 ]
 
 [[package]]
@@ -2020,6 +2020,7 @@ dependencies = [
  "futures",
  "indoc",
  "inquire",
+ "insta",
  "jp_attachment",
  "jp_attachment_bear_note",
  "jp_attachment_cmd_output",
@@ -2031,6 +2032,7 @@ dependencies = [
  "jp_id",
  "jp_llm",
  "jp_mcp",
+ "jp_model",
  "jp_openrouter",
  "jp_query",
  "jp_storage",
@@ -2050,7 +2052,7 @@ dependencies = [
  "time",
  "timeago",
  "tokio",
- "toml",
+ "toml 0.8.20",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -2062,10 +2064,13 @@ version = "0.1.0"
 dependencies = [
  "confique",
  "directories",
- "jp_conversation",
+ "duct",
+ "jp_attachment",
  "jp_mcp",
+ "jp_model",
  "json5",
  "path-clean",
+ "quick-xml 0.37.3",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2073,8 +2078,9 @@ dependencies = [
  "tempfile",
  "test-log",
  "thiserror 2.0.12",
- "toml",
+ "toml 0.8.20",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -2082,8 +2088,8 @@ name = "jp_conversation"
 version = "0.1.0"
 dependencies = [
  "jp_attachment",
+ "jp_config",
  "jp_id",
- "jp_mcp",
  "quick-xml 0.37.3",
  "serde",
  "serde_json",
@@ -2126,6 +2132,7 @@ dependencies = [
  "jp_config",
  "jp_conversation",
  "jp_mcp",
+ "jp_model",
  "jp_openrouter",
  "jp_query",
  "jp_test",
@@ -2157,6 +2164,16 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "jp_model"
+version = "0.1.0"
+dependencies = [
+ "jp_id",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -2193,6 +2210,7 @@ dependencies = [
 name = "jp_storage"
 version = "0.1.0"
 dependencies = [
+ "jp_config",
  "jp_conversation",
  "jp_id",
  "jp_mcp",
@@ -2203,7 +2221,7 @@ dependencies = [
  "test-log",
  "thiserror 2.0.12",
  "time",
- "toml",
+ "toml 0.8.20",
  "tracing",
 ]
 
@@ -2216,6 +2234,7 @@ dependencies = [
  "jp_config",
  "jp_conversation",
  "jp_llm",
+ "jp_model",
  "jp_query",
  "jp_workspace",
  "tokio",
@@ -2254,6 +2273,7 @@ name = "jp_workspace"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "jp_config",
  "jp_conversation",
  "jp_id",
  "jp_mcp",
@@ -4242,6 +4262,15 @@ dependencies = [
  "futures-sink",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "toml"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

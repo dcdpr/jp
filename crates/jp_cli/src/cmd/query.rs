@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     convert::Infallible,
     env, fs,
     path::{Path, PathBuf},
@@ -9,19 +9,25 @@ use std::{
 use clap::{builder::TypedValueParser as _, ArgAction};
 use crossterm::style::{Color, Stylize as _};
 use futures::StreamExt as _;
-use jp_config::{expand_tilde, style::code::LinkStyle};
+use jp_config::{
+    assignment::{AssignKeyValue as _, KvAssignment},
+    assistant::Instructions,
+    parse::expand_tilde,
+    style::code::LinkStyle,
+    PartialConfig,
+};
 use jp_conversation::{
     message::{ToolCallRequest, ToolCallResult},
-    persona::Instructions,
     thread::{Thread, ThreadBuilder},
-    AssistantMessage, Context, ContextId, Conversation, ConversationId, MessagePair, Model,
-    ModelId, PersonaId, UserMessage,
+    AssistantMessage, Conversation, ConversationId, MessagePair, UserMessage,
 };
 use jp_llm::provider::{self, CompletionChunk, StreamEvent};
 use jp_mcp::{config::McpServerId, tool::ToolChoice, ResourceContents};
+use jp_model::ModelId;
 use jp_query::query::{ChatQuery, StructuredQuery};
 use jp_task::task::TitleGeneratorTask;
 use jp_term::{code, osc::hyperlink, stdout};
+use jp_workspace::Workspace;
 use minijinja::{Environment, UndefinedBehavior};
 use termimad::FmtText;
 use tracing::{debug, info, trace};
@@ -30,27 +36,28 @@ use url::Url;
 use super::{attachment::register_attachment, Output};
 use crate::{
     cmd::Success,
+    ctx::IntoPartialConfig,
     editor::{self, Editor},
     error::{Error, Result},
-    parser, Ctx, KeyValue, PATH_STRING_PREFIX,
+    parser, Ctx, PATH_STRING_PREFIX,
 };
 
 #[derive(Debug, clap::Args)]
-pub struct Query {
+pub(crate) struct Query {
     /// The query to send. If not provided, uses `$JP_EDITOR`, `$VISUAL` or
     /// `$EDITOR` to open edit the query in an editor.
     #[arg(value_parser = string_or_path)]
-    pub query: Option<String>,
+    query: Option<Vec<String>>,
 
     /// Use the query string as a Jinja2 template.
     ///
     /// You can provide values for template variables using the
     /// `template.values` config key.
     #[arg(long)]
-    pub template: bool,
+    template: bool,
 
     #[arg(long, value_parser = string_or_path.try_map(json_schema))]
-    pub schema: Option<schemars::Schema>,
+    schema: Option<schemars::Schema>,
 
     /// Replay the last message in the conversation.
     ///
@@ -58,85 +65,84 @@ pub struct Query {
     /// message. If no query is provided, $EDITOR will open with the last
     /// message in the conversation.
     #[arg(long = "replay", conflicts_with = "new_conversation")]
-    pub replay: bool,
+    replay: bool,
 
     /// Start a new conversation without any message history.
-    ///
-    /// If a context named `default` exists, it will be attached to the
-    /// conversation.
     #[arg(short = 'n', long = "new")]
-    pub new_conversation: bool,
+    new_conversation: bool,
 
     /// Store the conversation locally, outside of the workspace.
     #[arg(short = 'l', long = "local", requires = "new_conversation")]
-    pub local: bool,
+    local: bool,
 
-    /// Add attachment to the context.
+    /// Add attachment to the configuration.
     #[arg(short = 'a', long = "attachment", value_parser = |s: &str| parser::attachment_url(s))]
-    pub attachments: Vec<Url>,
-
-    /// Use specific persona.
-    #[arg(short = 'p', long = "persona", value_parser = PersonaId::from_str)]
-    pub persona: Option<PersonaId>,
-
-    /// Use specific context.
-    #[arg(short = 'x', long = "context", value_parser = |s: &str| ContextId::try_from(s))]
-    pub context: Option<ContextId>,
+    attachments: Vec<Url>,
 
     /// Use specific MCP servers exclusively.
     #[arg(short = 'm', long = "mcp", value_parser = |s: &str| Ok::<_, Infallible>(McpServerId::new(s)))]
-    pub mcp: Vec<McpServerId>,
+    mcp: Vec<McpServerId>,
+
+    /// Do not use any/specific configured MCP servers.
+    ///
+    /// If the flag is provided without a value, all MCP servers are disabled,
+    /// if a value is provided, only the specified servers are disabled.
+    ///
+    /// This flag can be combined with `--mcp` to re-enable specific MCP
+    /// servers after disabling all or some others.
+    #[arg(short = 'M', long = "no-mcp", value_parser = |s: &str| Ok::<_, Infallible>(McpServerId::new(s)))]
+    no_mcp: Option<Vec<McpServerId>>,
 
     /// Whether and how to edit the query.
     #[arg(short = 'e', long = "edit", conflicts_with = "no_edit")]
-    pub edit: Option<Option<Editor>>,
+    edit: Option<Option<Editor>>,
 
     /// Do not edit the query.
     #[arg(short = 'E', long = "no-edit", conflicts_with = "edit")]
-    pub no_edit: bool,
+    no_edit: bool,
 
     /// The model to use.
     #[arg(short = 'o', long = "model", value_parser = ModelId::from_str)]
-    pub model: Option<ModelId>,
+    model: Option<ModelId>,
 
     /// The model parameters to use.
-    #[arg(short = 'r', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KeyValue::from_str)]
-    pub parameters: Vec<KeyValue>,
+    #[arg(short = 'r', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KvAssignment::from_str)]
+    parameters: Vec<KvAssignment>,
 
     /// Do not display the reasoning content.
     ///
     /// This does not stop the assistant from generating reasoning tokens to
     /// help with its accuracy, but it does not display them in the output.
     #[arg(long = "hide-reasoning")]
-    pub hide_reasoning: bool,
+    hide_reasoning: bool,
 
     /// Stream the assistant's response as it is generated.
     ///
     /// This is the default behaviour for TTY sessions, but can be forced for
     /// non-TTY sessions by setting this flag.
     #[arg(short = 's', long = "stream", conflicts_with = "no_stream")]
-    pub stream: bool,
+    stream: bool,
 
     /// Disable streaming the assistant's response.
     ///
     /// This is the default behaviour for non-TTY sessions, or for structured
     /// responses, but can be forced by setting this flag.
     #[arg(short = 'S', long = "no-stream", conflicts_with = "stream")]
-    pub no_stream: bool,
+    no_stream: bool,
 
     /// The tool to use.
     ///
     /// If a value is provided, the tool matching the value will be used.
     ///
     /// Note that this setting is *not* persisted across queries. To persist
-    /// tool choice behavior, use a named context with the `tool_choice` field,
-    /// or set `llm.tool_choice` in the config file.
+    /// tool choice behavior, set the `assistant.tool_choice` field in a
+    /// configuration file.
     #[arg(short = 't', long = "tool")]
-    pub tool_choice: Option<Option<String>>,
+    tool_choice: Option<Option<String>>,
 
     /// Disable tool use by the assistant.
     #[arg(short = 'T', long = "no-tool")]
-    pub no_tool_choice: bool,
+    no_tool_choice: bool,
 }
 
 /// How to render the response to the user.
@@ -155,18 +161,17 @@ pub(crate) enum RenderMode {
 }
 
 impl Query {
-    pub async fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
 
         let previous_id = self.update_active_conversation(ctx)?;
+        if ctx.config.assistant.model.id.is_none() {
+            return Err(Error::UndefinedModel.into());
+        }
 
-        self.update_config(&mut ctx.config)?;
-        self.update_context(ctx).await?;
         ctx.configure_active_mcp_servers().await?;
-        let model = self.get_model(ctx)?;
-
-        let (message, query_file) = self.build_message(ctx, &model).await?;
+        let (message, query_file) = self.build_message(ctx).await?;
 
         if let UserMessage::Query(query) = &message {
             if query.is_empty() {
@@ -184,27 +189,18 @@ impl Query {
                     &ctx.config,
                     &ctx.workspace,
                     Some(query.clone()),
-                ));
+                )?);
             }
         }
 
-        let conversation = ctx.workspace.get_active_conversation();
         let thread = self.build_thread(ctx, message.clone()).await?;
 
-        let context = conversation.context.clone();
         let mut messages = vec![];
         if let Some(schema) = self.schema.clone() {
-            messages.push(handle_structured_output(ctx, context, thread, &model, schema).await?);
+            messages.push(handle_structured_output(ctx, thread, schema).await?);
         } else {
-            self.handle_stream(
-                ctx,
-                context,
-                thread,
-                &model,
-                self.tool_choice(ctx),
-                &mut messages,
-            )
-            .await?;
+            self.handle_stream(ctx, thread, self.tool_choice(ctx), &mut messages)
+                .await?;
         }
 
         let mut reply = String::new();
@@ -245,11 +241,7 @@ impl Query {
         Ok(Success::Ok)
     }
 
-    async fn build_message(
-        &self,
-        ctx: &mut Ctx,
-        model: &Model,
-    ) -> Result<(UserMessage, Option<PathBuf>)> {
+    async fn build_message(&self, ctx: &mut Ctx) -> Result<(UserMessage, Option<PathBuf>)> {
         let conversation_id = ctx.workspace.active_conversation_id();
 
         // If replaying, remove the last message from the conversation, and use
@@ -275,6 +267,7 @@ impl Query {
         // only relevant for replays, otherwise the existing message is empty,
         // and we replace it with the provided query.
         if let Some(text) = &self.query {
+            let text = text.join(" ");
             match &mut message {
                 UserMessage::Query(query) if query.is_empty() => text.clone_into(query),
                 UserMessage::Query(query) => *query = format!("{text}\n\n{query}"),
@@ -282,7 +275,7 @@ impl Query {
             }
         }
 
-        let query_file_path = self.edit_message(&mut message, ctx, conversation_id, model)?;
+        let query_file_path = self.edit_message(&mut message, ctx, conversation_id)?;
 
         if let UserMessage::Query(query) = &mut message
             && self.template
@@ -307,136 +300,34 @@ impl Query {
         Ok((message, query_file_path))
     }
 
-    /// Update the conversation context based on the contextual information
-    /// passed in through the CLI, configuration, and environment variables.
-    async fn update_context(&self, ctx: &mut Ctx) -> Result<()> {
-        // Update context if specified
-        if let Some(id) = ctx.config.conversation.context.clone() {
-            debug!(
-                %id,
-                "Using named context in conversation due to conversation.context config."
-            );
-
-            // Get context.
-            let context = ctx
-                .workspace
-                .get_named_context(&id)
-                .ok_or(Error::NotFound("Context", id.to_string()))?
-                .clone();
-
-            // Update conversation context.
-            ctx.workspace.get_active_conversation_mut().context = context;
-        }
-
-        // Update persona if specified
-        if let Some(id) = ctx.config.conversation.persona.clone() {
-            debug!(
-                %id,
-                "Changing persona in conversation context due to conversation.persona config."
-            );
-
-            // Ensure persona exists.
-            ctx.workspace
-                .get_persona(&id)
-                .ok_or(Error::NotFound("Persona", id.to_string()))?;
-
-            // Update context with new persona.
-            ctx.workspace
-                .get_active_conversation_mut()
-                .context
-                .persona_id = id;
-        }
-
-        // Add any new attachments specified in arguments
-        for attachment in &self.attachments {
-            let context = &mut ctx.workspace.get_active_conversation_mut().context;
-            register_attachment(attachment, context).await?;
-        }
-
-        // Set exclusive MCP servers
-        let mut servers = HashSet::new();
-        for id in &self.mcp {
-            // Ensure MCP server exists.
-            ctx.workspace
-                .get_mcp_server(id)
-                .ok_or(Error::NotFound("MCP server", id.to_string()))?;
-
-            servers.insert(id.clone());
-        }
-
-        if !servers.is_empty() {
-            debug!(
-                servers = servers
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                "Overriding MCP server in conversation context due to --mcp flag."
-            );
-
-            ctx.workspace
-                .get_active_conversation_mut()
-                .context
-                .mcp_server_ids = servers;
-        }
-
-        Ok(())
-    }
-
-    /// Update the config based on overrides from the CLI.
-    ///
-    /// The `--cfg` global flag is handled separately, this is specifically for
-    /// "convenience" flags such as `--persona` or `--context`, which are
-    /// equivalent to `--cfg conversation.persona` and `--cfg
-    /// conversation.context`.
-    fn update_config(&self, config: &mut jp_config::Config) -> Result<()> {
-        // Hide reasoning.
-        if self.hide_reasoning {
-            config.style.reasoning.show = false;
-        }
-
-        // Update the conversation context.
-        if let Some(context) = self.context.as_ref() {
-            config.conversation.context = Some(context.clone());
-        }
-
-        // Update the persona.
-        if let Some(persona) = self.persona.as_ref() {
-            config.conversation.persona = Some(persona.clone());
-        }
-
-        // Update the model parameters.
-        for KeyValue(key, value) in &self.parameters {
-            config
-                .llm
-                .model
-                .parameters
-                .get_or_insert_default()
-                .set(key, value.to_owned())?;
-        }
-
-        Ok(())
-    }
-
     fn update_active_conversation(&self, ctx: &mut Ctx) -> Result<ConversationId> {
+        // Store the (old) active conversation ID, so that we can restore to it,
+        // if the current conversation is aborted early (e.g. because of an
+        // empty query or any other error).
         let last_active_conversation_id = ctx.workspace.active_conversation_id();
 
-        if !self.new_conversation {
-            return Ok(last_active_conversation_id);
+        // Set new active conversation if requested.
+        if self.new_conversation {
+            let id = ctx.workspace.create_conversation(Conversation {
+                local: self.local,
+                ..Default::default()
+            });
+
+            debug!(
+                %id,
+                local = %self.local,
+                "Creating new active conversation due to --new flag."
+            );
+
+            ctx.workspace.set_active_conversation_id(id)?;
         }
 
-        let id = ctx.workspace.create_conversation(Conversation {
-            local: self.local,
-            ..Default::default()
-        });
+        // Persist specific CLI configurations for the active conversation.
+        let mut config = ctx.workspace.get_active_conversation().config.clone();
+        self.apply_persistent_cli_config(Some(&ctx.workspace), &mut config)
+            .map_err(|e| Error::CliConfig(e.to_string()))?;
+        ctx.workspace.get_active_conversation_mut().config = config;
 
-        debug!(
-            %id,
-            local = %self.local,
-            "Creating new active conversation due to --new flag."
-        );
-
-        ctx.workspace.set_active_conversation_id(id)?;
         Ok(last_active_conversation_id)
     }
 
@@ -446,7 +337,6 @@ impl Query {
         message: &mut UserMessage,
         ctx: &mut Ctx,
         conversation_id: ConversationId,
-        model: &Model,
     ) -> Result<Option<PathBuf>> {
         let UserMessage::Query(query) = message else {
             return Ok(None);
@@ -486,95 +376,30 @@ impl Query {
         // otherwise open an empty editor.
         let query_file_path;
         (*query, query_file_path) =
-            editor::edit_query(ctx, conversation_id, model, initial_message, editor)
+            editor::edit_query(ctx, conversation_id, initial_message, editor)
                 .map(|(q, p)| (q, Some(p)))?;
 
         Ok(query_file_path)
     }
 
-    /// Get the model to use for the current query.
-    ///
-    /// 1. If the `model` CLI flag is set, use that.
-    /// 2. If the current persona has a model, use that.
-    /// 3. If a model is configured in a configuration file or environment
-    ///    variable, use that.
-    /// 4. Otherwise return an error.
-    fn get_model(&self, ctx: &Ctx) -> Result<Model> {
-        let persona_id = &ctx.workspace.get_active_conversation().context.persona_id;
-        let persona = ctx
-            .workspace
-            .get_persona(persona_id)
-            .ok_or(Error::NotFound("Persona", persona_id.to_string()))?;
-
-        let Some(id) = self
-            .model
-            .clone()
-            .or_else(|| persona.model.clone())
-            .or_else(|| ctx.config.llm.model.id.clone())
-        else {
-            return Err(Error::UndefinedModel);
-        };
-
-        let mut parameters = ctx.config.llm.model.parameters.clone().unwrap_or_default();
-        if persona.inherit_parameters {
-            parameters.merge(persona.parameters.clone());
-        } else {
-            parameters = persona.parameters.clone();
-        }
-
-        let model = Model { id, parameters };
-
-        trace!(provider = %model.id.provider(), slug = %model.id.slug(), "Loaded LLM model.");
-
-        Ok(model)
-    }
-
     fn tool_choice(&self, ctx: &Ctx) -> ToolChoice {
         self.no_tool_choice
             .then_some(ToolChoice::None)
-            .or_else(|| {
-                self.tool_choice.as_ref().map(|v| match v.as_deref() {
-                    None | Some("true") => ToolChoice::Required,
-                    Some(v) => match v {
-                        "false" => ToolChoice::None,
-                        _ => ToolChoice::Function(v.to_owned()),
-                    },
-                })
-            })
-            .or_else(|| {
-                ctx.workspace
-                    .get_active_conversation()
-                    .context
-                    .tool_choice
-                    .clone()
-            })
-            .or_else(|| ctx.config.llm.tool_choice.clone())
+            .or_else(|| ctx.config.assistant.tool_choice.clone())
             .unwrap_or(ToolChoice::Auto)
     }
 
     async fn build_thread(&self, ctx: &Ctx, message: UserMessage) -> Result<Thread> {
         let conversation_id = ctx.workspace.active_conversation_id();
-        let conversation = ctx.workspace.get_active_conversation();
-        let persona_id = &conversation.context.persona_id;
-        let persona = ctx
-            .workspace
-            .get_persona(persona_id)
-            .ok_or(Error::persona_not_found(persona_id))?;
-
         let tools = ctx.mcp_client.list_tools().await?;
         let mut attachments = vec![];
-        for handler in conversation.context.attachment_handlers.values() {
-            attachments.extend(
-                handler
-                    .get(&ctx.workspace.root, ctx.mcp_client.clone())
-                    .await
-                    .map_err(|e| Error::Attachment(e.to_string()))?,
-            );
+        for attachment in &ctx.config.conversation.attachments {
+            register_attachment(ctx, attachment, &mut attachments).await?;
         }
 
         let mut thread_builder = ThreadBuilder::default()
-            .with_system_prompt(persona.system_prompt.clone())
-            .with_instructions(persona.instructions.clone())
+            .with_system_prompt(ctx.config.assistant.system_prompt.clone())
+            .with_instructions(ctx.config.assistant.instructions.clone())
             .with_attachments(attachments)
             .with_history(ctx.workspace.get_messages(&conversation_id).to_vec())
             .with_message(message);
@@ -600,14 +425,21 @@ impl Query {
     async fn handle_stream(
         &self,
         ctx: &mut Ctx,
-        context: Context,
         mut thread: Thread,
-        model: &Model,
         tool_choice: ToolChoice,
         messages: &mut Vec<MessagePair>,
     ) -> Result<()> {
         let tools = ctx.mcp_client.list_tools().await?;
-        let provider = provider::get_provider(model.id.provider(), &ctx.config.llm.provider)?;
+        let model_id = &ctx
+            .config
+            .assistant
+            .model
+            .id
+            .clone()
+            .ok_or(jp_model::Error::MissingId)?;
+
+        let parameters = &ctx.config.assistant.model.parameters;
+        let provider = provider::get_provider(model_id.provider(), &ctx.config.assistant.provider)?;
         let message = thread.message.clone();
         let query = ChatQuery {
             thread: thread.clone(),
@@ -625,7 +457,9 @@ impl Query {
             tool_choice,
             ..Default::default()
         };
-        let mut stream = provider.chat_completion_stream(model, query).await?;
+        let mut stream = provider
+            .chat_completion_stream(model_id, parameters, query)
+            .await?;
 
         let mut content_tokens = String::new();
         let mut reasoning_tokens = String::new();
@@ -740,13 +574,16 @@ impl Query {
             println!();
         }
 
-        let message = MessagePair::new(message, AssistantMessage {
-            metadata,
-            content,
-            reasoning,
-            tool_calls: tool_calls.clone(),
-        })
-        .with_context(context.clone());
+        let message = MessagePair::new(
+            message,
+            AssistantMessage {
+                metadata,
+                content,
+                reasoning,
+                tool_calls: tool_calls.clone(),
+            },
+            ctx.config.clone(),
+        );
         messages.push(message.clone());
 
         // If the assistant asked for a tool call, we handle it automatically,
@@ -765,9 +602,7 @@ impl Query {
 
             Box::pin(self.handle_stream(
                 ctx,
-                context,
                 thread,
-                model,
                 // After the first tool call, we revert back to letting the LLM
                 // decide if/which tool to use.
                 ToolChoice::Auto,
@@ -787,6 +622,114 @@ impl Query {
         }
 
         RenderMode::Auto
+    }
+
+    /// Apply the CLI configurations that should be persisted in the conversation's
+    /// state.
+    fn apply_persistent_cli_config(
+        &self,
+        workspace: Option<&Workspace>,
+        partial: &mut PartialConfig,
+    ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Update the model.
+        if let Some(id) = self.model.as_ref() {
+            partial.assistant.model.id = Some(id.to_owned());
+        }
+
+        // Update the model parameters.
+        for kv in self.parameters.clone() {
+            partial.assistant.model.parameters.assign(kv)?;
+        }
+
+        // Add attachments.
+        partial
+            .conversation
+            .attachments
+            .get_or_insert_default()
+            .extend(self.attachments.iter().cloned());
+
+        // Handle MCP servers.
+        if let Some(ids) = self.no_mcp.as_ref() {
+            let servers = partial.conversation.mcp_servers.get_or_insert_default();
+
+            if ids.is_empty() {
+                servers.clear();
+            }
+            for id in ids {
+                servers.retain(|v| v != id);
+            }
+        }
+
+        for id in &self.mcp {
+            // Ensure MCP server exists.
+            if let Some(workspace) = workspace {
+                workspace
+                    .get_mcp_server(id)
+                    .ok_or(Error::NotFound("MCP server", id.to_string()))?;
+            }
+
+            partial
+                .conversation
+                .mcp_servers
+                .get_or_insert_default()
+                .push(id.clone());
+        }
+
+        Ok(())
+    }
+}
+
+impl IntoPartialConfig for Query {
+    fn apply_cli_config(
+        &self,
+        workspace: Option<&Workspace>,
+        mut partial: PartialConfig,
+    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        // 1. First apply CLI configurations that we also want to persist in the
+        //    conversation configuration state.
+        self.apply_persistent_cli_config(workspace, &mut partial)?;
+
+        // 2. Then apply CLI configurations that we do not want to persist
+        //    between queries.
+        //
+        // Hide reasoning.
+        if self.hide_reasoning {
+            partial.style.reasoning.show = Some(false);
+        }
+        // Tool choice.
+        partial.assistant.tool_choice = self.tool_choice.as_ref().map(|v| match v.as_deref() {
+            None | Some("true") => ToolChoice::Required,
+            Some(v) => match v {
+                "false" => ToolChoice::None,
+                _ => ToolChoice::Function(v.to_owned()),
+            },
+        });
+
+        Ok(partial)
+    }
+
+    fn apply_conversation_config(
+        &self,
+        workspace: Option<&Workspace>,
+        partial: PartialConfig,
+    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        // New conversations do not apply any existing conversation
+        // configurations. This is handled by the other configuration layers
+        // (files, environment variables, CLI arguments).
+        if self.new_conversation {
+            return Ok(partial);
+        }
+
+        // If we're not inside a workspace, there is no active conversation to
+        // fetch the configuration from.
+        let Some(workspace) = workspace else {
+            return Ok(partial);
+        };
+
+        Ok(jp_config::load_partial(
+            workspace.get_active_conversation().config.clone(),
+            partial,
+        ))
     }
 }
 
@@ -814,24 +757,37 @@ fn cleanup(
 
 async fn handle_structured_output(
     ctx: &mut Ctx,
-    context: Context,
     thread: Thread,
-    model: &Model,
     schema: schemars::Schema,
 ) -> Result<MessagePair> {
-    let provider = provider::get_provider(model.id.provider(), &ctx.config.llm.provider)?;
+    let model_id = &ctx
+        .config
+        .assistant
+        .model
+        .id
+        .clone()
+        .ok_or(jp_model::Error::MissingId)?;
+
+    let parameters = &ctx.config.assistant.model.parameters;
+    let provider = provider::get_provider(model_id.provider(), &ctx.config.assistant.provider)?;
     let message = thread.message.clone();
     let query =
         StructuredQuery::new(schema, thread).map_err(|err| Error::Schema(err.to_string()))?;
 
-    let value = provider.structured_completion(model, query).await?;
+    let value = provider
+        .structured_completion(model_id, parameters, query)
+        .await?;
     let content = if ctx.term.is_tty {
         serde_json::to_string_pretty(&value)?
     } else {
         serde_json::to_string(&value)?
     };
 
-    Ok(MessagePair::new(message, AssistantMessage::from(content)).with_context(context))
+    Ok(MessagePair::new(
+        message,
+        AssistantMessage::from(content),
+        ctx.config.clone(),
+    ))
 }
 
 #[expect(clippy::needless_pass_by_value)]

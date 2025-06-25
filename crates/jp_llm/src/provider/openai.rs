@@ -3,13 +3,16 @@ use std::env;
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
-use jp_config::llm;
+use jp_config::{
+    assistant,
+    model::parameters::{Parameters, Reasoning, ReasoningEffort},
+};
 use jp_conversation::{
-    model::{ProviderId, Reasoning, ReasoningEffort},
     thread::{Document, Documents, Thread},
-    AssistantMessage, MessagePair, Model, UserMessage,
+    AssistantMessage, MessagePair, UserMessage,
 };
 use jp_mcp::tool;
+use jp_model::{ModelId, ProviderId};
 use jp_query::query::ChatQuery;
 use openai_responses::{
     types::{self, Include, Request, SummaryConfig},
@@ -38,7 +41,12 @@ pub struct Openai {
 }
 
 impl Openai {
-    async fn create_request(&self, model: &Model, query: ChatQuery) -> Result<Request> {
+    async fn create_request(
+        &self,
+        model_id: &ModelId,
+        parameters: &Parameters,
+        query: ChatQuery,
+    ) -> Result<Request> {
         let ChatQuery {
             thread,
             tools,
@@ -50,27 +58,26 @@ impl Openai {
             .models()
             .await?
             .into_iter()
-            .find(|m| m.slug == model.id.slug());
+            .find(|m| m.slug == model_id.slug());
 
         let supports_reasoning = model_details
             .as_ref()
             .is_some_and(|d| d.reasoning.is_some());
 
         let request = Request {
-            model: types::Model::Other(model.id.slug().to_owned()),
+            model: types::Model::Other(model_id.slug().to_owned()),
             input: convert_thread(thread, supports_reasoning)?,
             include: supports_reasoning.then_some(vec![Include::ReasoningEncryptedContent]),
             store: Some(false),
             tool_choice: Some(convert_tool_choice(tool_choice)),
             tools: Some(convert_tools(tools, tool_call_strict_mode)),
-            temperature: model.parameters.temperature,
-            reasoning: model
-                .parameters
+            temperature: parameters.temperature,
+            reasoning: parameters
                 .reasoning
                 .map(|r| convert_reasoning(r, model_details.and_then(|d| d.max_output_tokens))),
-            max_output_tokens: model.parameters.max_tokens.map(Into::into),
+            max_output_tokens: parameters.max_tokens.map(Into::into),
             truncation: Some(types::Truncation::Auto),
-            top_p: model.parameters.top_p,
+            top_p: parameters.top_p,
             ..Default::default()
         };
 
@@ -95,9 +102,14 @@ impl Provider for Openai {
             .collect())
     }
 
-    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Reply> {
+    async fn chat_completion(
+        &self,
+        model_id: &ModelId,
+        parameters: &Parameters,
+        query: ChatQuery,
+    ) -> Result<Reply> {
         let client = self.client.clone();
-        let request = self.create_request(model, query).await?;
+        let request = self.create_request(model_id, parameters, query).await?;
         client
             .create(request)
             .await?
@@ -106,9 +118,14 @@ impl Provider for Openai {
             .map(Reply)
     }
 
-    async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
+    async fn chat_completion_stream(
+        &self,
+        model_id: &ModelId,
+        parameters: &Parameters,
+        query: ChatQuery,
+    ) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = self.create_request(model, query).await?;
+        let request = self.create_request(model_id, parameters, query).await?;
         let stream = Box::pin(stream! {
             let mut current_state = AccumulationState::default();
             let stream = client
@@ -312,10 +329,10 @@ fn map_event(event: types::Event, state: &mut AccumulationState) -> Option<Resul
     handle_delta(delta, state).transpose()
 }
 
-impl TryFrom<&llm::provider::openai::Config> for Openai {
+impl TryFrom<&assistant::provider::openai::Openai> for Openai {
     type Error = Error;
 
-    fn try_from(config: &llm::provider::openai::Config) -> Result<Self> {
+    fn try_from(config: &assistant::provider::openai::Openai) -> Result<Self> {
         let api_key = env::var(&config.api_key_env)
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
@@ -640,7 +657,7 @@ impl From<types::OutputItem> for Delta {
 mod tests {
     use std::path::PathBuf;
 
-    use jp_conversation::ModelId;
+    use jp_config::{Configurable as _, Partial as _};
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -653,7 +670,12 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_openai_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default().provider.openai;
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .openai;
+
         let vcr = vcr();
         vcr.cassette(
             function_name!(),
@@ -684,8 +706,13 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_openai_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default().provider.openai;
-        let model: ModelId = "openai/o4-mini".parse().unwrap();
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .openai;
+
+        let model_id = "openai/o4-mini".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -711,7 +738,7 @@ mod tests {
 
                 Openai::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model.into(), query)
+                    .chat_completion(&model_id, &Parameters::default(), query)
                     .await
             },
         )

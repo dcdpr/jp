@@ -2,12 +2,6 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Missing environment variable: {0}")]
-    MissingEnv(String),
-
-    #[error("Invalid URL: {0}")]
-    Url(#[from] url::ParseError),
-
     #[error("OpenRouter error: {0}")]
     OpenRouter(#[from] jp_openrouter::Error),
 
@@ -16,6 +10,12 @@ pub enum Error {
 
     #[error("Config error: {0}")]
     Config(#[from] jp_config::Error),
+
+    #[error("Missing environment variable: {0}")]
+    MissingEnv(String),
+
+    #[error("Invalid URL: {0}")]
+    Url(#[from] url::ParseError),
 
     #[error("Invalid response received: {0}")]
     InvalidResponse(String),

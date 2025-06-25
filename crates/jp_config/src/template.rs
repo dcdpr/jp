@@ -1,47 +1,61 @@
 use std::collections::HashMap;
 
 use confique::Config as Confique;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::error::Result;
+use crate::{
+    assignment::{set_error, AssignKeyValue, KvAssignment, KvValue},
+    error::Result,
+};
 
 /// Template configuration.
-#[derive(Debug, Clone, Default, PartialEq, Confique)]
-pub struct Config {
+#[derive(Debug, Clone, Default, PartialEq, Confique, Serialize, Deserialize)]
+#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
+#[config(partial_attr(serde(deny_unknown_fields)))]
+pub struct Template {
     /// Template variable values used to render query templates.
     #[config(default = {})]
     pub values: HashMap<String, Value>,
 }
 
-impl Config {
-    /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
-        match key {
-            _ if key.starts_with("values.") => {
-                let mut parts = key[7..].split('.').peekable();
+impl AssignKeyValue for <Template as Confique>::Partial {
+    fn assign(&mut self, mut kv: KvAssignment) -> Result<()> {
+        // let KvAssignment { key, value, .. } = kv;
+
+        let k = kv.key().as_str().to_owned();
+        match k.as_str() {
+            _ if kv.trim_prefix("values") => {
+                let mut parts = kv.key().segments().peekable();
                 let mut template_values = serde_json::Map::new();
                 let mut values = &mut template_values;
 
                 while let Some(segment) = parts.next() {
                     if parts.peek().is_none() {
-                        values.insert(segment.to_owned(), serde_json::from_str(&value.into())?);
+                        values.insert(segment.to_owned(), match kv.value().clone() {
+                            KvValue::Json(v) => v,
+                            KvValue::String(v) => serde_json::Value::String(v),
+                        });
                         break;
                     }
 
                     let next_val = values
                         .entry(segment.to_owned())
+                        .and_modify(|v| match v {
+                            Value::Object(_) => {}
+                            v => *v = serde_json::json!({}),
+                        })
                         .or_insert(serde_json::json!({}));
 
-                    if !next_val.is_object() {
-                        *next_val = serde_json::json!({});
-                    }
-
-                    values = next_val.as_object_mut().unwrap();
+                    values = match next_val {
+                        Value::Object(map) => map,
+                        _ => unreachable!(),
+                    };
                 }
 
-                self.values.extend(template_values);
+                self.values.get_or_insert_default().extend(template_values);
             }
-            _ => return crate::set_error(path, key),
+            _ => return set_error(kv.key()),
         }
 
         Ok(())

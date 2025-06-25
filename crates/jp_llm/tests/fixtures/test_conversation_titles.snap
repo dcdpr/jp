@@ -2,10 +2,4 @@
 source: crates/jp_test/src/mock.rs
 expression: expr
 ---
-Ok(
-    [
-        "Test Message Received",
-        "Minimal User Interaction",
-        "Basic Conversation Entry",
-    ],
-)
+()

@@ -1,6 +1,6 @@
 use std::io::{self, IsTerminal as _};
 
-use jp_config::Config;
+use jp_config::{Config, PartialConfig};
 use jp_mcp::{config::McpServer, server::embedded::EmbeddedServer};
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
@@ -8,37 +8,37 @@ use jp_workspace::Workspace;
 use crate::{Globals, Result};
 
 /// Context for the CLI application
-pub struct Ctx {
+pub(crate) struct Ctx {
     /// The workspace.
-    pub workspace: Workspace,
+    pub(crate) workspace: Workspace,
 
     /// Merged file/CLI configuration.
-    pub config: Config,
+    pub(crate) config: Config,
 
     /// Global CLI arguments.
-    pub term: Term,
+    pub(crate) term: Term,
 
     /// MCP client for interacting with MCP servers.
-    pub mcp_client: jp_mcp::Client,
+    pub(crate) mcp_client: jp_mcp::Client,
 
-    pub task_handler: jp_task::TaskHandler,
+    pub(crate) task_handler: jp_task::TaskHandler,
 }
 
-pub struct Term {
+pub(crate) struct Term {
     /// Global CLI arguments.
-    pub args: Globals,
+    pub(crate) args: Globals,
 
     /// Whether or not stdout is connected to a TTY.
     ///
     /// If you pipe (|) or redirect (>) the output, stdout is connected to a
     /// pipe or a regular file, respectively. These are not managed by the TTY
     /// subsystem.
-    pub is_tty: bool,
+    pub(crate) is_tty: bool,
 }
 
 impl Ctx {
     /// Create a new context with the given workspace
-    pub fn new(workspace: Workspace, args: Globals, config: Config) -> Self {
+    pub(crate) fn new(workspace: Workspace, args: Globals, config: Config) -> Self {
         let tools = workspace
             .mcp_tools()
             .cloned()
@@ -61,12 +61,11 @@ impl Ctx {
 
     /// Activate and deactivate MCP servers based on the active conversation
     /// context.
-    pub async fn configure_active_mcp_servers(&mut self) -> Result<()> {
-        let conversation = self.workspace.get_active_conversation();
-
-        let servers = conversation
-            .context
-            .mcp_server_ids
+    pub(crate) async fn configure_active_mcp_servers(&mut self) -> Result<()> {
+        let servers = self
+            .config
+            .conversation
+            .mcp_servers
             .clone()
             .iter()
             .filter_map(|id| self.workspace.get_mcp_server(id).cloned())
@@ -75,6 +74,24 @@ impl Ctx {
         self.mcp_client.handle_servers(&servers).await?;
 
         Ok(())
+    }
+}
+
+/// A trait for converting any type into a partial [`Config`].
+pub(crate) trait IntoPartialConfig {
+    fn apply_cli_config(
+        &self,
+        workspace: Option<&Workspace>,
+        partial: PartialConfig,
+    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>>;
+
+    #[expect(unused_variables)]
+    fn apply_conversation_config(
+        &self,
+        workspace: Option<&Workspace>,
+        partial: PartialConfig,
+    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(partial)
     }
 }
 

@@ -3,13 +3,16 @@ use std::env;
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt as _};
-use jp_config::llm::provider::openrouter;
+use jp_config::{
+    assistant::provider::openrouter,
+    model::parameters::{Parameters, ReasoningEffort},
+};
 use jp_conversation::{
     message::ToolCallRequest,
-    model::{ProviderId, ReasoningEffort},
     thread::{Document, Documents, Thread},
-    AssistantMessage, MessagePair, Model, UserMessage,
+    AssistantMessage, MessagePair, UserMessage,
 };
+use jp_model::{ModelId, ProviderId};
 use jp_openrouter::{
     types::{
         chat::{CacheControl, Content, Message},
@@ -56,7 +59,8 @@ impl Openrouter {
     async fn build_request(
         &self,
         query: ChatQuery,
-        model: &Model,
+        model_id: &ModelId,
+        parameters: &Parameters,
     ) -> Result<request::ChatCompletion> {
         let ChatQuery {
             thread,
@@ -69,11 +73,11 @@ impl Openrouter {
             .models()
             .await?
             .into_iter()
-            .find(|m| m.slug == model.id.slug());
+            .find(|m| m.slug == model_id.slug());
 
-        let slug = model.id.slug().to_owned();
-        let reasoning = model.parameters.reasoning;
-        let messages: RequestMessages = (model, thread).try_into()?;
+        let slug = model_id.slug().to_owned();
+        let reasoning = parameters.reasoning;
+        let messages: RequestMessages = (model_id, thread).try_into()?;
         let tools = tools
             .into_iter()
             .map(|tool| Tool::Function {
@@ -141,13 +145,18 @@ impl Provider for Openrouter {
             .collect())
     }
 
-    async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
+    async fn chat_completion_stream(
+        &self,
+        model_id: &ModelId,
+        parameters: &Parameters,
+        query: ChatQuery,
+    ) -> Result<EventStream> {
         debug!(
-            model = model.id.slug(),
+            model = model_id.slug(),
             "Starting OpenRouter chat completion stream."
         );
 
-        let request = self.build_request(query, model).await?;
+        let request = self.build_request(query, model_id, parameters).await?;
         let inner_stream = self
             .client
             .chat_completion_stream(request)
@@ -198,8 +207,13 @@ impl Provider for Openrouter {
         Ok(stream)
     }
 
-    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Reply> {
-        let request = self.build_request(query, model).await?;
+    async fn chat_completion(
+        &self,
+        model_id: &ModelId,
+        parameters: &Parameters,
+        query: ChatQuery,
+    ) -> Result<Reply> {
+        let request = self.build_request(query, model_id, parameters).await?;
         let completion =
             self.client.chat_completion(request).await.inspect_err(
                 |error| warn!(%error, "Error receiving completion from OpenRouter."),
@@ -271,10 +285,10 @@ impl From<StreamingDelta> for Delta {
     }
 }
 
-impl TryFrom<&openrouter::Config> for Openrouter {
+impl TryFrom<&openrouter::Openrouter> for Openrouter {
     type Error = Error;
 
-    fn try_from(config: &openrouter::Config) -> Result<Self> {
+    fn try_from(config: &openrouter::Openrouter) -> Result<Self> {
         let api_key = env::var(&config.api_key_env)
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
@@ -319,11 +333,11 @@ impl From<OpenRouterChunk> for StreamEvent {
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct RequestMessages(pub Vec<RequestMessage>);
 
-impl TryFrom<(&Model, Thread)> for RequestMessages {
+impl TryFrom<(&ModelId, Thread)> for RequestMessages {
     type Error = Error;
 
     #[expect(clippy::too_many_lines)]
-    fn try_from((model, thread): (&Model, Thread)) -> Result<Self> {
+    fn try_from((model_id, thread): (&ModelId, Thread)) -> Result<Self> {
         let Thread {
             system_prompt,
             instructions,
@@ -476,9 +490,9 @@ impl TryFrom<(&Model, Thread)> for RequestMessages {
         }
 
         // Only Anthropic and Google models support explicit caching.
-        if !model.id.slug().starts_with("anthropic") && !model.id.slug().starts_with("google") {
+        if !model_id.slug().starts_with("anthropic") && !model_id.slug().starts_with("google") {
             trace!(
-                slug = model.id.slug(),
+                slug = model_id.slug(),
                 "Model does not support caching directives, disabling cache."
             );
 
@@ -560,8 +574,7 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> RequestMessage {
 mod tests {
     use std::path::PathBuf;
 
-    use jp_config::llm;
-    use jp_conversation::ModelId;
+    use jp_config::{assistant, Configurable as _, Partial as _};
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -574,7 +587,12 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_openrouter_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default().provider.openrouter;
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .openrouter;
+
         let vcr = vcr();
         vcr.cassette(
             function_name!(),
@@ -606,8 +624,13 @@ mod tests {
     #[test(tokio::test)]
     async fn test_openrouter_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
     {
-        let mut config = llm::Config::default().provider.openrouter;
-        let model: ModelId = "openrouter/openai/o4-mini".parse().unwrap();
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .openrouter;
+
+        let model_id = "openrouter/openai/o4-mini".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -633,7 +656,7 @@ mod tests {
 
                 Openrouter::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model.into(), query)
+                    .chat_completion(&model_id, &Parameters::default(), query)
                     .await
             },
         )

@@ -3,11 +3,11 @@ use comfy_table::{Cell, Row};
 use crate::{cmd::Success, ctx::Ctx, Output};
 
 #[derive(Debug, clap::Args)]
-pub struct Args {}
+pub(crate) struct List {}
 
-impl Args {
+impl List {
     #[expect(clippy::unused_self, clippy::unnecessary_wraps)]
-    pub fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let servers: Vec<_> = ctx.workspace.mcp_servers().collect();
 
         if servers.is_empty() {
@@ -23,7 +23,6 @@ impl Args {
         ]);
         let mut rows = vec![];
 
-        let conversation = ctx.workspace.get_active_conversation();
         for server in servers {
             let mut row = Row::new();
             row.add_cell(Cell::new(server.id.to_string()));
@@ -36,7 +35,7 @@ impl Args {
             }
 
             row.add_cell(Cell::new(
-                conversation.context.mcp_server_ids.contains(&server.id),
+                ctx.config.conversation.mcp_servers.contains(&server.id),
             ));
 
             rows.push(row);

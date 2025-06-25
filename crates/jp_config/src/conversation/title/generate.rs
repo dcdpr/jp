@@ -1,39 +1,39 @@
-mod model;
-
 use confique::Config as Confique;
+use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::{
+    assignment::{set_error, AssignKeyValue, KvAssignment},
+    error::Result,
+    is_default, is_empty, model,
+};
 
 /// LLM configuration.
-#[derive(Debug, Clone, PartialEq, Confique)]
-pub struct Config {
+#[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
+#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
+#[config(partial_attr(serde(deny_unknown_fields)))]
+pub struct Generate {
     /// Model configuration for title generation.
-    // TODO: Figure out a way to re-use `jp_config::llm::model::Config` here,
-    // but the environment variables and defaults differ.
-    #[config(nested)]
-    pub model: model::Config,
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    pub model: model::Model,
 
     /// Whether to generate a title automatically for new conversations.
-    #[config(default = true, env = "JP_CONVERSATION_TITLE_GENERATE_AUTO")]
+    #[config(
+        default = true,
+        partial_attr(serde(skip_serializing_if = "is_default"))
+    )]
     pub auto: bool,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            model: model::Config::default(),
-            auto: true,
-        }
-    }
-}
+impl AssignKeyValue for <Generate as Confique>::Partial {
+    fn assign(&mut self, mut kv: KvAssignment) -> Result<()> {
+        let k = kv.key().as_str().to_owned();
+        match k.as_str() {
+            "model" => self.model = kv.try_into_object()?,
+            "auto" => self.auto = Some(kv.try_into_bool()?),
 
-impl Config {
-    /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
-        match key {
-            _ if key.starts_with("model.") => self.model.set(path, &key[6..], value)?,
-            "auto" => self.auto = value.into().parse()?,
-            _ => return crate::set_error(path, key),
+            _ if kv.trim_prefix("model") => self.model.assign(kv)?,
+
+            _ => return set_error(kv.key()),
         }
 
         Ok(())

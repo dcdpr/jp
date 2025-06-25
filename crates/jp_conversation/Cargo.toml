@@ -14,8 +14,8 @@ version.workspace = true
 
 [dependencies]
 jp_attachment = { workspace = true }
+jp_config = { workspace = true }
 jp_id = { workspace = true }
-jp_mcp = { workspace = true }
 
 quick-xml = { workspace = true, features = ["serialize"] }
 serde = { workspace = true }

@@ -12,8 +12,9 @@ use anthropic::Anthropic;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt as _};
 use google::Google;
-use jp_config::llm::provider;
-use jp_conversation::{message::ToolCallRequest, model::ProviderId, AssistantMessage, Model};
+use jp_config::{assistant::provider, model::parameters::Parameters};
+use jp_conversation::{message::ToolCallRequest, AssistantMessage};
+use jp_model::{ModelId, ProviderId};
 use jp_query::query::{ChatQuery, StructuredQuery};
 use ollama::Ollama;
 use openai::Openai;
@@ -262,13 +263,26 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     async fn models(&self) -> Result<Vec<ModelDetails>>;
 
     /// Perform a streaming chat completion.
-    async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream>;
+    async fn chat_completion_stream(
+        &self,
+        model_id: &ModelId,
+        parameters: &Parameters,
+        query: ChatQuery,
+    ) -> Result<EventStream>;
 
     /// Perform a non-streaming chat completion.
     ///
     /// Default implementation collects results from the streaming version.
-    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Reply> {
-        let mut stream = self.chat_completion_stream(model, query).await?;
+    async fn chat_completion(
+        &self,
+        model_id: &ModelId,
+        parameters: &Parameters,
+        query: ChatQuery,
+    ) -> Result<Reply> {
+        let mut stream = self
+            .chat_completion_stream(model_id, parameters, query)
+            .await?;
+
         let mut events = Vec::new();
         let mut reasoning = String::new();
         let mut content = String::new();
@@ -312,7 +326,12 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     ///
     /// Providers that have a dedicated structured response endpoint should
     /// override this method.
-    async fn structured_completion(&self, model: &Model, query: StructuredQuery) -> Result<Value> {
+    async fn structured_completion(
+        &self,
+        model_id: &ModelId,
+        parameters: &Parameters,
+        query: StructuredQuery,
+    ) -> Result<Value> {
         let mut chat_query = ChatQuery {
             thread: query.thread.clone(),
             tools: vec![query.tool()],
@@ -322,7 +341,9 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
 
         let max_retries = 3;
         for i in 1..=3 {
-            let result = self.chat_completion(model, chat_query.clone()).await;
+            let result = self
+                .chat_completion(model_id, parameters, chat_query.clone())
+                .await;
             let events = match result {
                 Ok(events) => events,
                 Err(error) if i >= max_retries => return Err(error),
@@ -354,7 +375,7 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     }
 }
 
-pub fn get_provider(id: ProviderId, config: &provider::Config) -> Result<Box<dyn Provider>> {
+pub fn get_provider(id: ProviderId, config: &provider::Provider) -> Result<Box<dyn Provider>> {
     let provider: Box<dyn Provider> = match id {
         ProviderId::Anthropic => Box::new(Anthropic::try_from(&config.anthropic)?),
         ProviderId::Deepseek => todo!(),
