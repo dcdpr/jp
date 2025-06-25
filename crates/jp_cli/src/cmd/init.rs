@@ -2,22 +2,28 @@ use std::{env, fs, path::PathBuf};
 
 use crossterm::style::Stylize as _;
 use duct::cmd;
-use jp_conversation::{ModelId, Persona, PersonaId};
+use jp_config::{Partial, PartialConfig};
+use jp_model::ModelId;
 use jp_workspace::Workspace;
 use path_clean::PathClean as _;
 
-use crate::{Output, DEFAULT_STORAGE_DIR};
+use crate::{ctx::IntoPartialConfig, Output, DEFAULT_STORAGE_DIR};
 
 #[derive(Debug, clap::Args)]
-pub struct Args {
+pub(crate) struct Init {
     /// Path to initialize the workspace at. Defaults to the current directory.
-    pub path: Option<PathBuf>,
+    path: Option<PathBuf>,
 }
 
-impl Args {
-    pub fn run(self) -> Output {
+impl Init {
+    pub(crate) fn run(&self) -> Output {
         let cwd = std::env::current_dir()?;
-        let mut root = self.path.unwrap_or_else(|| PathBuf::from(".")).clean();
+        let mut root = self
+            .path
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .clean();
+
         if !root.is_absolute() {
             root = cwd.join(root);
         }
@@ -35,20 +41,17 @@ impl Args {
 
         workspace = workspace.with_local_storage()?;
 
-        let id = PersonaId::try_from("default")?;
-        let persona = Persona {
-            model: default_model(),
-            ..Default::default()
-        };
-
-        if let Some(model) = persona.model.as_ref() {
-            print!("Using model {}", model.to_string().bold().blue());
-            let note =
-                "  (to use a different model, update `.jp/personas/default.json`)".to_owned();
+        let mut config = default_config();
+        config.assistant.model.id = default_model();
+        if let Some(id) = config.assistant.model.id.as_ref() {
+            print!("Using model {}", id.to_string().bold().blue());
+            let note = "  (to use a different model, update `.jp/config.toml`)".to_owned();
             println!("{}\n", note.grey().italic());
         }
 
-        workspace.create_persona_with_id(id, persona)?;
+        let data = toml::to_string_pretty(&config)?;
+        fs::write(storage.join("config.toml"), data)?;
+        fs::create_dir_all(storage.join("config.d"))?;
 
         workspace.persist()?;
 
@@ -56,8 +59,26 @@ impl Args {
     }
 }
 
+fn default_config() -> jp_config::PartialConfig {
+    let mut cfg = jp_config::PartialConfig::default_values();
+    cfg.assistant.provider.anthropic.base_url = None;
+    cfg.assistant.provider.google.base_url = None;
+    cfg.assistant.provider.openrouter.base_url = None;
+    cfg.assistant.provider.openrouter.app_name = None;
+    cfg.assistant.provider.openai.base_url = None;
+    cfg.assistant.provider.openai.base_url_env = None;
+    cfg.assistant.instructions = None;
+    cfg.assistant.model.parameters = <_>::empty();
+    cfg.conversation = <_>::empty();
+    cfg.style = <_>::empty();
+    cfg.template = <_>::empty();
+    cfg.editor = <_>::empty();
+
+    cfg
+}
+
 fn default_model() -> Option<ModelId> {
-    env::var("JP_LLM_MODEL_ID")
+    env::var("JP_ASSISTANT_MODEL_ID")
         .ok()
         .and_then(|v| ModelId::try_from(v).ok())
         .or_else(|| {
@@ -99,4 +120,26 @@ fn default_model() -> Option<ModelId> {
                 .then(|| "google/gemini-2.5-flash-preview-05-20".parse().ok())
                 .flatten()
         })
+}
+
+impl IntoPartialConfig for Init {
+    fn apply_cli_config(
+        &self,
+        _workspace: Option<&Workspace>,
+        partial: PartialConfig,
+    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(partial)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = default_config();
+
+        insta::assert_toml_snapshot!(config);
+    }
 }

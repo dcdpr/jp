@@ -6,12 +6,15 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 /// CLI Error types
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub(crate) enum Error {
     #[error("Command error: {0}")]
     Command(#[from] cmd::Error),
 
-    #[error("Config error: {0}")]
+    #[error("Configuration error")]
     Config(#[from] jp_config::Error),
+
+    #[error("CLI Config error: {0}")]
+    CliConfig(String),
 
     #[error("Workspace error: {0}")]
     Workspace(#[from] jp_workspace::Error),
@@ -24,6 +27,9 @@ pub enum Error {
 
     #[error("LLM error: {0}")]
     Llm(#[from] jp_llm::Error),
+
+    #[error("Model error: {0}")]
+    Model(#[from] jp_model::Error),
 
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
@@ -49,9 +55,6 @@ pub enum Error {
     #[error("No model configured. Use `--model` to specify a model.")]
     UndefinedModel,
 
-    #[error("Model parameter error: {0}")]
-    Parameter(#[from] jp_conversation::model::SetParameterError),
-
     #[error("Task error: {0}")]
     Task(Box<dyn std::error::Error + Send + Sync>),
 
@@ -69,14 +72,4 @@ pub enum Error {
 
     #[error("Invalid JSON schema: {0}")]
     Schema(String),
-}
-
-impl Error {
-    pub fn not_found(target: &'static str, id: &dyn ToString) -> Self {
-        Self::NotFound(target, id.to_string())
-    }
-
-    pub fn persona_not_found(id: &dyn ToString) -> Self {
-        Self::not_found("Persona", id)
-    }
 }

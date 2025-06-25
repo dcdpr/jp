@@ -1,67 +1,63 @@
 pub mod title;
 
 use confique::Config as Confique;
-use jp_conversation::{ContextId, PersonaId};
 use jp_mcp::config::McpServerId;
-use serde::Deserialize as _;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-use crate::{error::Result, parse_vec};
+use crate::{
+    assignment::{set_error, AssignKeyValue, KvAssignment},
+    error::Result,
+    is_default,
+};
 
 /// LLM configuration.
-#[derive(Debug, Clone, Default, PartialEq, Confique)]
-pub struct Config {
+#[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
+#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
+#[config(partial_attr(serde(deny_unknown_fields)))]
+pub struct Conversation {
     /// Title configuration.
     #[config(nested)]
-    pub title: title::Config,
-
-    /// Persona to use for the active conversation.
-    ///
-    /// If unset, uses the `default` persona, if one exists.
-    #[config(env = "JP_CONVERSATION_PERSONA", deserialize_with = de_persona)]
-    pub persona: Option<PersonaId>,
-
-    /// Context to use for the active conversation.
-    ///
-    /// If unset, uses the `default` context, if one exists.
-    #[config(env = "JP_CONVERSATION_CONTEXT", deserialize_with = de_context)]
-    pub context: Option<ContextId>,
+    pub title: title::Title,
 
     /// List of MCP servers to use for the active conversation.
-    #[config(default = [], env = "JP_CONVERSATION_MCP_SERVERS", deserialize_with = de_mcp_servers)]
+    #[config(
+        default = [],
+        deserialize_with = de_mcp_servers,
+        partial_attr(serde(skip_serializing_if = "is_default")),
+    )]
     pub mcp_servers: Vec<McpServerId>,
+
+    #[config(default = [], partial_attr(serde(skip_serializing_if = "is_default")))]
+    pub attachments: Vec<url::Url>,
 }
 
-impl Config {
-    /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
-        let value: String = value.into();
+impl AssignKeyValue for <Conversation as Confique>::Partial {
+    fn assign(&mut self, mut kv: KvAssignment) -> Result<()> {
+        let k = kv.key().as_str().to_owned();
 
-        match key {
-            _ if key.starts_with("title.") => self.title.set(path, &key[6..], value)?,
-            "persona" => self.persona = (!value.is_empty()).then(|| value.parse()).transpose()?,
-            "context" => self.context = (!value.is_empty()).then(|| value.parse()).transpose()?,
-            "mcp_servers" => self.mcp_servers = parse_vec(&value, McpServerId::new),
-            _ => return crate::set_error(path, key),
+        match k.as_str() {
+            "title" => self.title = kv.try_into_object()?,
+            "mcp_servers" => {
+                kv.try_set_or_merge_vec(self.mcp_servers.get_or_insert_default(), |v| match v {
+                    Value::String(v) => Ok(McpServerId::new(v)),
+                    _ => Err("Expected string".into()),
+                })?;
+            }
+            "attachments" => {
+                kv.try_set_or_merge_vec(self.attachments.get_or_insert_default(), |v| match v {
+                    Value::String(v) => Ok(url::Url::parse(&v)?),
+                    _ => Err("Expected string".into()),
+                })?;
+            }
+
+            _ if kv.trim_prefix("title") => self.title.assign(kv)?,
+
+            _ => return set_error(kv.key()),
         }
 
         Ok(())
     }
-}
-
-pub fn de_persona<'de, D>(deserializer: D) -> std::result::Result<PersonaId, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    String::deserialize(deserializer)
-        .and_then(|s| PersonaId::try_from(s).map_err(serde::de::Error::custom))
-}
-
-pub fn de_context<'de, D>(deserializer: D) -> std::result::Result<ContextId, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    String::deserialize(deserializer)
-        .and_then(|s| ContextId::try_from(s).map_err(serde::de::Error::custom))
 }
 
 pub fn de_mcp_servers<'de, D>(deserializer: D) -> std::result::Result<Vec<McpServerId>, D::Error>

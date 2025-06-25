@@ -12,6 +12,9 @@ pub enum Error {
     #[error("Storage error: {0}")]
     Storage(#[from] jp_storage::Error),
 
+    #[error("Config error: {0}")]
+    Config(#[from] jp_config::Error),
+
     #[error("Cannot persist workspace without storage")]
     MissingStorage,
 

@@ -7,7 +7,7 @@ use time::{macros::format_description, UtcDateTime, UtcOffset};
 use crate::{cmd::Success, ctx::Ctx, Output};
 
 #[derive(Debug, clap::Args)]
-pub struct Args {
+pub(crate) struct Ls {
     /// Sort conversations by a specific field.
     #[arg(long)]
     sort: Option<Sort>,
@@ -47,9 +47,9 @@ struct Details {
     local: bool,
 }
 
-impl Args {
+impl Ls {
     #[expect(clippy::unnecessary_wraps)]
-    pub fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let active_conversation_id = ctx.workspace.active_conversation_id();
         let limit = self.limit.unwrap_or(usize::MAX);
         let mut conversations = ctx

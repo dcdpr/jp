@@ -8,14 +8,8 @@ pub enum Error {
     #[error("Invalid ID format: {0}")]
     InvalidIdFormat(String),
 
-    #[error("Invalid provider ID: {0}")]
-    InvalidProviderId(String),
-
     #[error("Invalid ID: {0}")]
     Id(#[from] jp_id::Error),
-
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
 
     #[error("Invalid thread: {0}")]
     Thread(String),

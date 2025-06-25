@@ -1,13 +1,18 @@
 use std::str::FromStr;
 
 use confique::Config as Confique;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use crate::error::{Error, Result};
+use crate::{
+    assignment::{set_error, AssignKeyValue, KvAssignment},
+    error::{Error, Result},
+};
 
 /// Code style configuration.
-#[derive(Debug, Clone, PartialEq, Confique)]
-pub struct Config {
+#[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
+#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
+#[config(partial_attr(serde(deny_unknown_fields)))]
+pub struct Code {
     /// Theme to use for code blocks.
     ///
     /// This uses the [bat](https://github.com/sharkdp/bat) theme names.
@@ -54,7 +59,7 @@ pub struct Config {
     pub copy_link: LinkStyle,
 }
 
-impl Default for Config {
+impl Default for Code {
     fn default() -> Self {
         Self {
             theme: "Monokai Extended".to_string(),
@@ -66,22 +71,23 @@ impl Default for Config {
     }
 }
 
-impl Config {
-    /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
-        match key {
-            "theme" => self.theme = value.into(),
-            "color" => self.color = value.into().parse()?,
-            "file_link" => self.file_link = value.into().parse()?,
-            "copy_link" => self.copy_link = value.into().parse()?,
-            _ => return crate::set_error(path, key),
+impl AssignKeyValue for <Code as Confique>::Partial {
+    fn assign(&mut self, kv: KvAssignment) -> Result<()> {
+        let k = kv.key().as_str().to_owned();
+        match k.as_str() {
+            "theme" => self.theme = Some(kv.try_into_string()?),
+            "color" => self.color = Some(kv.try_into_bool()?),
+            "file_link" => self.file_link = Some(kv.try_into_string()?.parse()?),
+            "copy_link" => self.copy_link = Some(kv.try_into_string()?.parse()?),
+
+            _ => return set_error(kv.key()),
         }
 
         Ok(())
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LinkStyle {
     Off,
@@ -97,7 +103,7 @@ impl FromStr for LinkStyle {
             "off" => Ok(Self::Off),
             "full" => Ok(Self::Full),
             "osc8" => Ok(Self::Osc8),
-            _ => Err(Error::InvalidConfigValue {
+            _ => Err(Error::InvalidConfigValueType {
                 key: style.to_string(),
                 value: style.to_string(),
                 need: vec!["off".to_owned(), "full".to_owned(), "osc8".to_owned()],

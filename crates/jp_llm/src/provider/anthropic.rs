@@ -8,13 +8,13 @@ use async_anthropic::{
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
-use jp_config::llm;
+use jp_config::{assistant, model::parameters::Parameters};
 use jp_conversation::{
-    model::ProviderId,
     thread::{Document, Documents, Thread},
-    AssistantMessage, MessagePair, Model, UserMessage,
+    AssistantMessage, MessagePair, UserMessage,
 };
 use jp_mcp::tool;
+use jp_model::{ModelId, ProviderId};
 use jp_query::query::ChatQuery;
 use serde_json::Value;
 use time::macros::date;
@@ -34,7 +34,8 @@ pub struct Anthropic {
 impl Anthropic {
     async fn create_request(
         &self,
-        model: &Model,
+        model_id: &ModelId,
+        parameters: &Parameters,
         query: ChatQuery,
     ) -> Result<types::CreateMessagesRequest> {
         let ChatQuery {
@@ -48,13 +49,13 @@ impl Anthropic {
             .models()
             .await?
             .into_iter()
-            .find(|m| m.slug == model.id.slug());
+            .find(|m| m.slug == model_id.slug());
 
         let mut builder = types::CreateMessagesRequestBuilder::default();
         let system_prompt = thread.system_prompt.clone();
 
         builder
-            .model(model.id.slug())
+            .model(model_id.slug())
             .messages(convert_thread(thread)?);
 
         if let Some(system_prompt) = system_prompt {
@@ -68,13 +69,12 @@ impl Anthropic {
             builder.tools(tools).tool_choice(tool_choice);
         }
 
-        let max_tokens = model
-            .parameters
+        let max_tokens = parameters
             .max_tokens
             .or_else(|| details.as_ref().and_then(|d| d.max_output_tokens))
             .unwrap_or(DEFAULT_MAX_TOKENS as u32);
 
-        if let Some(thinking) = model.parameters.reasoning {
+        if let Some(thinking) = parameters.reasoning {
             let (supported, min_supported, max_supported) = if tool_choice_function {
                 info!(
                     "Anthropic API does not support reasoning when tool_choice forces tool use. \
@@ -85,7 +85,7 @@ impl Anthropic {
                 (details.supported, details.min_tokens, details.max_tokens)
             } else {
                 warn!(
-                    %model.id,
+                    %model_id,
                     "Model reasoning support unknown, but the request requested it. This may \
                 result in unexpected behavior"
                 );
@@ -104,25 +104,25 @@ impl Anthropic {
                 });
             } else {
                 warn!(
-                    %model.id,
+                    %model_id,
                     "Model does not support reasoning, but the request requested it. Reasnoning \
                      disabled."
                 );
             }
         }
 
-        if let Some(temperature) = model.parameters.temperature {
+        if let Some(temperature) = parameters.temperature {
             builder.temperature(temperature);
         }
 
         #[expect(clippy::cast_possible_wrap)]
         builder.max_tokens(max_tokens as i32);
 
-        if let Some(top_p) = model.parameters.top_p {
+        if let Some(top_p) = parameters.top_p {
             builder.top_p(top_p);
         }
 
-        if let Some(top_k) = model.parameters.top_k {
+        if let Some(top_k) = parameters.top_k {
             builder.top_k(top_k);
         }
 
@@ -154,8 +154,13 @@ impl Provider for Anthropic {
         Ok(models.into_iter().map(map_model).collect())
     }
 
-    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Reply> {
-        let request = self.create_request(model, query).await?;
+    async fn chat_completion(
+        &self,
+        model: &ModelId,
+        parameters: &Parameters,
+        query: ChatQuery,
+    ) -> Result<Reply> {
+        let request = self.create_request(model, parameters, query).await?;
         self.client
             .messages()
             .create(request)
@@ -165,9 +170,14 @@ impl Provider for Anthropic {
             .map(Reply)
     }
 
-    async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
+    async fn chat_completion_stream(
+        &self,
+        model_id: &ModelId,
+        parameters: &Parameters,
+        query: ChatQuery,
+    ) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = self.create_request(model, query).await?;
+        let request = self.create_request(model_id, parameters, query).await?;
         let stream = Box::pin(stream! {
             let mut current_state = AccumulationState::default();
             let stream = client
@@ -340,10 +350,10 @@ fn map_event(
     }
 }
 
-impl TryFrom<&llm::provider::anthropic::Config> for Anthropic {
+impl TryFrom<&assistant::provider::anthropic::Anthropic> for Anthropic {
     type Error = Error;
 
-    fn try_from(config: &llm::provider::anthropic::Config) -> Result<Self> {
+    fn try_from(config: &assistant::provider::anthropic::Anthropic) -> Result<Self> {
         let api_key = env::var(&config.api_key_env)
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
@@ -618,9 +628,9 @@ impl From<types::MessageContent> for Delta {
 mod tests {
     use std::path::PathBuf;
 
-    use jp_conversation::{
-        model::{Reasoning, ReasoningEffort},
-        ModelId,
+    use jp_config::{
+        model::parameters::{Reasoning, ReasoningEffort},
+        Configurable as _, Partial as _,
     };
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
@@ -634,7 +644,12 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_anthropic_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default().provider.anthropic;
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .anthropic;
+
         let vcr = vcr();
         vcr.cassette(
             function_name!(),
@@ -659,8 +674,12 @@ mod tests {
     #[test(tokio::test)]
     async fn test_anthropic_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
     {
-        let mut config = llm::Config::default().provider.anthropic;
-        let model: ModelId = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .anthropic;
+        let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -686,7 +705,7 @@ mod tests {
 
                 Anthropic::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model.into(), query)
+                    .chat_completion(&model_id, &Parameters::default(), query)
                     .await
             },
         )
@@ -696,8 +715,12 @@ mod tests {
     #[test(tokio::test)]
     async fn test_anthropic_redacted_thinking(
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default().provider.anthropic;
-        let model: ModelId = "anthropic/claude-3-7-sonnet-latest".parse().unwrap();
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .anthropic;
+        let model_id = "anthropic/claude-3-7-sonnet-latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
                 // See: <https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#thinking-redaction>
@@ -722,15 +745,17 @@ mod tests {
                     config.api_key_env = "USER".to_owned();
                 }
 
-                let mut model: Model = model.into();
-                model.parameters.reasoning = Some(Reasoning {
-                    effort: ReasoningEffort::Medium,
-                    exclude: false,
-                });
+                let parameters = Parameters {
+                    reasoning: Some(Reasoning {
+                        effort: ReasoningEffort::Medium,
+                        exclude: false,
+                    }),
+                    ..Default::default()
+                };
 
                 let events = Anthropic::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model, query.clone())
+                    .chat_completion(&model_id, &parameters, query.clone())
                     .await
                     .unwrap()
                     .into_inner();

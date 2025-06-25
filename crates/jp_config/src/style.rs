@@ -3,32 +3,45 @@ pub mod reasoning;
 pub mod typewriter;
 
 use confique::Config as Confique;
+use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::{
+    assignment::{set_error, AssignKeyValue, KvAssignment},
+    error::Result,
+    is_empty,
+};
 
 /// Style configuration.
-#[derive(Debug, Clone, Default, PartialEq, Confique)]
-pub struct Config {
+#[derive(Debug, Clone, Default, PartialEq, Confique, Serialize, Deserialize)]
+#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
+#[config(partial_attr(serde(deny_unknown_fields)))]
+pub struct Style {
     /// Fenced code block style.
-    #[config(nested)]
-    pub code: code::Config,
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    pub code: code::Code,
 
     /// Reasoning content style.
-    #[config(nested)]
-    pub reasoning: reasoning::Config,
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    pub reasoning: reasoning::Reasoning,
 
     // Typewriter style.
-    #[config(nested)]
-    pub typewriter: typewriter::Config,
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    pub typewriter: typewriter::Typewriter,
 }
 
-impl Config {
-    /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
-        match key {
-            _ if key.starts_with("code.") => self.code.set(path, &key[5..], value)?,
-            _ if key.starts_with("reasoning.") => self.reasoning.set(path, &key[10..], value)?,
-            _ => return crate::set_error(path, key),
+impl AssignKeyValue for <Style as Confique>::Partial {
+    fn assign(&mut self, mut kv: KvAssignment) -> Result<()> {
+        let k = kv.key().as_str().to_owned();
+        match k.as_str() {
+            "code" => self.code = kv.try_into_object()?,
+            "reasoning" => self.reasoning = kv.try_into_object()?,
+            "typewriter" => self.typewriter = kv.try_into_object()?,
+
+            _ if kv.trim_prefix("code") => self.code.assign(kv)?,
+            _ if kv.trim_prefix("reasoning") => self.reasoning.assign(kv)?,
+            _ if kv.trim_prefix("typewriter") => self.typewriter.assign(kv)?,
+
+            _ => return set_error(kv.key()),
         }
 
         Ok(())

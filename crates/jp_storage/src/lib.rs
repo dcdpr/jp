@@ -8,10 +8,7 @@ use std::{
 };
 
 pub use error::Error;
-use jp_conversation::{
-    Context, ContextId, Conversation, ConversationId, ConversationsMetadata, MessagePair, Persona,
-    PersonaId,
-};
+use jp_conversation::{Conversation, ConversationId, ConversationsMetadata, MessagePair};
 use jp_id::Id as _;
 use jp_mcp::{
     config::{McpServer, McpServerId},
@@ -35,8 +32,6 @@ type ConversationsAndMessages = (
 pub const DEFAULT_STORAGE_DIR: &str = ".jp";
 pub const METADATA_FILE: &str = "metadata.json";
 const MESSAGES_FILE: &str = "messages.json";
-const CONTEXTS_DIR: &str = "contexts";
-pub const PERSONAS_DIR: &str = "personas";
 pub const CONVERSATIONS_DIR: &str = "conversations";
 pub const MCP_SERVERS_DIR: &str = "mcp/servers";
 pub const MCP_TOOLS_DIR: &str = "mcp/tools";
@@ -160,45 +155,6 @@ impl Storage {
         read_json(&metadata_path)
     }
 
-    /// Loads all personas from the (copied) storage.
-    pub fn load_personas(&self) -> Result<TombMap<PersonaId, Persona>> {
-        let personas_path = self.root.join(PERSONAS_DIR);
-        trace!(path = %personas_path.display(), "Loading personas.");
-
-        let mut personas = TombMap::new();
-
-        for entry in fs::read_dir(&personas_path).ok().into_iter().flatten() {
-            let path = entry?.path();
-
-            if !path.is_file() || path.extension().is_some_and(|ext| ext != "json") {
-                continue;
-            }
-            let Some(filename) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            let Ok(id) = PersonaId::from_filename(filename) else {
-                warn!(?path, "Invalid persona filename. Skipping.");
-                continue;
-            };
-            let persona = match read_json::<Persona>(&path) {
-                Ok(persona) => persona,
-                Err(error) => {
-                    warn!(?path, ?error, "Failed to read persona file. Skipping.");
-                    continue;
-                }
-            };
-
-            personas.insert(id, persona);
-        }
-
-        let default_id = PersonaId::try_from("default")?;
-        if personas.is_empty() || !personas.contains_key(&default_id) {
-            personas.insert(default_id, Persona::default());
-        }
-
-        Ok(personas)
-    }
-
     /// Loads all MCP Servers from the (copied) storage.
     pub fn load_mcp_servers(&self) -> Result<TombMap<McpServerId, McpServer>> {
         let mcp_path = self.root.join(MCP_SERVERS_DIR);
@@ -259,36 +215,6 @@ impl Storage {
         Ok(tools)
     }
 
-    /// Loads all Named Contexts from the (copied) storage.
-    pub fn load_named_contexts(&self) -> Result<TombMap<ContextId, Context>> {
-        let contexts_path = self.root.join(CONTEXTS_DIR);
-        trace!(path = %contexts_path.display(), "Loading named contexts.");
-
-        let mut contexts = TombMap::new();
-
-        for entry in fs::read_dir(&contexts_path).ok().into_iter().flatten() {
-            let path = entry?.path();
-            if !path.is_file() || path.extension().is_some_and(|ext| ext != "json") {
-                continue;
-            }
-            let Some(filename) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            let Ok(id) = ContextId::from_filename(filename) else {
-                warn!(?path, "Invalid context filename. Skipping.");
-                continue;
-            };
-            let Ok(context) = read_json::<Context>(&path) else {
-                warn!(?path, "Failed to read context file. Skipping.");
-                continue;
-            };
-
-            contexts.insert(id, context);
-        }
-
-        Ok(contexts)
-    }
-
     /// Loads all conversations and their associated messages, including local
     /// conversations.
     pub fn load_conversations_and_messages(&self) -> Result<ConversationsAndMessages> {
@@ -308,14 +234,6 @@ impl Storage {
         }
 
         Ok((conversations, messages))
-    }
-
-    pub fn persist_named_contexts(&mut self, contexts: &TombMap<ContextId, Context>) -> Result<()> {
-        let root = self.root.as_path();
-        let contexts_dir = root.join(CONTEXTS_DIR);
-        trace!(path = %contexts_dir.display(), "Persisting named contexts.");
-
-        persist_inner(root, &contexts_dir, contexts, ContextId::to_path_buf)
     }
 
     pub fn persist_mcp_servers(&mut self, servers: &TombMap<McpServerId, McpServer>) -> Result<()> {
@@ -423,14 +341,6 @@ impl Storage {
         write_json(&metadata_path, metadata)?;
 
         Ok(())
-    }
-
-    pub fn persist_personas(&mut self, personas: &TombMap<PersonaId, Persona>) -> Result<()> {
-        let root = self.root.as_path();
-        let personas_dir = root.join(PERSONAS_DIR);
-        trace!(path = %personas_dir.display(), "Persisting personas.");
-
-        persist_inner(root, &personas_dir, personas, PersonaId::to_path_buf)
     }
 }
 
@@ -664,14 +574,12 @@ mod tests {
     use std::{
         fs::{self, File},
         str::FromStr as _,
-        time::Duration,
     };
 
-    use jp_conversation::{Context, ConversationId};
+    use jp_conversation::ConversationId;
     use jp_mcp::transport::{self, Transport};
     use tempfile::tempdir;
     use test_log::test;
-    use time::UtcDateTime;
 
     use super::*;
 
@@ -737,120 +645,6 @@ mod tests {
     }
 
     #[test]
-    fn test_load_personas_reads_existing() {
-        let original_dir = tempdir().unwrap();
-        let personas_orig_path = original_dir.path().join(PERSONAS_DIR);
-        fs::create_dir(&personas_orig_path).unwrap();
-
-        let persona1 = Persona {
-            name: "Persona One".to_string(),
-            ..Default::default()
-        };
-        let persona2 = Persona {
-            name: "Persona Two".to_string(),
-            ..Default::default()
-        };
-        let id1 = PersonaId::try_from("p1").unwrap();
-        let id2 = PersonaId::try_from("p2").unwrap();
-
-        write_json(&personas_orig_path.join(id1.to_path_buf()), &persona1).unwrap();
-        write_json(&personas_orig_path.join(id2.to_path_buf()), &persona2).unwrap();
-        fs::write(personas_orig_path.join("not-a-persona.txt"), "ignore me").unwrap(); // Non-json file
-
-        let storage = Storage::new(original_dir.path()).unwrap();
-        let loaded_personas = storage.load_personas().unwrap();
-
-        assert_eq!(loaded_personas.len(), 3); // p1 + p2 + default
-        assert_eq!(loaded_personas.get(&id1).unwrap().name, "Persona One");
-        assert_eq!(loaded_personas.get(&id2).unwrap().name, "Persona Two");
-    }
-
-    #[test]
-    fn test_load_personas_creates_default_if_dir_missing() {
-        let original_dir = tempdir().unwrap(); // Dir exists, but PERSONAS_DIR doesn't
-        let storage = Storage::new(original_dir.path()).unwrap();
-        let loaded_personas = storage.load_personas().unwrap();
-
-        assert_eq!(loaded_personas.len(), 1);
-        assert!(loaded_personas.contains_key(&PersonaId::try_from("default").unwrap()));
-        assert_eq!(
-            loaded_personas
-                .get(&PersonaId::try_from("default").unwrap())
-                .unwrap()
-                .name,
-            "Default"
-        );
-    }
-
-    #[test]
-    fn test_load_personas_creates_default_if_dir_empty() {
-        let original_dir = tempdir().unwrap();
-        fs::create_dir(original_dir.path().join(PERSONAS_DIR)).unwrap(); // Empty dir
-
-        let storage = Storage::new(original_dir.path()).unwrap();
-        let loaded_personas = storage.load_personas().unwrap();
-
-        assert_eq!(loaded_personas.len(), 1);
-        assert!(loaded_personas.contains_key(&PersonaId::try_from("default").unwrap()));
-    }
-
-    #[test]
-    fn test_load_personas_includes_default_even_if_others_exist() {
-        let original_dir = tempdir().unwrap();
-        let personas_orig_path = original_dir.path().join(PERSONAS_DIR);
-        fs::create_dir(&personas_orig_path).unwrap();
-
-        let persona1 = Persona {
-            name: "Persona One".to_string(),
-            ..Default::default()
-        };
-        let id1 = PersonaId::try_from("p1").unwrap();
-        write_json(&personas_orig_path.join(id1.to_path_buf()), &persona1).unwrap();
-
-        let storage = Storage::new(original_dir.path()).unwrap();
-        let loaded_personas = storage.load_personas().unwrap();
-
-        // Should load p1 AND add default if it wasn't present
-        assert_eq!(loaded_personas.len(), 2);
-        assert!(loaded_personas.contains_key(&id1));
-        assert!(loaded_personas.contains_key(&PersonaId::try_from("default").unwrap()));
-    }
-
-    #[test]
-    fn test_load_personas_handles_malformed_json() {
-        let original_dir = tempdir().unwrap();
-        let personas_orig_path = original_dir.path().join(PERSONAS_DIR);
-        fs::create_dir(&personas_orig_path).unwrap();
-
-        let id_good = PersonaId::try_from("good").unwrap();
-        let id_bad = PersonaId::try_from("bad").unwrap();
-        let persona_good = Persona {
-            name: "Good".into(),
-            ..Default::default()
-        };
-
-        write_json(
-            &personas_orig_path.join(id_good.to_path_buf()),
-            &persona_good,
-        )
-        .unwrap();
-        fs::write(
-            personas_orig_path.join(id_bad.to_path_buf()),
-            "{ invalid json ",
-        )
-        .unwrap();
-
-        let storage = Storage::new(original_dir.path()).unwrap();
-        // Should load 'good' and 'default', warn about 'bad' (check stderr manually if needed)
-        let loaded = storage.load_personas().unwrap();
-
-        assert_eq!(loaded.len(), 2);
-        assert!(loaded.contains_key(&id_good));
-        assert!(loaded.contains_key(&PersonaId::try_from("default").unwrap()));
-        assert!(!loaded.contains_key(&id_bad));
-    }
-
-    #[test]
     fn test_conversation_dir_name_generation() {
         let id = ConversationId::from_str("jp-c17457886043-otvo8").unwrap();
         assert_eq!(id.to_dirname(None).unwrap(), "17457886043");
@@ -874,60 +668,6 @@ mod tests {
             id.to_dirname(Some("")).unwrap(), // Empty title
             "17457886043"
         );
-    }
-
-    #[test]
-    fn test_load_conversations_and_messages() {
-        let original_dir = tempdir().unwrap();
-        let storage = Storage::new(original_dir.path()).unwrap(); // Storage uses temp copy
-
-        // Setup: Create conversation directories in the *storage's* temp dir
-        let conv_dir_path = storage.root.join(CONVERSATIONS_DIR);
-        fs::create_dir(&conv_dir_path).unwrap();
-
-        let now = UtcDateTime::now();
-        let id1 = ConversationId::try_from(now - Duration::from_secs(24 * 60 * 60)).unwrap();
-        let id2 = ConversationId::try_from(now).unwrap();
-
-        let context1 = Context::new(PersonaId::try_from("default").unwrap());
-        let context2 = Context::new(PersonaId::try_from("other").unwrap());
-
-        let conv1_dir = conv_dir_path.join(id1.to_dirname(Some("Conv 1")).unwrap());
-        fs::create_dir(&conv1_dir).unwrap();
-        let conv1 = Conversation {
-            last_activated_at: UtcDateTime::now(),
-            title: Some("Conv 1".into()),
-            context: context1.clone(),
-            ..Default::default()
-        };
-        write_json(&conv1_dir.join(METADATA_FILE), &conv1).unwrap();
-        let messages1 = vec![MessagePair::new("Q1".into(), "R1".into()).with_context(context1)];
-        write_json(&conv1_dir.join(MESSAGES_FILE), &messages1).unwrap();
-
-        let conv2_dir = conv_dir_path.join(id2.to_dirname(None).unwrap());
-        fs::create_dir(&conv2_dir).unwrap();
-        let conv2 = Conversation {
-            last_activated_at: UtcDateTime::now(),
-            title: None,
-            context: context2.clone(),
-            ..Default::default()
-        };
-        write_json(&conv2_dir.join(METADATA_FILE), &conv2).unwrap();
-        // No messages file for conv2
-
-        // Action: Load conversations and messages
-        let (loaded_convs, loaded_msgs) = storage.load_conversations_and_messages().unwrap();
-
-        // Assertions
-        assert_eq!(loaded_convs.len(), 2);
-        assert_eq!(loaded_msgs.len(), 1); // Only conv1 had messages
-
-        assert_eq!(loaded_convs.get(&id1).unwrap().title, Some("Conv 1".into()));
-        assert_eq!(loaded_convs.get(&id2).unwrap().title, None);
-
-        assert_eq!(loaded_msgs.get(&id1).unwrap().len(), 1);
-        assert_eq!(loaded_msgs.get(&id1).unwrap()[0].message, "Q1".into());
-        assert!(!loaded_msgs.contains_key(&id2)); // No messages for conv2
     }
 
     #[test]
@@ -981,52 +721,5 @@ mod tests {
         let servers = storage.load_mcp_servers().unwrap();
         assert_eq!(servers.len(), 1);
         assert!(servers.contains_key(&id));
-    }
-
-    #[test]
-    fn test_load_named_contexts() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let contexts_path = root.join(CONTEXTS_DIR);
-        fs::create_dir(&contexts_path).unwrap();
-
-        let id1 = ContextId::try_from("foo").unwrap();
-        let ctx1 = Context::new(PersonaId::try_from("p1").unwrap());
-
-        let id2 = ContextId::try_from("bar").unwrap();
-        let ctx2 = Context::new(PersonaId::try_from("p2").unwrap());
-
-        write_json(&contexts_path.join(id1.to_path_buf()), &ctx1).unwrap();
-        write_json(&contexts_path.join(id2.to_path_buf()), &ctx2).unwrap();
-        fs::write(contexts_path.join("ignore_me.txt"), "data").unwrap();
-
-        let storage = Storage::new(root).unwrap();
-        let loaded = storage.load_named_contexts().unwrap();
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded.get(&id1), Some(&ctx1));
-        assert_eq!(loaded.get(&id2), Some(&ctx2));
-    }
-
-    #[test]
-    fn test_persist_named_contexts() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let mut storage = Storage::new(root).unwrap();
-
-        let id = ContextId::try_from("ctx-gamma").unwrap();
-        let ctx = Context::new(PersonaId::try_from("default").unwrap());
-
-        storage
-            .persist_named_contexts(&TombMap::from([(id.clone(), ctx.clone())]))
-            .unwrap();
-
-        let contexts_path = root.join(CONTEXTS_DIR);
-        assert!(contexts_path.is_dir());
-        assert!(contexts_path.join(id.to_path_buf()).is_file());
-
-        let storage = Storage::new(root).unwrap();
-        let ctxs = storage.load_named_contexts().unwrap();
-        assert_eq!(ctxs.len(), 1);
-        assert_eq!(ctxs.get(&id), Some(&ctx));
     }
 }

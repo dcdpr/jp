@@ -112,8 +112,9 @@ impl FromStr for ToolChoice {
 
     fn from_str(s: &str) -> Result<Self, Error> {
         match s {
-            "false" => Ok(Self::None),
-            "true" => Ok(Self::Required),
+            "auto" => Ok(Self::Auto),
+            "none" | "false" => Ok(Self::None),
+            "required" | "true" => Ok(Self::Required),
             s if s.chars().all(|c| c.is_alphanumeric() || c == '_') => {
                 Ok(Self::Function(s.to_owned()))
             }

@@ -1,9 +1,9 @@
 use jp_attachment::Attachment;
+use jp_config::assistant::Instructions;
 use serde::Serialize;
 
 use crate::{
     error::{Error, Result},
-    persona::Instructions,
     MessagePair, UserMessage,
 };
 

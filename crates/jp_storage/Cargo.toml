@@ -13,6 +13,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+jp_config = { workspace = true }
 jp_conversation = { workspace = true }
 jp_id = { workspace = true }
 jp_mcp = { workspace = true }

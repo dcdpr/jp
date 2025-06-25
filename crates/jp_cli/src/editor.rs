@@ -2,7 +2,7 @@ use std::{env, fs, path::PathBuf, str::FromStr};
 
 use duct::Expression;
 use jp_config::editor;
-use jp_conversation::{ConversationId, Model, UserMessage};
+use jp_conversation::{ConversationId, UserMessage};
 use time::{macros::format_description, UtcOffset};
 
 use crate::{
@@ -21,7 +21,7 @@ const CUT_MARKER: &[&str] = &[
 
 /// How to edit the query.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum Editor {
+pub(crate) enum Editor {
     /// Use whatever editor is configured.
     #[default]
     Default,
@@ -35,9 +35,9 @@ pub enum Editor {
 
 impl Editor {
     /// Get the editor from the CLI, or the config, or `None`.
-    pub fn from_cli_or_config(
+    pub(crate) fn from_cli_or_config(
         cli: Option<Option<Self>>,
-        config: jp_config::editor::Config,
+        config: jp_config::editor::Editor,
     ) -> Option<Self> {
         // If no CLI editor is configured, use the config editor, if any.
         let Some(editor) = cli else {
@@ -54,7 +54,7 @@ impl Editor {
         }
     }
 
-    pub fn command(&self) -> Option<Expression> {
+    pub(crate) fn command(&self) -> Option<Expression> {
         let cmd = match self {
             Editor::Disabled | Editor::Default => return None,
             Editor::Command(cmd) => cmd,
@@ -71,10 +71,10 @@ impl Editor {
     }
 }
 
-impl TryFrom<editor::Config> for Editor {
+impl TryFrom<editor::Editor> for Editor {
     type Error = Error;
 
-    fn try_from(editor: editor::Config) -> Result<Self> {
+    fn try_from(editor: editor::Editor) -> Result<Self> {
         editor
             .cmd
             .or_else(|| editor.env_vars.iter().find_map(|var| env::var(var).ok()))
@@ -97,18 +97,18 @@ impl FromStr for Editor {
 
 /// Options for opening an editor.
 #[derive(Debug)]
-pub struct Options {
-    pub cmd: Expression,
+pub(crate) struct Options {
+    cmd: Expression,
 
     /// The working directory to use.
-    pub cwd: Option<PathBuf>,
+    cwd: Option<PathBuf>,
 
     /// The initial content to use.
-    pub content: Option<String>,
+    content: Option<String>,
 }
 
 impl Options {
-    pub fn new(cmd: Expression) -> Self {
+    pub(crate) fn new(cmd: Expression) -> Self {
         Self {
             cmd,
             cwd: None,
@@ -118,27 +118,27 @@ impl Options {
 
     /// Add a working directory to the editor options.
     #[must_use]
-    pub fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
+    pub(crate) fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
         self.cwd = Some(cwd.into());
         self
     }
 
     /// Add content to the editor options.
     #[must_use]
-    pub fn with_content(mut self, content: impl Into<String>) -> Self {
+    pub(crate) fn with_content(mut self, content: impl Into<String>) -> Self {
         self.content = Some(content.into());
         self
     }
 }
 
-pub struct RevertFileGuard {
+pub(crate) struct RevertFileGuard {
     path: Option<PathBuf>,
     orig: String,
     exists: bool,
 }
 
 impl RevertFileGuard {
-    pub fn disarm(&mut self) {
+    pub(crate) fn disarm(&mut self) {
         self.path.take();
     }
 }
@@ -186,7 +186,7 @@ impl Drop for RevertFileGuard {
 /// (in other words, `content` is ignored).
 ///
 /// When the editor is closed, the contents are returned.
-pub fn open(path: PathBuf, options: Options) -> Result<(String, RevertFileGuard)> {
+pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFileGuard)> {
     let Options { cmd, cwd, content } = options;
 
     let exists = path.exists();
@@ -233,10 +233,9 @@ pub fn open(path: PathBuf, options: Options) -> Result<(String, RevertFileGuard)
 
 /// Open an editor for the user to input or edit text using a file in the workspace
 #[expect(clippy::too_many_lines)]
-pub fn edit_query(
+pub(crate) fn edit_query(
     ctx: &Ctx,
     conversation_id: ConversationId,
-    model: &Model,
     initial_message: Option<String>,
     cmd: Expression,
 ) -> Result<(String, PathBuf)> {
@@ -321,10 +320,15 @@ pub fn edit_query(
         initial_text.push(buf);
     }
 
-    if let Some(persona) = ctx.config.conversation.persona.as_ref() {
-        initial_text.push(format!("persona: {persona}\n"));
-    }
-    initial_text.push(format!("model: {}\n", model.id));
+    initial_text.push(format!(
+        "model: {}\n",
+        ctx.config
+            .assistant
+            .model
+            .id
+            .as_ref()
+            .map_or_else(|| "(unset)".to_owned(), ToString::to_string)
+    ));
 
     if !initial_text.is_empty() {
         let mut intro = String::new();

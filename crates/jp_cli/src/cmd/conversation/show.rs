@@ -4,15 +4,15 @@ use jp_format::conversation::DetailsFmt;
 use crate::{cmd::Success, ctx::Ctx, error::Error, Output};
 
 #[derive(Debug, clap::Args)]
-pub struct Args {
+pub(crate) struct Show {
     /// Conversation ID to show.
     ///
     /// Defaults to the active conversation if not specified.
     id: Option<ConversationId>,
 }
 
-impl Args {
-    pub fn run(self, ctx: &mut Ctx) -> Output {
+impl Show {
+    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
         let id = self.id.unwrap_or(active_id);
         let Some(conversation) = ctx.workspace.get_conversation(&id).cloned() else {

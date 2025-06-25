@@ -4,15 +4,15 @@ use jp_conversation::ConversationId;
 use crate::{ctx::Ctx, Output};
 
 #[derive(Debug, clap::Args)]
-pub struct Args {
+pub(crate) struct Use {
     /// Conversation ID to use as the active conversation.
     ///
     /// If not specified, the *previous* active conversation is used (if any).
     id: Option<ConversationId>,
 }
 
-impl Args {
-    pub fn run(self, ctx: &mut Ctx) -> Output {
+impl Use {
+    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let id = self.id.unwrap_or_else(|| {
             let active_id = ctx.workspace.active_conversation_id();
             let mut conversations = ctx

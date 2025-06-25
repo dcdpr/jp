@@ -1,3 +1,8 @@
+config_load_paths = [".config/jp"]
+
+[assistant.model]
+id = "anthropic/claude-sonnet-4-0"
+
 [style.code]
 copy_link = "osc8"
 

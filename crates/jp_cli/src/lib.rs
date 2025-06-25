@@ -1,10 +1,11 @@
 mod cmd;
 mod ctx;
 mod editor;
-pub mod error;
+mod error;
 mod parser;
 
 use std::{
+    error::Error as _,
     fmt,
     io::{stdout, IsTerminal as _},
     num::NonZeroI32,
@@ -20,12 +21,16 @@ use clap::{
 use cmd::{Commands, Output, Success};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::Stylize as _;
-use ctx::Ctx;
+use ctx::{Ctx, IntoPartialConfig};
 use error::{Error, Result};
-use jp_config::{file_to_key_value_pairs, Config};
+use jp_config::{
+    assignment::{AssignKeyValue as _, KvAssignment},
+    assistant::Instructions,
+    Config, Partial, PartialConfig,
+};
 use jp_workspace::Workspace;
 use serde_json::Value;
-use tracing::{info, trace};
+use tracing::{debug, info, trace};
 
 const DEFAULT_STORAGE_DIR: &str = ".jp";
 
@@ -38,7 +43,7 @@ const PATH_STRING_PREFIX: char = '@';
 // Jean Pierre's LLM Toolkit.
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
-pub struct Cli {
+struct Cli {
     #[command(flatten, next_help_heading = "Global Options")]
     globals: Globals,
 
@@ -47,10 +52,27 @@ pub struct Cli {
 }
 
 #[derive(Debug, clap::Args)]
-pub struct Globals {
+struct Globals {
     /// Override a configuration value for the duration of the command.
-    #[arg(short, long = "cfg", value_name = "KEY=VALUE", global = true, action = ArgAction::Append, value_parser = KeyValueOrPath::from_str)]
+    #[arg(
+        short,
+        long = "cfg",
+        global = true,
+        action = ArgAction::Append,
+        value_name = "KEY=VALUE",
+        value_parser = KeyValueOrPath::from_str,
+    )]
     config: Vec<KeyValueOrPath>,
+
+    #[arg(
+        short = 'I',
+        long = "no-inherit",
+        global = true,
+        value_parser = BoolValueParser::new().map(|v| !v),
+        default_value_t = true,
+        help = "Disable loading of non-CLI provided config.",
+    )]
+    load_non_cli_config: bool,
 
     /// Increase verbosity of logging.
     ///
@@ -68,20 +90,20 @@ pub struct Globals {
 
     /// Use OCI-compliant terminal links.
     #[arg(
-        long = "no-hyperlinks",
         short = 'H',
+        long = "no-hyperlinks",
         global = true,
         default_value_t = false,
         value_parser = BoolValueParser::new().map(|v| !v),
-        help = "Disable OCI-compliant terminal links."
+        help = "Disable OCI-compliant terminal links.",
     )]
     hyperlinks: bool,
 
     /// Use OCI-compliant terminal links.
     #[arg(
+        short = 'C',
         long = "no-color",
         alias = "no-colors",
-        short = 'C',
         global = true,
         default_value_t = false,
         value_parser = BoolValueParser::new().map(|v| !v),
@@ -101,15 +123,15 @@ pub struct Globals {
         global = true,
         default_value_t = false,
         value_parser = BoolValueParser::new().map(|v| !v),
-        help = "Disable persistence for the duration of the command."
+        help = "Disable persistence for the duration of the command.",
     )]
-    pub persist: bool,
+    persist: bool,
 
     /// The workspace to use for the command.
     ///
     /// This can be either a path to a workspace directory, or a workspace ID.
     #[arg(short, long, global = true, value_parser = WorkspaceIdOrPath::from_str)]
-    pub workspace: Option<WorkspaceIdOrPath>,
+    workspace: Option<WorkspaceIdOrPath>,
     // TODO
     // /// The format of the output.
     // #[arg(long, global = true, value_enum, default_value_t = Format::Text)]
@@ -117,38 +139,8 @@ pub struct Globals {
 }
 
 #[derive(Debug, Clone)]
-pub struct KeyValue(String, String);
-
-impl KeyValue {
-    #[must_use]
-    pub fn key(&self) -> &str {
-        &self.0
-    }
-
-    #[must_use]
-    pub fn value(&self) -> &str {
-        &self.1
-    }
-}
-
-impl FromStr for KeyValue {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        s.split_once('=')
-            .ok_or(jp_config::Error::InvalidConfigValue {
-                key: s.to_string(),
-                value: s.to_string(),
-                need: vec!["<key>=<value>".to_string(), "@<path>".to_string()],
-            })
-            .map(|(key, value)| Self(key.to_string(), value.to_string()))
-            .map_err(Into::into)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum KeyValueOrPath {
-    KeyValue(KeyValue),
+pub(crate) enum KeyValueOrPath {
+    KeyValue(KvAssignment),
     Path(PathBuf),
 }
 
@@ -156,16 +148,23 @@ impl FromStr for KeyValueOrPath {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
+        // String prefixed with `@` is always a path.
         if let Some(s) = s.strip_prefix(PATH_STRING_PREFIX) {
             return Ok(Self::Path(PathBuf::from(s.trim())));
         }
 
-        s.parse().map(Self::KeyValue)
+        // String without `=` is always a path.
+        if !s.contains('=') {
+            return Ok(Self::Path(PathBuf::from(s.trim())));
+        }
+
+        // Anything else is parsed as a key-value pair.
+        s.parse().map(Self::KeyValue).map_err(Into::into)
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum WorkspaceIdOrPath {
+pub(crate) enum WorkspaceIdOrPath {
     Id(jp_workspace::Id),
     Path(PathBuf),
 }
@@ -228,18 +227,16 @@ pub async fn run() {
 
 async fn run_inner(cli: Cli) -> Result<Success> {
     match cli.command {
-        Commands::Init(args) => args.run().map_err(Into::into),
+        Commands::Init(ref args) => args.run().map_err(Into::into),
         cmd => {
             let mut workspace = load_workspace(cli.globals.workspace.as_ref())?;
             if !cli.globals.persist {
                 workspace.disable_persistence();
             }
 
-            let mut config = load_config(&workspace)?;
-            apply_cli_configs(&cli.globals.config, &mut config)?;
-
             workspace.load()?;
 
+            let config = load_config(&cmd, Some(&workspace), &cli.globals.config)?;
             let mut ctx = Ctx::new(workspace, cli.globals, config);
             let output = cmd.run(&mut ctx).await;
             if output.is_err() {
@@ -287,7 +284,16 @@ fn parse_error(error: error::Error, is_tty: bool) -> (i32, String) {
         _ => (
             NonZeroI32::new(1).unwrap(),
             Some(strip_ansi_escapes::strip_str(error.to_string())),
-            vec![],
+            {
+                let mut metadata = vec![];
+                let mut source = error.source();
+                while let Some(error) = source {
+                    metadata.push((String::new(), error.to_string().into()));
+                    source = error.source();
+                }
+
+                metadata
+            },
         ),
     };
 
@@ -304,7 +310,7 @@ fn parse_error(error: error::Error, is_tty: bool) -> (i32, String) {
                             .add_cell(
                                 Cell::new(match v {
                                     Value::String(s) => s,
-                                    v => v.to_string(),
+                                    v => format!("{v:#}"),
                                 })
                                 .set_alignment(CellAlignment::Left),
                             );
@@ -336,23 +342,132 @@ fn parse_error(error: error::Error, is_tty: bool) -> (i32, String) {
     (code.into(), error)
 }
 
-/// Load the workspace configuration.
-fn load_config(workspace: &Workspace) -> Result<Config> {
-    let partial = if let Some(storage) = workspace.storage_path() {
-        // First look for `config.toml` in the storage directory.
-        let partial = jp_config::load_partial(&storage.join("config.toml"), false, None)?;
+/// Load the static partial workspace configuration.
+///
+/// This uses all configuration sources known at the start of the CLI run.
+///
+/// 1. First, the `.JP/CONFIG.TOML` file is loaded, if it exists.
+/// 2. Next, apply any CONFIGURATION FILE in the path hierarchy starting at the
+///    workspace root.
+/// 3. Next, apply the ENVIRONMENT VARIABLES.
+/// 4. Next, apply the ACTIVE CONVERSATION CONFIGURATION.
+/// 5. Next, apply any FILES LOADED USING `--CFG`.
+/// 6. Next, apply any CUSTOM CLI ARGUMENTS.
+/// 7. Finally, apply SPECIFIC DEFAULT VALUES if the value is not already set.
+fn load_partial_config(
+    cmd: &Commands,
+    workspace: Option<&Workspace>,
+    overrides: &[KeyValueOrPath],
+) -> Result<PartialConfig> {
+    let root = workspace.map_or_else(std::env::current_dir, |w| Ok(w.root.clone()))?;
 
-        // Then search for a config file, starting from the workspace root.
-        jp_config::load_partial(&workspace.root, true, Some(partial))
+    let partial = if let Some(storage) = workspace.and_then(Workspace::storage_path) {
+        // First look for `config.toml` in the storage directory.
+        let partial = jp_config::load_partial_from_file(&storage.join("config.toml"), false, None)?;
+
+        // Then search for a config file, starting from the root.
+        jp_config::load_partial_from_file(&root, true, Some(partial))
     } else {
-        // Search for a config file, starting from the workspace root.
-        jp_config::load_partial(&workspace.root, true, None)
+        // Search for a config file, starting from the root.
+        jp_config::load_partial_from_file(&root, true, None)
     }?;
 
     // Load environment variables.
-    let partial = jp_config::load_envs(partial)?;
+    let mut partial = jp_config::load_envs(partial)?;
 
-    // Build the final config.
+    // Apply conversation-specific config, if needed.
+    if let Some(workspace) = workspace {
+        partial = cmd
+            .apply_conversation_config(Some(workspace), partial)
+            .map_err(|e| Error::CliConfig(e.to_string()))?;
+    }
+
+    // Load CLI-provided `--cfg` arguments. These are different from
+    // command-specific CLI arguments, in that they are global, and allow you to
+    // change any field in the [`Config`] struct.
+    for field in overrides {
+        match field {
+            KeyValueOrPath::Path(path) if path.exists() => {
+                partial = jp_config::load_partial_from_file(path, false, Some(partial))?;
+            }
+            KeyValueOrPath::Path(path) => {
+                // Get the list of `config_load_paths`
+                //
+                // We do this on every iteration of `overrides`, to allow
+                // additional load paths to be added using `--cfg`.
+                let config_load_paths = workspace.iter().flat_map(|w| {
+                    partial
+                        .config_load_paths
+                        .iter()
+                        .flatten()
+                        .filter(|p| p.is_relative())
+                        .map(|p| w.root.join(p))
+                });
+
+                let mut found = false;
+                for load_path in config_load_paths {
+                    debug!(
+                        path = %path.display(),
+                        load_path = %load_path.display(),
+                        "Trying to load partial from config load path"
+                    );
+
+                    if let Some(path) = jp_config::find_file_in_path(path, &load_path)? {
+                        partial = jp_config::load_partial_from_file(&path, false, Some(partial))?;
+                        found = true;
+                        break;
+                    }
+                }
+
+                // This will walk up the directory tree to find the config file,
+                // or return an error if it cannot be found.
+                if !found {
+                    partial = jp_config::load_partial_from_file(path, false, Some(partial))?;
+                }
+            }
+            KeyValueOrPath::KeyValue(kv) => {
+                let mut kv_partial = PartialConfig::empty();
+                kv_partial.assign(kv.clone())?;
+                partial = jp_config::load_partial(kv_partial, partial);
+            }
+        }
+    }
+
+    // Load command-specific CLI arguments last (e.g. `jp query --model`).
+    partial = cmd
+        .apply_cli_config(workspace, partial)
+        .map_err(|e| Error::CliConfig(e.to_string()))?;
+
+    // Apply custom defaults.
+    if partial.assistant.instructions.is_none() {
+        partial.assistant.instructions =
+            Some(vec![Instructions::new("How to respond to the user")
+                .with_item("Be concise")
+                .with_item("Use simple sentences. But feel free to use technical jargon.")
+                .with_item(
+                    "Do NOT overexplain basic concepts. Assume the user is technically proficient.",
+                )
+                .with_item(
+                    "AVOID flattering, corporate-ish or marketing language. Maintain a neutral \
+                     viewpoint.",
+                )
+                .with_item(
+                    "AVOID vague and / or generic claims which may seem correct but are not \
+                     substantiated by the context.",
+                )]);
+    }
+
+    Ok(partial)
+}
+
+/// Load the workspace configuration.
+fn load_config(
+    cmd: &Commands,
+    workspace: Option<&Workspace>,
+    overrides: &[KeyValueOrPath],
+) -> Result<Config> {
+    let partial = load_partial_config(cmd, workspace, overrides)?;
+
     jp_config::build(partial).map_err(Into::into)
 }
 
@@ -404,34 +519,6 @@ fn load_workspace(workspace: Option<&WorkspaceIdOrPath>) -> Result<Workspace> {
     workspace.id().store(&storage)?;
 
     workspace.with_local_storage().map_err(Into::into)
-}
-
-/// Apply CLI config overrides to the [`Config`].
-fn apply_cli_configs(overrides: &[KeyValueOrPath], config: &mut Config) -> Result<()> {
-    trace!(overrides = ?overrides, "Applying CLI config overrides.");
-
-    for field in overrides {
-        match field {
-            KeyValueOrPath::KeyValue(KeyValue(key, value)) => apply_cli_config(key, value, config)?,
-            KeyValueOrPath::Path(path) => {
-                for (key, value) in file_to_key_value_pairs(path)? {
-                    apply_cli_config(&key, &value, config)?;
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn apply_cli_config(key: &str, value: &str, config: &mut Config) -> Result<()> {
-    // Whenever an `inherit` key is set to `false`, we reset the config to
-    // its default values.
-    if key == "inherit" && !value.parse::<bool>().unwrap_or_default() {
-        *config = Config::default();
-    }
-
-    config.set(key, key, value).map_err(Into::into)
 }
 
 fn configure_logging(verbose: u8, quiet: bool) {

@@ -8,10 +8,13 @@ nextest_version  := "0.9.97"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
+default:
+  just --list
+
 # Open a commit message in the editor, using Jean-Pierre.
 commit args="Give me a commit message": _install-jp
     #!/usr/bin/env sh
-    if message=$(jp query --no-persist --new --context=commit --hide-reasoning --no-tool '{{args}}'); then
+    if message=$(jp query --no-persist --new --cfg=personas/commit --hide-reasoning --no-tool {{args}}); then
         echo "$message" | sed -e 's/\x1b\[[0-9;]*[mGKHF]//g' | git commit --edit --file=-
     fi
 
@@ -34,6 +37,9 @@ preview-docs: (_docs "preview")
 # Live-check the code, using Clippy and Bacon.
 check: (_install "bacon@" + bacon_version)
     @bacon
+
+test *FLAGS: (_install "cargo-nextest@" + nextest_version)
+    cargo nextest run --workspace --all-targets {{FLAGS}}
 
 # Run all ci tasks.
 [group('ci')]

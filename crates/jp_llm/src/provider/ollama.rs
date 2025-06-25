@@ -3,13 +3,13 @@ use std::{mem, str::FromStr as _};
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::StreamExt as _;
-use jp_config::llm;
+use jp_config::{assistant, model::parameters::Parameters};
 use jp_conversation::{
-    model::ProviderId,
     thread::{Document, Documents, Thread},
-    AssistantMessage, MessagePair, Model, UserMessage,
+    AssistantMessage, MessagePair, UserMessage,
 };
 use jp_mcp::tool::ToolChoice;
+use jp_model::{ModelId, ProviderId};
 use jp_query::query::ChatQuery;
 use ollama_rs::{
     generation::{
@@ -44,8 +44,13 @@ impl Provider for Ollama {
         Ok(models.into_iter().map(map_model).collect())
     }
 
-    async fn chat_completion(&self, model: &Model, query: ChatQuery) -> Result<Reply> {
-        let request = create_request(model, query)?;
+    async fn chat_completion(
+        &self,
+        model_id: &ModelId,
+        parameters: &Parameters,
+        query: ChatQuery,
+    ) -> Result<Reply> {
+        let request = create_request(model_id, parameters, query)?;
         self.client
             .send_chat_messages(request)
             .await
@@ -54,9 +59,14 @@ impl Provider for Ollama {
             .map(Reply)
     }
 
-    async fn chat_completion_stream(&self, model: &Model, query: ChatQuery) -> Result<EventStream> {
+    async fn chat_completion_stream(
+        &self,
+        model_id: &ModelId,
+        parameters: &Parameters,
+        query: ChatQuery,
+    ) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = create_request(model, query)?;
+        let request = create_request(model_id, parameters, query)?;
         let stream = Box::pin(stream! {
             let mut current_state = AccumulationState::default();
             let mut extractor = ReasoningExtractor::default();
@@ -160,7 +170,11 @@ fn map_content(
     events
 }
 
-fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest> {
+fn create_request(
+    model_id: &ModelId,
+    parameters: &Parameters,
+    query: ChatQuery,
+) -> Result<ChatMessageRequest> {
     let ChatQuery {
         thread,
         tools,
@@ -169,7 +183,7 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest>
     } = query;
 
     let mut request = ChatMessageRequest::new(
-        model.id.slug().to_owned(),
+        model_id.slug().to_owned(),
         convert_thread(thread, tool_choice)?,
     );
 
@@ -180,15 +194,15 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest>
 
     let mut options = ModelOptions::default();
 
-    if let Some(temperature) = model.parameters.temperature {
+    if let Some(temperature) = parameters.temperature {
         options = options.temperature(temperature);
     }
 
-    if let Some(top_p) = model.parameters.top_p {
+    if let Some(top_p) = parameters.top_p {
         options = options.top_p(top_p);
     }
 
-    if let Some(top_k) = model.parameters.top_k {
+    if let Some(top_k) = parameters.top_k {
         options = options.top_k(top_k);
     }
 
@@ -196,8 +210,7 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest>
     //
     // This can be used to force Ollama to use a larger context window then the
     // one determined based on the machine's resources.
-    if let Some(context_window) = model
-        .parameters
+    if let Some(context_window) = parameters
         .other
         .get("context_window")
         .and_then(Value::as_u64)
@@ -205,12 +218,7 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest>
         options = options.num_ctx(context_window);
     }
 
-    if let Some(keep_alive) = model
-        .parameters
-        .other
-        .get("keep_alive")
-        .and_then(Value::as_str)
-    {
+    if let Some(keep_alive) = parameters.other.get("keep_alive").and_then(Value::as_str) {
         let unit = keep_alive
             .chars()
             .last()
@@ -237,10 +245,10 @@ fn create_request(model: &Model, query: ChatQuery) -> Result<ChatMessageRequest>
     Ok(request)
 }
 
-impl TryFrom<&llm::provider::ollama::Config> for Ollama {
+impl TryFrom<&assistant::provider::ollama::Ollama> for Ollama {
     type Error = Error;
 
-    fn try_from(config: &llm::provider::ollama::Config) -> Result<Self> {
+    fn try_from(config: &assistant::provider::ollama::Ollama) -> Result<Self> {
         let url = Url::from_str(&config.base_url)?;
         let port = url.port().unwrap_or(11434);
         let client = reqwest::Client::new();
@@ -615,7 +623,7 @@ impl ReasoningExtractor {
 mod tests {
     use std::{path::PathBuf, result::Result};
 
-    use jp_conversation::ModelId;
+    use jp_config::{Config, Configurable as _, Partial as _, PartialConfig};
     use jp_query::structured::conversation_titles;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
@@ -629,7 +637,11 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_ollama_models() -> Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default().provider.ollama;
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .ollama;
         let vcr = vcr(&config.base_url);
         vcr.cassette(
             function_name!(),
@@ -656,8 +668,12 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_ollama_chat_completion() -> Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default().provider.ollama;
-        let model: ModelId = "ollama/llama3:latest".parse().unwrap();
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .ollama;
+        let model_id = "ollama/llama3:latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -679,7 +695,7 @@ mod tests {
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model.into(), query)
+                    .chat_completion(&model_id, &Parameters::default(), query)
                     .await
             },
         )
@@ -688,8 +704,12 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_ollama_chat_completion_stream() -> Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default().provider.ollama;
-        let model: ModelId = "ollama/llama3:latest".parse().unwrap();
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .ollama;
+        let model_id = "ollama/llama3:latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -711,7 +731,7 @@ mod tests {
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .chat_completion_stream(&model.into(), query)
+                    .chat_completion_stream(&model_id, &Parameters::default(), query)
                     .await
                     .unwrap()
                     .filter_map(
@@ -726,11 +746,19 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_ollama_structured_completion() -> Result<(), Box<dyn std::error::Error>> {
-        let mut config = llm::Config::default().provider.ollama;
-        let model: ModelId = "ollama/llama3.1:8b".parse().unwrap();
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .ollama;
+        let model_id = "ollama/llama3.1:8b".parse().unwrap();
 
         let message = UserMessage::Query("Test message".to_string());
-        let history = vec![MessagePair::new(message, AssistantMessage::default())];
+        let history = vec![MessagePair::new(
+            message,
+            AssistantMessage::default(),
+            Config::from_partial(PartialConfig::default_values()).unwrap(),
+        )];
 
         let vcr = vcr(&config.base_url);
         vcr.cassette(
@@ -746,7 +774,7 @@ mod tests {
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .structured_completion(&model.into(), query)
+                    .structured_completion(&model_id, &Parameters::default(), query)
                     .await
             },
         )

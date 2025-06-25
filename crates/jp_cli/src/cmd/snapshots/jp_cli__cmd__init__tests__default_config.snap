@@ -1,0 +1,27 @@
+---
+source: crates/jp_cli/src/cmd/init.rs
+expression: config
+---
+inherit = true
+config_load_paths = ['.jp/config.d']
+
+[assistant]
+system_prompt = 'You are a helpful assistant.'
+
+[assistant.provider.anthropic]
+api_key_env = 'ANTHROPIC_API_KEY'
+
+[assistant.provider.deepseek]
+api_key_env = 'DEEPSEEK_API_KEY'
+
+[assistant.provider.google]
+api_key_env = 'GEMINI_API_KEY'
+
+[assistant.provider.openrouter]
+api_key_env = 'OPENROUTER_API_KEY'
+
+[assistant.provider.openai]
+api_key_env = 'OPENAI_API_KEY'
+
+[assistant.provider.ollama]
+base_url = 'http://localhost:11434'

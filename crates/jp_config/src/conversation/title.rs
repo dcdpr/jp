@@ -1,23 +1,32 @@
 pub mod generate;
 
 use confique::Config as Confique;
+use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::{
+    assignment::{set_error, AssignKeyValue, KvAssignment},
+    error::Result,
+};
 
 /// LLM configuration.
-#[derive(Debug, Clone, Default, PartialEq, Confique)]
-pub struct Config {
+#[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
+#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
+#[config(partial_attr(serde(deny_unknown_fields)))]
+pub struct Title {
     /// Title generation configuration.
     #[config(nested)]
-    pub generate: generate::Config,
+    pub generate: generate::Generate,
 }
 
-impl Config {
-    /// Set a configuration value using a stringified key/value pair.
-    pub fn set(&mut self, path: &str, key: &str, value: impl Into<String>) -> Result<()> {
-        match key {
-            _ if key.starts_with("generate.") => self.generate.set(path, &key[9..], value)?,
-            _ => return crate::set_error(path, key),
+impl AssignKeyValue for <Title as Confique>::Partial {
+    fn assign(&mut self, mut kv: KvAssignment) -> Result<()> {
+        let k = kv.key().as_str().to_owned();
+        match k.as_str() {
+            "generate" => self.generate = kv.try_into_object()?,
+
+            _ if kv.trim_prefix("generate") => self.generate.assign(kv)?,
+
+            _ => return set_error(kv.key()),
         }
 
         Ok(())
