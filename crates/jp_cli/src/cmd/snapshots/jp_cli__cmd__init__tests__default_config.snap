@@ -16,6 +16,9 @@ api_key_env = 'DEEPSEEK_API_KEY'
 [assistant.provider.google]
 api_key_env = 'GEMINI_API_KEY'
 
+[assistant.provider.llamacpp]
+base_url = 'http://127.0.0.1:8080'
+
 [assistant.provider.openrouter]
 api_key_env = 'OPENROUTER_API_KEY'
 

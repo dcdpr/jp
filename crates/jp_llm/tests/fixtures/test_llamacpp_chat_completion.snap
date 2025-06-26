@@ -1,0 +1,9 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    Reply(
+        [],
+    ),
+)

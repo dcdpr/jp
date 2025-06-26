@@ -53,6 +53,7 @@ linkme = { version = "0.3", default-features = false }
 minijinja = { version = "2", default-features = false }
 octocrab = { version = "0.44", default-features = false }
 ollama-rs = { version = "0.3", default-features = false }
+openai = { git = "https://github.com/JeanMertz/openai", branch = "tmp", default-features = false } # <https://github.com/rellfy/openai/pull/57>
 openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs", default-features = false } # <https://github.com/m1guelpf/openai-responses-rs/pull/6>
 path-clean = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }
@@ -63,6 +64,7 @@ rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "mai
 rusqlite = { version = "0.35", default-features = false }
 saphyr = { version = "0.0.4", default-features = false }
 schemars = { version = "1.0.0-alpha.17", default-features = false }
+schemars_08 = { package = "schemars", version = "0.8.22", default-features = false }
 serde = { version = "1", default-features = false }
 serde_json = { version = "1", default-features = false }
 serde_yaml = { version = "0.9", default-features = false }

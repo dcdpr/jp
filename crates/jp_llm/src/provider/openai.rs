@@ -344,7 +344,10 @@ impl TryFrom<&assistant::provider::openai::Openai> for Openai {
             )]))
             .build()?;
 
-        let client = Client::new(&api_key)?.with_base_url(config.base_url.clone());
+        let base_url =
+            std::env::var(&config.base_url_env).unwrap_or_else(|_| config.base_url.clone());
+
+        let client = Client::new(&api_key)?.with_base_url(base_url);
 
         Ok(Openai {
             reqwest_client,
