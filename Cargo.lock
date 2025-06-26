@@ -2749,8 +2749,7 @@ dependencies = [
 [[package]]
 name = "openai"
 version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cefecf807bb3032265c7d487e238229b70b40f197354478201694149ddd06de"
+source = "git+https://github.com/JeanMertz/openai?branch=tmp#397bf6727f7b361ab5e227e92c382081f6f8c7dc"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2758,6 +2757,7 @@ dependencies = [
  "futures-util",
  "reqwest",
  "reqwest-eventsource",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "tokio",
