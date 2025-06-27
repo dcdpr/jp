@@ -1,5 +1,4 @@
 use duct::cmd;
-use indoc::formatdoc;
 use serde_json::{from_str, Value};
 
 use crate::{to_xml, Result, Workspace};
@@ -86,14 +85,15 @@ pub(crate) async fn cargo_test(
     let failed_tests = failure.len();
 
     if ran_tests == 0 {
-        return Err("Unable to run any tests. Are the package and test name correct?")?;
+        return Err("Unable to find any tests. Are the package and test name correct?")?;
     }
 
-    Ok(formatdoc! {"
-        Ran {ran_tests}/{total_tests} tests, of which {failed_tests} failed.
+    let mut response =
+        format!("Ran {ran_tests}/{total_tests} tests, of which {failed_tests} failed.\n");
+    if !failure.is_empty() {
+        response.push_str("\nWhat follows is an XML representation of the failed tests:\n\n");
+        response.push_str(&to_xml(TestResult { failure })?);
+    }
 
-        What follows is an XML representation of the failed tests:
-
-        {}", to_xml(TestResult { failure })?
-    })
+    Ok(response)
 }
