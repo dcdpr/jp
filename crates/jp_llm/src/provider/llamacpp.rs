@@ -8,7 +8,7 @@ use jp_conversation::{
     AssistantMessage, MessagePair, UserMessage,
 };
 use jp_mcp::tool::{self, ToolChoice};
-use jp_model::ModelId;
+use jp_model::{ModelId, ProviderId};
 use jp_query::query::ChatQuery;
 use openai::{
     chat::{
@@ -22,7 +22,10 @@ use openai::{
 use serde::Serialize;
 use tracing::{debug, trace};
 
-use super::{CompletionChunk, Delta, EventStream, ModelDetails, StreamEvent};
+use super::{
+    openai::{ModelListResponse, ModelResponse},
+    CompletionChunk, Delta, EventStream, ModelDetails, StreamEvent,
+};
 use crate::{
     error::{Error, Result},
     provider::{handle_delta, AccumulationState, Provider, ReasoningExtractor},
@@ -30,17 +33,13 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Llamacpp {
+    reqwest_client: reqwest::Client,
     credentials: Credentials,
+    base_url: String,
 }
 
 impl Llamacpp {
-    fn new(base_url: String) -> Self {
-        let credentials = Credentials::new("", base_url);
-
-        Self { credentials }
-    }
-
-    /// Build request for Openai API.
+    /// Build request for Llama.cpp API.
     fn build_request(
         &self,
         model_id: &ModelId,
@@ -63,7 +62,7 @@ impl Llamacpp {
             slug,
             messages_size = messages.len(),
             tools_size = tools.len(),
-            "Built Openai request."
+            "Built Llamacpp request."
         );
 
         Ok(ChatCompletionDelta::builder(slug, messages)
@@ -76,7 +75,18 @@ impl Llamacpp {
 #[async_trait]
 impl Provider for Llamacpp {
     async fn models(&self) -> Result<Vec<ModelDetails>> {
-        todo!()
+        Ok(self
+            .reqwest_client
+            .get(format!("{}/v1/models", self.base_url))
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<ModelListResponse>()
+            .await?
+            .data
+            .iter()
+            .map(map_model)
+            .collect())
     }
 
     async fn chat_completion_stream(
@@ -182,13 +192,34 @@ fn map_content(
     events
 }
 
+fn map_model(model: &ModelResponse) -> ModelDetails {
+    ModelDetails {
+        provider: ProviderId::Llamacpp,
+        slug: model
+            .id
+            .rsplit_once('/')
+            .map_or(model.id.as_str(), |(_, v)| v)
+            .to_string(),
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+    }
+}
+
 impl TryFrom<&assistant::provider::llamacpp::Llamacpp> for Llamacpp {
     type Error = Error;
 
     fn try_from(config: &assistant::provider::llamacpp::Llamacpp) -> Result<Self> {
+        let reqwest_client = reqwest::Client::builder().build()?;
         let base_url = config.base_url.clone();
+        let credentials = Credentials::new("", &base_url);
 
-        Ok(Llamacpp::new(base_url))
+        Ok(Llamacpp {
+            reqwest_client,
+            credentials,
+            base_url,
+        })
     }
 }
 
@@ -461,41 +492,29 @@ mod tests {
         Vcr::new("http://127.0.0.1:8080", fixtures)
     }
 
-    // #[test(tokio::test)]
-    // async fn test_llamacpp_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    //     let mut config =
-    //         assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-    //             .unwrap()
-    //             .provider
-    //             .openai;
-    //
-    //     let vcr = vcr();
-    //     vcr.cassette(
-    //         function_name!(),
-    //         |rule| {
-    //             rule.filter(|when| {
-    //                 when.any_request();
-    //             });
-    //         },
-    //         |recording, url| async move {
-    //             config.base_url = url;
-    //             if !recording {
-    //                 // dummy api key value when replaying a cassette
-    //                 config.api_key_env = "USER".to_owned();
-    //             }
-    //
-    //             Openai::try_from(&config)
-    //                 .unwrap()
-    //                 .models()
-    //                 .await
-    //                 .map(|mut v| {
-    //                     v.truncate(10);
-    //                     v
-    //                 })
-    //         },
-    //     )
-    //     .await
-    // }
+    #[test(tokio::test)]
+    async fn test_llamacpp_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config =
+            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
+                .unwrap()
+                .provider
+                .llamacpp;
+
+        let vcr = vcr();
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
+                });
+            },
+            |_, url| async move {
+                config.base_url = url;
+                Llamacpp::try_from(&config).unwrap().models().await
+            },
+        )
+        .await
+    }
 
     #[test(tokio::test)]
     async fn test_llamacpp_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>

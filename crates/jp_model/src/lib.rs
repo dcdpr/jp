@@ -115,19 +115,26 @@ impl FromStr for ModelId {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        let (provider, name) = s.split_once('/').unwrap_or(("", s));
+        let (provider, name) =
+            s.split_once('/')
+                .map(|(p, n)| (p.trim(), n.trim()))
+                .ok_or(Error::InvalidIdFormat(
+                    "ID must match <provider>/<model>".to_owned(),
+                ))?;
 
-        if name.chars().any(|c| {
-            !(c.is_numeric()
-                || (c.is_ascii_alphabetic() && c.is_ascii_lowercase())
-                || c == '-'
-                || c == '_'
-                || c == '.'
-                || c == ':'
-                || c == '/')
-        }) {
+        if name.is_empty()
+            || name.chars().any(|c| {
+                !(c.is_numeric()
+                    || c.is_ascii_alphabetic()
+                    || c == '-'
+                    || c == '_'
+                    || c == '.'
+                    || c == ':'
+                    || c == '/')
+            })
+        {
             return Err(Error::InvalidIdFormat(
-                "Model ID must be [a-z0-9_-.:/]".to_string(),
+                "Model ID must be [a-zA-Z0-9_-.:/]+".to_string(),
             ));
         }
 
@@ -197,6 +204,7 @@ impl FromStr for ProviderId {
             "openai" => Ok(Self::Openai),
             "openrouter" => Ok(Self::Openrouter),
             "ollama" => Ok(Self::Ollama),
+            _ if s.is_empty() => Err(Error::InvalidProviderId("<empty>".to_owned())),
             _ => Err(Error::InvalidProviderId(s.to_owned())),
         }
     }
