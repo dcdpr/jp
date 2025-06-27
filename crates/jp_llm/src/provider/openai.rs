@@ -146,15 +146,15 @@ impl Provider for Openai {
 
 #[derive(Debug, Deserialize)]
 #[expect(dead_code)]
-struct ModelListResponse {
+pub(crate) struct ModelListResponse {
     object: String,
-    data: Vec<ModelResponse>,
+    pub data: Vec<ModelResponse>,
 }
 
 #[derive(Debug, Deserialize)]
 #[expect(dead_code)]
-struct ModelResponse {
-    id: String,
+pub(crate) struct ModelResponse {
+    pub id: String,
     object: String,
     #[serde(with = "time::serde::timestamp")]
     created: OffsetDateTime,
