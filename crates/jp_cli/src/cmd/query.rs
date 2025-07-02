@@ -4,6 +4,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     str::FromStr,
+    time::Duration,
 };
 
 use clap::{builder::TypedValueParser as _, ArgAction};
@@ -469,7 +470,20 @@ impl Query {
         let mut tool_call_results = Vec::new();
 
         while let Some(event) = stream.next().await {
-            let data = match event? {
+            let event = match event {
+                Err(jp_llm::Error::RateLimit { retry_after }) => {
+                    println!(
+                        "Rate limited, retrying in {} seconds.",
+                        retry_after.unwrap_or(0)
+                    );
+                    tokio::time::sleep(Duration::from_secs(retry_after.unwrap_or(0))).await;
+                    return Box::pin(self.handle_stream(ctx, thread, tool_choice, messages)).await;
+                }
+                Err(e) => return Err(e.into()),
+                Ok(event) => event,
+            };
+
+            let data = match event {
                 StreamEvent::ChatChunk(chunk) => match chunk {
                     CompletionChunk::Reasoning(data) if !data.is_empty() => {
                         reasoning_tokens.push_str(&data);
