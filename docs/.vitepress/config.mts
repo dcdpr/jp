@@ -4,7 +4,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
     lang: 'en-US',
-    base: '/jp/',
+    base: '/', // https://jp.computer
     title: "Jean-Pierre",
     description: "An LLM-based Programming Assistant",
     cleanUrls: true,
