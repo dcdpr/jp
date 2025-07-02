@@ -455,7 +455,7 @@ impl Query {
                     .filter(|v| &v.name == name)
                     .collect(),
             },
-            tool_choice,
+            tool_choice: tool_choice.clone(),
             ..Default::default()
         };
         let mut stream = provider
