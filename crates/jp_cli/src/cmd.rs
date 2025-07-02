@@ -418,6 +418,11 @@ impl From<jp_llm::Error> for Error {
                 ("error", error.to_string()),
             ]
             .into(),
+            RateLimit { retry_after } => [
+                ("message", "Rate limited".into()),
+                ("retry_after", retry_after.unwrap_or_default().to_string()),
+            ]
+            .into(),
         };
 
         Self::from(metadata)

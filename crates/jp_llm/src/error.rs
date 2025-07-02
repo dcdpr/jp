@@ -55,6 +55,9 @@ pub enum Error {
 
     #[error("Anthropic request builder error: {0}")]
     AnthropicRequestBuilder(#[from] async_anthropic::types::CreateMessagesRequestBuilderError),
+
+    #[error("request rate limited (retry after {} seconds)", retry_after.unwrap_or_default())]
+    RateLimit { retry_after: Option<u64> },
 }
 
 impl From<openai_responses::types::response::Error> for Error {
