@@ -11,7 +11,10 @@ quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" 
 default:
   just --list
 
+install: _install-jp
+
 # Open a commit message in the editor, using Jean-Pierre.
+[group('git')]
 commit args="Give me a commit message": _install-jp
     #!/usr/bin/env sh
     if message=$(jp query --no-persist --new --cfg=personas/commit --hide-reasoning --no-tool {{args}}); then
@@ -75,8 +78,8 @@ docs-ci: _install_ci_matchers
 # Generate code coverage on CI.
 [group('ci')]
 coverage-ci: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version) _install_ci_matchers
-    cargo llvm-cov --no-report nextest
-    cargo llvm-cov --no-report --doc
+    cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --no-report nextest
+    cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info
 
 # Check for security vulnerabilities on CI.
