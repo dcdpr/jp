@@ -59,7 +59,10 @@ impl Anthropic {
             .messages(convert_thread(thread)?);
 
         if let Some(system_prompt) = system_prompt {
-            builder.system(system_prompt);
+            builder.system(types::Text {
+                text: system_prompt,
+                cache_control: Some(types::CacheControl::default()),
+            });
         }
 
         let tools = convert_tools(tools, tool_call_strict_mode);
@@ -183,7 +186,11 @@ impl Provider for Anthropic {
             let stream = client
                 .messages()
                 .create_stream(request).await
-                .map_err(Error::from);
+                .map_err(|e| match e {
+                    async_anthropic::errors::AnthropicError::RateLimit { retry_after } =>
+                        Error::RateLimit { retry_after },
+                    _ => Error::from(e),
+                });
 
             tokio::pin!(stream);
             while let Some(event) = stream.next().await {
@@ -276,7 +283,6 @@ fn map_response(response: types::CreateMessagesResponse) -> Result<Vec<Event>> {
     response
         .content
         .into_iter()
-        .flatten()
         .filter_map(|item| {
             let metadata = match &item {
                 types::MessageContent::Thinking(Thinking { signature, .. }) => {
@@ -382,19 +388,47 @@ fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolChoice {
     }
 }
 
-fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<serde_json::Map<String, Value>> {
+fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
     tools
         .into_iter()
         .map(|tool| {
-            let mut map = serde_json::Map::new();
-            map.insert("name".to_owned(), tool.name.into());
-            map.insert("description".to_owned(), tool.description.into());
-            map.insert(
-                "input_schema".to_owned(),
-                tool.input_schema.as_ref().clone().into(),
-            );
+            types::Tool::Custom(types::CustomTool {
+                name: tool.name.into(),
+                description: tool.description.map(Into::into),
+                input_schema: {
+                    let mut map = tool.input_schema.as_ref().clone();
+                    map.remove("type");
 
-            map
+                    let required = map
+                        .remove("required")
+                        .map(|v| match v {
+                            Value::Array(v) => v
+                                .into_iter()
+                                .filter_map(|v| match v {
+                                    Value::String(v) => Some(v),
+                                    _ => None,
+                                })
+                                .collect(),
+                            _ => vec![],
+                        })
+                        .unwrap_or_default();
+
+                    let properties = map
+                        .remove("properties")
+                        .map(|v| match v {
+                            Value::Object(v) => v,
+                            _ => serde_json::Map::default(),
+                        })
+                        .unwrap_or_default();
+
+                    types::ToolInputSchema {
+                        kind: types::ToolInputSchemaKind::Object,
+                        properties,
+                        required,
+                    }
+                },
+                cache_control: None,
+            })
         })
         .collect()
 }
@@ -408,6 +442,7 @@ struct Messages(Vec<types::Message>);
 impl TryFrom<Thread> for Messages {
     type Error = Error;
 
+    #[expect(clippy::too_many_lines)]
     fn try_from(thread: Thread) -> Result<Self> {
         let Thread {
             instructions,
@@ -431,12 +466,28 @@ impl TryFrom<Thread> for Messages {
         }
 
         let mut items = vec![];
-        let history = history
+        let mut history = history
             .into_iter()
             .flat_map(message_pair_to_messages)
             .collect::<Vec<_>>();
 
         // Historical messages second, these are static.
+        //
+        // Make sure to add cache control (2/4) to the last history message.
+        if let Some(message) = history.last_mut().and_then(|m| m.content.0.last_mut()) {
+            match message {
+                types::MessageContent::Text(m) => {
+                    m.cache_control = Some(types::CacheControl::default());
+                }
+                types::MessageContent::ToolUse(m) => {
+                    m.cache_control = Some(types::CacheControl::default());
+                }
+                types::MessageContent::ToolResult(m) => {
+                    m.cache_control = Some(types::CacheControl::default());
+                }
+                _ => {}
+            }
+        }
         items.extend(history);
 
         // Group multiple contents blocks into a single message.
@@ -446,16 +497,31 @@ impl TryFrom<Thread> for Messages {
             content.push(
                 "Before we continue, here are some contextual details that will help you generate \
                  a better response."
-                    .to_string(),
+                    .into(),
             );
         }
 
         // Then instructions in XML tags.
-        for instruction in &instructions {
-            content.push(instruction.try_to_xml()?);
+        //
+        // Cached (3/4), (for the last instruction), as it's not expected to
+        // change.
+        let mut instructions = instructions.iter().peekable();
+        while let Some(instruction) = instructions.next() {
+            content.push(types::MessageContent::Text(types::Text {
+                text: instruction.try_to_xml()?,
+                cache_control: instructions
+                    .peek()
+                    .map_or(Some(types::CacheControl::default()), |_| None),
+            }));
         }
 
         // Then large list of attachments, formatted as XML.
+        //
+        // see: <https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/long-context-tips>
+        // see: <https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-xml-tags>
+        //
+        // Cached (4/4), more likely to change, but we'll keep the previous
+        // cache if changed.
         if !attachments.is_empty() {
             let documents: Documents = attachments
                 .into_iter()
@@ -465,7 +531,10 @@ impl TryFrom<Thread> for Messages {
                 .collect::<Vec<_>>()
                 .into();
 
-            content.push(documents.try_to_xml()?);
+            content.push(types::MessageContent::Text(types::Text {
+                text: documents.try_to_xml()?,
+                cache_control: Some(types::CacheControl::default()),
+            }));
         }
 
         // Attach all data, and add a "fake" acknowledgement by the assistant.
@@ -474,12 +543,7 @@ impl TryFrom<Thread> for Messages {
         if !content.is_empty() {
             items.push(types::Message {
                 role: types::MessageRole::User,
-                content: types::MessageContentList(
-                    content
-                        .into_iter()
-                        .map(|s| types::MessageContent::Text(s.into()))
-                        .collect(),
-                ),
+                content: types::MessageContentList(content),
             });
         }
 
@@ -519,6 +583,7 @@ impl TryFrom<Thread> for Messages {
                             tool_use_id: result.id,
                             content: Some(result.content),
                             is_error: result.error,
+                            cache_control: None,
                         },
                     )]),
                 }));
@@ -548,6 +613,7 @@ fn user_message_to_message(user: UserMessage) -> types::Message {
                     tool_use_id: result.id,
                     content: Some(result.content),
                     is_error: result.error,
+                    cache_control: None,
                 })
             })
             .collect(),
@@ -595,6 +661,7 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> types::Message {
             id: tool_call.id,
             input: tool_call.arguments,
             name: tool_call.name,
+            cache_control: None,
         }));
     }
 
