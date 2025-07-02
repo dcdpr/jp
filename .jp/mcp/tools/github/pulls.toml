@@ -21,4 +21,15 @@ Filter pull requests by their state.
 
 If unspecified, all pull requests will be returned.
 """
-choices = ["open", "closed"]
+
+[[properties]]
+name = "file_diffs"
+type = "array"
+items.type = "string"
+description = """
+List of changed file paths to get the diff for.
+
+If unspecified, only the list of changed files will be returned, but not the
+actual diff. You can re-run the tool with the correct file path to get the
+diff.
+"""

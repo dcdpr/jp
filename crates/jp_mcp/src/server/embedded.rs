@@ -72,23 +72,20 @@ impl EmbeddedServer {
 
             for prop in &tool.properties {
                 let mut schema = Map::new();
-
                 let name = get_property("name", id, prop, Value::as_str)?;
-
-                schema.insert(
-                    "type".to_owned(),
-                    get_property("type", id, prop, Value::as_str)?.into(),
-                );
-
-                if let Some(description) = prop.get("description").and_then(Value::as_str) {
-                    schema.insert("description".to_owned(), description.into());
-                }
-
                 if prop
                     .get("required")
                     .is_some_and(|v| v.as_bool().unwrap_or(false))
                 {
                     required_properties.push(id.to_string());
+                }
+
+                for (key, value) in prop {
+                    if key == "name" || key == "type" || key == "required" {
+                        continue;
+                    }
+
+                    schema.insert(key.into(), value.clone());
                 }
 
                 properties.insert(name.to_string(), schema.into());

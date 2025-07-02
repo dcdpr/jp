@@ -1,15 +1,24 @@
+#![allow(clippy::too_many_arguments)]
+
 mod cargo;
+mod fs;
 mod github;
 
 use std::path::PathBuf;
 
-use cargo::test::cargo_test;
-use github::{
-    issues::github_issues,
-    pulls::github_pulls,
-    repo::{github_code_search, github_read_file},
-};
 use serde_json::{Map, Value};
+
+type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+type Result<T> = std::result::Result<T, Error>;
+
+pub async fn run(ws: Workspace, t: Tool) -> Result<String> {
+    match t.name.as_str() {
+        s if s.starts_with("cargo_") => cargo::run(ws, t).await,
+        s if s.starts_with("github_") => github::run(ws, t).await,
+        s if s.starts_with("fs_") => fs::run(ws, t).await,
+        _ => Err(format!("Unknown tool '{}'", t.name).into()),
+    }
+}
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Workspace {
@@ -48,23 +57,14 @@ impl Tool {
     }
 }
 
-type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
-type Result<T> = std::result::Result<T, Error>;
-
-pub async fn run(ws: Workspace, t: Tool) -> Result<String> {
-    match t.name.as_str() {
-        "cargo_test" => cargo_test(&ws, t.opt("package")?, t.opt("testname")?).await,
-        "github_issues" => github_issues(t.opt("number")?).await,
-        "github_pulls" => github_pulls(t.opt("number")?, t.opt("state")?).await,
-        "github_code_search" => github_code_search(t.opt("repository")?, t.req("query")?).await,
-        "github_read_file" => github_read_file(t.opt("repository")?, t.req("path")?).await,
-        _ => todo!(),
-    }
+fn to_xml<T: serde::Serialize>(value: T) -> Result<String> {
+    to_xml_with_root(value, "")
 }
 
-fn to_xml<T: serde::Serialize>(value: T) -> Result<String> {
+fn to_xml_with_root<T: serde::Serialize>(value: T, root: &str) -> Result<String> {
+    let root = if root.is_empty() { None } else { Some(root) };
     let mut buffer = String::new();
-    let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
+    let mut serializer = quick_xml::se::Serializer::with_root(&mut buffer, root)?;
     serializer.indent(' ', 2);
     value
         .serialize(serializer)
