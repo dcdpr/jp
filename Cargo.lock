@@ -2195,7 +2195,6 @@ dependencies = [
  "async-anthropic",
  "async-stream",
  "async-trait",
- "backon 1.5.0",
  "futures",
  "gemini_client_rs",
  "insta",
