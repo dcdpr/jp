@@ -1,0 +1,22 @@
+inherit = "cargo"
+description = "List files in the project's local filesystem."
+
+[[properties]]
+name = "prefixes"
+type = "array"
+items.type = "string"
+description = """
+Optional list of path prefixes to filter the results by.
+
+If unspecified, all files in the project will be returned.
+"""
+
+[[properties]]
+name = "extensions"
+type = "array"
+items.type = "string"
+description = """
+Optional list of file extensions to filter the results by.
+
+If unspecified, all extensions will be returned.
+"""

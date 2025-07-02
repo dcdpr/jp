@@ -43,6 +43,9 @@ dyn-hash = { version = "0.2", default-features = false }
 futures = { version = "0.3", default-features = false }
 gemini_client_rs = { git = "https://github.com/JeanMertz/gemini-client", default-features = false } # <https://github.com/Adriftdev/gemini-client/pull/8>
 glob = { version = "0.3", default-features = false }
+grep-printer = { version = "0.2", default-features = false }
+grep-regex = { version = "0.1", default-features = false }
+grep-searcher = { version = "0.1", default-features = false }
 httpmock = { git = "https://github.com/alexliesenfeld/httpmock", default-features = false }
 ignore = { version = "0.4", default-features = false }
 indoc = { version = "2", default-features = false }

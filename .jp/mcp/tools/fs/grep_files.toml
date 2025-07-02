@@ -1,0 +1,32 @@
+inherit = "cargo"
+description = "Grep files in the project's local filesystem."
+
+[[properties]]
+name = "pattern"
+type = "string"
+required = true
+description = """
+Regular expression to filter the results by.
+"""
+
+[[properties]]
+name = "paths"
+type = "array"
+items.type = "string"
+description = """
+Optional list of files or directories to search.
+
+If unspecified, all files in the project will be returned.
+"""
+
+[[properties]]
+name = "return_entire_file"
+type = "boolean"
+default = false
+description = """
+Whether to return the entire file contents.
+
+If enabled, the tool will return the entire file contents of any files matching
+the pattern. If disabled (the default), only the matching lines and 5 contextual
+lines above and below the matching lines will be returned.
+"""

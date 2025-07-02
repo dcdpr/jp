@@ -1,0 +1,177 @@
+inherit = "cargo"
+description = """
+Track a new bug in the project's GitHub repository.
+
+- MOST IMPORTANTLY: Avoid fluff, and focus on the issue at hand. Do not add more
+  text than is necessary to explain the issue.
+
+- Use markdown to format text.
+
+- Explain the motivation for creating the issue. You can include a comparison of
+  the current behavior with the expected behavior in order to illustrate the
+  impact of the issue.
+
+- Use the body to explain what and why vs. how.
+
+- Wrap the body at 72 characters.
+
+- Use backticks (``) to format code or crate references.
+
+- Add optional references to related issues or PRs in the body.
+
+- Link to relevant code, documentation, or other resources in the body, using
+  proper Github links.
+
+- Use a narrative style to describe the issue in one or more paragraphs, avoid
+  using lists, unless they are necessary to convey details about the issue.
+"""
+
+[[properties]]
+name = "title"
+type = "string"
+required = true
+description = """
+The title of the bug to track.
+
+Should be a single line, not include any markdown except for backticks (`) where
+applicable. Keep the title short and descriptive.
+"""
+
+[[properties]]
+name = "description"
+type = "string"
+required = true
+description = "A clear and concise description of what the issue is about."
+
+[[properties]]
+name = "expected_behavior"
+type = "string"
+required = true
+description = "A description of the expected behavior."
+
+[[properties]]
+name = "actual_behavior"
+type = "string"
+required = true
+description = "A description of the actual behavior."
+
+[[properties]]
+name = "complexity"
+type = "string"
+enum = ["low", "medium", "high"]
+required = true
+description = """
+Complexity of the issue.
+
+This is used to estimate the effort required to fix the issue.
+"""
+
+[[properties]]
+name = "reproduce"
+type = "string"
+description = """
+Optional notes on how to reproduce the issue.
+
+This is only needed if the combination of `description`, `expected_behavior`,
+and `actual_behavior` is not sufficient to explain the issue.
+"""
+
+[[properties]]
+name = "proposed_solution"
+type = "string"
+description = """
+Optional proposed solution to the issue.
+
+This should be a high-level, SHORT description of the solution you would
+propose. It should be brief, not go into too much detail, and IF code is added,
+it should be limited in size, and optionally be pseudo-code to avoid making the
+solution obsolete if the code is later changed.
+"""
+
+[[properties]]
+name = "tasks"
+type = "array"
+items.type = "string"
+description = """
+Optional tasks in the order they need to be done in to resolve the bug. Include
+links to specific lines of code where the task should happen at.
+"""
+
+[[properties]]
+name = "resource_links"
+type = "array"
+items.type = "string"
+description = """
+Optional list of resources relevant to the issue.
+
+The links should only contain the path to the resource, not the full URL.
+
+The following resource links are supported:
+
+- issue: issues/{issue number}
+- pull: pull/{pull request number}
+- commit: commit/{commit hash}
+- file: blob/{commit hash}/{file path}
+
+  relevant files for this issue. This will help people navigate the project and
+  offer some clues of where to start.
+
+- lines: blob/{commit hash}/{file path}#L{start line}-L{end line}
+"""
+
+[[properties]]
+name = "labels"
+type = "array"
+items.type = "string"
+description = """
+Additional labels to add to the issue.
+
+- The issue will always be assigned the `bug` label.
+- If unspecified, no additional labels will be added.
+- Only labels that exist on the project can be added, non-existing labels will
+  result in an error with a list of valid labels, so you can retry again.
+"""
+
+[[properties]]
+name = "assignees"
+type = "array"
+items.type = "string"
+description = """
+Assignees to add to the issue.
+
+- You should only add assignees if explicitly requested by the user.
+- If unspecified, no assignees will be added.
+- Only collaborators on the project can be added, non-existing assignees will
+  result in an error with a list of valid assignees, so you can retry again.
+"""
+
+# [[properties]]
+# name = "body"
+# type = "string"
+# required = true
+# description = """
+# The body of the issue to create.
+#
+# - MOST IMPORTANTLY: Avoid fluff, and focus on the issue at hand. Do not add more
+#   text than is necessary to explain the issue.
+#
+# - Use markdown to format the body.
+#
+# - Explain the motivation for creating the issue. You can include a comparison of
+#   the current behavior with the expected behavior in order to illustrate the
+#   impact of the issue.
+#
+# - Use the body to explain what and why vs. how.
+#
+# - Wrap the body at 72 characters.
+#
+# - Use backticks (``) to format code or crate references.
+#
+# - Add optional references to related issues or PRs in the body.
+#
+# - Link to relevant code, documentation, or other resources in the body, using
+#   proper Github links.
+#
+# - Use a narrative style to describe the issue in one or more paragraphs, avoid
+#   using lists, unless they are necessary to convey details about the issue.
+# """

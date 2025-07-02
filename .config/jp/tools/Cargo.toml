@@ -15,6 +15,10 @@ version.workspace = true
 [dependencies]
 base64 = { workspace = true, features = ["std"] }
 duct = { workspace = true }
+grep-printer = { workspace = true }
+grep-regex = { workspace = true }
+grep-searcher = { workspace = true }
+ignore = { workspace = true }
 indoc = { workspace = true }
 octocrab = { workspace = true, features = [
     "default-client",
@@ -30,6 +34,10 @@ serde_json = { workspace = true, features = ["std", "preserve_order", "alloc"] }
 time = { workspace = true, features = ["serde-human-readable"] }
 tokio = { workspace = true, features = ["full"] }
 url = { workspace = true, features = ["serde", "std"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+test-log = { workspace = true }
 
 [lints]
 workspace = true
