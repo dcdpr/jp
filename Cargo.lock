@@ -156,9 +156,9 @@ dependencies = [
 [[package]]
 name = "async-anthropic"
 version = "0.6.0"
-source = "git+https://github.com/JeanMertz/async-anthropic#6e5ff9bc8d2fd0e147bd6e6fc631d736cd458207"
+source = "git+https://github.com/JeanMertz/async-anthropic#2e4d8bd33fdc4916ea11fda490c285377f6fcdb6"
 dependencies = [
- "backon",
+ "backon 1.5.1",
  "derive_builder",
  "reqwest",
  "reqwest-eventsource",
@@ -402,6 +402,15 @@ name = "backon"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd0b50b1b78dbadd44ab18b3c794e496f3a139abb9fbc27d9c94c4eebbb96496"
+dependencies = [
+ "fastrand",
+ "tokio",
+]
+
+[[package]]
+name = "backon"
+version = "1.5.1"
+source = "git+https://github.com/JeanMertz/backon#341ea10a868218c5b1bcdfdd168df71b5e7e8c67"
 dependencies = [
  "fastrand",
  "tokio",
@@ -2186,6 +2195,7 @@ dependencies = [
  "async-anthropic",
  "async-stream",
  "async-trait",
+ "backon 1.5.0",
  "futures",
  "gemini_client_rs",
  "insta",
@@ -2243,7 +2253,7 @@ name = "jp_openrouter"
 version = "0.1.0"
 dependencies = [
  "async-stream",
- "backon",
+ "backon 1.5.0",
  "futures",
  "jp_test",
  "reqwest",
@@ -4908,7 +4918,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
