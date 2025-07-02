@@ -80,7 +80,7 @@ docs-ci: _install_ci_matchers
 coverage-ci: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version) _install_ci_matchers
     cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --no-report nextest
     cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --no-report --doc
-    cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly report --doctests --lcov --output-path lcov.info
+    cargo llvm-cov report --doctests --lcov --output-path lcov.info
 
 # Check for security vulnerabilities on CI.
 [group('ci')]
