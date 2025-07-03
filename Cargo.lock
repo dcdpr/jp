@@ -2173,6 +2173,7 @@ dependencies = [
 name = "jp_conversation"
 version = "0.1.0"
 dependencies = [
+ "insta",
  "jp_attachment",
  "jp_config",
  "jp_id",

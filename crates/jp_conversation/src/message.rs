@@ -2,7 +2,6 @@
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
-use jp_config::Config;
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id, NANOSECONDS_PER_DECISECOND,
@@ -24,20 +23,16 @@ pub struct MessagePair {
 
     /// The assistant message that was replied to the user.
     pub reply: AssistantMessage,
-
-    /// The context that was active when this message pair was generated.
-    pub config: Config,
 }
 
 impl MessagePair {
     /// Creates a new message pair with the current timestamp.
     #[must_use]
-    pub fn new(message: UserMessage, reply: AssistantMessage, config: Config) -> Self {
+    pub fn new(message: UserMessage, reply: AssistantMessage) -> Self {
         Self {
             timestamp: UtcDateTime::now(),
             message,
             reply,
-            config,
         }
     }
 

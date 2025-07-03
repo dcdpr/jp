@@ -23,5 +23,8 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
 time = { workspace = true, features = ["serde-human-readable"] }
 
+[dev-dependencies]
+insta = { workspace = true, features = ["json"] }
+
 [lints]
 workspace = true

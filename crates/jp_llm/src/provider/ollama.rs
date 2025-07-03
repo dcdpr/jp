@@ -514,7 +514,7 @@ impl From<ToolCall> for Delta {
 mod tests {
     use std::{path::PathBuf, result::Result};
 
-    use jp_config::{Config, Configurable as _, Partial as _, PartialConfig};
+    use jp_config::{Configurable as _, Partial as _};
     use jp_query::structured::conversation_titles;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
@@ -645,11 +645,7 @@ mod tests {
         let model_id = "ollama/llama3.1:8b".parse().unwrap();
 
         let message = UserMessage::Query("Test message".to_string());
-        let history = vec![MessagePair::new(
-            message,
-            AssistantMessage::default(),
-            Config::from_partial(PartialConfig::default_values()).unwrap(),
-        )];
+        let history = vec![MessagePair::new(message, AssistantMessage::default())];
 
         let vcr = vcr(&config.base_url);
         vcr.cassette(
