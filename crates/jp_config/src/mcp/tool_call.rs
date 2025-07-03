@@ -54,6 +54,7 @@ impl AssignKeyValue for <ToolCall as Confique>::Partial {
 /// full tool call results. Additionally, the full tool call results will be
 /// sent back to the assistant, regardless of this setting.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum InlineResults {
     /// Never show the tool call results inline.
     Off,
