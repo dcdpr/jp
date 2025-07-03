@@ -16,15 +16,15 @@ pub struct Code {
     /// Theme to use for code blocks.
     ///
     /// This uses the [bat](https://github.com/sharkdp/bat) theme names.
-    #[config(default = "Monokai Extended", env = "JP_STYLE_CODE_THEME")]
+    #[config(default = "Monokai Extended")]
     pub theme: String,
 
     /// Whether to colorize code blocks.
-    #[config(default = true, env = "JP_STYLE_CODE_COLOR")]
+    #[config(default = true)]
     pub color: bool,
 
     /// Show line numbers in code blocks.
-    #[config(default = false, env = "JP_STYLE_CODE_LINE_NUMBERS")]
+    #[config(default = false)]
     pub line_numbers: bool,
 
     /// Show a link to the file containing the source code in code blocks.

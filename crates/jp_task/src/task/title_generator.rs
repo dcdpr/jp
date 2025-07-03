@@ -30,11 +30,7 @@ impl TitleGeneratorTask {
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let mut messages = workspace.get_messages(&conversation_id).to_vec();
         if let Some(query) = query {
-            messages.push(MessagePair::new(
-                query.into(),
-                AssistantMessage::default(),
-                config.clone(),
-            ));
+            messages.push(MessagePair::new(query.into(), AssistantMessage::default()));
         }
 
         let model_id = config

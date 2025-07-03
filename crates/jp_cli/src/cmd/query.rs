@@ -315,10 +315,9 @@ impl Query {
 
         // Set new active conversation if requested.
         if self.new_conversation {
-            let id = ctx.workspace.create_conversation(Conversation {
-                local: self.local,
-                ..Default::default()
-            });
+            let id = ctx
+                .workspace
+                .create_conversation(Conversation::default().with_local(self.local));
 
             debug!(
                 %id,
@@ -330,10 +329,12 @@ impl Query {
         }
 
         // Persist specific CLI configurations for the active conversation.
-        let mut config = ctx.workspace.get_active_conversation().config.clone();
+        let mut config = ctx.workspace.get_active_conversation().config().clone();
         self.apply_persistent_cli_config(Some(&ctx.workspace), &mut config)
             .map_err(|e| Error::CliConfig(e.to_string()))?;
-        ctx.workspace.get_active_conversation_mut().config = config;
+        ctx.workspace
+            .get_active_conversation_mut()
+            .set_config(config);
 
         Ok(last_active_conversation_id)
     }
@@ -541,16 +542,12 @@ impl Query {
             println!();
         }
 
-        let message = MessagePair::new(
-            message,
-            AssistantMessage {
-                metadata,
-                content,
-                reasoning,
-                tool_calls: event_handler.tool_calls.clone(),
-            },
-            ctx.config.clone(),
-        );
+        let message = MessagePair::new(message, AssistantMessage {
+            metadata,
+            content,
+            reasoning,
+            tool_calls: event_handler.tool_calls.clone(),
+        });
         messages.push(message.clone());
 
         // If the assistant asked for a tool call, we handle it within the same
@@ -687,7 +684,7 @@ impl IntoPartialConfig for Query {
         };
 
         Ok(jp_config::load_partial(
-            workspace.get_active_conversation().config.clone(),
+            workspace.get_active_conversation().config().clone(),
             partial,
         ))
     }
@@ -743,11 +740,7 @@ async fn handle_structured_output(
         serde_json::to_string(&value)?
     };
 
-    Ok(MessagePair::new(
-        message,
-        AssistantMessage::from(content),
-        ctx.config.clone(),
-    ))
+    Ok(MessagePair::new(message, AssistantMessage::from(content)))
 }
 
 #[expect(clippy::needless_pass_by_value)]

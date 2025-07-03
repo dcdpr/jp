@@ -42,23 +42,17 @@ pub struct DetailsFmt {
 impl DetailsFmt {
     #[must_use]
     pub fn new(id: ConversationId, conversation: Conversation, messages: &[MessagePair]) -> Self {
-        let Conversation {
-            title,
-            last_activated_at,
-            ..
-        } = conversation;
-
         let last_message_at = messages.iter().map(|m| m.timestamp).max();
 
         Self {
             id,
-            assistant_name: conversation.config.assistant.name.clone(),
-            title: title.clone(),
+            assistant_name: conversation.config().assistant.name.clone(),
+            title: conversation.title,
             message_count: messages.len(),
             local: None,
             active_conversation: None,
             last_message_at,
-            last_activated_at,
+            last_activated_at: conversation.last_activated_at,
             hyperlinks: true,
             color: true,
         }
