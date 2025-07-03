@@ -1,10 +1,10 @@
-bacon_version    := "3.15.0"
-binstall_version := "1.12.7"
-deny_version     := "0.18.2"
+bacon_version    := "3.16.0"
+binstall_version := "1.14.1"
+deny_version     := "0.18.3"
 insta_version    := "1.43.1"
 jilu_version     := "0.13.1"
 llvm_cov_version := "0.6.16"
-nextest_version  := "0.9.97"
+nextest_version  := "0.9.99"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
