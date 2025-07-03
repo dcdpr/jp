@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
     error::Result,
-    is_default,
+    serde::is_default,
 };
 
 /// Model configuration.
@@ -74,7 +74,7 @@ impl AssignKeyValue for <Parameters as Confique>::Partial {
         match kv.key().as_str() {
             "max_tokens" => self.max_tokens = Some(kv.try_into_string()?.parse()?),
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

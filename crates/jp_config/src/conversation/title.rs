@@ -26,7 +26,7 @@ impl AssignKeyValue for <Title as Confique>::Partial {
 
             _ if kv.trim_prefix("generate") => self.generate.assign(kv)?,
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

@@ -28,7 +28,7 @@ impl AssignKeyValue for <Llamacpp as Confique>::Partial {
         match kv.key().as_str() {
             "base_url" => self.base_url = Some(kv.try_into_string()?),
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

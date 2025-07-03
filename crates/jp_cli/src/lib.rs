@@ -26,7 +26,7 @@ use error::{Error, Result};
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::Instructions,
-    Config, Partial, PartialConfig,
+    Config, PartialConfig,
 };
 use jp_workspace::Workspace;
 use serde_json::Value;
@@ -425,11 +425,7 @@ fn load_partial_config(
                     partial = jp_config::load_partial_from_file(path, false, Some(partial))?;
                 }
             }
-            KeyValueOrPath::KeyValue(kv) => {
-                let mut kv_partial = PartialConfig::empty();
-                kv_partial.assign(kv.clone())?;
-                partial = jp_config::load_partial(kv_partial, partial);
-            }
+            KeyValueOrPath::KeyValue(kv) => partial.assign(kv.clone())?,
         }
     }
 

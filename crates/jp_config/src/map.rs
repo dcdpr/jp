@@ -1,77 +1,133 @@
-use core::fmt;
-use std::{collections::HashMap, hash::Hash, marker::PhantomData};
-
-use serde::{
-    de::{DeserializeOwned, MapAccess, Visitor},
-    Deserialize, Deserializer, Serialize,
+use std::{
+    collections::HashMap,
+    fmt,
+    hash::Hash,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
 };
 
-#[derive(Debug)]
-pub struct ConfigMap<K: DeserializeOwned + Eq + Hash, V: confique::Config> {
-    pub inner: HashMap<K, V>,
-}
+use confique::{
+    internal::map_err_prefix_path,
+    meta::{Field, FieldKind, Meta},
+    Config, Error, Partial,
+};
+use serde::{
+    de::{Deserializer, MapAccess, Visitor},
+    Deserialize, Serialize,
+};
 
-impl<K: DeserializeOwned + Eq + Hash, V: confique::Config> std::ops::Deref for ConfigMap<K, V> {
+#[derive(Serialize)]
+pub struct ConfigMap<K, V: Config>(HashMap<K, V>);
+
+#[derive(Serialize)]
+pub struct ConfigMapPartial<K, V: Partial>(HashMap<K, V>);
+
+impl<K, V: Config> Deref for ConfigMap<K, V> {
     type Target = HashMap<K, V>;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner
+        &self.0
     }
 }
 
-impl<K: DeserializeOwned + Eq + Hash, V: confique::Config> std::ops::DerefMut for ConfigMap<K, V> {
+impl<K, V: Partial> Deref for ConfigMapPartial<K, V> {
+    type Target = HashMap<K, V>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<K, V: Config> DerefMut for ConfigMap<K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+        &mut self.0
     }
 }
 
-#[derive(Debug, Default, PartialEq, Serialize)]
-pub struct ConfigMapPartial<K: DeserializeOwned + Eq + Hash, V: confique::Partial> {
-    pub inner: HashMap<K, V>,
+impl<K, V: Partial> DerefMut for ConfigMapPartial<K, V> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
-impl<K: DeserializeOwned + Eq + Hash + Clone, V: confique::Config + Clone> Clone
-    for ConfigMap<K, V>
+impl<K, V> fmt::Debug for ConfigMap<K, V>
+where
+    K: fmt::Debug,
+    V: fmt::Debug + Config,
 {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
     }
 }
 
-impl<K: DeserializeOwned + Eq + Hash, V: confique::Config> Default for ConfigMap<K, V> {
-    fn default() -> Self {
-        Self {
-            inner: HashMap::default(),
-        }
+impl<K, V> fmt::Debug for ConfigMapPartial<K, V>
+where
+    K: fmt::Debug,
+    V: fmt::Debug + Partial,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
     }
 }
 
-impl<K: DeserializeOwned + Eq + Hash + PartialEq, V: confique::Config + PartialEq> PartialEq
-    for ConfigMap<K, V>
+impl<K, V> PartialEq for ConfigMap<K, V>
+where
+    K: Eq + Hash,
+    V: PartialEq + Config,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.inner.eq(&other.inner)
+        self.0.eq(&other.0)
     }
 }
 
-impl<K: DeserializeOwned + Eq + Hash + Serialize, V: confique::Config + Serialize> Serialize
-    for ConfigMap<K, V>
+impl<K, V> PartialEq for ConfigMapPartial<K, V>
+where
+    K: Eq + Hash,
+    V: PartialEq + Partial,
 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.inner.serialize(serializer)
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
     }
 }
 
-struct ConfigMapVisitor<K: DeserializeOwned + Eq + Hash, V: confique::Config> {
+impl<K, V: Config> Default for ConfigMap<K, V> {
+    fn default() -> Self {
+        Self(HashMap::default())
+    }
+}
+
+impl<K, V: Partial> Default for ConfigMapPartial<K, V> {
+    fn default() -> Self {
+        Self(HashMap::default())
+    }
+}
+
+impl<K, V> Clone for ConfigMap<K, V>
+where
+    K: Clone,
+    V: Config + Clone,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<K, V> Clone for ConfigMapPartial<K, V>
+where
+    K: Clone,
+    V: Clone + Partial,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+// See: <https://serde.rs/deserialize-map.html>
+struct ConfigMapVisitor<K, V: Config> {
     marker: PhantomData<fn() -> ConfigMap<K, V>>,
 }
 
-impl<K: DeserializeOwned + Eq + Hash, V: confique::Config> ConfigMapVisitor<K, V> {
+impl<K, V: Config> ConfigMapVisitor<K, V> {
     fn new() -> Self {
         ConfigMapVisitor {
             marker: PhantomData,
@@ -79,10 +135,10 @@ impl<K: DeserializeOwned + Eq + Hash, V: confique::Config> ConfigMapVisitor<K, V
     }
 }
 
-impl<'de, K: DeserializeOwned + Eq + Hash, V: confique::Config> Visitor<'de>
-    for ConfigMapVisitor<K, V>
+impl<'de, K, V> Visitor<'de> for ConfigMapVisitor<K, V>
 where
-    V: Deserialize<'de>,
+    K: Deserialize<'de> + Eq + Hash,
+    V: Deserialize<'de> + Config,
 {
     type Value = ConfigMap<K, V>;
 
@@ -90,114 +146,112 @@ where
         formatter.write_str("a config map")
     }
 
-    // Deserialize MyMap from an abstract "map" provided by the
-    // Deserializer. The MapAccess input is a callback provided by
-    // the Deserializer to let us see each entry in the map.
     fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
     where
         M: MapAccess<'de>,
     {
         let mut map = ConfigMap::default();
         while let Some((key, value)) = access.next_entry()? {
-            map.inner.insert(key, value);
+            map.insert(key, value);
         }
 
         Ok(map)
     }
 }
 
-// This is the trait that informs Serde how to deserialize MyMap.
-impl<'de, K: DeserializeOwned + Eq + Hash, V: confique::Config> Deserialize<'de> for ConfigMap<K, V>
+impl<'de, K, V> Deserialize<'de> for ConfigMap<K, V>
 where
-    V: Deserialize<'de>,
+    K: Deserialize<'de> + Eq + Hash,
+    V: Deserialize<'de> + Config,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        // Instantiate our Visitor and ask the Deserializer to drive
-        // it over the input data, resulting in an instance of MyMap.
         deserializer.deserialize_map(ConfigMapVisitor::new())
     }
 }
 
-impl<K: DeserializeOwned + Eq + Hash, V: confique::Config> confique::Config for ConfigMap<K, V> {
-    type Partial = ConfigMapPartial<K, V::Partial>;
-
-    // TODO
-    const META: confique::meta::Meta = confique::meta::Meta {
-        name: "",
-        doc: &[],
-        fields: &[],
-    };
-
-    fn from_partial(partial: Self::Partial) -> Result<Self, confique::Error> {
-        // TODO: this needs to use `confique::internal::map_err_prefix_path` to give the correct path in errors
-        let inner: Result<_, confique::Error> = partial
-            .inner
-            .into_iter()
-            .map(|(k, v)| Ok((k, V::from_partial(v)?)))
-            .collect();
-        Ok(Self { inner: inner? })
-    }
-}
-
-impl<'de, K: DeserializeOwned + Eq + Hash, V: confique::Partial> serde::Deserialize<'de>
-    for ConfigMapPartial<K, V>
+impl<'de, K, V> Deserialize<'de> for ConfigMapPartial<K, V>
+where
+    K: Deserialize<'de> + Eq + Hash,
+    V: Partial,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::de::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
-        Ok(Self {
-            inner: HashMap::deserialize(deserializer)?,
-        })
+        Ok(Self(HashMap::deserialize(deserializer)?))
     }
 }
 
-impl<K: DeserializeOwned + Eq + Hash, V: confique::Partial> confique::Partial
-    for ConfigMapPartial<K, V>
+pub(crate) trait ConfigKey: for<'de> Deserialize<'de> + Eq + Hash {
+    const KIND: &'static str;
+}
+
+impl<K, V> Config for ConfigMap<K, V>
+where
+    K: ConfigKey,
+    V: Config,
+{
+    type Partial = ConfigMapPartial<K, V::Partial>;
+
+    const META: Meta = Meta {
+        name: std::any::type_name::<Self>(),
+        doc: &["A config map of key-value pairs."],
+        fields: &[Field {
+            name: K::KIND,
+            doc: &[],
+            kind: FieldKind::Nested { meta: &V::META },
+        }],
+    };
+
+    fn from_partial(partial: Self::Partial) -> Result<Self, Error> {
+        let map = partial
+            .0
+            .into_iter()
+            .map(|(k, v)| {
+                map_err_prefix_path(V::from_partial(v), Self::META.fields[0].name).map(|v| (k, v))
+            })
+            .collect::<Result<_, Error>>()?;
+
+        Ok(Self(map))
+    }
+}
+
+impl<K, V> Partial for ConfigMapPartial<K, V>
+where
+    K: for<'de> Deserialize<'de> + Eq + Hash,
+    V: Partial,
 {
     fn empty() -> Self {
-        Self {
-            inner: HashMap::new(),
-        }
+        Self(HashMap::new())
     }
 
     fn default_values() -> Self {
         Self::empty()
     }
 
-    fn from_env() -> Result<Self, confique::Error> {
+    fn from_env() -> Result<Self, Error> {
         Ok(Self::empty())
     }
 
     fn with_fallback(mut self, fallback: Self) -> Self {
-        for (k, v) in fallback.inner {
-            let v = match self.inner.remove(&k) {
+        for (k, v) in fallback.0 {
+            let v = match self.remove(&k) {
                 Some(value) => value.with_fallback(v),
                 None => v,
             };
-            self.inner.insert(k, v);
+            self.insert(k, v);
         }
         self
     }
 
     fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+        self.0.is_empty()
     }
 
     fn is_complete(&self) -> bool {
-        self.inner.values().all(confique::Partial::is_complete)
-    }
-}
-
-impl<K: DeserializeOwned + Eq + Hash + Clone, V: confique::Partial + Clone> Clone
-    for ConfigMapPartial<K, V>
-{
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
+        self.values().all(Partial::is_complete)
     }
 }

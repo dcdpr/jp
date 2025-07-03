@@ -24,6 +24,16 @@ impl EmbeddedServer {
         }
     }
 
+    pub async fn get_command_path(&self, id: &McpToolId) -> Result<PathBuf, Error> {
+        self.tools
+            .lock()
+            .await
+            .get(id)
+            .cloned()
+            .and_then(|t| t.command.first().cloned().map(Into::into))
+            .ok_or_else(|| Error::new(model::ErrorCode::METHOD_NOT_FOUND, id.to_string(), None))
+    }
+
     fn build_command(
         &self,
         id: &McpToolId,

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, process::Stdio, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 
 use rmcp::{
     model::{
@@ -15,6 +15,7 @@ use crate::{
     config::{McpServer, McpServerId},
     error::Result,
     server::embedded::EmbeddedServer,
+    tool::McpToolId,
     transport::Transport,
     Error,
 };
@@ -50,11 +51,47 @@ impl Client {
             tools.extend(server.list_all_tools().await?);
         }
 
-        for client in self.clients.lock().await.values() {
-            tools.extend(client.peer().list_all_tools().await?);
+        for (server_id, client) in self.clients.lock().await.iter() {
+            let client_tools = client
+                .peer()
+                .list_all_tools()
+                .await?
+                .into_iter()
+                .map(|mut tool| {
+                    if !tools.iter().any(|t| t.name == tool.name) {
+                        return Ok(tool);
+                    }
+
+                    // If the tool name is already taken, append the server ID to
+                    // the name.
+                    tool.name = format!("{server_id}_{}", tool.name).into();
+                    if !tools.iter().any(|t| t.name == tool.name) {
+                        return Ok(tool);
+                    }
+
+                    // If the tool name is still taken, return an error.
+                    Err(Error::DuplicateTool(tool.name.to_string()))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            tools.extend(client_tools);
         }
 
         Ok(tools)
+    }
+
+    /// Get the server ID of the given tool ID.
+    pub async fn get_tool_server_id(&self, id: &McpToolId) -> Result<McpServerId> {
+        let server_ids = self.list_server_ids().await;
+
+        for server_id in server_ids {
+            let tools = self.list_tools_by_server_id(&server_id).await?;
+            if tools.iter().any(|t| t.name == id.as_str()) {
+                return Ok(server_id);
+            }
+        }
+
+        Err(Error::UnknownTool(id.to_string()))
     }
 
     /// Call a tool by name with given parameters.
@@ -156,6 +193,15 @@ impl Client {
         Ok(())
     }
 
+    /// Get the path to the tool binary for the embedded server.
+    pub async fn get_embedded_tool_path(&self, id: &McpToolId) -> Result<PathBuf> {
+        let Some(server) = self.embedded_server.as_ref() else {
+            return Err(Error::UnknownTool(id.to_string()));
+        };
+
+        server.get_command_path(id).await.map_err(Into::into)
+    }
+
     /// Create a new MCP client for a server configuration
     async fn create_client(config: &McpServer) -> Result<RunningService<RoleClient, ()>> {
         match config.transport {
@@ -190,5 +236,39 @@ impl Client {
                 Ok(client)
             }
         }
+    }
+
+    /// List tools available on a specific server.
+    async fn list_tools_by_server_id(&self, id: &McpServerId) -> Result<Vec<Tool>> {
+        if id.as_str() == "embedded" {
+            return self.list_embedded_tools().await;
+        }
+
+        let mut tools = vec![];
+        if let Some(client) = self.clients.lock().await.get(id) {
+            tools.extend(client.peer().list_all_tools().await?);
+        }
+
+        Ok(tools)
+    }
+
+    /// List all server IDs.
+    async fn list_server_ids(&self) -> Vec<McpServerId> {
+        self.clients
+            .lock()
+            .await
+            .keys()
+            .cloned()
+            .chain(std::iter::once(McpServerId::new("embedded")))
+            .collect()
+    }
+
+    async fn list_embedded_tools(&self) -> Result<Vec<Tool>> {
+        let mut tools = vec![];
+        if let Some(server) = self.embedded_server.as_ref() {
+            tools.extend(server.list_all_tools().await?);
+        }
+
+        Ok(tools)
     }
 }

@@ -43,7 +43,7 @@ impl AssignKeyValue for <Openai as Confique>::Partial {
             "base_url" => self.base_url = Some(kv.try_into_string()?),
             "base_url_env" => self.base_url_env = Some(kv.try_into_string()?),
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

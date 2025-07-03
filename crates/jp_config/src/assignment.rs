@@ -26,111 +26,15 @@ pub struct KvAssignment {
     strategy: AssignmentStrategy,
 }
 
-/// The strategy to use for setting a value in a configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AssignmentStrategy {
-    /// The value should be merged with the existing value, if applicable.
-    Merge,
-
-    /// The value should be set, overwriting any existing value.
-    Set,
-}
-
-/// A key in a configuration.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KvKey {
-    /// The "path" of the key.
-    path: String,
-
-    /// The delimiter used to separate the path elements.
-    delim: KeyDelim,
-
-    /// The full path, unchanged even after calling `trim_prefix`.
-    full_path: String,
-}
-
-impl KvKey {
-    /// The (possibly trimmed) key value.
-    pub(crate) fn as_str(&self) -> &str {
-        &self.path
-    }
-
-    /// The full path, unchanged even after calling `trim_prefix`.
-    #[expect(clippy::misnamed_getters)]
-    pub(crate) fn path(&self) -> &str {
-        &self.full_path
-    }
-
-    pub(crate) fn segments(&self) -> impl Iterator<Item = &str> {
-        self.path.split(self.delim.as_str())
-    }
-
-    /// Trim the start of the key for the nunmber of characters specified.
-    ///
-    /// For example, given the key `foo.bar.baz`, calling `trim(3)` will result
-    /// in `bar.baz`.
-    ///
-    /// Returns `true` if the key was trimmed.
-    pub(crate) fn trim_prefix(&mut self, segment: &str) -> bool {
-        let delim = self.delim.as_str();
-        let n = segment.len() + delim.len();
-
-        // Must be at least segment + delim long.
-        if self.path.len() < n {
-            return false;
-        }
-
-        let segment = &self.path[..n];
-
-        // Must start with segment.
-        if !segment.starts_with(segment) {
-            return false;
-        }
-
-        // Must end with delim.
-        if !segment.ends_with(delim) {
-            return false;
-        }
-
-        self.path.drain(..n);
-        true
-    }
-}
-
-/// The delimiter used to separate the path elements.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum KeyDelim {
-    /// Dot-delimited key, e.g. `foo.bar`.
-    Dot,
-
-    /// Underscore-delimited key, e.g. `foo_bar`.
-    Underscore,
-}
-
-impl KeyDelim {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Dot => ".",
-            Self::Underscore => "_",
-        }
-    }
-}
-
-/// A value to set in a configuration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(untagged)]
-pub enum KvValue {
-    /// A raw JSON value.
-    Json(Value),
-
-    /// A string value.
-    String(String),
-}
-
 impl KvAssignment {
     #[must_use]
     pub fn key(&self) -> &KvKey {
         &self.key
+    }
+
+    #[must_use]
+    pub fn key_mut(&mut self) -> &mut KvKey {
+        &mut self.key
     }
 
     #[must_use]
@@ -397,8 +301,101 @@ impl FromStr for KvAssignment {
     }
 }
 
-pub(crate) fn set_error(k: &KvKey) -> Result<(), Error> {
-    Err(Error::UnknownConfigKey {
+/// The strategy to use for setting a value in a configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AssignmentStrategy {
+    /// The value should be merged with the existing value, if applicable.
+    Merge,
+
+    /// The value should be set, overwriting any existing value.
+    Set,
+}
+
+/// A key in a configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KvKey {
+    /// The "path" of the key.
+    path: String,
+
+    /// The delimiter used to separate the path elements.
+    delim: KeyDelim,
+
+    /// The full path, unchanged even after calling `trim_prefix`.
+    full_path: String,
+}
+
+impl KvKey {
+    /// The (possibly trimmed) key value.
+    pub(crate) fn as_str(&self) -> &str {
+        &self.path
+    }
+
+    /// The full path, unchanged even after calling `trim_prefix`.
+    #[expect(clippy::misnamed_getters)]
+    pub(crate) fn path(&self) -> &str {
+        &self.full_path
+    }
+
+    pub(crate) fn segments(&self) -> impl Iterator<Item = &str> {
+        self.path.split(self.delim.as_str())
+    }
+
+    /// Trim the start of the key for the nunmber of characters specified.
+    ///
+    /// For example, given the key `foo.bar.baz`, calling `trim_prefix("foo")`
+    /// will result in `bar.baz`.
+    ///
+    /// Returns `true` if the key was trimmed.
+    pub(crate) fn trim_prefix(&mut self, segment: &str) -> bool {
+        let mut segments = self.segments();
+        if segments.next() != Some(segment) {
+            return false;
+        }
+
+        self.path = segments.collect::<Vec<_>>().join(self.delim.as_str());
+        true
+    }
+
+    /// Trim the first segment of the key, returning it.
+    pub(crate) fn trim_any_prefix(&mut self) -> Option<String> {
+        let segment = self.segments().next()?.to_owned();
+        self.trim_prefix(&segment);
+        Some(segment)
+    }
+}
+
+/// The delimiter used to separate the path elements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyDelim {
+    /// Dot-delimited key, e.g. `foo.bar`.
+    Dot,
+
+    /// Underscore-delimited key, e.g. `foo_bar`.
+    Underscore,
+}
+
+impl KeyDelim {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Dot => ".",
+            Self::Underscore => "_",
+        }
+    }
+}
+
+/// A value to set in a configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum KvValue {
+    /// A raw JSON value.
+    Json(Value),
+
+    /// A string value.
+    String(String),
+}
+
+pub(crate) fn set_error(k: &KvKey) -> Error {
+    Error::UnknownConfigKey {
         key: k.path().to_owned(),
         available_keys: {
             let mut keys = Config::fields();
@@ -419,5 +416,5 @@ pub(crate) fn set_error(k: &KvKey) -> Result<(), Error> {
 
             keys
         },
-    })
+    }
 }

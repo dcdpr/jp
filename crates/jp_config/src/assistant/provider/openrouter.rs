@@ -48,7 +48,7 @@ impl AssignKeyValue for <Openrouter as Confique>::Partial {
             }
             "base_url" => self.base_url = Some(kv.try_into_string()?),
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

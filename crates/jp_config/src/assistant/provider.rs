@@ -59,7 +59,7 @@ impl AssignKeyValue for <Provider as Confique>::Partial {
             _ if kv.trim_prefix("openrouter") => self.openrouter.assign(kv)?,
             _ if kv.trim_prefix("openai") => self.openai.assign(kv)?,
             _ if kv.trim_prefix("ollama") => self.ollama.assign(kv)?,
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())
