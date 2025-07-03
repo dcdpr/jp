@@ -88,7 +88,7 @@ impl StreamEventHandler {
             call.arguments
         );
 
-        handler.handle(&data, ctx, false)?;
+        handler.handle(&data, ctx)?;
         let result = handle_tool_call(ctx, call.clone()).await?;
         self.tool_call_results.push(result.clone());
 
@@ -127,7 +127,7 @@ impl StreamEventHandler {
                 }
             };
 
-            handler.handle(&data, ctx, true)?;
+            handler.handle(&data, ctx)?;
 
             Ok(None)
         } else {

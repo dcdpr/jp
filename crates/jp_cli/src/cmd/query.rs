@@ -510,12 +510,12 @@ impl Query {
                 continue;
             };
 
-            resp_handler.handle(&data, ctx, false)?;
+            resp_handler.handle(&data, ctx)?;
         }
 
         // Ensure we handle the last line of the stream.
         if !resp_handler.buffer.is_empty() {
-            resp_handler.handle("\n", ctx, false)?;
+            resp_handler.handle("\n", ctx)?;
         }
 
         let content_tokens = event_handler.content_tokens.trim().to_string();
@@ -541,12 +541,16 @@ impl Query {
             println!();
         }
 
-        let message = MessagePair::new(message, AssistantMessage {
-            metadata,
-            content,
-            reasoning,
-            tool_calls: event_handler.tool_calls.clone(),
-        });
+        let message = MessagePair::new(
+            message,
+            AssistantMessage {
+                metadata,
+                content,
+                reasoning,
+                tool_calls: event_handler.tool_calls.clone(),
+            },
+            ctx.config.clone(),
+        );
         messages.push(message.clone());
 
         // If the assistant asked for a tool call, we handle it within the same

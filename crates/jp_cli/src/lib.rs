@@ -26,7 +26,7 @@ use error::{Error, Result};
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::Instructions,
-    Config, Partial, PartialConfig,
+    Config, PartialConfig,
 };
 use jp_workspace::Workspace;
 use serde_json::Value;
