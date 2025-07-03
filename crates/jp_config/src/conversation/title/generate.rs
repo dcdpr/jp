@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
     error::Result,
-    is_default, is_empty, model,
+    model,
+    serde::{is_default, is_nested_empty},
 };
 
 /// LLM configuration.
@@ -13,7 +14,7 @@ use crate::{
 #[config(partial_attr(serde(deny_unknown_fields)))]
 pub struct Generate {
     /// Model configuration for title generation.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub model: model::Model,
 
     /// Whether to generate a title automatically for new conversations.
@@ -33,7 +34,7 @@ impl AssignKeyValue for <Generate as Confique>::Partial {
 
             _ if kv.trim_prefix("model") => self.model.assign(kv)?,
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

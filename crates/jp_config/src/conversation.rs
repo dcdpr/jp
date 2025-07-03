@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
     error::Result,
-    is_default,
+    serde::is_default,
 };
 
 /// LLM configuration.
@@ -53,7 +53,7 @@ impl AssignKeyValue for <Conversation as Confique>::Partial {
 
             _ if kv.trim_prefix("title") => self.title.assign(kv)?,
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

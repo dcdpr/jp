@@ -72,7 +72,7 @@ impl AssignKeyValue for <Typewriter as Confique>::Partial {
                 });
             }
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

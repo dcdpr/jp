@@ -708,7 +708,7 @@ dependencies = [
 [[package]]
 name = "confique"
 version = "0.3.0"
-source = "git+https://github.com/aschey/confique?branch=feat%2Fpartial-attrs#12d551c3448364813f51d7639e314b590409222c"
+source = "git+https://github.com/JeanMertz/confique?branch=merged#45d665097ab6065e5d8f500fb099a0f7ec98f476"
 dependencies = [
  "confique-macro",
  "json5",
@@ -720,7 +720,7 @@ dependencies = [
 [[package]]
 name = "confique-macro"
 version = "0.0.11"
-source = "git+https://github.com/aschey/confique?branch=feat%2Fpartial-attrs#12d551c3448364813f51d7639e314b590409222c"
+source = "git+https://github.com/JeanMertz/confique?branch=merged#45d665097ab6065e5d8f500fb099a0f7ec98f476"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -916,7 +916,7 @@ dependencies = [
  "bitflags 2.9.0",
  "document-features",
  "parking_lot",
- "rustix 1.0.2",
+ "rustix 1.0.7",
 ]
 
 [[package]]
@@ -1130,6 +1130,12 @@ name = "entities"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5320ae4c3782150d900b79807611a59a99fc9a1d61d686faafc24b93fc8d7ca"
+
+[[package]]
+name = "env_home"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7f84e12ccf0a7ddc17a6c41c93326024c42920d7ee630d04950e6926645c0fe"
 
 [[package]]
 name = "equivalent"
@@ -1540,6 +1546,12 @@ name = "hermit-abi"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fbf6a919d6cf397374f7dfeeea91d974c7c0a7221d0d0f4f20d859d329e53fcc"
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "home"
@@ -2087,6 +2099,7 @@ dependencies = [
  "crossterm 0.29.0",
  "duct",
  "futures",
+ "hex",
  "indoc",
  "inquire",
  "insta",
@@ -2109,11 +2122,14 @@ dependencies = [
  "jp_term",
  "jp_workspace",
  "minijinja",
+ "open-editor",
  "path-clean",
  "reqwest",
  "schemars 1.0.0-alpha.17",
  "serde",
  "serde_json",
+ "sha1",
+ "sha2",
  "strip-ansi-escapes",
  "termimad",
  "test-log",
@@ -2125,6 +2141,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "which",
 ]
 
 [[package]]
@@ -2825,6 +2842,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "open-editor"
+version = "0.2.0"
+source = "git+https://github.com/JeanMertz/open-editor?branch=jean%2Fcustom-editor#179576dd2cfaa18920266acd8281a84c4d14eab6"
+dependencies = [
+ "which",
+]
+
+[[package]]
 name = "openai"
 version = "1.1.1"
 source = "git+https://github.com/JeanMertz/openai?branch=tmp#397bf6727f7b361ab5e227e92c382081f6f8c7dc"
@@ -3468,9 +3493,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.0.2"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7178faa4b75a30e269c71e61c353ce2748cf3d76f0c44c393f4e60abf49b825"
+checksum = "c71e83d6afe7ff64890ec6b71d6a69bb8a610ab78ce364b3352876bb4c801266"
 dependencies = [
  "bitflags 2.9.0",
  "errno",
@@ -3842,6 +3867,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4118,7 +4154,7 @@ checksum = "488960f40a3fd53d72c2a29a58722561dee8afdd175bd88e3db4677d7b2ba600"
 dependencies = [
  "fastrand",
  "once_cell",
- "rustix 1.0.2",
+ "rustix 1.0.7",
  "windows-sys 0.59.0",
 ]
 
@@ -4179,7 +4215,7 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45c6481c4829e4cc63825e62c49186a34538b7b2750b73b266581ffb612fb5ed"
 dependencies = [
- "rustix 1.0.2",
+ "rustix 1.0.7",
  "windows-sys 0.59.0",
 ]
 
@@ -4896,6 +4932,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "which"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3fabb953106c3c8eea8306e4393700d7657561cb43122571b172bbfb7c7ba1d"
+dependencies = [
+ "env_home",
+ "rustix 1.0.7",
+ "winsafe",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5243,6 +5290,12 @@ checksum = "0e97b544156e9bebe1a0ffbc03484fc1ffe3100cbce3ffb17eac35f7cdd7ab36"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "winsafe"
+version = "0.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
 
 [[package]]
 name = "write16"

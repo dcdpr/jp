@@ -1,3 +1,5 @@
+mod event;
+
 use std::{
     collections::BTreeMap,
     convert::Infallible,
@@ -9,21 +11,25 @@ use std::{
 
 use clap::{builder::TypedValueParser as _, ArgAction};
 use crossterm::style::{Color, Stylize as _};
+use event::{handle_tool_calls, StreamEventHandler};
 use futures::StreamExt as _;
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::Instructions,
     parse::expand_tilde,
-    style::code::LinkStyle,
+    style::LinkStyle,
     PartialConfig,
 };
 use jp_conversation::{
-    message::{ToolCallRequest, ToolCallResult},
     thread::{Thread, ThreadBuilder},
     AssistantMessage, Conversation, ConversationId, MessagePair, UserMessage,
 };
-use jp_llm::provider::{self, CompletionChunk, StreamEvent};
-use jp_mcp::{config::McpServerId, tool::ToolChoice, ResourceContents};
+use jp_llm::provider::{self, StreamEvent};
+use jp_mcp::{
+    config::McpServerId,
+    tool::{McpToolId, ToolChoice},
+    Tool,
+};
 use jp_model::ModelId;
 use jp_query::query::{ChatQuery, StructuredQuery};
 use jp_task::task::TitleGeneratorTask;
@@ -392,7 +398,8 @@ impl Query {
 
     async fn build_thread(&self, ctx: &Ctx, message: UserMessage) -> Result<Thread> {
         let conversation_id = ctx.workspace.active_conversation_id();
-        let tools = ctx.mcp_client.list_tools().await?;
+        let tools = list_enabled_tools(ctx).await?;
+
         let mut attachments = vec![];
         for attachment in &ctx.config.conversation.attachments {
             register_attachment(ctx, attachment, &mut attachments).await?;
@@ -430,7 +437,7 @@ impl Query {
         tool_choice: ToolChoice,
         messages: &mut Vec<MessagePair>,
     ) -> Result<()> {
-        let tools = ctx.mcp_client.list_tools().await?;
+        let tools = list_enabled_tools(ctx).await?;
         let model_id = &ctx
             .config
             .assistant
@@ -462,12 +469,15 @@ impl Query {
             .chat_completion_stream(model_id, parameters, query)
             .await?;
 
-        let mut content_tokens = String::new();
-        let mut reasoning_tokens = String::new();
-        let mut handler = ResponseHandler::new(self.render_mode());
+        let mut event_handler = StreamEventHandler {
+            content_tokens: String::new(),
+            reasoning_tokens: String::new(),
+            tool_calls: vec![],
+            tool_call_results: vec![],
+        };
+
+        let mut resp_handler = ResponseHandler::new(self.render_mode());
         let mut metadata = BTreeMap::new();
-        let mut tool_calls = Vec::new();
-        let mut tool_call_results = Vec::new();
 
         while let Some(event) = stream.next().await {
             let event = match event {
@@ -484,72 +494,11 @@ impl Query {
             };
 
             let data = match event {
-                StreamEvent::ChatChunk(chunk) => match chunk {
-                    CompletionChunk::Reasoning(data) if !data.is_empty() => {
-                        reasoning_tokens.push_str(&data);
-
-                        if !ctx.config.style.reasoning.show {
-                            continue;
-                        }
-
-                        data
-                    }
-                    CompletionChunk::Content(mut data) if !data.is_empty() => {
-                        let reasoning_ended = !reasoning_tokens.is_empty()
-                            && ctx.config.style.reasoning.show
-                            && content_tokens.is_empty();
-
-                        content_tokens.push_str(&data);
-
-                        // If the response includes reasoning, we add two newlines
-                        // after the reasoning, but before the content.
-                        if reasoning_ended {
-                            data = format!("\n\n{data}");
-                        }
-
-                        data
-                    }
-                    _ => continue,
-                },
-                // Tool calls are handled after the stream is finished.
-                //
-                // We do add a history of the call to the content tokens for the
-                // LLMs understanding, but we do not print it to the terminal.
+                StreamEvent::ChatChunk(chunk) => event_handler.handle_chat_chunk(ctx, chunk),
                 StreamEvent::ToolCall(call) => {
-                    tool_calls.push(call.clone());
-
-                    let data = indoc::formatdoc!(
-                        "
-                    ---
-                    executing tool: **{}**
-
-                    arguments:
-                    ```json
-                    {:#}
-                    ```
-
-                ",
-                        call.name,
-                        call.arguments
-                    );
-
-                    handler.handle(&data, ctx)?;
-                    let result = handle_tool_call(ctx, call.clone()).await?;
-                    tool_call_results.push(result.clone());
-
-                    let content = if result.content.starts_with("```") {
-                        result.content
-                    } else {
-                        format!("```\n{}\n```", result.content)
-                    };
-
-                    indoc::formatdoc! {"
-                    result:
-
-                    {content}
-                    ---
-                    "
-                    }
+                    event_handler
+                        .handle_tool_call(ctx, call, &mut resp_handler)
+                        .await?
                 }
                 StreamEvent::Metadata(key, data) => {
                     metadata.insert(key, data);
@@ -557,62 +506,55 @@ impl Query {
                 }
             };
 
-            handler.handle(&data, ctx)?;
+            let Some(data) = data else {
+                continue;
+            };
+
+            resp_handler.handle(&data, ctx, false)?;
         }
 
         // Ensure we handle the last line of the stream.
-        if !handler.buffer.is_empty() {
-            handler.handle("\n", ctx)?;
+        if !resp_handler.buffer.is_empty() {
+            resp_handler.handle("\n", ctx, false)?;
         }
 
-        let content_tokens = content_tokens.trim().to_string();
+        let content_tokens = event_handler.content_tokens.trim().to_string();
         let content = if !content_tokens.is_empty() {
             Some(content_tokens)
-        } else if content_tokens.is_empty() && tool_calls.is_empty() {
+        } else if content_tokens.is_empty() && event_handler.tool_calls.is_empty() {
             Some("<no reply>".to_string())
         } else {
             None
         };
 
-        let reasoning_tokens = reasoning_tokens.trim().to_string();
+        let reasoning_tokens = event_handler.reasoning_tokens.trim().to_string();
         let reasoning = if reasoning_tokens.is_empty() {
             None
         } else {
             Some(reasoning_tokens)
         };
 
-        if let RenderMode::Buffered = handler.render_mode {
-            println!("{}", handler.parsed.join("\n"));
+        if let RenderMode::Buffered = resp_handler.render_mode {
+            println!("{}", resp_handler.parsed.join("\n"));
         } else if content.is_some() || reasoning.is_some() {
             // Final newline.
             println!();
         }
 
-        let message = MessagePair::new(
-            message,
-            AssistantMessage {
-                metadata,
-                content,
-                reasoning,
-                tool_calls: tool_calls.clone(),
-            },
-            ctx.config.clone(),
-        );
+        let message = MessagePair::new(message, AssistantMessage {
+            metadata,
+            content,
+            reasoning,
+            tool_calls: event_handler.tool_calls.clone(),
+        });
         messages.push(message.clone());
 
-        // If the assistant asked for a tool call, we handle it automatically,
-        // essentially going into a "loop" until no more tool calls are
-        // requested.
-        //
-        // TODO:
-        //
-        // This should be handled differently, asking for permission to run a
-        // tool (unless whitelisted per conversation/globally), it should log
-        // the fact that a tool call is triggered, and it should guard against
-        // infinite loops.
-        if !tool_call_results.is_empty() {
+        // If the assistant asked for a tool call, we handle it within the same
+        // "conversation turn", essentially going into a "loop" until no more
+        // tool calls are requested.
+        if !event_handler.tool_call_results.is_empty() {
             thread.history.push(message);
-            thread.message = UserMessage::ToolCallResults(tool_call_results);
+            thread.message = UserMessage::ToolCallResults(event_handler.tool_call_results);
 
             Box::pin(self.handle_stream(
                 ctx,
@@ -820,45 +762,6 @@ fn string_or_path(s: &str) -> Result<String> {
     }
 
     Ok(s.to_owned())
-}
-
-async fn handle_tool_calls(
-    ctx: &Ctx,
-    tool_calls: Vec<ToolCallRequest>,
-) -> Result<Vec<ToolCallResult>> {
-    let mut results = vec![];
-    for call in tool_calls {
-        results.push(handle_tool_call(ctx, call).await?);
-    }
-
-    Ok(results)
-}
-
-async fn handle_tool_call(ctx: &Ctx, call: ToolCallRequest) -> Result<ToolCallResult> {
-    info!(tool = %call.name, arguments = %call.arguments, "Calling tool.");
-
-    let result = ctx.mcp_client.call_tool(&call.name, call.arguments).await?;
-    trace!(result = ?result, "Tool call completed.");
-
-    Ok(ToolCallResult {
-        id: call.id,
-        error: result.is_error.unwrap_or(false),
-        content: result
-            .content
-            .into_iter()
-            .filter_map(|c| match c.raw {
-                jp_mcp::RawContent::Text(text_content) => Some(text_content.text),
-                jp_mcp::RawContent::Resource(embedded_resource) => {
-                    match embedded_resource.resource {
-                        ResourceContents::TextResourceContents { text, .. } => Some(text),
-                        ResourceContents::BlobResourceContents { .. } => None,
-                    }
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n"),
-    })
 }
 
 struct Line {
@@ -1180,4 +1083,26 @@ impl ResponseHandler {
 
         Ok(path)
     }
+}
+
+async fn list_enabled_tools(ctx: &Ctx) -> Result<Vec<Tool>> {
+    let mut tools = vec![];
+    let all_tools = ctx.mcp_client.list_tools().await?;
+    for tool in all_tools {
+        let tool_id = McpToolId::new(&*tool.name);
+        let server_id = ctx.mcp_client.get_tool_server_id(&tool_id).await?;
+        let server_cfg = ctx.config.mcp.get_server_with_defaults(server_id.as_str());
+        if !server_cfg.enable {
+            continue;
+        }
+
+        let tool_cfg = server_cfg.get_tool_with_defaults(&tool.name);
+        if !tool_cfg.enable {
+            continue;
+        }
+
+        tools.push(tool);
+    }
+
+    Ok(tools)
 }

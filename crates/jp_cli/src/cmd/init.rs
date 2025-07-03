@@ -73,6 +73,7 @@ fn default_config() -> jp_config::PartialConfig {
     cfg.style = <_>::empty();
     cfg.template = <_>::empty();
     cfg.editor = <_>::empty();
+    cfg.mcp = <_>::empty();
 
     cfg
 }

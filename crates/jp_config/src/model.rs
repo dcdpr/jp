@@ -1,14 +1,13 @@
 pub mod parameters;
 
-use std::str::FromStr;
-
 use confique::Config as Confique;
 use jp_model::ModelId;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
-    is_empty, Error,
+    serde::{de_from_str_opt, is_nested_empty},
+    Error,
 };
 
 /// Model configuration.
@@ -17,11 +16,11 @@ use crate::{
 #[config(partial_attr(serde(deny_unknown_fields)))]
 pub struct Model {
     /// Model to use.
-    #[config(partial_attr(serde(default, deserialize_with = "de_option_model_id")))]
+    #[config(partial_attr(serde(default, deserialize_with = "de_from_str_opt")))]
     pub id: Option<ModelId>,
 
     /// The parameters to use for the model.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub parameters: parameters::Parameters,
 }
 
@@ -39,19 +38,9 @@ impl AssignKeyValue for <Model as Confique>::Partial {
 
             _ if kv.trim_prefix("parameters") => self.parameters.assign(kv)?,
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())
     }
-}
-
-pub fn de_option_model_id<'de, D>(deserializer: D) -> Result<Option<ModelId>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Option::<String>::deserialize(deserializer)?
-        .map(|v| ModelId::from_str(&v))
-        .transpose()
-        .map_err(serde::de::Error::custom)
 }

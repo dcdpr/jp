@@ -28,7 +28,7 @@ impl AssignKeyValue for <Deepseek as Confique>::Partial {
     fn assign(&mut self, kv: KvAssignment) -> Result<()> {
         match kv.key().as_str() {
             "api_key_env" => self.api_key_env = Some(kv.try_into_string()?),
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

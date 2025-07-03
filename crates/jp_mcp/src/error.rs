@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::config::McpServerId;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -24,6 +26,17 @@ pub enum Error {
 
     #[error("Invalid tool choice: {0}, must be one of [auto, none, required, fn:<name>]")]
     UnknownToolChoice(String),
+
+    #[error("Duplicate tool configured: {0}")]
+    DuplicateTool(String),
+
+    #[error("Checksum mismatch for tool: {tool} ({}), expected {expected}, got {got}", path.display())]
+    ChecksumMismatch {
+        tool: String,
+        path: PathBuf,
+        expected: String,
+        got: String,
+    },
 }
 
 #[cfg(test)]

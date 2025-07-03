@@ -23,6 +23,7 @@ jp_query = { workspace = true }
 async-anthropic = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
+backon = { workspace = true }
 futures = { workspace = true }
 gemini_client_rs = { workspace = true }
 ollama-rs = { workspace = true, features = ["rustls", "stream"] }

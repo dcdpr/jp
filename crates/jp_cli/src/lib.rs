@@ -425,11 +425,7 @@ fn load_partial_config(
                     partial = jp_config::load_partial_from_file(path, false, Some(partial))?;
                 }
             }
-            KeyValueOrPath::KeyValue(kv) => {
-                let mut kv_partial = PartialConfig::empty();
-                kv_partial.assign(kv.clone())?;
-                partial = jp_config::load_partial(kv_partial, partial);
-            }
+            KeyValueOrPath::KeyValue(kv) => partial.assign(kv.clone())?,
         }
     }
 

@@ -1,11 +1,11 @@
-use std::str::FromStr;
-
 use confique::Config as Confique;
 use serde::{Deserialize, Serialize};
 
+use super::LinkStyle;
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
-    error::{Error, Result},
+    error::Result,
+    serde::de_from_str,
 };
 
 /// Code style configuration.
@@ -32,7 +32,7 @@ pub struct Code {
     /// Can be one of: `off`, `full`, `osc8`.
     ///
     /// See: <https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda>
-    #[config(default = "osc8", env = "JP_STYLE_CODE_FILE_LINK", deserialize_with = de_link_style)]
+    #[config(default = "osc8", deserialize_with = de_from_str)]
     pub file_link: LinkStyle,
 
     /// Similar to `file_link`, but adds a link with the scheme `copy://`.
@@ -55,7 +55,7 @@ pub struct Code {
     ///   end
     /// end)
     /// ```
-    #[config(default = "off", env = "JP_STYLE_CODE_COPY_LINK", deserialize_with = de_link_style)]
+    #[config(default = "off", deserialize_with = de_from_str)]
     pub copy_link: LinkStyle,
 }
 
@@ -80,42 +80,9 @@ impl AssignKeyValue for <Code as Confique>::Partial {
             "file_link" => self.file_link = Some(kv.try_into_string()?.parse()?),
             "copy_link" => self.copy_link = Some(kv.try_into_string()?.parse()?),
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LinkStyle {
-    Off,
-    Full,
-    Osc8,
-}
-
-impl FromStr for LinkStyle {
-    type Err = Error;
-
-    fn from_str(style: &str) -> Result<Self> {
-        match style {
-            "off" => Ok(Self::Off),
-            "full" => Ok(Self::Full),
-            "osc8" => Ok(Self::Osc8),
-            _ => Err(Error::InvalidConfigValueType {
-                key: style.to_string(),
-                value: style.to_string(),
-                need: vec!["off".to_owned(), "full".to_owned(), "osc8".to_owned()],
-            }),
-        }
-    }
-}
-
-fn de_link_style<'de, D>(deserializer: D) -> std::result::Result<LinkStyle, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let string: String = String::deserialize(deserializer)?;
-    LinkStyle::from_str(&string).map_err(serde::de::Error::custom)
 }

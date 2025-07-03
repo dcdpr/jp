@@ -55,7 +55,7 @@ impl AssignKeyValue for <Template as Confique>::Partial {
 
                 self.values.get_or_insert_default().extend(template_values);
             }
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

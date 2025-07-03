@@ -49,7 +49,7 @@ pub(crate) enum Error {
     #[error("Editor error: {0}")]
     Editor(String),
 
-    #[error("Editor error")]
+    #[error("Missing editor")]
     MissingEditor,
 
     #[error("No model configured. Use `--model` to specify a model.")]
@@ -72,4 +72,7 @@ pub(crate) enum Error {
 
     #[error("Invalid JSON schema: {0}")]
     Schema(String),
+
+    #[error("Cannot locate binary: {0}")]
+    Which(#[from] which::Error),
 }

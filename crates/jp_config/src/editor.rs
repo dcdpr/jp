@@ -1,3 +1,5 @@
+use std::env;
+
 use confique::Config as Confique;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -25,6 +27,19 @@ pub struct Editor {
     pub env_vars: Vec<String>,
 }
 
+impl Editor {
+    /// The command to use for editing text.
+    ///
+    /// If no command is configured, and no configured environment variables are
+    /// set, returns `None`.
+    #[must_use]
+    pub fn command(&self) -> Option<String> {
+        self.cmd
+            .clone()
+            .or_else(|| self.env_vars.iter().find_map(|v| env::var(v).ok()))
+    }
+}
+
 impl AssignKeyValue for <Editor as Confique>::Partial {
     fn assign(&mut self, kv: KvAssignment) -> Result<()> {
         match kv.key().as_str() {
@@ -36,7 +51,7 @@ impl AssignKeyValue for <Editor as Confique>::Partial {
                 })?;
             }
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

@@ -49,14 +49,18 @@ comrak = { workspace = true }
 crossterm = { workspace = true }
 duct = { workspace = true }
 futures = { workspace = true }
+hex = { workspace = true, features = ["alloc"] }
 indoc = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
 minijinja = { workspace = true }
+open-editor = { workspace = true }
 path-clean = { workspace = true }
 reqwest = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
 strip-ansi-escapes = { workspace = true }
 termimad = { workspace = true }
 thiserror = { workspace = true }
@@ -75,6 +79,7 @@ tracing-subscriber = { workspace = true, features = [
     "valuable",
 ] }
 url = { workspace = true }
+which = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["toml"] }

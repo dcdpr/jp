@@ -8,7 +8,9 @@ use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
     assistant, conversation, editor,
     error::Result,
-    is_default, is_empty, style, template, Partial,
+    mcp,
+    serde::{is_default, is_nested_empty},
+    style, template, Partial,
 };
 
 pub type PartialConfig = <Config as Confique>::Partial;
@@ -19,10 +21,7 @@ pub type PartialConfig = <Config as Confique>::Partial;
 #[config(partial_attr(serde(deny_unknown_fields)))]
 pub struct Config {
     /// Inherit from a local ancestor or global configuration file.
-    #[config(
-        default = true,
-        partial_attr(serde(skip_serializing_if = "is_default"))
-    )]
+    #[config(default = true)]
     pub inherit: bool,
 
     /// Paths from which configuration files can be loaded without specifying
@@ -38,24 +37,28 @@ pub struct Config {
     pub config_load_paths: Vec<PathBuf>,
 
     /// LLM-specific configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub assistant: assistant::Assistant,
 
     /// Conversation-specific configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub conversation: conversation::Conversation,
 
     /// Styling configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub style: style::Style,
 
     /// Template configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub template: template::Template,
 
     /// Editor configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub editor: editor::Editor,
+
+    /// MCP configuration.
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
+    pub mcp: mcp::Mcp,
 }
 
 impl Config {
@@ -118,14 +121,16 @@ impl AssignKeyValue for <Config as Confique>::Partial {
             "style" => self.style = kv.try_into_object()?,
             "template" => self.template = kv.try_into_object()?,
             "editor" => self.editor = kv.try_into_object()?,
+            "mcp" => self.mcp = kv.try_into_object()?,
 
             _ if kv.trim_prefix("assistant") => self.assistant.assign(kv)?,
             _ if kv.trim_prefix("conversation") => self.conversation.assign(kv)?,
             _ if kv.trim_prefix("style") => self.style.assign(kv)?,
             _ if kv.trim_prefix("template") => self.template.assign(kv)?,
             _ if kv.trim_prefix("editor") => self.editor.assign(kv)?,
+            _ if kv.trim_prefix("mcp") => self.mcp.assign(kv)?,
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())
@@ -139,6 +144,7 @@ mod tests {
     use confique::Partial as _;
 
     use super::*;
+    use crate::style::LinkStyle;
 
     #[test]
     fn test_set_cli() {
@@ -155,7 +161,7 @@ mod tests {
             }),
             ("style.code.file_link=full", {
                 let mut partial = PartialConfig::default_values();
-                partial.style.code.file_link = Some(style::code::LinkStyle::Full);
+                partial.style.code.file_link = Some(LinkStyle::Full);
                 partial
             }),
             ("conversation.title.generate.auto=false", {

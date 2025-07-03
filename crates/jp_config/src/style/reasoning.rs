@@ -31,7 +31,7 @@ impl AssignKeyValue for <Reasoning as Confique>::Partial {
         match k.as_str() {
             "show" => self.show = Some(kv.try_into_bool()?),
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())

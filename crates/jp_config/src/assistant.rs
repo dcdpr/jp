@@ -1,7 +1,5 @@
 pub mod provider;
 
-use std::str::FromStr;
-
 use confique::Config as Confique;
 use jp_mcp::tool::ToolChoice;
 use serde::{Deserialize, Serialize};
@@ -10,7 +8,8 @@ use serde_json::Value;
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
     error::Result,
-    is_empty, model,
+    model,
+    serde::{de_from_str_opt, is_default, is_nested_empty},
 };
 
 pub type AssistantPartial = <Assistant as Confique>::Partial;
@@ -21,6 +20,7 @@ pub type AssistantPartial = <Assistant as Confique>::Partial;
 #[config(partial_attr(serde(deny_unknown_fields)))]
 pub struct Assistant {
     /// Optional name of the assistant.
+    #[config(partial_attr(serde(skip_serializing_if = "is_default")))]
     pub name: Option<String>,
 
     /// The system prompt to use for the assistant.
@@ -36,15 +36,15 @@ pub struct Assistant {
     pub instructions: Vec<Instructions>,
 
     /// How the LLM should choose tools, if any are available.
-    #[config(partial_attr(serde(default, deserialize_with = "de_tool_choice")))]
+    #[config(partial_attr(serde(default, deserialize_with = "de_from_str_opt")))]
     pub tool_choice: Option<ToolChoice>,
 
     /// Provider configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub provider: provider::Provider,
 
     /// Model configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_empty")))]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub model: model::Model,
 }
 
@@ -68,21 +68,11 @@ impl AssignKeyValue for <Assistant as Confique>::Partial {
             _ if kv.trim_prefix("provider") => self.provider.assign(kv)?,
             _ if kv.trim_prefix("model") => self.model.assign(kv)?,
 
-            _ => return set_error(kv.key()),
+            _ => return Err(set_error(kv.key())),
         }
 
         Ok(())
     }
-}
-
-fn de_tool_choice<'de, D>(deserializer: D) -> std::result::Result<Option<ToolChoice>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Option::<String>::deserialize(deserializer)?
-        .map(|v| ToolChoice::from_str(&v))
-        .transpose()
-        .map_err(serde::de::Error::custom)
 }
 
 /// A list of instructions for a persona.

@@ -273,6 +273,7 @@ impl From<crate::error::Error> for Error {
             Bat(error) => return error.into(),
             Template(error) => return error.into(),
             Json(error) => return error.into(),
+            Which(error) => return error.into(),
             NotFound(target, id) => [
                 ("message", "Not found".into()),
                 ("target", target.into()),
@@ -354,6 +355,7 @@ impl_from_error!(jp_mcp::Error, "MCP error");
 impl_from_error!(jp_model::Error, "Model error");
 impl_from_error!(jp_config::Error, "Config error");
 impl_from_error!(jp_conversation::Error, "Conversation error");
+impl_from_error!(which::Error, "Which error");
 
 impl From<jp_llm::Error> for Error {
     fn from(error: jp_llm::Error) -> Self {
