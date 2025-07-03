@@ -92,7 +92,12 @@ impl Confique for Mcp {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McpPartial {
+    #[serde(default, skip_serializing_if = "is_default_servers")]
     pub servers: ConfigMapPartial<ServerId, ServerPartial>,
+}
+
+fn is_default_servers(servers: &ConfigMapPartial<ServerId, ServerPartial>) -> bool {
+    &McpPartial::default().servers == servers
 }
 
 impl Default for McpPartial {

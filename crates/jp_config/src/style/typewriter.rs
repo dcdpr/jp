@@ -44,15 +44,6 @@ pub struct Typewriter {
     pub code_delay: Duration,
 }
 
-impl Default for Typewriter {
-    fn default() -> Self {
-        Self {
-            text_delay: Duration::from_millis(3),
-            code_delay: Duration::from_micros(500),
-        }
-    }
-}
-
 impl AssignKeyValue for <Typewriter as Confique>::Partial {
     fn assign(&mut self, kv: KvAssignment) -> Result<()> {
         let k = kv.key().as_str().to_owned();

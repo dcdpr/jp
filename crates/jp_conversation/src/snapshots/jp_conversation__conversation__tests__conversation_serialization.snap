@@ -6,6 +6,7 @@ expression: conv
   "last_activated_at": "2023-01-01 00:00:00.0",
   "local": true,
   "config": {
+    "inherit": true,
     "config_load_paths": [
       ".jp/config.d"
     ],
@@ -47,10 +48,6 @@ expression: conv
       }
     },
     "style": {
-      "tool_call": {
-        "show_results": true,
-        "results_file_link": "osc8"
-      },
       "reasoning": {
         "show": true
       },

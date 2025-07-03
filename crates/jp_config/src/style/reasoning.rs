@@ -19,12 +19,6 @@ pub struct Reasoning {
     pub show: bool,
 }
 
-impl Default for Reasoning {
-    fn default() -> Self {
-        Self { show: true }
-    }
-}
-
 impl AssignKeyValue for <Reasoning as Confique>::Partial {
     fn assign(&mut self, kv: KvAssignment) -> Result<()> {
         let k = kv.key().as_str().to_owned();
