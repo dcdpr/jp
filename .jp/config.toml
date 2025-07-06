@@ -3,8 +3,15 @@ config_load_paths = [".config/jp"]
 [assistant.model]
 id = "anthropic/claude-sonnet-4-0"
 
-[style.code]
-copy_link = "osc8"
+[style]
+code.copy_link = "osc8"
 
-[conversation.title.generate.model]
-id = "openrouter/google/gemini-2.5-flash-preview"
+[conversation]
+title.generate.model.id = "anthropic/claude-3-5-haiku-latest"
+title.generate.auto = true
+
+[mcp.servers.'*'.tools]
+"*".run = "always"
+"*".result = "always"
+create_issue_bug.run = "ask"
+create_issue_enhancement.run = "ask"

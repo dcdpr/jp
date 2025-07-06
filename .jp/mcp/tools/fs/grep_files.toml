@@ -1,5 +1,16 @@
 inherit = "cargo"
-description = "Grep files in the project's local filesystem."
+description = """
+Grep files in the project's local filesystem.
+
+If misused, this tool can return *A LOT* of matches, making it difficult to
+parse the results. It is recommended to use search patterns that are as specific
+as possible to the content you are looking for.
+
+If the number of results exceeds 100, the `context` option is disabled, and 50
+matches are returned without context. You can re-run the tool with a more
+specific pattern or limited to specific paths to narrow down the results with
+context.
+"""
 
 [[properties]]
 name = "pattern"
@@ -10,6 +21,14 @@ Regular expression to filter the results by.
 """
 
 [[properties]]
+name = "context"
+type = "integer"
+default = 0
+description = """
+Number of lines of context to include before and after the matching lines.
+"""
+
+[[properties]]
 name = "paths"
 type = "array"
 items.type = "string"
@@ -17,16 +36,4 @@ description = """
 Optional list of files or directories to search.
 
 If unspecified, all files in the project will be returned.
-"""
-
-[[properties]]
-name = "return_entire_file"
-type = "boolean"
-default = false
-description = """
-Whether to return the entire file contents.
-
-If enabled, the tool will return the entire file contents of any files matching
-the pattern. If disabled (the default), only the matching lines and 5 contextual
-lines above and below the matching lines will be returned.
 """

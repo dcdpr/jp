@@ -1,0 +1,90 @@
+{
+  "last_activated_at": "2025-07-04 09:24:42.644346",
+  "local": false,
+  "config": {
+    "inherit": true,
+    "config_load_paths": [
+      ".jp/config.d"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "provider": {
+        "anthropic": {
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com"
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        }
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": true
+        }
+      }
+    },
+    "style": {
+      "code": {
+        "theme": "Monokai Extended",
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "reasoning": {
+        "show": true
+      },
+      "typewriter": {
+        "text_delay": "3000u",
+        "code_delay": "50u"
+      }
+    },
+    "editor": {
+      "env_vars": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ]
+    },
+    "mcp": {
+      "servers": {
+        "*": {
+          "enable": true,
+          "tools": {
+            "*": {
+              "enable": true,
+              "run": "ask",
+              "result": "always",
+              "style": {
+                "inline_results": "full",
+                "results_file_link": "osc8"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
