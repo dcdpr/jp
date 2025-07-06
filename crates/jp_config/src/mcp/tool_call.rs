@@ -64,7 +64,7 @@ pub enum InlineResults {
     Full,
 
     /// Show the first N lines of the tool call results inline.
-    Truncate(u32),
+    Truncate { lines: usize },
 }
 
 impl FromStr for InlineResults {
@@ -75,8 +75,8 @@ impl FromStr for InlineResults {
             "off" => Ok(Self::Off),
             "full" => Ok(Self::Full),
             v => v
-                .parse::<u32>()
-                .map(Self::Truncate)
+                .parse::<usize>()
+                .map(|lines| Self::Truncate { lines })
                 .map_err(|_| Error::InvalidConfigValueType {
                     key: style.to_string(),
                     value: style.to_string(),
