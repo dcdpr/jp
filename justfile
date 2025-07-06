@@ -11,7 +11,17 @@ quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" 
 default:
   just --list
 
-install: _install-jp
+install:
+    @just quiet_flag="" _install-jp
+
+[group('issue')]
+issue-bug args="Please create a bug report for the following:\n\n": _install-jp
+    jp query --no-persist --new --cfg=personas/product-owner --hide-reasoning --edit=true {{args}}
+
+# Create a feature request issue.
+[group('issue')]
+issue-feat args="Please create a feature request for the following:\n\n": _install-jp
+    jp query --no-persist --new --cfg=personas/product-owner --hide-reasoning --edit=true {{args}}
 
 # Open a commit message in the editor, using Jean-Pierre.
 [group('git')]

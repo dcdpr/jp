@@ -1,0 +1,22 @@
+inherit = "cargo"
+description = "Grep the project's user documentation."
+
+[[properties]]
+name = "pattern"
+type = "string"
+required = true
+description = """
+Regular expression to filter the results by.
+"""
+
+[[properties]]
+name = "return_entire_file"
+type = "boolean"
+default = false
+description = """
+Whether to return the entire file contents.
+
+If enabled, the tool will return the entire file contents of any files matching
+the pattern. If disabled (the default), only the matching lines and 5 contextual
+lines above and below the matching lines will be returned.
+"""

@@ -1,33 +1,40 @@
-use std::{io, path::PathBuf};
+use std::path::PathBuf;
 
-use grep_printer::Standard;
+use grep_printer::StandardBuilder;
 use grep_regex::RegexMatcher;
-use grep_searcher::{Searcher, SearcherBuilder, Sink, SinkContext, SinkError as _, SinkMatch};
+use grep_searcher::SearcherBuilder;
 
 use crate::Error;
 
 pub(crate) async fn fs_grep_files(
     root: PathBuf,
     pattern: String,
+    context: Option<usize>,
     paths: Option<Vec<String>>,
-    return_entire_file: Option<bool>,
 ) -> std::result::Result<String, Error> {
-    let paths: Vec<_> = paths
-        .unwrap_or(vec![String::new()])
-        .into_iter()
+    let absolute_paths: Vec<_> = paths
+        .as_deref()
+        .unwrap_or(&[String::new()])
+        .iter()
         .map(|v| root.join(v.trim_start_matches('/')))
         .filter(|v| v.exists())
         .collect();
 
     let matcher = RegexMatcher::new(&pattern)?;
-    let mut printer = Standard::new_no_color(vec![]);
+
+    let mut printer = StandardBuilder::new()
+        .max_columns(Some(1000))
+        .max_columns_preview(true)
+        .max_matches(Some(100))
+        .trim_ascii(true)
+        .build_no_color(vec![]);
+
     let mut searcher = SearcherBuilder::new()
-        .before_context(5)
-        .after_context(5)
-        .passthru(return_entire_file.unwrap_or_default())
+        .before_context(context.unwrap_or(0))
+        .after_context(context.unwrap_or(0))
         .build();
 
-    for path in paths {
+    for path in absolute_paths {
         let files = if path.is_dir() {
             super::fs_list_files(path.clone(), None, None)
                 .await?
@@ -50,48 +57,28 @@ pub(crate) async fn fs_grep_files(
         }
     }
 
-    Ok(String::from_utf8(printer.into_inner().into_inner())?)
-}
+    let matches = String::from_utf8(printer.into_inner().into_inner())?;
 
-#[derive(Clone, Debug)]
-pub struct LossyWithCtx<F>(pub F)
-where
-    F: FnMut(u64, &str) -> Result<bool, io::Error>;
+    let lines = matches.lines().count();
+    if matches.is_empty() {
+        Ok("No matches found. Broaden your search to see more.".to_owned())
+    } else if lines > 200 && context.is_some() {
+        Box::pin(fs_grep_files(root, pattern, None, paths))
+            .await
+            .map(|v| {
+                format!(
+                    "{v}\n[Hidden contextual lines due to excessive number of lines returned. \
+                     Narrow down your search to see more.]"
+                )
+            })
+    } else if lines > 100 {
+        Ok(indoc::formatdoc! {"
+            {}
 
-impl<F> Sink for LossyWithCtx<F>
-where
-    F: FnMut(u64, &str) -> Result<bool, io::Error>,
-{
-    type Error = io::Error;
-
-    fn matched(&mut self, _searcher: &Searcher, mat: &SinkMatch<'_>) -> Result<bool, io::Error> {
-        use std::borrow::Cow;
-
-        let matched = match std::str::from_utf8(mat.bytes()) {
-            Ok(matched) => Cow::Borrowed(matched),
-            Err(_) => String::from_utf8_lossy(mat.bytes()),
-        };
-        let Some(line_number) = mat.line_number() else {
-            let msg = "line numbers not enabled";
-            return Err(io::Error::error_message(msg));
-        };
-
-        (self.0)(line_number, &matched)
-    }
-
-    fn context(&mut self, _searcher: &Searcher, mat: &SinkContext<'_>) -> Result<bool, io::Error> {
-        use std::borrow::Cow;
-
-        let matched = match std::str::from_utf8(mat.bytes()) {
-            Ok(matched) => Cow::Borrowed(matched),
-            Err(_) => String::from_utf8_lossy(mat.bytes()),
-        };
-        let Some(line_number) = mat.line_number() else {
-            let msg = "line numbers not enabled";
-            return Err(io::Error::error_message(msg));
-        };
-
-        (self.0)(line_number, &matched)
+            [Showing 100/{lines} lines of matches... Narrow down your search to see more.]
+        ", matches.lines().take(100).collect::<Vec<_>>().join("\n"),})
+    } else {
+        Ok(matches)
     }
 }
 
@@ -108,7 +95,6 @@ mod tests {
         struct TestCase {
             pattern: &'static str,
             paths: Vec<&'static str>,
-            return_entire_file: bool,
             given: Vec<(&'static str, &'static str)>,
             expected: Vec<&'static str>,
         }
@@ -117,7 +103,6 @@ mod tests {
             ("pattern", TestCase {
                 pattern: "hi",
                 paths: vec!["test/a.txt"],
-                return_entire_file: false,
                 given: vec![("test/a.txt", "hello\nhi\ngoodbye")],
                 expected: vec![
                     "test/a.txt-1-hello\n",
@@ -125,27 +110,9 @@ mod tests {
                     "test/a.txt-3-goodbye\n",
                 ],
             }),
-            ("return-entire-file", TestCase {
-                pattern: "1|2|3",
-                paths: vec!["test/a.txt"],
-                return_entire_file: true,
-                given: vec![("test/a.txt", "1\n2\n3\n4\n5\n6\n7\n8\n9")],
-                expected: vec![
-                    "test/a.txt:1:1\n",
-                    "test/a.txt:2:2\n",
-                    "test/a.txt:3:3\n",
-                    "test/a.txt-4-4\n",
-                    "test/a.txt-5-5\n",
-                    "test/a.txt-6-6\n",
-                    "test/a.txt-7-7\n",
-                    "test/a.txt-8-8\n",
-                    "test/a.txt-9-9\n",
-                ],
-            }),
             ("dont-return-entire-file", TestCase {
                 pattern: "1|2|3",
                 paths: vec!["test/a.txt"],
-                return_entire_file: false,
                 given: vec![("test/a.txt", "1\n2\n3\n4\n5\n6\n7\n8\n9")],
                 expected: vec![
                     "test/a.txt:1:1\n",
@@ -161,7 +128,6 @@ mod tests {
             ("multiple-files", TestCase {
                 pattern: "1|2|3",
                 paths: vec!["test/a.txt", "test/b.txt"],
-                return_entire_file: false,
                 given: vec![
                     ("test/a.txt", "1\n2\n3\n4\n5\n6\n7\n8\n9"),
                     ("test/b.txt", "1\n2\n3\n4\n5\n6\n7\n8\n9"),
@@ -188,14 +154,12 @@ mod tests {
             ("multiple-files", TestCase {
                 pattern: "foo",
                 paths: vec![],
-                return_entire_file: false,
                 given: vec![("test/a.txt", "foo"), ("test/b.txt", "bar")],
                 expected: vec!["test/a.txt:1:foo\n"],
             }),
             ("search-in-subdir", TestCase {
                 pattern: "foo",
                 paths: vec!["test/subdir"],
-                return_entire_file: false,
                 given: vec![
                     ("test/a.txt", "baz"),
                     ("test/b.txt", "bar"),
@@ -210,7 +174,6 @@ mod tests {
             TestCase {
                 pattern,
                 paths,
-                return_entire_file,
                 given,
                 expected,
             },
@@ -230,14 +193,9 @@ mod tests {
             let paths =
                 (!paths.is_empty()).then_some(paths.into_iter().map(str::to_owned).collect());
 
-            let matches = fs_grep_files(
-                PathBuf::from(root),
-                pattern.to_owned(),
-                paths,
-                Some(return_entire_file),
-            )
-            .await
-            .unwrap();
+            let matches = fs_grep_files(PathBuf::from(root), pattern.to_owned(), Some(5), paths)
+                .await
+                .unwrap();
 
             assert_eq!(matches, expected.join(""), "test case: {name}");
         }

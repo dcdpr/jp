@@ -7,7 +7,7 @@ use crate::{
     to_xml, Result,
 };
 
-pub(crate) async fn github_create_bug_issue(
+pub(crate) async fn github_create_issue_bug(
     title: String,
     description: String,
     expected_behavior: String,
@@ -57,14 +57,24 @@ pub(crate) async fn github_create_bug_issue(
         body.push_str(&proposed_solution);
     }
 
-    if let Some(tasks) = tasks {
-        body.push_str("\n\n## Tasks\n");
+    if let Some(tasks) = tasks
+        && !tasks.is_empty()
+    {
+        body.push_str("\n\n## Tasks\n- [ ] ");
         body.push_str(&tasks.join("\n- [ ] "));
     }
 
-    if let Some(resource_links) = resource_links {
+    if let Some(resource_links) = resource_links
+        && !resource_links.is_empty()
+    {
+        let resource_links = resource_links
+            .into_iter()
+            .map(|link| format!("- https://github.com/{ORG}/{REPO}/{link}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
         body.push_str("\n\n## Resources\n\n");
-        body.push_str(&resource_links.join("\n"));
+        body.push_str(&resource_links);
     }
 
     let mut labels = labels.unwrap_or_default();
