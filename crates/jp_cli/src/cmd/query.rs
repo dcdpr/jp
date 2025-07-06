@@ -1,4 +1,5 @@
 mod event;
+mod response_handler;
 
 use std::{
     collections::BTreeMap,
@@ -10,14 +11,12 @@ use std::{
 };
 
 use clap::{builder::TypedValueParser as _, ArgAction};
-use crossterm::style::{Color, Stylize as _};
 use event::{handle_tool_calls, StreamEventHandler};
 use futures::StreamExt as _;
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::Instructions,
     parse::expand_tilde,
-    style::LinkStyle,
     PartialConfig,
 };
 use jp_conversation::{
@@ -33,10 +32,10 @@ use jp_mcp::{
 use jp_model::ModelId;
 use jp_query::query::{ChatQuery, StructuredQuery};
 use jp_task::task::TitleGeneratorTask;
-use jp_term::{code, osc::hyperlink, stdout};
+use jp_term::stdout;
 use jp_workspace::Workspace;
 use minijinja::{Environment, UndefinedBehavior};
-use termimad::FmtText;
+use response_handler::ResponseHandler;
 use tracing::{debug, info, trace};
 use url::Url;
 
@@ -511,12 +510,12 @@ impl Query {
                 continue;
             };
 
-            resp_handler.handle(&data, ctx)?;
+            resp_handler.handle(&data, ctx, false)?;
         }
 
         // Ensure we handle the last line of the stream.
         if !resp_handler.buffer.is_empty() {
-            resp_handler.handle("\n", ctx)?;
+            resp_handler.handle("\n", ctx, false)?;
         }
 
         let content_tokens = event_handler.content_tokens.trim().to_string();
@@ -770,13 +769,16 @@ struct Line {
 enum LineVariant {
     Normal,
     Code,
+    Raw,
     FencedCodeBlockStart { language: Option<String> },
     FencedCodeBlockEnd { indent: usize },
 }
 
 impl Line {
-    fn new(content: String, in_fenced_code_block: bool) -> Self {
-        let variant = if in_fenced_code_block && content.trim().ends_with("```") {
+    fn new(content: String, in_fenced_code_block: bool, raw: bool) -> Self {
+        let variant = if raw {
+            LineVariant::Raw
+        } else if in_fenced_code_block && content.trim().ends_with("```") {
             let indent = content.chars().take_while(|c| c.is_whitespace()).count();
 
             LineVariant::FencedCodeBlockEnd { indent }
@@ -801,284 +803,6 @@ impl Line {
         };
 
         Line { content, variant }
-    }
-}
-
-#[derive(Debug, Default)]
-struct ResponseHandler {
-    /// How to render the response.
-    render_mode: RenderMode,
-
-    /// The streamed, unprocessed lines received from the LLM.
-    received: Vec<String>,
-
-    /// The lines that have been parsed so far.
-    ///
-    /// If `should_stream` is `true`, these lines have been printed to the
-    /// terminal. Otherwise they will be printed when the response handler is
-    /// finished.
-    parsed: Vec<String>,
-
-    /// A temporary buffer of data received from the LLM.
-    buffer: String,
-
-    in_fenced_code_block: bool,
-    // (language, code)
-    code_buffer: (Option<String>, Vec<String>),
-    code_line: usize,
-
-    // The last index of the line that ends a code block.
-    // (streamed, printed)
-    last_fenced_code_block_end: (usize, usize),
-}
-
-impl ResponseHandler {
-    fn new(render_mode: RenderMode) -> Self {
-        Self {
-            render_mode,
-            ..Default::default()
-        }
-    }
-
-    fn handle(&mut self, data: &str, ctx: &Ctx) -> Result<()> {
-        self.buffer.push_str(data);
-
-        while let Some(Line { content, variant }) = self.get_line() {
-            self.received.push(content);
-
-            let delay = match variant {
-                LineVariant::Code => ctx.config.style.typewriter.code_delay,
-                _ => ctx.config.style.typewriter.text_delay,
-            };
-
-            let lines = self.handle_line(&variant, ctx)?;
-
-            if !matches!(self.render_mode, RenderMode::Buffered) {
-                stdout::typewriter(&lines.join("\n"), delay)?;
-            }
-
-            self.parsed.extend(lines);
-        }
-
-        Ok(())
-    }
-
-    #[expect(clippy::too_many_lines)]
-    fn handle_line(&mut self, variant: &LineVariant, ctx: &Ctx) -> Result<Vec<String>> {
-        let Some(content) = self.received.last().map(String::as_str) else {
-            return Ok(vec![]);
-        };
-
-        match variant {
-            LineVariant::Code => {
-                self.code_line += 1;
-                self.code_buffer.1.push(content.to_owned());
-
-                let mut buf = String::new();
-                let config = code::Config {
-                    language: self.code_buffer.0.clone(),
-                    theme: ctx
-                        .config
-                        .style
-                        .code
-                        .color
-                        .then(|| ctx.config.style.code.theme.clone()),
-                };
-
-                if !code::format(content, &mut buf, &config)? {
-                    let config = code::Config {
-                        language: None,
-                        theme: config.theme,
-                    };
-
-                    code::format(content, &mut buf, &config)?;
-                }
-
-                if ctx.config.style.code.line_numbers {
-                    buf.insert_str(
-                        0,
-                        &format!("{:2} │ ", self.code_line)
-                            .with(Color::AnsiValue(238))
-                            .to_string(),
-                    );
-                }
-
-                Ok(vec![buf])
-            }
-            LineVariant::FencedCodeBlockStart { language } => {
-                self.code_buffer.0.clone_from(language);
-                self.code_buffer.1.clear();
-                self.code_line = 0;
-                self.in_fenced_code_block = true;
-
-                Ok(vec![content.with(Color::AnsiValue(238)).to_string()])
-            }
-            LineVariant::FencedCodeBlockEnd { indent } => {
-                self.last_fenced_code_block_end = (self.received.len(), self.parsed.len() + 2);
-
-                let path = self.persist_code_block()?;
-                let mut links = vec![];
-
-                match ctx.config.style.code.file_link {
-                    LinkStyle::Off => {}
-                    LinkStyle::Full => {
-                        links.push(format!(
-                            "{}see: file://{}",
-                            " ".repeat(*indent),
-                            path.display()
-                        ));
-                    }
-                    LinkStyle::Osc8 => {
-                        links.push(format!(
-                            "{}[{}]",
-                            " ".repeat(*indent),
-                            hyperlink(
-                                format!("file://{}", path.display()),
-                                "open in editor".red().to_string()
-                            )
-                        ));
-                    }
-                }
-
-                match ctx.config.style.code.copy_link {
-                    LinkStyle::Off => {}
-                    LinkStyle::Full => {
-                        links.push(format!(
-                            "{}copy: copy://{}",
-                            " ".repeat(*indent),
-                            path.display()
-                        ));
-                    }
-                    LinkStyle::Osc8 => {
-                        links.push(format!(
-                            "{}[{}]",
-                            " ".repeat(*indent),
-                            hyperlink(
-                                format!("copy://{}", path.display()),
-                                "copy to clipboard".red().to_string()
-                            )
-                        ));
-                    }
-                }
-
-                self.in_fenced_code_block = false;
-
-                let mut lines = vec![content.with(Color::AnsiValue(238)).to_string()];
-                if !links.is_empty() {
-                    lines.push(links.join(" "));
-                }
-
-                Ok(lines)
-            }
-            LineVariant::Normal => {
-                // We feed all the lines for markdown formatting, but only
-                // print the last one, as the others are already printed.
-                //
-                // This helps the parser to use previous context to apply
-                // the correct formatting to the current line.
-                //
-                // We only care about the lines after the last code block
-                // end, because a) formatting context is reset after a code
-                // block, and b) we dot not limit the line length of code, makes
-                // it impossible to correctly find the non-printed lines based
-                // on wrapped vs non-wrapped lines.
-                let lines = self
-                    .received
-                    .iter()
-                    .skip(self.last_fenced_code_block_end.0)
-                    .cloned()
-                    .collect::<Vec<_>>();
-
-                // `termimad` removes empty lines at the start or end, but we
-                // want to keep them as we will have more lines to print.
-                let empty_lines_start_count = lines.iter().take_while(|s| s.is_empty()).count();
-                let empty_lines_end_count = lines.iter().rev().take_while(|s| s.is_empty()).count();
-
-                let options = comrak::Options {
-                    render: comrak::RenderOptions {
-                        unsafe_: true,
-                        prefer_fenced: true,
-                        experimental_minimize_commonmark: true,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                };
-
-                let formatted = comrak::markdown_to_commonmark(&lines.join("\n"), &options);
-
-                let mut formatted =
-                    FmtText::from(&termimad::MadSkin::default(), &formatted, Some(100)).to_string();
-
-                for _ in 0..empty_lines_start_count {
-                    formatted.insert(0, '\n');
-                }
-
-                // Only add an extra newline if we have more than one line,
-                // otherwise a single empty line will be interpreted as both a
-                // missing start and end newline.
-                if lines.iter().any(|s| !s.is_empty()) {
-                    for _ in 0..empty_lines_end_count {
-                        formatted.push('\n');
-                    }
-                }
-
-                let lines = formatted
-                    .lines()
-                    .skip(self.parsed.len() - self.last_fenced_code_block_end.1)
-                    .map(ToOwned::to_owned)
-                    .collect::<Vec<_>>();
-
-                Ok(lines)
-            }
-        }
-    }
-
-    fn get_line(&mut self) -> Option<Line> {
-        let s = &mut self.buffer;
-        let idx = s.find('\n')?;
-
-        // Determine the end index of the actual line *content*.
-        // Check if the character before '\n' is '\r'.
-        let end_idx = if idx > 0 && s.as_bytes().get(idx - 1) == Some(&b'\r') {
-            idx - 1
-        } else {
-            idx
-        };
-
-        // Extract the line content *before* draining.
-        // Creating a slice and then converting to owned String.
-        let extracted_line = s[..end_idx].to_string();
-
-        // Calculate the index *after* the newline sequence to drain up to.
-        // This ensures we remove the '\n' and potentially the preceding '\r'.
-        let drain_end_idx = idx + 1;
-        s.drain(..drain_end_idx);
-
-        Some(Line::new(extracted_line, self.in_fenced_code_block))
-    }
-
-    fn persist_code_block(&self) -> Result<PathBuf> {
-        let code = self.code_buffer.1.clone();
-        let language = self.code_buffer.0.as_deref().unwrap_or("txt");
-        let ext = match language {
-            "c++" => "cpp",
-            "javascript" => "js",
-            "python" => "py",
-            "ruby" => "rb",
-            "rust" => "rs",
-            "typescript" => "ts",
-            lang => lang,
-        };
-
-        let millis = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_millis();
-        let path = std::env::temp_dir().join(format!("code_{millis}.{ext}"));
-
-        fs::write(&path, code.join("\n"))?;
-
-        Ok(path)
     }
 }
 

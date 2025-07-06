@@ -1,13 +1,17 @@
 use std::{
-    fs,
+    env, fs,
     path::{Path, PathBuf},
+    time,
 };
 
 use crossterm::style::Stylize as _;
 use hex::ToHex as _;
 use inquire::Confirm;
 use jp_config::{
-    mcp::server::{checksum::Algorithm, tool},
+    mcp::{
+        server::{checksum::Algorithm, tool},
+        tool_call,
+    },
     style::LinkStyle,
 };
 use jp_conversation::message::{ToolCallRequest, ToolCallResult};
@@ -88,68 +92,107 @@ impl StreamEventHandler {
             call.arguments
         );
 
-        handler.handle(&data, ctx)?;
-        let result = handle_tool_call(ctx, call.clone()).await?;
+        handler.handle(&data, ctx, false)?;
+        let result = call_tool(ctx, call.clone()).await?;
         self.tool_call_results.push(result.clone());
-
-        // FIXME: Need to add `output: ...\n---` and render it
-        if result.content.len() > 10_000 {
-            let ext = result
-                .content
-                .lines()
-                .next()
-                .map_or("txt", |v| v.trim_start_matches("```"))
-                .chars()
-                .take(10)
-                .collect::<String>();
-
-            let millis = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .subsec_millis();
-
-            let path = std::env::temp_dir().join(format!("tool_call_{millis}.{ext}"));
-            fs::write(&path, &result.content)?;
-
-            let data = match ctx.config.style.code.file_link {
-                LinkStyle::Off => return Ok(None),
-                LinkStyle::Full => {
-                    format!("large result omitted, see: file://{}\n", path.display())
-                }
-                LinkStyle::Osc8 => {
-                    format!(
-                        "[{}]\n",
-                        hyperlink(
-                            format!("file://{}", path.display()),
-                            "large result omitted, open in editor".red().to_string()
-                        )
-                    )
-                }
-            };
-
-            handler.handle(&data, ctx)?;
-
-            Ok(None)
-        } else {
-            let content = if result.content.starts_with("```") || result.content.trim().is_empty() {
-                result.content
-            } else {
-                format!("```\n{}\n```", result.content)
-            };
-
-            Ok(Some(indoc::formatdoc! {"
-                            result:
-
-                            {content}
-                            ---
-                            "
-            }))
-        }
+        build_tool_call_result(ctx, &call, &result, handler).await
     }
 }
 
+async fn build_tool_call_result(
+    ctx: &Ctx,
+    call: &ToolCallRequest,
+    result: &ToolCallResult,
+    handler: &mut ResponseHandler,
+) -> Result<Option<String>, Error> {
+    let tool_id = McpToolId::new(&call.name);
+    let server_id = ctx.mcp_client.get_tool_server_id(&tool_id).await?;
+    let server_cfg = ctx.config.mcp.get_server_with_defaults(server_id.as_str());
+    let tool_cfg = server_cfg.get_tool_with_defaults(&call.name);
+
+    let mut lines = result.content.trim().lines().collect::<Vec<_>>();
+    let ext = lines
+        .first()
+        .and_then(|v| v.strip_prefix("```"))
+        .map(|v| {
+            v.chars()
+                .take_while(char::is_ascii_alphabetic)
+                .collect::<String>()
+        })
+        .map(|v| format!(".{v}"));
+
+    if ext.is_some() {
+        lines.remove(0);
+    }
+
+    if lines.last().is_some_and(|v| v.ends_with("```")) {
+        lines.pop();
+    }
+
+    let content = lines.join("\n");
+
+    let millis = time::SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_millis();
+
+    let file_name = match ext.as_ref() {
+        Some(ext) => format!("tool_call_{millis}.{ext}"),
+        None => format!("tool_call_{millis}"),
+    };
+
+    let path = env::temp_dir().join(file_name);
+    fs::write(&path, &content)?;
+
+    let max_lines = match tool_cfg.style.inline_results {
+        tool_call::InlineResults::Truncate { lines } => lines,
+        _ => content.lines().count(),
+    };
+
+    let mut data = String::new();
+
+    if let Some(ext) = ext.as_ref() {
+        data.push_str("```");
+        data.push_str(ext);
+        data.push('\n');
+    }
+
+    for line in content.lines().take(max_lines) {
+        data.push_str(line);
+        data.push('\n');
+    }
+
+    if ext.is_some() {
+        data.push_str("\n```");
+    }
+
+    if matches!(tool_cfg.style.inline_results, tool_call::InlineResults::Off) {
+        data.clear();
+    }
+
+    handler.handle(&data, ctx, false)?;
+
+    let link = match tool_cfg.style.results_file_link {
+        LinkStyle::Off => None,
+        LinkStyle::Full => Some(format!("see: file://{}", path.display())),
+        LinkStyle::Osc8 => Some(format!(
+            "[{}]",
+            hyperlink(
+                format!("file://{}", path.display()),
+                "open in editor".red().to_string()
+            )
+        )),
+    };
+
+    if let Some(link) = link {
+        handler.handle(&link, ctx, true)?;
+    }
+
+    Ok(None)
+}
+
 #[expect(clippy::too_many_lines)]
-async fn handle_tool_call(ctx: &Ctx, mut call: ToolCallRequest) -> Result<ToolCallResult, Error> {
+async fn call_tool(ctx: &Ctx, mut call: ToolCallRequest) -> Result<ToolCallResult, Error> {
     info!(tool = %call.name, arguments = %call.arguments, "Calling tool.");
     let tool_id = McpToolId::new(&call.name);
     let server_id = ctx.mcp_client.get_tool_server_id(&tool_id).await?;
@@ -283,7 +326,7 @@ pub(super) async fn handle_tool_calls(
 ) -> Result<Vec<ToolCallResult>, Error> {
     let mut results = vec![];
     for call in tool_calls {
-        results.push(handle_tool_call(ctx, call).await?);
+        results.push(call_tool(ctx, call).await?);
     }
 
     Ok(results)
