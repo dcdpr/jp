@@ -41,12 +41,13 @@ pub struct Storage {
     /// The path to the original storage directory.
     root: PathBuf,
 
-    /// The path to the local storage directory.
+    /// The path to the user storage directory.
     ///
-    /// This is used (among other things) to store the active conversation id.
+    /// This is used (among other things) to store the active conversation id
+    /// that are tied to the current user.
     ///
-    /// If unset, local storage is disabled.
-    local: Option<PathBuf>,
+    /// If unset, user storage is disabled.
+    user: Option<PathBuf>,
 }
 
 impl Storage {
@@ -64,64 +65,64 @@ impl Storage {
             trace!(path = %root.display(), "Created storage directory.");
         }
 
-        Ok(Self { root, local: None })
+        Ok(Self { root, user: None })
     }
 
-    pub fn with_local(mut self, local: impl Into<PathBuf>) -> Result<Self> {
-        let local: PathBuf = local.into();
+    pub fn with_user_storage(mut self, path: impl Into<PathBuf>) -> Result<Self> {
+        let path: PathBuf = path.into();
 
-        // Create local storage directory, if needed.
-        if local.exists() {
-            if !local.is_dir() {
-                return Err(Error::NotDir(local));
+        // Create user storage directory, if needed.
+        if path.exists() {
+            if !path.is_dir() {
+                return Err(Error::NotDir(path));
             }
 
-            if let Some(path) = local
+            if let Some(path) = path
                 .join("storage")
                 .read_link()
                 .ok()
                 .filter(|v| v != &self.root)
             {
-                // TODO: Perhaps we could re-link the local storage to the new
+                // TODO: Perhaps we could re-link the user storage to the new
                 // path whenever the CLI runs from a "copy" of a workspace with
                 // the same ID? This might be possible, but I'm not sure what
                 // the implications could be down the road.
                 //
-                // For now, we just warn and disable local storage. This is an
+                // For now, we just warn and disable user storage. This is an
                 // edge case when someone (e.g.) clones a repository twice in
                 // different locations, and then runs `jp` from each location.
                 warn!(
-                    "Workspace with same ID already exists at {}, disabling local storage.",
+                    "Workspace with same ID already exists at {}, disabling user storage.",
                     path.display()
                 );
                 return Ok(self);
             }
         } else {
-            fs::create_dir_all(&local)?;
-            trace!(path = %local.display(), "Created local storage directory.");
+            fs::create_dir_all(&path)?;
+            trace!(path = %path.display(), "Created user storage directory.");
         }
 
         // Create reference back to workspace storage.
-        let link = local.join("storage");
+        let link = path.join("storage");
         if link.exists() {
             if !link.is_symlink() {
                 return Err(Error::NotSymlink(link));
             }
         } else {
             #[cfg(unix)]
-            std::os::unix::fs::symlink(&self.root, local.join("storage"))?;
+            std::os::unix::fs::symlink(&self.root, path.join("storage"))?;
             #[cfg(windows)]
-            std::os::windows::fs::symlink_dir(&self.root, local.join("storage"))?;
+            std::os::windows::fs::symlink_dir(&self.root, path.join("storage"))?;
             #[cfg(not(any(unix, windows)))]
             {
                 tracing::error!(
-                    "Unsupported platform, cannot create symlink. Disabling local storage."
+                    "Unsupported platform, cannot create symlink. Disabling user storage."
                 );
                 return Ok(self);
             }
         }
 
-        self.local = Some(local);
+        self.user = Some(path);
         Ok(self)
     }
 
@@ -131,22 +132,22 @@ impl Storage {
         &self.root
     }
 
-    /// Returns the path to the local storage directory, if configured.
+    /// Returns the path to the user storage directory, if configured.
     #[must_use]
-    pub fn local_path(&self) -> Option<&Path> {
-        self.local.as_deref()
+    pub fn user_storage_path(&self) -> Option<&Path> {
+        self.user.as_deref()
     }
 
     /// Loads the conversations metadata from storage.
     ///
-    /// This loads the file from local storage if configured, otherwise the
+    /// This loads the file from user storage if configured, otherwise the
     /// workspace storage is used.
     ///
     /// If the file does not exist, return default conversations metadata.
     pub fn load_conversations_metadata(&self) -> Result<ConversationsMetadata> {
-        let root = self.local.as_deref().unwrap_or(self.root.as_path());
+        let root = self.user.as_deref().unwrap_or(self.root.as_path());
         let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
-        trace!(path = %metadata_path.display(), "Loading local conversations metadata.");
+        trace!(path = %metadata_path.display(), "Loading user conversations metadata.");
 
         if !metadata_path.exists() {
             return Ok(ConversationsMetadata::default());
@@ -158,7 +159,7 @@ impl Storage {
     /// Loads all MCP Servers from the (copied) storage.
     pub fn load_mcp_servers(&self) -> Result<TombMap<McpServerId, McpServer>> {
         let mcp_path = self.root.join(MCP_SERVERS_DIR);
-        let local_mcp_path = self.local.as_ref().map(|p| p.join(MCP_SERVERS_DIR));
+        let user_mcp_path = self.user.as_ref().map(|p| p.join(MCP_SERVERS_DIR));
         trace!(path = %mcp_path.display(), "Loading MCP servers.");
 
         let mut servers = TombMap::new();
@@ -182,14 +183,14 @@ impl Storage {
                 }
             };
 
-            // Merge local server config on top of workspace server config.
-            let mut server: McpServer = match local_mcp_path.as_ref().map(|p| p.join(filename)) {
+            // Merge user server config on top of workspace server config.
+            let mut server: McpServer = match user_mcp_path.as_ref().map(|p| p.join(filename)) {
                 Some(p) if p.is_file() => match read_json::<Value>(&p) {
                     Err(error) => {
                         warn!(?path, ?error, "Failed to read MCP server file. Skipping.");
                         continue;
                     }
-                    Ok(local) => deep_merge(server, local)?,
+                    Ok(user) => deep_merge(server, user)?,
                 },
                 _ => serde_json::from_value(server)?,
             };
@@ -215,22 +216,22 @@ impl Storage {
         Ok(tools)
     }
 
-    /// Loads all conversations and their associated messages, including local
+    /// Loads all conversations and their associated messages, including user
     /// conversations.
     pub fn load_conversations_and_messages(&self) -> Result<ConversationsAndMessages> {
         let (mut conversations, mut messages) =
             load_conversations_and_messages_from_dir(&self.root)?;
 
-        if let Some(local) = self.local.as_ref() {
-            let (mut local_conversations, local_messages) =
-                load_conversations_and_messages_from_dir(local)?;
+        if let Some(user) = self.user.as_ref() {
+            let (mut user_conversations, user_messages) =
+                load_conversations_and_messages_from_dir(user)?;
 
-            for (_, conversation) in local_conversations.iter_mut_untracked() {
-                conversation.local = true;
+            for (_, conversation) in user_conversations.iter_mut_untracked() {
+                conversation.user = true;
             }
 
-            conversations.extend(local_conversations);
-            messages.extend(local_messages);
+            conversations.extend(user_conversations);
+            messages.extend(user_messages);
         }
 
         Ok((conversations, messages))
@@ -254,14 +255,14 @@ impl Storage {
         active_conversation: &Conversation,
     ) -> Result<()> {
         let root = self.root.as_path();
-        let local = self.local.as_deref().unwrap_or(root);
+        let user = self.user.as_deref().unwrap_or(root);
 
         let conversations_dir = root.join(CONVERSATIONS_DIR);
-        let local_conversations_dir = local.join(CONVERSATIONS_DIR);
+        let user_conversations_dir = user.join(CONVERSATIONS_DIR);
 
         trace!(
             global = %conversations_dir.display(),
-            local = %local_conversations_dir.display(),
+            user = %user_conversations_dir.display(),
             "Persisting conversations."
         );
 
@@ -273,8 +274,8 @@ impl Storage {
 
         for (id, conversation) in all_conversations {
             let dir_name = id.to_dirname(conversation.title.as_deref())?;
-            let conv_dir = if conversation.local {
-                local_conversations_dir.join(dir_name)
+            let conv_dir = if conversation.user {
+                user_conversations_dir.join(dir_name)
             } else {
                 conversations_dir.join(dir_name)
             };
@@ -283,7 +284,7 @@ impl Storage {
                 id,
                 &conv_dir,
                 &conversations_dir,
-                &local_conversations_dir,
+                &user_conversations_dir,
             )?;
 
             fs::create_dir_all(&conv_dir)?;
@@ -303,7 +304,7 @@ impl Storage {
             .filter(|&id| id != active_conversation_id)
             .collect::<Vec<_>>();
 
-        for dir in [&conversations_dir, &local_conversations_dir] {
+        for dir in [&conversations_dir, &user_conversations_dir] {
             let mut deleted = Vec::new();
             for entry in dir.read_dir()?.flatten() {
                 let path = entry.path();
@@ -334,9 +335,9 @@ impl Storage {
         &mut self,
         metadata: &ConversationsMetadata,
     ) -> Result<()> {
-        let root = self.local.as_deref().unwrap_or(self.root.as_path());
+        let root = self.user.as_deref().unwrap_or(self.root.as_path());
         let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
-        trace!(path = %metadata_path.display(), "Persisting local conversations metadata.");
+        trace!(path = %metadata_path.display(), "Persisting user conversations metadata.");
 
         write_json(&metadata_path, metadata)?;
 
@@ -473,11 +474,11 @@ fn remove_unused_conversation_dirs(
     id: &ConversationId,
     conversation_dir: &Path,
     workspace_conversations_dir: &Path,
-    local_conversations_dir: &Path,
+    user_conversations_dir: &Path,
 ) -> Result<()> {
     // Gather all possible conversation directory names
     let mut dirs = vec![];
-    for conversations_dir in &[workspace_conversations_dir, local_conversations_dir] {
+    for conversations_dir in &[workspace_conversations_dir, user_conversations_dir] {
         let pat = id.to_dirname(None)?;
         dirs.push(conversations_dir.join(&pat));
         for entry in fs::read_dir(conversations_dir).ok().into_iter().flatten() {
@@ -610,30 +611,30 @@ mod tests {
     }
 
     #[test]
-    fn test_load_local_conversations_metadata_reads_existing() {
+    fn test_load_user_conversations_metadata_reads_existing() {
         let original_dir = tempdir().unwrap();
-        let local_dir = tempdir().unwrap();
-        let meta_path = local_dir.path().join(METADATA_FILE);
+        let user_dir = tempdir().unwrap();
+        let meta_path = user_dir.path().join(METADATA_FILE);
         let existing_id = ConversationId::default();
         let existing_meta = ConversationsMetadata::new(existing_id);
         write_json(&meta_path, &existing_meta).unwrap();
 
         let storage = Storage::new(original_dir.path())
             .unwrap()
-            .with_local(local_dir.path())
+            .with_user_storage(user_dir.path())
             .unwrap();
         let loaded_meta = storage.load_conversations_metadata().unwrap();
         assert_eq!(loaded_meta, existing_meta);
     }
 
     #[test]
-    fn test_load_local_conversations_metadata_creates_default_when_missing() {
+    fn test_load_user_conversations_metadata_creates_default_when_missing() {
         let storage_dir = tempdir().unwrap();
-        let local_dir = tempdir().unwrap();
+        let user_dir = tempdir().unwrap();
 
         let storage = Storage::new(storage_dir.path())
             .unwrap()
-            .with_local(local_dir.path())
+            .with_user_storage(user_dir.path())
             .unwrap();
         let loaded_meta = storage.load_conversations_metadata().unwrap();
         let default_meta = ConversationsMetadata::default();

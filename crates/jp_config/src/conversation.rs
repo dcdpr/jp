@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
     error::Result,
-    serde::is_default,
+    serde::{is_nested_default, is_none_or_default},
 };
 
 /// LLM configuration.
@@ -17,18 +17,18 @@ use crate::{
 #[config(partial_attr(serde(deny_unknown_fields)))]
 pub struct Conversation {
     /// Title configuration.
-    #[config(nested)]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_default")))]
     pub title: title::Title,
 
     /// List of MCP servers to use for the active conversation.
     #[config(
         default = [],
         deserialize_with = de_mcp_servers,
-        partial_attr(serde(skip_serializing_if = "is_default")),
+        partial_attr(serde(skip_serializing_if = "is_none_or_default")),
     )]
     pub mcp_servers: Vec<McpServerId>,
 
-    #[config(default = [], partial_attr(serde(skip_serializing_if = "is_default")))]
+    #[config(default = [], partial_attr(serde(skip_serializing_if = "is_none_or_default")))]
     pub attachments: Vec<url::Url>,
 }
 

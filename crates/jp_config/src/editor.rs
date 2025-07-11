@@ -17,6 +17,7 @@ pub struct Editor {
     /// The command to use for editing text.
     ///
     /// If unset, falls back to `env_vars`.
+    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
     pub cmd: Option<String>,
 
     /// The environment variables to use for editing text. Used if `cmd` is

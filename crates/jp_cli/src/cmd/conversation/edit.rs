@@ -13,12 +13,12 @@ pub(crate) struct Edit {
     /// Conversation ID to edit. Defaults to active conversation.
     id: Option<ConversationId>,
 
-    /// Toggle the conversation between local and workspace-scoped.
+    /// Toggle the conversation between user and workspace-scoped.
     ///
-    /// A local conversation is stored on your local machine and is not part of
-    /// the workspace storage. This means, when using a VCS, local conversations
-    /// are not stored in the VCS, but are otherwise identical to workspace
-    /// conversations.
+    /// A user-scoped conversation is stored on your local machine and is not
+    /// part of the workspace storage. This means, when using a VCS, user
+    /// conversations are not stored in the VCS, but are otherwise identical to
+    /// workspace conversations.
     #[arg(long, group = "edit")]
     local: Option<Option<bool>>,
 
@@ -42,8 +42,8 @@ impl Edit {
             );
         };
 
-        if let Some(local) = self.local {
-            conversation.local = local.unwrap_or(!conversation.local);
+        if let Some(user) = self.local {
+            conversation.user = user.unwrap_or(!conversation.user);
         }
 
         if let Some(title) = self.title {

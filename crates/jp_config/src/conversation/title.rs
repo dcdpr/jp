@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
     error::Result,
+    serde::is_nested_empty,
 };
 
 /// LLM configuration.
@@ -14,7 +15,7 @@ use crate::{
 #[config(partial_attr(serde(deny_unknown_fields)))]
 pub struct Title {
     /// Title generation configuration.
-    #[config(nested)]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub generate: generate::Generate,
 }
 

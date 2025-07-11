@@ -16,8 +16,7 @@ use futures::StreamExt as _;
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::Instructions,
-    parse::expand_tilde,
-    PartialConfig,
+    expand_tilde, PartialConfig,
 };
 use jp_conversation::{
     thread::{Thread, ThreadBuilder},

@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    assignment::{set_error, AssignKeyValue, KvAssignment},
+    assignment::{AssignKeyValue, KvAssignment},
     error::Result,
-    serde::is_default,
+    serde::is_none_or_default,
 };
 
 /// Model configuration.
@@ -23,15 +23,18 @@ pub struct Parameters {
     /// necessary to set a higher limit if your conversation is long or has more
     /// context attached.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
     pub max_tokens: Option<u32>,
 
     /// Reasoning configuration.
     ///
     /// Should be `None` if the model does not support reasoning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
     pub reasoning: Option<Reasoning>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
     pub temperature: Option<f32>,
 
     /// Control the randomness and diversity of the generated text. Also
@@ -45,6 +48,7 @@ pub struct Parameters {
     /// As opposed to `top_k`, this is a dynamic approach that considers tokens
     /// until their cumulative probability reaches a threshold P.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
     pub top_p: Option<f32>,
 
     /// Control the diversity and focus of the model's output. It determines how
@@ -54,18 +58,19 @@ pub struct Parameters {
     /// As opposed to `top_p`, it is a fixed-size approach that considers the
     /// top K most probable tokens, discarding the rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
     pub top_k: Option<u32>,
 
     /// The `stop_words` parameter can be set to specific sequences, such as a
     /// period or specific word, to stop the model from generating text when it
     /// encounters these sequences.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[config(default = [], partial_attr(serde(skip_serializing_if = "is_default")))]
+    #[config(default = [], partial_attr(serde(skip_serializing_if = "is_none_or_default")))]
     pub stop_words: Vec<String>,
 
     // Other non-typed parameters that some models might support.
     #[serde(default, flatten, skip_serializing_if = "HashMap::is_empty")]
-    #[config(default = {}, partial_attr(serde(skip_serializing_if = "is_default")))]
+    #[config(default = {}, partial_attr(serde(skip_serializing_if = "is_none_or_default")))]
     pub other: HashMap<String, Value>,
 }
 
@@ -73,8 +78,23 @@ impl AssignKeyValue for <Parameters as Confique>::Partial {
     fn assign(&mut self, kv: KvAssignment) -> Result<()> {
         match kv.key().as_str() {
             "max_tokens" => self.max_tokens = Some(kv.try_into_string()?.parse()?),
-
-            _ => return Err(set_error(kv.key())),
+            "reasoning" => self.reasoning = Some(kv.try_into_object()?),
+            "temperature" => self.temperature = Some(kv.try_into_string()?.parse()?),
+            "top_p" => self.top_p = Some(kv.try_into_string()?.parse()?),
+            "top_k" => self.top_k = Some(kv.try_into_string()?.parse()?),
+            "stop_words" => {
+                self.stop_words = Some(
+                    kv.try_into_string()?
+                        .split(',')
+                        .map(str::to_owned)
+                        .collect(),
+                );
+            }
+            k => {
+                self.other
+                    .get_or_insert_default()
+                    .insert(k.to_owned(), kv.into_value());
+            }
         }
 
         Ok(())

@@ -55,14 +55,14 @@ impl Ls {
         let mut conversations = ctx
             .workspace
             .conversations()
-            .filter(|(_, c)| !self.local || c.local)
+            .filter(|(_, c)| !self.local || c.user)
             .map(|(id, c)| (id, c, ctx.workspace.get_messages(id)))
             .map(|(id, c, messages)| Details {
                 id: *id,
                 title: c.title.clone(),
                 messages: messages.len(),
                 last_message_at: messages.last().map(|m| m.timestamp),
-                local: c.local,
+                local: c.user,
             })
             .collect::<Vec<_>>();
 

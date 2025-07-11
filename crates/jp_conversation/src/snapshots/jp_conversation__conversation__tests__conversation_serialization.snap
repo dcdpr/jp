@@ -40,13 +40,6 @@ expression: conv
         }
       }
     },
-    "conversation": {
-      "title": {
-        "generate": {
-          "auto": true
-        }
-      }
-    },
     "style": {
       "reasoning": {
         "show": true

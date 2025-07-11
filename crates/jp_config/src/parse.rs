@@ -8,52 +8,36 @@ use directories::ProjectDirs;
 use path_clean::PathClean as _;
 use tracing::{debug, info, trace};
 
-use super::{error::Result, Config};
+use super::Config;
 use crate::{Error, PartialConfig};
 
 const APPLICATION: &str = "jp";
 const GLOBAL_CONFIG_ENV_VAR: &str = "JP_GLOBAL_CONFIG_FILE";
-const VALID_CONFIG_FILE_STEMS_GLOBAL: &[&str] = &["config"];
-const VALID_CONFIG_FILE_STEMS_LOCAL: &[&str] = &["jp", ".jp"];
 const VALID_CONFIG_FILE_EXTS: &[&str] = &["toml", "json", "json5", "yaml", "yml"];
 
-/// Load a partial configuration for a given root directory.
-pub fn load_partial_from_file(
-    root: &Path,
-    search: bool,
-    base: Option<PartialConfig>,
-) -> Result<PartialConfig> {
-    trace!(root = %root.display(), ?search, "Loading partial configuration.");
+/// Load multiple partial configurations, starting with the first. Later
+/// partials override earlier ones, until one of the partials disables
+/// inheritance.
+#[must_use]
+pub fn load_partials_with_inheritance(partials: Vec<PartialConfig>) -> PartialConfig {
+    // Start with an empty partial.
+    let mut partial = PartialConfig::empty();
 
-    let mut inherit = search;
-    let mut partials = Vec::new();
+    // Apply all partials in reverse order (most general to most specific),
+    // until we find a partial that has `inherit = false`.
+    for p in partials {
+        if partial.inherit.is_some_and(|v| !v) {
+            break;
+        }
 
-    // Load config file present at `root`.
-    if let Some(file) = open_config_file(root, VALID_CONFIG_FILE_STEMS_LOCAL)? {
-        partials.push(file.load::<PartialConfig>()?);
+        partial = load_partial(p, partial);
     }
 
-    // Start with local configs by walking up the directory tree.
-    if inherit && let Some(root) = root.parent() {
-        inherit = search_config_file(root, &mut partials)?;
-    }
-
-    // Add global config if inheritance is allowed, and file is found.
-    if inherit && let Some(file) = open_global_config_file(env::var("HOME").ok().as_deref())? {
-        partials.push(file.load::<PartialConfig>()?);
-    }
-
-    // Merge all partials in reverse order (most general to most specific).
-    let mut merged = base.unwrap_or(PartialConfig::default_values());
-    for partial in partials.into_iter().rev() {
-        merged = partial.with_fallback(merged);
-    }
-
-    Ok(merged)
+    partial
 }
 
 /// Load environment variables into a partial configuration.
-pub fn load_envs(base: PartialConfig) -> Result<PartialConfig> {
+pub fn load_envs(base: PartialConfig) -> Result<PartialConfig, Error> {
     trace!("Loading environment variable configuration.");
     Ok(Config::set_from_envs()?.with_fallback(base))
 }
@@ -64,7 +48,13 @@ pub fn load_partial(partial: PartialConfig, fallback: PartialConfig) -> PartialC
     partial.with_fallback(fallback)
 }
 
-pub fn find_file_in_path(segment: &Path, load_path: &Path) -> Result<Option<PathBuf>> {
+pub fn find_file_in_path<S: AsRef<Path>, P: AsRef<Path>>(
+    segment: S,
+    load_path: P,
+) -> Result<Option<PathBuf>, Error> {
+    let segment = segment.as_ref();
+    let load_path = load_path.as_ref();
+
     // Segment has to be relative to a load path.
     if segment.has_root() {
         return Ok(None);
@@ -73,8 +63,8 @@ pub fn find_file_in_path(segment: &Path, load_path: &Path) -> Result<Option<Path
     let path = load_path.join(segment);
 
     // If the segment matches a file, return the path as-is.
-    if segment.is_file() {
-        return Ok(Some(segment.to_path_buf()));
+    if path.is_file() {
+        return Ok(Some(path));
     }
 
     // Try and find the file in the load path, trying all valid extensions.
@@ -86,6 +76,88 @@ pub fn find_file_in_path(segment: &Path, load_path: &Path) -> Result<Option<Path
 
         info!(path = %path.display(), "Found configuration file in load path.");
         return Ok(Some(path));
+    }
+
+    Ok(None)
+}
+
+/// Load a partial configuration from a file at `path`, if it exists.
+///
+/// This loads either the file directly, or tries to load a file with the same
+/// name, but the extension replaced with one of the valid
+/// `VALID_CONFIG_FILE_EXTS`.
+pub fn load_partial_at_path<P: Into<PathBuf>>(path: P) -> Result<Option<PartialConfig>, Error> {
+    open_config_file_at_path(path)?
+        .map(|file| file.load::<PartialConfig>())
+        .transpose()
+        .map_err(Into::into)
+}
+
+/// Load a partial configuration from a file at `path`, recursing upwards until
+/// either `/` or `root` is reached.
+pub fn load_partial_at_path_recursive<P: Into<PathBuf>>(
+    path: P,
+    root: Option<&Path>,
+) -> Result<Option<PartialConfig>, Error> {
+    let path: PathBuf = path.into();
+
+    // Try and load the provided path as a partial.
+    // e.g. `/foo/bar/config.toml`
+    let partial = load_partial_at_path(&path)?;
+
+    // Take the file name of the provided path.
+    // e.g. `config.toml`
+    let mut iter = path.iter();
+    let Some(file_name) = iter.next_back() else {
+        return Ok(partial);
+    };
+
+    // Check if `/foo/bar` is the same as the provided root, if it is, we're done.
+    if root.is_some_and(|root| root == iter.as_path()) {
+        return Ok(partial);
+    }
+
+    // Remove the path segment *before* the file name.
+    // e.g. `bar`, or return early if there are no more path segments.
+    if iter.next_back().is_none() {
+        return Ok(partial);
+    }
+
+    // Try and load `/foo/config.toml`
+    let path = iter.as_path().join(file_name);
+    let fallback = load_partial_at_path_recursive(path, root)?;
+
+    match (partial, fallback) {
+        // If we found both `/foo/bar/config.toml` AND `/foo/config.toml`, merge
+        // them (longer path taking precedence).
+        (Some(partial), Some(fallback)) => Ok(Some(partial.with_fallback(fallback))),
+
+        // otherwise, return either one, or none.
+        (partial, fallback) => Ok(partial.or(fallback)),
+    }
+}
+
+/// Open a configuration file at `path`, if it exists.
+///
+/// If the file does not exist, the same file name is used but with one of the
+/// valid `VALID_CONFIG_FILE_EXTS` extensions.
+pub fn open_config_file_at_path<P: Into<PathBuf>>(path: P) -> Result<Option<File>, Error> {
+    let mut path: PathBuf = path.into();
+
+    trace!(path = %path.display(), "Trying to open configuration file.");
+    if path.is_file() {
+        info!(path = %path.display(), "Found configuration file.");
+        return File::new(path).map(Some).map_err(Into::into);
+    }
+
+    for ext in VALID_CONFIG_FILE_EXTS {
+        path.set_extension(ext);
+        if !path.is_file() {
+            continue;
+        }
+
+        info!(path = %path.display(), "Found configuration file.");
+        return File::new(path).map(Some).map_err(Into::into);
     }
 
     Ok(None)
@@ -118,86 +190,33 @@ where
 }
 
 /// Build a final configuration from merged partial configurations.
-pub fn build(config: PartialConfig) -> Result<Config> {
+pub fn build(config: PartialConfig) -> Result<Config, Error> {
+    let config = config.with_fallback(PartialConfig::default_values());
     let config = Config::from_partial(config)?;
     debug!(?config, "Loaded configuration.");
 
     Ok(config)
 }
 
-/// Search for a config file, starting at `root` and working up the directory
-/// tree.
-///
-/// All config files found are loaded pushed into the `partials` vector, until a
-/// config file is found that has `inherit = false`.
-fn search_config_file(root: &Path, partials: &mut Vec<PartialConfig>) -> Result<bool> {
-    let mut inherit = true;
-    if let Some(file) = open_config_file(root, VALID_CONFIG_FILE_STEMS_LOCAL)? {
-        let partial = file.load::<PartialConfig>()?;
-        inherit = partial.inherit.unwrap_or(true);
-        partials.push(partial);
-    }
-
-    let Some(parent) = root.parent() else {
-        return Ok(inherit);
-    };
-
-    if inherit {
-        inherit = search_config_file(parent, partials)?;
-    }
-
-    Ok(inherit)
-}
-
-/// Get a file handle to the config file at `path`, if it exists.
-///
-/// If `path` is a file, it is opened, or an error is returned.
-///
-/// If `path` is a directory, the first file with a valid
-/// [`VALID_CONFIG_FILE_EXTS`] extension is opened, if any.
-fn open_config_file(path: &Path, stems: &[&str]) -> Result<Option<File>> {
-    trace!(path = %path.display(), "Searching for configuration file.");
-
-    if path.is_file() {
-        info!(path = %path.display(), "Found configuration file.");
-        return File::new(path).map(Some).map_err(Into::into);
-    }
-
-    for stem in stems {
-        for ext in VALID_CONFIG_FILE_EXTS {
-            let path = path.join(format!("{stem}.{ext}"));
-            if !path.is_file() {
-                continue;
-            }
-
-            info!(path = %path.display(), "Found configuration file.");
-            return File::new(path).map(Some).map_err(Into::into);
-        }
-    }
-
-    Ok(None)
-}
-
 /// Get a file handle to the global config file, if it exists.
-fn open_global_config_file(home: Option<&str>) -> Result<Option<File>> {
+#[must_use]
+pub fn user_global_config_path(home: Option<&Path>) -> Option<PathBuf> {
     env::var(GLOBAL_CONFIG_ENV_VAR)
         .ok()
-        .and_then(|path| expand_tilde(path, home))
+        .and_then(|path| expand_tilde(path, home.and_then(Path::to_str)))
         .map(|path| path.clean())
         .inspect(|path| debug!(path = %path.display(), "Custom global configuration file path configured."))
-        .or_else(|| {
+        .or_else(||
             ProjectDirs::from("", "", APPLICATION)
-                .map(|p| p.config_dir().to_path_buf())
-        })
-        .map(|path| open_config_file(&path, VALID_CONFIG_FILE_STEMS_GLOBAL))
-        .transpose()
-        .map(Option::flatten)
+                .map(|p| p.config_dir().join("config.toml"))
+        )
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
 
+    use serde_json::Value;
     use serial_test::serial;
     use tempfile::tempdir;
     use test_log::test;
@@ -231,16 +250,6 @@ mod tests {
         }
     }
 
-    /// Load configuration, respecting the hierarchical inheritance chain
-    ///
-    /// If `search` is true, the function will walk up the directory tree to find
-    /// the configuration file, before returning the final configuration.
-    fn load(root: &Path, search: bool) -> Result<Config> {
-        trace!(root = %root.display(), ?search, "Loading configuration.");
-
-        build(load_envs(load_partial_from_file(root, search, None)?)?)
-    }
-
     // Helper to write config content to a file, creating parent dirs
     fn write_config(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {
@@ -250,347 +259,433 @@ mod tests {
     }
 
     #[test]
-    fn test_expand_tilde_no_tilde() {
-        let path = "no/tilde/here";
-        assert_eq!(expand_tilde(path, Some("/tmp")), Some(PathBuf::from(path)));
-    }
+    fn test_load_partials_with_inheritance() {
+        struct TestCase {
+            partials: Vec<PartialConfig>,
+            want: (&'static str, Option<Value>),
+        }
 
-    #[test]
-    fn test_expand_tilde_with_tilde() {
-        let home = "/tmp";
-        let path = "~/subdir";
-        let expected = PathBuf::from(home).join("subdir");
-        assert_eq!(expand_tilde(path, Some(home)), Some(expected));
-    }
+        let cases = vec![
+            ("disabled inheritance", TestCase {
+                partials: vec![
+                    {
+                        let mut partial = PartialConfig::empty();
+                        partial.assistant.provider.openrouter.api_key_env = Some("FOO".to_owned());
+                        partial
+                    },
+                    {
+                        let mut partial = PartialConfig::empty();
+                        partial.assistant.provider.openrouter.api_key_env = Some("BAR".to_owned());
+                        partial.inherit = Some(false);
+                        partial
+                    },
+                    {
+                        let mut partial = PartialConfig::empty();
+                        partial.assistant.provider.openrouter.api_key_env = Some("BAZ".to_owned());
+                        partial
+                    },
+                ],
+                want: (
+                    "/assistant/provider/openrouter/api_key_env",
+                    Some("BAR".into()),
+                ),
+            }),
+            ("inheritance", TestCase {
+                partials: vec![
+                    {
+                        let mut partial = PartialConfig::empty();
+                        partial.assistant.provider.openrouter.api_key_env = Some("FOO".to_owned());
+                        partial
+                    },
+                    {
+                        let mut partial = PartialConfig::empty();
+                        partial.assistant.provider.openrouter.api_key_env = Some("BAR".to_owned());
+                        partial.inherit = Some(true);
+                        partial
+                    },
+                    {
+                        let mut partial = PartialConfig::empty();
+                        partial.assistant.provider.openrouter.api_key_env = Some("BAZ".to_owned());
+                        partial
+                    },
+                ],
+                want: (
+                    "/assistant/provider/openrouter/api_key_env",
+                    Some("BAZ".into()),
+                ),
+            }),
+        ];
 
-    #[test]
-    fn test_expand_tilde_only_tilde() {
-        let home = "/tmp";
-        let path = "~";
-        let expected = PathBuf::from(home);
-        assert_eq!(expand_tilde(path, Some(home)), Some(expected));
-    }
+        for (name, case) in cases {
+            let partial = load_partials_with_inheritance(case.partials);
+            let json = serde_json::to_value(&partial).unwrap();
+            let val = json.pointer(case.want.0);
 
-    #[test]
-    fn test_expand_tilde_missing_home() {
-        let path = "~/no_home";
-        assert_eq!(expand_tilde(path, None::<&str>), None);
-    }
-
-    #[test]
-    fn test_open_config_file_direct_path() {
-        let tmp = tempdir().unwrap();
-        let cfg = tmp.path().join("my_config.toml");
-        write_config(&cfg, "assistant.provider.openrouter.api_key_env = 'FOO'");
-
-        let file = open_config_file(&cfg, &[]).unwrap().unwrap();
-        let partial = file.load::<PartialConfig>().unwrap();
-        assert_eq!(
-            partial.assistant.provider.openrouter.api_key_env.unwrap(),
-            "FOO"
-        );
-    }
-
-    #[test]
-    fn test_open_config_file_in_dir_default_names() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-
-        for stem in VALID_CONFIG_FILE_STEMS_LOCAL {
-            for ext in VALID_CONFIG_FILE_EXTS {
-                let data = match *ext {
-                    "toml" => "assistant.provider.openrouter.api_key_env = 'BAR'",
-                    "yaml" | "yml" => {
-                        "assistant:\n  provider:\n    openrouter:\n      api_key_env: BAR"
-                    }
-                    "json5" => {
-                        "{ assistant: { provider: { openrouter: { api_key_env: 'BAR' } } } }"
-                    }
-                    "json" => {
-                        r#"{ "assistant": { "provider": { "openrouter": { "api_key_env": "BAR" } } } }"#
-                    }
-                    _ => panic!("Untested extension: {ext}"),
-                };
-
-                let path = root.join(format!("{stem}.{ext}"));
-                write_config(&path, data);
-
-                let file = open_config_file(root, VALID_CONFIG_FILE_STEMS_LOCAL)
-                    .unwrap()
-                    .unwrap();
-                let partial = file.load::<PartialConfig>().unwrap();
-                assert_eq!(
-                    partial.assistant.provider.openrouter.api_key_env.unwrap(),
-                    "BAR"
-                );
-                fs::remove_file(path).unwrap();
-            }
+            assert_eq!(val, case.want.1.as_ref(), "failed case: {name}");
         }
     }
 
     #[test]
-    fn test_open_config_file_not_found() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let cfg = root.join("jp.toml");
+    #[serial(env_vars)]
+    fn test_load_envs() {
+        let _env = EnvVarGuard::set("JP_ASSISTANT_PROVIDER_OPENROUTER_API_KEY_ENV", "ENV1");
 
-        assert!(open_config_file(root, VALID_CONFIG_FILE_STEMS_LOCAL)
-            .unwrap()
-            .is_none()); // No file in dir
-        assert!(open_config_file(&cfg, VALID_CONFIG_FILE_STEMS_LOCAL)
-            .unwrap()
-            .is_none()); // File doesn't exist
+        let partial = load_envs(PartialConfig::empty()).unwrap();
+        assert_eq!(
+            partial.assistant.provider.openrouter.api_key_env,
+            Some("ENV1".to_owned())
+        );
     }
 
     #[test]
-    #[serial(env_vars)]
-    fn test_load_no_files_yields_defaults() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path(); // No config files created
+    fn test_load_partial() {
+        let partial = load_partial(PartialConfig::empty(), PartialConfig::default_values());
+        assert_eq!(
+            partial.assistant.provider.openrouter.api_key_env,
+            Some("OPENROUTER_API_KEY".to_owned())
+        );
+    }
 
-        let config = load(root, true).unwrap(); // Search enabled
-
-        assert!(config.inherit);
+    #[test]
+    fn test_build() {
+        let config = build(PartialConfig::default_values()).unwrap();
         assert_eq!(
             config.assistant.provider.openrouter.api_key_env,
-            "OPENROUTER_API_KEY"
+            "OPENROUTER_API_KEY".to_owned()
         );
-        assert_eq!(config.assistant.provider.openrouter.app_name, "JP");
-        assert_eq!(config.assistant.provider.openrouter.app_referrer, None);
     }
 
     #[test]
-    #[serial(env_vars)]
-    fn test_load_single_file_at_root() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        write_config(
-            &root.join("jp.toml"),
-            "assistant.provider.openrouter.api_key_env = 'ROOT_KEY'",
-        );
+    fn test_expand_tilde() {
+        struct TestCase {
+            path: &'static str,
+            home: Option<&'static str>,
+            expected: Option<&'static str>,
+        }
 
-        let config = load(root, false).unwrap(); // Search disabled
+        let cases = vec![
+            ("no tilde with home", TestCase {
+                path: "no/tilde/here",
+                home: Some("/tmp"),
+                expected: Some("no/tilde/here"),
+            }),
+            ("no tilde missing home", TestCase {
+                path: "no/tilde/here",
+                home: None,
+                expected: Some("no/tilde/here"),
+            }),
+            ("tilde path with home", TestCase {
+                path: "~/subdir",
+                home: Some("/tmp"),
+                expected: Some("/tmp/subdir"),
+            }),
+            ("only tilde with home", TestCase {
+                path: "~",
+                home: Some("/tmp"),
+                expected: Some("/tmp"),
+            }),
+            ("tilde missing home", TestCase {
+                path: "~",
+                home: None,
+                expected: None,
+            }),
+        ];
 
-        assert_eq!(config.assistant.provider.openrouter.api_key_env, "ROOT_KEY");
-        assert!(config.inherit); // Default inherit=true
+        for (name, case) in cases {
+            assert_eq!(
+                expand_tilde(case.path, case.home),
+                case.expected.map(PathBuf::from),
+                "Failed test case: {name}"
+            );
+        }
     }
 
     #[test]
-    #[serial(env_vars)]
-    fn test_load_hierarchy_and_merge() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path().join("foo/bar/workspace");
-        fs::create_dir_all(&root).unwrap();
-        let bar = root.parent().unwrap();
-        let foo = bar.parent().unwrap();
+    fn test_find_file_in_path() {
+        struct TestCase {
+            segment: &'static str,
+            load_path: &'static str,
+            files: Vec<&'static str>,
+            want: Result<Option<&'static str>, &'static str>,
+        }
 
-        write_config(
-            &foo.join(".jp.toml"), // Lowest precedence
-            "inherit = true\nassistant.provider.openrouter.app_name = 'GRANDPARENT'",
-        );
-        write_config(
-            &bar.join(".jp.toml"), // Middle precedence
-            "assistant.provider.openrouter.api_key_env = \
-             'PARENT_KEY'\nassistant.provider.openrouter.app_name = 'PARENT'", /* Overrides grandparent name */
-        );
-        write_config(
-            &root.join("jp.toml"),                                    // Highest precedence
-            "assistant.provider.openrouter.api_key_env = 'ROOT_KEY'", // Overrides parent key_env
-        );
+        let cases = vec![
+            ("exact match", TestCase {
+                segment: "config.toml",
+                load_path: "foo",
+                files: vec!["foo/config.toml"],
+                want: Ok(Some("foo/config.toml")),
+            }),
+            ("exact match for any file type", TestCase {
+                segment: "config.xxx",
+                load_path: "foo",
+                files: vec!["foo/config.xxx"],
+                want: Ok(Some("foo/config.xxx")),
+            }),
+            ("match different supported file type", TestCase {
+                segment: "config.xxx",
+                load_path: "foo",
+                files: vec!["foo/config.toml"],
+                want: Ok(Some("foo/config.toml")),
+            }),
+            ("nested match", TestCase {
+                segment: "bar/baz/config.toml",
+                load_path: "foo",
+                files: vec!["foo/bar/baz/config.toml"],
+                want: Ok(Some("foo/bar/baz/config.toml")),
+            }),
+            ("does not recurse", TestCase {
+                segment: "config.toml",
+                load_path: "foo",
+                files: vec!["foo/bar/baz/config.toml"],
+                want: Ok(None),
+            }),
+            ("does not accept absolute segments", TestCase {
+                segment: "/config.toml",
+                load_path: "foo",
+                files: vec!["foo/config.toml"],
+                want: Ok(None),
+            }),
+        ];
 
-        let config = load(&root, true).unwrap(); // Search enabled
+        for (name, case) in cases {
+            let tmp = tempdir().unwrap();
+            let root = tmp.path();
+            for file in case.files {
+                write_config(&root.join(file), "");
+            }
 
-        // FIXME: This `inherit` assertion is wrong, because it also defaults to
-        // `true`, so this isn't really testing the grandparent inheritance.
-        //
-        // But, we don't have any other fields to test against, so we'll change
-        // this in the future when the config struct expands.
-        assert!(config.inherit); // From grandparent
-        assert_eq!(config.assistant.provider.openrouter.api_key_env, "ROOT_KEY"); // From root
-        assert_eq!(config.assistant.provider.openrouter.app_name, "PARENT"); // From parent
-        assert_eq!(config.assistant.provider.openrouter.app_referrer, None); // Default
+            let got = find_file_in_path(case.segment, root.join(case.load_path));
+            if let Err(got) = &case.want {
+                assert!(got.starts_with(got), "failed case: {name}");
+                continue;
+            }
+
+            assert_eq!(
+                got.map_err(|e| e.to_string())
+                    .map(|v| v.map(|p| p.strip_prefix(root).unwrap().to_path_buf())),
+                case.want
+                    .map(|v| v.map(PathBuf::from))
+                    .map_err(str::to_owned),
+                "failed case: {name}",
+            );
+        }
     }
 
     #[test]
-    #[serial(env_vars)]
-    fn test_load_inherit_false_stops_search() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path().join("foo/bar/workspace");
-        fs::create_dir_all(&root).unwrap();
-        let bar = root.parent().unwrap();
-        let foo = bar.parent().unwrap();
+    fn test_load_partial_at_path() {
+        struct TestCase {
+            file: &'static str,
+            data: &'static str,
+            arg: &'static str,
+            want: Result<Option<&'static str>, &'static str>,
+        }
 
-        write_config(
-            &foo.join(".jp.toml"), // Should NOT be loaded
-            "assistant.provider.openrouter.api_key_env = 'GRANDPARENT_KEY'",
-        );
-        write_config(
-            &bar.join(".jp.toml"), // Should be loaded, and stop search
-            "inherit = false\nassistant.provider.openrouter.app_name = 'PARENT'",
-        );
-        write_config(
-            &root.join("jp.toml"), // Should be loaded (most specific)
-            "assistant.provider.openrouter.api_key_env = 'ROOT_KEY'",
-        );
+        let cases = vec![
+            ("exact match toml", TestCase {
+                file: "config.toml",
+                data: "assistant.provider.openrouter.api_key_env = 'FOO'",
+                arg: "config.toml",
+                want: Ok(Some("FOO")),
+            }),
+            ("exact match json", TestCase {
+                file: "config.json",
+                data: r#"{"assistant":{"provider":{"openrouter":{"api_key_env":"FOO"}}}}"#,
+                arg: "config.json",
+                want: Ok(Some("FOO")),
+            }),
+            ("exact match yaml", TestCase {
+                file: "config.yaml",
+                data: "assistant:\n  provider:\n    openrouter:\n      api_key_env: FOO",
+                arg: "config.yaml",
+                want: Ok(Some("FOO")),
+            }),
+            ("toml mismatch", TestCase {
+                file: "config.toml",
+                data: "assistant.provider.openrouter.api_key_env = 'FOO'",
+                arg: "config.json",
+                want: Ok(Some("FOO")),
+            }),
+            ("json mismatch", TestCase {
+                file: "config.json",
+                data: r#"{"assistant":{"provider":{"openrouter":{"api_key_env":"FOO"}}}}"#,
+                arg: "config.yaml",
+                want: Ok(Some("FOO")),
+            }),
+            ("yaml mismatch", TestCase {
+                file: "config.yaml",
+                data: "assistant:\n  provider:\n    openrouter:\n      api_key_env: FOO",
+                arg: "config.toml",
+                want: Ok(Some("FOO")),
+            }),
+            ("no extension", TestCase {
+                file: "config.toml",
+                data: "assistant.provider.openrouter.api_key_env = 'FOO'",
+                arg: "config",
+                want: Ok(Some("FOO")),
+            }),
+            ("no match", TestCase {
+                file: "config.ini",
+                data: "",
+                arg: "config.toml",
+                want: Ok(None),
+            }),
+            ("found invalid file", TestCase {
+                file: "config.ini",
+                data: "",
+                arg: "config.ini",
+                want: Err("unknown configuration file format/extension:"),
+            }),
+        ];
 
-        let config = load(&root, true).unwrap(); // Search enabled
+        for (name, case) in cases {
+            let tmp = tempdir().unwrap();
+            let root = tmp.path();
+            write_config(&root.join(case.file), case.data);
 
-        assert!(!config.inherit); // From parent config file
-        assert_eq!(config.assistant.provider.openrouter.api_key_env, "ROOT_KEY"); // From root config
+            let partial = load_partial_at_path(root.join(case.arg));
+            if let Err(err) = &case.want {
+                assert!(partial.is_err(), "failed case: {name}");
+                assert!(
+                    partial.unwrap_err().to_string().starts_with(err),
+                    "failed case: {name}"
+                );
+                continue;
+            }
 
-        // Grandparent key_env should not be present
-        assert_eq!(config.assistant.provider.openrouter.app_name, "PARENT"); // From parent config
+            assert_eq!(
+                partial
+                    .map(|r| r.and_then(|p| p.assistant.provider.openrouter.api_key_env))
+                    .map_err(|e| e.to_string()),
+                case.want
+                    .map(|v| v.map(str::to_owned))
+                    .map_err(str::to_owned),
+                "failed case: {name}",
+            );
+        }
     }
 
     #[test]
-    #[serial(env_vars)]
-    fn test_load_disable_search() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path().join("project/workspace");
-        fs::create_dir_all(&root).unwrap();
-        let parent = root.parent().unwrap();
+    fn test_load_partial_at_path_recursive() {
+        struct TestCase {
+            files: Vec<(&'static str, &'static str)>,
+            path: &'static str,
+            root: Option<&'static str>,
+            want: Result<Option<(&'static str, Option<Value>)>, &'static str>,
+        }
 
-        write_config(
-            &parent.join(".jp.toml"), // Should NOT be loaded
-            "assistant.provider.openrouter.api_key_env = 'PARENT_KEY'",
-        );
-        write_config(
-            &root.join("jp.toml"), // Should be loaded
-            "assistant.provider.openrouter.app_name = 'ROOT_APP'",
-        );
+        let cases = vec![
+            ("override from longest path", TestCase {
+                files: vec![
+                    (
+                        "foo/config.toml",
+                        "assistant.provider.openrouter.api_key_env = 'FOO'",
+                    ),
+                    (
+                        "config.json",
+                        r#"{"assistant":{"provider":{"openrouter":{"api_key_env":"BAR"}}}}"#,
+                    ),
+                ],
+                path: "foo/config.toml",
+                root: None,
+                want: Ok(Some((
+                    "/assistant/provider/openrouter/api_key_env",
+                    Some("FOO".into()),
+                ))),
+            }),
+            ("merge different paths", TestCase {
+                files: vec![
+                    (
+                        "foo/config.toml",
+                        "assistant.provider.openrouter.api_key_env = 'FOO'",
+                    ),
+                    (
+                        "config.json",
+                        r#"{"assistant":{"provider":{"openrouter":{"app_referrer":"BAR"}}}}"#,
+                    ),
+                ],
+                path: "foo/config.toml",
+                root: None,
+                want: Ok(Some((
+                    "/assistant/provider/openrouter",
+                    Some(serde_json::json!({"api_key_env": "FOO", "app_referrer": "BAR"})),
+                ))),
+            }),
+            ("find upstream", TestCase {
+                files: vec![
+                    (
+                        "foo/config.toml",
+                        "assistant.provider.openrouter.api_key_env = 'FOO'",
+                    ),
+                    (
+                        "config.json",
+                        r#"{"assistant":{"provider":{"openrouter":{"app_referrer":"BAR"}}}}"#,
+                    ),
+                ],
+                path: "foo/bar/baz/config.yaml",
+                root: None,
+                want: Ok(Some((
+                    "/assistant/provider/openrouter",
+                    Some(serde_json::json!({"api_key_env": "FOO", "app_referrer": "BAR"})),
+                ))),
+            }),
+            ("merge until root", TestCase {
+                files: vec![
+                    (
+                        "foo/config.toml",
+                        "assistant.provider.openrouter.api_key_env = 'FOO'",
+                    ),
+                    (
+                        "config.json",
+                        r#"{"assistant":{"provider":{"openrouter":{"app_referrer":"BAR"}}}}"#,
+                    ),
+                ],
+                path: "foo/bar/config.yaml",
+                root: Some("foo"),
+                want: Ok(Some((
+                    "/assistant/provider/openrouter",
+                    Some(serde_json::json!({"api_key_env": "FOO"})),
+                ))),
+            }),
+            ("load dir instead of file", TestCase {
+                files: vec![
+                    (
+                        "foo/config.toml",
+                        "assistant.provider.openrouter.api_key_env = 'FOO'",
+                    ),
+                    (
+                        "config.json",
+                        r#"{"assistant":{"provider":{"openrouter":{"app_referrer":"BAR"}}}}"#,
+                    ),
+                ],
+                path: "foo",
+                root: None,
+                want: Ok(None),
+            }),
+        ];
 
-        let config = load(&root, false).unwrap(); // Search disabled
+        for (name, case) in cases {
+            let tmp = tempdir().unwrap();
+            let root = tmp.path();
+            for (file, data) in case.files {
+                write_config(&root.join(file), data);
+            }
+            let root_arg = case.root.map(|r| root.join(r));
 
-        assert_eq!(config.assistant.provider.openrouter.app_name, "ROOT_APP"); // From root
-        assert_eq!(
-            config.assistant.provider.openrouter.api_key_env,
-            "OPENROUTER_API_KEY"
-        ); // Default (parent not loaded)
-        assert!(config.inherit); // Default
-    }
+            let got = load_partial_at_path_recursive(root.join(case.path), root_arg.as_deref());
 
-    #[test]
-    #[serial(env_vars)]
-    fn test_load_env_var_overrides_file() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        write_config(
-            &root.join("config.toml"),
-            "assistant.provider.openrouter.api_key_env = \
-             'FILE_KEY'\nassistant.provider.openrouter.app_name = 'FILE_APP'",
-        );
-
-        let _guard1 = EnvVarGuard::set("JP_ASSISTANT_PROVIDER_OPENROUTER_API_KEY_ENV", "ENV_KEY");
-        let _guard2 = EnvVarGuard::set("JP_ASSISTANT_PROVIDER_OPENROUTER_APP_NAME", "ENV_APP");
-
-        // Load with search disabled to only consider root file + env
-        let config = load(root, false).unwrap();
-
-        assert_eq!(config.assistant.provider.openrouter.api_key_env, "ENV_KEY"); // Overridden
-        assert_eq!(config.assistant.provider.openrouter.app_name, "ENV_APP"); // Overridden
-        assert_eq!(config.assistant.provider.openrouter.app_referrer, None); // Default (not set)
-    }
-
-    #[test]
-    #[serial(env_vars)]
-    fn test_load_env_var_only() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path(); // No config files
-
-        let _guard1 = EnvVarGuard::set(
-            "JP_ASSISTANT_PROVIDER_OPENROUTER_API_KEY_ENV",
-            "ENV_KEY_ONLY",
-        );
-        let _guard2 = EnvVarGuard::set(
-            "JP_ASSISTANT_PROVIDER_OPENROUTER_APP_REFERRER",
-            "http://example.com",
-        );
-
-        let config = load(root, true).unwrap(); // Search enabled, but finds nothing
-
-        assert_eq!(
-            config.assistant.provider.openrouter.api_key_env,
-            "ENV_KEY_ONLY"
-        ); // From env
-        assert_eq!(config.assistant.provider.openrouter.app_name, "JP"); // Default (not set)
-        assert_eq!(
-            config.assistant.provider.openrouter.app_referrer,
-            Some("http://example.com".to_string())
-        ); // From env
-    }
-
-    #[test]
-    #[serial(env_vars)]
-    fn test_load_env_var_overrides_even_with_inherit_false() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path().join("project/workspace");
-        fs::create_dir_all(&root).unwrap();
-        let parent = root.parent().unwrap();
-
-        write_config(
-            &parent.join(".jp.toml"), // Should NOT be loaded by file search
-            "assistant.provider.openrouter.api_key_env = 'PARENT_KEY'",
-        );
-        write_config(
-            &root.join("jp.toml"), // Should be loaded, sets inherit=false
-            "inherit = false\nassistant.provider.openrouter.app_name = 'ROOT_APP'",
-        );
-
-        // Env var should still override the value from root file
-        let _guard1 = EnvVarGuard::set(
-            "JP_ASSISTANT_PROVIDER_OPENROUTER_APP_NAME",
-            "ENV_APP_OVERRIDE",
-        );
-        // Env var should provide value even though parent file wasn't loaded
-        let _guard2 = EnvVarGuard::set(
-            "JP_ASSISTANT_PROVIDER_OPENROUTER_API_KEY_ENV",
-            "ENV_KEY_INHERIT_FALSE",
-        );
-
-        let config = load(&root, true).unwrap(); // Search enabled
-
-        assert!(!config.inherit); // From root file
-        assert_eq!(
-            config.assistant.provider.openrouter.app_name,
-            "ENV_APP_OVERRIDE"
-        ); // Env overrides root file
-        assert_eq!(
-            config.assistant.provider.openrouter.api_key_env,
-            "ENV_KEY_INHERIT_FALSE"
-        ); // Env provides value despite inherit=false
-    }
-
-    #[test]
-    #[serial(env_vars)]
-    fn test_load_precedence_file_over_file_env_over_all() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path().join("project/workspace");
-        fs::create_dir_all(&root).unwrap();
-        let parent = root.parent().unwrap();
-
-        write_config(
-            &parent.join(".jp.toml"), // Loaded first (lowest file precedence)
-            "assistant.provider.openrouter.api_key_env = \
-             'PARENT_KEY'\nassistant.provider.openrouter.app_name = 'PARENT_APP'",
-        );
-        write_config(
-            &root.join("config.toml"), // Loaded second (highest file precedence)
-            "assistant.provider.openrouter.app_name = 'ROOT_APP'", // Overrides parent app_name
-        );
-
-        // Env var overrides both files
-        let _guard = EnvVarGuard::set("JP_ASSISTANT_PROVIDER_OPENROUTER_APP_NAME", "ENV_APP_FINAL");
-
-        let config = load(&root, true).unwrap(); // Search enabled
-
-        assert!(config.inherit); // Default from parent
-        assert_eq!(
-            config.assistant.provider.openrouter.api_key_env,
-            "PARENT_KEY"
-        ); // From parent file (not overridden by root file or env)
-        assert_eq!(
-            config.assistant.provider.openrouter.app_name,
-            "ENV_APP_FINAL"
-        ); // Env overrides root file override of parent file
+            match (got, case.want) {
+                (Err(got), Err(want)) => assert_eq!(got.to_string(), want.to_owned()),
+                (Ok(None), Ok(None)) => {}
+                (Ok(Some(got)), Ok(Some((path, want)))) => {
+                    let json = serde_json::to_value(&got).unwrap();
+                    let val = json.pointer(path);
+                    assert_eq!(val, want.as_ref(), "failed case: {name}");
+                }
+                (got, want) => {
+                    panic!("failed case: {name}\n\ngot:  {got:?}\nwant: {want:?}")
+                }
+            }
+        }
     }
 }

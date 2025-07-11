@@ -5,7 +5,7 @@ use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
     error::Result,
     model,
-    serde::{is_default, is_nested_empty},
+    serde::{is_default, is_nested_default},
 };
 
 /// LLM configuration.
@@ -14,7 +14,7 @@ use crate::{
 #[config(partial_attr(serde(deny_unknown_fields)))]
 pub struct Generate {
     /// Model configuration for title generation.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_default")))]
     pub model: model::Model,
 
     /// Whether to generate a title automatically for new conversations.

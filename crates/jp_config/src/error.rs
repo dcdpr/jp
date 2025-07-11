@@ -22,7 +22,10 @@ pub enum Error {
     #[error("Parse int error: {0}")]
     ParseInt(#[from] std::num::ParseIntError),
 
-    #[error("Url parse error: {0}")]
+    #[error("Parse float error")]
+    ParseFloat(#[from] std::num::ParseFloatError),
+
+    #[error("Url parse error")]
     Url(#[from] url::ParseError),
 
     #[error("Unknown config key: {key}\n\nAvailable keys:\n  - {}", available_keys.join("\n  - "))]
@@ -47,6 +50,9 @@ pub enum Error {
 
     #[error("Model slug error: {0}")]
     ModelSlug(String),
+
+    #[error("Config file not found: {0}")]
+    MissingConfigFile(PathBuf),
 
     #[error(r#"Invalid or missing file extension: {path}, must be one of "json", "json5", "yaml", "yml" or "toml""#)]
     InvalidFileExtension { path: PathBuf },
