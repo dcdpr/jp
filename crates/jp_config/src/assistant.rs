@@ -9,7 +9,7 @@ use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
     error::Result,
     model,
-    serde::{de_from_str_opt, is_default, is_nested_empty},
+    serde::{de_from_str_opt, is_default, is_nested_default_or_empty, is_none_or_default},
 };
 
 pub type AssistantPartial = <Assistant as Confique>::Partial;
@@ -30,21 +30,31 @@ pub struct Assistant {
     /// A list of instructions for the assistant.
     #[config(
         default = [],
-        partial_attr(serde(skip_serializing_if = "Option::is_none"))
+        partial_attr(serde(skip_serializing_if = "is_none_or_default"))
     )]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub instructions: Vec<Instructions>,
 
     /// How the LLM should choose tools, if any are available.
-    #[config(partial_attr(serde(default, deserialize_with = "de_from_str_opt")))]
+    #[config(partial_attr(serde(
+        default,
+        deserialize_with = "de_from_str_opt",
+        skip_serializing_if = "is_none_or_default"
+    )))]
     pub tool_choice: Option<ToolChoice>,
 
     /// Provider configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
+    #[config(
+        nested,
+        partial_attr(serde(skip_serializing_if = "is_nested_default_or_empty"))
+    )]
     pub provider: provider::Provider,
 
     /// Model configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
+    #[config(
+        nested,
+        partial_attr(serde(skip_serializing_if = "is_nested_default_or_empty"))
+    )]
     pub model: model::Model,
 }
 
@@ -92,7 +102,7 @@ pub struct Instructions {
 
     /// A list of examples to go with the instructions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub examples: Vec<String>,
+    pub examples: Vec<Example>,
 }
 
 impl Instructions {
@@ -130,4 +140,15 @@ impl Instructions {
         self.items.push(item.into());
         self
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Example {
+    Generic(String),
+    Contrast {
+        right: String,
+        wrong: String,
+        reason: Option<String>,
+    },
 }

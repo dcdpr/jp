@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
-    serde::{de_from_str_opt, is_nested_empty},
+    serde::{de_from_str_opt, is_nested_default_or_empty},
     Error,
 };
 
@@ -16,11 +16,18 @@ use crate::{
 #[config(partial_attr(serde(deny_unknown_fields)))]
 pub struct Model {
     /// Model to use.
-    #[config(partial_attr(serde(default, deserialize_with = "de_from_str_opt")))]
+    #[config(partial_attr(serde(
+        default,
+        deserialize_with = "de_from_str_opt",
+        skip_serializing_if = "Option::is_none"
+    )))]
     pub id: Option<ModelId>,
 
     /// The parameters to use for the model.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
+    #[config(
+        nested,
+        partial_attr(serde(skip_serializing_if = "is_nested_default_or_empty"))
+    )]
     pub parameters: parameters::Parameters,
 }
 

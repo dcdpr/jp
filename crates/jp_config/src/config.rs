@@ -9,7 +9,7 @@ use crate::{
     assistant, conversation, editor,
     error::Result,
     mcp,
-    serde::{is_default, is_nested_empty},
+    serde::{is_default, is_nested_default_or_empty, is_nested_empty},
     style, template, Partial,
 };
 
@@ -21,7 +21,10 @@ pub type PartialConfig = <Config as Confique>::Partial;
 #[config(partial_attr(serde(deny_unknown_fields)))]
 pub struct Config {
     /// Inherit from a local ancestor or global configuration file.
-    #[config(default = true)]
+    #[config(
+        default = true,
+        partial_attr(serde(skip_serializing_if = "is_default"))
+    )]
     pub inherit: bool,
 
     /// Paths from which configuration files can be loaded without specifying
@@ -41,7 +44,10 @@ pub struct Config {
     pub assistant: assistant::Assistant,
 
     /// Conversation-specific configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
+    #[config(
+        nested,
+        partial_attr(serde(skip_serializing_if = "is_nested_default_or_empty"))
+    )]
     pub conversation: conversation::Conversation,
 
     /// Styling configuration.
@@ -49,7 +55,10 @@ pub struct Config {
     pub style: style::Style,
 
     /// Template configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
+    #[config(
+        nested,
+        partial_attr(serde(skip_serializing_if = "is_nested_default_or_empty"))
+    )]
     pub template: template::Template,
 
     /// Editor configuration.
@@ -206,5 +215,15 @@ mod tests {
         assert!(err
             .to_string()
             .starts_with("Unknown config key: invalid.key\n\nAvailable keys:\n"));
+    }
+
+    #[test]
+    fn test_partial_config_empty_serialize() {
+        insta::assert_json_snapshot!(PartialConfig::empty());
+    }
+
+    #[test]
+    fn test_partial_config_default_values_serialize() {
+        insta::assert_json_snapshot!(PartialConfig::default_values());
     }
 }

@@ -16,14 +16,21 @@ pub struct Openrouter {
     pub api_key_env: String,
 
     /// Application name sent to Openrouter.
-    #[config(default = "JP")]
+    #[config(
+        default = "JP",
+        partial_attr(serde(skip_serializing_if = "Option::is_none"))
+    )]
     pub app_name: String,
 
     /// Optional HTTP referrer to send with requests.
+    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
     pub app_referrer: Option<String>,
 
     /// The base URL to use for API requests.
-    #[config(default = "https://openrouter.ai")]
+    #[config(
+        default = "https://openrouter.ai",
+        partial_attr(serde(skip_serializing_if = "Option::is_none"))
+    )]
     pub base_url: String,
 }
 

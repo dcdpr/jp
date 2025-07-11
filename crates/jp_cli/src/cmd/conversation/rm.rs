@@ -55,7 +55,7 @@ impl Rm {
             );
         };
         let messages = ctx.workspace.get_messages(&id);
-        let local = conversation.local;
+        let local = conversation.user;
         let mut details = DetailsFmt::new(id, conversation, messages)
             .with_local_flag(local)
             .with_active_conversation(active_id)

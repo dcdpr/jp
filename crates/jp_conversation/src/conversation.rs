@@ -22,9 +22,9 @@ pub struct Conversation {
     /// The last time the conversation was activated.
     pub last_activated_at: UtcDateTime,
 
-    /// Whether the conversation is stored locally or in the workspace.
+    /// Whether the conversation is stored in the user or workspace storage.
     #[serde(skip)]
-    pub local: bool,
+    pub user: bool,
 
     /// The partial configuration persisted for this conversation.
     #[serde(default = "PartialConfig::empty")]
@@ -50,7 +50,7 @@ impl Serialize for Conversation {
         }
 
         state.serialize_field("last_activated_at", &self.last_activated_at)?;
-        state.serialize_field("local", &self.local)?;
+        state.serialize_field("local", &self.user)?;
 
         state.serialize_field(
             "config",
@@ -67,7 +67,7 @@ impl Default for Conversation {
             last_activated_at: UtcDateTime::now(),
             title: None,
             config: PartialConfig::default_values(),
-            local: false,
+            user: false,
         }
     }
 }
@@ -83,7 +83,7 @@ impl Conversation {
 
     #[must_use]
     pub fn with_local(mut self, local: bool) -> Self {
-        self.local = local;
+        self.user = local;
         self
     }
 
@@ -300,7 +300,7 @@ mod tests {
                 time::Date::from_calendar_date(2023, time::Month::January, 1).unwrap(),
                 time::Time::MIDNIGHT,
             ),
-            local: true,
+            user: true,
             config,
         };
 

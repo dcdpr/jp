@@ -26,9 +26,10 @@ use error::{Error, Result};
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::Instructions,
-    Config, PartialConfig,
+    load_partial, load_partial_at_path, load_partial_at_path_recursive,
+    load_partials_with_inheritance, user_global_config_path, Config, PartialConfig,
 };
-use jp_workspace::Workspace;
+use jp_workspace::{user_data_dir, Workspace};
 use serde_json::Value;
 use tracing::{debug, info, trace};
 
@@ -346,34 +347,22 @@ fn parse_error(error: error::Error, is_tty: bool) -> (i32, String) {
 ///
 /// This uses all configuration sources known at the start of the CLI run.
 ///
-/// 1. First, the `.JP/CONFIG.TOML` file is loaded, if it exists.
-/// 2. Next, apply any CONFIGURATION FILE in the path hierarchy starting at the
-///    workspace root.
-/// 3. Next, apply the ENVIRONMENT VARIABLES.
-/// 4. Next, apply the ACTIVE CONVERSATION CONFIGURATION.
-/// 5. Next, apply any FILES LOADED USING `--CFG`.
-/// 6. Next, apply any CUSTOM CLI ARGUMENTS.
-/// 7. Finally, apply SPECIFIC DEFAULT VALUES if the value is not already set.
+/// See: <https://jp.computer/configuration>
 fn load_partial_config(
     cmd: &Commands,
     workspace: Option<&Workspace>,
     overrides: &[KeyValueOrPath],
 ) -> Result<PartialConfig> {
-    let root = workspace.map_or_else(std::env::current_dir, |w| Ok(w.root.clone()))?;
+    // Load all partials in different file locations, the first loaded file
+    // having the lowest precedence.
+    let partials = load_partial_configs_from_files(workspace, std::env::current_dir().ok())?;
 
-    let partial = if let Some(storage) = workspace.and_then(Workspace::storage_path) {
-        // First look for `config.toml` in the storage directory.
-        let partial = jp_config::load_partial_from_file(&storage.join("config.toml"), false, None)?;
-
-        // Then search for a config file, starting from the root.
-        jp_config::load_partial_from_file(&root, true, Some(partial))
-    } else {
-        // Search for a config file, starting from the root.
-        jp_config::load_partial_from_file(&root, true, None)
-    }?;
+    // Load all partials, merging later partials over earlier ones, unless one
+    // of the partials set `inherit = false`, then later partials are ignored.
+    let mut partial = load_partials_with_inheritance(partials);
 
     // Load environment variables.
-    let mut partial = jp_config::load_envs(partial)?;
+    partial = jp_config::load_envs(partial)?;
 
     // Apply conversation-specific config, if needed.
     if let Some(workspace) = workspace {
@@ -388,7 +377,9 @@ fn load_partial_config(
     for field in overrides {
         match field {
             KeyValueOrPath::Path(path) if path.exists() => {
-                partial = jp_config::load_partial_from_file(path, false, Some(partial))?;
+                if let Some(p) = load_partial_at_path(path)? {
+                    partial = load_partial(p, partial);
+                }
             }
             KeyValueOrPath::Path(path) => {
                 // Get the list of `config_load_paths`
@@ -413,16 +404,16 @@ fn load_partial_config(
                     );
 
                     if let Some(path) = jp_config::find_file_in_path(path, &load_path)? {
-                        partial = jp_config::load_partial_from_file(&path, false, Some(partial))?;
+                        if let Some(p) = load_partial_at_path(path)? {
+                            partial = load_partial(p, partial);
+                        }
                         found = true;
                         break;
                     }
                 }
 
-                // This will walk up the directory tree to find the config file,
-                // or return an error if it cannot be found.
                 if !found {
-                    partial = jp_config::load_partial_from_file(path, false, Some(partial))?;
+                    return Err(jp_config::Error::MissingConfigFile(path.clone()).into());
                 }
             }
             KeyValueOrPath::KeyValue(kv) => partial.assign(kv.clone())?,
@@ -456,6 +447,56 @@ fn load_partial_config(
     Ok(partial)
 }
 
+fn load_partial_configs_from_files(
+    workspace: Option<&Workspace>,
+    cwd: Option<PathBuf>,
+) -> Result<Vec<PartialConfig>> {
+    let mut partials = vec![];
+
+    // Load `$XDG_CONFIG_HOME/jp/config.toml`.
+    if let Some(user_global_config) = user_global_config_path(std::env::home_dir().as_deref())
+        .and_then(|p| load_partial_at_path(p).transpose())
+        .transpose()?
+    {
+        partials.push(user_global_config);
+    }
+
+    // Load `$WORKSPACE_ROOT/.jp/config.toml`.
+    if let Some(workspace_config) = workspace
+        .and_then(Workspace::storage_path)
+        .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
+        .transpose()?
+    {
+        partials.push(workspace_config);
+    }
+
+    // Load `$CWD/.jp.toml`, recursing up the directory tree until either the
+    // root of the workspace, or filesystem is reached.
+    if let Some(cwd_config) = cwd
+        .and_then(|cwd| {
+            load_partial_at_path_recursive(
+                cwd.join(".jp.toml"),
+                Workspace::find_root(cwd, DEFAULT_STORAGE_DIR).as_deref(),
+            )
+            .transpose()
+        })
+        .transpose()?
+    {
+        partials.push(cwd_config);
+    }
+
+    // Load `$XDG_DATA_HOME/jp/<workspace_the id>config.toml`.
+    if let Some(user_workspace_config) = workspace
+        .and_then(Workspace::user_storage_path)
+        .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
+        .transpose()?
+    {
+        partials.push(user_workspace_config);
+    }
+
+    Ok(partials)
+}
+
 /// Load the workspace configuration.
 fn load_config(
     cmd: &Commands,
@@ -474,7 +515,7 @@ fn load_workspace(workspace: Option<&WorkspaceIdOrPath>) -> Result<Workspace> {
         Some(WorkspaceIdOrPath::Path(path)) => path.clone(),
 
         // TODO: Centralize this in a new `UserStorage` struct.
-        Some(WorkspaceIdOrPath::Id(id)) => jp_workspace::user_data_dir()?
+        Some(WorkspaceIdOrPath::Id(id)) => user_data_dir()?
             .read_dir()?
             .map(|dir| dir.ok().map(|dir| dir.path().clone()))
             .find_map(|path| {

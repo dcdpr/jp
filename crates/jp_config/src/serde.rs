@@ -1,7 +1,8 @@
+#![allow(clippy::ref_option)]
+
 use confique::Partial;
 use serde::Deserialize as _;
 
-#[expect(dead_code)]
 pub(crate) fn is_nested_default_or_empty<T: Partial + PartialEq>(v: &T) -> bool {
     is_nested_default(v) || is_nested_empty(v)
 }
@@ -12,6 +13,10 @@ pub(crate) fn is_nested_default<T: Partial + PartialEq>(v: &T) -> bool {
 
 pub(crate) fn is_nested_empty<T: Partial + PartialEq>(v: &T) -> bool {
     v == &T::empty()
+}
+
+pub(crate) fn is_none_or_default<T: Default + PartialEq>(v: &Option<T>) -> bool {
+    v.as_ref().is_none_or(|v| v == &T::default())
 }
 
 pub(crate) fn is_default<T: Default + PartialEq>(v: &T) -> bool {

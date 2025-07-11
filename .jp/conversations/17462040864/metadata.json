@@ -1,22 +1,5 @@
 {
   "last_activated_at": "2025-05-02 16:41:26.443706",
-  "context": {
-    "persona_id": "default",
-    "attachments": {
-      "file_content": {
-        "type": "file_content",
-        "includes": [
-          "/**/*.json",
-          "/**/*.md",
-          "/**/*.rs",
-          "/**/*.toml"
-        ],
-        "excludes": [
-          "/**/target/**",
-          "/codecompanion-workspace.json",
-          "/rust-toolchain.toml"
-        ]
-      }
-    }
-  }
+  "local": false,
+  "config": {}
 }

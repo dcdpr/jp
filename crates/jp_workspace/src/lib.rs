@@ -133,7 +133,7 @@ impl Workspace {
             &self.id,
         ));
 
-        self.storage = Some(storage.with_local(local)?);
+        self.storage = Some(storage.with_user_storage(local)?);
         Ok(self)
     }
 
@@ -152,11 +152,11 @@ impl Workspace {
         self.storage.as_ref().map(Storage::path)
     }
 
-    /// Returns the path to the local storage directory, if persistence is
-    /// enabled, and local storage is configured.
+    /// Returns the path to the user storage directory, if persistence is
+    /// enabled, and user storage is configured.
     #[must_use]
-    pub fn local_storage_path(&self) -> Option<&Path> {
-        self.storage.as_ref().and_then(Storage::local_path)
+    pub fn user_storage_path(&self) -> Option<&Path> {
+        self.storage.as_ref().and_then(Storage::user_storage_path)
     }
 
     /// Load the workspace state from the persisted storage.
@@ -402,7 +402,7 @@ impl Workspace {
     pub fn mcp_servers_local_path(&self) -> Option<PathBuf> {
         self.storage
             .as_ref()
-            .and_then(|p| p.local_path().map(|p| p.join(MCP_SERVERS_DIR)))
+            .and_then(|p| p.user_storage_path().map(|p| p.join(MCP_SERVERS_DIR)))
     }
 
     /// Gets a reference to an MCP server by its ID.

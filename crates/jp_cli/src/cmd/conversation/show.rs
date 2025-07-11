@@ -19,9 +19,9 @@ impl Show {
             return Err(Error::NotFound("Conversation", id.to_string()).into());
         };
         let messages = ctx.workspace.get_messages(&id);
-        let local = conversation.local;
+        let user = conversation.user;
         let details = DetailsFmt::new(id, conversation, messages)
-            .with_local_flag(local)
+            .with_local_flag(user)
             .with_active_conversation(active_id)
             .with_hyperlinks(ctx.term.args.hyperlinks)
             .with_color(ctx.term.args.colors);

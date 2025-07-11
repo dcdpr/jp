@@ -7,6 +7,7 @@ use serde_json::Value;
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment, KvValue},
     error::Result,
+    serde::is_none_or_default,
 };
 
 /// Template configuration.
@@ -15,7 +16,7 @@ use crate::{
 #[config(partial_attr(serde(deny_unknown_fields)))]
 pub struct Template {
     /// Template variable values used to render query templates.
-    #[config(default = {})]
+    #[config(default = {}, partial_attr(serde(skip_serializing_if = "is_none_or_default")))]
     pub values: HashMap<String, Value>,
 }
 

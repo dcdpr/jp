@@ -9,7 +9,6 @@ use crate::{
 /// Openai API configuration.
 #[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
 #[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
-#[config(partial_attr(serde(deny_unknown_fields)))]
 pub struct Openai {
     /// Environment variable that contains the API key.
     #[config(default = "OPENAI_API_KEY")]

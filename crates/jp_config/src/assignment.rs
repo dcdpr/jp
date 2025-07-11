@@ -197,6 +197,14 @@ impl KvAssignment {
         }
     }
 
+    pub(crate) fn into_value(self) -> Value {
+        let Self { value, .. } = self;
+        match value {
+            KvValue::Json(v) => v,
+            KvValue::String(v) => Value::String(v),
+        }
+    }
+
     pub(crate) fn try_into_string(self) -> Result<String, Error> {
         let Self { key, value, .. } = self;
 
