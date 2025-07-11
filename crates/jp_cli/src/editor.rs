@@ -196,7 +196,9 @@ pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFil
         exists,
     };
 
-    if !exists {
+    let existing_content = fs::read_to_string(&path).unwrap_or_default();
+
+    if !exists || existing_content.is_empty() {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
