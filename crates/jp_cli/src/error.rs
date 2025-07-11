@@ -7,40 +7,40 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 /// CLI Error types
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
-    #[error("Command error: {0}")]
+    #[error("Command error")]
     Command(#[from] cmd::Error),
 
     #[error("Configuration error")]
     Config(#[from] jp_config::Error),
 
-    #[error("CLI Config error: {0}")]
+    #[error("CLI Config error")]
     CliConfig(String),
 
-    #[error("Workspace error: {0}")]
+    #[error("Workspace error")]
     Workspace(#[from] jp_workspace::Error),
 
-    #[error("Conversation error: {0}")]
+    #[error("Conversation error")]
     Conversation(#[from] jp_conversation::Error),
 
-    #[error("MCP error: {0}")]
+    #[error("MCP error")]
     Mcp(#[from] jp_mcp::Error),
 
-    #[error("LLM error: {0}")]
+    #[error("LLM error")]
     Llm(#[from] jp_llm::Error),
 
-    #[error("Model error: {0}")]
+    #[error("Model error")]
     Model(#[from] jp_model::Error),
 
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
 
-    #[error("IO error: {0}")]
+    #[error("IO error")]
     Io(#[from] io::Error),
 
-    #[error("URL error: {0}")]
+    #[error("URL error")]
     Url(#[from] url::ParseError),
 
-    #[error("Bat error: {0}")]
+    #[error("Bat error")]
     Bat(#[from] bat::error::Error),
 
     #[error("Attachment error: {0}")]
@@ -58,7 +58,7 @@ pub(crate) enum Error {
     #[error("Task error: {0}")]
     Task(Box<dyn std::error::Error + Send + Sync>),
 
-    #[error("Template error: {0}")]
+    #[error("Template error")]
     Template(#[from] minijinja::Error),
 
     #[error("Undefined template variable: {0}")]
@@ -67,7 +67,7 @@ pub(crate) enum Error {
     #[error("Replay error: {0}")]
     Replay(String),
 
-    #[error("JSON error: {0}")]
+    #[error("JSON error")]
     Json(#[from] serde_json::Error),
 
     #[error("Invalid JSON schema: {0}")]
