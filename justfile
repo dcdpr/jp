@@ -15,19 +15,19 @@ install:
     @just quiet_flag="" _install-jp
 
 [group('issue')]
-issue-bug args="Please create a bug report for the following:\n\n": _install-jp
-    jp query --no-persist --new --cfg=personas/product-owner --hide-reasoning --edit=true {{args}}
+issue-bug +ARGS="Please create a bug report for the following:\n\n": _install-jp
+    jp query --no-persist --new --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
 
 # Create a feature request issue.
 [group('issue')]
-issue-feat args="Please create a feature request for the following:\n\n": _install-jp
-    jp query --no-persist --new --cfg=personas/product-owner --hide-reasoning --edit=true {{args}}
+issue-feat +ARGS="Please create a feature request for the following:\n\n": _install-jp
+    jp query --no-persist --new --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
 
 # Open a commit message in the editor, using Jean-Pierre.
 [group('git')]
-commit args="Give me a commit message": _install-jp
+commit +ARGS="Give me a commit message": _install-jp
     #!/usr/bin/env sh
-    if message=$(jp query --no-persist --new --cfg=personas/commit --hide-reasoning --no-tool {{args}}); then
+    if message=$(jp query --no-persist --new --cfg=personas/commit --hide-reasoning --no-tool {{ARGS}}); then
         echo "$message" | sed -e 's/\x1b\[[0-9;]*[mGKHF]//g' | git commit --edit --file=-
     fi
 
