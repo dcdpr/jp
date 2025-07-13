@@ -39,7 +39,7 @@ jobs:
             ~/.cargo/bin/
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-        key: toolchain-site
+          key: toolchain-site
       - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
       - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
         with:
