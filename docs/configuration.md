@@ -82,10 +82,10 @@ by the application, such as the `model` and `provider` options. Others are not,
 but can be added manually by editing the conversation metadata file in
 `<workspace path>/.jp/conversations/<conversation id>/metadata.json`.
 
-This means that if you start a new conversation with `jp query --new --model
-<provider>/<model>`, the same model will be re-used for every turn in the
-conversation, unless a new model is specified using CLI arguments, or when the
-conversation metadata is manually edited.
+This means the following command will re-use the same model for every turn in
+the conversation: `jp query --new --model <provider>/<model>`, unless a new
+model is specified using CLI arguments, or when the conversation metadata is
+manually edited.
 
 ### Configuration Options Or Files Loaded Via `--cfg`
 
