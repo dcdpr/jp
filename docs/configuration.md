@@ -2,8 +2,8 @@
 
 ## Loading And Ordering
 
-Configuration options can be set in multiple ways, and the order in which they
-are loaded is as follows, with later options overriding earlier ones.
+Configuration options can be set in multiple ways, the order in which they are
+loaded is as follows, with later options overriding earlier ones:
 
 1. Hard-coded defaults
 2. Configuration files
@@ -16,6 +16,10 @@ are loaded is as follows, with later options overriding earlier ones.
 
 The application sets a number of hard-coded defaults for the best user
 experience. You can use `jp config show --defaults` to show the defaults.
+
+Note that defaults can be context-specific. For example, the `assistant.model`
+option depends on whether specific local `ollama` models are available, or which
+cloud-model environment variables (such as `OPENAI_API_KEY`) are set.
 
 ### Configuration Files
 

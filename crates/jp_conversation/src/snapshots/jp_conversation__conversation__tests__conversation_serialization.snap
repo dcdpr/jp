@@ -55,6 +55,20 @@ expression: conv
         "VISUAL",
         "EDITOR"
       ]
+    },
+    "mcp": {
+      "servers": {
+        "*": {
+          "enable": true,
+          "tools": {
+            "*": {
+              "enable": true,
+              "run": "ask",
+              "result": "always"
+            }
+          }
+        }
+      }
     }
   }
 }

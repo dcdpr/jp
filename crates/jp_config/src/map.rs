@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fmt,
     hash::Hash,
     marker::PhantomData,
@@ -11,19 +10,37 @@ use confique::{
     meta::{Field, FieldKind, Meta},
     Config, Error, Partial,
 };
+use indexmap::IndexMap;
 use serde::{
     de::{Deserializer, MapAccess, Visitor},
-    Deserialize, Serialize,
+    ser::SerializeMap as _,
+    Deserialize, Serialize, Serializer,
 };
 
 #[derive(Serialize)]
-pub struct ConfigMap<K, V: Config>(HashMap<K, V>);
+pub struct ConfigMap<K, V: Config>(IndexMap<K, V>);
 
-#[derive(Serialize)]
-pub struct ConfigMapPartial<K, V: Partial>(HashMap<K, V>);
+pub struct ConfigMapPartial<K, V: Partial>(IndexMap<K, V>);
+
+impl<K, V> Serialize for ConfigMapPartial<K, V>
+where
+    K: Serialize + std::fmt::Debug,
+    V: Serialize + Partial + PartialEq + std::fmt::Debug,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (k, v) in self.iter() {
+            map.serialize_entry(k, v)?;
+        }
+        map.end()
+    }
+}
 
 impl<K, V: Config> Deref for ConfigMap<K, V> {
-    type Target = HashMap<K, V>;
+    type Target = IndexMap<K, V>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -31,7 +48,7 @@ impl<K, V: Config> Deref for ConfigMap<K, V> {
 }
 
 impl<K, V: Partial> Deref for ConfigMapPartial<K, V> {
-    type Target = HashMap<K, V>;
+    type Target = IndexMap<K, V>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -92,13 +109,13 @@ where
 
 impl<K, V: Config> Default for ConfigMap<K, V> {
     fn default() -> Self {
-        Self(HashMap::default())
+        Self(IndexMap::default())
     }
 }
 
 impl<K, V: Partial> Default for ConfigMapPartial<K, V> {
     fn default() -> Self {
-        Self(HashMap::default())
+        Self(IndexMap::default())
     }
 }
 
@@ -181,7 +198,7 @@ where
     where
         D: Deserializer<'de>,
     {
-        Ok(Self(HashMap::deserialize(deserializer)?))
+        Ok(Self(IndexMap::deserialize(deserializer)?))
     }
 }
 
@@ -225,7 +242,7 @@ where
     V: Partial,
 {
     fn empty() -> Self {
-        Self(HashMap::new())
+        Self(IndexMap::new())
     }
 
     fn default_values() -> Self {
@@ -238,7 +255,7 @@ where
 
     fn with_fallback(mut self, fallback: Self) -> Self {
         for (k, v) in fallback.0 {
-            let v = match self.remove(&k) {
+            let v = match self.shift_remove(&k) {
                 Some(value) => value.with_fallback(v),
                 None => v,
             };

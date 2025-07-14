@@ -49,6 +49,7 @@ grep-searcher = { version = "0.1", default-features = false }
 hex = { version = "0.4", default-features = false }
 httpmock = { git = "https://github.com/alexliesenfeld/httpmock", default-features = false }
 ignore = { version = "0.4", default-features = false }
+indexmap = { version = "2", default-features = false }
 indoc = { version = "2", default-features = false }
 inquire = { version = "0.7", default-features = false }
 insta = { version = "1", default-features = false }
@@ -86,6 +87,7 @@ timeago = { version = "0.4", default-features = false }
 tokio = { version = "1", default-features = false, features = ["full"] }
 tokio-util = { version = "0.7", default-features = false }
 toml = { version = "0.8", default-features = false }
+toml_edit = { version = "0.23", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 typetag = { version = "0.2", default-features = false }

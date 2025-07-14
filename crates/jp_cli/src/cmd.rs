@@ -1,4 +1,5 @@
 mod attachment;
+mod config;
 mod conversation;
 mod init;
 mod mcp;
@@ -14,10 +15,13 @@ use serde_json::Value;
 use crate::{ctx::IntoPartialConfig, Ctx};
 
 #[derive(Debug, clap::Subcommand)]
-#[expect(clippy::large_enum_variant)]
 pub(crate) enum Commands {
     /// Initialize a new workspace.
     Init(init::Init),
+
+    /// Configuration management.
+    #[command(visible_alias = "cfg")]
+    Config(config::Config),
 
     /// Query the assistant.
     #[command(visible_alias = "q")]
@@ -44,6 +48,7 @@ impl Commands {
     pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         match self {
             Commands::Query(args) => args.run(ctx).await,
+            Commands::Config(args) => args.run(ctx),
             Commands::Attachment(args) => args.run(ctx),
             Commands::AttachmentAdd(args) => args.run(ctx),
             Commands::Mcp(args) => args.run(ctx),
@@ -55,6 +60,7 @@ impl Commands {
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Commands::Query(_) => "query",
+            Commands::Config(_) => "config",
             Commands::Attachment(_) => "attachment",
             Commands::AttachmentAdd(_) => "attachment-add",
             Commands::Mcp(_) => "mcp",
@@ -274,6 +280,7 @@ impl From<crate::error::Error> for Error {
             Template(error) => return error.into(),
             Json(error) => return error.into(),
             Which(error) => return error.into(),
+            ConfigLoader(error) => return error.into(),
             NotFound(target, id) => [
                 ("message", "Not found".into()),
                 ("target", target.into()),
@@ -345,9 +352,12 @@ impl_from_error!(minijinja::Error, "Template error");
 impl_from_error!(bat::error::Error, "Error while formatting code");
 impl_from_error!(url::ParseError, "Error while parsing URL");
 impl_from_error!(serde_json::Error, "Error while parsing JSON");
+impl_from_error!(serde_yaml::Error, "Error while parsing YAML");
 impl_from_error!(serde::de::value::Error, "Deserialization error");
 impl_from_error!(toml::de::Error, "Error while parsing TOML");
+impl_from_error!(toml_edit::de::Error, "Error while parsing TOML");
 impl_from_error!(toml::ser::Error, "Error while serializing TOML");
+impl_from_error!(toml_edit::ser::Error, "Error while serializing TOML");
 impl_from_error!(reqwest::Error, "Error while making HTTP request");
 impl_from_error!(std::str::ParseBoolError, "Error parsing boolean value");
 impl_from_error!(std::num::ParseIntError, "Error parsing integer value");
@@ -355,6 +365,7 @@ impl_from_error!(jp_mcp::Error, "MCP error");
 impl_from_error!(jp_model::Error, "Model error");
 impl_from_error!(jp_config::Error, "Config error");
 impl_from_error!(jp_conversation::Error, "Conversation error");
+impl_from_error!(jp_config::fs::ConfigLoaderError, "Config loader error");
 impl_from_error!(which::Error, "Which error");
 
 impl From<jp_llm::Error> for Error {

@@ -3,15 +3,21 @@ config_load_paths = [".config/jp"]
 [assistant.model]
 id = "anthropic/claude-sonnet-4-0"
 
-[style]
-code.copy_link = "osc8"
+[conversation.title.generate]
+auto = true
 
-[conversation]
-title.generate.model.id = "anthropic/claude-3-5-haiku-latest"
-title.generate.auto = true
+[conversation.title.generate.model]
+id = "anthropic/claude-3-5-haiku-latest"
 
-[mcp.servers.'*'.tools]
-"*".run = "always"
-"*".result = "always"
-create_issue_bug.run = "ask"
-create_issue_enhancement.run = "ask"
+[style.code]
+copy_link = "osc8"
+
+[mcp.servers."*".tools."*"]
+run = "always"
+result = "always"
+
+[mcp.servers."*".tools.create_issue_bug]
+run = "ask"
+
+[mcp.servers."*".tools.create_issue_enhancement]
+run = "ask"

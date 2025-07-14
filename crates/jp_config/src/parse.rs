@@ -198,7 +198,7 @@ pub fn build(config: PartialConfig) -> Result<Config, Error> {
     Ok(config)
 }
 
-/// Get a file handle to the global config file, if it exists.
+/// Get the path to user the global config directory, if it exists.
 #[must_use]
 pub fn user_global_config_path(home: Option<&Path>) -> Option<PathBuf> {
     env::var(GLOBAL_CONFIG_ENV_VAR)
@@ -206,10 +206,7 @@ pub fn user_global_config_path(home: Option<&Path>) -> Option<PathBuf> {
         .and_then(|path| expand_tilde(path, home.and_then(Path::to_str)))
         .map(|path| path.clean())
         .inspect(|path| debug!(path = %path.display(), "Custom global configuration file path configured."))
-        .or_else(||
-            ProjectDirs::from("", "", APPLICATION)
-                .map(|p| p.config_dir().join("config.toml"))
-        )
+        .or_else(|| ProjectDirs::from("", "", APPLICATION).map(|p| p.config_dir().to_path_buf()))
 }
 
 #[cfg(test)]

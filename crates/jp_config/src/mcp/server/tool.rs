@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
     mcp::tool_call::{InlineResults, ToolCall},
+    serde::is_nested_default_or_empty,
     style::LinkStyle,
     Error,
 };
@@ -97,11 +98,17 @@ impl Confique for Tool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolPartial {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<RunMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<ResultMode>,
     // TODO: fix this, have the partial impl `Default`?
-    #[serde(default = "default_style")]
+    #[serde(
+        default = "default_style",
+        skip_serializing_if = "is_nested_default_or_empty"
+    )]
     pub style: <ToolCall as Confique>::Partial,
 }
 
@@ -181,13 +188,14 @@ impl Partial for ToolPartial {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunMode {
+    /// Ask for confirmation before running the tool.
+    #[default]
+    Ask,
     /// Always run the tool, without asking for confirmation.
     Always,
-    /// Ask for confirmation before running the tool.
-    Ask,
     /// Open an editor to edit the tool call before running it.
     Edit,
 }
@@ -197,8 +205,8 @@ impl FromStr for RunMode {
 
     fn from_str(s: &str) -> Result<Self, Error> {
         match s {
-            "always" => Ok(Self::Always),
             "ask" => Ok(Self::Ask),
+            "always" => Ok(Self::Always),
             "edit" => Ok(Self::Edit),
             _ => Err(Error::InvalidConfigValueType {
                 key: s.to_string(),
@@ -209,10 +217,11 @@ impl FromStr for RunMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResultMode {
     /// Always deliver the results of the tool call.
+    #[default]
     Always,
     /// Ask for confirmation before delivering the results of the tool call.
     Ask,
