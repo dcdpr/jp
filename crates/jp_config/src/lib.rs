@@ -6,6 +6,7 @@ mod config;
 pub mod conversation;
 pub mod editor;
 pub(crate) mod error;
+pub mod fs;
 mod map;
 pub mod mcp;
 pub mod model;

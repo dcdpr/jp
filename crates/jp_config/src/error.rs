@@ -74,6 +74,9 @@ pub enum Error {
 
     #[error("Failed to serialize XML")]
     XmlSerialization(#[from] quick_xml::SeError),
+
+    #[error("Config path not found: {0}")]
+    ConfigNotFound(String),
 }
 
 #[cfg(test)]

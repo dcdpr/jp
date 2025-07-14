@@ -163,8 +163,10 @@ impl ConfigKey for ToolId {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerPartial {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable: Option<bool>,
     pub tools: ConfigMapPartial<ToolId, ToolPartial>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binary_checksum: Option<checksum::ChecksumPartial>,
 }
 

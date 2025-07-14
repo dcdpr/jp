@@ -13,7 +13,10 @@ pub(crate) enum Error {
     #[error("Configuration error")]
     Config(#[from] jp_config::Error),
 
-    #[error("CLI Config error")]
+    #[error("unable to load configuration file")]
+    ConfigLoader(#[from] jp_config::fs::ConfigLoaderError),
+
+    #[error("CLI Config error: {0}")]
     CliConfig(String),
 
     #[error("Workspace error")]

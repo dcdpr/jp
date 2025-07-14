@@ -92,6 +92,11 @@ impl Conversation {
         &self.config
     }
 
+    #[must_use]
+    pub fn config_mut(&mut self) -> &mut PartialConfig {
+        &mut self.config
+    }
+
     pub fn set_config(&mut self, config: PartialConfig) {
         self.config = config;
     }
