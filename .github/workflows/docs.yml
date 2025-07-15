@@ -31,7 +31,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/cache/restore@36f1e144e1c8edb0a652766b484448563d8baf46 # v4
+      - uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         id: cache
         with:
           path: |
@@ -44,9 +44,10 @@ jobs:
       - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
         with:
           fetch-depth: 0 # Not needed if Vitepress' lastUpdated is not enabled
-      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      - uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
         with:
           cache-bin: false
+          cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       - uses: actions/configure-pages@d5606572c479bee637007364c6b4800ac4fc8573 # v5
@@ -54,7 +55,7 @@ jobs:
       - run: just build-changelog > change-log.md
       - run: just build-docs
       - if: ${{ github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@36f1e144e1c8edb0a652766b484448563d8baf46 # v4
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
           path: |
             ~/.rustup
