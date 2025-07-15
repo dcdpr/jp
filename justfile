@@ -60,7 +60,7 @@ shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
 
 # Run all ci tasks.
 [group('ci')]
-ci: build-ci lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci
+ci: build-ci lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci
 
 # Build the code on CI.
 [group('ci')]
@@ -109,7 +109,7 @@ insta-ci: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta
 # Check for unused dependencies on CI.
 [group('ci')]
 shear-ci:
-    just shear --expand
+    @just shear --expand
 
 @_install_ci_matchers:
     echo "::add-matcher::.github/matchers.json"
