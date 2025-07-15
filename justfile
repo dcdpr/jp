@@ -5,6 +5,7 @@ insta_version    := "1.43.1"
 jilu_version     := "0.13.1"
 llvm_cov_version := "0.6.16"
 nextest_version  := "0.9.99"
+shear_version    := "1.4.0"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
@@ -54,6 +55,9 @@ check: (_install "bacon@" + bacon_version)
 test *FLAGS: (_install "cargo-nextest@" + nextest_version)
     cargo nextest run --workspace --all-targets {{FLAGS}}
 
+shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
+    cargo shear {{FLAGS}}
+
 # Run all ci tasks.
 [group('ci')]
 ci: build-ci lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci
@@ -101,6 +105,11 @@ deny-ci: (_install "cargo-deny@" + deny_version) _install_ci_matchers
 [group('ci')]
 insta-ci: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta_version)
     cargo insta test --check --unreferenced=auto
+
+# Check for unused dependencies on CI.
+[group('ci')]
+shear-ci:
+    just shear --expand
 
 @_install_ci_matchers:
     echo "::add-matcher::.github/matchers.json"

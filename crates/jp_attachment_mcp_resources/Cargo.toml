@@ -17,16 +17,9 @@ jp_attachment = { workspace = true }
 jp_mcp = { workspace = true }
 
 async-trait = { workspace = true }
-duct = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 serde = { workspace = true }
 url = { workspace = true, features = ["serde"] }
-
-[dev-dependencies]
-indoc = { workspace = true }
-tempfile = { workspace = true }
-test-log = { workspace = true }
-tokio = { workspace = true }
 
 [lints]
 workspace = true
