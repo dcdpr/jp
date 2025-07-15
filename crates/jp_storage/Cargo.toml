@@ -28,7 +28,6 @@ tracing = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 test-log = { workspace = true }
-time = { workspace = true }
 
 [lints]
 workspace = true

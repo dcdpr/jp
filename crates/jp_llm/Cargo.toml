@@ -23,7 +23,6 @@ jp_query = { workspace = true }
 async-anthropic = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
-backon = { workspace = true }
 futures = { workspace = true }
 gemini_client_rs = { workspace = true }
 ollama-rs = { workspace = true, features = ["rustls", "stream"] }
@@ -31,7 +30,6 @@ openai = { workspace = true, features = ["rustls", "reqwest"] }
 openai_responses = { workspace = true, features = ["stream"] }
 reqwest = { workspace = true }
 reqwest-eventsource = { workspace = true }
-schemars_08 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
@@ -41,7 +39,6 @@ tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
-insta = { workspace = true, features = ["colors"] }
 jp_test = { workspace = true }
 test-log = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt"] }

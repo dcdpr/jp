@@ -2076,15 +2076,10 @@ name = "jp_attachment_mcp_resources"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "duct",
- "indoc",
  "jp_attachment",
  "jp_mcp",
  "quick-xml 0.37.3",
  "serde",
- "tempfile",
- "test-log",
- "tokio",
  "url",
 ]
 
@@ -2128,12 +2123,9 @@ dependencies = [
  "schemars 1.0.0-alpha.17",
  "serde",
  "serde_json",
- "serde_yaml",
- "serial_test",
  "sha1",
  "sha2",
  "strip-ansi-escapes",
- "tempfile",
  "termimad",
  "test-log",
  "thiserror 2.0.12",
@@ -2141,7 +2133,6 @@ dependencies = [
  "timeago",
  "tokio",
  "toml 0.8.20",
- "toml_edit 0.23.1",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -2154,10 +2145,8 @@ version = "0.1.0"
 dependencies = [
  "confique",
  "directories",
- "duct",
  "indexmap 2.8.0",
  "insta",
- "jp_attachment",
  "jp_mcp",
  "jp_model",
  "json5",
@@ -2198,8 +2187,6 @@ dependencies = [
  "comfy-table",
  "crossterm 0.29.0",
  "jp_conversation",
- "jp_id",
- "jp_term",
  "time",
  "timeago",
 ]
@@ -2220,10 +2207,8 @@ dependencies = [
  "async-anthropic",
  "async-stream",
  "async-trait",
- "backon 1.5.0",
  "futures",
  "gemini_client_rs",
- "insta",
  "jp_config",
  "jp_conversation",
  "jp_mcp",
@@ -2236,7 +2221,6 @@ dependencies = [
  "openai_responses",
  "reqwest",
  "reqwest-eventsource",
- "schemars 0.8.22",
  "serde",
  "serde_json",
  "test-log",
@@ -2252,14 +2236,12 @@ dependencies = [
 name = "jp_mcp"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "minijinja",
  "rmcp",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
  "tokio",
- "tokio-util",
  "tracing",
 ]
 
@@ -2269,7 +2251,6 @@ version = "0.1.0"
 dependencies = [
  "jp_id",
  "serde",
- "serde_json",
  "thiserror 2.0.12",
 ]
 
@@ -2296,7 +2277,6 @@ name = "jp_query"
 version = "0.1.0"
 dependencies = [
  "indoc",
- "jp_config",
  "jp_conversation",
  "jp_mcp",
  "schemars 1.0.0-alpha.17",
@@ -2317,7 +2297,6 @@ dependencies = [
  "tempfile",
  "test-log",
  "thiserror 2.0.12",
- "time",
  "toml 0.8.20",
  "tracing",
 ]
@@ -2377,7 +2356,6 @@ dependencies = [
  "jp_storage",
  "jp_tombmap",
  "serde",
- "serde_json",
  "tempfile",
  "test-log",
  "thiserror 2.0.12",

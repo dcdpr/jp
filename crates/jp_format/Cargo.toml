@@ -14,8 +14,6 @@ version.workspace = true
 
 [dependencies]
 jp_conversation = { workspace = true }
-jp_id = { workspace = true }
-jp_term = { workspace = true }
 
 comfy-table = { workspace = true }
 crossterm = { workspace = true }

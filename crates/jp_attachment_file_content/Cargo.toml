@@ -17,7 +17,7 @@ jp_attachment = { workspace = true }
 jp_mcp = { workspace = true }
 
 async-trait = { workspace = true }
-crossbeam-channel = { workspace = true }
+crossbeam-channel = { workspace = true, features = ["std"] }
 glob = { workspace = true }
 ignore = { workspace = true }
 serde = { workspace = true }

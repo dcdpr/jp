@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        task: [build, lint, fmt, test, docs, coverage, deny, insta]
+        task: [build, lint, fmt, test, docs, coverage, deny, insta, shear]
     name: ${{ matrix.task }}
     steps:
       - uses: actions/cache/restore@36f1e144e1c8edb0a652766b484448563d8baf46 # v4

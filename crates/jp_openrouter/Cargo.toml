@@ -23,7 +23,7 @@ reqwest = { workspace = true, features = [
     "rustls-tls",
     "stream",
 ] }
-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
 time = { workspace = true, features = [
