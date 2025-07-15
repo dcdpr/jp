@@ -22,7 +22,7 @@ jobs:
         task: [build, lint, fmt, test, docs, coverage, deny, insta, shear]
     name: ${{ matrix.task }}
     steps:
-      - uses: actions/cache/restore@36f1e144e1c8edb0a652766b484448563d8baf46 # v4
+      - uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         id: cache
         with:
           path: |
@@ -33,10 +33,11 @@ jobs:
           key: toolchain-${{ matrix.task }}
       - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
       - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
-      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      - uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
         with:
           key: ${{ matrix.task }}
           cache-bin: false
+          cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: just ${{ matrix.task }}-ci
       - if: ${{ matrix.task == 'coverage' }}
@@ -44,7 +45,7 @@ jobs:
         with:
           file: lcov.info
       - if: ${{ github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@36f1e144e1c8edb0a652766b484448563d8baf46 # v4
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
           path: |
             ~/.rustup
