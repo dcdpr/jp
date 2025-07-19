@@ -1,3 +1,16 @@
+# .jp files
 .jp/conversations/**/messages.json
-docs/.vitepress/dist
-docs/.vitepress/cache
+.jp/QUERY_MESSAGE.md
+
+# docs
+docs/.yarn/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+docs/.pnp.*
+docs/yarn.lock
+
+# rust
+**/target/**
+
+# misc
+.git/
