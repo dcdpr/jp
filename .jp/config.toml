@@ -6,18 +6,11 @@ id = "anthropic/claude-sonnet-4-0"
 [conversation.title.generate]
 auto = true
 
-[conversation]
-mcp_servers = ["bookworm"]
-
 [conversation.title.generate.model]
 id = "anthropic/claude-3-5-haiku-latest"
 
 [style.code]
 copy_link = "osc8"
-
-[style.typewriter]
-code_delay = "0"
-text_delay = "0"
 
 [mcp.servers."*".tools."*"]
 run = "always"
