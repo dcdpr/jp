@@ -6,7 +6,7 @@ Ok(
     Reply(
         [
             Content(
-                "This is an automated response from the AI. You sent a test message, and I'm here to acknowledge it! If you have any questions or need assistance with anything, feel free to ask.",
+                "This is a test! I'm receiving your message and responding accordingly. Please feel free to send me any questions or topics you'd like to discuss, and I'll do my best to help!",
             ),
         ],
     ),

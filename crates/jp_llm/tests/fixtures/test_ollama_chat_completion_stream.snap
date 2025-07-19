@@ -2,4 +2,4 @@
 source: crates/jp_test/src/mock.rs
 expression: expr
 ---
-"This is a test message. I'm receiving it just fine!"
+"It looks like you're testing out our chat! That's perfectly fine - I'm here to help answer any questions or have a conversation with you. Is there anything specific you'd like to talk about, or are you just looking for some friendly chatter?"
