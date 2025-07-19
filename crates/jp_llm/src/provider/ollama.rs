@@ -242,6 +242,10 @@ fn create_request(
 
     request = request.options(options);
 
+    if parameters.reasoning.is_some() {
+        request = request.think(true);
+    }
+
     Ok(request)
 }
 
@@ -321,6 +325,7 @@ impl TryFrom<(Thread, ToolChoice)> for Messages {
                 content: system_prompt,
                 tool_calls: vec![],
                 images: None,
+                thinking: None,
             });
         }
 
@@ -390,6 +395,7 @@ impl TryFrom<(Thread, ToolChoice)> for Messages {
                 content: content.join("\n\n"),
                 tool_calls: vec![],
                 images: None,
+                thinking: None,
             });
         }
 
@@ -403,6 +409,7 @@ impl TryFrom<(Thread, ToolChoice)> for Messages {
                     .into(),
                 tool_calls: vec![],
                 images: None,
+                thinking: None,
             });
         }
 
@@ -420,6 +427,7 @@ impl TryFrom<(Thread, ToolChoice)> for Messages {
                     content: text,
                     tool_calls: vec![],
                     images: None,
+                    thinking: None,
                 });
             }
             UserMessage::ToolCallResults(results) => {
@@ -428,6 +436,7 @@ impl TryFrom<(Thread, ToolChoice)> for Messages {
                     content: result.content,
                     tool_calls: vec![],
                     images: None,
+                    thinking: None,
                 }));
             }
         }
@@ -451,6 +460,7 @@ fn user_message_to_messages(user: UserMessage) -> Vec<ChatMessage> {
             content: query,
             tool_calls: vec![],
             images: None,
+            thinking: None,
         }],
         UserMessage::Query(_) => vec![],
         UserMessage::ToolCallResults(results) => results
@@ -460,6 +470,7 @@ fn user_message_to_messages(user: UserMessage) -> Vec<ChatMessage> {
                 content: result.content,
                 tool_calls: vec![],
                 images: None,
+                thinking: None,
             })
             .collect(),
     }
@@ -467,6 +478,7 @@ fn user_message_to_messages(user: UserMessage) -> Vec<ChatMessage> {
 
 fn assistant_message_to_messages(assistant: AssistantMessage) -> Vec<ChatMessage> {
     let AssistantMessage {
+        reasoning,
         content,
         tool_calls,
         ..
@@ -479,23 +491,27 @@ fn assistant_message_to_messages(assistant: AssistantMessage) -> Vec<ChatMessage
             content: text,
             tool_calls: vec![],
             images: None,
+            thinking: reasoning,
         });
     }
 
-    items.push(ChatMessage {
-        role: MessageRole::Assistant,
-        content: String::new(),
-        tool_calls: tool_calls
-            .into_iter()
-            .map(|call| ToolCall {
-                function: ToolCallFunction {
-                    name: call.name,
-                    arguments: call.arguments,
-                },
-            })
-            .collect(),
-        images: None,
-    });
+    if !tool_calls.is_empty() {
+        items.push(ChatMessage {
+            role: MessageRole::Assistant,
+            content: String::new(),
+            tool_calls: tool_calls
+                .into_iter()
+                .map(|call| ToolCall {
+                    function: ToolCallFunction {
+                        name: call.name,
+                        arguments: call.arguments,
+                    },
+                })
+                .collect(),
+            images: None,
+            thinking: None,
+        });
+    }
 
     items
 }
