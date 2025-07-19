@@ -7,15 +7,4 @@ then:
   header:
     - name: content-type
       value: application/json; charset=utf-8
-  body: "{\"model\":\"llama3.1:8b\",\"created_at\":\"2025-07-19T22:35:40.453554Z\",\"message\":{\"role\":\"assistant\",\"content\":\"{\\\"name\\\": \\\"generate_structured_data\\\", \\\"parameters\\\": {\\\"titles\\\": [\\\"[\\\"\\\"Test Message Conversation\\\"\\\", \\\"\\\"Short Titles Example\\\"\\\", \\\"\\\"Concise Descriptions Required\\\"\\\"]\\\"}}\"},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":7414630458,\"load_duration\":5774328083,\"prompt_eval_count\":214,\"prompt_eval_duration\":856115084,\"eval_count\":38,\"eval_duration\":778838750}"
----
-when:
-  path: /api/chat
-  method: POST
-  body: "{\"model\":\"llama3.1:8b\",\"messages\":[{\"role\":\"user\",\"content\":\"Test message\",\"tool_calls\":[],\"thinking\":null},{\"role\":\"user\",\"content\":\"Generate 3 concise, descriptive, factual titles for this conversation. Try to keep them short and to the point, no more than 50 characters.\\n\\nDO NOT generate titles about the request to generate titles!\",\"tool_calls\":[],\"thinking\":null}],\"tools\":[{\"type\":\"Function\",\"function\":{\"name\":\"generate_structured_data\",\"description\":\"Generate structured data\",\"parameters\":{\"description\":\"Generate 3 concise, descriptive factual titles for this conversation.\",\"type\":\"object\",\"properties\":{\"titles\":{\"type\":\"array\",\"items\":{\"description\":\"A concise, descriptive title for the conversation\",\"type\":\"string\"}}},\"required\":[\"titles\"],\"additionalProperties\":false}}}],\"options\":{},\"stream\":false,\"think\":null}"
-then:
-  status: 200
-  header:
-    - name: content-type
-      value: application/json; charset=utf-8
-  body: "{\"model\":\"llama3.1:8b\",\"created_at\":\"2025-07-19T22:35:41.160929Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"generate_structured_data\",\"arguments\":{\"titles\":[\"Test message conversation\",\"Message testing discussion\",\"Conversational test analysis\"]}}}]},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":701716084,\"load_duration\":26588584,\"prompt_eval_count\":214,\"prompt_eval_duration\":21015792,\"eval_count\":32,\"eval_duration\":653476542}"
+  body: "{\"model\":\"llama3.1:8b\",\"created_at\":\"2025-07-19T22:40:10.927963Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"generate_structured_data\",\"arguments\":{\"titles\":[\"Conversation Test Message\",\"User Inquiry - Test Message\",\"Test Message Response Needed\"]}}}]},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":1007610541,\"load_duration\":52714833,\"prompt_eval_count\":214,\"prompt_eval_duration\":236819542,\"eval_count\":35,\"eval_duration\":717295500}"
