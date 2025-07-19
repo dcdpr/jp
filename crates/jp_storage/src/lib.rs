@@ -68,35 +68,41 @@ impl Storage {
         Ok(Self { root, user: None })
     }
 
-    pub fn with_user_storage(mut self, path: impl Into<PathBuf>) -> Result<Self> {
-        let path: PathBuf = path.into();
+    pub fn with_user_storage(
+        mut self,
+        root: &Path,
+        name: impl Into<String>,
+        id: impl Into<String>,
+    ) -> Result<Self> {
+        let name: String = name.into();
+        let id: String = id.into();
+        let mut path = root.join(format!("{name}-{id}"));
 
         // Create user storage directory, if needed.
-        if path.exists() {
-            if !path.is_dir() {
-                return Err(Error::NotDir(path));
+        if root.exists()
+            && let Some(existing_path) = fs::read_dir(root)?.find_map(|entry| {
+                let path = entry.ok()?.path();
+                path.to_string_lossy().ends_with(&id).then_some(path)
+            })
+        {
+            if !existing_path.is_dir() {
+                return Err(Error::NotDir(existing_path));
             }
 
-            if let Some(path) = path
+            // If the symlink already exists, but points to a different instance
+            // of the workspace, remove the symlink, so we can re-link to the
+            // current workspace instance.
+            if let Some(existing) = existing_path
                 .join("storage")
                 .read_link()
                 .ok()
                 .filter(|v| v != &self.root)
             {
-                // TODO: Perhaps we could re-link the user storage to the new
-                // path whenever the CLI runs from a "copy" of a workspace with
-                // the same ID? This might be possible, but I'm not sure what
-                // the implications could be down the road.
-                //
-                // For now, we just warn and disable user storage. This is an
-                // edge case when someone (e.g.) clones a repository twice in
-                // different locations, and then runs `jp` from each location.
-                warn!(
-                    "Workspace with same ID already exists at {}, disabling user storage.",
-                    path.display()
-                );
-                return Ok(self);
+                trace!(existing = %existing.display(), "Removing existing user storage symlink.");
+                fs::remove_file(existing_path.join("storage"))?;
             }
+
+            path = existing_path;
         } else {
             fs::create_dir_all(&path)?;
             trace!(path = %path.display(), "Created user storage directory.");
@@ -614,14 +620,17 @@ mod tests {
     fn test_load_user_conversations_metadata_reads_existing() {
         let original_dir = tempdir().unwrap();
         let user_dir = tempdir().unwrap();
-        let meta_path = user_dir.path().join(METADATA_FILE);
+        let name = "test";
+        let id = "1234";
+        let user_workspace_dir = user_dir.path().join(format!("{name}-{id}"));
+        let meta_path = user_workspace_dir.join(METADATA_FILE);
         let existing_id = ConversationId::default();
         let existing_meta = ConversationsMetadata::new(existing_id);
         write_json(&meta_path, &existing_meta).unwrap();
 
         let storage = Storage::new(original_dir.path())
             .unwrap()
-            .with_user_storage(user_dir.path())
+            .with_user_storage(user_dir.path(), name, id)
             .unwrap();
         let loaded_meta = storage.load_conversations_metadata().unwrap();
         assert_eq!(loaded_meta, existing_meta);
@@ -631,10 +640,12 @@ mod tests {
     fn test_load_user_conversations_metadata_creates_default_when_missing() {
         let storage_dir = tempdir().unwrap();
         let user_dir = tempdir().unwrap();
+        let name = "test";
+        let id = "1234";
 
         let storage = Storage::new(storage_dir.path())
             .unwrap()
-            .with_user_storage(user_dir.path())
+            .with_user_storage(user_dir.path(), name, id)
             .unwrap();
         let loaded_meta = storage.load_conversations_metadata().unwrap();
         let default_meta = ConversationsMetadata::default();

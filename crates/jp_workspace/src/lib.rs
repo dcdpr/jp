@@ -123,17 +123,14 @@ impl Workspace {
     pub fn with_local_storage(mut self) -> Result<Self> {
         let storage = self.storage.take().ok_or(Error::MissingStorage)?;
 
-        // Create unique local storage path based on (hashed) workspace path.
-        let local = user_data_dir()?.join(format!(
-            "{}-{}",
-            self.root
-                .file_name()
-                .ok_or_else(|| Error::NotDir(self.root.clone()))?
-                .to_string_lossy(),
-            &self.id,
-        ));
+        let id: &str = &self.id;
+        let name = self
+            .root
+            .file_name()
+            .ok_or_else(|| Error::NotDir(self.root.clone()))?
+            .to_string_lossy();
 
-        self.storage = Some(storage.with_user_storage(local)?);
+        self.storage = Some(storage.with_user_storage(&user_data_dir()?, name, id)?);
         Ok(self)
     }
 
