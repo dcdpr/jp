@@ -14,7 +14,12 @@ pub fn is_file_dirty(root: &Path, file: &Path) -> Result<bool, Error> {
         .output()?;
 
     if !output.status.success() {
-        return Err("Git command failed".into());
+        return Err(format!(
+            "Git command failed ({}): {}",
+            output.status.code().unwrap_or_default(),
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
     }
 
     Ok(!output.stdout.is_empty())
