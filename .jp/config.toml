@@ -16,6 +16,44 @@ copy_link = "osc8"
 run = "always"
 result = "always"
 
+[mcp.servers.embedded.tools.fs_read_file]
+run = "always"
+result = "always"
+style.inline_results = "off"
+style.results_file_link = "osc8"
+
+[mcp.servers.embedded.tools.fs_grep_files]
+run = "always"
+result = "always"
+style.inline_results = "10"
+style.results_file_link = "osc8"
+
+[mcp.servers.embedded.tools.fs_list_files]
+run = "always"
+result = "always"
+style.inline_results = "10"
+style.results_file_link = "osc8"
+
+[mcp.servers.github.tools."*"]
+run = "ask"
+style.inline_results = "off"
+style.results_file_link = "osc8"
+
+[mcp.servers.bookworm.tools."*"]
+run = "always"
+style.inline_results = "off"
+style.results_file_link = "osc8"
+
+[mcp.servers.github.tools.github_issues]
+run = "always"
+style.inline_results = "off"
+style.results_file_link = "osc8"
+
+[mcp.servers.github.tools.github_pulls]
+run = "always"
+style.inline_results = "off"
+style.results_file_link = "osc8"
+
 [mcp.servers."*".tools.create_issue_bug]
 run = "ask"
 

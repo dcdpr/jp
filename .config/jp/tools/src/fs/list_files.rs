@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use ignore::Walk;
+use ignore::{WalkBuilder, WalkState};
 
 use crate::Error;
 
@@ -17,29 +17,52 @@ pub(crate) async fn fs_list_files(
     let mut entries = vec![];
     for prefix in &prefixes {
         let prefixed = root.join(prefix.trim_start_matches('/'));
-        let matches = Walk::new(&prefixed)
-            // Ignore invalid entries.
-            .filter_map(Result::ok)
-            // Ignore non-files.
-            .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
-            // Ignore files that don't match the extension, if any.
-            .filter(|entry| {
-                extensions.as_ref().is_none_or(|extensions| {
-                    entry
-                        .path()
-                        .extension()
-                        .is_some_and(|ext| extensions.contains(&ext.to_string_lossy().into_owned()))
+
+        let (tx, matches) = crossbeam_channel::unbounded();
+        WalkBuilder::new(&prefixed)
+            // Include hidden and otherwise ignored files.
+            .standard_filters(false)
+            .follow_links(false)
+            // Respect `.ignore` files (also in parent directories).
+            .ignore(true)
+            .parents(true)
+            .build_parallel()
+            .run(|| {
+                let tx = tx.clone();
+                let extensions = extensions.clone();
+                let root = root.clone();
+                Box::new(move |entry| {
+                    // Ignore invalid entries.
+                    let Ok(entry) = entry else {
+                        return WalkState::Continue;
+                    };
+
+                    // Ignore non-files.
+                    if entry.file_type().is_none_or(|ft| !ft.is_file()) {
+                        return WalkState::Continue;
+                    }
+
+                    // Ignore files that don't match the extension, if any.
+                    if extensions.as_ref().is_some_and(|extensions| {
+                        entry.path().extension().is_some_and(|ext| {
+                            !extensions.contains(&ext.to_string_lossy().into_owned())
+                        })
+                    }) {
+                        return WalkState::Continue;
+                    }
+
+                    // Strip non-workspace prefix from files.
+                    let Ok(path) = entry.into_path().strip_prefix(&root).map(PathBuf::from) else {
+                        return WalkState::Continue;
+                    };
+
+                    let _result = tx.send(path.to_string_lossy().to_string());
+
+                    WalkState::Continue
                 })
-            })
-            // Strip non-workspace prefix from files.
-            .filter_map(|entry| {
-                entry
-                    .into_path()
-                    .strip_prefix(&root)
-                    .ok()
-                    .map(|path| path.to_string_lossy().into_owned())
             });
 
+        drop(tx);
         entries.extend(matches);
     }
 

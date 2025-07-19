@@ -64,7 +64,13 @@ pub(crate) async fn github_create_issue_enhancement(
     {
         let resource_links = resource_links
             .into_iter()
-            .map(|link| format!("- https://github.com/{ORG}/{REPO}/{link}"))
+            .map(|link| {
+                if link.starts_with("http") {
+                    link
+                } else {
+                    format!("- https://github.com/{ORG}/{REPO}/{link}")
+                }
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
