@@ -1,0 +1,14 @@
+inherit = "cargo"
+description = """
+Delete a file in the project's local filesystem.
+
+The file must exist, be a regular file, and have no uncommitted changes.
+"""
+
+[[properties]]
+name = "path"
+type = "string"
+required = true
+description = """
+The path to the file to delete. The path must be relative to the project's root.
+"""

@@ -1,0 +1,20 @@
+inherit = "cargo"
+description = """
+Create a new file in the project's local filesystem.
+"""
+
+[[properties]]
+name = "path"
+type = "string"
+required = true
+description = """
+The path to the file to create. The path must be relative to the project's root.
+"""
+
+[[properties]]
+name = "contents"
+type = "string"
+required = false
+description = """
+The contents of the file to create. If not specified, the file will be empty.
+"""
