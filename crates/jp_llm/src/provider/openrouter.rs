@@ -495,10 +495,9 @@ impl TryFrom<(&ModelId, Thread)> for RequestMessages {
                 slug = model_id.slug(),
                 "Model does not support caching directives, disabling cache."
             );
-
-            messages
-                .iter_mut()
-                .for_each(|m| m.content_mut().iter_mut().for_each(Content::disable_cache));
+            for m in &mut messages {
+                m.content_mut().iter_mut().for_each(Content::disable_cache);
+            }
         }
 
         Ok(RequestMessages(messages))
