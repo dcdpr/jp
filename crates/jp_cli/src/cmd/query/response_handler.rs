@@ -13,6 +13,9 @@ pub(super) struct ResponseHandler {
     /// How to render the response.
     pub render_mode: RenderMode,
 
+    /// Whether to render tool call request/results.
+    pub render_tool_calls: bool,
+
     /// The streamed, unprocessed lines received from the LLM.
     received: Vec<String>,
 
@@ -37,9 +40,10 @@ pub(super) struct ResponseHandler {
 }
 
 impl ResponseHandler {
-    pub fn new(render_mode: RenderMode) -> Self {
+    pub fn new(render_mode: RenderMode, render_tool_calls: bool) -> Self {
         Self {
             render_mode,
+            render_tool_calls,
             ..Default::default()
         }
     }

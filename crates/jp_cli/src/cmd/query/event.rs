@@ -77,8 +77,9 @@ impl StreamEventHandler {
     ) -> Result<Option<String>, Error> {
         self.tool_calls.push(call.clone());
 
-        let data = indoc::formatdoc!(
-            "\n\n
+        if handler.render_tool_calls {
+            let data = indoc::formatdoc!(
+                "\n\n
                     ---
                     calling tool: **{}**
 
@@ -88,11 +89,13 @@ impl StreamEventHandler {
                     ```
 
                 ",
-            call.name,
-            call.arguments
-        );
+                call.name,
+                call.arguments
+            );
 
-        handler.handle(&data, ctx, false)?;
+            handler.handle(&data, ctx, false)?;
+        }
+
         let result = call_tool(ctx, call.clone()).await?;
         self.tool_call_results.push(result.clone());
         build_tool_call_result(ctx, &call, &result, handler).await
@@ -170,7 +173,9 @@ async fn build_tool_call_result(
         data.clear();
     }
 
-    handler.handle(&data, ctx, false)?;
+    if handler.render_tool_calls {
+        handler.handle(&data, ctx, false)?;
+    }
 
     let link = match tool_cfg.style.results_file_link {
         LinkStyle::Off => None,
@@ -184,7 +189,9 @@ async fn build_tool_call_result(
         )),
     };
 
-    if let Some(link) = link {
+    if handler.render_tool_calls
+        && let Some(link) = link
+    {
         handler.handle(&link, ctx, true)?;
     }
 

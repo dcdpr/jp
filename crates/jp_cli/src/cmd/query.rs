@@ -121,6 +121,13 @@ pub(crate) struct Query {
     #[arg(long = "hide-reasoning")]
     hide_reasoning: bool,
 
+    /// Do not display tool calls.
+    ///
+    /// This does not stop the assistant from running tool calls, but it does
+    /// not display them in the output.
+    #[arg(long = "hide-tool-calls")]
+    hide_tool_calls: bool,
+
     /// Stream the assistant's response as it is generated.
     ///
     /// This is the default behaviour for TTY sessions, but can be forced for
@@ -475,7 +482,7 @@ impl Query {
             tool_call_results: vec![],
         };
 
-        let mut resp_handler = ResponseHandler::new(self.render_mode());
+        let mut printer = ResponseHandler::new(self.render_mode(), ctx.config.style.tool_call.show);
         let mut metadata = BTreeMap::new();
 
         while let Some(event) = stream.next().await {
@@ -508,7 +515,7 @@ impl Query {
                 StreamEvent::ChatChunk(chunk) => event_handler.handle_chat_chunk(ctx, chunk),
                 StreamEvent::ToolCall(call) => {
                     event_handler
-                        .handle_tool_call(ctx, call, &mut resp_handler)
+                        .handle_tool_call(ctx, call, &mut printer)
                         .await?
                 }
                 StreamEvent::Metadata(key, data) => {
@@ -521,12 +528,12 @@ impl Query {
                 continue;
             };
 
-            resp_handler.handle(&data, ctx, false)?;
+            printer.handle(&data, ctx, false)?;
         }
 
         // Ensure we handle the last line of the stream.
-        if !resp_handler.buffer.is_empty() {
-            resp_handler.handle("\n", ctx, false)?;
+        if !printer.buffer.is_empty() {
+            printer.handle("\n", ctx, false)?;
         }
 
         let content_tokens = event_handler.content_tokens.trim().to_string();
@@ -545,8 +552,8 @@ impl Query {
             Some(reasoning_tokens)
         };
 
-        if let RenderMode::Buffered = resp_handler.render_mode {
-            println!("{}", resp_handler.parsed.join("\n"));
+        if let RenderMode::Buffered = printer.render_mode {
+            println!("{}", printer.parsed.join("\n"));
         } else if content.is_some() || reasoning.is_some() {
             // Final newline.
             println!();
@@ -662,6 +669,10 @@ impl IntoPartialConfig for Query {
         // Hide reasoning.
         if self.hide_reasoning {
             partial.style.reasoning.show = Some(false);
+        }
+        // Hide tool calls.
+        if self.hide_tool_calls {
+            partial.style.tool_call.show = Some(false);
         }
         // Tool choice.
         partial.assistant.tool_choice = self.tool_choice.as_ref().map(|v| match v.as_deref() {
