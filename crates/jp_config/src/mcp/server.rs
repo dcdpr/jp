@@ -128,26 +128,26 @@ impl Server {
         let id = ToolId(id.to_owned());
 
         let defaults = self.tools.get(&global_id).cloned().unwrap_or_default();
-        let mut tool = self.tools.get(&id);
+        let tool = self.tools.get(&id);
 
         Tool {
             enable: tool
-                .take_if(|s| s.enable != defaults.enable)
+                .filter(|s| s.enable != defaults.enable)
                 .unwrap_or(&defaults)
                 .enable,
 
             run: tool
-                .take_if(|s| s.run != defaults.run)
+                .filter(|s| s.run != defaults.run)
                 .unwrap_or(&defaults)
                 .run,
 
             result: tool
-                .take_if(|s| s.result != defaults.result)
+                .filter(|s| s.result != defaults.result)
                 .unwrap_or(&defaults)
                 .result,
 
             style: tool
-                .take_if(|s| s.style != defaults.style)
+                .filter(|s| s.style != defaults.style)
                 .unwrap_or(&defaults)
                 .style
                 .clone(),
@@ -167,6 +167,12 @@ impl Default for Server {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ToolId(String);
+
+impl ToolId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+}
 
 impl Deref for ToolId {
     type Target = str;
@@ -239,5 +245,354 @@ impl Partial for ServerPartial {
                 .binary_checksum
                 .as_ref()
                 .is_some_and(Partial::is_complete)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        mcp::{
+            server::{
+                tool::{ResultMode, RunMode, Tool},
+                ToolId,
+            },
+            tool_call::{InlineResults, ToolCall},
+        },
+        style::LinkStyle,
+    };
+
+    #[test]
+    #[expect(clippy::too_many_lines)]
+    fn test_server_get_tool_with_defaults() {
+        struct TestCase {
+            tools: Vec<(&'static str, Tool)>,
+            input: &'static str,
+            expected: Tool,
+        }
+
+        let cases = vec![
+            ("no tools", TestCase {
+                tools: vec![],
+                input: "foo",
+                expected: Tool::default(),
+            }),
+            ("truncated inline results merge test", TestCase {
+                tools: vec![
+                    ("*", Tool {
+                        enable: true,
+                        run: RunMode::Ask,
+                        result: ResultMode::Always,
+                        style: ToolCall {
+                            inline_results: InlineResults::Truncate { lines: 5 },
+                            results_file_link: LinkStyle::Osc8,
+                        },
+                    }),
+                    ("specific", Tool {
+                        enable: true,
+                        run: RunMode::Ask,
+                        result: ResultMode::Always,
+                        style: ToolCall {
+                            inline_results: InlineResults::Truncate { lines: 20 },
+                            results_file_link: LinkStyle::Osc8,
+                        },
+                    }),
+                ],
+                input: "specific",
+                expected: Tool {
+                    enable: true,
+                    run: RunMode::Ask,
+                    result: ResultMode::Always,
+                    style: ToolCall {
+                        inline_results: InlineResults::Truncate { lines: 20 },
+                        results_file_link: LinkStyle::Osc8,
+                    },
+                },
+            }),
+            ("no match", TestCase {
+                tools: vec![("foo", Tool {
+                    enable: false,
+                    ..Tool::default()
+                })],
+                input: "bar",
+                expected: Tool::default(),
+            }),
+            ("single match", TestCase {
+                tools: vec![("foo", Tool {
+                    enable: false,
+                    ..Tool::default()
+                })],
+                input: "foo",
+                expected: Tool {
+                    enable: false,
+                    ..Tool::default()
+                },
+            }),
+            ("global defaults only", TestCase {
+                tools: vec![("*", Tool {
+                    enable: false,
+                    ..Tool::default()
+                })],
+                input: "nonexistent",
+                expected: Tool {
+                    enable: false,
+                    ..Tool::default()
+                },
+            }),
+            ("merge with global defaults - full override", TestCase {
+                tools: vec![
+                    ("*", Tool {
+                        enable: false,
+                        run: RunMode::Edit,
+                        result: ResultMode::Ask,
+                        style: ToolCall {
+                            inline_results: InlineResults::Off,
+                            results_file_link: LinkStyle::Off,
+                        },
+                    }),
+                    ("specific", Tool {
+                        enable: true,
+                        run: RunMode::Always,
+                        result: ResultMode::Edit,
+                        style: ToolCall {
+                            inline_results: InlineResults::Truncate { lines: 10 },
+                            results_file_link: LinkStyle::Full,
+                        },
+                    }),
+                ],
+                input: "specific",
+                expected: Tool {
+                    enable: true,
+                    run: RunMode::Always,
+                    result: ResultMode::Edit,
+                    style: ToolCall {
+                        inline_results: InlineResults::Truncate { lines: 10 },
+                        results_file_link: LinkStyle::Full,
+                    },
+                },
+            }),
+            (
+                "merge with global defaults - partial override enable only",
+                TestCase {
+                    tools: vec![
+                        ("*", Tool {
+                            enable: false,
+                            run: RunMode::Edit,
+                            result: ResultMode::Ask,
+                            style: ToolCall {
+                                inline_results: InlineResults::Off,
+                                results_file_link: LinkStyle::Off,
+                            },
+                        }),
+                        ("specific", Tool {
+                            enable: true,
+                            run: RunMode::Edit,
+                            result: ResultMode::Ask,
+                            style: ToolCall {
+                                inline_results: InlineResults::Off,
+                                results_file_link: LinkStyle::Off,
+                            },
+                        }),
+                    ],
+                    input: "specific",
+                    expected: Tool {
+                        enable: true,
+                        run: RunMode::Edit,
+                        result: ResultMode::Ask,
+                        style: ToolCall {
+                            inline_results: InlineResults::Off,
+                            results_file_link: LinkStyle::Off,
+                        },
+                    },
+                },
+            ),
+            (
+                "merge with global defaults - partial override run only",
+                TestCase {
+                    tools: vec![
+                        ("*", Tool {
+                            enable: false,
+                            run: RunMode::Edit,
+                            result: ResultMode::Ask,
+                            style: ToolCall {
+                                inline_results: InlineResults::Off,
+                                results_file_link: LinkStyle::Off,
+                            },
+                        }),
+                        ("specific", Tool {
+                            enable: false,
+                            run: RunMode::Always,
+                            result: ResultMode::Ask,
+                            style: ToolCall {
+                                inline_results: InlineResults::Off,
+                                results_file_link: LinkStyle::Off,
+                            },
+                        }),
+                    ],
+                    input: "specific",
+                    expected: Tool {
+                        enable: false,
+                        run: RunMode::Always,
+                        result: ResultMode::Ask,
+                        style: ToolCall {
+                            inline_results: InlineResults::Off,
+                            results_file_link: LinkStyle::Off,
+                        },
+                    },
+                },
+            ),
+            (
+                "merge with global defaults - partial override result only",
+                TestCase {
+                    tools: vec![
+                        ("*", Tool {
+                            enable: false,
+                            run: RunMode::Edit,
+                            result: ResultMode::Ask,
+                            style: ToolCall {
+                                inline_results: InlineResults::Off,
+                                results_file_link: LinkStyle::Off,
+                            },
+                        }),
+                        ("specific", Tool {
+                            enable: false,
+                            run: RunMode::Edit,
+                            result: ResultMode::Edit,
+                            style: ToolCall {
+                                inline_results: InlineResults::Off,
+                                results_file_link: LinkStyle::Off,
+                            },
+                        }),
+                    ],
+                    input: "specific",
+                    expected: Tool {
+                        enable: false,
+                        run: RunMode::Edit,
+                        result: ResultMode::Edit,
+                        style: ToolCall {
+                            inline_results: InlineResults::Off,
+                            results_file_link: LinkStyle::Off,
+                        },
+                    },
+                },
+            ),
+            (
+                "merge with global defaults - partial override style inline_results only",
+                TestCase {
+                    tools: vec![
+                        ("*", Tool {
+                            enable: false,
+                            run: RunMode::Edit,
+                            result: ResultMode::Ask,
+                            style: ToolCall {
+                                inline_results: InlineResults::Off,
+                                results_file_link: LinkStyle::Off,
+                            },
+                        }),
+                        ("specific", Tool {
+                            enable: false,
+                            run: RunMode::Edit,
+                            result: ResultMode::Ask,
+                            style: ToolCall {
+                                inline_results: InlineResults::Full,
+                                results_file_link: LinkStyle::Off,
+                            },
+                        }),
+                    ],
+                    input: "specific",
+                    expected: Tool {
+                        enable: false,
+                        run: RunMode::Edit,
+                        result: ResultMode::Ask,
+                        style: ToolCall {
+                            inline_results: InlineResults::Full,
+                            results_file_link: LinkStyle::Off,
+                        },
+                    },
+                },
+            ),
+            (
+                "merge with global defaults - partial override style results_file_link only",
+                TestCase {
+                    tools: vec![
+                        ("*", Tool {
+                            enable: false,
+                            run: RunMode::Edit,
+                            result: ResultMode::Ask,
+                            style: ToolCall {
+                                inline_results: InlineResults::Off,
+                                results_file_link: LinkStyle::Off,
+                            },
+                        }),
+                        ("specific", Tool {
+                            enable: false,
+                            run: RunMode::Edit,
+                            result: ResultMode::Ask,
+                            style: ToolCall {
+                                inline_results: InlineResults::Off,
+                                results_file_link: LinkStyle::Full,
+                            },
+                        }),
+                    ],
+                    input: "specific",
+                    expected: Tool {
+                        enable: false,
+                        run: RunMode::Edit,
+                        result: ResultMode::Ask,
+                        style: ToolCall {
+                            inline_results: InlineResults::Off,
+                            results_file_link: LinkStyle::Full,
+                        },
+                    },
+                },
+            ),
+            ("exact match with defaults should use defaults", TestCase {
+                tools: vec![
+                    ("*", Tool {
+                        enable: false,
+                        run: RunMode::Edit,
+                        result: ResultMode::Ask,
+                        style: ToolCall {
+                            inline_results: InlineResults::Off,
+                            results_file_link: LinkStyle::Off,
+                        },
+                    }),
+                    ("specific", Tool {
+                        enable: false,
+                        run: RunMode::Edit,
+                        result: ResultMode::Ask,
+                        style: ToolCall {
+                            inline_results: InlineResults::Off,
+                            results_file_link: LinkStyle::Off,
+                        },
+                    }),
+                ],
+                input: "specific",
+                expected: Tool {
+                    enable: false,
+                    run: RunMode::Edit,
+                    result: ResultMode::Ask,
+                    style: ToolCall {
+                        inline_results: InlineResults::Off,
+                        results_file_link: LinkStyle::Off,
+                    },
+                },
+            }),
+        ];
+
+        for (name, test) in cases {
+            let server = Server {
+                enable: true,
+                binary_checksum: None,
+                tools: test
+                    .tools
+                    .into_iter()
+                    .map(|(k, v)| (ToolId::new(k), v))
+                    .collect::<ConfigMap<_, _>>(),
+            };
+
+            let received = server.get_tool_with_defaults(test.input);
+            assert_eq!(received, test.expected, "test case: {name}");
+        }
     }
 }

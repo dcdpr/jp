@@ -147,25 +147,394 @@ impl Mcp {
         let id = ServerId(id.to_owned());
 
         let defaults = self.servers.get(&global_id).cloned().unwrap_or_default();
-        let mut server = self.servers.get(&id);
+        let server = self.servers.get(&id);
 
         Server {
             enable: server
-                .take_if(|s| s.enable != defaults.enable)
+                .filter(|s| s.enable != defaults.enable)
                 .unwrap_or(&defaults)
                 .enable,
 
             binary_checksum: server
-                .take_if(|s| s.binary_checksum != defaults.binary_checksum)
+                .filter(|s| s.binary_checksum != defaults.binary_checksum)
                 .unwrap_or(&defaults)
                 .binary_checksum
                 .clone(),
 
             tools: server
-                .take_if(|s| s.tools != defaults.tools)
+                .filter(|s| s.tools != defaults.tools)
                 .unwrap_or(&defaults)
                 .tools
                 .clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mcp::server::{
+        checksum::{Algorithm, Checksum},
+        tool::Tool,
+        ToolId,
+    };
+
+    #[test]
+    #[expect(clippy::too_many_lines)]
+    fn test_mcp_get_server_with_defaults() {
+        struct TestCase {
+            servers: Vec<(&'static str, Server)>,
+            input: &'static str,
+            expected: Server,
+        }
+
+        let cases = vec![
+            ("no servers", TestCase {
+                servers: vec![],
+                input: "foo",
+                expected: Server {
+                    enable: true,
+                    binary_checksum: None,
+                    tools: ConfigMap::default(),
+                },
+            }),
+            ("no match", TestCase {
+                servers: vec![("foo", Server {
+                    enable: false,
+                    binary_checksum: Some(Checksum {
+                        algorithm: Algorithm::Sha256,
+                        value: "foo".to_owned(),
+                    }),
+                    tools: ConfigMap::default(),
+                })],
+                input: "bar",
+                expected: Server {
+                    enable: true,
+                    binary_checksum: None,
+                    tools: ConfigMap::default(),
+                },
+            }),
+            ("single match", TestCase {
+                servers: vec![("foo", Server {
+                    enable: false,
+                    binary_checksum: Some(Checksum {
+                        algorithm: Algorithm::Sha256,
+                        value: "bar".to_owned(),
+                    }),
+                    tools: ConfigMap::default(),
+                })],
+                input: "foo",
+                expected: Server {
+                    enable: false,
+                    binary_checksum: Some(Checksum {
+                        algorithm: Algorithm::Sha256,
+                        value: "bar".to_owned(),
+                    }),
+                    tools: ConfigMap::default(),
+                },
+            }),
+            ("global defaults only", TestCase {
+                servers: vec![("*", Server {
+                    enable: false,
+                    binary_checksum: Some(Checksum {
+                        algorithm: Algorithm::Sha256,
+                        value: "global".to_owned(),
+                    }),
+                    tools: ConfigMap::from_iter(vec![(ToolId::new("*"), Tool {
+                        enable: !Tool::default().enable,
+                        ..Tool::default()
+                    })]),
+                })],
+                input: "nonexistent",
+                expected: Server {
+                    enable: false,
+                    binary_checksum: Some(Checksum {
+                        algorithm: Algorithm::Sha256,
+                        value: "global".to_owned(),
+                    }),
+                    tools: ConfigMap::from_iter(vec![(ToolId::new("*"), Tool {
+                        enable: !Tool::default().enable,
+                        ..Tool::default()
+                    })]),
+                },
+            }),
+            ("merge with global defaults - full override", TestCase {
+                servers: vec![
+                    ("*", Server {
+                        enable: false,
+                        binary_checksum: Some(Checksum {
+                            algorithm: Algorithm::Sha256,
+                            value: "default".to_owned(),
+                        }),
+                        tools: ConfigMap::from_iter(vec![(ToolId::new("default_tool"), Tool {
+                            enable: !Tool::default().enable,
+                            ..Tool::default()
+                        })]),
+                    }),
+                    ("specific", Server {
+                        enable: true,
+                        binary_checksum: Some(Checksum {
+                            algorithm: Algorithm::Sha256,
+                            value: "specific".to_owned(),
+                        }),
+                        tools: ConfigMap::from_iter(vec![(
+                            ToolId::new("specific_tool"),
+                            Tool::default(),
+                        )]),
+                    }),
+                ],
+                input: "specific",
+                expected: Server {
+                    enable: true,
+                    binary_checksum: Some(Checksum {
+                        algorithm: Algorithm::Sha256,
+                        value: "specific".to_owned(),
+                    }),
+                    tools: ConfigMap::from_iter(vec![(
+                        ToolId::new("specific_tool"),
+                        Tool::default(),
+                    )]),
+                },
+            }),
+            (
+                "merge with global defaults - partial override enable only",
+                TestCase {
+                    servers: vec![
+                        ("*", Server {
+                            enable: false,
+                            binary_checksum: Some(Checksum {
+                                algorithm: Algorithm::Sha256,
+                                value: "default".to_owned(),
+                            }),
+                            tools: ConfigMap::from_iter(vec![(
+                                ToolId::new("default_tool"),
+                                Tool {
+                                    enable: !Tool::default().enable,
+                                    ..Tool::default()
+                                },
+                            )]),
+                        }),
+                        ("specific", Server {
+                            enable: true,
+                            binary_checksum: Some(Checksum {
+                                algorithm: Algorithm::Sha256,
+                                value: "default".to_owned(),
+                            }),
+                            tools: ConfigMap::from_iter(vec![(
+                                ToolId::new("default_tool"),
+                                Tool {
+                                    enable: !Tool::default().enable,
+                                    ..Tool::default()
+                                },
+                            )]),
+                        }),
+                    ],
+                    input: "specific",
+                    expected: Server {
+                        enable: true,
+                        binary_checksum: Some(Checksum {
+                            algorithm: Algorithm::Sha256,
+                            value: "default".to_owned(),
+                        }),
+                        tools: ConfigMap::from_iter(vec![(ToolId::new("default_tool"), Tool {
+                            enable: !Tool::default().enable,
+                            ..Tool::default()
+                        })]),
+                    },
+                },
+            ),
+            (
+                "merge with global defaults - partial override checksum only",
+                TestCase {
+                    servers: vec![
+                        ("*", Server {
+                            enable: false,
+                            binary_checksum: Some(Checksum {
+                                algorithm: Algorithm::Sha256,
+                                value: "default".to_owned(),
+                            }),
+                            tools: ConfigMap::from_iter(vec![(
+                                ToolId::new("default_tool"),
+                                Tool {
+                                    enable: !Tool::default().enable,
+                                    ..Tool::default()
+                                },
+                            )]),
+                        }),
+                        ("specific", Server {
+                            enable: false,
+                            binary_checksum: Some(Checksum {
+                                algorithm: Algorithm::Sha256,
+                                value: "specific".to_owned(),
+                            }),
+                            tools: ConfigMap::from_iter(vec![(
+                                ToolId::new("default_tool"),
+                                Tool {
+                                    enable: !Tool::default().enable,
+                                    ..Tool::default()
+                                },
+                            )]),
+                        }),
+                    ],
+                    input: "specific",
+                    expected: Server {
+                        enable: false,
+                        binary_checksum: Some(Checksum {
+                            algorithm: Algorithm::Sha256,
+                            value: "specific".to_owned(),
+                        }),
+                        tools: ConfigMap::from_iter(vec![(ToolId::new("default_tool"), Tool {
+                            enable: !Tool::default().enable,
+                            ..Tool::default()
+                        })]),
+                    },
+                },
+            ),
+            (
+                "merge with global defaults - partial override tools only",
+                TestCase {
+                    servers: vec![
+                        ("*", Server {
+                            enable: false,
+                            binary_checksum: Some(Checksum {
+                                algorithm: Algorithm::Sha256,
+                                value: "default".to_owned(),
+                            }),
+                            tools: ConfigMap::from_iter(vec![(
+                                ToolId::new("default_tool"),
+                                Tool {
+                                    enable: !Tool::default().enable,
+                                    ..Tool::default()
+                                },
+                            )]),
+                        }),
+                        ("specific", Server {
+                            enable: false,
+                            binary_checksum: Some(Checksum {
+                                algorithm: Algorithm::Sha256,
+                                value: "default".to_owned(),
+                            }),
+                            tools: ConfigMap::from_iter(vec![(
+                                ToolId::new("specific_tool"),
+                                Tool::default(),
+                            )]),
+                        }),
+                    ],
+                    input: "specific",
+                    expected: Server {
+                        enable: false,
+                        binary_checksum: Some(Checksum {
+                            algorithm: Algorithm::Sha256,
+                            value: "default".to_owned(),
+                        }),
+                        tools: ConfigMap::from_iter(vec![(
+                            ToolId::new("specific_tool"),
+                            Tool::default(),
+                        )]),
+                    },
+                },
+            ),
+            ("merge None checksum with Some default", TestCase {
+                servers: vec![
+                    ("*", Server {
+                        enable: true,
+                        binary_checksum: Some(Checksum {
+                            algorithm: Algorithm::Sha256,
+                            value: "default".to_owned(),
+                        }),
+                        tools: ConfigMap::default(),
+                    }),
+                    ("specific", Server {
+                        enable: true,
+                        binary_checksum: None,
+                        tools: ConfigMap::default(),
+                    }),
+                ],
+                input: "specific",
+                expected: Server {
+                    enable: true,
+                    binary_checksum: None,
+                    tools: ConfigMap::default(),
+                },
+            }),
+            ("merge Some checksum with None default", TestCase {
+                servers: vec![
+                    ("*", Server {
+                        enable: true,
+                        binary_checksum: None,
+                        tools: ConfigMap::default(),
+                    }),
+                    ("specific", Server {
+                        enable: true,
+                        binary_checksum: Some(Checksum {
+                            algorithm: Algorithm::Sha256,
+                            value: "specific".to_owned(),
+                        }),
+                        tools: ConfigMap::default(),
+                    }),
+                ],
+                input: "specific",
+                expected: Server {
+                    enable: true,
+                    binary_checksum: Some(Checksum {
+                        algorithm: Algorithm::Sha256,
+                        value: "specific".to_owned(),
+                    }),
+                    tools: ConfigMap::default(),
+                },
+            }),
+            ("exact match with defaults should use defaults", TestCase {
+                servers: vec![
+                    ("*", Server {
+                        enable: false,
+                        binary_checksum: Some(Checksum {
+                            algorithm: Algorithm::Sha256,
+                            value: "same".to_owned(),
+                        }),
+                        tools: ConfigMap::from_iter(vec![(ToolId::new("tool"), Tool {
+                            enable: !Tool::default().enable,
+                            ..Tool::default()
+                        })]),
+                    }),
+                    ("specific", Server {
+                        enable: false,
+                        binary_checksum: Some(Checksum {
+                            algorithm: Algorithm::Sha256,
+                            value: "same".to_owned(),
+                        }),
+                        tools: ConfigMap::from_iter(vec![(ToolId::new("tool"), Tool {
+                            enable: !Tool::default().enable,
+                            ..Tool::default()
+                        })]),
+                    }),
+                ],
+                input: "specific",
+                expected: Server {
+                    enable: false,
+                    binary_checksum: Some(Checksum {
+                        algorithm: Algorithm::Sha256,
+                        value: "same".to_owned(),
+                    }),
+                    tools: ConfigMap::from_iter(vec![(ToolId::new("tool"), Tool {
+                        enable: !Tool::default().enable,
+                        ..Tool::default()
+                    })]),
+                },
+            }),
+        ];
+
+        for (name, test) in cases {
+            let mcp = Mcp {
+                servers: test
+                    .servers
+                    .into_iter()
+                    .map(|(k, v)| (ServerId(k.to_string()), v))
+                    .collect(),
+            };
+
+            let received = mcp.get_server_with_defaults(test.input);
+            dbg!(&received);
+            assert_eq!(received, test.expected, "test case: {name}");
         }
     }
 }

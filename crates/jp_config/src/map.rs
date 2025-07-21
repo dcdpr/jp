@@ -139,6 +139,25 @@ where
     }
 }
 
+impl<K, V> FromIterator<(K, V)> for ConfigMap<K, V>
+where
+    K: Hash + Eq,
+    V: Config,
+{
+    /// Create a `ConfigMap` from the sequence of key-value pairs in the
+    /// iterable.
+    ///
+    /// `from_iter` uses the same logic as `extend`. See
+    /// [`extend`][IndexMap::extend] for more details.
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iterable: I) -> Self {
+        let iter = iterable.into_iter();
+        let (low, _) = iter.size_hint();
+        let mut map = IndexMap::with_capacity_and_hasher(low, <_>::default());
+        map.extend(iter);
+        Self(map)
+    }
+}
+
 // See: <https://serde.rs/deserialize-map.html>
 struct ConfigMapVisitor<K, V: Config> {
     marker: PhantomData<fn() -> ConfigMap<K, V>>,
