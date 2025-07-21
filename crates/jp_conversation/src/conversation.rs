@@ -16,7 +16,7 @@ use crate::error::{Error, Result};
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Conversation {
     /// The optional title of the conversation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub title: Option<String>,
 
     /// The last time the conversation was activated.
@@ -52,10 +52,12 @@ impl Serialize for Conversation {
         state.serialize_field("last_activated_at", &self.last_activated_at)?;
         state.serialize_field("local", &self.user)?;
 
-        state.serialize_field(
-            "config",
-            &trim_config(self.config.clone()).map_err(S::Error::custom)?,
-        )?;
+        let config = trim_config(self.config.clone()).map_err(S::Error::custom)?;
+        if let serde_json::Value::Object(v) = &config
+            && !v.is_empty()
+        {
+            state.serialize_field("config", &config)?;
+        }
 
         state.end()
     }
@@ -256,8 +258,23 @@ impl Default for ConversationsMetadata {
 }
 
 fn trim_config(
-    cfg: jp_config::PartialConfig,
+    mut cfg: jp_config::PartialConfig,
 ) -> std::result::Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    let defaults = jp_config::PartialConfig::default_values();
+
+    if cfg.assistant.system_prompt == defaults.assistant.system_prompt {
+        cfg.assistant.system_prompt = None;
+    }
+
+    if cfg.mcp.servers == defaults.mcp.servers {
+        cfg.mcp.servers = <_>::empty();
+    }
+
+    cfg.inherit = None;
+    cfg.config_load_paths = None;
+    cfg.style = <_>::empty();
+    cfg.editor = <_>::empty();
+
     Ok(match serde_json::to_value(cfg)? {
         serde_json::Value::Object(v) => v
             .into_iter()
@@ -294,11 +311,6 @@ mod tests {
 
     #[test]
     fn test_conversation_serialization() {
-        let mut config = PartialConfig::default_values();
-        config.assistant.provider.openai.base_url = None;
-        config.assistant.provider.openrouter.app_name = None;
-        config.style.code = <_>::empty();
-
         let conv = Conversation {
             title: None,
             last_activated_at: UtcDateTime::new(
@@ -306,7 +318,7 @@ mod tests {
                 time::Time::MIDNIGHT,
             ),
             user: true,
-            config,
+            config: PartialConfig::default_values(),
         };
 
         insta::assert_json_snapshot!(conv);

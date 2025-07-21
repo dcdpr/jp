@@ -21,6 +21,9 @@ expression: "PartialConfig::default_values()"
     "reasoning": {
       "show": true
     },
+    "tool_call": {
+      "show": true
+    },
     "typewriter": {
       "text_delay": "3000u",
       "code_delay": "50u"
