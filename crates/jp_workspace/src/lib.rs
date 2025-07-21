@@ -123,6 +123,7 @@ impl Workspace {
     pub fn with_local_storage(mut self) -> Result<Self> {
         let storage = self.storage.take().ok_or(Error::MissingStorage)?;
 
+        let root = user_data_dir()?.join("workspace");
         let id: &str = &self.id;
         let name = self
             .root
@@ -130,7 +131,7 @@ impl Workspace {
             .ok_or_else(|| Error::NotDir(self.root.clone()))?
             .to_string_lossy();
 
-        self.storage = Some(storage.with_user_storage(&user_data_dir()?, name, id)?);
+        self.storage = Some(storage.with_user_storage(&root, name, id)?);
         Ok(self)
     }
 
