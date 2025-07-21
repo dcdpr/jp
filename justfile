@@ -28,7 +28,7 @@ issue-feat +ARGS="Please create a feature request for the following:\n\n": _inst
 [group('git')]
 commit +ARGS="Give me a commit message": _install-jp
     #!/usr/bin/env sh
-    if message=$(jp query --no-persist --new --cfg=personas/commit --hide-reasoning --no-tool {{ARGS}}); then
+    if message=$(jp query --no-persist --new --cfg=personas/commit {{ARGS}}); then
         echo "$message" | sed -e 's/\x1b\[[0-9;]*[mGKHF]//g' | git commit --edit --file=-
     fi
 
