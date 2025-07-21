@@ -318,6 +318,12 @@ impl From<crate::error::Error> for Error {
             CliConfig(error) => {
                 [("message", "CLI Config error".to_owned()), ("error", error)].into()
             }
+            UnknownModel { model, available } => [
+                ("message", "Unknown model".into()),
+                ("model", model),
+                ("available", available.join(", ")),
+            ]
+            .into(),
         };
 
         Self::from(metadata)
@@ -433,6 +439,7 @@ impl From<jp_llm::Error> for Error {
                 ("retry_after", retry_after.unwrap_or_default().to_string()),
             ]
             .into(),
+            UnknownModel(model) => [("message", "Unknown model".into()), ("model", model)].into(),
         };
 
         Self::from(metadata)
