@@ -222,7 +222,12 @@ pub async fn run() {
         Err(error) => parse_error(error, is_tty),
     };
 
-    println!("{output}");
+    if code == 0 {
+        println!("{output}");
+    } else {
+        eprintln!("{output}");
+    }
+
     std::process::exit(code);
 }
 
