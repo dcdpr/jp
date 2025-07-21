@@ -1,5 +1,6 @@
 pub mod code;
 pub mod reasoning;
+pub mod tool_call;
 pub mod typewriter;
 
 use std::str::FromStr;
@@ -27,6 +28,10 @@ pub struct Style {
     #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub reasoning: reasoning::Reasoning,
 
+    /// Tool call content style.
+    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
+    pub tool_call: tool_call::ToolCall,
+
     // Typewriter style.
     #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
     pub typewriter: typewriter::Typewriter,
@@ -42,6 +47,7 @@ impl AssignKeyValue for <Style as Confique>::Partial {
 
             _ if kv.trim_prefix("code") => self.code.assign(kv)?,
             _ if kv.trim_prefix("reasoning") => self.reasoning.assign(kv)?,
+            _ if kv.trim_prefix("tool_call") => self.reasoning.assign(kv)?,
             _ if kv.trim_prefix("typewriter") => self.typewriter.assign(kv)?,
 
             _ => return Err(set_error(kv.key())),
