@@ -67,8 +67,6 @@ impl From<gemini_client_rs::GeminiError> for Error {
     fn from(error: gemini_client_rs::GeminiError) -> Self {
         use gemini_client_rs::GeminiError;
 
-        dbg!(&error);
-
         match &error {
             GeminiError::Api(api) if api.get("status").is_some_and(|v| v.as_u64() == Some(404)) => {
                 if let Some(model) = api.pointer("/message/error/message").and_then(|v| {
