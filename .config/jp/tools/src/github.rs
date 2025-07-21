@@ -57,10 +57,10 @@ pub async fn run(_: Workspace, t: Tool) -> std::result::Result<String, Error> {
 }
 
 async fn auth() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    let token = std::env::var("GITHUB_TOKEN")
-        .or_else(|_| std::env::var("JP_GITHUB_TOKEN"))
+    let token = std::env::var("JP_GITHUB_TOKEN")
+        .or_else(|_| std::env::var("GITHUB_TOKEN"))
         .map_err(|_| {
-            "unable to get auth token. Set `GITHUB_TOKEN` or `JP_GITHUB_TOKEN` to a valid token."
+            "unable to get auth token. Set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to a valid token."
         })?;
 
     let octocrab = octocrab::Octocrab::builder()
@@ -73,7 +73,7 @@ async fn auth() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     if octocrab::instance().current().user().await.is_err() {
         return Err(
             "Unable to authenticate with github. This might be because the token is expired. \
-             Either set `GITHUB_TOKEN` or `JP_GITHUB_TOKEN` to a valid token."
+             Either set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to a valid token."
                 .into(),
         );
     }
