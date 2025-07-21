@@ -91,7 +91,7 @@ impl EmbeddedServer {
                 }
 
                 for (key, value) in prop {
-                    if key == "name" || key == "type" || key == "required" {
+                    if key == "name" || key == "required" {
                         continue;
                     }
 
