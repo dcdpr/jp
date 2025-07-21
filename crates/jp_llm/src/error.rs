@@ -71,17 +71,13 @@ impl From<gemini_client_rs::GeminiError> for Error {
 
         match &error {
             GeminiError::Api(api) if api.get("status").is_some_and(|v| v.as_u64() == Some(404)) => {
-                if let Some(model) = api.get("message").and_then(|v| {
-                    v.get("error").and_then(|v| {
-                        v.get("message").and_then(|v| {
-                            v.as_str().and_then(|s| {
-                                s.contains("Call ListModels").then(|| {
-                                    s.split('/')
-                                        .nth(1)
-                                        .and_then(|v| v.split(' ').next())
-                                        .unwrap_or("unknown")
-                                })
-                            })
+                if let Some(model) = api.pointer("/message/error/message").and_then(|v| {
+                    v.as_str().and_then(|s| {
+                        s.contains("Call ListModels").then(|| {
+                            s.split('/')
+                                .nth(1)
+                                .and_then(|v| v.split(' ').next())
+                                .unwrap_or("unknown")
                         })
                     })
                 }) {
