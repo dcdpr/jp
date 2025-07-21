@@ -36,13 +36,16 @@ pub enum Error {
     },
 
     #[error("Gemini error: {0}")]
-    Gemini(#[from] gemini_client_rs::GeminiError),
+    Gemini(gemini_client_rs::GeminiError),
 
     #[error("Ollama error: {0}")]
     Ollama(#[from] ollama_rs::error::OllamaError),
 
     #[error("Missing structured data in response")]
     MissingStructuredData,
+
+    #[error("Unknown model: {0}")]
+    UnknownModel(String),
 
     #[error("Invalid JSON: {0}")]
     Json(#[from] serde_json::Error),
@@ -58,6 +61,37 @@ pub enum Error {
 
     #[error("request rate limited (retry after {} seconds)", retry_after.unwrap_or_default())]
     RateLimit { retry_after: Option<u64> },
+}
+
+impl From<gemini_client_rs::GeminiError> for Error {
+    fn from(error: gemini_client_rs::GeminiError) -> Self {
+        use gemini_client_rs::GeminiError;
+
+        dbg!(&error);
+
+        match &error {
+            GeminiError::Api(api) if api.get("status").is_some_and(|v| v.as_u64() == Some(404)) => {
+                if let Some(model) = api.get("message").and_then(|v| {
+                    v.get("error").and_then(|v| {
+                        v.get("message").and_then(|v| {
+                            v.as_str().and_then(|s| {
+                                s.contains("Call ListModels").then(|| {
+                                    s.split('/')
+                                        .nth(1)
+                                        .and_then(|v| v.split(' ').next())
+                                        .unwrap_or("unknown")
+                                })
+                            })
+                        })
+                    })
+                }) {
+                    return Self::UnknownModel(model.to_owned());
+                }
+                Self::Gemini(error)
+            }
+            _ => Self::Gemini(error),
+        }
+    }
 }
 
 impl From<openai_responses::types::response::Error> for Error {

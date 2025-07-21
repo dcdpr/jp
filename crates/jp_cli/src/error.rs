@@ -78,4 +78,10 @@ pub(crate) enum Error {
 
     #[error("Cannot locate binary: {0}")]
     Which(#[from] which::Error),
+
+    #[error("Unknown model: {}", .model)]
+    UnknownModel {
+        model: String,
+        available: Vec<String>,
+    },
 }

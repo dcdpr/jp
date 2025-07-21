@@ -488,7 +488,19 @@ impl Query {
                     tokio::time::sleep(Duration::from_secs(retry_after.unwrap_or(0))).await;
                     return Box::pin(self.handle_stream(ctx, thread, tool_choice, messages)).await;
                 }
-                Err(e) => return Err(e.into()),
+                Err(jp_llm::Error::UnknownModel(model)) => {
+                    let available = provider
+                        .models()
+                        .await?
+                        .into_iter()
+                        .map(|v| v.slug)
+                        .collect();
+
+                    return Err(Error::UnknownModel { model, available });
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
                 Ok(event) => event,
             };
 

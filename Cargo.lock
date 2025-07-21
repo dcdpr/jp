@@ -1402,7 +1402,7 @@ dependencies = [
 [[package]]
 name = "gemini_client_rs"
 version = "0.4.0"
-source = "git+https://github.com/JeanMertz/gemini-client#41518bb21f22848e526c45ece2849a82717cd990"
+source = "git+https://github.com/JeanMertz/gemini-client#4e6480b186aac950e359ee1ff87396cb2794dd64"
 dependencies = [
  "async-stream",
  "futures-util",
