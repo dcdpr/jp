@@ -127,11 +127,31 @@ impl Server {
         let global_id = ToolId(String::from("*"));
         let id = ToolId(id.to_owned());
 
-        self.tools
-            .get(&id)
-            .cloned()
-            .or_else(|| self.tools.get(&global_id).cloned())
-            .unwrap_or(Tool::default())
+        let defaults = self.tools.get(&global_id).cloned().unwrap_or_default();
+        let mut tool = self.tools.get(&id);
+
+        Tool {
+            enable: tool
+                .take_if(|s| s.enable != defaults.enable)
+                .unwrap_or(&defaults)
+                .enable,
+
+            run: tool
+                .take_if(|s| s.run != defaults.run)
+                .unwrap_or(&defaults)
+                .run,
+
+            result: tool
+                .take_if(|s| s.result != defaults.result)
+                .unwrap_or(&defaults)
+                .result,
+
+            style: tool
+                .take_if(|s| s.style != defaults.style)
+                .unwrap_or(&defaults)
+                .style
+                .clone(),
+        }
     }
 }
 

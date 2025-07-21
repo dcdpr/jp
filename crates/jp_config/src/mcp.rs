@@ -146,10 +146,26 @@ impl Mcp {
         let global_id = ServerId(String::from("*"));
         let id = ServerId(id.to_owned());
 
-        self.servers
-            .get(&id)
-            .cloned()
-            .or_else(|| self.servers.get(&global_id).cloned())
-            .unwrap_or(Server::default())
+        let defaults = self.servers.get(&global_id).cloned().unwrap_or_default();
+        let mut server = self.servers.get(&id);
+
+        Server {
+            enable: server
+                .take_if(|s| s.enable != defaults.enable)
+                .unwrap_or(&defaults)
+                .enable,
+
+            binary_checksum: server
+                .take_if(|s| s.binary_checksum != defaults.binary_checksum)
+                .unwrap_or(&defaults)
+                .binary_checksum
+                .clone(),
+
+            tools: server
+                .take_if(|s| s.tools != defaults.tools)
+                .unwrap_or(&defaults)
+                .tools
+                .clone(),
+        }
     }
 }
