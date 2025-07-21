@@ -1,5 +1,31 @@
 [conversation]
-attachments = ["cmd://git?arg=diff&arg=--cached"]
+# Add `git diff --cached` output as an attachment.
+attachments = [
+    "cmd://git?arg=diff&arg=--cached",
+]
+
+# Hide all content except the final response.
+[style]
+reasoning.show = false
+tool_call.show = false
+
+# Disable all MCP servers.
+[mcp.servers."*".tools."*"]
+enable = false
+
+[mcp.servers.embedded.tools."*"]
+enable = false
+run = "always"
+result = "always"
+
+# Enable only the tools we need.
+[mcp.servers.embedded.tools]
+fs_read_file.enable = true
+fs_list_files.enable = true
+fs_grep_files.enable = true
+fs_grep_user_docs.enable = true
+github_pulls.enable = true
+github_issues.enable = true
 
 [assistant]
 name = "Commit Writer"
@@ -52,6 +78,40 @@ items = [
     """
     Only changes visible/noticeable to the end user should marked as `feat`,
     `fix`, or `perf`.
+    """,
+    """
+    The code in `.config/jp/tools` is used for project tooling not part of the
+    "jp" releases, and should be considered `chore(tools)` changes.
+    """,
+]
+
+[[assistant.instructions]]
+title = "Research Steps"
+description = """
+    Research steps to take before writing a commit message.
+    """
+items = [
+    """
+    Use the `github_issues` tool to find any related issues that are
+    resolved/fixed/closed by the commit. You MUST reference the issue number in
+    the commit message footer, e.g.:
+
+    ```
+    Closes #123
+    Fixes #123
+    Resolves #123
+    ```
+
+    You can use either of the three prefixes, picking the one that fits best.
+    """,
+    """
+    Research the impact of the change on the user experience. Commit messages
+    should always start by describing the impact on the user experience, and
+    then lower-level details of the change.
+    """,
+    """
+    If the impact of a change is not immediately obvious, use the tools
+    available to you to build more context around the change.
     """,
 ]
 
