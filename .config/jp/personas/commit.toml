@@ -97,9 +97,9 @@ items = [
     the commit message footer, e.g.:
 
     ```
-    Closes #123
-    Fixes #123
-    Resolves #123
+    Closes: #123
+    Fixes: #123
+    Resolves: #123
     ```
 
     You can use either of the three prefixes, picking the one that fits best.
@@ -195,7 +195,7 @@ items = [
 
 [[assistant.instructions]]
 title = "Commit Message Header Format"
-description = "<type>(<scope>): <subject line>"
+description = "<type>(<scope>)[!]: <subject line>"
 items = [
     """
     <type>: Commit Type: build|ci|docs|feat|fix|perf|refactor|test
@@ -203,6 +203,9 @@ items = [
     """
     <scope>: Commit Scope: One or more comma-space-separated scopes relevant to
     the changes.
+    """,
+    """
+    [!]: Optional breaking change indicator.
     """,
     """
     <subject line>: Summary in present tense. Capitalized. No period at the end.
