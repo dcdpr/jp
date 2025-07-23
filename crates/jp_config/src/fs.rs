@@ -99,7 +99,7 @@ impl ConfigFile {
         f(&mut value)?;
 
         self.content = match self.format {
-            Format::Toml => toml_edit::ser::to_string_pretty(&value)?,
+            Format::Toml => toml::ser::to_string_pretty(&value)?,
             Format::Json => serde_json::to_string_pretty(&value)?,
             Format::Json5 => json5::to_string(&value)?,
             Format::Yaml => serde_yaml::to_string(&value)?,

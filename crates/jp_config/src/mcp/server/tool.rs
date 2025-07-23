@@ -104,16 +104,11 @@ pub struct ToolPartial {
     pub run: Option<RunMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<ResultMode>,
-    // TODO: fix this, have the partial impl `Default`?
     #[serde(
-        default = "default_style",
+        default = "confique::Partial::empty",
         skip_serializing_if = "is_nested_default_or_empty"
     )]
     pub style: <ToolCall as Confique>::Partial,
-}
-
-fn default_style() -> <ToolCall as Confique>::Partial {
-    <ToolCall as Confique>::Partial::default_values()
 }
 
 impl AssignKeyValue for ToolPartial {

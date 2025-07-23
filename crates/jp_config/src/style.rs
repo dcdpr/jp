@@ -57,12 +57,13 @@ impl AssignKeyValue for <Style as Confique>::Partial {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LinkStyle {
-    Off,
+    #[default]
     Full,
     Osc8,
+    Off,
 }
 
 impl FromStr for LinkStyle {
@@ -70,13 +71,13 @@ impl FromStr for LinkStyle {
 
     fn from_str(style: &str) -> Result<Self> {
         match style {
-            "off" => Ok(Self::Off),
             "full" => Ok(Self::Full),
             "osc8" => Ok(Self::Osc8),
+            "off" => Ok(Self::Off),
             _ => Err(Error::InvalidConfigValueType {
                 key: style.to_string(),
                 value: style.to_string(),
-                need: vec!["off".to_owned(), "full".to_owned(), "osc8".to_owned()],
+                need: vec!["full".to_owned(), "osc8".to_owned(), "off".to_owned()],
             }),
         }
     }
