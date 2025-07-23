@@ -45,6 +45,17 @@ pub struct Server {
     pub binary_checksum: Option<Checksum>,
 }
 
+impl Server {
+    #[must_use]
+    pub fn get_tool(&self, id: &ToolId) -> Tool {
+        self.tools
+            .get(id)
+            .cloned()
+            .or_else(|| self.tools.get(&ToolId::new("*")).cloned())
+            .unwrap_or_default()
+    }
+}
+
 impl AssignKeyValue for <Server as Confique>::Partial {
     fn assign(&mut self, mut kv: KvAssignment) -> Result<(), Error> {
         let k = kv.key().as_str().to_owned();

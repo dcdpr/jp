@@ -30,6 +30,17 @@ pub struct Mcp {
     pub servers: ConfigMap<ServerId, Server>,
 }
 
+impl Mcp {
+    #[must_use]
+    pub fn get_server(&self, id: &ServerId) -> Server {
+        self.servers
+            .get(id)
+            .cloned()
+            .or_else(|| self.servers.get(&ServerId::new("*")).cloned())
+            .unwrap_or_default()
+    }
+}
+
 impl AssignKeyValue for <Mcp as Confique>::Partial {
     fn assign(&mut self, mut kv: KvAssignment) -> Result<(), Error> {
         let k = kv.key().as_str().to_owned();
@@ -136,22 +147,9 @@ impl Partial for McpPartial {
     }
 
     fn with_fallback(self, fallback: Self) -> Self {
-        let servers = self
-            .merge_servers_with_inheritance(&fallback)
-            .into_iter()
-            .filter(|(k, _)| k != &ServerId::new("*"))
-            .map(|(k, mut v)| {
-                v.tools = v
-                    .tools
-                    .into_iter()
-                    .filter(|(k, _)| k != &ToolId::new("*"))
-                    .collect();
-
-                (k, v)
-            })
-            .collect();
-
-        Self { servers }
+        Self {
+            servers: self.merge_servers_with_inheritance(&fallback),
+        }
     }
 
     fn is_empty(&self) -> bool {
