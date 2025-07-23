@@ -27,5 +27,8 @@ pub fn is_file_dirty(root: &Path, file: &Path) -> Result<bool, Error> {
         .into());
     }
 
-    Ok(!output.stdout.is_empty())
+    String::from_utf8(output.stdout)
+        // The second column is the non-staged status indicator.
+        .map(|v| v.chars().nth(1) == Some('M'))
+        .map_err(Into::into)
 }
