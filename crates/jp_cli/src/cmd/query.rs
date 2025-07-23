@@ -16,7 +16,12 @@ use futures::StreamExt as _;
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::Instructions,
-    expand_tilde, PartialConfig,
+    expand_tilde,
+    mcp::{
+        server::{Server, ToolId},
+        ServerId,
+    },
+    PartialConfig,
 };
 use jp_conversation::{
     thread::{Thread, ThreadBuilder},
@@ -834,12 +839,24 @@ async fn list_enabled_tools(ctx: &Ctx) -> Result<Vec<Tool>> {
     for tool in all_tools {
         let tool_id = McpToolId::new(&*tool.name);
         let server_id = ctx.mcp_client.get_tool_server_id(&tool_id).await?;
-        let server_cfg = ctx.config.mcp.get_server_with_defaults(server_id.as_str());
+        let server_defaults = Server::default();
+        let server_cfg = ctx
+            .config
+            .mcp
+            .servers
+            .get(&ServerId::new(server_id.as_str()))
+            .unwrap_or(&server_defaults);
+
         if !server_cfg.enable {
             continue;
         }
 
-        let tool_cfg = server_cfg.get_tool_with_defaults(&tool.name);
+        let tool_defaults = jp_config::mcp::server::tool::Tool::default();
+        let tool_cfg = server_cfg
+            .tools
+            .get(&ToolId::new(tool.name.as_ref()))
+            .unwrap_or(&tool_defaults);
+
         if !tool_cfg.enable {
             continue;
         }

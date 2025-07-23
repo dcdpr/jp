@@ -172,6 +172,11 @@ impl ToolId {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl Deref for ToolId {
@@ -191,9 +196,20 @@ impl ConfigKey for ToolId {
 pub struct ServerPartial {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable: Option<bool>,
+    #[serde(default, skip_serializing_if = "ConfigMapPartial::is_empty")]
     pub tools: ConfigMapPartial<ToolId, ToolPartial>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binary_checksum: Option<checksum::ChecksumPartial>,
+}
+
+impl ServerPartial {
+    #[must_use]
+    pub(crate) fn get_tool_or_empty(&self, tool_id: &ToolId) -> ToolPartial {
+        self.tools
+            .get(tool_id)
+            .cloned()
+            .unwrap_or(ToolPartial::empty())
+    }
 }
 
 impl Default for ServerPartial {
@@ -229,8 +245,8 @@ impl Partial for ServerPartial {
     fn with_fallback(self, fallback: Self) -> Self {
         Self {
             enable: self.enable.or(fallback.enable),
-            tools: self.tools.with_fallback(fallback.tools),
             binary_checksum: self.binary_checksum.or(fallback.binary_checksum),
+            tools: self.tools.with_fallback(fallback.tools),
         }
     }
 

@@ -22,7 +22,11 @@ use crate::{
 pub struct ToolCall {
     /// Whether to show the tool call results inline. Even if disabled, a link
     /// will be added to a file containing the tool call results.
-    #[config(default = "full", deserialize_with = de_from_str)]
+    #[config(
+        default = "full",
+        deserialize_with = de_from_str,
+        partial_attr(serde(skip_serializing_if = "Option::is_none"))
+    )]
     pub inline_results: InlineResults,
 
     /// Show a link to the file containing the source code in code blocks.
@@ -30,7 +34,11 @@ pub struct ToolCall {
     /// Can be one of: `off`, `full`, `osc8`.
     ///
     /// See: <https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda>
-    #[config(default = "osc8", deserialize_with = de_from_str)]
+    #[config(
+        default = "osc8",
+        deserialize_with = de_from_str,
+        partial_attr(serde(skip_serializing_if = "Option::is_none"))
+    )]
     pub results_file_link: LinkStyle,
 }
 
@@ -64,7 +72,16 @@ pub enum InlineResults {
     Full,
 
     /// Show the first N lines of the tool call results inline.
+    #[serde(untagged, serialize_with = "serialize_truncate")]
     Truncate { lines: usize },
+}
+
+#[expect(clippy::trivially_copy_pass_by_ref)]
+fn serialize_truncate<S>(lines: &usize, serializer: S) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&lines.to_string())
 }
 
 impl FromStr for InlineResults {

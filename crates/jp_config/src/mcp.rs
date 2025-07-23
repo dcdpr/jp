@@ -14,6 +14,7 @@ use server::{Server, ServerPartial};
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
     map::{ConfigKey, ConfigMap, ConfigMapPartial},
+    mcp::server::ToolId,
     Error,
 };
 
@@ -54,6 +55,18 @@ impl AssignKeyValue for <Mcp as Confique>::Partial {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ServerId(String);
+
+impl ServerId {
+    #[must_use]
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 impl Deref for ServerId {
     type Target = str;
@@ -123,9 +136,22 @@ impl Partial for McpPartial {
     }
 
     fn with_fallback(self, fallback: Self) -> Self {
-        Self {
-            servers: self.servers.with_fallback(fallback.servers),
-        }
+        let servers = self
+            .merge_servers_with_inheritance(&fallback)
+            .into_iter()
+            .filter(|(k, _)| k != &ServerId::new("*"))
+            .map(|(k, mut v)| {
+                v.tools = v
+                    .tools
+                    .into_iter()
+                    .filter(|(k, _)| k != &ToolId::new("*"))
+                    .collect();
+
+                (k, v)
+            })
+            .collect();
+
+        Self { servers }
     }
 
     fn is_empty(&self) -> bool {
@@ -137,404 +163,529 @@ impl Partial for McpPartial {
     }
 }
 
-impl Mcp {
-    /// Get a server by ID.
-    ///
-    /// This handles fetching defaults from any `*` server/tool as well.
+impl McpPartial {
+    /// Get the server with the given ID, or an empty server if it does not
+    /// exist.
     #[must_use]
-    pub fn get_server_with_defaults(&self, id: &str) -> Server {
-        let global_id = ServerId(String::from("*"));
-        let id = ServerId(id.to_owned());
+    fn get_server_or_empty(&self, server_id: &ServerId) -> ServerPartial {
+        self.servers
+            .get(server_id)
+            .cloned()
+            .unwrap_or(ServerPartial::empty())
+    }
 
-        let defaults = self.servers.get(&global_id).cloned().unwrap_or_default();
-        let server = self.servers.get(&id);
+    /// Merge the servers of this configuration with the ones of the given
+    /// configuration, using nested inheritance.
+    ///
+    /// Servers inherit their configuration from the global (`*`) server, if the
+    /// server itself does not have a configuration for a given field.
+    ///
+    /// Tools have a more complex inheritance scheme:
+    ///
+    /// ```markdown,ignore
+    /// 1. server  .servers.my_server.tools.my_tool
+    /// 2. fallback.servers.my_server.tools.my_tool
+    /// 3. server  .servers.my_server.tools.*
+    /// 4. fallback.servers.my_server.tools.*
+    /// 5. server  .servers.*        .tools.my_tool
+    /// 6. fallback.servers.*        .tools.my_tool
+    /// 7. server  .servers.*        .tools.*
+    /// 8. fallback.servers.*        .tools.*
+    /// ```
+    ///
+    /// Both `self` and `other` are merged together in the correct order.
+    fn merge_servers_with_inheritance(
+        &self,
+        other: &Self,
+    ) -> ConfigMapPartial<ServerId, ServerPartial> {
+        // Iterate over all server IDs.
+        let ids = self.servers.keys().chain(other.servers.keys());
 
-        Server {
-            enable: server
-                .filter(|s| s.enable != defaults.enable)
-                .unwrap_or(&defaults)
-                .enable,
+        let mut result = ConfigMapPartial::default();
+        for server_id in ids {
+            let server = self.get_server_or_empty(server_id);
+            let fallback = other.get_server_or_empty(server_id);
 
-            binary_checksum: server
-                .filter(|s| s.binary_checksum != defaults.binary_checksum)
-                .unwrap_or(&defaults)
-                .binary_checksum
-                .clone(),
+            let merged_server = if server_id.as_str() == "*" {
+                server.with_fallback(fallback)
+            } else {
+                let global_server = self.get_server_or_empty(&ServerId::new("*"));
+                let global_fallback = other.get_server_or_empty(&ServerId::new("*"));
 
-            tools: server
-                .filter(|s| s.tools != defaults.tools)
-                .unwrap_or(&defaults)
-                .tools
-                .clone(),
+                // Handle tools with mixed server/tool inheritance
+                let tools = server
+                    .tools
+                    .keys()
+                    .chain(fallback.tools.keys())
+                    .chain(global_server.tools.keys())
+                    .chain(global_fallback.tools.keys())
+                    .map(|id| {
+                        let server_tool = server.get_tool_or_empty(id);
+                        let server_tool_global = server.get_tool_or_empty(&ToolId::new("*"));
+                        let global_server_tool = global_server.get_tool_or_empty(id);
+                        let global_server_tool_global =
+                            global_server.get_tool_or_empty(&ToolId::new("*"));
+
+                        let fallback_tool = fallback.get_tool_or_empty(id);
+                        let fallback_tool_global = fallback.get_tool_or_empty(&ToolId::new("*"));
+                        let global_fallback_tool = global_fallback.get_tool_or_empty(id);
+                        let global_fallback_tool_global =
+                            global_fallback.get_tool_or_empty(&ToolId::new("*"));
+
+                        let tool = server_tool
+                            .with_fallback(fallback_tool)
+                            .with_fallback(server_tool_global)
+                            .with_fallback(fallback_tool_global)
+                            .with_fallback(global_server_tool)
+                            .with_fallback(global_fallback_tool)
+                            .with_fallback(global_server_tool_global)
+                            .with_fallback(global_fallback_tool_global);
+
+                        (id.clone(), tool)
+                    })
+                    .collect();
+
+                // Merge server-level fields (enable, binary_checksum) with simple inheritance
+                let mut server = server
+                    .with_fallback(fallback)
+                    .with_fallback(global_server)
+                    .with_fallback(global_fallback);
+
+                server.tools = tools;
+                server
+            };
+
+            result.insert(server_id.clone(), merged_server);
         }
+
+        result
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
+    use pretty_assertions::assert_eq;
+
     use super::*;
-    use crate::mcp::server::{
-        checksum::{Algorithm, Checksum},
-        tool::Tool,
-        ToolId,
-    };
 
     #[test]
-    #[expect(clippy::too_many_lines)]
-    fn test_mcp_get_server_with_defaults() {
+    #[expect(clippy::too_many_lines, clippy::needless_raw_string_hashes)]
+    fn test_server_partial_with_fallback() {
         struct TestCase {
-            servers: Vec<(&'static str, Server)>,
-            input: &'static str,
-            expected: Server,
+            config: &'static str,
+            fallback: &'static str,
+            expected: &'static str,
         }
 
         let cases = vec![
-            ("no servers", TestCase {
-                servers: vec![],
-                input: "foo",
-                expected: Server {
-                    enable: true,
-                    binary_checksum: None,
-                    tools: ConfigMap::default(),
-                },
+            ("direct", TestCase {
+                config: indoc! {r#"
+                    [servers."*".tools.github_issues]
+                    run = "always"
+                "#},
+                fallback: indoc! {r#"
+                    [servers.embedded.tools.github_issues]
+                    result = "ask"
+                "#},
+                expected: indoc! {r#"
+                    [servers.embedded.tools.github_issues]
+                    run = "always"
+                    result = "ask"
+                "#},
             }),
-            ("no match", TestCase {
-                servers: vec![("foo", Server {
-                    enable: false,
-                    binary_checksum: Some(Checksum {
-                        algorithm: Algorithm::Sha256,
-                        value: "foo".to_owned(),
-                    }),
-                    tools: ConfigMap::default(),
-                })],
-                input: "bar",
-                expected: Server {
-                    enable: true,
-                    binary_checksum: None,
-                    tools: ConfigMap::default(),
-                },
+            ("global_tool_inheritance", TestCase {
+                config: indoc! {r#"
+                    [servers."*".tools."*"]
+                    enable = false
+                    run = "always"
+                    result = "ask"
+                "#},
+                fallback: indoc! {r#"
+                    [servers.embedded.tools.github_issues]
+                    enable = true
+                "#},
+                expected: indoc! {r#"
+                    [servers.embedded.tools.github_issues]
+                    enable = true
+                    run = "always"
+                    result = "ask"
+                "#},
             }),
-            ("single match", TestCase {
-                servers: vec![("foo", Server {
-                    enable: false,
-                    binary_checksum: Some(Checksum {
-                        algorithm: Algorithm::Sha256,
-                        value: "bar".to_owned(),
-                    }),
-                    tools: ConfigMap::default(),
-                })],
-                input: "foo",
-                expected: Server {
-                    enable: false,
-                    binary_checksum: Some(Checksum {
-                        algorithm: Algorithm::Sha256,
-                        value: "bar".to_owned(),
-                    }),
-                    tools: ConfigMap::default(),
-                },
+            ("server_level_fallback", TestCase {
+                config: indoc! {r#"
+                    [servers."*"]
+                    enable = true
+
+                    [servers."*".tools."*"]
+                    run = "edit"
+                "#},
+                fallback: indoc! {r#"
+                    [servers.embedded.binary_checksum]
+                    value = "abc123"
+
+                    [servers.embedded.tools.github_issues]
+                    result = "always"
+                "#},
+                expected: indoc! {r#"
+                    [servers.embedded]
+                    enable = true
+
+                    [servers.embedded.tools.github_issues]
+                    run = "edit"
+                    result = "always"
+
+                    [servers.embedded.binary_checksum]
+                    value = "abc123"
+                "#},
             }),
-            ("global defaults only", TestCase {
-                servers: vec![("*", Server {
-                    enable: false,
-                    binary_checksum: Some(Checksum {
-                        algorithm: Algorithm::Sha256,
-                        value: "global".to_owned(),
-                    }),
-                    tools: ConfigMap::from_iter(vec![(ToolId::new("*"), Tool {
-                        enable: !Tool::default().enable,
-                        ..Tool::default()
-                    })]),
-                })],
-                input: "nonexistent",
-                expected: Server {
-                    enable: false,
-                    binary_checksum: Some(Checksum {
-                        algorithm: Algorithm::Sha256,
-                        value: "global".to_owned(),
-                    }),
-                    tools: ConfigMap::from_iter(vec![(ToolId::new("*"), Tool {
-                        enable: !Tool::default().enable,
-                        ..Tool::default()
-                    })]),
-                },
+            ("complex_2d_inheritance", TestCase {
+                config: indoc! {r#"
+                    [servers."*"]
+                    enable = true
+
+                    [servers."*".tools."*"]
+                    run = "always"
+                    result = "always"
+
+                    [servers."*".tools.github_issues]
+                    enable = false
+
+                    [servers.embedded.tools."*"]
+                    run = "edit"
+                "#},
+                fallback: indoc! {r#"
+                    [servers.embedded.binary_checksum]
+                    value = "fallback123"
+
+                    [servers.embedded.tools.github_issues]
+                    result = "ask"
+                "#},
+                expected: indoc! {r#"
+                    [servers.embedded]
+                    enable = true
+
+                    [servers.embedded.tools.github_issues]
+                    enable = false
+                    run = "edit"
+                    result = "ask"
+
+                    [servers.embedded.binary_checksum]
+                    value = "fallback123"
+                "#},
             }),
-            ("merge with global defaults - full override", TestCase {
-                servers: vec![
-                    ("*", Server {
-                        enable: false,
-                        binary_checksum: Some(Checksum {
-                            algorithm: Algorithm::Sha256,
-                            value: "default".to_owned(),
-                        }),
-                        tools: ConfigMap::from_iter(vec![(ToolId::new("default_tool"), Tool {
-                            enable: !Tool::default().enable,
-                            ..Tool::default()
-                        })]),
-                    }),
-                    ("specific", Server {
-                        enable: true,
-                        binary_checksum: Some(Checksum {
-                            algorithm: Algorithm::Sha256,
-                            value: "specific".to_owned(),
-                        }),
-                        tools: ConfigMap::from_iter(vec![(
-                            ToolId::new("specific_tool"),
-                            Tool::default(),
-                        )]),
-                    }),
-                ],
-                input: "specific",
-                expected: Server {
-                    enable: true,
-                    binary_checksum: Some(Checksum {
-                        algorithm: Algorithm::Sha256,
-                        value: "specific".to_owned(),
-                    }),
-                    tools: ConfigMap::from_iter(vec![(
-                        ToolId::new("specific_tool"),
-                        Tool::default(),
-                    )]),
-                },
+            ("tool_style_inheritance", TestCase {
+                config: indoc! {r#"
+                    [servers."*".tools."*"]
+                    enable = true
+
+                    [servers."*".tools."*".style]
+                    inline_results = "off"
+                    results_file_link = "off"
+                "#},
+                fallback: indoc! {r#"
+                    [servers.embedded.tools.github_issues.style]
+                    inline_results = "off"
+                    results_file_link = "full"
+                "#},
+                expected: indoc! {r#"
+                    [servers.embedded.tools.github_issues]
+                    enable = true
+
+                    [servers.embedded.tools.github_issues.style]
+                    inline_results = "off"
+                    results_file_link = "full"
+                "#},
+            }),
+            ("mixed_specific_and_global", TestCase {
+                config: indoc! {r#"
+                    [servers."*".tools."*"]
+                    enable = false
+                    run = "always"
+
+                    [servers.embedded.tools."*"]
+                    enable = true
+
+                    [servers.embedded.tools.github_issues]
+                    run = "edit"
+                "#},
+                fallback: indoc! {r#"
+                    [servers."*"]
+                    enable = true
+
+                    [servers."*".binary_checksum]
+                    value = "global_fallback"
+
+                    [servers.another.tools.github_issues]
+                    result = "ask"
+                "#},
+                expected: indoc! {r#"
+                    [servers.embedded]
+                    enable = true
+
+                    [servers.embedded.tools.github_issues]
+                    enable = true
+                    run = "edit"
+
+                    [servers.embedded.binary_checksum]
+                    value = "global_fallback"
+
+                    [servers.another]
+                    enable = true
+
+                    [servers.another.tools.github_issues]
+                    enable = false
+                    run = "always"
+                    result = "ask"
+
+                    [servers.another.binary_checksum]
+                    value = "global_fallback"
+                "#},
+            }),
+            ("deep_tool_config_override", TestCase {
+                config: indoc! {r#"
+                    [servers."*".tools."*"]
+                    run = "always"
+
+                    [servers."*".tools."*".style]
+                    inline_results = "off"
+
+                    [servers.embedded.tools.github_issues.style]
+                    inline_results = "50"
+                    results_file_link = "osc8"
+                "#},
+                fallback: indoc! {r#"
+                    [servers.embedded.tools."*"]
+                    result = "edit"
+
+                    [servers.embedded.tools."*".style]
+                    results_file_link = "off"
+                "#},
+                expected: indoc! {r#"
+                    [servers.embedded.tools.github_issues]
+                    run = "always"
+                    result = "edit"
+
+                    [servers.embedded.tools.github_issues.style]
+                    inline_results = "50"
+                    results_file_link = "osc8"
+                "#},
+            }),
+            ("empty_config_with_fallback", TestCase {
+                config: "",
+                fallback: indoc! {r#"
+                    [servers."*"]
+                    enable = true
+
+                    [servers."*".tools."*"]
+                    run = "always"
+                    result = "always"
+
+                    [servers.embedded.tools.github_issues]
+                    enable = false
+                "#},
+                expected: indoc! {r#"
+                    [servers.embedded]
+                    enable = true
+
+                    [servers.embedded.tools.github_issues]
+                    enable = false
+                    run = "always"
+                    result = "always"
+                "#},
+            }),
+            ("fallback_empty", TestCase {
+                config: indoc! {r#"
+                    [servers.embedded]
+                    enable = false
+
+                    [servers.embedded.tools.github_issues]
+                    run = "edit"
+                    result = "ask"
+                "#},
+                fallback: "",
+                expected: indoc! {r#"
+                    [servers.embedded]
+                    enable = false
+
+                    [servers.embedded.tools.github_issues]
+                    run = "edit"
+                    result = "ask"
+                "#},
+            }),
+            ("global server, global tool only", TestCase {
+                config: indoc! {r#"
+                    [servers."*"]
+                    enable = true
+
+                    [servers."*".tools."*"]
+                    enable = false
+                    run = "always"
+                    result = "ask"
+                    style.inline_results = "off"
+                    style.results_file_link = "off"
+
+                    [servers.embedded.tools.github_issues]
+                "#},
+                fallback: "",
+                expected: indoc! {r#"
+                    [servers.embedded]
+                    enable = true
+
+                    [servers.embedded.tools.github_issues]
+                    enable = false
+                    run = "always"
+                    result = "ask"
+
+                    [servers.embedded.tools.github_issues.style]
+                    inline_results = "off"
+                    results_file_link = "off"
+                "#},
+            }),
+            ("global server, specific tool overrides enable", TestCase {
+                config: indoc! {r#"
+                    [servers."*"]
+                    enable = true
+
+                    [servers."*".tools."*"]
+                    enable = false
+                    run = "always"
+                    result = "ask"
+                    style.inline_results = "off"
+                    style.results_file_link = "off"
+
+                    [servers."*".tools.github_issues]
+                    enable = true
+                    style.inline_results = "full"
+                    style.results_file_link = "osc8"
+
+                    [servers.embedded.tools.github_issues]
+                "#},
+                fallback: "",
+                expected: indoc! {r#"
+                    [servers.embedded]
+                    enable = true
+
+                    [servers.embedded.tools.github_issues]
+                    enable = true
+                    run = "always"
+                    result = "ask"
+                "#},
+            }),
+            ("specific server, global tool overrides run", TestCase {
+                config: indoc! {r#"
+                    [servers."*"]
+                    enable = true
+
+                    [servers."*".tools."*"]
+                    enable = false
+                    run = "always"
+                    result = "ask"
+                    style.inline_results = "off"
+                    style.results_file_link = "off"
+
+                    [servers.embedded.tools."*"]
+                    run = "edit"
+                    result = "edit"
+
+                    [servers.embedded.tools.github_issues]
+                "#},
+                fallback: "",
+                expected: indoc! {r#"
+                    [servers.embedded]
+                    enable = true
+
+                    [servers.embedded.tools.github_issues]
+                    enable = false
+                    run = "edit"
+                    result = "edit"
+
+                    [servers.embedded.tools.github_issues.style]
+                    inline_results = "off"
+                    results_file_link = "off"
+                "#},
+            }),
+            ("complex inheritance chain", TestCase {
+                config: indoc! {r#"
+                    [servers."*"]
+                    enable = true
+
+                    [servers."*".tools."*"]
+                    enable = false
+                    run = "always"
+                    result = "always"
+                    style.inline_results = "full"
+                    style.results_file_link = "off"
+
+                    [servers."*".tools.github_issues]
+                    enable = true
+
+                    [servers.embedded.tools.github_issues]
+                    result = "edit"
+                    style.inline_results = "10"
+
+                    [servers.embedded.tools."*"]
+                    run = "edit"
+                    result = "ask"
+                "#},
+                fallback: "",
+                expected: indoc! {r#"
+                    [servers.embedded]
+                    enable = true
+
+                    [servers.embedded.tools.github_issues]
+                    enable = true
+                    run = "edit"
+                    result = "edit"
+
+                    [servers.embedded.tools.github_issues.style]
+                    inline_results = "10"
+                    results_file_link = "off"
+                "#},
             }),
             (
-                "merge with global defaults - partial override enable only",
+                "complex inheritance with Some None distinctions",
                 TestCase {
-                    servers: vec![
-                        ("*", Server {
-                            enable: false,
-                            binary_checksum: Some(Checksum {
-                                algorithm: Algorithm::Sha256,
-                                value: "default".to_owned(),
-                            }),
-                            tools: ConfigMap::from_iter(vec![(
-                                ToolId::new("default_tool"),
-                                Tool {
-                                    enable: !Tool::default().enable,
-                                    ..Tool::default()
-                                },
-                            )]),
-                        }),
-                        ("specific", Server {
-                            enable: true,
-                            binary_checksum: Some(Checksum {
-                                algorithm: Algorithm::Sha256,
-                                value: "default".to_owned(),
-                            }),
-                            tools: ConfigMap::from_iter(vec![(
-                                ToolId::new("default_tool"),
-                                Tool {
-                                    enable: !Tool::default().enable,
-                                    ..Tool::default()
-                                },
-                            )]),
-                        }),
-                    ],
-                    input: "specific",
-                    expected: Server {
-                        enable: true,
-                        binary_checksum: Some(Checksum {
-                            algorithm: Algorithm::Sha256,
-                            value: "default".to_owned(),
-                        }),
-                        tools: ConfigMap::from_iter(vec![(ToolId::new("default_tool"), Tool {
-                            enable: !Tool::default().enable,
-                            ..Tool::default()
-                        })]),
-                    },
+                    config: indoc! {r#"
+                    [servers."*"]
+                    enable = true
+
+                    [servers."*".tools."*"]
+                    enable = false
+                    run = "always"
+                    result = "always"
+                    style.inline_results = "off"
+                    style.results_file_link = "off"
+
+                    [servers.embedded.tools.github_issues]
+                    enable = true
+                "#},
+                    fallback: "",
+                    expected: indoc! {r#"
+                        [servers.embedded]
+                        enable = true
+
+                        [servers.embedded.tools.github_issues]
+                        enable = true
+                        run = "always"
+                        result = "always"
+
+                        [servers.embedded.tools.github_issues.style]
+                        inline_results = "off"
+                        results_file_link = "off"
+                "#},
                 },
             ),
-            (
-                "merge with global defaults - partial override checksum only",
-                TestCase {
-                    servers: vec![
-                        ("*", Server {
-                            enable: false,
-                            binary_checksum: Some(Checksum {
-                                algorithm: Algorithm::Sha256,
-                                value: "default".to_owned(),
-                            }),
-                            tools: ConfigMap::from_iter(vec![(
-                                ToolId::new("default_tool"),
-                                Tool {
-                                    enable: !Tool::default().enable,
-                                    ..Tool::default()
-                                },
-                            )]),
-                        }),
-                        ("specific", Server {
-                            enable: false,
-                            binary_checksum: Some(Checksum {
-                                algorithm: Algorithm::Sha256,
-                                value: "specific".to_owned(),
-                            }),
-                            tools: ConfigMap::from_iter(vec![(
-                                ToolId::new("default_tool"),
-                                Tool {
-                                    enable: !Tool::default().enable,
-                                    ..Tool::default()
-                                },
-                            )]),
-                        }),
-                    ],
-                    input: "specific",
-                    expected: Server {
-                        enable: false,
-                        binary_checksum: Some(Checksum {
-                            algorithm: Algorithm::Sha256,
-                            value: "specific".to_owned(),
-                        }),
-                        tools: ConfigMap::from_iter(vec![(ToolId::new("default_tool"), Tool {
-                            enable: !Tool::default().enable,
-                            ..Tool::default()
-                        })]),
-                    },
-                },
-            ),
-            (
-                "merge with global defaults - partial override tools only",
-                TestCase {
-                    servers: vec![
-                        ("*", Server {
-                            enable: false,
-                            binary_checksum: Some(Checksum {
-                                algorithm: Algorithm::Sha256,
-                                value: "default".to_owned(),
-                            }),
-                            tools: ConfigMap::from_iter(vec![(
-                                ToolId::new("default_tool"),
-                                Tool {
-                                    enable: !Tool::default().enable,
-                                    ..Tool::default()
-                                },
-                            )]),
-                        }),
-                        ("specific", Server {
-                            enable: false,
-                            binary_checksum: Some(Checksum {
-                                algorithm: Algorithm::Sha256,
-                                value: "default".to_owned(),
-                            }),
-                            tools: ConfigMap::from_iter(vec![(
-                                ToolId::new("specific_tool"),
-                                Tool::default(),
-                            )]),
-                        }),
-                    ],
-                    input: "specific",
-                    expected: Server {
-                        enable: false,
-                        binary_checksum: Some(Checksum {
-                            algorithm: Algorithm::Sha256,
-                            value: "default".to_owned(),
-                        }),
-                        tools: ConfigMap::from_iter(vec![(
-                            ToolId::new("specific_tool"),
-                            Tool::default(),
-                        )]),
-                    },
-                },
-            ),
-            ("merge None checksum with Some default", TestCase {
-                servers: vec![
-                    ("*", Server {
-                        enable: true,
-                        binary_checksum: Some(Checksum {
-                            algorithm: Algorithm::Sha256,
-                            value: "default".to_owned(),
-                        }),
-                        tools: ConfigMap::default(),
-                    }),
-                    ("specific", Server {
-                        enable: true,
-                        binary_checksum: None,
-                        tools: ConfigMap::default(),
-                    }),
-                ],
-                input: "specific",
-                expected: Server {
-                    enable: true,
-                    binary_checksum: None,
-                    tools: ConfigMap::default(),
-                },
-            }),
-            ("merge Some checksum with None default", TestCase {
-                servers: vec![
-                    ("*", Server {
-                        enable: true,
-                        binary_checksum: None,
-                        tools: ConfigMap::default(),
-                    }),
-                    ("specific", Server {
-                        enable: true,
-                        binary_checksum: Some(Checksum {
-                            algorithm: Algorithm::Sha256,
-                            value: "specific".to_owned(),
-                        }),
-                        tools: ConfigMap::default(),
-                    }),
-                ],
-                input: "specific",
-                expected: Server {
-                    enable: true,
-                    binary_checksum: Some(Checksum {
-                        algorithm: Algorithm::Sha256,
-                        value: "specific".to_owned(),
-                    }),
-                    tools: ConfigMap::default(),
-                },
-            }),
-            ("exact match with defaults should use defaults", TestCase {
-                servers: vec![
-                    ("*", Server {
-                        enable: false,
-                        binary_checksum: Some(Checksum {
-                            algorithm: Algorithm::Sha256,
-                            value: "same".to_owned(),
-                        }),
-                        tools: ConfigMap::from_iter(vec![(ToolId::new("tool"), Tool {
-                            enable: !Tool::default().enable,
-                            ..Tool::default()
-                        })]),
-                    }),
-                    ("specific", Server {
-                        enable: false,
-                        binary_checksum: Some(Checksum {
-                            algorithm: Algorithm::Sha256,
-                            value: "same".to_owned(),
-                        }),
-                        tools: ConfigMap::from_iter(vec![(ToolId::new("tool"), Tool {
-                            enable: !Tool::default().enable,
-                            ..Tool::default()
-                        })]),
-                    }),
-                ],
-                input: "specific",
-                expected: Server {
-                    enable: false,
-                    binary_checksum: Some(Checksum {
-                        algorithm: Algorithm::Sha256,
-                        value: "same".to_owned(),
-                    }),
-                    tools: ConfigMap::from_iter(vec![(ToolId::new("tool"), Tool {
-                        enable: !Tool::default().enable,
-                        ..Tool::default()
-                    })]),
-                },
-            }),
         ];
 
         for (name, test) in cases {
-            let mcp = Mcp {
-                servers: test
-                    .servers
-                    .into_iter()
-                    .map(|(k, v)| (ServerId(k.to_string()), v))
-                    .collect(),
-            };
+            let config = toml::from_str::<McpPartial>(test.config).unwrap();
+            let fallback = toml::from_str::<McpPartial>(test.fallback).unwrap();
 
-            let received = mcp.get_server_with_defaults(test.input);
-            dbg!(&received);
-            assert_eq!(received, test.expected, "test case: {name}");
+            let merged = config.with_fallback(fallback);
+            let actual = toml::to_string_pretty(&merged).unwrap();
+
+            assert_eq!(test.expected.to_owned(), actual, "test case: {name}");
         }
     }
 }

@@ -9,8 +9,12 @@ use hex::ToHex as _;
 use inquire::Confirm;
 use jp_config::{
     mcp::{
-        server::{checksum::Algorithm, tool},
-        tool_call,
+        server::{
+            checksum::Algorithm,
+            tool::{self, Tool},
+            Server, ToolId,
+        },
+        tool_call, ServerId,
     },
     style::LinkStyle,
 };
@@ -110,8 +114,19 @@ async fn build_tool_call_result(
 ) -> Result<Option<String>, Error> {
     let tool_id = McpToolId::new(&call.name);
     let server_id = ctx.mcp_client.get_tool_server_id(&tool_id).await?;
-    let server_cfg = ctx.config.mcp.get_server_with_defaults(server_id.as_str());
-    let tool_cfg = server_cfg.get_tool_with_defaults(&call.name);
+    let server_defaults = Server::default();
+    let server_cfg = ctx
+        .config
+        .mcp
+        .servers
+        .get(&ServerId::new(server_id.as_str()))
+        .unwrap_or(&server_defaults);
+
+    let tool_defaults = Tool::default();
+    let tool_cfg = server_cfg
+        .tools
+        .get(&ToolId::new(&call.name))
+        .unwrap_or(&tool_defaults);
 
     let mut lines = result.content.trim().lines().collect::<Vec<_>>();
     let ext = lines
@@ -203,8 +218,19 @@ async fn call_tool(ctx: &Ctx, mut call: ToolCallRequest) -> Result<ToolCallResul
     info!(tool = %call.name, arguments = %call.arguments, "Calling tool.");
     let tool_id = McpToolId::new(&call.name);
     let server_id = ctx.mcp_client.get_tool_server_id(&tool_id).await?;
-    let server_cfg = ctx.config.mcp.get_server_with_defaults(server_id.as_str());
-    let mut tool_cfg = server_cfg.get_tool_with_defaults(&call.name);
+    let server_defaults = Server::default();
+    let server_cfg = ctx
+        .config
+        .mcp
+        .servers
+        .get(&ServerId::new(server_id.as_str()))
+        .unwrap_or(&server_defaults);
+
+    let mut tool_cfg = server_cfg
+        .tools
+        .get(&ToolId::new(&call.name))
+        .cloned()
+        .unwrap_or_default();
 
     if let Some(checksum) = &server_cfg.binary_checksum {
         let path = get_tool_binary_path(ctx, &tool_id).await?;
