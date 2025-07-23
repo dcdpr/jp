@@ -49,14 +49,19 @@ build-docs: (_docs "build")
 preview-docs: (_docs "preview")
 
 # Live-check the code, using Clippy and Bacon.
-check: (_install "bacon@" + bacon_version)
-    @bacon
+check: (bacon "check")
 
 test *FLAGS: (_install "cargo-nextest@" + nextest_version)
     cargo nextest run --workspace --all-targets {{FLAGS}}
 
+testw *FLAGS:
+    just bacon test {{FLAGS}}
+
 shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
     cargo shear {{FLAGS}}
+
+bacon CMD *FLAGS: (_install "bacon@" + bacon_version)
+    @bacon {{CMD}} -- {{FLAGS}}
 
 # Run all ci tasks.
 [group('ci')]
