@@ -83,6 +83,17 @@ impl IntoPartialConfig for Commands {
             _ => Ok(partial),
         }
     }
+
+    fn apply_conversation_config(
+        &self,
+        workspace: Option<&Workspace>,
+        partial: PartialConfig,
+    ) -> Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        match self {
+            Commands::Query(args) => args.apply_conversation_config(workspace, partial),
+            _ => Ok(partial),
+        }
+    }
 }
 
 pub(crate) type Output = std::result::Result<Success, Error>;
