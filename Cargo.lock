@@ -2229,6 +2229,7 @@ dependencies = [
  "async-trait",
  "futures",
  "gemini_client_rs",
+ "insta",
  "jp_config",
  "jp_conversation",
  "jp_mcp",
