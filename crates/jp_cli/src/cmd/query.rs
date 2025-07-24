@@ -17,10 +17,7 @@ use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::Instructions,
     expand_tilde,
-    mcp::{
-        server::{Server, ToolId},
-        ServerId,
-    },
+    mcp::{server::ToolId, ServerId},
     PartialConfig,
 };
 use jp_conversation::{
@@ -839,23 +836,16 @@ async fn list_enabled_tools(ctx: &Ctx) -> Result<Vec<Tool>> {
     for tool in all_tools {
         let tool_id = McpToolId::new(&*tool.name);
         let server_id = ctx.mcp_client.get_tool_server_id(&tool_id).await?;
-        let server_defaults = Server::default();
         let server_cfg = ctx
             .config
             .mcp
-            .servers
-            .get(&ServerId::new(server_id.as_str()))
-            .unwrap_or(&server_defaults);
+            .get_server(&ServerId::new(server_id.as_str()));
 
         if !server_cfg.enable {
             continue;
         }
 
-        let tool_defaults = jp_config::mcp::server::tool::Tool::default();
-        let tool_cfg = server_cfg
-            .tools
-            .get(&ToolId::new(tool.name.as_ref()))
-            .unwrap_or(&tool_defaults);
+        let tool_cfg = server_cfg.get_tool(&ToolId::new(tool.name.as_ref()));
 
         if !tool_cfg.enable {
             continue;

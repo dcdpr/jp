@@ -30,6 +30,17 @@ pub struct Mcp {
     pub servers: ConfigMap<ServerId, Server>,
 }
 
+impl Mcp {
+    #[must_use]
+    pub fn get_server(&self, id: &ServerId) -> Server {
+        self.servers
+            .get(id)
+            .cloned()
+            .or_else(|| self.servers.get(&ServerId::new("*")).cloned())
+            .unwrap_or_default()
+    }
+}
+
 impl AssignKeyValue for <Mcp as Confique>::Partial {
     fn assign(&mut self, mut kv: KvAssignment) -> Result<(), Error> {
         let k = kv.key().as_str().to_owned();
@@ -136,22 +147,9 @@ impl Partial for McpPartial {
     }
 
     fn with_fallback(self, fallback: Self) -> Self {
-        let servers = self
-            .merge_servers_with_inheritance(&fallback)
-            .into_iter()
-            .filter(|(k, _)| k != &ServerId::new("*"))
-            .map(|(k, mut v)| {
-                v.tools = v
-                    .tools
-                    .into_iter()
-                    .filter(|(k, _)| k != &ToolId::new("*"))
-                    .collect();
-
-                (k, v)
-            })
-            .collect();
-
-        Self { servers }
+        Self {
+            servers: self.merge_servers_with_inheritance(&fallback),
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -268,6 +266,13 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::mcp::{
+        server::{
+            checksum::{Algorithm, Checksum},
+            tool::{ResultMode, RunMode, ToolPartial},
+        },
+        tool_call::confique_partial_tool_call::PartialToolCall,
+    };
 
     #[test]
     #[expect(clippy::too_many_lines, clippy::needless_raw_string_hashes)]
@@ -682,10 +687,110 @@ mod tests {
             let config = toml::from_str::<McpPartial>(test.config).unwrap();
             let fallback = toml::from_str::<McpPartial>(test.fallback).unwrap();
 
-            let merged = config.with_fallback(fallback);
+            let mut merged = config.with_fallback(fallback);
+
+            // Filter out the "*" servers and tools, as we're not testing them.
+            merged.servers = merged
+                .servers
+                .into_iter()
+                .filter_map(|(k, mut v)| {
+                    if k.as_str() == "*" {
+                        return None;
+                    }
+
+                    v.tools = v
+                        .tools
+                        .into_iter()
+                        .filter_map(|(k, v)| {
+                            if k.as_str() == "*" {
+                                return None;
+                            }
+
+                            Some((k, v))
+                        })
+                        .collect();
+
+                    Some((k, v))
+                })
+                .collect();
+
             let actual = toml::to_string_pretty(&merged).unwrap();
 
             assert_eq!(test.expected.to_owned(), actual, "test case: {name}");
         }
+    }
+
+    #[test]
+    fn test_server_partial_with_fallback_merges_multiple_wildcards() {
+        let partial = McpPartial {
+            servers: ConfigMapPartial::from_iter([
+                (ServerId("*".to_string()), ServerPartial {
+                    tools: ConfigMapPartial::from_iter([(ToolId::new("*"), ToolPartial {
+                        run: Some(RunMode::Ask),
+                        enable: None,
+                        result: None,
+                        style: PartialToolCall::empty(),
+                    })]),
+                    ..Default::default()
+                }),
+                (ServerId("test".to_string()), ServerPartial {
+                    tools: ConfigMapPartial::from_iter([(ToolId::new("*"), ToolPartial {
+                        result: Some(ResultMode::Edit),
+                        enable: None,
+                        run: None,
+                        style: PartialToolCall::empty(),
+                    })]),
+                    ..Default::default()
+                }),
+            ]),
+        };
+
+        let partial = partial.with_fallback(McpPartial::empty());
+        let tool = partial
+            .servers
+            .get(&ServerId::new("test"))
+            .unwrap()
+            .tools
+            .get(&ToolId::new("*"))
+            .unwrap();
+
+        assert_eq!(tool.result, Some(ResultMode::Edit));
+        assert_eq!(tool.run, Some(RunMode::Ask));
+    }
+
+    #[test]
+    fn test_mcp_get_server() {
+        let config = Mcp {
+            servers: ConfigMap::from_iter([
+                (ServerId::new("test"), Server {
+                    enable: false,
+                    ..Default::default()
+                }),
+                (ServerId::new("*"), Server {
+                    binary_checksum: Some(Checksum {
+                        algorithm: Algorithm::Sha256,
+                        value: "1234567890".to_string(),
+                    }),
+                    ..Default::default()
+                }),
+            ]),
+        };
+
+        let server1 = config.get_server(&ServerId::new("test"));
+        assert!(!server1.enable);
+        assert_eq!(server1.binary_checksum, None);
+
+        let server2 = config.get_server(&ServerId::new("*"));
+        assert!(server2.enable);
+        assert_eq!(
+            server2.binary_checksum,
+            Some(Checksum {
+                algorithm: Algorithm::Sha256,
+                value: "1234567890".to_string(),
+            })
+        );
+
+        let server3 = config.get_server(&ServerId::new("nonexistent"));
+        assert_eq!(server2, server3);
     }
 }

@@ -45,6 +45,17 @@ pub struct Server {
     pub binary_checksum: Option<Checksum>,
 }
 
+impl Server {
+    #[must_use]
+    pub fn get_tool(&self, id: &ToolId) -> Tool {
+        self.tools
+            .get(id)
+            .cloned()
+            .or_else(|| self.tools.get(&ToolId::new("*")).cloned())
+            .unwrap_or_default()
+    }
+}
+
 impl AssignKeyValue for <Server as Confique>::Partial {
     fn assign(&mut self, mut kv: KvAssignment) -> Result<(), Error> {
         let k = kv.key().as_str().to_owned();
@@ -610,5 +621,33 @@ mod tests {
             let received = server.get_tool_with_defaults(test.input);
             assert_eq!(received, test.expected, "test case: {name}");
         }
+    }
+
+    #[test]
+    fn test_server_get_tool() {
+        let config = Server {
+            tools: ConfigMap::from_iter([
+                (ToolId::new("test"), Tool {
+                    enable: false,
+                    ..Default::default()
+                }),
+                (ToolId::new("*"), Tool {
+                    run: RunMode::Edit,
+                    ..Default::default()
+                }),
+            ]),
+            ..Default::default()
+        };
+
+        let tool1 = config.get_tool(&ToolId::new("test"));
+        assert!(!tool1.enable);
+        assert_eq!(tool1.run, RunMode::default());
+
+        let tool2 = config.get_tool(&ToolId::new("*"));
+        assert!(tool2.enable);
+        assert_eq!(tool2.run, RunMode::Edit);
+
+        let tool3 = config.get_tool(&ToolId::new("nonexistent"));
+        assert_eq!(tool2, tool3);
     }
 }
