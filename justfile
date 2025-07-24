@@ -1,6 +1,7 @@
 bacon_version    := "3.16.0"
 binstall_version := "1.14.1"
 deny_version     := "0.18.3"
+expand_version   := "1.0.52"
 insta_version    := "1.43.1"
 jilu_version     := "0.13.1"
 llvm_cov_version := "0.6.16"
@@ -51,7 +52,7 @@ preview-docs: (_docs "preview")
 # Live-check the code, using Clippy and Bacon.
 check: (bacon "check")
 
-test *FLAGS: (_install "cargo-nextest@" + nextest_version)
+test *FLAGS: (_install "cargo-nextest@" + nextest_version) (_install "cargo-expand@" + expand_version)
     cargo nextest run --workspace --all-targets {{FLAGS}}
 
 testw *FLAGS:
@@ -85,7 +86,7 @@ fmt-ci: (_rustup_component "rustfmt") _install_ci_matchers
 # Test the code on CI.
 [group('ci')]
 test-ci: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
-    cargo nextest run --workspace --all-targets --no-fail-fast
+    @just test --no-fail-fast
 
 # Generate documentation on CI.
 [group('ci')]
@@ -113,7 +114,7 @@ insta-ci: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta
 
 # Check for unused dependencies on CI.
 [group('ci')]
-shear-ci:
+shear-ci: (_install "cargo-expand@" + expand_version)
     @just shear --expand
 
 @_install_ci_matchers:
