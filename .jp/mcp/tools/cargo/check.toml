@@ -1,0 +1,7 @@
+inherit = "cargo"
+description = "Run `cargo check` for the given package, validating if the code compiles."
+
+[[properties]]
+name = "package"
+description = "Package to run check for, if unspecified, all workspace packages will be checked."
+type = "string"
