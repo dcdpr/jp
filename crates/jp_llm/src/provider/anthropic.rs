@@ -2,10 +2,7 @@ use std::env;
 
 use async_anthropic::{
     messages::DEFAULT_MAX_TOKENS,
-    types::{
-        self, ListModelsResponse, Thinking, ToolBash, ToolCodeExecution, ToolComputerUse,
-        ToolTextEditor, ToolWebSearch,
-    },
+    types::{self, ListModelsResponse, Thinking},
     Client,
 };
 use async_stream::stream;
