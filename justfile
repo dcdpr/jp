@@ -1,6 +1,7 @@
 bacon_version    := "3.16.0"
 binstall_version := "1.14.1"
 deny_version     := "0.18.3"
+expand_version   := "1.0.114"
 insta_version    := "1.43.1"
 jilu_version     := "0.13.1"
 llvm_cov_version := "0.6.16"
@@ -51,7 +52,7 @@ preview-docs: (_docs "preview")
 # Live-check the code, using Clippy and Bacon.
 check: (bacon "check")
 
-test *FLAGS: (_install "cargo-nextest@" + nextest_version)
+test *FLAGS: (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
     cargo nextest run --workspace --all-targets {{FLAGS}}
 
 testw *FLAGS:
@@ -92,7 +93,7 @@ fmt-ci: (_rustup_component "rustfmt") _install_ci_matchers
 # Test the code on CI.
 [group('ci')]
 test-ci: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
-    cargo nextest run --workspace --all-targets --no-fail-fast
+    @just test --no-fail-fast
 
 # Generate documentation on CI.
 [group('ci')]
@@ -103,10 +104,12 @@ docs-ci: _install_ci_matchers
 
 # Generate code coverage on CI.
 [group('ci')]
-coverage-ci: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version) _install_ci_matchers
+coverage-ci: _coverage-ci-setup
     cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --no-report nextest
     cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info
+
+_coverage-ci-setup: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version) _install_ci_matchers
 
 # Check for security vulnerabilities on CI.
 [group('ci')]
@@ -115,12 +118,14 @@ deny-ci: (_install "cargo-deny@" + deny_version) _install_ci_matchers
 
 # Validate insta snapshots on CI.
 [group('ci')]
-insta-ci: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta_version)
+insta-ci: _insta-ci-setup
     cargo insta test --check --unreferenced=auto
+
+_insta-ci-setup: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta_version + " cargo-expand@" + expand_version)
 
 # Check for unused dependencies on CI.
 [group('ci')]
-shear-ci:
+shear-ci: (_install "cargo-expand@" + expand_version)
     @just shear --expand
 
 @_install_ci_matchers:
