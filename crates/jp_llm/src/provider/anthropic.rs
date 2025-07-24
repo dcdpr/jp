@@ -2,7 +2,10 @@ use std::env;
 
 use async_anthropic::{
     messages::DEFAULT_MAX_TOKENS,
-    types::{self, ListModelsResponse, Thinking},
+    types::{
+        self, ListModelsResponse, Thinking, ToolBash, ToolCodeExecution, ToolComputerUse,
+        ToolTextEditor, ToolWebSearch,
+    },
     Client,
 };
 use async_stream::stream;
@@ -389,7 +392,7 @@ fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolChoice {
 }
 
 fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
-    tools
+    let mut tools: Vec<_> = tools
         .into_iter()
         .map(|tool| {
             types::Tool::Custom(types::CustomTool {
@@ -430,7 +433,41 @@ fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
                 cache_control: None,
             })
         })
-        .collect()
+        .collect();
+
+    // Cache tool definitions (4/4), as they are unlikely to change.
+    if let Some(tool) = tools.last_mut() {
+        let cache_control = match tool {
+            types::Tool::Custom(tool) => &mut tool.cache_control,
+            types::Tool::Bash(ToolBash::Bash20241022(tool)) => &mut tool.cache_control,
+            types::Tool::Bash(ToolBash::Bash20250124(tool)) => &mut tool.cache_control,
+            types::Tool::CodeExecution(ToolCodeExecution::CodeExecution20250522(tool)) => {
+                &mut tool.cache_control
+            }
+            types::Tool::ComputerUse(ToolComputerUse::ComputerUse20241022(tool)) => {
+                &mut tool.cache_control
+            }
+            types::Tool::ComputerUse(ToolComputerUse::ComputerUse20250124(tool)) => {
+                &mut tool.cache_control
+            }
+            types::Tool::TextEditor(ToolTextEditor::TextEditor20241022(tool)) => {
+                &mut tool.cache_control
+            }
+            types::Tool::TextEditor(ToolTextEditor::TextEditor20250124(tool)) => {
+                &mut tool.cache_control
+            }
+            types::Tool::TextEditor(ToolTextEditor::TextEditor20250429(tool)) => {
+                &mut tool.cache_control
+            }
+            types::Tool::WebSearch(ToolWebSearch::WebSearch20250305(tool)) => {
+                &mut tool.cache_control
+            }
+        };
+
+        *cache_control = Some(types::CacheControl::default());
+    }
+
+    tools
 }
 
 fn convert_thread(thread: Thread) -> Result<Vec<types::Message>> {
@@ -473,7 +510,7 @@ impl TryFrom<Thread> for Messages {
 
         // Historical messages second, these are static.
         //
-        // Make sure to add cache control (2/4) to the last history message.
+        // Make sure to add cache control (1/4) to the last history message.
         if let Some(message) = history.last_mut().and_then(|m| m.content.0.last_mut()) {
             match message {
                 types::MessageContent::Text(m) => {
@@ -503,7 +540,7 @@ impl TryFrom<Thread> for Messages {
 
         // Then instructions in XML tags.
         //
-        // Cached (3/4), (for the last instruction), as it's not expected to
+        // Cached (2/4), (for the last instruction), as it's not expected to
         // change.
         let mut instructions = instructions.iter().peekable();
         while let Some(instruction) = instructions.next() {
@@ -520,7 +557,7 @@ impl TryFrom<Thread> for Messages {
         // see: <https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/long-context-tips>
         // see: <https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-xml-tags>
         //
-        // Cached (4/4), more likely to change, but we'll keep the previous
+        // Cached (3/4), more likely to change, but we'll keep the previous
         // cache if changed.
         if !attachments.is_empty() {
             let documents: Documents = attachments
