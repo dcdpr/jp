@@ -680,7 +680,33 @@ mod tests {
             let config = toml::from_str::<McpPartial>(test.config).unwrap();
             let fallback = toml::from_str::<McpPartial>(test.fallback).unwrap();
 
-            let merged = config.with_fallback(fallback);
+            let mut merged = config.with_fallback(fallback);
+
+            // Filter out the "*" servers and tools, as we're not testing them.
+            merged.servers = merged
+                .servers
+                .into_iter()
+                .filter_map(|(k, mut v)| {
+                    if k.as_str() == "*" {
+                        return None;
+                    }
+
+                    v.tools = v
+                        .tools
+                        .into_iter()
+                        .filter_map(|(k, v)| {
+                            if k.as_str() == "*" {
+                                return None;
+                            }
+
+                            Some((k, v))
+                        })
+                        .collect();
+
+                    Some((k, v))
+                })
+                .collect();
+
             let actual = toml::to_string_pretty(&merged).unwrap();
 
             assert_eq!(test.expected.to_owned(), actual, "test case: {name}");
