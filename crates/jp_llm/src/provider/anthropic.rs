@@ -2,7 +2,10 @@ use std::env;
 
 use async_anthropic::{
     messages::DEFAULT_MAX_TOKENS,
-    types::{self, ListModelsResponse, Thinking},
+    types::{
+        self, ListModelsResponse, Thinking, ToolBash, ToolCodeExecution, ToolComputerUse,
+        ToolTextEditor, ToolWebSearch,
+    },
     Client,
 };
 use async_stream::stream;
@@ -45,11 +48,21 @@ impl Anthropic {
             tool_call_strict_mode,
         } = query;
 
+        // see: <https://docs.anthropic.com/en/docs/about-claude/models/overview#model-aliases>
+        let details_slug = match model_id.slug() {
+            "claude-opus-4-0" => "claude-opus-4-20250514",
+            "claude-sonnet-4-0" => "claude-sonnet-4-20250514",
+            "claude-3-7-sonnet-latest" => "claude-3-7-sonnet-20250219",
+            "claude-3-5-sonnet-latest" => "claude-3-5-sonnet-20241022",
+            "claude-3-5-haiku-latest" => "claude-3-5-haiku-20241022",
+            slug => slug,
+        };
+
         let details = self
             .models()
             .await?
             .into_iter()
-            .find(|m| m.slug == model_id.slug());
+            .find(|m| m.slug == details_slug);
 
         let mut builder = types::CreateMessagesRequestBuilder::default();
         let system_prompt = thread.system_prompt.clone();
@@ -75,7 +88,15 @@ impl Anthropic {
         let max_tokens = parameters
             .max_tokens
             .or_else(|| details.as_ref().and_then(|d| d.max_output_tokens))
-            .unwrap_or(DEFAULT_MAX_TOKENS as u32);
+            .unwrap_or_else(|| {
+                warn!(
+                    %model_id,
+                    %DEFAULT_MAX_TOKENS,
+                    "Model `max_tokens` parameter not found, using default value."
+                );
+
+                DEFAULT_MAX_TOKENS as u32
+            });
 
         if let Some(thinking) = parameters.reasoning {
             let (supported, min_supported, max_supported) = if tool_choice_function {
