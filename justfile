@@ -27,9 +27,10 @@ issue-feat +ARGS="Please create a feature request for the following:\n\n": _inst
 
 # Open a commit message in the editor, using Jean-Pierre.
 [group('git')]
+[positional-arguments]
 commit +ARGS="Give me a commit message": _install-jp
     #!/usr/bin/env sh
-    if message=$(jp query --no-persist --new --cfg=personas/commit {{ARGS}}); then
+    if message=$(jp query --no-persist --new --cfg=personas/commit "$@"); then
         echo "$message" | sed -e 's/\x1b\[[0-9;]*[mGKHF]//g' | git commit --edit --file=-
     fi
 
