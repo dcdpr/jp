@@ -622,4 +622,32 @@ mod tests {
             assert_eq!(received, test.expected, "test case: {name}");
         }
     }
+
+    #[test]
+    fn test_server_get_tool() {
+        let config = Server {
+            tools: ConfigMap::from_iter([
+                (ToolId::new("test"), Tool {
+                    enable: false,
+                    ..Default::default()
+                }),
+                (ToolId::new("*"), Tool {
+                    run: RunMode::Edit,
+                    ..Default::default()
+                }),
+            ]),
+            ..Default::default()
+        };
+
+        let tool1 = config.get_tool(&ToolId::new("test"));
+        assert!(!tool1.enable);
+        assert_eq!(tool1.run, RunMode::default());
+
+        let tool2 = config.get_tool(&ToolId::new("*"));
+        assert!(tool2.enable);
+        assert_eq!(tool2.run, RunMode::Edit);
+
+        let tool3 = config.get_tool(&ToolId::new("nonexistent"));
+        assert_eq!(tool2, tool3);
+    }
 }
