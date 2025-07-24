@@ -5,6 +5,8 @@ use crate::{Result, Workspace};
 pub(crate) async fn cargo_check(workspace: &Workspace, package: Option<String>) -> Result<String> {
     let package = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
     let result = cmd!("cargo", "check", "--color=never", &package, "--quiet")
+        // Prevent warnings from being treated as errors, e.g. on CI.
+        .env("RUSTFLAGS", "-W warnings")
         .stdout_capture()
         .stderr_capture()
         .dir(&workspace.path)
