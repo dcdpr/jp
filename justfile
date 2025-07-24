@@ -52,7 +52,7 @@ preview-docs: (_docs "preview")
 # Live-check the code, using Clippy and Bacon.
 check: (bacon "check")
 
-test *FLAGS: (_install "cargo-nextest@" + nextest_version) (_install "cargo-expand@" + expand_version)
+test *FLAGS: (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
     cargo nextest run --workspace --all-targets {{FLAGS}}
 
 testw *FLAGS:
@@ -109,7 +109,7 @@ deny-ci: (_install "cargo-deny@" + deny_version) _install_ci_matchers
 
 # Validate insta snapshots on CI.
 [group('ci')]
-insta-ci: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta_version)
+insta-ci: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta_version + " cargo-expand@" + expand_version)
     cargo insta test --check --unreferenced=auto
 
 # Check for unused dependencies on CI.
