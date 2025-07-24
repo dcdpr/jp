@@ -39,6 +39,7 @@ tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+insta = { workspace = true }
 jp_test = { workspace = true }
 test-log = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
