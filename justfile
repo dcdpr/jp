@@ -63,6 +63,13 @@ shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
 bacon CMD *FLAGS: (_install "bacon@" + bacon_version)
     @bacon {{CMD}} -- {{FLAGS}}
 
+[group('tools')]
+install-tools: _install-tools
+
+[group('tools')]
+serve-tools WORKSPACE TOOL:
+    @jp-tools '{{WORKSPACE}}' '{{TOOL}}'
+
 # Run all ci tasks.
 [group('ci')]
 ci: build-ci lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci
@@ -131,6 +138,9 @@ shear-ci:
 
 @_install-binstall:
     cargo install {{quiet_flag}} --locked --version {{binstall_version}} cargo-binstall
+
+@_install-tools:
+    cargo install {{quiet_flag}} --locked --path .config/jp/tools
 
 [working-directory: 'docs']
 @_docs-install:
