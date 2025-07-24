@@ -4562,6 +4562,7 @@ dependencies = [
  "ignore",
  "indoc",
  "octocrab",
+ "pretty_assertions",
  "quick-xml",
  "serde",
  "serde_json",
