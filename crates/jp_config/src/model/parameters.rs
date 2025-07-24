@@ -137,9 +137,9 @@ impl ReasoningEffort {
     #[must_use]
     pub fn to_tokens(self, max_tokens: u32) -> u32 {
         match self {
-            Self::High => (max_tokens * 80) / 100,
-            Self::Medium => (max_tokens * 50) / 100,
-            Self::Low => (max_tokens * 20) / 100,
+            Self::High => max_tokens.saturating_mul(80) / 100,
+            Self::Medium => max_tokens.saturating_mul(50) / 100,
+            Self::Low => max_tokens.saturating_mul(20) / 100,
             Self::Absolute(tokens) => tokens,
         }
     }

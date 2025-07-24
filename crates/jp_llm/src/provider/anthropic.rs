@@ -34,108 +34,6 @@ pub struct Anthropic {
     client: Client,
 }
 
-impl Anthropic {
-    async fn create_request(
-        &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
-        query: ChatQuery,
-    ) -> Result<types::CreateMessagesRequest> {
-        let ChatQuery {
-            thread,
-            tools,
-            tool_choice,
-            tool_call_strict_mode,
-        } = query;
-
-        let details = self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.slug == model_id.slug());
-
-        let mut builder = types::CreateMessagesRequestBuilder::default();
-        let system_prompt = thread.system_prompt.clone();
-
-        builder
-            .model(model_id.slug())
-            .messages(convert_thread(thread)?);
-
-        if let Some(system_prompt) = system_prompt {
-            builder.system(types::Text {
-                text: system_prompt,
-                cache_control: Some(types::CacheControl::default()),
-            });
-        }
-
-        let tools = convert_tools(tools, tool_call_strict_mode);
-        let tool_choice_function = matches!(tool_choice, jp_mcp::tool::ToolChoice::Function(_));
-        let tool_choice = convert_tool_choice(tool_choice);
-        if !tools.is_empty() {
-            builder.tools(tools).tool_choice(tool_choice);
-        }
-
-        let max_tokens = parameters
-            .max_tokens
-            .or_else(|| details.as_ref().and_then(|d| d.max_output_tokens))
-            .unwrap_or(DEFAULT_MAX_TOKENS as u32);
-
-        if let Some(thinking) = parameters.reasoning {
-            let (supported, min_supported, max_supported) = if tool_choice_function {
-                info!(
-                    "Anthropic API does not support reasoning when tool_choice forces tool use. \
-                     Disabling reasoning."
-                );
-                (false, 0, None)
-            } else if let Some(details) = details.as_ref().and_then(|d| d.reasoning) {
-                (details.supported, details.min_tokens, details.max_tokens)
-            } else {
-                warn!(
-                    %model_id,
-                    "Model reasoning support unknown, but the request requested it. This may \
-                result in unexpected behavior"
-                );
-
-                (true, 0, None)
-            };
-
-            if supported {
-                builder.thinking(types::ExtendedThinking {
-                    kind: "enabled".to_string(),
-                    budget_tokens: thinking
-                        .effort
-                        .to_tokens(max_tokens)
-                        .max(min_supported)
-                        .min(max_supported.unwrap_or(u32::MAX)),
-                });
-            } else {
-                warn!(
-                    %model_id,
-                    "Model does not support reasoning, but the request requested it. Reasnoning \
-                     disabled."
-                );
-            }
-        }
-
-        if let Some(temperature) = parameters.temperature {
-            builder.temperature(temperature);
-        }
-
-        #[expect(clippy::cast_possible_wrap)]
-        builder.max_tokens(max_tokens as i32);
-
-        if let Some(top_p) = parameters.top_p {
-            builder.top_p(top_p);
-        }
-
-        if let Some(top_k) = parameters.top_k {
-            builder.top_k(top_k);
-        }
-
-        builder.build().map_err(Into::into)
-    }
-}
-
 #[async_trait]
 impl Provider for Anthropic {
     async fn models(&self) -> Result<Vec<ModelDetails>> {
@@ -166,7 +64,10 @@ impl Provider for Anthropic {
         parameters: &Parameters,
         query: ChatQuery,
     ) -> Result<Reply> {
-        let request = self.create_request(model, parameters, query).await?;
+        let details = self.models().await?;
+        let model_details = get_details_for_model(model, &details);
+        let request = create_request(model, model_details, parameters, query)?;
+
         self.client
             .messages()
             .create(request)
@@ -183,8 +84,11 @@ impl Provider for Anthropic {
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = self.create_request(model_id, parameters, query).await?;
-        let stream = Box::pin(stream! {
+        let details = self.models().await?;
+        let model_details = get_details_for_model(model_id, &details);
+        let request = create_request(model_id, model_details, parameters, query)?;
+
+        Ok(Box::pin(stream! {
             let mut current_state = AccumulationState::default();
             let stream = client
                 .messages()
@@ -201,10 +105,127 @@ impl Provider for Anthropic {
                     yield event;
                 }
             }
+        }))
+    }
+}
+
+fn create_request(
+    model_id: &ModelId,
+    model_details: Option<&ModelDetails>,
+    parameters: &Parameters,
+    query: ChatQuery,
+) -> Result<types::CreateMessagesRequest> {
+    let ChatQuery {
+        thread,
+        tools,
+        tool_choice,
+        tool_call_strict_mode,
+    } = query;
+
+    let mut builder = types::CreateMessagesRequestBuilder::default();
+    let system_prompt = thread.system_prompt.clone();
+
+    builder
+        .model(model_id.slug())
+        .messages(convert_thread(thread)?);
+
+    if let Some(system_prompt) = system_prompt {
+        builder.system(types::Text {
+            text: system_prompt,
+            cache_control: Some(types::CacheControl::default()),
+        });
+    }
+
+    let tools = convert_tools(tools, tool_call_strict_mode);
+    let tool_choice_function = matches!(tool_choice, jp_mcp::tool::ToolChoice::Function(_));
+    let tool_choice = convert_tool_choice(tool_choice);
+    if !tools.is_empty() {
+        builder.tools(tools).tool_choice(tool_choice);
+    }
+
+    let max_tokens = parameters
+        .max_tokens
+        .or_else(|| model_details.as_ref().and_then(|d| d.max_output_tokens))
+        .unwrap_or_else(|| {
+            warn!(
+                %model_id,
+                %DEFAULT_MAX_TOKENS,
+                "Model `max_tokens` parameter not found, using default value."
+            );
+
+            DEFAULT_MAX_TOKENS as u32
         });
 
-        Ok(stream)
+    if let Some(thinking) = parameters.reasoning {
+        let (supported, min_supported, max_supported) = if tool_choice_function {
+            info!(
+                "Anthropic API does not support reasoning when tool_choice forces tool use. \
+                 Disabling reasoning."
+            );
+            (false, 0, None)
+        } else if let Some(details) = model_details.as_ref().and_then(|d| d.reasoning) {
+            (details.supported, details.min_tokens, details.max_tokens)
+        } else {
+            warn!(
+                %model_id,
+                "Model reasoning support unknown, but the request requested it. This may \
+            result in unexpected behavior"
+            );
+
+            (true, 0, None)
+        };
+
+        if supported {
+            builder.thinking(types::ExtendedThinking {
+                kind: "enabled".to_string(),
+                budget_tokens: thinking
+                    .effort
+                    .to_tokens(max_tokens)
+                    .max(min_supported)
+                    .min(max_supported.unwrap_or(u32::MAX)),
+            });
+        } else {
+            warn!(
+                %model_id,
+                "Model does not support reasoning, but the request requested it. Reasnoning \
+                 disabled."
+            );
+        }
     }
+
+    if let Some(temperature) = parameters.temperature {
+        builder.temperature(temperature);
+    }
+
+    #[expect(clippy::cast_possible_wrap)]
+    builder.max_tokens(max_tokens as i32);
+
+    if let Some(top_p) = parameters.top_p {
+        builder.top_p(top_p);
+    }
+
+    if let Some(top_k) = parameters.top_k {
+        builder.top_k(top_k);
+    }
+
+    builder.build().map_err(Into::into)
+}
+
+fn get_details_for_model<'a>(
+    model_id: &ModelId,
+    details: &'a [ModelDetails],
+) -> Option<&'a ModelDetails> {
+    // see: <https://docs.anthropic.com/en/docs/about-claude/models/overview#model-aliases>
+    let details_slug = match model_id.slug() {
+        "claude-opus-4-0" => "claude-opus-4-20250514",
+        "claude-sonnet-4-0" => "claude-sonnet-4-20250514",
+        "claude-3-7-sonnet-latest" => "claude-3-7-sonnet-20250219",
+        "claude-3-5-sonnet-latest" => "claude-3-5-sonnet-20241022",
+        "claude-3-5-haiku-latest" => "claude-3-5-haiku-20241022",
+        slug => slug,
+    };
+
+    details.iter().find(|m| m.slug == details_slug)
 }
 
 fn map_model(model: types::Model) -> ModelDetails {
@@ -872,5 +893,103 @@ mod tests {
             },
         )
         .await
+    }
+
+    #[test]
+    fn test_create_request() {
+        let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
+        let query = ChatQuery {
+            thread: Thread {
+                message: "Test message".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let parameters = Parameters {
+            reasoning: Some(Reasoning {
+                effort: ReasoningEffort::Medium,
+                exclude: false,
+            }),
+            top_p: Some(1.0),
+            top_k: Some(40),
+            ..Default::default()
+        };
+
+        let model_details = map_model(types::Model {
+            id: "claude-3-5-haiku-latest".to_owned(),
+            display_name: String::new(),
+            created_at: String::new(),
+            model_type: String::new(),
+        });
+
+        let request = create_request(&model_id, Some(&model_details), &parameters, query);
+
+        insta::assert_debug_snapshot!(request);
+    }
+
+    #[test]
+    fn test_get_details_for_model() {
+        let details = vec![
+            ModelDetails {
+                provider: ProviderId::Anthropic,
+                slug: "claude-opus-4-20250514".to_owned(),
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: None,
+                knowledge_cutoff: None,
+            },
+            ModelDetails {
+                provider: ProviderId::Anthropic,
+                slug: "claude-sonnet-4-20250514".to_owned(),
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: None,
+                knowledge_cutoff: None,
+            },
+            ModelDetails {
+                provider: ProviderId::Anthropic,
+                slug: "claude-3-7-sonnet-20250219".to_owned(),
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: None,
+                knowledge_cutoff: None,
+            },
+            ModelDetails {
+                provider: ProviderId::Anthropic,
+                slug: "claude-3-5-sonnet-20241022".to_owned(),
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: None,
+                knowledge_cutoff: None,
+            },
+            ModelDetails {
+                provider: ProviderId::Anthropic,
+                slug: "claude-3-5-haiku-20241022".to_owned(),
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: None,
+                knowledge_cutoff: None,
+            },
+        ];
+
+        let cases = vec![
+            ("anthropic/claude-opus-4-0", Some(&details[0])),
+            ("anthropic/claude-opus-4-20250514", Some(&details[0])),
+            ("anthropic/claude-sonnet-4-0", Some(&details[1])),
+            ("anthropic/claude-sonnet-4-20250514", Some(&details[1])),
+            ("anthropic/claude-3-7-sonnet-latest", Some(&details[2])),
+            ("anthropic/claude-3-7-sonnet-20250219", Some(&details[2])),
+            ("anthropic/claude-3-5-sonnet-latest", Some(&details[3])),
+            ("anthropic/claude-3-5-sonnet-20241022", Some(&details[3])),
+            ("anthropic/claude-3-5-haiku-latest", Some(&details[4])),
+            ("anthropic/claude-3-5-haiku-20241022", Some(&details[4])),
+            ("anthropic/nonexistent", None),
+        ];
+
+        for (model_id, expected) in cases {
+            let actual = get_details_for_model(&model_id.parse().unwrap(), &details);
+            assert_eq!(actual, expected);
+        }
     }
 }

@@ -1,0 +1,44 @@
+---
+source: crates/jp_llm/src/provider/anthropic.rs
+expression: request
+---
+Ok(
+    CreateMessagesRequest {
+        messages: [
+            Message {
+                role: User,
+                content: MessageContentList(
+                    [
+                        Text(
+                            Text {
+                                text: "Test message",
+                                cache_control: None,
+                            },
+                        ),
+                    ],
+                ),
+            },
+        ],
+        model: "claude-3-5-haiku-latest",
+        max_tokens: 8192,
+        thinking: Some(
+            ExtendedThinking {
+                kind: "enabled",
+                budget_tokens: 4096,
+            },
+        ),
+        metadata: {},
+        stop_sequences: [],
+        stream: false,
+        temperature: None,
+        tool_choice: None,
+        tools: [],
+        top_k: Some(
+            40,
+        ),
+        top_p: Some(
+            1.0,
+        ),
+        system: None,
+    },
+)
