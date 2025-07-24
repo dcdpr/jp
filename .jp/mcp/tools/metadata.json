@@ -2,12 +2,8 @@
   "templates": {
     "cargo": {
       "command": [
-        "cargo",
-        "run",
-        "--quiet",
-        "--package",
-        "tools",
-        "--",
+        "just",
+        "serve-tools",
         "{{ workspace }}",
         "{{ tool }}"
       ]

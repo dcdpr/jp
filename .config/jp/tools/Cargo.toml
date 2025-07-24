@@ -42,3 +42,7 @@ test-log = { workspace = true }
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "jp-tools"
+path = "src/main.rs"
