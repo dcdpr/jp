@@ -97,10 +97,12 @@ docs-ci: _install_ci_matchers
 
 # Generate code coverage on CI.
 [group('ci')]
-coverage-ci: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version) _install_ci_matchers
+coverage-ci: _coverage-ci-setup
     cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --no-report nextest
     cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info
+
+_coverage-ci-setup: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version) _install_ci_matchers
 
 # Check for security vulnerabilities on CI.
 [group('ci')]
@@ -109,8 +111,10 @@ deny-ci: (_install "cargo-deny@" + deny_version) _install_ci_matchers
 
 # Validate insta snapshots on CI.
 [group('ci')]
-insta-ci: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta_version + " cargo-expand@" + expand_version)
+insta-ci: _insta-ci-setup
     cargo insta test --check --unreferenced=auto
+
+_insta-ci-setup: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta_version + " cargo-expand@" + expand_version)
 
 # Check for unused dependencies on CI.
 [group('ci')]
