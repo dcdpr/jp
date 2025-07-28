@@ -43,7 +43,7 @@ const PATH_STRING_PREFIX: char = '@';
 
 // Jean Pierre's LLM Toolkit.
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, long_version = env!("LONG_VERSION"), about, long_about = None)]
 struct Cli {
     #[command(flatten, next_help_heading = "Global Options")]
     globals: Globals,
