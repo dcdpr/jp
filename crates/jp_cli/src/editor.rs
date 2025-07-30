@@ -2,7 +2,7 @@ use std::{env, fs, path::PathBuf, str::FromStr};
 
 use duct::Expression;
 use jp_config::editor;
-use jp_conversation::{ConversationId, UserMessage};
+use jp_conversation::{event::EventKind, AssistantMessage, ConversationId, UserMessage};
 use time::{macros::format_description, UtcOffset};
 
 use crate::{
@@ -242,21 +242,21 @@ pub(crate) fn edit_query(
     cmd: Expression,
 ) -> Result<(String, PathBuf)> {
     let root = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
-    let history = ctx.workspace.get_messages(&conversation_id);
+    let history = ctx.workspace.get_events(&conversation_id);
 
     let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
 
     let mut initial_text = vec![];
-    for message in history {
+    for event in history {
         let mut buf = String::new();
         buf.push_str("# ");
         buf.push_str(
-            &message
-                .timestamp
+            &event
+                .created_at
                 .to_offset(local_offset)
                 .format(&format)
-                .unwrap_or_else(|_| message.timestamp.to_string()),
+                .unwrap_or_else(|_| event.created_at.to_string()),
         );
         buf.push_str("\n\n");
 
@@ -271,12 +271,12 @@ pub(crate) fn edit_query(
             ..Default::default()
         };
 
-        match &message.message {
-            UserMessage::Query(query) => {
+        match &event.kind {
+            EventKind::UserMessage(UserMessage::Query(query)) => {
                 buf.push_str("## YOU\n\n");
                 buf.push_str(&comrak::markdown_to_commonmark(query, &options));
             }
-            UserMessage::ToolCallResults(results) => {
+            EventKind::UserMessage(UserMessage::ToolCallResults(results)) => {
                 for result in results {
                     buf.push_str("## TOOL CALL RESULT\n\n");
                     buf.push_str("```\n");
@@ -284,38 +284,47 @@ pub(crate) fn edit_query(
                     buf.push_str("\n```");
                 }
             }
+            _ => {}
         }
         buf.push('\n');
 
         buf.push_str("## ASSISTANT\n\n");
-        if let Some(reasoning) = &message.reply.reasoning {
-            buf.push_str(&comrak::markdown_to_commonmark(
-                &format!("### reasoning\n\n{reasoning}\n\n"),
-                &options,
-            ));
-        }
-        if let Some(content) = &message.reply.content {
-            buf.push_str(&comrak::markdown_to_commonmark(
-                &format!(
-                    "{}{content}\n\n",
-                    if message.reply.reasoning.is_some() {
-                        "### response\n\n"
-                    } else {
-                        ""
-                    }
-                ),
-                &options,
-            ));
-        }
-        for tool_call in &message.reply.tool_calls {
-            let Ok(result) = serde_json::to_string_pretty(&tool_call) else {
-                continue;
-            };
+        if let EventKind::AssistantMessage(AssistantMessage {
+            reasoning,
+            content,
+            tool_calls,
+            ..
+        }) = &event.kind
+        {
+            if let Some(reasoning) = &reasoning {
+                buf.push_str(&comrak::markdown_to_commonmark(
+                    &format!("### reasoning\n\n{reasoning}\n\n"),
+                    &options,
+                ));
+            }
+            if let Some(content) = &content {
+                buf.push_str(&comrak::markdown_to_commonmark(
+                    &format!(
+                        "{}{content}\n\n",
+                        if reasoning.is_some() {
+                            "### response\n\n"
+                        } else {
+                            ""
+                        }
+                    ),
+                    &options,
+                ));
+            }
+            for tool_call in tool_calls {
+                let Ok(result) = serde_json::to_string_pretty(&tool_call) else {
+                    continue;
+                };
 
-            buf.push_str("## TOOL CALL REQUEST\n\n");
-            buf.push_str("```json\n");
-            buf.push_str(&result);
-            buf.push_str("\n```");
+                buf.push_str("## TOOL CALL REQUEST\n\n");
+                buf.push_str("```json\n");
+                buf.push_str(&result);
+                buf.push_str("\n```");
+            }
         }
         buf.push_str("\n\n");
 

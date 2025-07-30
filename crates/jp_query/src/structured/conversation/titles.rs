@@ -1,13 +1,13 @@
 use std::error::Error;
 
-use jp_conversation::{thread::ThreadBuilder, MessagePair};
+use jp_conversation::{event::ConversationEvent, thread::ThreadBuilder};
 use serde_json::Value;
 
 use crate::query::StructuredQuery;
 
 pub fn titles(
     count: usize,
-    messages: Vec<MessagePair>,
+    messages: Vec<ConversationEvent>,
     rejected: &[String],
 ) -> Result<StructuredQuery, Box<dyn Error + Send + Sync>> {
     let schema = schemars::json_schema!({

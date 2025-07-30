@@ -17,7 +17,7 @@ use std::{
 pub use error::Error;
 use error::Result;
 pub use id::Id;
-use jp_conversation::{Conversation, ConversationId, MessagePair};
+use jp_conversation::{event::ConversationEvent, Conversation, ConversationId};
 use jp_mcp::{
     config::{McpServer, McpServerId},
     tool::McpTool,
@@ -168,7 +168,7 @@ impl Workspace {
         // Workspace state
         let mcp_servers = storage.load_mcp_servers()?;
         let mcp_tools = storage.load_mcp_tools()?;
-        let (mut conversations, messages) = storage.load_conversations_and_messages()?;
+        let (mut conversations, events) = storage.load_conversations_and_events()?;
 
         // Local state
         let conversations_metadata = storage.load_conversations_metadata()?;
@@ -199,7 +199,7 @@ impl Workspace {
             local: LocalState {
                 active_conversation,
                 conversations,
-                messages,
+                events,
                 mcp_servers,
                 mcp_tools,
             },
@@ -223,9 +223,9 @@ impl Workspace {
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
         storage.persist_conversations_metadata(&self.state.user.conversations_metadata)?;
-        storage.persist_conversations_and_messages(
+        storage.persist_conversations_and_events(
             &self.state.local.conversations,
-            &self.state.local.messages,
+            &self.state.local.events,
             &self
                 .state
                 .user
@@ -276,11 +276,11 @@ impl Workspace {
         );
 
         // Insert the old active conversation back into the list of
-        // conversations, but only if it has any messages attached.
+        // conversations, but only if it has any events attached.
         if self
             .state
             .local
-            .messages
+            .events
             .get(&old_active_conversation_id)
             .is_some_and(|v| !v.is_empty())
         {
@@ -320,7 +320,7 @@ impl Workspace {
         let id = ConversationId::default();
 
         self.state.local.conversations.insert(id, conversation);
-        self.state.local.messages.entry(id).or_default();
+        self.state.local.events.entry(id).or_default();
         id
     }
 
@@ -351,29 +351,30 @@ impl Workspace {
         &mut self.state.local.active_conversation
     }
 
-    /// Gets the messages for a specific conversation. Returns an empty slice if not found.
+    /// Gets the events for a specific conversation. Returns an empty slice if
+    /// not found.
     #[must_use]
-    pub fn get_messages(&self, id: &ConversationId) -> &[MessagePair] {
+    pub fn get_events(&self, id: &ConversationId) -> &[ConversationEvent] {
         self.state
             .local
-            .messages
+            .events
             .get(id)
             .map_or(&[], |v| v.as_slice())
     }
 
-    /// Removes the last message from a conversation.
-    pub fn pop_message(&mut self, id: &ConversationId) -> Option<MessagePair> {
-        self.state.local.messages.get_mut(id).and_then(Vec::pop)
+    /// Removes the last event from a conversation.
+    pub fn pop_event(&mut self, id: &ConversationId) -> Option<ConversationEvent> {
+        self.state.local.events.get_mut(id).and_then(Vec::pop)
     }
 
-    /// Adds a message to a conversation.
-    pub fn add_message(&mut self, id: ConversationId, message: MessagePair) {
+    /// Adds a event to a conversation.
+    pub fn add_event(&mut self, id: ConversationId, event: impl Into<ConversationEvent>) {
         self.state
             .local
-            .messages
+            .events
             .entry(id)
             .or_default()
-            .push(message);
+            .push(event.into());
     }
 
     /// Returns an iterator over all configured MCP tools.

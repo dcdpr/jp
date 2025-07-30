@@ -8,8 +8,9 @@ use jp_config::{
     model::parameters::{Parameters, Reasoning, ReasoningEffort},
 };
 use jp_conversation::{
+    event::{ConversationEvent, EventKind},
     thread::{Document, Documents, Thread},
-    AssistantMessage, MessagePair, UserMessage,
+    AssistantMessage, UserMessage,
 };
 use jp_mcp::tool;
 use jp_model::{ModelId, ProviderId};
@@ -420,9 +421,12 @@ impl TryFrom<(Thread, bool)> for Inputs {
         // one more back in history, to avoid disjointing tool call requests and
         // their responses.
         let mut history_after_instructions = vec![];
-        while let Some(message) = history.pop() {
-            let tool_call_results = matches!(message.message, UserMessage::ToolCallResults(_));
-            history_after_instructions.insert(0, message);
+        while let Some(event) = history.pop() {
+            let tool_call_results = matches!(
+                event.kind,
+                EventKind::UserMessage(UserMessage::ToolCallResults(_))
+            );
+            history_after_instructions.insert(0, event);
 
             if !tool_call_results {
                 break;
@@ -432,7 +436,7 @@ impl TryFrom<(Thread, bool)> for Inputs {
         let mut items = vec![];
         let history = history
             .into_iter()
-            .flat_map(|v| message_pair_to_messages(v, supports_reasoning))
+            .flat_map(|v| event_to_messages(v, supports_reasoning))
             .collect::<Vec<_>>();
 
         // System message first, if any.
@@ -509,7 +513,7 @@ impl TryFrom<(Thread, bool)> for Inputs {
         items.extend(
             history_after_instructions
                 .into_iter()
-                .flat_map(|v| message_pair_to_messages(v, supports_reasoning)),
+                .flat_map(|v| event_to_messages(v, supports_reasoning)),
         );
 
         // User query
@@ -539,13 +543,13 @@ impl TryFrom<(Thread, bool)> for Inputs {
     }
 }
 
-fn message_pair_to_messages(msg: MessagePair, reasoning: bool) -> Vec<types::InputItem> {
-    let (user, assistant) = msg.split();
-
-    user_message_to_messages(user)
-        .into_iter()
-        .chain(assistant_message_to_messages(assistant, reasoning))
-        .collect()
+fn event_to_messages(event: ConversationEvent, reasoning: bool) -> Vec<types::InputItem> {
+    match event.kind {
+        EventKind::UserMessage(user) => user_message_to_messages(user),
+        EventKind::AssistantMessage(assistant) => {
+            assistant_message_to_messages(assistant, reasoning)
+        }
+    }
 }
 
 fn user_message_to_messages(user: UserMessage) -> Vec<types::InputItem> {

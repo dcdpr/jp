@@ -21,8 +21,9 @@ use jp_config::{
     PartialConfig,
 };
 use jp_conversation::{
+    event::{ConversationEvent, EventKind},
     thread::{Thread, ThreadBuilder},
-    AssistantMessage, Conversation, ConversationId, MessagePair, UserMessage,
+    AssistantMessage, Conversation, ConversationId, UserMessage,
 };
 use jp_llm::provider::{self, StreamEvent};
 use jp_mcp::{
@@ -209,34 +210,48 @@ impl Query {
 
         let thread = self.build_thread(ctx, message.clone()).await?;
 
-        let mut messages = vec![];
+        let mut events = vec![];
         if let Some(schema) = self.schema.clone() {
-            messages.push(handle_structured_output(ctx, thread, schema).await?);
+            events.extend(handle_structured_output(ctx, thread, schema).await?);
         } else {
-            self.handle_stream(ctx, thread, self.tool_choice(ctx), &mut messages)
+            self.handle_stream(ctx, thread, self.tool_choice(ctx), &mut events)
                 .await?;
         }
 
         let mut reply = String::new();
-        for message in messages {
+        for event in events {
             let conversation_id = ctx.workspace.active_conversation_id();
-            trace!(
-                conversation = %conversation_id,
-                content_size = message.reply.content.as_deref().unwrap_or_default().len(),
-                reasoning_size = message
-                    .reply
-                    .reasoning
+            let mut content_size = 0;
+            let mut reasoning_size = 0;
+
+            if let EventKind::AssistantMessage(AssistantMessage {
+                reasoning, content, ..
+            }) = &event.kind
+            {
+                content_size = content.as_deref().unwrap_or_default().len();
+                reasoning_size = reasoning
                     .as_ref()
                     .map(ToString::to_string)
                     .unwrap_or_default()
-                    .len(),
-                "Storing response message in conversation."
+                    .len();
+            }
+
+            trace!(
+                %conversation_id,
+                content_size,
+                reasoning_size,
+                "Storing event in conversation."
             );
 
-            if let Some(content) = &message.reply.content {
+            if let EventKind::AssistantMessage(AssistantMessage {
+                content: Some(content),
+                ..
+            }) = &event.kind
+            {
                 reply.push_str(content);
             }
-            ctx.workspace.add_message(conversation_id, message.clone());
+
+            ctx.workspace.add_event(conversation_id, event);
         }
 
         // Clean up the query file.
@@ -258,26 +273,40 @@ impl Query {
     async fn build_message(&self, ctx: &mut Ctx) -> Result<(UserMessage, Option<PathBuf>)> {
         let conversation_id = ctx.workspace.active_conversation_id();
 
-        // If replaying, remove the last message from the conversation, and use
-        // its query message to build the new query.
-        let mut message = self
+        // If replaying, remove the last user-message event from the
+        // conversation, and use its query message to build the new query.
+        let (mut message, tail) = self
             .replay
-            .then(|| ctx.workspace.pop_message(&conversation_id))
+            .then(|| {
+                let mut tail = vec![];
+
+                loop {
+                    match ctx.workspace.pop_event(&conversation_id)?.kind {
+                        EventKind::UserMessage(message) => {
+                            tail.reverse();
+                            return Some((message, tail));
+                        }
+                        event @ EventKind::AssistantMessage(_) => tail.push(event),
+                    }
+                }
+            })
             .flatten()
-            .map_or(UserMessage::Query(String::new()), |m| m.message);
+            .unwrap_or((UserMessage::Query(String::new()), vec![]));
 
         // If replaying a tool call, re-run the requested tool(s) and return the
         // new results.
         if let UserMessage::ToolCallResults(_) = &mut message {
-            let Some(response) = ctx.workspace.get_messages(&conversation_id).last() else {
+            let Some(EventKind::AssistantMessage(AssistantMessage { tool_calls, .. })) =
+                tail.last()
+            else {
                 return Err(Error::Replay("No assistant response found".into()));
             };
 
-            let results = handle_tool_calls(ctx, response.reply.tool_calls.clone()).await?;
+            let results = handle_tool_calls(ctx, tool_calls.clone()).await?;
             message = UserMessage::ToolCallResults(results);
         }
 
-        // If a query is provided, prepend it to the existing message. This is
+        // If a query is provided, prepend it to the existing event. This is
         // only relevant for replays, otherwise the existing message is empty,
         // and we replace it with the provided query.
         if let Some(text) = &self.query {
@@ -417,7 +446,7 @@ impl Query {
             .with_system_prompt(ctx.config.assistant.system_prompt.clone())
             .with_instructions(ctx.config.assistant.instructions.clone())
             .with_attachments(attachments)
-            .with_history(ctx.workspace.get_messages(&conversation_id).to_vec())
+            .with_history(ctx.workspace.get_events(&conversation_id).to_vec())
             .with_message(message);
 
         if !tools.is_empty() {
@@ -443,7 +472,7 @@ impl Query {
         ctx: &mut Ctx,
         mut thread: Thread,
         tool_choice: ToolChoice,
-        messages: &mut Vec<MessagePair>,
+        events: &mut Vec<ConversationEvent>,
     ) -> Result<()> {
         let tools = list_enabled_tools(ctx).await?;
         let model_id = &ctx
@@ -495,7 +524,7 @@ impl Query {
                         retry_after.unwrap_or(0)
                     );
                     tokio::time::sleep(Duration::from_secs(retry_after.unwrap_or(0))).await;
-                    return Box::pin(self.handle_stream(ctx, thread, tool_choice, messages)).await;
+                    return Box::pin(self.handle_stream(ctx, thread, tool_choice, events)).await;
                 }
                 Err(jp_llm::Error::UnknownModel(model)) => {
                     let available = provider
@@ -561,19 +590,21 @@ impl Query {
             println!();
         }
 
-        let message = MessagePair::new(message, AssistantMessage {
+        let reply = ConversationEvent::new(AssistantMessage {
             metadata,
             content,
             reasoning,
             tool_calls: event_handler.tool_calls.clone(),
         });
-        messages.push(message.clone());
+        events.push(ConversationEvent::new(message.clone()));
+        events.push(reply.clone());
 
         // If the assistant asked for a tool call, we handle it within the same
         // "conversation turn", essentially going into a "loop" until no more
         // tool calls are requested.
         if !event_handler.tool_call_results.is_empty() {
-            thread.history.push(message);
+            thread.history.push(ConversationEvent::new(message));
+            thread.history.push(reply);
             thread.message = UserMessage::ToolCallResults(event_handler.tool_call_results);
 
             Box::pin(self.handle_stream(
@@ -582,7 +613,7 @@ impl Query {
                 // After the first tool call, we revert back to letting the LLM
                 // decide if/which tool to use.
                 ToolChoice::Auto,
-                messages,
+                events,
             ))
             .await?;
         }
@@ -739,7 +770,7 @@ async fn handle_structured_output(
     ctx: &mut Ctx,
     thread: Thread,
     schema: schemars::Schema,
-) -> Result<MessagePair> {
+) -> Result<Vec<ConversationEvent>> {
     let model_id = &ctx
         .config
         .assistant
@@ -763,7 +794,10 @@ async fn handle_structured_output(
         serde_json::to_string(&value)?
     };
 
-    Ok(MessagePair::new(message, AssistantMessage::from(content)))
+    Ok(vec![
+        ConversationEvent::new(message),
+        ConversationEvent::new(AssistantMessage::from(content)),
+    ])
 }
 
 #[expect(clippy::needless_pass_by_value)]

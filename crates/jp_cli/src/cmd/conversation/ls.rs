@@ -56,12 +56,12 @@ impl Ls {
             .workspace
             .conversations()
             .filter(|(_, c)| !self.local || c.user)
-            .map(|(id, c)| (id, c, ctx.workspace.get_messages(id)))
-            .map(|(id, c, messages)| Details {
+            .map(|(id, c)| (id, c, ctx.workspace.get_events(id)))
+            .map(|(id, c, events)| Details {
                 id: *id,
                 title: c.title.clone(),
-                messages: messages.len(),
-                last_message_at: messages.last().map(|m| m.timestamp),
+                messages: events.len(),
+                last_message_at: events.last().map(|m| m.created_at),
                 local: c.user,
             })
             .collect::<Vec<_>>();

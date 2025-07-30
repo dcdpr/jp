@@ -54,9 +54,9 @@ impl Rm {
                 format!("Conversation {} not found", id.to_string().bold().yellow()).into(),
             );
         };
-        let messages = ctx.workspace.get_messages(&id);
+        let events = ctx.workspace.get_events(&id);
         let local = conversation.user;
-        let mut details = DetailsFmt::new(id, conversation, messages)
+        let mut details = DetailsFmt::new(id, conversation, events)
             .with_local_flag(local)
             .with_active_conversation(active_id)
             .with_hyperlinks(ctx.term.args.hyperlinks)

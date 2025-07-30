@@ -4,8 +4,9 @@ use async_stream::stream;
 use async_trait::async_trait;
 use jp_config::{assistant, model::parameters::Parameters};
 use jp_conversation::{
+    event::{ConversationEvent, EventKind},
     thread::{Document, Documents, Thread},
-    AssistantMessage, MessagePair, UserMessage,
+    AssistantMessage, UserMessage,
 };
 use jp_mcp::tool::{self, ToolChoice};
 use jp_model::{ModelId, ProviderId};
@@ -305,9 +306,12 @@ impl TryFrom<Thread> for Messages {
         // one more back in history, to avoid disjointing tool call requests and
         // their responses.
         let mut history_after_instructions = vec![];
-        while let Some(message) = history.pop() {
-            let tool_call_results = matches!(message.message, UserMessage::ToolCallResults(_));
-            history_after_instructions.insert(0, message);
+        while let Some(event) = history.pop() {
+            let tool_call_results = matches!(
+                event.kind,
+                EventKind::UserMessage(UserMessage::ToolCallResults(_))
+            );
+            history_after_instructions.insert(0, event);
 
             if !tool_call_results {
                 break;
@@ -317,7 +321,7 @@ impl TryFrom<Thread> for Messages {
         let mut items = vec![];
         let history = history
             .into_iter()
-            .flat_map(message_pair_to_messages)
+            .flat_map(event_to_messages)
             .collect::<Vec<_>>();
 
         // System message first, if any.
@@ -388,7 +392,7 @@ impl TryFrom<Thread> for Messages {
         items.extend(
             history_after_instructions
                 .into_iter()
-                .flat_map(message_pair_to_messages),
+                .flat_map(event_to_messages),
         );
 
         // User query
@@ -413,13 +417,11 @@ impl TryFrom<Thread> for Messages {
     }
 }
 
-fn message_pair_to_messages(msg: MessagePair) -> Vec<ChatCompletionMessage> {
-    let (user, assistant) = msg.split();
-
-    user_message_to_messages(user)
-        .into_iter()
-        .chain(Some(assistant_message_to_message(assistant)))
-        .collect()
+fn event_to_messages(event: ConversationEvent) -> Vec<ChatCompletionMessage> {
+    match event.kind {
+        EventKind::UserMessage(user) => user_message_to_messages(user),
+        EventKind::AssistantMessage(assistant) => vec![assistant_message_to_message(assistant)],
+    }
 }
 
 fn user_message_to_messages(user: UserMessage) -> Vec<ChatCompletionMessage> {

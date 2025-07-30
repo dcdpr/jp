@@ -12,7 +12,7 @@ use time::UtcDateTime;
 
 use crate::error::{Error, Result};
 
-/// A sequence of messages between the user and LLM.
+/// A sequence of events between the user and LLM.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Conversation {
     /// The optional title of the conversation.

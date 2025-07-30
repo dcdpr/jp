@@ -2,7 +2,7 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use jp_config::{assistant::Assistant, Config};
-use jp_conversation::{AssistantMessage, ConversationId, MessagePair};
+use jp_conversation::{event::ConversationEvent, AssistantMessage, ConversationId, UserMessage};
 use jp_llm::{provider, structured_completion};
 use jp_model::ModelId;
 use jp_query::structured::conversation_titles;
@@ -17,7 +17,7 @@ pub struct TitleGeneratorTask {
     pub conversation_id: ConversationId,
     pub model_id: ModelId,
     pub assistant: Assistant,
-    pub messages: Vec<MessagePair>,
+    pub events: Vec<ConversationEvent>,
     pub title: Option<String>,
 }
 
@@ -28,9 +28,10 @@ impl TitleGeneratorTask {
         workspace: &Workspace,
         query: Option<String>,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let mut messages = workspace.get_messages(&conversation_id).to_vec();
+        let mut events = workspace.get_events(&conversation_id).to_vec();
         if let Some(query) = query {
-            messages.push(MessagePair::new(query.into(), AssistantMessage::default()));
+            events.push(ConversationEvent::new(UserMessage::Query(query)));
+            events.push(ConversationEvent::new(AssistantMessage::default()));
         }
 
         let model_id = config
@@ -44,7 +45,7 @@ impl TitleGeneratorTask {
             conversation_id,
             model_id,
             assistant: config.assistant.clone(),
-            messages,
+            events,
             title: None,
         })
     }
@@ -58,7 +59,7 @@ impl TitleGeneratorTask {
         let provider_id = model_id.provider();
 
         let provider = provider::get_provider(provider_id, provider_config)?;
-        let query = conversation_titles(1, self.messages.clone(), &[])?;
+        let query = conversation_titles(1, self.events.clone(), &[])?;
         let titles: Vec<String> =
             structured_completion(provider.as_ref(), model_id, parameters, query).await?;
 
