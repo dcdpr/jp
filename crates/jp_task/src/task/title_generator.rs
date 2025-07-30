@@ -30,7 +30,7 @@ impl TitleGeneratorTask {
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let mut events = workspace.get_events(&conversation_id).to_vec();
         if let Some(query) = query {
-            events.push(ConversationEvent::new(UserMessage::Query(query)));
+            events.push(ConversationEvent::new(UserMessage::Query { query }));
             events.push(ConversationEvent::new(AssistantMessage::default()));
         }
 

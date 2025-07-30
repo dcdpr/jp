@@ -518,10 +518,10 @@ impl TryFrom<(Thread, bool)> for Inputs {
 
         // User query
         match message {
-            UserMessage::Query(text) => {
+            UserMessage::Query { query } => {
                 items.push(types::InputItem::InputMessage(types::APIInputMessage {
                     role: types::Role::User,
-                    content: types::ContentInput::Text(text),
+                    content: types::ContentInput::Text(query),
                     status: None,
                 }));
             }
@@ -554,14 +554,14 @@ fn event_to_messages(event: ConversationEvent, reasoning: bool) -> Vec<types::In
 
 fn user_message_to_messages(user: UserMessage) -> Vec<types::InputItem> {
     match user {
-        UserMessage::Query(query) if !query.is_empty() => {
+        UserMessage::Query { query } if !query.is_empty() => {
             vec![types::InputItem::InputMessage(types::APIInputMessage {
                 role: types::Role::User,
                 content: types::ContentInput::Text(query),
                 status: None,
             })]
         }
-        UserMessage::Query(_) => vec![],
+        UserMessage::Query { .. } => vec![],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
             .map(|result| {

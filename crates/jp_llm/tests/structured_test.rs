@@ -23,7 +23,9 @@ async fn test_conversation_titles() -> Result<(), Box<dyn std::error::Error>> {
             .provider
             .openrouter;
 
-    let message = UserMessage::Query("Test message".to_string());
+    let message = UserMessage::Query {
+        query: "Test message".to_string(),
+    };
     let history = vec![
         ConversationEvent::new(message),
         ConversationEvent::new(AssistantMessage::default()),

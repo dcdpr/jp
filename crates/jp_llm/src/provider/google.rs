@@ -371,10 +371,10 @@ impl TryFrom<Thread> for Messages {
 
         // User query
         match message {
-            UserMessage::Query(text) => {
+            UserMessage::Query { query } => {
                 items.push(types::Content {
                     role: types::Role::User,
-                    parts: vec![types::ContentData::Text(text).into()],
+                    parts: vec![types::ContentData::Text(query).into()],
                 });
             }
             UserMessage::ToolCallResults(results) => {
@@ -405,7 +405,7 @@ fn event_to_message(event: ConversationEvent) -> types::Content {
 
 fn user_message_to_message(user: UserMessage) -> types::Content {
     let parts = match user {
-        UserMessage::Query(query) => vec![types::ContentData::Text(query).into()],
+        UserMessage::Query { query } => vec![types::ContentData::Text(query).into()],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
             .map(|result| {

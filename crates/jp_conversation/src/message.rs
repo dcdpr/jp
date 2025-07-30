@@ -15,7 +15,10 @@ use crate::error::{Error, Result};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged, rename_all = "snake_case")]
 pub enum UserMessage {
-    Query(String),
+    Query {
+        #[serde(rename = "message")]
+        query: String,
+    },
     ToolCallResults(Vec<ToolCallResult>),
 }
 
@@ -23,7 +26,7 @@ impl UserMessage {
     #[must_use]
     pub fn query(&self) -> Option<&str> {
         match self {
-            Self::Query(query) if !query.is_empty() => Some(query),
+            Self::Query { query } if !query.is_empty() => Some(query),
             _ => None,
         }
     }
@@ -38,14 +41,14 @@ impl UserMessage {
 }
 
 impl From<String> for UserMessage {
-    fn from(message: String) -> Self {
-        Self::Query(message)
+    fn from(query: String) -> Self {
+        Self::Query { query }
     }
 }
 
 impl From<&str> for UserMessage {
     fn from(message: &str) -> Self {
-        Self::Query(message.to_string())
+        message.to_owned().into()
     }
 }
 
@@ -57,7 +60,9 @@ impl From<Vec<ToolCallResult>> for UserMessage {
 
 impl Default for UserMessage {
     fn default() -> Self {
-        Self::Query(String::new())
+        Self::Query {
+            query: String::new(),
+        }
     }
 }
 

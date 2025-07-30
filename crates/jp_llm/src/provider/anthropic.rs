@@ -625,11 +625,11 @@ impl TryFrom<Thread> for Messages {
 
         // User query
         match message {
-            UserMessage::Query(text) => {
+            UserMessage::Query { query } => {
                 items.push(types::Message {
                     role: types::MessageRole::User,
                     content: types::MessageContentList(vec![types::MessageContent::Text(
-                        text.into(),
+                        query.into(),
                     )]),
                 });
             }
@@ -661,7 +661,7 @@ fn event_to_message(event: ConversationEvent) -> types::Message {
 
 fn user_message_to_message(user: UserMessage) -> types::Message {
     let list = match user {
-        UserMessage::Query(query) => vec![types::MessageContent::Text(query.into())],
+        UserMessage::Query { query } => vec![types::MessageContent::Text(query.into())],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
             .map(|result| {

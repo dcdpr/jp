@@ -479,7 +479,7 @@ impl TryFrom<(&ModelId, Thread)> for RequestMessages {
 
         // User query
         match message {
-            UserMessage::Query(query) => {
+            UserMessage::Query { query } => {
                 messages.push(Message::default().with_text(query).user());
             }
             UserMessage::ToolCallResults(results) => {
@@ -519,10 +519,10 @@ fn event_to_messages(event: ConversationEvent) -> Vec<RequestMessage> {
 
 fn user_message_to_messages(user: UserMessage) -> Vec<RequestMessage> {
     match user {
-        UserMessage::Query(query) if !query.is_empty() => {
+        UserMessage::Query { query } if !query.is_empty() => {
             vec![Message::default().with_text(query).user()]
         }
-        UserMessage::Query(_) => vec![],
+        UserMessage::Query { .. } => vec![],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
             .map(|result| {

@@ -188,7 +188,7 @@ impl Query {
         ctx.configure_active_mcp_servers().await?;
         let (message, query_file) = self.build_message(ctx).await?;
 
-        if let UserMessage::Query(query) = &message {
+        if let UserMessage::Query { query } = &message {
             if query.is_empty() {
                 return cleanup(ctx, previous_id, query_file.as_deref()).map_err(Into::into);
             }
@@ -291,7 +291,12 @@ impl Query {
                 }
             })
             .flatten()
-            .unwrap_or((UserMessage::Query(String::new()), vec![]));
+            .unwrap_or((
+                UserMessage::Query {
+                    query: String::new(),
+                },
+                vec![],
+            ));
 
         // If replaying a tool call, re-run the requested tool(s) and return the
         // new results.
@@ -312,15 +317,15 @@ impl Query {
         if let Some(text) = &self.query {
             let text = text.join(" ");
             match &mut message {
-                UserMessage::Query(query) if query.is_empty() => text.clone_into(query),
-                UserMessage::Query(query) => *query = format!("{text}\n\n{query}"),
+                UserMessage::Query { query } if query.is_empty() => text.clone_into(query),
+                UserMessage::Query { query } => *query = format!("{text}\n\n{query}"),
                 UserMessage::ToolCallResults(_) => {}
             }
         }
 
         let query_file_path = self.edit_message(&mut message, ctx, conversation_id)?;
 
-        if let UserMessage::Query(query) = &mut message
+        if let UserMessage::Query { query } = &mut message
             && self.template
         {
             let mut env = Environment::empty();
@@ -382,7 +387,7 @@ impl Query {
         ctx: &mut Ctx,
         conversation_id: ConversationId,
     ) -> Result<Option<PathBuf>> {
-        let UserMessage::Query(query) = message else {
+        let UserMessage::Query { query } = message else {
             return Ok(None);
         };
 

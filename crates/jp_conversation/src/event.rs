@@ -6,7 +6,7 @@ use crate::{AssistantMessage, UserMessage};
 /// A single event in a conversation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConversationEvent {
-    pub created_at: UtcDateTime,
+    pub timestamp: UtcDateTime,
     #[serde(flatten)]
     pub kind: EventKind,
 }
@@ -15,7 +15,7 @@ impl ConversationEvent {
     #[must_use]
     pub fn new(event: impl Into<EventKind>) -> Self {
         Self {
-            created_at: UtcDateTime::now(),
+            timestamp: UtcDateTime::now(),
             kind: event.into(),
         }
     }

@@ -253,10 +253,10 @@ pub(crate) fn edit_query(
         buf.push_str("# ");
         buf.push_str(
             &event
-                .created_at
+                .timestamp
                 .to_offset(local_offset)
                 .format(&format)
-                .unwrap_or_else(|_| event.created_at.to_string()),
+                .unwrap_or_else(|_| event.timestamp.to_string()),
         );
         buf.push_str("\n\n");
 
@@ -272,7 +272,7 @@ pub(crate) fn edit_query(
         };
 
         match &event.kind {
-            EventKind::UserMessage(UserMessage::Query(query)) => {
+            EventKind::UserMessage(UserMessage::Query { query }) => {
                 buf.push_str("## YOU\n\n");
                 buf.push_str(&comrak::markdown_to_commonmark(query, &options));
             }

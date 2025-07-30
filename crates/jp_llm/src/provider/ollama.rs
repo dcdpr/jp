@@ -420,10 +420,10 @@ impl TryFrom<(Thread, ToolChoice)> for Messages {
 
         // User query
         match message {
-            UserMessage::Query(text) => {
+            UserMessage::Query { query } => {
                 items.push(ChatMessage {
                     role: MessageRole::User,
-                    content: text,
+                    content: query,
                     tool_calls: vec![],
                     images: None,
                     thinking: None,
@@ -452,14 +452,14 @@ fn event_to_messages(event: ConversationEvent) -> Vec<ChatMessage> {
 
 fn user_message_to_messages(user: UserMessage) -> Vec<ChatMessage> {
     match user {
-        UserMessage::Query(query) if !query.is_empty() => vec![ChatMessage {
+        UserMessage::Query { query } if !query.is_empty() => vec![ChatMessage {
             role: MessageRole::User,
             content: query,
             tool_calls: vec![],
             images: None,
             thinking: None,
         }],
-        UserMessage::Query(_) => vec![],
+        UserMessage::Query { .. } => vec![],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
             .map(|result| ChatMessage {
@@ -657,7 +657,9 @@ mod tests {
                 .ollama;
         let model_id = "ollama/llama3.1:8b".parse().unwrap();
 
-        let message = UserMessage::Query("Test message".to_string());
+        let message = UserMessage::Query {
+            query: "Test message".to_string(),
+        };
         let history = vec![
             ConversationEvent::new(message),
             ConversationEvent::new(AssistantMessage::default()),

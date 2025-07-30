@@ -46,7 +46,7 @@ impl DetailsFmt {
         conversation: Conversation,
         messages: &[ConversationEvent],
     ) -> Self {
-        let last_message_at = messages.iter().map(|m| m.created_at).max();
+        let last_message_at = messages.iter().map(|m| m.timestamp).max();
 
         Self {
             id,

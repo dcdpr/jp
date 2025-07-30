@@ -61,7 +61,7 @@ impl Ls {
                 id: *id,
                 title: c.title.clone(),
                 messages: events.len(),
-                last_message_at: events.last().map(|m| m.created_at),
+                last_message_at: events.last().map(|m| m.timestamp),
                 local: c.user,
             })
             .collect::<Vec<_>>();

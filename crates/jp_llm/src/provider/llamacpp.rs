@@ -397,10 +397,10 @@ impl TryFrom<Thread> for Messages {
 
         // User query
         match message {
-            UserMessage::Query(text) => {
+            UserMessage::Query { query } => {
                 items.push(ChatCompletionMessage {
                     role: ChatCompletionMessageRole::User,
-                    content: Some(text),
+                    content: Some(query),
                     ..Default::default()
                 });
             }
@@ -426,12 +426,12 @@ fn event_to_messages(event: ConversationEvent) -> Vec<ChatCompletionMessage> {
 
 fn user_message_to_messages(user: UserMessage) -> Vec<ChatCompletionMessage> {
     match user {
-        UserMessage::Query(query) if !query.is_empty() => vec![ChatCompletionMessage {
+        UserMessage::Query { query } if !query.is_empty() => vec![ChatCompletionMessage {
             role: ChatCompletionMessageRole::User,
             content: Some(query),
             ..Default::default()
         }],
-        UserMessage::Query(_) => vec![],
+        UserMessage::Query { .. } => vec![],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
             .map(|result| ChatCompletionMessage {
