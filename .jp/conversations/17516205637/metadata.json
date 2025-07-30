@@ -2,36 +2,6 @@
   "last_activated_at": "2025-07-13 23:44:33.329403",
   "local": false,
   "config": {
-    "inherit": true,
-    "config_load_paths": [
-      ".jp/config.d"
-    ],
-    "assistant": {
-      "system_prompt": "You are a helpful assistant."
-    },
-    "style": {
-      "code": {
-        "theme": "Monokai Extended",
-        "color": true,
-        "line_numbers": false,
-        "file_link": "osc8",
-        "copy_link": "off"
-      },
-      "reasoning": {
-        "show": true
-      },
-      "typewriter": {
-        "text_delay": "3000u",
-        "code_delay": "50u"
-      }
-    },
-    "editor": {
-      "env_vars": [
-        "JP_EDITOR",
-        "VISUAL",
-        "EDITOR"
-      ]
-    },
     "mcp": {
       "servers": {
         "*": {

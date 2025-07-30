@@ -135,7 +135,7 @@ impl Ls {
         }
 
         let messages_fmt = if ctx.term.args.hyperlinks {
-            hyperlink(format!("jp://show-messages/{id}"), messages.to_string())
+            hyperlink(format!("jp://show-events/{id}"), messages.to_string())
         } else {
             messages.to_string()
         };
