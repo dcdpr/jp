@@ -1,6 +1,8 @@
 //! Represents the in-memory state of the workspace.
 
-use jp_conversation::{message::MessagePair, Conversation, ConversationId, ConversationsMetadata};
+use jp_conversation::{
+    event::ConversationEvent, Conversation, ConversationId, ConversationsMetadata,
+};
 use jp_mcp::{
     config::{McpServer, McpServerId},
     tool::{McpTool, McpToolId},
@@ -30,7 +32,7 @@ pub(crate) struct LocalState {
     pub conversations: TombMap<ConversationId, Conversation>,
 
     #[serde(skip_serializing_if = "TombMap::is_empty")]
-    pub messages: TombMap<ConversationId, Vec<MessagePair>>,
+    pub events: TombMap<ConversationId, Vec<ConversationEvent>>,
 
     #[serde(skip_serializing_if = "TombMap::is_empty")]
     pub mcp_servers: TombMap<McpServerId, McpServer>,

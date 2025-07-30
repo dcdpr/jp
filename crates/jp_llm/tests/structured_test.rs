@@ -1,7 +1,7 @@
 use std::{env, path::PathBuf};
 
 use jp_config::{assistant, model::parameters::Parameters, Configurable as _, Partial as _};
-use jp_conversation::{AssistantMessage, MessagePair, UserMessage};
+use jp_conversation::{event::ConversationEvent, AssistantMessage, UserMessage};
 use jp_llm::{provider::openrouter::Openrouter, structured_completion};
 use jp_query::structured::conversation_titles;
 use jp_test::{function_name, mock::Vcr};
@@ -23,8 +23,13 @@ async fn test_conversation_titles() -> Result<(), Box<dyn std::error::Error>> {
             .provider
             .openrouter;
 
-    let message = UserMessage::Query("Test message".to_string());
-    let history = vec![MessagePair::new(message, AssistantMessage::default())];
+    let message = UserMessage::Query {
+        query: "Test message".to_string(),
+    };
+    let history = vec![
+        ConversationEvent::new(message),
+        ConversationEvent::new(AssistantMessage::default()),
+    ];
 
     let vcr = vcr();
     vcr.cassette(

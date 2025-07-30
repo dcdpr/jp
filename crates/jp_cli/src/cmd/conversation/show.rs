@@ -18,9 +18,9 @@ impl Show {
         let Some(conversation) = ctx.workspace.get_conversation(&id).cloned() else {
             return Err(Error::NotFound("Conversation", id.to_string()).into());
         };
-        let messages = ctx.workspace.get_messages(&id);
+        let events = ctx.workspace.get_events(&id);
         let user = conversation.user;
-        let details = DetailsFmt::new(id, conversation, messages)
+        let details = DetailsFmt::new(id, conversation, events)
             .with_local_flag(user)
             .with_active_conversation(active_id)
             .with_hyperlinks(ctx.term.args.hyperlinks)
