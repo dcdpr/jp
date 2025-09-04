@@ -9,6 +9,7 @@ config_load_paths = ['.jp/config.d']
 system_prompt = 'You are a helpful assistant.'
 [assistant.provider.anthropic]
 api_key_env = 'ANTHROPIC_API_KEY'
+beta_headers = []
 
 [assistant.provider.deepseek]
 api_key_env = 'DEEPSEEK_API_KEY'
