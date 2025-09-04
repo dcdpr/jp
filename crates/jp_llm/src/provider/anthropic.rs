@@ -3,7 +3,7 @@ use std::env;
 use async_anthropic::{
     messages::DEFAULT_MAX_TOKENS,
     types::{
-        self, ListModelsResponse, Thinking, ToolBash, ToolCodeExecution, ToolComputerUse,
+        self, ListModelsResponse, System, Thinking, ToolBash, ToolCodeExecution, ToolComputerUse,
         ToolTextEditor, ToolWebSearch,
     },
     Client,
@@ -109,6 +109,7 @@ impl Provider for Anthropic {
     }
 }
 
+#[expect(clippy::too_many_lines)]
 fn create_request(
     model_id: &ModelId,
     model_details: Option<&ModelDetails>,
@@ -123,21 +124,68 @@ fn create_request(
     } = query;
 
     let mut builder = types::CreateMessagesRequestBuilder::default();
-    let system_prompt = thread.system_prompt.clone();
+
+    let Thread {
+        system_prompt,
+        instructions,
+        attachments,
+        history,
+        message,
+    } = thread;
 
     builder
         .model(model_id.slug())
-        .messages(convert_thread(thread)?);
+        .messages(Messages::try_from((history, message))?.0);
 
-    if let Some(system_prompt) = system_prompt {
-        builder.system(types::Text {
-            text: system_prompt,
+    let mut system_content = vec![];
+
+    if let Some(text) = system_prompt {
+        system_content.push(types::SystemContent::Text(types::Text {
+            text,
+            cache_control: (instructions.is_empty() || attachments.is_empty())
+                .then_some(types::CacheControl::default()),
+        }));
+    }
+
+    if !instructions.is_empty() {
+        let text = instructions
+            .into_iter()
+            .map(|instruction| instruction.try_to_xml().map_err(Into::into))
+            .collect::<Result<Vec<_>>>()?
+            .join("\n\n");
+
+        system_content.push(types::SystemContent::Text(types::Text {
+            text,
             cache_control: Some(types::CacheControl::default()),
-        });
+        }));
+    }
+
+    if !attachments.is_empty() {
+        let documents: Documents = attachments
+            .into_iter()
+            .enumerate()
+            .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
+            .map(Document::from)
+            .collect::<Vec<_>>()
+            .into();
+
+        system_content.push(types::SystemContent::Text(types::Text {
+            text: documents.try_to_xml()?,
+
+            // Anthropic limits the number of cache points to 4 per request. We
+            // currently use 5 cache points, so this one is optional, depending
+            // on whether we have any tools or not, making sure we stay within
+            // the limit.
+            cache_control: tools.is_empty().then_some(types::CacheControl::default()),
+        }));
+    }
+
+    if !system_content.is_empty() {
+        builder.system(System::Content(system_content));
     }
 
     let tools = convert_tools(tools, tool_call_strict_mode);
-    let tool_choice_function = matches!(tool_choice, jp_mcp::tool::ToolChoice::Function(_));
+    let tool_choice_function = matches!(tool_choice, tool::ToolChoice::Function(_));
     let tool_choice = convert_tool_choice(tool_choice);
     if !tools.is_empty() {
         builder.tools(tools).tool_choice(tool_choice);
@@ -491,47 +539,21 @@ fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
     tools
 }
 
-fn convert_thread(thread: Thread) -> Result<Vec<types::Message>> {
-    Messages::try_from(thread).map(|v| v.0)
-}
-
 struct Messages(Vec<types::Message>);
 
-impl TryFrom<Thread> for Messages {
+impl TryFrom<(Vec<MessagePair>, UserMessage)> for Messages {
     type Error = Error;
 
-    #[expect(clippy::too_many_lines)]
-    fn try_from(thread: Thread) -> Result<Self> {
-        let Thread {
-            instructions,
-            attachments,
-            mut history,
-            message,
-            ..
-        } = thread;
-
-        // If the last history message is a tool call response, we need to go
-        // one more back in history, to avoid disjointing tool call requests and
-        // their responses.
-        let mut history_after_instructions = vec![];
-        while let Some(message) = history.pop() {
-            let tool_call_results = matches!(message.message, UserMessage::ToolCallResults(_));
-            history_after_instructions.insert(0, message);
-
-            if !tool_call_results {
-                break;
-            }
-        }
-
+    fn try_from((history, message): (Vec<MessagePair>, UserMessage)) -> Result<Self> {
         let mut items = vec![];
+
+        // Historical messages.
         let mut history = history
             .into_iter()
             .flat_map(message_pair_to_messages)
             .collect::<Vec<_>>();
 
-        // Historical messages second, these are static.
-        //
-        // Make sure to add cache control (1/4) to the last history message.
+        // Make sure to add cache control to the last history message.
         if let Some(message) = history.last_mut().and_then(|m| m.content.0.last_mut()) {
             match message {
                 types::MessageContent::Text(m) => {
@@ -546,82 +568,8 @@ impl TryFrom<Thread> for Messages {
                 _ => {}
             }
         }
+
         items.extend(history);
-
-        // Group multiple contents blocks into a single message.
-        let mut content = vec![];
-
-        if !instructions.is_empty() {
-            content.push(
-                "Before we continue, here are some contextual details that will help you generate \
-                 a better response."
-                    .into(),
-            );
-        }
-
-        // Then instructions in XML tags.
-        //
-        // Cached (2/4), (for the last instruction), as it's not expected to
-        // change.
-        let mut instructions = instructions.iter().peekable();
-        while let Some(instruction) = instructions.next() {
-            content.push(types::MessageContent::Text(types::Text {
-                text: instruction.try_to_xml()?,
-                cache_control: instructions
-                    .peek()
-                    .map_or(Some(types::CacheControl::default()), |_| None),
-            }));
-        }
-
-        // Then large list of attachments, formatted as XML.
-        //
-        // see: <https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/long-context-tips>
-        // see: <https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-xml-tags>
-        //
-        // Cached (3/4), more likely to change, but we'll keep the previous
-        // cache if changed.
-        if !attachments.is_empty() {
-            let documents: Documents = attachments
-                .into_iter()
-                .enumerate()
-                .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
-                .map(Document::from)
-                .collect::<Vec<_>>()
-                .into();
-
-            content.push(types::MessageContent::Text(types::Text {
-                text: documents.try_to_xml()?,
-                cache_control: Some(types::CacheControl::default()),
-            }));
-        }
-
-        // Attach all data, and add a "fake" acknowledgement by the assistant.
-        //
-        // See `provider::openrouter` for more information.
-        if !content.is_empty() {
-            items.push(types::Message {
-                role: types::MessageRole::User,
-                content: types::MessageContentList(content),
-            });
-        }
-
-        if items
-            .last()
-            .is_some_and(|m| matches!(m.role, types::MessageRole::User))
-        {
-            items.push(types::Message {
-                role: types::MessageRole::Assistant,
-                content: types::MessageContentList(vec![types::MessageContent::Text(
-                    "Thank you for those details, I'll use them to inform my next response.".into(),
-                )]),
-            });
-        }
-
-        items.extend(
-            history_after_instructions
-                .into_iter()
-                .flat_map(message_pair_to_messages),
-        );
 
         // User query
         match message {
