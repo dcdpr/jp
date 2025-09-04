@@ -29,6 +29,12 @@ use crate::{
     provider::{handle_delta, AccumulationState, Delta},
 };
 
+/// Anthropic limits the number of cache points to 4 per request. Returning an API error if the
+/// request exceeds this limit.
+///
+/// We detect where we inject cache controls and make sure to not exceed this limit.
+const MAX_CACHE_CONTROL_COUNT: usize = 4;
+
 #[derive(Debug, Clone)]
 pub struct Anthropic {
     client: Client,
@@ -133,17 +139,23 @@ fn create_request(
         message,
     } = thread;
 
+    let mut cache_control_count = MAX_CACHE_CONTROL_COUNT;
+
     builder
         .model(model_id.slug())
-        .messages(Messages::try_from((history, message))?.0);
+        .messages(Messages::build(history, message, &mut cache_control_count).0);
+
+    let tools = convert_tools(tools, tool_call_strict_mode, &mut cache_control_count);
 
     let mut system_content = vec![];
 
     if let Some(text) = system_prompt {
         system_content.push(types::SystemContent::Text(types::Text {
             text,
-            cache_control: (instructions.is_empty() || attachments.is_empty())
-                .then_some(types::CacheControl::default()),
+            cache_control: (cache_control_count > 0).then_some({
+                cache_control_count = cache_control_count.saturating_sub(1);
+                types::CacheControl::default()
+            }),
         }));
     }
 
@@ -156,7 +168,10 @@ fn create_request(
 
         system_content.push(types::SystemContent::Text(types::Text {
             text,
-            cache_control: Some(types::CacheControl::default()),
+            cache_control: (cache_control_count > 0).then_some({
+                cache_control_count = cache_control_count.saturating_sub(1);
+                types::CacheControl::default()
+            }),
         }));
     }
 
@@ -176,7 +191,10 @@ fn create_request(
             // currently use 5 cache points, so this one is optional, depending
             // on whether we have any tools or not, making sure we stay within
             // the limit.
-            cache_control: tools.is_empty().then_some(types::CacheControl::default()),
+            cache_control: (cache_control_count > 0).then_some({
+                _ = cache_control_count.saturating_sub(1);
+                types::CacheControl::default()
+            }),
         }));
     }
 
@@ -184,7 +202,6 @@ fn create_request(
         builder.system(System::Content(system_content));
     }
 
-    let tools = convert_tools(tools, tool_call_strict_mode);
     let tool_choice_function = matches!(tool_choice, tool::ToolChoice::Function(_));
     let tool_choice = convert_tool_choice(tool_choice);
     if !tools.is_empty() {
@@ -464,7 +481,11 @@ fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolChoice {
     }
 }
 
-fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
+fn convert_tools(
+    tools: Vec<jp_mcp::Tool>,
+    _strict: bool,
+    cache_controls: &mut usize,
+) -> Vec<types::Tool> {
     let mut tools: Vec<_> = tools
         .into_iter()
         .map(|tool| {
@@ -508,8 +529,10 @@ fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
         })
         .collect();
 
-    // Cache tool definitions (4/4), as they are unlikely to change.
-    if let Some(tool) = tools.last_mut() {
+    // Cache tool definitions, as they are unlikely to change.
+    if *cache_controls > 0
+        && let Some(tool) = tools.last_mut()
+    {
         let cache_control = match tool {
             types::Tool::Custom(tool) => &mut tool.cache_control,
             types::Tool::Bash(ToolBash::Bash20241022(tool)) => &mut tool.cache_control,
@@ -538,6 +561,7 @@ fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
         };
 
         *cache_control = Some(types::CacheControl::default());
+        *cache_controls = cache_controls.saturating_sub(1);
     }
 
     tools
@@ -545,10 +569,8 @@ fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
 
 struct Messages(Vec<types::Message>);
 
-impl TryFrom<(Vec<MessagePair>, UserMessage)> for Messages {
-    type Error = Error;
-
-    fn try_from((history, message): (Vec<MessagePair>, UserMessage)) -> Result<Self> {
+impl Messages {
+    fn build(history: Vec<MessagePair>, message: UserMessage, cache_controls: &mut usize) -> Self {
         let mut items = vec![];
 
         // Historical messages.
@@ -558,7 +580,11 @@ impl TryFrom<(Vec<MessagePair>, UserMessage)> for Messages {
             .collect::<Vec<_>>();
 
         // Make sure to add cache control to the last history message.
-        if let Some(message) = history.last_mut().and_then(|m| m.content.0.last_mut()) {
+        if *cache_controls > 0
+            && let Some(message) = history.last_mut().and_then(|m| m.content.0.last_mut())
+        {
+            *cache_controls = cache_controls.saturating_sub(1);
+
             match message {
                 types::MessageContent::Text(m) => {
                     m.cache_control = Some(types::CacheControl::default());
@@ -600,7 +626,7 @@ impl TryFrom<(Vec<MessagePair>, UserMessage)> for Messages {
             }
         }
 
-        Ok(Self(items))
+        Self(items)
     }
 }
 
