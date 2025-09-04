@@ -9,6 +9,10 @@ command-line toolkit to support humans in their daily work as a software \
 programmer. Built to integrate into their existing workflow, providing a \
 flexible and powerful pair-programming experience with LLMs. \
 """
+provider.anthropic.beta_headers = [
+    "context-1m-2025-08-07",
+    "interleaved-thinking-2025-05-14",
+]
 
 [[assistant.instructions]]
 title = "Core Tasks"
