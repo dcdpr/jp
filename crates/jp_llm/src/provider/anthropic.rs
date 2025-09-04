@@ -387,18 +387,22 @@ impl TryFrom<&assistant::provider::anthropic::Anthropic> for Anthropic {
         let api_key = env::var(&config.api_key_env)
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
+        let mut builder = Client::builder();
+        builder
+            .api_key(api_key)
+            .base_url(config.base_url.clone())
+            .version("2023-06-01");
+
+        if !config.beta_headers.is_empty() {
+            builder.beta(config.beta_headers.join(","));
+        }
+
         Ok(Anthropic {
-            client: Client::builder()
-                .api_key(api_key)
-                .base_url(config.base_url.clone())
-                .beta("interleaved-thinking-2025-05-14,extended-cache-ttl-2025-04-11")
-                .version("2023-06-01")
-                .build()
-                .map_err(|e| {
-                    Error::Anthropic(async_anthropic::errors::AnthropicError::Unknown(
-                        e.to_string(),
-                    ))
-                })?,
+            client: builder.build().map_err(|e| {
+                Error::Anthropic(async_anthropic::errors::AnthropicError::Unknown(
+                    e.to_string(),
+                ))
+            })?,
         })
     }
 }

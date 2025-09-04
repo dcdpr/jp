@@ -1,5 +1,6 @@
 use confique::Config as Confique;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::{
     assignment::{set_error, AssignKeyValue, KvAssignment},
@@ -24,6 +25,15 @@ pub struct Anthropic {
         env = "JP_ASSISTANT_PROVIDER_ANTHROPIC_BASE_URL"
     )]
     pub base_url: String,
+
+    /// Any optional headers to enable beta features.
+    ///
+    /// See: <https://docs.anthropic.com/en/api/beta-headers>
+    ///
+    /// To find out which beta headers are available, see:
+    /// <https://docs.anthropic.com/en/release-notes/api>
+    #[config(default = [], env = "JP_ASSISTANT_PROVIDER_ANTHROPIC_BETA_HEADERS")]
+    pub beta_headers: Vec<String>,
 }
 
 impl Default for Anthropic {
@@ -31,6 +41,7 @@ impl Default for Anthropic {
         Self {
             api_key_env: "ANTHROPIC_API_KEY".to_owned(),
             base_url: "https://api.anthropic.com".to_owned(),
+            beta_headers: vec![],
         }
     }
 }
@@ -40,6 +51,12 @@ impl AssignKeyValue for <Anthropic as Confique>::Partial {
         match kv.key().as_str() {
             "api_key_env" => self.api_key_env = Some(kv.try_into_string()?),
             "base_url" => self.base_url = Some(kv.try_into_string()?),
+            "beta_headers" => {
+                kv.try_set_or_merge_vec(self.beta_headers.get_or_insert_default(), |v| match v {
+                    Value::String(v) => Ok(v),
+                    _ => Err("Expected string".into()),
+                })?;
+            }
             _ => return Err(set_error(kv.key())),
         }
 
