@@ -6,7 +6,7 @@ Ok(
     Reply(
         [
             Content(
-                "Received your test message! How can I assist you today?",
+                "Hello! I’ve received your test message. How can I assist you today?",
             ),
         ],
     ),

@@ -7,4 +7,4 @@ then:
   header:
     - name: content-type
       value: application/json; charset=utf-8
-  body: "{\"model\":\"llama3:latest\",\"created_at\":\"2025-07-19T22:34:55.05786Z\",\"message\":{\"role\":\"assistant\",\"content\":\"This is a test! I'm receiving your message and responding accordingly. Please feel free to send me any questions or topics you'd like to discuss, and I'll do my best to help!\"},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":6963363125,\"load_duration\":5537783875,\"prompt_eval_count\":12,\"prompt_eval_duration\":283811750,\"eval_count\":40,\"eval_duration\":1140501458}"
+  body: "{\"model\":\"llama3:latest\",\"created_at\":\"2025-09-16T19:33:40.968289Z\",\"message\":{\"role\":\"assistant\",\"content\":\"This is a test message. It's working! How can I assist you today?\"},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":2964550833,\"load_duration\":1896859625,\"prompt_eval_count\":12,\"prompt_eval_duration\":17341041,\"eval_count\":18,\"eval_duration\":290406459}"

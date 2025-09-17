@@ -16,20 +16,28 @@ version.workspace = true
 jp_config = { workspace = true }
 jp_conversation = { workspace = true }
 jp_mcp = { workspace = true }
-jp_model = { workspace = true }
 jp_openrouter = { workspace = true }
-jp_query = { workspace = true }
 
 async-anthropic = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
+crossterm = { workspace = true }
+duct = { workspace = true }
+duct_sh = { workspace = true }
 futures = { workspace = true }
 gemini_client_rs = { workspace = true }
+indexmap = { workspace = true }
+indoc = { workspace = true }
+inquire = { workspace = true }
+minijinja = { workspace = true }
 ollama-rs = { workspace = true, features = ["rustls", "stream"] }
+open-editor = { workspace = true }
 openai = { workspace = true, features = ["rustls", "reqwest"] }
 openai_responses = { workspace = true, features = ["stream"] }
+quick-xml = { workspace = true, features = ["serialize"] }
 reqwest = { workspace = true }
 reqwest-eventsource = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }

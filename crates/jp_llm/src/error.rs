@@ -61,6 +61,9 @@ pub enum Error {
 
     #[error("request rate limited (retry after {} seconds)", retry_after.unwrap_or_default())]
     RateLimit { retry_after: Option<u64> },
+
+    #[error("Failed to serialize XML")]
+    XmlSerialization(#[from] quick_xml::SeError),
 }
 
 impl From<gemini_client_rs::GeminiError> for Error {
@@ -104,4 +107,56 @@ impl PartialEq for Error {
         // Good enough for testing purposes
         format!("{self:?}") == format!("{other:?}")
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ToolError {
+    #[error("Disabled in configuration")]
+    Disabled,
+
+    #[error("Command is only supported for local tools")]
+    UnexpectedCommand,
+
+    #[error("Command missing for local tool")]
+    MissingCommand,
+
+    #[error("Failed to fetch tool from MCP client")]
+    McpGetToolError(#[source] jp_mcp::Error),
+
+    #[error("Failed to run tool from MCP client")]
+    McpRunToolError(#[source] jp_mcp::Error),
+
+    #[error("Failed to serialize tool arguments")]
+    SerializeArgumentsError {
+        arguments: serde_json::Value,
+        #[source]
+        error: serde_json::Error,
+    },
+
+    #[error("Failed to open editor to edit tool call")]
+    OpenEditorError {
+        arguments: serde_json::Value,
+        #[source]
+        error: open_editor::errors::OpenEditorError,
+    },
+
+    #[error("Failed to edit tool call")]
+    EditArgumentsError {
+        arguments: serde_json::Value,
+        #[source]
+        error: serde_json::Error,
+    },
+
+    #[error("Template error")]
+    TemplateError {
+        data: String,
+        #[source]
+        error: minijinja::Error,
+    },
+
+    #[error("Invalid `type` property for {key}, expected one of {need:?}")]
+    InvalidType {
+        key: String,
+        need: Vec<&'static str>,
+    },
 }

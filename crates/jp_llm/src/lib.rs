@@ -1,7 +1,8 @@
 mod error;
 pub mod provider;
-mod structured;
+pub mod query;
+pub mod structured;
+pub mod tool;
 
-pub use error::Error;
+pub use error::{Error, ToolError};
 pub use provider::{CompletionChunk, Provider};
-pub use structured::completion as structured_completion;

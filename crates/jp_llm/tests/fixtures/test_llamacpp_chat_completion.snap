@@ -4,6 +4,10 @@ expression: expr
 ---
 Ok(
     Reply(
-        [],
+        [
+            Content(
+                "Hello! This is a test message from Qwen, the large language model created by Alibaba Cloud. How can I assist you today?",
+            ),
+        ],
     ),
 )

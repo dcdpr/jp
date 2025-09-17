@@ -67,5 +67,5 @@ pub fn titles(
         .with_message(message)
         .build()?;
 
-    Ok(StructuredQuery::new(schema, thread)?.with_mapping(mapping))
+    Ok(StructuredQuery::new(schema, thread).with_mapping(mapping))
 }

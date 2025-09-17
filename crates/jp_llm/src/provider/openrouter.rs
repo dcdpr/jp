@@ -4,15 +4,18 @@ use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt as _};
 use jp_config::{
-    assistant::provider::openrouter,
-    model::parameters::{Parameters, ReasoningEffort},
+    assistant::tool_choice::ToolChoice,
+    model::{
+        id::{ModelIdConfig, ProviderId},
+        parameters::{ParametersConfig, ReasoningEffort},
+    },
+    providers::llm::openrouter::OpenrouterConfig,
 };
 use jp_conversation::{
     message::ToolCallRequest,
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
 };
-use jp_model::{ModelId, ProviderId};
 use jp_openrouter::{
     types::{
         chat::{CacheControl, Content, Message},
@@ -21,11 +24,10 @@ use jp_openrouter::{
             self, ChatCompletion as OpenRouterChunk, Choice, ErrorResponse, FinishReason,
             StreamingDelta,
         },
-        tool::{self, FunctionCall, Tool, ToolCall, ToolChoice, ToolFunction},
+        tool::{self, FunctionCall, Tool, ToolCall, ToolFunction},
     },
     Client,
 };
-use jp_query::query::ChatQuery;
 use serde::Serialize;
 use serde_json::Value;
 use tracing::{debug, trace, warn};
@@ -33,7 +35,8 @@ use tracing::{debug, trace, warn};
 use super::{CompletionChunk, Delta, Event, EventStream, ModelDetails, Reply, StreamEvent};
 use crate::{
     error::Result,
-    provider::{handle_delta, AccumulationState, Provider},
+    provider::{handle_delta, openai::parameters_with_strict_mode, AccumulationState, Provider},
+    query::ChatQuery,
     Error,
 };
 
@@ -59,8 +62,8 @@ impl Openrouter {
     async fn build_request(
         &self,
         query: ChatQuery,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
     ) -> Result<request::ChatCompletion> {
         let ChatQuery {
             thread,
@@ -73,30 +76,30 @@ impl Openrouter {
             .models()
             .await?
             .into_iter()
-            .find(|m| m.slug == model_id.slug());
+            .find(|m| *m.slug == *model_id.name);
 
-        let slug = model_id.slug().to_owned();
+        let slug = model_id.name.to_string();
         let reasoning = parameters.reasoning;
         let messages: RequestMessages = (model_id, thread).try_into()?;
         let tools = tools
             .into_iter()
             .map(|tool| Tool::Function {
                 function: ToolFunction {
-                    name: tool.name.to_string(),
-                    description: tool.description.map(|v| v.to_string()),
-                    parameters: tool.input_schema.as_ref().clone(),
+                    parameters: parameters_with_strict_mode(tool.parameters, tool_call_strict_mode),
+                    name: tool.name,
+                    description: tool.description,
                     strict: tool_call_strict_mode,
                 },
             })
             .collect::<Vec<_>>();
-        let tool_choice: ToolChoice = if tools.is_empty() {
-            ToolChoice::None
+        let tool_choice: tool::ToolChoice = if tools.is_empty() {
+            tool::ToolChoice::None
         } else {
             match tool_choice {
-                jp_mcp::tool::ToolChoice::Auto => ToolChoice::Auto,
-                jp_mcp::tool::ToolChoice::None => ToolChoice::None,
-                jp_mcp::tool::ToolChoice::Required => ToolChoice::Required,
-                jp_mcp::tool::ToolChoice::Function(name) => ToolChoice::function(name),
+                ToolChoice::Auto => tool::ToolChoice::Auto,
+                ToolChoice::None => tool::ToolChoice::None,
+                ToolChoice::Required => tool::ToolChoice::Required,
+                ToolChoice::Function(name) => tool::ToolChoice::function(name),
             }
         };
 
@@ -147,12 +150,12 @@ impl Provider for Openrouter {
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         debug!(
-            model = model_id.slug(),
+            model = %model_id.name,
             "Starting OpenRouter chat completion stream."
         );
 
@@ -209,8 +212,8 @@ impl Provider for Openrouter {
 
     async fn chat_completion(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
         let request = self.build_request(query, model_id, parameters).await?;
@@ -285,10 +288,10 @@ impl From<StreamingDelta> for Delta {
     }
 }
 
-impl TryFrom<&openrouter::Openrouter> for Openrouter {
+impl TryFrom<&OpenrouterConfig> for Openrouter {
     type Error = Error;
 
-    fn try_from(config: &openrouter::Openrouter) -> Result<Self> {
+    fn try_from(config: &OpenrouterConfig) -> Result<Self> {
         let api_key = env::var(&config.api_key_env)
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
@@ -333,11 +336,11 @@ impl From<OpenRouterChunk> for StreamEvent {
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct RequestMessages(pub Vec<RequestMessage>);
 
-impl TryFrom<(&ModelId, Thread)> for RequestMessages {
+impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
     type Error = Error;
 
     #[expect(clippy::too_many_lines)]
-    fn try_from((model_id, thread): (&ModelId, Thread)) -> Result<Self> {
+    fn try_from((model_id, thread): (&ModelIdConfig, Thread)) -> Result<Self> {
         let Thread {
             system_prompt,
             instructions,
@@ -490,9 +493,9 @@ impl TryFrom<(&ModelId, Thread)> for RequestMessages {
         }
 
         // Only Anthropic and Google models support explicit caching.
-        if !model_id.slug().starts_with("anthropic") && !model_id.slug().starts_with("google") {
+        if !model_id.name.starts_with("anthropic") && !model_id.name.starts_with("google") {
             trace!(
-                slug = model_id.slug(),
+                slug = %model_id.name,
                 "Model does not support caching directives, disabling cache."
             );
             for m in &mut messages {
@@ -573,7 +576,7 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> RequestMessage {
 mod tests {
     use std::path::PathBuf;
 
-    use jp_config::{assistant, Configurable as _, Partial as _};
+    use jp_config::providers::llm::LlmProviderConfig;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -586,12 +589,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_openrouter_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .openrouter;
-
+        let mut config = LlmProviderConfig::default().openrouter;
         let vcr = vcr();
         vcr.cassette(
             function_name!(),
@@ -623,12 +621,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_openrouter_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
     {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .openrouter;
-
+        let mut config = LlmProviderConfig::default().openrouter;
         let model_id = "openrouter/openai/o4-mini".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
@@ -655,7 +648,7 @@ mod tests {
 
                 Openrouter::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &Parameters::default(), query)
+                    .chat_completion(&model_id, &ParametersConfig::default(), query)
                     .await
             },
         )

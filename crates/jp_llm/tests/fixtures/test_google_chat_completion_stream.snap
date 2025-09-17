@@ -2,4 +2,4 @@
 source: crates/jp_test/src/mock.rs
 expression: expr
 ---
-"Received. How can I help you today?"
+"Received."
