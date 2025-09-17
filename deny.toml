@@ -31,5 +31,6 @@ allow-git = [
     "https://github.com/JeanMertz/gemini-client",
     "https://github.com/JeanMertz/openai-responses-rs",
     "https://github.com/JeanMertz/openai?branch=tmp",
+    "https://github.com/JeanMertz/schematic?branch=merged",
     "https://github.com/modelcontextprotocol/rust-sdk",
 ]
