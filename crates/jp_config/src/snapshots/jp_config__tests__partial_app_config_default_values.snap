@@ -9,12 +9,12 @@ Ok(
                 true,
             ),
             config_load_paths: Some(
-                [
-                    ".jp/config.d",
-                ],
+                [],
             ),
             extends: Some(
-                [],
+                [
+                    "config.d/**/*",
+                ],
             ),
             assistant: PartialAssistantConfig {
                 name: None,
