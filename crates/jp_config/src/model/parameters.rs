@@ -1,19 +1,20 @@
-use std::{collections::HashMap, str::FromStr};
+//! LLM model parameters configuration.
 
-use confique::Config as Confique;
+use std::fmt;
+
+use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::{
-    assignment::{AssignKeyValue, KvAssignment},
-    error::Result,
-    serde::is_none_or_default,
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    BoxedError,
 };
 
-/// Model configuration.
-#[derive(Debug, Clone, Default, PartialEq, Confique, Serialize, Deserialize)]
-#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
-pub struct Parameters {
+/// Assistant-specific configuration.
+#[derive(Debug, Clone, Config)]
+#[config(rename_all = "snake_case", allow_unknown_fields)]
+pub struct ParametersConfig {
     /// Maximum number of tokens to generate.
     ///
     /// This can usually be left unset, in which case the model will be allowed
@@ -22,19 +23,17 @@ pub struct Parameters {
     /// based on the local machine's resources, in such cases, it might be
     /// necessary to set a higher limit if your conversation is long or has more
     /// context attached.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
     pub max_tokens: Option<u32>,
 
     /// Reasoning configuration.
     ///
     /// Should be `None` if the model does not support reasoning.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
-    pub reasoning: Option<Reasoning>,
+    #[setting(nested)]
+    pub reasoning: Option<ReasoningConfig>,
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
+    /// Temperature of the model.
+    ///
+    /// ...
     pub temperature: Option<f32>,
 
     /// Control the randomness and diversity of the generated text. Also
@@ -47,8 +46,6 @@ pub struct Parameters {
     ///
     /// As opposed to `top_k`, this is a dynamic approach that considers tokens
     /// until their cumulative probability reaches a threshold P.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
     pub top_p: Option<f32>,
 
     /// Control the diversity and focus of the model's output. It determines how
@@ -57,43 +54,33 @@ pub struct Parameters {
     ///
     /// As opposed to `top_p`, it is a fixed-size approach that considers the
     /// top K most probable tokens, discarding the rest.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
     pub top_k: Option<u32>,
 
     /// The `stop_words` parameter can be set to specific sequences, such as a
     /// period or specific word, to stop the model from generating text when it
     /// encounters these sequences.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[config(default = [], partial_attr(serde(skip_serializing_if = "is_none_or_default")))]
+    #[setting(default, merge = schematic::merge::append_vec)]
     pub stop_words: Vec<String>,
 
-    // Other non-typed parameters that some models might support.
-    #[serde(default, flatten, skip_serializing_if = "HashMap::is_empty")]
-    #[config(default = {}, partial_attr(serde(skip_serializing_if = "is_none_or_default")))]
-    pub other: HashMap<String, Value>,
+    /// Other non-typed parameters that some models might support.
+    #[setting(default, flatten, merge = schematic::merge::merge_iter)]
+    pub other: Map<String, Value>,
 }
 
-impl AssignKeyValue for <Parameters as Confique>::Partial {
-    fn assign(&mut self, kv: KvAssignment) -> Result<()> {
-        match kv.key().as_str() {
-            "max_tokens" => self.max_tokens = Some(kv.try_into_string()?.parse()?),
-            "reasoning" => self.reasoning = Some(kv.try_into_object()?),
-            "temperature" => self.temperature = Some(kv.try_into_string()?.parse()?),
-            "top_p" => self.top_p = Some(kv.try_into_string()?.parse()?),
-            "top_k" => self.top_k = Some(kv.try_into_string()?.parse()?),
-            "stop_words" => {
-                self.stop_words = Some(
-                    kv.try_into_string()?
-                        .split(',')
-                        .map(str::to_owned)
-                        .collect(),
-                );
-            }
+impl AssignKeyValue for PartialParametersConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            "max_tokens" => self.max_tokens = kv.try_some_u32()?,
+            "temperature" => self.temperature = kv.try_some_f32()?,
+            "top_p" => self.top_p = kv.try_some_f32()?,
+            "top_k" => self.top_k = kv.try_some_u32()?,
+            _ if kv.p("stop_words") => kv.try_some_vec_of_strings(&mut self.stop_words)?,
+            _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
             k => {
                 self.other
                     .get_or_insert_default()
-                    .insert(k.to_owned(), kv.into_value());
+                    .insert(k.to_owned(), kv.value.into_value());
             }
         }
 
@@ -101,21 +88,35 @@ impl AssignKeyValue for <Parameters as Confique>::Partial {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
-pub struct Reasoning {
+/// Configuration for reasoning.
+#[derive(Debug, Clone, Copy, PartialEq, Config)]
+pub struct ReasoningConfig {
     /// Effort to use for reasoning.
-    #[serde(default)]
+    #[setting(default)]
     pub effort: ReasoningEffort,
 
     /// Whether to exclude reasoning tokens from the response. The model will
     /// still generate reasoning tokens, but they will not be included in the
     /// response.
-    #[serde(default)]
+    #[setting(default)]
     pub exclude: bool,
 }
 
+impl AssignKeyValue for PartialReasoningConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            "effort" => self.effort = kv.try_some_from_str()?,
+            "exclude" => self.exclude = kv.try_some_bool()?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
 /// Effort to use for reasoning.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningEffort {
     /// Allocates a large portion of tokens for reasoning (approximately 80% of
@@ -130,24 +131,28 @@ pub enum ReasoningEffort {
     Low,
 
     /// Allocate a specific number of tokens for reasoning.
-    Absolute(u32),
+    #[variant(fallback)]
+    Absolute(Tokens),
 }
 
 impl ReasoningEffort {
+    /// Convert the effort to the absolute number of tokens to use.
     #[must_use]
-    pub fn to_tokens(self, max_tokens: u32) -> u32 {
+    pub const fn to_tokens(self, max_tokens: u32) -> u32 {
         match self {
             Self::High => max_tokens.saturating_mul(80) / 100,
             Self::Medium => max_tokens.saturating_mul(50) / 100,
             Self::Low => max_tokens.saturating_mul(20) / 100,
-            Self::Absolute(tokens) => tokens,
+            Self::Absolute(Tokens(tokens)) => tokens,
         }
     }
 
+    /// Convert the effort to a relative effort, based on the given maximum
+    /// number of tokens.
     #[must_use]
-    pub fn abs_to_rel(&self, max_tokens: Option<u32>) -> Self {
+    pub const fn abs_to_rel(&self, max_tokens: Option<u32>) -> Self {
         match (self, max_tokens) {
-            (Self::Absolute(tokens), Some(max)) => {
+            (Self::Absolute(Tokens(tokens)), Some(max)) => {
                 if *tokens > (max * 80) / 100 {
                     Self::High
                 } else if *tokens > (max * 50) / 100 {
@@ -162,19 +167,20 @@ impl ReasoningEffort {
     }
 }
 
-impl FromStr for ReasoningEffort {
-    type Err = Box<dyn std::error::Error + Send + Sync>;
+/// Wrapper around a number of tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct Tokens(u32);
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "high" => Ok(Self::High),
-            "medium" => Ok(Self::Medium),
-            "low" => Ok(Self::Low),
-            _ => Ok(Self::Absolute(s.parse().map_err(|_| {
-                format!(
-                    "Invalid reasoning effort: {s}, must be one of high, medium, low, or a number"
-                )
-            })?)),
-        }
+impl fmt::Display for Tokens {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl TryFrom<&str> for Tokens {
+    type Error = BoxedError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Ok(Self(s.parse()?))
     }
 }

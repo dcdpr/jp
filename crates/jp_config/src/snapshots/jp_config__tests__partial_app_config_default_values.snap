@@ -1,0 +1,191 @@
+---
+source: crates/jp_config/src/lib.rs
+expression: "PartialAppConfig::default_values(&())"
+---
+Ok(
+    Some(
+        PartialAppConfig {
+            inherit: Some(
+                true,
+            ),
+            config_load_paths: Some(
+                [
+                    ".jp/config.d",
+                ],
+            ),
+            extends: Some(
+                [],
+            ),
+            assistant: PartialAssistantConfig {
+                name: None,
+                system_prompt: Some(
+                    "You are a helpful assistant.",
+                ),
+                instructions: [
+                    PartialInstructionsConfig {
+                        title: Some(
+                            "How to respond to the user",
+                        ),
+                        description: None,
+                        items: Some(
+                            [
+                                "Be concise",
+                                "Use simple sentences. But feel free to use technical jargon.",
+                                "Do NOT overexplain basic concepts. Assume the user is technically proficient.",
+                                "AVOID flattering, corporate-ish or marketing language. Maintain a neutral viewpoint.",
+                                "AVOID vague and / or generic claims which may seem correct but are not substantiated by the context.",
+                            ],
+                        ),
+                        examples: [],
+                    },
+                ],
+                tool_choice: None,
+                model: PartialModelConfig {
+                    id: PartialModelIdConfig {
+                        provider: None,
+                        name: None,
+                    },
+                    parameters: PartialParametersConfig {
+                        max_tokens: None,
+                        reasoning: None,
+                        temperature: None,
+                        top_p: None,
+                        top_k: None,
+                        stop_words: None,
+                        other: None,
+                    },
+                },
+            },
+            conversation: PartialConversationConfig {
+                title: PartialTitleConfig {
+                    generate: PartialGenerateConfig {
+                        auto: Some(
+                            true,
+                        ),
+                        model: None,
+                    },
+                },
+                tools: PartialToolsConfig {
+                    defaults: PartialToolsDefaultsConfig {
+                        run: None,
+                        result: None,
+                        style: PartialDisplayStyleConfig {
+                            inline_results: None,
+                            results_file_link: None,
+                        },
+                    },
+                    tools: {},
+                },
+                attachments: None,
+            },
+            style: PartialStyleConfig {
+                code: PartialCodeConfig {
+                    theme: Some(
+                        "Monokai Extended",
+                    ),
+                    color: Some(
+                        true,
+                    ),
+                    line_numbers: Some(
+                        false,
+                    ),
+                    file_link: Some(
+                        Osc8,
+                    ),
+                    copy_link: Some(
+                        Off,
+                    ),
+                },
+                reasoning: PartialReasoningConfig {
+                    show: Some(
+                        true,
+                    ),
+                },
+                tool_call: PartialToolCallConfig {
+                    show: Some(
+                        true,
+                    ),
+                },
+                typewriter: PartialTypewriterConfig {
+                    text_delay: None,
+                    code_delay: None,
+                },
+            },
+            editor: PartialEditorConfig {
+                cmd: None,
+                envs: Some(
+                    [
+                        "JP_EDITOR",
+                        "VISUAL",
+                        "EDITOR",
+                    ],
+                ),
+            },
+            template: PartialTemplateConfig {
+                values: None,
+            },
+            providers: PartialProviderConfig {
+                llm: PartialLlmProviderConfig {
+                    anthropic: PartialAnthropicConfig {
+                        api_key_env: Some(
+                            "ANTHROPIC_API_KEY",
+                        ),
+                        base_url: Some(
+                            "https://api.anthropic.com",
+                        ),
+                        beta_headers: Some(
+                            [],
+                        ),
+                    },
+                    deepseek: PartialDeepseekConfig {
+                        api_key_env: Some(
+                            "DEEPSEEK_API_KEY",
+                        ),
+                    },
+                    google: PartialGoogleConfig {
+                        api_key_env: Some(
+                            "GEMINI_API_KEY",
+                        ),
+                        base_url: Some(
+                            "https://generativelanguage.googleapis.com/v1beta",
+                        ),
+                    },
+                    llamacpp: PartialLlamacppConfig {
+                        base_url: Some(
+                            "http://127.0.0.1:8080",
+                        ),
+                    },
+                    ollama: PartialOllamaConfig {
+                        base_url: Some(
+                            "http://localhost:11434",
+                        ),
+                    },
+                    openai: PartialOpenaiConfig {
+                        api_key_env: Some(
+                            "OPENAI_API_KEY",
+                        ),
+                        base_url: Some(
+                            "https://api.openai.com",
+                        ),
+                        base_url_env: Some(
+                            "OPENAI_BASE_URL",
+                        ),
+                    },
+                    openrouter: PartialOpenrouterConfig {
+                        api_key_env: Some(
+                            "OPENROUTER_API_KEY",
+                        ),
+                        app_name: Some(
+                            "JP",
+                        ),
+                        app_referrer: None,
+                        base_url: Some(
+                            "https://openrouter.ai",
+                        ),
+                    },
+                },
+                mcp: {},
+            },
+        },
+    ),
+)

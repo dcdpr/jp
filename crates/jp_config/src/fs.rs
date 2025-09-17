@@ -1,24 +1,51 @@
+//! Configuration file loader.
+
 use std::{
     borrow::Cow,
+    env,
     path::{Path, PathBuf},
 };
 
+use directories::ProjectDirs;
+use path_clean::PathClean as _;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
+use crate::{Error, PartialAppConfig};
+
+/// Application name for configuration file storage paths.
+const APPLICATION: &str = "jp";
+
+/// Valid configuration file extensions.
 pub const CONFIG_FILE_EXTENSIONS: &[&str] = &["toml", "json", "json5", "yaml", "yml"];
 
+/// Environment variable used to specify the path to the global configuration
+const GLOBAL_CONFIG_ENV_VAR: &str = "JP_GLOBAL_CONFIG_FILE";
+
+/// Configuration loader error.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigLoaderError {
+    /// Provided path is not a directory.
     #[error("provided path is not a directory")]
-    PathIsNotADirectory { got: PathBuf },
+    PathIsNotADirectory {
+        /// The path which is not a directory.
+        got: PathBuf,
+    },
 
+    /// Configuration file not found.
     #[error("config file not found")]
     NotFound {
+        /// The path to the configuration file.
         path: PathBuf,
+
+        /// The file stem which was searched for.
         stem: String,
+
+        /// The extensions which were searched for.
         extensions: Vec<String>,
     },
 
+    /// IO error.
     #[error("IO error")]
     Io(#[from] std::io::Error),
 }
@@ -77,7 +104,7 @@ impl ConfigFile {
     ///
     /// Returns an error if the file content could not be deserialized into the
     /// provided type `T`.
-    pub fn deserialize<T: for<'de> Deserialize<'de>>(
+    fn deserialize<T: for<'de> Deserialize<'de>>(
         &self,
     ) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
         match self.format {
@@ -88,6 +115,12 @@ impl ConfigFile {
         }
     }
 
+    /// Edit the file content using the provided function.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file content could not be deserialized into the
+    /// provided type `T`, or if the function returns an error.
     pub fn edit_content<T>(
         &mut self,
         f: impl FnOnce(&mut T) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
@@ -109,6 +142,11 @@ impl ConfigFile {
     }
 
     /// Format the content of the configuration file, using the provided type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file content could not be deserialized into the
+    /// provided type `T`.
     pub fn format_content<T>(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
     where
         T: Serialize + for<'de> Deserialize<'de>,
@@ -127,9 +165,16 @@ impl ConfigFile {
 /// A configuration file format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Format {
+    /// TOML format.
     Toml,
+
+    /// JSON format.
     Json,
+
+    /// JSON5 format.
     Json5,
+
+    /// YAML format.
     Yaml,
 }
 
@@ -148,7 +193,7 @@ impl Format {
 
     /// Get the file extension as a static string slice.
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Toml => "toml",
             Self::Json => "json",
@@ -161,6 +206,11 @@ impl Format {
 impl ConfigLoader {
     /// Load the closest configuration file to `path`, if any, or create a new
     /// one if configured to do so.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration file could not be found, or if the
+    /// file could not be loaded.
     pub fn load<P: AsRef<Path>>(&self, directory: P) -> Result<ConfigFile, ConfigLoaderError> {
         let directory = directory.as_ref();
 
@@ -233,5 +283,94 @@ impl ConfigLoader {
                 .map(ToString::to_string)
                 .collect(),
         })
+    }
+}
+
+/// Get the path to user the global config directory, if it exists.
+#[must_use]
+pub fn user_global_config_path(home: Option<&Path>) -> Option<PathBuf> {
+    env::var(GLOBAL_CONFIG_ENV_VAR)
+        .ok()
+        .and_then(|path| expand_tilde(path, home.and_then(Path::to_str)))
+        .map(|path| path.clean())
+        .inspect(|path| debug!(path = %path.display(), "Custom global configuration file path configured."))
+        .or_else(|| ProjectDirs::from("", "", APPLICATION).map(|p| p.config_dir().to_path_buf()))
+}
+
+/// Expand tilde in path to home directory
+///
+/// If no tilde is found, returns `Some` with the original path. If a tilde is
+/// found, but no home directory is set, returns `None`.
+pub fn expand_tilde<T: AsRef<str>>(path: impl AsRef<str>, home: Option<T>) -> Option<PathBuf> {
+    if path.as_ref().starts_with('~') {
+        return home.map(|home| PathBuf::from(path.as_ref().replacen('~', home.as_ref(), 1)));
+    }
+
+    Some(PathBuf::from(path.as_ref()))
+}
+
+/// Load a partial configuration, with optional fallback.
+///
+/// # Errors
+///
+/// Returns an error if merging the partials fails, which returns a
+/// [`schematic::MergeError`].
+pub fn load_partial(
+    mut partial: PartialAppConfig,
+    fallback: PartialAppConfig,
+) -> Result<PartialAppConfig, Error> {
+    use schematic::PartialConfig as _;
+
+    partial.merge(&(), fallback)?;
+    Ok(partial)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_tilde() {
+        struct TestCase {
+            path: &'static str,
+            home: Option<&'static str>,
+            expected: Option<&'static str>,
+        }
+
+        let cases = vec![
+            ("no tilde with home", TestCase {
+                path: "no/tilde/here",
+                home: Some("/tmp"),
+                expected: Some("no/tilde/here"),
+            }),
+            ("no tilde missing home", TestCase {
+                path: "no/tilde/here",
+                home: None,
+                expected: Some("no/tilde/here"),
+            }),
+            ("tilde path with home", TestCase {
+                path: "~/subdir",
+                home: Some("/tmp"),
+                expected: Some("/tmp/subdir"),
+            }),
+            ("only tilde with home", TestCase {
+                path: "~",
+                home: Some("/tmp"),
+                expected: Some("/tmp"),
+            }),
+            ("tilde missing home", TestCase {
+                path: "~",
+                home: None,
+                expected: None,
+            }),
+        ];
+
+        for (name, case) in cases {
+            assert_eq!(
+                expand_tilde(case.path, case.home),
+                case.expected.map(PathBuf::from),
+                "Failed test case: {name}"
+            );
+        }
     }
 }

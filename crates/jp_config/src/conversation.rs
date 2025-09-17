@@ -1,71 +1,53 @@
-pub mod title;
+//! Conversation-specific configuration for Jean-Pierre.
 
-use confique::Config as Confique;
-use jp_mcp::config::McpServerId;
-use serde::{Deserialize, Serialize};
+pub mod title;
+pub mod tool;
+
+use schematic::Config;
 use serde_json::Value;
 
 use crate::{
-    assignment::{set_error, AssignKeyValue, KvAssignment},
-    error::Result,
-    serde::{is_nested_default, is_none_or_default},
+    assignment::{missing_key, type_error, AssignKeyValue, AssignResult, KvAssignment},
+    conversation::{
+        title::{PartialTitleConfig, TitleConfig},
+        tool::{PartialToolsConfig, ToolsConfig},
+    },
 };
 
-/// LLM configuration.
-#[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
-#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
-#[config(partial_attr(serde(deny_unknown_fields)))]
-pub struct Conversation {
+/// Conversation-specific configuration.
+#[derive(Debug, Config)]
+#[config(rename_all = "snake_case")]
+pub struct ConversationConfig {
     /// Title configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_default")))]
-    pub title: title::Title,
+    #[setting(nested)]
+    pub title: TitleConfig,
 
-    /// List of MCP servers to use for the active conversation.
-    #[config(
-        default = [],
-        deserialize_with = de_mcp_servers,
-        partial_attr(serde(skip_serializing_if = "is_none_or_default")),
-    )]
-    pub mcp_servers: Vec<McpServerId>,
+    /// Tool configuration.
+    #[setting(nested)]
+    pub tools: ToolsConfig,
 
-    #[config(default = [], partial_attr(serde(skip_serializing_if = "is_none_or_default")))]
+    /// Attachment configuration.
+    #[setting(default, merge = schematic::merge::append_vec)]
     pub attachments: Vec<url::Url>,
 }
 
-impl AssignKeyValue for <Conversation as Confique>::Partial {
-    fn assign(&mut self, mut kv: KvAssignment) -> Result<()> {
-        let k = kv.key().as_str().to_owned();
+impl AssignKeyValue for PartialConversationConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            _ if kv.p("title") => self.title.assign(kv)?,
+            _ if kv.p("tools") => self.tools.assign(kv)?,
+            _ if kv.p("attachments") => {
+                let parser = |kv: KvAssignment| match kv.value.clone().into_value() {
+                    Value::String(v) => url::Url::parse(&v).map_err(Into::into),
+                    _ => type_error(kv.key(), &kv.value, &["string"]).map_err(Into::into),
+                };
 
-        match k.as_str() {
-            "title" => self.title = kv.try_into_object()?,
-            "mcp_servers" => {
-                kv.try_set_or_merge_vec(self.mcp_servers.get_or_insert_default(), |v| match v {
-                    Value::String(v) => Ok(McpServerId::new(v)),
-                    _ => Err("Expected string".into()),
-                })?;
+                kv.try_vec(self.attachments.get_or_insert_default(), parser)?;
             }
-            "attachments" => {
-                kv.try_set_or_merge_vec(self.attachments.get_or_insert_default(), |v| match v {
-                    Value::String(v) => Ok(url::Url::parse(&v)?),
-                    _ => Err("Expected string".into()),
-                })?;
-            }
-
-            _ if kv.trim_prefix("title") => self.title.assign(kv)?,
-
-            _ => return Err(set_error(kv.key())),
+            _ => return missing_key(&kv),
         }
 
         Ok(())
     }
-}
-
-pub fn de_mcp_servers<'de, D>(deserializer: D) -> std::result::Result<Vec<McpServerId>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Vec::<String>::deserialize(deserializer)?
-        .into_iter()
-        .map(McpServerId::new)
-        .collect())
 }
