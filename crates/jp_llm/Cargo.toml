@@ -29,7 +29,13 @@ gemini_client_rs = { workspace = true }
 indexmap = { workspace = true }
 indoc = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
-minijinja = { workspace = true }
+minijinja = { workspace = true, features = [
+    "serde",
+    "json",
+    "builtins",
+    "unicode",
+    "preserve_order",
+] }
 ollama-rs = { workspace = true, features = ["rustls", "stream"] }
 open-editor = { workspace = true }
 openai = { workspace = true, features = ["rustls", "reqwest"] }
