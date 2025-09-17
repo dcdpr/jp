@@ -28,7 +28,7 @@ futures = { workspace = true }
 gemini_client_rs = { workspace = true }
 indexmap = { workspace = true }
 indoc = { workspace = true }
-inquire = { workspace = true }
+inquire = { workspace = true, features = ["crossterm"] }
 minijinja = { workspace = true }
 ollama-rs = { workspace = true, features = ["rustls", "stream"] }
 open-editor = { workspace = true }
