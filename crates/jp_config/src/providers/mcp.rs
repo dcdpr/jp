@@ -33,15 +33,15 @@ pub struct StdioConfig {
 
     /// The arguments to pass to the command.
     #[setting(default, merge = schematic::merge::append_vec)]
-    pub args: Vec<String>,
+    pub arguments: Vec<String>,
 
     /// The environment variables to expose to the command.
-    #[setting(default, rename = "env", merge = schematic::merge::append_vec)]
-    pub environment_variables: Vec<String>,
+    #[setting(default, merge = schematic::merge::append_vec)]
+    pub variables: Vec<String>,
 
     /// The binary checksum for the binary.
     #[setting(nested)]
-    pub binary_checksum: Option<ChecksumConfig>,
+    pub checksum: Option<ChecksumConfig>,
 }
 
 impl AssignKeyValue for PartialStdioConfig {
@@ -49,9 +49,9 @@ impl AssignKeyValue for PartialStdioConfig {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
             "command" => self.command = kv.try_some_from_str()?,
-            _ if kv.p("args") => kv.try_some_vec_of_strings(&mut self.args)?,
-            _ if kv.p("env") => kv.try_some_vec_of_strings(&mut self.environment_variables)?,
-            _ if kv.p("binary_checksum") => self.binary_checksum.assign(kv)?,
+            _ if kv.p("args") => kv.try_some_vec_of_strings(&mut self.arguments)?,
+            _ if kv.p("env") => kv.try_some_vec_of_strings(&mut self.variables)?,
+            _ if kv.p("binary_checksum") => self.checksum.assign(kv)?,
             _ => return missing_key(&kv),
         }
 

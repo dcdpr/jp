@@ -91,7 +91,7 @@ pub struct AppConfig {
     /// referenced by their basename, optionally without a file extension. For
     /// example, a file named `my-agent.toml` in a config load path can be
     /// loaded using `--cfg my-agent`.
-    #[setting(default = vec![".jp/config.d".into()], merge = schematic::merge::append_vec)]
+    #[setting(default = vec![], merge = schematic::merge::append_vec)]
     pub config_load_paths: Vec<RelativePathBuf>,
 
     /// Extends the configuration from the given files.
@@ -103,7 +103,7 @@ pub struct AppConfig {
     ///
     /// Note that extended files ARE loaded by default, in contrast to
     /// [`Self::config_load_paths`].
-    #[setting(default = vec![], merge = schematic::merge::preserve)]
+    #[setting(default = vec!["config.d/**/*".into()], merge = schematic::merge::preserve)]
     pub extends: Vec<RelativePathBuf>,
 
     /// Assistant configuration.

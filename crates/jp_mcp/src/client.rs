@@ -212,7 +212,7 @@ impl Client {
     ) -> Result<RunningService<RoleClient, ()>> {
         match config {
             McpProviderConfig::Stdio(config) => {
-                if let Some(checksum) = &config.binary_checksum {
+                if let Some(checksum) = &config.checksum {
                     verify_file_checksum(
                         id.as_str(),
                         &config.command,
@@ -223,7 +223,7 @@ impl Client {
 
                 // Build environment variables
                 let vars = config
-                    .environment_variables
+                    .variables
                     .iter()
                     .map(|key| Ok((key.to_owned(), env::var(key)?)))
                     .collect::<Result<HashMap<_, _>>>()?;
@@ -231,7 +231,7 @@ impl Client {
                 // Create command
                 let mut cmd = Command::new(&config.command);
                 cmd.stderr(Stdio::null());
-                cmd.args(&config.args);
+                cmd.args(&config.arguments);
 
                 // Add environment variables
                 for (key, value) in vars {
