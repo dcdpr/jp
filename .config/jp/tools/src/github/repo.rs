@@ -82,7 +82,7 @@ pub(crate) async fn github_read_file(repository: Option<String>, path: String) -
         .into_iter()
         .map(|item| File {
             path: item.path,
-            kind: item.r#type.to_string(),
+            kind: item.r#type.clone(),
             content: item.content.map(|content| match item.encoding.as_deref() {
                 Some("base64") => BASE64_STANDARD
                     .decode(
