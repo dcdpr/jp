@@ -72,7 +72,7 @@ impl Storage {
 
         // Create user storage directory, if needed.
         if root.exists()
-            && let Some(mut existing_path) = fs::read_dir(root)?.find_map(|entry| {
+            && let Some(existing_path) = fs::read_dir(root)?.find_map(|entry| {
                 let path = entry.ok()?.path();
                 path.to_string_lossy().ends_with(&id).then_some(path)
             })
