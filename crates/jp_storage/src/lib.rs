@@ -2,7 +2,6 @@ pub mod error;
 pub mod value;
 
 use std::{
-    ffi::OsStr,
     fs, iter,
     path::{Path, PathBuf},
 };

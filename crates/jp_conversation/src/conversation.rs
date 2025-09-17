@@ -2,7 +2,7 @@
 
 use std::{fmt, str::FromStr};
 
-use jp_config::{Partial, PartialConfig};
+use jp_config::PartialAppConfig;
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id, NANOSECONDS_PER_DECISECOND,
@@ -27,8 +27,8 @@ pub struct Conversation {
     pub user: bool,
 
     /// The partial configuration persisted for this conversation.
-    #[serde(default = "PartialConfig::empty")]
-    config: PartialConfig,
+    #[serde(default = "PartialAppConfig::empty")]
+    config: PartialAppConfig,
 }
 
 impl Serialize for Conversation {
@@ -68,7 +68,7 @@ impl Default for Conversation {
         Self {
             last_activated_at: UtcDateTime::now(),
             title: None,
-            config: PartialConfig::default_values(),
+            config: PartialAppConfig::default(),
             user: false,
         }
     }
@@ -90,16 +90,16 @@ impl Conversation {
     }
 
     #[must_use]
-    pub fn config(&self) -> &PartialConfig {
+    pub fn config(&self) -> &PartialAppConfig {
         &self.config
     }
 
     #[must_use]
-    pub fn config_mut(&mut self) -> &mut PartialConfig {
+    pub fn config_mut(&mut self) -> &mut PartialAppConfig {
         &mut self.config
     }
 
-    pub fn set_config(&mut self, config: PartialConfig) {
+    pub fn set_config(&mut self, config: PartialAppConfig) {
         self.config = config;
     }
 }
@@ -258,23 +258,8 @@ impl Default for ConversationsMetadata {
 }
 
 fn trim_config(
-    mut cfg: jp_config::PartialConfig,
+    cfg: jp_config::PartialAppConfig,
 ) -> std::result::Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
-    let defaults = jp_config::PartialConfig::default_values();
-
-    if cfg.assistant.system_prompt == defaults.assistant.system_prompt {
-        cfg.assistant.system_prompt = None;
-    }
-
-    if cfg.mcp.servers == defaults.mcp.servers {
-        cfg.mcp.servers = <_>::empty();
-    }
-
-    cfg.inherit = None;
-    cfg.config_load_paths = None;
-    cfg.style = <_>::empty();
-    cfg.editor = <_>::empty();
-
     Ok(match serde_json::to_value(cfg)? {
         serde_json::Value::Object(v) => v
             .into_iter()
@@ -318,7 +303,7 @@ mod tests {
                 time::Time::MIDNIGHT,
             ),
             user: true,
-            config: PartialConfig::default_values(),
+            config: PartialAppConfig::default(),
         };
 
         insta::assert_json_snapshot!(conv);

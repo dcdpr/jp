@@ -1,3 +1,5 @@
+use crate::ConversationId;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
@@ -13,6 +15,9 @@ pub enum Error {
 
     #[error("Invalid thread: {0}")]
     Thread(String),
+
+    #[error("unknown conversation ID")]
+    UnknownId(ConversationId),
 }
 
 #[cfg(test)]

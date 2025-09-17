@@ -543,29 +543,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "confique"
-version = "0.3.0"
-source = "git+https://github.com/JeanMertz/confique?branch=merged#45d665097ab6065e5d8f500fb099a0f7ec98f476"
-dependencies = [
- "confique-macro",
- "json5",
- "serde",
- "serde_yaml",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "confique-macro"
-version = "0.0.11"
-source = "git+https://github.com/JeanMertz/confique?branch=merged#45d665097ab6065e5d8f500fb099a0f7ec98f476"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "console"
 version = "0.15.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -592,6 +569,15 @@ name = "convert_case"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb402b8d4c85569410425650ce3eddc7d698ed96d39a73f941b08fb63082f1e7"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "convert_case"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
 dependencies = [
  "unicode-segmentation",
 ]
@@ -793,8 +779,18 @@ version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee"
 dependencies = [
- "darling_core",
- "darling_macro",
+ "darling_core 0.20.11",
+ "darling_macro 0.20.11",
+]
+
+[[package]]
+name = "darling"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a79c4acb1fd5fa3d9304be4c76e031c54d2e92d172a393e24b19a14fe8532fe9"
+dependencies = [
+ "darling_core 0.21.0",
+ "darling_macro 0.21.0",
 ]
 
 [[package]]
@@ -812,12 +808,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "darling_core"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74875de90daf30eb59609910b84d4d368103aaec4c924824c6799b28f77d6a1d"
+dependencies = [
+ "fnv",
+ "ident_case",
+ "proc-macro2",
+ "quote",
+ "strsim",
+ "syn",
+]
+
+[[package]]
 name = "darling_macro"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
 dependencies = [
- "darling_core",
+ "darling_core 0.20.11",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "darling_macro"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e79f8e61677d5df9167cd85265f8e5f64b215cdea3fb55eebc3e622e44c7a146"
+dependencies = [
+ "darling_core 0.21.0",
  "quote",
  "syn",
 ]
@@ -847,7 +868,7 @@ version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d5bcf7b024d6835cfb3d473887cd966994907effbe9227e8c8219824d06c4e8"
 dependencies = [
- "darling",
+ "darling 0.20.11",
  "proc-macro2",
  "quote",
  "syn",
@@ -878,7 +899,7 @@ version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
 dependencies = [
- "convert_case",
+ "convert_case 0.7.1",
  "proc-macro2",
  "quote",
  "syn",
@@ -911,6 +932,15 @@ name = "directories"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "16f5094c54661b38d03bd7e50df373292118db60b585c08a411c6d840017fe7d"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
+name = "dirs"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
 dependencies = [
  "dirs-sys",
 ]
@@ -957,6 +987,15 @@ dependencies = [
  "os_pipe",
  "shared_child",
  "shared_thread",
+]
+
+[[package]]
+name = "duct_sh"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8139179d1d133ab7153920ba3812915b17c61e2514a6f98b1fd03f2c07668d1"
+dependencies = [
+ "duct",
 ]
 
 [[package]]
@@ -1803,6 +1842,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "is_ci"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7655c9839580ee829dfacba1d1278c2b7883e50a277ff7541299489d6bdfdc45"
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1861,6 +1906,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "duct",
+ "indexmap",
  "indoc",
  "jp_attachment",
  "jp_mcp",
@@ -1880,6 +1926,7 @@ dependencies = [
  "crossbeam-channel",
  "glob",
  "ignore",
+ "indexmap",
  "jp_attachment",
  "jp_mcp",
  "serde",
@@ -1912,7 +1959,6 @@ dependencies = [
  "crossterm 0.29.0",
  "duct",
  "futures",
- "hex",
  "indoc",
  "inquire",
  "insta",
@@ -1927,22 +1973,18 @@ dependencies = [
  "jp_id",
  "jp_llm",
  "jp_mcp",
- "jp_model",
  "jp_openrouter",
- "jp_query",
  "jp_storage",
  "jp_task",
  "jp_term",
  "jp_workspace",
  "minijinja",
- "open-editor",
  "path-clean",
+ "quick-xml",
  "reqwest",
  "schemars 1.0.4",
  "serde",
  "serde_json",
- "sha1",
- "sha2",
  "strip-ansi-escapes",
  "termimad",
  "test-log",
@@ -1961,17 +2003,18 @@ dependencies = [
 name = "jp_config"
 version = "0.1.0"
 dependencies = [
- "confique",
  "directories",
+ "duct",
+ "duct_sh",
+ "glob",
  "indexmap",
- "indoc",
  "insta",
- "jp_mcp",
- "jp_model",
+ "jp_id",
  "json5",
  "path-clean",
- "pretty_assertions",
  "quick-xml",
+ "relative-path",
+ "schematic",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1982,6 +2025,7 @@ dependencies = [
  "toml 0.9.2",
  "tracing",
  "url",
+ "which",
 ]
 
 [[package]]
@@ -2026,21 +2070,29 @@ dependencies = [
  "async-anthropic",
  "async-stream",
  "async-trait",
+ "crossterm 0.29.0",
+ "duct",
+ "duct_sh",
  "futures",
  "gemini_client_rs",
+ "indexmap",
+ "indoc",
+ "inquire",
  "insta",
  "jp_config",
  "jp_conversation",
  "jp_mcp",
- "jp_model",
  "jp_openrouter",
- "jp_query",
  "jp_test",
+ "minijinja",
  "ollama-rs",
+ "open-editor",
  "openai",
  "openai_responses",
+ "quick-xml",
  "reqwest",
  "reqwest-eventsource",
+ "schemars 1.0.4",
  "serde",
  "serde_json",
  "test-log",
@@ -2056,22 +2108,19 @@ dependencies = [
 name = "jp_mcp"
 version = "0.1.0"
 dependencies = [
+ "hex",
+ "indexmap",
+ "jp_config",
  "minijinja",
  "rmcp",
  "serde",
  "serde_json",
+ "sha1",
+ "sha2",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "jp_model"
-version = "0.1.0"
-dependencies = [
- "jp_id",
- "serde",
- "thiserror 2.0.12",
+ "which",
 ]
 
 [[package]]
@@ -2093,24 +2142,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "jp_query"
-version = "0.1.0"
-dependencies = [
- "indoc",
- "jp_conversation",
- "jp_mcp",
- "schemars 1.0.4",
- "serde_json",
-]
-
-[[package]]
 name = "jp_storage"
 version = "0.1.0"
 dependencies = [
  "jp_config",
  "jp_conversation",
  "jp_id",
- "jp_mcp",
  "jp_tombmap",
  "serde",
  "serde_json",
@@ -2130,8 +2167,6 @@ dependencies = [
  "jp_config",
  "jp_conversation",
  "jp_llm",
- "jp_model",
- "jp_query",
  "jp_workspace",
  "tokio",
  "tokio-util",
@@ -2172,7 +2207,6 @@ dependencies = [
  "jp_config",
  "jp_conversation",
  "jp_id",
- "jp_mcp",
  "jp_storage",
  "jp_tombmap",
  "serde",
@@ -2390,6 +2424,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "483758ad303d734cec05e5c12b41d7e93e6a6390c5e9dae6bdeb7c1259012d28"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "miette"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f98efec8807c63c752b5bd61f862c165c115b0a35685bdcfd9238c7aeb592b7"
+dependencies = [
+ "cfg-if",
+ "miette-derive",
+ "unicode-width 0.1.14",
+]
+
+[[package]]
+name = "miette-derive"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db5b29714e950dbb20d5e6f74f9dcec4edbcc1067bb7f8ed198c097b8c1a818b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2640,8 +2696,9 @@ dependencies = [
 
 [[package]]
 name = "open-editor"
-version = "0.2.0"
-source = "git+https://github.com/JeanMertz/open-editor?branch=jean%2Fcustom-editor#179576dd2cfaa18920266acd8281a84c4d14eab6"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9fd068aaa1a8a41846aa26201e1796842f9083b5436f08cf505b7ca6767c40e5"
 dependencies = [
  "which",
 ]
@@ -2649,7 +2706,7 @@ dependencies = [
 [[package]]
 name = "openai"
 version = "1.1.1"
-source = "git+https://github.com/JeanMertz/openai?branch=tmp#397bf6727f7b361ab5e227e92c382081f6f8c7dc"
+source = "git+https://github.com/JeanMertz/openai?branch=tmp#eadbd6e7c3589e4b073e11604eb34ea02befaf28"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2709,6 +2766,12 @@ dependencies = [
  "libc",
  "windows-sys 0.59.0",
 ]
+
+[[package]]
+name = "owo-colors"
+version = "4.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48dd4f4a2c8405440fd0462561f0e5806bd0f77e86f51c761481bdd4018b545e"
 
 [[package]]
 name = "parking"
@@ -3103,6 +3166,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
+name = "relative-path"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bca40a312222d8ba74837cb474edef44b37f561da5f773981007a10bbaa992b0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.12.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3362,9 +3434,9 @@ dependencies = [
 
 [[package]]
 name = "scc"
-version = "2.3.4"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22b2d775fb28f245817589471dd49c5edf64237f4a19d10ce9a92ff4651a27f4"
+checksum = "46e6f046b7fef48e2660c57ed794263155d713de679057f2d0c169bfc6e756cc"
 dependencies = [
  "sdd",
 ]
@@ -3425,6 +3497,50 @@ dependencies = [
  "quote",
  "serde_derive_internals",
  "syn",
+]
+
+[[package]]
+name = "schematic"
+version = "0.18.12"
+source = "git+https://github.com/JeanMertz/schematic?branch=merged#01813ed4d2cf76c49cd88f40122eb4abcb69924f"
+dependencies = [
+ "indexmap",
+ "miette",
+ "schematic_macros",
+ "schematic_types",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_yaml",
+ "starbase_styles",
+ "thiserror 2.0.12",
+ "toml 0.9.2",
+ "tracing",
+]
+
+[[package]]
+name = "schematic_macros"
+version = "0.18.11"
+source = "git+https://github.com/JeanMertz/schematic?branch=merged#01813ed4d2cf76c49cd88f40122eb4abcb69924f"
+dependencies = [
+ "convert_case 0.8.0",
+ "darling 0.21.0",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "schematic_types"
+version = "0.10.6"
+source = "git+https://github.com/JeanMertz/schematic?branch=merged#01813ed4d2cf76c49cd88f40122eb4abcb69924f"
+dependencies = [
+ "indexmap",
+ "relative-path",
+ "serde_json",
+ "serde_yaml",
+ "toml 0.9.2",
+ "url",
 ]
 
 [[package]]
@@ -3588,7 +3704,7 @@ version = "3.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de90945e6565ce0d9a25098082ed4ee4002e047cb59892c318d66821e14bb30f"
 dependencies = [
- "darling",
+ "darling 0.20.11",
  "proc-macro2",
  "quote",
  "syn",
@@ -3804,6 +3920,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
+name = "starbase_styles"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0349ad67ce08b85bac46bf215e818732609552e2e591e14e5c13ed2f95ccef98"
+dependencies = [
+ "dirs",
+ "owo-colors",
+ "supports-color",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3847,6 +3974,15 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "supports-color"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c64fc7232dd8d2e4ac5ce4ef302b1d81e0b80d055b9d77c7c4f51f6aa4c867d6"
+dependencies = [
+ "is_ci",
+]
 
 [[package]]
 name = "syn"
