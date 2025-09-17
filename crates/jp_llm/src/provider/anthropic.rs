@@ -148,7 +148,7 @@ fn create_request(
     let mut cache_control_count = MAX_CACHE_CONTROL_COUNT;
 
     builder
-        .model(model_id.slug())
+        .model(model_id.name.clone())
         .messages(Messages::build(history, message, &mut cache_control_count).0);
 
     let tools = convert_tools(tools, tool_call_strict_mode, &mut cache_control_count);

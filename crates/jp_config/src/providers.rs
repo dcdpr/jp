@@ -2,7 +2,6 @@
 
 pub mod llm;
 pub mod mcp;
-pub mod tts;
 
 use indexmap::IndexMap;
 use schematic::Config;
