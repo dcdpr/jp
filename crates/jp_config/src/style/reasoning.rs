@@ -24,4 +24,3 @@ impl AssignKeyValue for PartialReasoningConfig {
         Ok(())
     }
 }
-

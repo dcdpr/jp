@@ -51,7 +51,7 @@ build-docs: (_docs "build")
 preview-docs: (_docs "preview")
 
 # Live-check the code, using Clippy and Bacon.
-check: (bacon "check")
+check: (bacon "clippy")
 
 test *FLAGS: (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
     cargo nextest run --workspace --all-targets {{FLAGS}}

@@ -3,3 +3,6 @@ disallowed-methods = []
 disallowed-types = []
 
 too-many-arguments-threshold = 10
+allow-unwrap-in-tests = true
+allowed-duplicate-crates = ["windows_i686_gnullvm"]
+# check-private-items = true

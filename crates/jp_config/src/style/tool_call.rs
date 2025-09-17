@@ -27,4 +27,3 @@ impl AssignKeyValue for PartialToolCallConfig {
         Ok(())
     }
 }
-
