@@ -69,7 +69,7 @@ mod tests {
               |     ^^^^^^^^^^^^^^^^^^^^
               |
               = note: this `Result` may be an `Err` variant, which should be handled
-              = note: `#[warn(unused_must_use)]` on by default
+              = note: `#[warn(unused_must_use)]` (part of `#[warn(unused)]`) on by default
             help: use `let _ = ...` to ignore the resulting value
               |
             2 |     let _ = std::env::var("FOO");
