@@ -47,7 +47,6 @@ comrak = { workspace = true }
 crossterm = { workspace = true }
 duct = { workspace = true }
 futures = { workspace = true }
-indoc = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
 minijinja = { workspace = true }
 path-clean = { workspace = true }

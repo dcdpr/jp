@@ -17,7 +17,6 @@ jp_config = { workspace = true }
 
 hex = { workspace = true }
 indexmap = { workspace = true }
-minijinja = { workspace = true, features = ["serde", "json", "builtins"] }
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
