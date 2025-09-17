@@ -1959,7 +1959,6 @@ dependencies = [
  "crossterm 0.29.0",
  "duct",
  "futures",
- "indoc",
  "inquire",
  "insta",
  "jp_attachment",
@@ -2111,7 +2110,6 @@ dependencies = [
  "hex",
  "indexmap",
  "jp_config",
- "minijinja",
  "rmcp",
  "serde",
  "serde_json",
@@ -2471,7 +2469,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e60ac08614cc09062820e51d5d94c2fce16b94ea4e5003bb81b99a95f84e876"
 dependencies = [
  "serde",
- "serde_json",
 ]
 
 [[package]]
