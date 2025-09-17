@@ -1,8 +1,8 @@
-use jp_config::PartialConfig;
+use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 use url::Url;
 
-use crate::{ctx::Ctx, parser, IntoPartialConfig, Output};
+use crate::{ctx::Ctx, parser, IntoPartialAppConfig, Output};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Rm {
@@ -19,12 +19,12 @@ impl Rm {
     }
 }
 
-impl IntoPartialConfig for Rm {
+impl IntoPartialAppConfig for Rm {
     fn apply_cli_config(
         &self,
         _: Option<&Workspace>,
-        mut partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        mut partial: PartialAppConfig,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         partial
             .conversation
             .attachments

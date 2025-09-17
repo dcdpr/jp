@@ -3,7 +3,6 @@ mod response_handler;
 
 use std::{
     collections::BTreeMap,
-    convert::Infallible,
     env, fs,
     path::{Path, PathBuf},
     str::FromStr,
@@ -15,23 +14,20 @@ use event::{handle_tool_calls, StreamEventHandler};
 use futures::StreamExt as _;
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
-    assistant::Instructions,
-    expand_tilde,
-    mcp::{server::ToolId, ServerId},
-    PartialConfig,
+    assistant::{instructions::InstructionsConfig, tool_choice::ToolChoice},
+    fs::{expand_tilde, load_partial},
+    model::id::{ModelIdConfig, PartialModelIdConfig},
+    PartialAppConfig,
 };
 use jp_conversation::{
     thread::{Thread, ThreadBuilder},
     AssistantMessage, Conversation, ConversationId, MessagePair, UserMessage,
 };
-use jp_llm::provider::{self, StreamEvent};
-use jp_mcp::{
-    config::McpServerId,
-    tool::{McpToolId, ToolChoice},
-    Tool,
+use jp_llm::{
+    provider::{self, StreamEvent},
+    query::{ChatQuery, StructuredQuery},
+    tool::tool_definitions,
 };
-use jp_model::ModelId;
-use jp_query::query::{ChatQuery, StructuredQuery};
 use jp_task::task::TitleGeneratorTask;
 use jp_term::stdout;
 use jp_workspace::Workspace;
@@ -43,7 +39,7 @@ use url::Url;
 use super::{attachment::register_attachment, Output};
 use crate::{
     cmd::Success,
-    ctx::IntoPartialConfig,
+    ctx::IntoPartialAppConfig,
     editor::{self, Editor},
     error::{Error, Result},
     parser, Ctx, PATH_STRING_PREFIX,
@@ -86,20 +82,6 @@ pub(crate) struct Query {
     #[arg(short = 'a', long = "attachment", value_parser = |s: &str| parser::attachment_url(s))]
     attachments: Vec<Url>,
 
-    /// Use specific MCP servers exclusively.
-    #[arg(short = 'm', long = "mcp", value_parser = |s: &str| Ok::<_, Infallible>(McpServerId::new(s)))]
-    mcp: Vec<McpServerId>,
-
-    /// Do not use any/specific configured MCP servers.
-    ///
-    /// If the flag is provided without a value, all MCP servers are disabled,
-    /// if a value is provided, only the specified servers are disabled.
-    ///
-    /// This flag can be combined with `--mcp` to re-enable specific MCP
-    /// servers after disabling all or some others.
-    #[arg(short = 'M', long = "no-mcp", value_parser = |s: &str| Ok::<_, Infallible>(McpServerId::new(s)))]
-    no_mcp: Option<Vec<McpServerId>>,
-
     /// Whether and how to edit the query.
     #[arg(short = 'e', long = "edit", conflicts_with = "no_edit")]
     edit: Option<Option<Editor>>,
@@ -109,8 +91,8 @@ pub(crate) struct Query {
     no_edit: bool,
 
     /// The model to use.
-    #[arg(short = 'o', long = "model", value_parser = ModelId::from_str)]
-    model: Option<ModelId>,
+    #[arg(short = 'o', long = "model", value_parser = ModelIdConfig::from_str)]
+    model: Option<ModelIdConfig>,
 
     /// The model parameters to use.
     #[arg(short = 'r', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KvAssignment::from_str)]
@@ -180,9 +162,6 @@ impl Query {
         trace!(args = ?self, "Received arguments.");
 
         let previous_id = self.update_active_conversation(ctx)?;
-        if ctx.config.assistant.model.id.is_none() {
-            return Err(Error::UndefinedModel.into());
-        }
 
         ctx.configure_active_mcp_servers().await?;
         let (message, query_file) = self.build_message(ctx).await?;
@@ -192,15 +171,19 @@ impl Query {
                 return cleanup(ctx, previous_id, query_file.as_deref()).map_err(Into::into);
             }
 
-            // Generate title for new conversations.
+            let messages = ctx
+                .workspace
+                .get_messages(&ctx.workspace.active_conversation_id());
+
+            // Generate title for new or empty conversations.
             if ctx.term.args.persist
-                && self.new_conversation
-                && ctx.config.conversation.title.generate.auto
+                && (self.new_conversation || messages.is_empty())
+                && ctx.config().conversation.title.generate.auto
             {
                 debug!("Generating title for new conversation");
                 ctx.task_handler.spawn(TitleGeneratorTask::new(
                     ctx.workspace.active_conversation_id(),
-                    &ctx.config,
+                    ctx.config(),
                     &ctx.workspace,
                     Some(query.clone()),
                 )?);
@@ -222,14 +205,15 @@ impl Query {
             let conversation_id = ctx.workspace.active_conversation_id();
             trace!(
                 conversation = %conversation_id,
-                content_size = message.reply.content.as_deref().unwrap_or_default().len(),
-                reasoning_size = message
+                content_size_bytes = message.reply.content.as_deref().unwrap_or_default().len(),
+                reasoning_size_bytes = message
                     .reply
                     .reasoning
                     .as_ref()
                     .map(ToString::to_string)
                     .unwrap_or_default()
                     .len(),
+                tool_calls_count = message.reply.tool_calls.len(),
                 "Storing response message in conversation."
             );
 
@@ -246,7 +230,7 @@ impl Query {
 
         if self.schema.is_some() && !reply.is_empty() {
             if let RenderMode::Streamed = self.render_mode() {
-                stdout::typewriter(&reply, ctx.config.style.typewriter.code_delay)?;
+                stdout::typewriter(&reply, ctx.config().style.typewriter.code_delay.into())?;
             } else {
                 return Ok(Success::Json(serde_json::from_str(&reply)?));
             }
@@ -301,14 +285,14 @@ impl Query {
             let tmpl = env.get_template("query")?;
             // TODO: supported nested variables
             for var in tmpl.undeclared_variables(false) {
-                if ctx.config.template.values.contains_key(&var) {
+                if ctx.config().template.values.contains_key(&var) {
                     continue;
                 }
 
                 return Err(Error::TemplateUndefinedVariable(var));
             }
 
-            *query = tmpl.render(&ctx.config.template.values)?;
+            *query = tmpl.render(&ctx.config().template.values)?;
         }
 
         Ok((message, query_file_path))
@@ -357,7 +341,7 @@ impl Query {
             return Ok(None);
         };
 
-        let mut editor = Editor::from_cli_or_config(self.edit.clone(), ctx.config.editor.clone());
+        let mut editor = Editor::from_cli_or_config(self.edit.clone(), &ctx.config().editor);
 
         // Explicitly disable editing if the `--no-edit` flag is set.
         if self.no_edit || self.query.as_ref().is_some_and(|_| self.edit.is_none()) {
@@ -369,6 +353,9 @@ impl Query {
             Some(Editor::Default) => unreachable!("handled in `from_cli_or_config`"),
             // If editing is disabled, we set the query as a single whitespace,
             // which allows the query to pass through to the assistant.
+            //
+            // FIXME: Some models (such as Anthropic) do not accept empty
+            // queries.
             Some(Editor::Disabled) => {
                 if query.is_empty() {
                     " ".clone_into(query);
@@ -398,30 +385,31 @@ impl Query {
     }
 
     fn tool_choice(&self, ctx: &Ctx) -> ToolChoice {
-        self.no_tool_choice
-            .then_some(ToolChoice::None)
-            .or_else(|| ctx.config.assistant.tool_choice.clone())
-            .unwrap_or(ToolChoice::Auto)
+        if self.no_tool_choice {
+            ToolChoice::None
+        } else {
+            ctx.config().assistant.tool_choice.clone()
+        }
     }
 
     async fn build_thread(&self, ctx: &Ctx, message: UserMessage) -> Result<Thread> {
         let conversation_id = ctx.workspace.active_conversation_id();
-        let tools = list_enabled_tools(ctx).await?;
-
+        let tools =
+            tool_definitions(ctx.config().conversation.tools.iter(), &ctx.mcp_client).await?;
         let mut attachments = vec![];
-        for attachment in &ctx.config.conversation.attachments {
+        for attachment in &ctx.config().conversation.attachments {
             register_attachment(ctx, attachment, &mut attachments).await?;
         }
 
         let mut thread_builder = ThreadBuilder::default()
-            .with_system_prompt(ctx.config.assistant.system_prompt.clone())
-            .with_instructions(ctx.config.assistant.instructions.clone())
+            .with_system_prompt(ctx.config().assistant.system_prompt.clone())
+            .with_instructions(ctx.config().assistant.instructions.clone())
             .with_attachments(attachments)
             .with_history(ctx.workspace.get_messages(&conversation_id).to_vec())
             .with_message(message);
 
         if !tools.is_empty() {
-            let instruction = Instructions::default()
+            let instruction = InstructionsConfig::default()
                 .with_title("Tool Usage")
                 .with_description("How to leverage the tools available to you.".to_string())
                 .with_item("Use all the tools available to you to give the best possible answer.")
@@ -445,17 +433,13 @@ impl Query {
         tool_choice: ToolChoice,
         messages: &mut Vec<MessagePair>,
     ) -> Result<()> {
-        let tools = list_enabled_tools(ctx).await?;
-        let model_id = &ctx
-            .config
-            .assistant
-            .model
-            .id
-            .clone()
-            .ok_or(jp_model::Error::MissingId)?;
+        let tools =
+            tool_definitions(ctx.config().conversation.tools.iter(), &ctx.mcp_client).await?;
 
-        let parameters = &ctx.config.assistant.model.parameters;
-        let provider = provider::get_provider(model_id.provider(), &ctx.config.assistant.provider)?;
+        let model_id = &ctx.config().assistant.model.id.clone();
+
+        let parameters = &ctx.config().assistant.model.parameters;
+        let provider = provider::get_provider(model_id.provider, &ctx.config().providers.llm)?;
         let message = thread.message.clone();
         let query = ChatQuery {
             thread: thread.clone(),
@@ -484,7 +468,8 @@ impl Query {
             tool_call_results: vec![],
         };
 
-        let mut printer = ResponseHandler::new(self.render_mode(), ctx.config.style.tool_call.show);
+        let mut printer =
+            ResponseHandler::new(self.render_mode(), ctx.config().style.tool_call.show);
         let mut metadata = BTreeMap::new();
 
         while let Some(event) = stream.next().await {
@@ -604,12 +589,15 @@ impl Query {
     /// state.
     fn apply_persistent_cli_config(
         &self,
-        workspace: Option<&Workspace>,
-        partial: &mut PartialConfig,
+        _workspace: Option<&Workspace>,
+        partial: &mut PartialAppConfig,
     ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Update the model.
         if let Some(id) = self.model.as_ref() {
-            partial.assistant.model.id = Some(id.to_owned());
+            partial.assistant.model.id = PartialModelIdConfig {
+                provider: Some(id.provider),
+                name: Some(id.name.clone()),
+            };
         }
 
         // Update the model parameters.
@@ -624,43 +612,16 @@ impl Query {
             .get_or_insert_default()
             .extend(self.attachments.iter().cloned());
 
-        // Handle MCP servers.
-        if let Some(ids) = self.no_mcp.as_ref() {
-            let servers = partial.conversation.mcp_servers.get_or_insert_default();
-
-            if ids.is_empty() {
-                servers.clear();
-            }
-            for id in ids {
-                servers.retain(|v| v != id);
-            }
-        }
-
-        for id in &self.mcp {
-            // Ensure MCP server exists.
-            if let Some(workspace) = workspace {
-                workspace
-                    .get_mcp_server(id)
-                    .ok_or(Error::NotFound("MCP server", id.to_string()))?;
-            }
-
-            partial
-                .conversation
-                .mcp_servers
-                .get_or_insert_default()
-                .push(id.clone());
-        }
-
         Ok(())
     }
 }
 
-impl IntoPartialConfig for Query {
+impl IntoPartialAppConfig for Query {
     fn apply_cli_config(
         &self,
         workspace: Option<&Workspace>,
-        mut partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        mut partial: PartialAppConfig,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         // 1. First apply CLI configurations that we also want to persist in the
         //    conversation configuration state.
         self.apply_persistent_cli_config(workspace, &mut partial)?;
@@ -691,8 +652,8 @@ impl IntoPartialConfig for Query {
     fn apply_conversation_config(
         &self,
         workspace: Option<&Workspace>,
-        partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        partial: PartialAppConfig,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         // New conversations do not apply any existing conversation
         // configurations. This is handled by the other configuration layers
         // (files, environment variables, CLI arguments).
@@ -706,10 +667,11 @@ impl IntoPartialConfig for Query {
             return Ok(partial);
         };
 
-        Ok(jp_config::load_partial(
+        load_partial(
             workspace.get_active_conversation().config().clone(),
             partial,
-        ))
+        )
+        .map_err(Into::into)
     }
 }
 
@@ -740,19 +702,12 @@ async fn handle_structured_output(
     thread: Thread,
     schema: schemars::Schema,
 ) -> Result<MessagePair> {
-    let model_id = &ctx
-        .config
-        .assistant
-        .model
-        .id
-        .clone()
-        .ok_or(jp_model::Error::MissingId)?;
+    let model_id = &ctx.config().assistant.model.id.clone();
 
-    let parameters = &ctx.config.assistant.model.parameters;
-    let provider = provider::get_provider(model_id.provider(), &ctx.config.assistant.provider)?;
+    let parameters = &ctx.config().assistant.model.parameters;
+    let provider = provider::get_provider(model_id.provider, &ctx.config().providers.llm)?;
     let message = thread.message.clone();
-    let query =
-        StructuredQuery::new(schema, thread).map_err(|err| Error::Schema(err.to_string()))?;
+    let query = StructuredQuery::new(schema, thread);
 
     let value = provider
         .structured_completion(model_id, parameters, query)
@@ -828,31 +783,4 @@ impl Line {
 
         Line { content, variant }
     }
-}
-
-async fn list_enabled_tools(ctx: &Ctx) -> Result<Vec<Tool>> {
-    let mut tools = vec![];
-    let all_tools = ctx.mcp_client.list_tools().await?;
-    for tool in all_tools {
-        let tool_id = McpToolId::new(&*tool.name);
-        let server_id = ctx.mcp_client.get_tool_server_id(&tool_id).await?;
-        let server_cfg = ctx
-            .config
-            .mcp
-            .get_server(&ServerId::new(server_id.as_str()));
-
-        if !server_cfg.enable {
-            continue;
-        }
-
-        let tool_cfg = server_cfg.get_tool(&ToolId::new(tool.name.as_ref()));
-
-        if !tool_cfg.enable {
-            continue;
-        }
-
-        tools.push(tool);
-    }
-
-    Ok(tools)
 }

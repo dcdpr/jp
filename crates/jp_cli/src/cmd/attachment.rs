@@ -2,7 +2,7 @@ use jp_attachment_bear_note as _;
 use jp_attachment_cmd_output as _;
 use jp_attachment_file_content as _;
 use jp_attachment_mcp_resources as _;
-use jp_config::PartialConfig;
+use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 use tracing::trace;
 use url::Url;
@@ -11,7 +11,7 @@ use super::Output;
 use crate::{
     ctx::Ctx,
     error::{Error, Result},
-    IntoPartialConfig,
+    IntoPartialAppConfig,
 };
 
 pub(super) mod add;
@@ -34,12 +34,12 @@ impl Attachment {
     }
 }
 
-impl IntoPartialConfig for Attachment {
+impl IntoPartialAppConfig for Attachment {
     fn apply_cli_config(
         &self,
         workspace: Option<&Workspace>,
-        partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        partial: PartialAppConfig,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         match &self.command {
             Commands::Add(args) => args.apply_cli_config(workspace, partial),
             Commands::Remove(args) => args.apply_cli_config(workspace, partial),

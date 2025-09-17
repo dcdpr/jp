@@ -21,13 +21,16 @@ use clap::{
 use cmd::{Commands, Output, Success};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::Stylize as _;
-use ctx::{Ctx, IntoPartialConfig};
+use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
-    assistant::Instructions,
-    load_partial, load_partial_at_path, load_partial_at_path_recursive,
-    load_partials_with_inheritance, user_global_config_path, Config, PartialConfig,
+    fs::{load_partial, user_global_config_path},
+    util::{
+        build, find_file_in_load_path, load_envs, load_partial_at_path,
+        load_partial_at_path_recursive, load_partials_with_inheritance,
+    },
+    AppConfig, PartialAppConfig,
 };
 use jp_workspace::{user_data_dir, Workspace};
 use serde_json::Value;
@@ -243,7 +246,7 @@ async fn run_inner(cli: Cli) -> Result<Success> {
             workspace.load()?;
 
             let config = load_config(&cmd, Some(&workspace), &cli.globals.config)?;
-            let mut ctx = Ctx::new(workspace, cli.globals, config);
+            let mut ctx = Ctx::new(workspace, cli.globals, config)?;
             let output = cmd.run(&mut ctx).await;
             if output.is_err() {
                 tracing::info!("Error running command. Disabling workspace persistence.");
@@ -357,17 +360,17 @@ fn load_partial_config(
     cmd: &Commands,
     workspace: Option<&Workspace>,
     overrides: &[KeyValueOrPath],
-) -> Result<PartialConfig> {
+) -> Result<PartialAppConfig> {
     // Load all partials in different file locations, the first loaded file
     // having the lowest precedence.
     let partials = load_partial_configs_from_files(workspace, std::env::current_dir().ok())?;
 
     // Load all partials, merging later partials over earlier ones, unless one
     // of the partials set `inherit = false`, then later partials are ignored.
-    let mut partial = load_partials_with_inheritance(partials);
+    let mut partial = load_partials_with_inheritance(partials)?;
 
     // Load environment variables.
-    partial = jp_config::load_envs(partial)?;
+    partial = load_envs(partial).map_err(|e| Error::CliConfig(e.to_string()))?;
 
     // Apply conversation-specific config, if needed.
     if let Some(workspace) = workspace {
@@ -383,7 +386,7 @@ fn load_partial_config(
         match field {
             KeyValueOrPath::Path(path) if path.exists() => {
                 if let Some(p) = load_partial_at_path(path)? {
-                    partial = load_partial(p, partial);
+                    partial = load_partial(p, partial)?;
                 }
             }
             KeyValueOrPath::Path(path) => {
@@ -396,8 +399,7 @@ fn load_partial_config(
                         .config_load_paths
                         .iter()
                         .flatten()
-                        .filter(|p| p.is_relative())
-                        .map(|p| w.root.join(p))
+                        .map(|p| p.to_path(&w.root))
                 });
 
                 let mut found = false;
@@ -408,9 +410,9 @@ fn load_partial_config(
                         "Trying to load partial from config load path"
                     );
 
-                    if let Some(path) = jp_config::find_file_in_path(path, &load_path)? {
+                    if let Some(path) = find_file_in_load_path(path, &load_path) {
                         if let Some(p) = load_partial_at_path(path)? {
-                            partial = load_partial(p, partial);
+                            partial = load_partial(p, partial)?;
                         }
                         found = true;
                         break;
@@ -418,10 +420,12 @@ fn load_partial_config(
                 }
 
                 if !found {
-                    return Err(jp_config::Error::MissingConfigFile(path.clone()).into());
+                    return Err(Error::MissingConfigFile(path.clone()));
                 }
             }
-            KeyValueOrPath::KeyValue(kv) => partial.assign(kv.clone())?,
+            KeyValueOrPath::KeyValue(kv) => partial
+                .assign(kv.clone())
+                .map_err(|e| Error::CliConfig(e.to_string()))?,
         }
     }
 
@@ -430,32 +434,13 @@ fn load_partial_config(
         .apply_cli_config(workspace, partial)
         .map_err(|e| Error::CliConfig(e.to_string()))?;
 
-    // Apply custom defaults.
-    if partial.assistant.instructions.is_none() {
-        partial.assistant.instructions =
-            Some(vec![Instructions::new("How to respond to the user")
-                .with_item("Be concise")
-                .with_item("Use simple sentences. But feel free to use technical jargon.")
-                .with_item(
-                    "Do NOT overexplain basic concepts. Assume the user is technically proficient.",
-                )
-                .with_item(
-                    "AVOID flattering, corporate-ish or marketing language. Maintain a neutral \
-                     viewpoint.",
-                )
-                .with_item(
-                    "AVOID vague and / or generic claims which may seem correct but are not \
-                     substantiated by the context.",
-                )]);
-    }
-
     Ok(partial)
 }
 
 fn load_partial_configs_from_files(
     workspace: Option<&Workspace>,
     cwd: Option<PathBuf>,
-) -> Result<Vec<PartialConfig>> {
+) -> Result<Vec<PartialAppConfig>> {
     let mut partials = vec![];
 
     // Load `$XDG_CONFIG_HOME/jp/config.toml`.
@@ -507,10 +492,10 @@ fn load_config(
     cmd: &Commands,
     workspace: Option<&Workspace>,
     overrides: &[KeyValueOrPath],
-) -> Result<Config> {
+) -> Result<AppConfig> {
     let partial = load_partial_config(cmd, workspace, overrides)?;
 
-    jp_config::build(partial).map_err(Into::into)
+    build(partial).map_err(Into::into)
 }
 
 /// Find the workspace for the current directory.

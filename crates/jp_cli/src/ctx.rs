@@ -1,7 +1,7 @@
 use std::io::{self, IsTerminal as _};
 
-use jp_config::{Config, PartialConfig};
-use jp_mcp::{config::McpServer, server::embedded::EmbeddedServer};
+use jp_config::{conversation::tool::ToolSource, AppConfig, PartialAppConfig};
+use jp_mcp::id::{McpServerId, McpToolId};
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
 
@@ -13,7 +13,7 @@ pub(crate) struct Ctx {
     pub(crate) workspace: Workspace,
 
     /// Merged file/CLI configuration.
-    pub(crate) config: Config,
+    config: AppConfig,
 
     /// Global CLI arguments.
     pub(crate) term: Term,
@@ -38,59 +38,82 @@ pub(crate) struct Term {
 
 impl Ctx {
     /// Create a new context with the given workspace
-    pub(crate) fn new(workspace: Workspace, args: Globals, config: Config) -> Self {
-        let tools = workspace
-            .mcp_tools()
-            .cloned()
-            .map(|v| (v.id.clone(), v))
-            .collect();
+    pub(crate) fn new(workspace: Workspace, args: Globals, config: AppConfig) -> Result<Self> {
+        let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone())?;
 
-        let server = EmbeddedServer::new(tools, workspace.root.clone());
-
-        Self {
+        Ok(Self {
             workspace,
             config,
             term: Term {
                 args,
                 is_tty: io::stdout().is_terminal(),
             },
-            mcp_client: jp_mcp::Client::default().with_embedded_server(server),
+            mcp_client,
             task_handler: TaskHandler::default(),
-        }
+        })
+    }
+
+    /// Get immutable access to the configuration.
+    ///
+    /// NOTE: There is *NO* mutable access to the configuration *after*
+    /// configuration initialization. This is to simplify the cognetive
+    /// complexity of configuration lifecycle management throughout the lifetime
+    /// of the CLI application.
+    ///
+    /// Any changes to the configuration should be done using the "partial
+    /// configuration" API in [`jp_config`] *before* constructing the final
+    /// [`AppConfig`] object.
+    pub(crate) fn config(&self) -> &AppConfig {
+        &self.config
     }
 
     /// Activate and deactivate MCP servers based on the active conversation
     /// context.
     pub(crate) async fn configure_active_mcp_servers(&mut self) -> Result<()> {
-        let servers = self
-            .config
-            .conversation
-            .mcp_servers
-            .clone()
-            .iter()
-            .filter_map(|id| self.workspace.get_mcp_server(id).cloned())
-            .collect::<Vec<McpServer>>();
+        let mut server_ids = vec![];
 
-        self.mcp_client.handle_servers(&servers).await?;
+        for (name, cfg) in self.config.conversation.tools.iter() {
+            if !cfg.enable() {
+                continue;
+            }
+
+            let ToolSource::Mcp { server, tool } = &cfg.source() else {
+                continue;
+            };
+
+            let tool_name = tool.as_deref().unwrap_or(name);
+            let server_id = match server.as_deref() {
+                Some(server) => McpServerId::new(server),
+                None => self
+                    .mcp_client
+                    .get_tool_server_id(&McpToolId::new(tool_name), None)
+                    .await
+                    .cloned()?,
+            };
+
+            server_ids.push(server_id);
+        }
+
+        self.mcp_client.run_services(&server_ids).await?;
 
         Ok(())
     }
 }
 
 /// A trait for converting any type into a partial [`Config`].
-pub(crate) trait IntoPartialConfig {
+pub(crate) trait IntoPartialAppConfig {
     fn apply_cli_config(
         &self,
         workspace: Option<&Workspace>,
-        partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>>;
+        partial: PartialAppConfig,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>>;
 
     #[expect(unused_variables)]
     fn apply_conversation_config(
         &self,
         workspace: Option<&Workspace>,
-        partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        partial: PartialAppConfig,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         Ok(partial)
     }
 }

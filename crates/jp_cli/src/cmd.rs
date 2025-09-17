@@ -2,17 +2,16 @@ mod attachment;
 mod config;
 mod conversation;
 mod init;
-mod mcp;
 mod query;
 
 use std::{borrow::Cow, fmt, num::NonZeroI32};
 
 use comfy_table::Row;
-use jp_config::PartialConfig;
+use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 use serde_json::Value;
 
-use crate::{ctx::IntoPartialConfig, Ctx};
+use crate::{ctx::IntoPartialAppConfig, Ctx};
 
 #[derive(Debug, clap::Subcommand)]
 pub(crate) enum Commands {
@@ -35,10 +34,6 @@ pub(crate) enum Commands {
     #[command(name = "aa", hide = true)]
     AttachmentAdd(attachment::add::Add),
 
-    /// Manage MCP servers.
-    #[command(visible_alias = "m")]
-    Mcp(mcp::Mcp),
-
     /// Manage conversations.
     #[command(visible_alias = "c", alias = "conversations")]
     Conversation(conversation::Conversation),
@@ -51,7 +46,6 @@ impl Commands {
             Commands::Config(args) => args.run(ctx),
             Commands::Attachment(args) => args.run(ctx),
             Commands::AttachmentAdd(args) => args.run(ctx),
-            Commands::Mcp(args) => args.run(ctx),
             Commands::Conversation(args) => args.run(ctx).await,
             Commands::Init(_) => unreachable!("handled before workspace initialization"),
         }
@@ -63,19 +57,18 @@ impl Commands {
             Commands::Config(_) => "config",
             Commands::Attachment(_) => "attachment",
             Commands::AttachmentAdd(_) => "attachment-add",
-            Commands::Mcp(_) => "mcp",
             Commands::Init(_) => "init",
             Commands::Conversation(_) => "conversation",
         }
     }
 }
 
-impl IntoPartialConfig for Commands {
+impl IntoPartialAppConfig for Commands {
     fn apply_cli_config(
         &self,
         workspace: Option<&Workspace>,
-        partial: PartialConfig,
-    ) -> Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        partial: PartialAppConfig,
+    ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         match self {
             Commands::Query(args) => args.apply_cli_config(workspace, partial),
             Commands::Attachment(args) => args.apply_cli_config(workspace, partial),
@@ -87,8 +80,8 @@ impl IntoPartialConfig for Commands {
     fn apply_conversation_config(
         &self,
         workspace: Option<&Workspace>,
-        partial: PartialConfig,
-    ) -> Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        partial: PartialAppConfig,
+    ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         match self {
             Commands::Query(args) => args.apply_conversation_config(workspace, partial),
             _ => Ok(partial),
@@ -280,9 +273,9 @@ impl From<crate::error::Error> for Error {
         let metadata: Vec<(&str, String)> = match error {
             Command(error) => return error,
             Config(error) => return error.into(),
+            KeyValue(error) => return error.into(),
             Workspace(error) => return error.into(),
             Conversation(error) => return error.into(),
-            Model(error) => return error.into(),
             Mcp(error) => return error.into(),
             Llm(error) => return error.into(),
             Io(error) => return error.into(),
@@ -292,6 +285,7 @@ impl From<crate::error::Error> for Error {
             Json(error) => return error.into(),
             Which(error) => return error.into(),
             ConfigLoader(error) => return error.into(),
+            Tool(error) => return error.into(),
             NotFound(target, id) => [
                 ("message", "Not found".into()),
                 ("target", target.into()),
@@ -300,14 +294,10 @@ impl From<crate::error::Error> for Error {
             .into(),
             Attachment(error) => [
                 ("message", "Attachment error".into()),
-                ("error", error.to_string()),
+                ("error", error.clone()),
             ]
             .into(),
-            Editor(error) => [
-                ("message", "Editor error".into()),
-                ("error", error.to_string()),
-            ]
-            .into(),
+            Editor(error) => [("message", "Editor error".into()), ("error", error.clone())].into(),
             Task(error) => with_cause(error.as_ref(), "Task error"),
             Replay(error) => [("message", "Replay error".to_owned()), ("error", error)].into(),
             TemplateUndefinedVariable(var) => [
@@ -315,17 +305,7 @@ impl From<crate::error::Error> for Error {
                 ("variable", var),
             ]
             .into(),
-            Schema(error) => [
-                ("message", "Invalid JSON schema".to_owned()),
-                ("error", error),
-            ]
-            .into(),
             MissingEditor => [("message", "Missing editor".to_owned())].into(),
-            UndefinedModel => [(
-                "message",
-                "Undefined model. Use `--model` to specify a model.".to_owned(),
-            )]
-            .into(),
             CliConfig(error) => {
                 [("message", "CLI Config error".to_owned()), ("error", error)].into()
             }
@@ -333,6 +313,11 @@ impl From<crate::error::Error> for Error {
                 ("message", "Unknown model".into()),
                 ("model", model),
                 ("available", available.join(", ")),
+            ]
+            .into(),
+            MissingConfigFile(path) => [
+                ("message", "Missing config file".into()),
+                ("path", path.display().to_string()),
             ]
             .into(),
         };
@@ -364,22 +349,27 @@ macro_rules! impl_from_error {
     };
 }
 
-impl_from_error!(std::io::Error, "IO error");
-impl_from_error!(minijinja::Error, "Template error");
 impl_from_error!(bat::error::Error, "Error while formatting code");
-impl_from_error!(url::ParseError, "Error while parsing URL");
-impl_from_error!(serde_json::Error, "Error while parsing JSON");
+impl_from_error!(
+    jp_config::assignment::KvAssignmentError,
+    "Key-value assignment error"
+);
+impl_from_error!(jp_config::Error, "Config error");
+impl_from_error!(jp_config::fs::ConfigLoaderError, "Config loader error");
+impl_from_error!(jp_conversation::Error, "Conversation error");
+impl_from_error!(jp_llm::ToolError, "Tool error");
+impl_from_error!(jp_mcp::Error, "MCP error");
+impl_from_error!(minijinja::Error, "Template error");
+impl_from_error!(quick_xml::SeError, "XML serialization error");
+impl_from_error!(reqwest::Error, "Error while making HTTP request");
 impl_from_error!(serde::de::value::Error, "Deserialization error");
+impl_from_error!(serde_json::Error, "Error while parsing JSON");
+impl_from_error!(std::io::Error, "IO error");
+impl_from_error!(std::num::ParseIntError, "Error parsing integer value");
+impl_from_error!(std::str::ParseBoolError, "Error parsing boolean value");
 impl_from_error!(toml::de::Error, "Error while parsing TOML");
 impl_from_error!(toml::ser::Error, "Error while serializing TOML");
-impl_from_error!(reqwest::Error, "Error while making HTTP request");
-impl_from_error!(std::str::ParseBoolError, "Error parsing boolean value");
-impl_from_error!(std::num::ParseIntError, "Error parsing integer value");
-impl_from_error!(jp_mcp::Error, "MCP error");
-impl_from_error!(jp_model::Error, "Model error");
-impl_from_error!(jp_config::Error, "Config error");
-impl_from_error!(jp_conversation::Error, "Conversation error");
-impl_from_error!(jp_config::fs::ConfigLoaderError, "Config loader error");
+impl_from_error!(url::ParseError, "Error while parsing URL");
 impl_from_error!(which::Error, "Which error");
 
 impl From<jp_llm::Error> for Error {
@@ -389,6 +379,7 @@ impl From<jp_llm::Error> for Error {
         let metadata: Vec<(&str, String)> = match error {
             OpenRouter(error) => return error.into(),
             Conversation(error) => return error.into(),
+            XmlSerialization(error) => return error.into(),
             Config(error) => return error.into(),
             Json(error) => return error.into(),
             Request(error) => return error.into(),
@@ -521,7 +512,7 @@ impl From<jp_workspace::Error> for Error {
             .into(),
             Id(error) => [
                 ("message", "Invalid workspace ID".into()),
-                ("error", error.to_string().into()),
+                ("error", error.clone().into()),
             ]
             .into(),
         };

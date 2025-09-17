@@ -8,7 +8,7 @@ pub(crate) struct Ls {}
 impl Ls {
     #[expect(clippy::unused_self, clippy::unnecessary_wraps)]
     pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
-        let uris = &ctx.config.conversation.attachments;
+        let uris = &ctx.config().conversation.attachments;
 
         if uris.is_empty() {
             return Ok("No attachments in current context.".into());

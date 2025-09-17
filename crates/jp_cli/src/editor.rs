@@ -1,7 +1,7 @@
-use std::{env, fs, path::PathBuf, str::FromStr};
+use std::{fs, path::PathBuf, str::FromStr};
 
 use duct::Expression;
-use jp_config::editor;
+use jp_config::editor::EditorConfig;
 use jp_conversation::{ConversationId, UserMessage};
 use time::{macros::format_description, UtcOffset};
 
@@ -20,14 +20,14 @@ const CUT_MARKER: &[&str] = &[
 ];
 
 /// How to edit the query.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub(crate) enum Editor {
     /// Use whatever editor is configured.
     #[default]
     Default,
 
     /// Use the given command.
-    Command(String),
+    Command(Expression),
 
     /// Do not edit the query.
     Disabled,
@@ -37,7 +37,7 @@ impl Editor {
     /// Get the editor from the CLI, or the config, or `None`.
     pub(crate) fn from_cli_or_config(
         cli: Option<Option<Self>>,
-        config: jp_config::editor::Editor,
+        config: &EditorConfig,
     ) -> Option<Self> {
         // If no CLI editor is configured, use the config editor, if any.
         let Some(editor) = cli else {
@@ -55,29 +55,18 @@ impl Editor {
     }
 
     pub(crate) fn command(&self) -> Option<Expression> {
-        let cmd = match self {
-            Editor::Disabled | Editor::Default => return None,
-            Editor::Command(cmd) => cmd,
-        };
-
-        let (cmd, args) = cmd.split_once(' ').unwrap_or((cmd, ""));
-        let args = if args.is_empty() {
-            vec![]
-        } else {
-            args.split(' ').collect::<Vec<_>>()
-        };
-
-        Some(duct::cmd(cmd, &args))
+        match self {
+            Editor::Disabled | Editor::Default => None,
+            Editor::Command(cmd) => Some(cmd.clone()),
+        }
     }
 }
 
-impl TryFrom<editor::Editor> for Editor {
+impl TryFrom<&EditorConfig> for Editor {
     type Error = Error;
 
-    fn try_from(editor: editor::Editor) -> Result<Self> {
-        editor
-            .cmd
-            .or_else(|| editor.env_vars.iter().find_map(|var| env::var(var).ok()))
+    fn try_from(cfg: &EditorConfig) -> Result<Self> {
+        cfg.command()
             .map(Editor::Command)
             .ok_or(Error::MissingEditor)
     }
@@ -90,7 +79,14 @@ impl FromStr for Editor {
         match s {
             "true" => Ok(Self::Default),
             "false" => Ok(Self::Disabled),
-            s => Ok(Self::Command(s.to_owned())),
+            s => {
+                let cfg = EditorConfig {
+                    cmd: Some(s.to_owned()),
+                    ..Default::default()
+                };
+
+                cfg.command().map(Self::Command).ok_or(Error::MissingEditor)
+            }
         }
     }
 }
@@ -234,7 +230,6 @@ pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFil
 }
 
 /// Open an editor for the user to input or edit text using a file in the workspace
-#[expect(clippy::too_many_lines)]
 pub(crate) fn edit_query(
     ctx: &Ctx,
     conversation_id: ConversationId,
@@ -271,22 +266,6 @@ pub(crate) fn edit_query(
             ..Default::default()
         };
 
-        match &message.message {
-            UserMessage::Query(query) => {
-                buf.push_str("## YOU\n\n");
-                buf.push_str(&comrak::markdown_to_commonmark(query, &options));
-            }
-            UserMessage::ToolCallResults(results) => {
-                for result in results {
-                    buf.push_str("## TOOL CALL RESULT\n\n");
-                    buf.push_str("```\n");
-                    buf.push_str(&result.content);
-                    buf.push_str("\n```");
-                }
-            }
-        }
-        buf.push('\n');
-
         buf.push_str("## ASSISTANT\n\n");
         if let Some(reasoning) = &message.reply.reasoning {
             buf.push_str(&comrak::markdown_to_commonmark(
@@ -317,20 +296,28 @@ pub(crate) fn edit_query(
             buf.push_str(&result);
             buf.push_str("\n```");
         }
-        buf.push_str("\n\n");
 
+        buf.push_str("\n\n");
+        match &message.message {
+            UserMessage::Query(query) => {
+                buf.push_str("## YOU\n\n");
+                buf.push_str(&comrak::markdown_to_commonmark(query, &options));
+            }
+            UserMessage::ToolCallResults(results) => {
+                for result in results {
+                    buf.push_str("## TOOL CALL RESULT\n\n");
+                    buf.push_str("```\n");
+                    buf.push_str(&result.content);
+                    buf.push_str("\n```");
+                }
+            }
+        }
+
+        buf.push('\n');
         initial_text.push(buf);
     }
 
-    initial_text.push(format!(
-        "model: {}\n",
-        ctx.config
-            .assistant
-            .model
-            .id
-            .as_ref()
-            .map_or_else(|| "(unset)".to_owned(), ToString::to_string)
-    ));
+    initial_text.push(format!("model: {}\n", ctx.config().assistant.model.id));
 
     if !initial_text.is_empty() {
         let mut intro = String::new();
@@ -360,6 +347,7 @@ pub(crate) fn edit_query(
         .unwrap_or(content.len());
 
     content.truncate(eof);
+    content = content.trim().to_owned();
 
     // Disarm the guard, so the file is not reverted.
     guard.disarm();

@@ -55,13 +55,12 @@ impl ResponseHandler {
             self.received.push(content);
 
             let delay = match variant {
-                LineVariant::Code => ctx.config.style.typewriter.code_delay,
+                LineVariant::Code => ctx.config().style.typewriter.code_delay.into(),
                 LineVariant::Raw => Duration::ZERO,
-                _ => ctx.config.style.typewriter.text_delay,
+                _ => ctx.config().style.typewriter.text_delay.into(),
             };
 
             let lines = self.handle_line(&variant, ctx)?;
-
             if !matches!(self.render_mode, RenderMode::Buffered) {
                 stdout::typewriter(&lines.join("\n"), delay)?;
             }
@@ -88,11 +87,11 @@ impl ResponseHandler {
                 let config = code::Config {
                     language: self.code_buffer.0.clone(),
                     theme: ctx
-                        .config
+                        .config()
                         .style
                         .code
                         .color
-                        .then(|| ctx.config.style.code.theme.clone()),
+                        .then(|| ctx.config().style.code.theme.clone()),
                 };
 
                 if !code::format(content, &mut buf, &config)? {
@@ -104,7 +103,7 @@ impl ResponseHandler {
                     code::format(content, &mut buf, &config)?;
                 }
 
-                if ctx.config.style.code.line_numbers {
+                if ctx.config().style.code.line_numbers {
                     buf.insert_str(
                         0,
                         &format!("{:2} │ ", self.code_line)
@@ -129,14 +128,10 @@ impl ResponseHandler {
                 let path = self.persist_code_block()?;
                 let mut links = vec![];
 
-                match ctx.config.style.code.file_link {
+                match ctx.config().style.code.file_link {
                     LinkStyle::Off => {}
                     LinkStyle::Full => {
-                        links.push(format!(
-                            "{}see: file://{}",
-                            " ".repeat(*indent),
-                            path.display()
-                        ));
+                        links.push(format!("{}see: {}", " ".repeat(*indent), path.display()));
                     }
                     LinkStyle::Osc8 => {
                         links.push(format!(
@@ -150,7 +145,7 @@ impl ResponseHandler {
                     }
                 }
 
-                match ctx.config.style.code.copy_link {
+                match ctx.config().style.code.copy_link {
                     LinkStyle::Off => {}
                     LinkStyle::Full => {
                         links.push(format!(
