@@ -100,7 +100,7 @@ impl Ctx {
     }
 }
 
-/// A trait for converting any type into a partial [`Config`].
+/// A trait for converting any type into a partial [`AppConfig`].
 pub(crate) trait IntoPartialAppConfig {
     fn apply_cli_config(
         &self,
