@@ -130,3 +130,6 @@ result_large_err = "allow"
 similar_names = "allow"
 struct_excessive_bools = "allow"
 struct_field_names = "allow"
+
+[workspace.lints.rustdoc]
+private_intra_doc_links = "allow"
