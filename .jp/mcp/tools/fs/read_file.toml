@@ -1,4 +1,6 @@
-inherit = "cargo"
+[conversation.tools.fs_read_file]
+source = "local"
+command = "just serve-tools {{workspace}} {{tool}}"
 description = """
 Read the contents of a file in the project's local filesystem.
 
@@ -6,8 +8,7 @@ You can use `fs_grep_files` to search for specific patterns in the file
 contents, before reading the entire contents of a specific file using this tool.
 """
 
-[[properties]]
-name = "path"
+[conversation.tools.fs_read_file.arguments.path]
 type = "string"
 required = true
 description = """

@@ -1,4 +1,6 @@
-inherit = "cargo"
+[conversation.tools.github_code_search]
+source = "local"
+command = "just serve-tools {{workspace}} {{tool}}"
 description = """
 Find code matching a query in any GitHub repository.
 
@@ -6,8 +8,7 @@ This tool returns a list of matched files, to fetch the actual code of a
 file, use the `github_read_file` tool.
 """
 
-[[properties]]
-name = "repository"
+[conversation.tools.github_code_search.arguments.repository]
 type = "string"
 description = """
 Repository to search for code.
@@ -15,8 +16,7 @@ Repository to search for code.
 If unspecified, it defaults to the current project's GitHub repository.
 """
 
-[[properties]]
-name = "query"
+[conversation.tools.github_code_search.arguments.query]
 type = "string"
 required = true
 description = '''
