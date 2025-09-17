@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use jp_attachment::{
     distributed_slice, linkme, typetag, Attachment, BoxedHandler, Handler, HANDLERS,
 };
-use jp_mcp::{config::McpServerId, Client, ResourceContents};
+use jp_mcp::{id::McpServerId, Client, ResourceContents};
 use serde::{Deserialize, Serialize};
 use url::Url;
 

@@ -38,10 +38,10 @@ pub(crate) struct Term {
 
 impl Ctx {
     /// Create a new context with the given workspace
-    pub(crate) fn new(workspace: Workspace, args: Globals, config: AppConfig) -> Result<Self> {
-        let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone())?;
+    pub(crate) fn new(workspace: Workspace, args: Globals, config: AppConfig) -> Self {
+        let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
-        Ok(Self {
+        Self {
             workspace,
             config,
             term: Term {
@@ -50,7 +50,7 @@ impl Ctx {
             },
             mcp_client,
             task_handler: TaskHandler::default(),
-        })
+        }
     }
 
     /// Get immutable access to the configuration.

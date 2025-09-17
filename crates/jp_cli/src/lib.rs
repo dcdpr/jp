@@ -246,7 +246,7 @@ async fn run_inner(cli: Cli) -> Result<Success> {
             workspace.load()?;
 
             let config = load_config(&cmd, Some(&workspace), &cli.globals.config)?;
-            let mut ctx = Ctx::new(workspace, cli.globals, config)?;
+            let mut ctx = Ctx::new(workspace, cli.globals, config);
             let output = cmd.run(&mut ctx).await;
             if output.is_err() {
                 tracing::info!("Error running command. Disabling workspace persistence.");

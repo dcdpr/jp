@@ -208,6 +208,7 @@ mod pat {
 #[cfg(test)]
 mod tests {
     use glob::Pattern;
+    use indexmap::IndexMap;
     use tempfile::tempdir;
     use url::Url;
 
@@ -316,7 +317,7 @@ mod tests {
         let mut handler = FileContent::default();
         handler.add(&Url::parse("file:/file.txt")?).await?;
 
-        let client = Client::default();
+        let client = Client::new(IndexMap::default());
         let attachments = handler.get(tmp.path(), client).await?;
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].source, "file.txt");
