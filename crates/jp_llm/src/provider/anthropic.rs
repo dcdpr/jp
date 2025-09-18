@@ -299,6 +299,7 @@ fn get_details_for_model<'a>(
     details.iter().find(|m| m.slug == details_slug)
 }
 
+#[expect(clippy::match_same_arms)]
 fn map_model(model: types::Model) -> ModelDetails {
     match model.id.as_str() {
         "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelDetails {

@@ -30,7 +30,7 @@ base64 = { version = "0.22", default-features = false }
 bat = { version = "0.25", default-features = false }
 clap = { version = "4", default-features = false }
 comfy-table = { version = "7", default-features = false }
-comrak = { version = "0.40", default-features = false }
+comrak = { version = "0.41", default-features = false }
 crossbeam-channel = { version = "0.5", default-features = false }
 crossterm = { version = "0.29", default-features = false }
 directories = { version = "6", default-features = false }
@@ -54,7 +54,7 @@ insta = { version = "1", default-features = false }
 json5 = { version = "0.4", default-features = false }
 linkme = { version = "0.3", default-features = false }
 minijinja = { version = "2", default-features = false }
-octocrab = { version = "0.44", default-features = false }
+octocrab = { version = "0.45", default-features = false }
 ollama-rs = { version = "0.3", default-features = false }
 open-editor = { version = "1", default-features = false }
 openai = { git = "https://github.com/JeanMertz/openai", branch = "tmp", default-features = false } # <https://github.com/rellfy/openai/pull/57>
@@ -80,7 +80,7 @@ sha1 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 strip-ansi-escapes = { version = "0.2", default-features = false }
 tempfile = { version = "3", default-features = false }
-termimad = { version = "0.33", default-features = false }
+termimad = { version = "0.34", default-features = false }
 test-log = { version = "0.2", default-features = false, features = ["trace"] }
 thiserror = { version = "2", default-features = false }
 time = { version = "0.3", default-features = false }

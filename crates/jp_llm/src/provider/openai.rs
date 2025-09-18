@@ -168,7 +168,7 @@ pub(crate) struct ModelResponse {
     owned_by: String,
 }
 
-#[expect(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines, clippy::match_same_arms)]
 fn map_model(model: ModelResponse) -> ModelDetails {
     match model.id.as_str() {
         "o4-mini" | "o4-mini-2025-04-16" => ModelDetails {

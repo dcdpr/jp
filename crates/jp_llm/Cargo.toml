@@ -30,11 +30,11 @@ indexmap = { workspace = true }
 indoc = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
 minijinja = { workspace = true, features = [
-    "serde",
-    "json",
     "builtins",
-    "unicode",
+    "json",
     "preserve_order",
+    "serde",
+    "unicode",
 ] }
 ollama-rs = { workspace = true, features = ["rustls", "stream"] }
 open-editor = { workspace = true }
