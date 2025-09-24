@@ -35,6 +35,8 @@ use crate::{
     tool::ToolDefinition,
 };
 
+static PROVIDER: ProviderId = ProviderId::Anthropic;
+
 /// Anthropic limits the number of cache points to 4 per request. Returning an API error if the
 /// request exceeds this limit.
 ///
@@ -80,13 +82,22 @@ impl Provider for Anthropic {
         let model_details = get_details_for_model(model, &details);
         let request = create_request(model, model_details, parameters, query)?;
 
+        trace!(
+            request = serde_json::to_string(&request).unwrap_or_default(),
+            stream = false,
+            "Anthropic chat completion request."
+        );
+
         self.client
             .messages()
             .create(request)
             .await
             .map_err(Into::into)
             .and_then(map_response)
-            .map(Reply)
+            .map(|events| Reply {
+                provider: PROVIDER,
+                events,
+            })
     }
 
     async fn chat_completion_stream(
@@ -99,6 +110,12 @@ impl Provider for Anthropic {
         let details = self.models().await?;
         let model_details = get_details_for_model(model_id, &details);
         let request = create_request(model_id, model_details, parameters, query)?;
+
+        trace!(
+            request = serde_json::to_string(&request).unwrap_or_default(),
+            stream = true,
+            "Anthropic chat completion stream request."
+        );
 
         Ok(Box::pin(stream! {
             let mut current_state = AccumulationState::default();
@@ -131,7 +148,7 @@ fn create_request(
     let ChatQuery {
         thread,
         tools,
-        tool_choice,
+        mut tool_choice,
         tool_call_strict_mode,
     } = query;
 
@@ -204,14 +221,21 @@ fn create_request(
         }));
     }
 
-    if !system_content.is_empty() {
-        builder.system(System::Content(system_content));
-    }
+    let tool_choice_function = match tool_choice.clone() {
+        ToolChoice::Function(name) => Some(name),
+        _ => None,
+    };
 
-    let tool_choice_function = matches!(tool_choice, ToolChoice::Function(_));
-    let tool_choice = convert_tool_choice(tool_choice);
-    if !tools.is_empty() {
-        builder.tools(tools).tool_choice(tool_choice);
+    // If there is only one tool, we can set the tool choice to "required",
+    // since that gets us the same behavior, but avoids the issue of not
+    // supporting reasoning when using the "function" tool choice.
+    //
+    // From testing, it seems that sending a single tool with the
+    // "function" tool choice can result in incorrect API responses from
+    // Anthropic. I (Jean) have an open support case with Anthropic to dig into
+    // this finding more.
+    if tools.len() == 1 && tool_choice_function.is_some() {
+        tool_choice = ToolChoice::Required;
     }
 
     let max_tokens = parameters
@@ -227,41 +251,57 @@ fn create_request(
             DEFAULT_MAX_TOKENS as u32
         });
 
-    if let Some(thinking) = parameters.reasoning {
-        let (supported, min_supported, max_supported) = if tool_choice_function {
-            info!(
-                "Anthropic API does not support reasoning when tool_choice forces tool use. \
-                 Disabling reasoning."
-            );
-            (false, 0, None)
-        } else if let Some(details) = model_details.as_ref().and_then(|d| d.reasoning) {
-            (details.supported, details.min_tokens, details.max_tokens)
-        } else {
-            warn!(
-                %model_id,
-                "Model reasoning support unknown, but the request requested it. This may \
-            result in unexpected behavior"
-            );
+    let reasoning_support = model_details.as_ref().and_then(|m| m.reasoning);
+    let reasoning_config = model_details
+        .as_ref()
+        .and_then(|m| m.custom_reasoning_config(parameters.reasoning()));
 
-            (true, 0, None)
+    // See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#extended-thinking-with-tool-use>
+    if reasoning_config.is_some()
+        && let Some(tool) = tool_choice_function
+    {
+        info!(
+            "Anthropic API does not support reasoning when tool_choice forces tool use. Switching \
+             to soft-force mode."
+        );
+        tool_choice = ToolChoice::Auto;
+        system_content.push(types::SystemContent::Text(types::Text {
+            text: format!(
+                "IMPORTANT: You MUST use the function or tool named '{tool}' available to you. DO \
+                 NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR DETAILS. JUST RUN \
+                 IT."
+            ),
+            cache_control: None,
+        }));
+    }
+
+    let tool_choice = convert_tool_choice(tool_choice);
+
+    if !tools.is_empty() {
+        builder.tools(tools).tool_choice(tool_choice);
+    }
+
+    if !system_content.is_empty() {
+        builder.system(System::Content(system_content));
+    }
+
+    if let Some(config) = reasoning_config {
+        let (min_budget, max_budget) = match reasoning_support {
+            Some(ReasoningDetails::Supported {
+                min_tokens,
+                max_tokens,
+            }) => (min_tokens, max_tokens.unwrap_or(u32::MAX)),
+            _ => (0, u32::MAX),
         };
 
-        if supported {
-            builder.thinking(types::ExtendedThinking {
-                kind: "enabled".to_string(),
-                budget_tokens: thinking
-                    .effort
-                    .to_tokens(max_tokens)
-                    .max(min_supported)
-                    .min(max_supported.unwrap_or(u32::MAX)),
-            });
-        } else {
-            warn!(
-                %model_id,
-                "Model does not support reasoning, but the request requested it. Reasnoning \
-                 disabled."
-            );
-        }
+        builder.thinking(types::ExtendedThinking {
+            kind: "enabled".to_string(),
+            budget_tokens: config
+                .effort
+                .to_tokens(max_tokens)
+                .max(min_budget)
+                .min(max_budget),
+        });
     }
 
     if let Some(temperature) = parameters.temperature {
@@ -303,23 +343,23 @@ fn get_details_for_model<'a>(
 fn map_model(model: types::Model) -> ModelDetails {
     match model.id.as_str() {
         "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelDetails {
-            provider: ProviderId::Anthropic,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
         },
         "claude-opus-4-0" | "claude-opus-4-20250514" => ModelDetails {
-            provider: ProviderId::Anthropic,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
         },
         "claude-sonnet-4-0" | "claude-sonnet-4-20250514" => ModelDetails {
-            provider: ProviderId::Anthropic,
+            provider: PROVIDER,
             slug: model.id,
             // TODO: The context window is 1_000_000 *IF* the
             // `context-1m-2025-08-07` beta header is set.
@@ -329,19 +369,19 @@ fn map_model(model: types::Model) -> ModelDetails {
             // is configured.
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
         },
         "claude-3-7-sonnet-latest" | "claude-3-7-sonnet-20250219" => ModelDetails {
-            provider: ProviderId::Anthropic,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 11 - 1)),
         },
         "claude-3-5-haiku-latest" | "claude-3-5-haiku-20241022" => ModelDetails {
-            provider: ProviderId::Anthropic,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
@@ -351,7 +391,7 @@ fn map_model(model: types::Model) -> ModelDetails {
         "claude-3-5-sonnet-latest"
         | "claude-3-5-sonnet-20241022"
         | "claude-3-5-sonnet-20240620" => ModelDetails {
-            provider: ProviderId::Anthropic,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
@@ -359,7 +399,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             knowledge_cutoff: Some(date!(2024 - 4 - 1)),
         },
         "claude-3-opus-latest" | "claude-3-opus-20240229" => ModelDetails {
-            provider: ProviderId::Anthropic,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
@@ -367,7 +407,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             knowledge_cutoff: Some(date!(2023 - 8 - 1)),
         },
         "claude-3-haiku-20240307" => ModelDetails {
-            provider: ProviderId::Anthropic,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
@@ -378,7 +418,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             warn!(model = id, ?model, "Missing model details.");
 
             ModelDetails {
-                provider: ProviderId::Anthropic,
+                provider: PROVIDER,
                 slug: model.id,
                 context_window: None,
                 max_output_tokens: None,
@@ -390,6 +430,11 @@ fn map_model(model: types::Model) -> ModelDetails {
 }
 
 fn map_response(response: types::CreateMessagesResponse) -> Result<Vec<Event>> {
+    trace!(
+        response = serde_json::to_string(&response).unwrap_or_default(),
+        "Received response from Anthropic API."
+    );
+
     response
         .content
         .into_iter()
@@ -403,6 +448,7 @@ fn map_response(response: types::CreateMessagesResponse) -> Result<Vec<Event>> {
                 }
                 _ => None,
             };
+
             let v: Option<Result<Event>> = Delta::from(item).into();
             v.map(|v| (v, metadata))
         })
@@ -419,6 +465,11 @@ fn map_event(
     state: &mut AccumulationState,
 ) -> Vec<Result<StreamEvent>> {
     use types::{ContentBlockDelta::*, MessagesStreamEvent::*};
+
+    trace!(
+        event = serde_json::to_string(&event).unwrap_or_default(),
+        "Received event from Anthropic API."
+    );
 
     match event {
         MessageStart { message, .. } => message
@@ -672,6 +723,7 @@ fn user_message_to_message(user: UserMessage) -> types::Message {
 
 fn assistant_message_to_message(assistant: AssistantMessage) -> types::Message {
     let AssistantMessage {
+        provider,
         reasoning,
         content,
         tool_calls,
@@ -686,15 +738,19 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> types::Message {
     {
         list.push(types::MessageContent::RedactedThinking { data });
     } else if let Some(thinking) = reasoning {
-        let thinking = Thinking {
-            thinking,
-            signature: metadata
-                .get("signature")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-        };
-
-        list.push(types::MessageContent::Thinking(thinking));
+        if provider == PROVIDER {
+            list.push(types::MessageContent::Thinking(Thinking {
+                thinking,
+                signature: metadata
+                    .get("signature")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            }));
+        } else {
+            list.push(types::MessageContent::Text(
+                format!("<think>\n{thinking}\n</think>\n\n").into(),
+            ));
+        }
     }
 
     if let Some(text) = content {
@@ -743,7 +799,7 @@ mod tests {
     use indexmap::IndexMap;
     use jp_config::{
         conversation::tool::{OneOrManyTypes, ToolParameterConfig, ToolParameterItemsConfig},
-        model::parameters::{ReasoningConfig, ReasoningEffort},
+        model::parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort},
         providers::llm::LlmProviderConfig,
     };
     use jp_test::{function_name, mock::Vcr};
@@ -908,13 +964,11 @@ mod tests {
                     config.api_key_env = "USER".to_owned();
                 }
 
-                let parameters = ParametersConfig {
-                    reasoning: Some(ReasoningConfig {
-                        effort: ReasoningEffort::Medium,
-                        exclude: false,
-                    }),
-                    ..Default::default()
-                };
+                let mut parameters = ParametersConfig::default();
+                parameters.set_reasoning(ReasoningConfig::Custom(CustomReasoningConfig {
+                    effort: ReasoningEffort::Medium,
+                    exclude: false,
+                }));
 
                 let events = Anthropic::try_from(&config)
                     .unwrap()
@@ -944,15 +998,13 @@ mod tests {
             ..Default::default()
         };
 
-        let parameters = ParametersConfig {
-            reasoning: Some(ReasoningConfig {
-                effort: ReasoningEffort::Medium,
-                exclude: false,
-            }),
-            top_p: Some(1.0),
-            top_k: Some(40),
-            ..Default::default()
-        };
+        let mut parameters = ParametersConfig::default();
+        parameters.top_p = Some(1.0);
+        parameters.top_k = Some(40);
+        parameters.set_reasoning(ReasoningConfig::Custom(CustomReasoningConfig {
+            effort: ReasoningEffort::Medium,
+            exclude: false,
+        }));
 
         let model_details = map_model(types::Model {
             id: "claude-3-5-haiku-latest".to_owned(),
@@ -970,7 +1022,7 @@ mod tests {
     fn test_get_details_for_model() {
         let details = vec![
             ModelDetails {
-                provider: ProviderId::Anthropic,
+                provider: PROVIDER,
                 slug: "claude-opus-4-20250514".to_owned(),
                 context_window: None,
                 max_output_tokens: None,
@@ -978,7 +1030,7 @@ mod tests {
                 knowledge_cutoff: None,
             },
             ModelDetails {
-                provider: ProviderId::Anthropic,
+                provider: PROVIDER,
                 slug: "claude-sonnet-4-20250514".to_owned(),
                 context_window: None,
                 max_output_tokens: None,
@@ -986,7 +1038,7 @@ mod tests {
                 knowledge_cutoff: None,
             },
             ModelDetails {
-                provider: ProviderId::Anthropic,
+                provider: PROVIDER,
                 slug: "claude-3-7-sonnet-20250219".to_owned(),
                 context_window: None,
                 max_output_tokens: None,
@@ -994,7 +1046,7 @@ mod tests {
                 knowledge_cutoff: None,
             },
             ModelDetails {
-                provider: ProviderId::Anthropic,
+                provider: PROVIDER,
                 slug: "claude-3-5-sonnet-20241022".to_owned(),
                 context_window: None,
                 max_output_tokens: None,
@@ -1002,7 +1054,7 @@ mod tests {
                 knowledge_cutoff: None,
             },
             ModelDetails {
-                provider: ProviderId::Anthropic,
+                provider: PROVIDER,
                 slug: "claude-3-5-haiku-20241022".to_owned(),
                 context_window: None,
                 max_output_tokens: None,

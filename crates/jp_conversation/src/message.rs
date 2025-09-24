@@ -2,6 +2,7 @@
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
+use jp_config::model::id::ProviderId;
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id, NANOSECONDS_PER_DECISECOND,
@@ -121,8 +122,11 @@ impl Default for UserMessage {
 //
 // E.g. make `Content` an enum, containing either `Text`, `ToolCalls` or
 // `TextWithToolCalls`.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssistantMessage {
+    /// The provider that produced the message.
+    pub provider: ProviderId,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
 
@@ -161,9 +165,23 @@ pub struct AssistantMessage {
     pub metadata: BTreeMap<String, Value>,
 }
 
-impl<T: Into<String>> From<T> for AssistantMessage {
-    fn from(message: T) -> Self {
+impl AssistantMessage {
+    #[must_use]
+    pub fn new(provider: ProviderId) -> Self {
         Self {
+            provider,
+            metadata: BTreeMap::default(),
+            reasoning: None,
+            content: None,
+            tool_calls: vec![],
+        }
+    }
+}
+
+impl<T: Into<String>> From<(ProviderId, T)> for AssistantMessage {
+    fn from((provider, message): (ProviderId, T)) -> Self {
+        Self {
+            provider,
             metadata: BTreeMap::default(),
             reasoning: None,
             content: Some(message.into()),

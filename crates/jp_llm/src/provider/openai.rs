@@ -9,7 +9,7 @@ use jp_config::{
     conversation::tool::ToolParameterConfig,
     model::{
         id::{ModelIdConfig, ProviderId},
-        parameters::{ParametersConfig, ReasoningConfig, ReasoningEffort},
+        parameters::{CustomReasoningConfig, ParametersConfig, ReasoningEffort},
     },
     providers::llm::openai::OpenaiConfig,
 };
@@ -38,6 +38,8 @@ use crate::{
     tool::ToolDefinition,
 };
 
+static PROVIDER: ProviderId = ProviderId::Openai;
+
 #[derive(Debug, Clone)]
 pub struct Openai {
     reqwest_client: reqwest::Client,
@@ -65,9 +67,12 @@ impl Openai {
             .into_iter()
             .find(|m| *m.slug == *model_id.name);
 
-        let supports_reasoning = model_details
+        let reasoning_support = model_details.as_ref().and_then(|m| m.reasoning);
+        let supports_reasoning =
+            reasoning_support.is_some_and(|v| matches!(v, ReasoningDetails::Supported { .. }));
+        let reasoning = model_details
             .as_ref()
-            .is_some_and(|d| d.reasoning.is_some());
+            .and_then(|m| m.custom_reasoning_config(parameters.reasoning()));
 
         let request = Request {
             model: types::Model::Other(model_id.name.to_string()),
@@ -77,8 +82,7 @@ impl Openai {
             tool_choice: Some(convert_tool_choice(tool_choice)),
             tools: Some(convert_tools(tools, tool_call_strict_mode)),
             temperature: parameters.temperature,
-            reasoning: parameters
-                .reasoning
+            reasoning: reasoning
                 .map(|r| convert_reasoning(r, model_details.and_then(|d| d.max_output_tokens))),
             max_output_tokens: parameters.max_tokens.map(Into::into),
             truncation: Some(types::Truncation::Auto),
@@ -122,7 +126,10 @@ impl Provider for Openai {
             .await?
             .map_err(Into::into)
             .and_then(map_response)
-            .map(Reply)
+            .map(|events| Reply {
+                provider: PROVIDER,
+                events,
+            })
     }
 
     async fn chat_completion_stream(
@@ -172,63 +179,63 @@ pub(crate) struct ModelResponse {
 fn map_model(model: ModelResponse) -> ModelDetails {
     match model.id.as_str() {
         "o4-mini" | "o4-mini-2025-04-16" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "o3-mini" | "o3-mini-2025-01-31" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "o1-mini" | "o1-mini-2024-09-12" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(128_000),
             max_output_tokens: Some(65_536),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "o3" | "o3-2025-04-16" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "o3-pro" | "o3-pro-2025-06-10" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "o1" | "o1-2024-12-17" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "o1-pro" | "o1-pro-2025-03-19" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "gpt-4.1" | "gpt-4.1-2025-04-14" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
@@ -236,7 +243,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "gpt-4o" | "gpt-4o-2024-08-06" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
@@ -244,7 +251,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "chatgpt-4o" | "chatgpt-4o-latest" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
@@ -252,7 +259,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
@@ -260,7 +267,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
@@ -268,7 +275,7 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
@@ -276,74 +283,74 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "gpt-5-nano" | "gpt-5-nano-2025-08-07" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 8 - 30)),
         },
         "gpt-5-mini" | "gpt-5-mini-2025-08-07" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 8 - 30)),
         },
         "gpt-5" | "gpt-5-2025-08-07" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 8 - 30)),
         },
         "gpt-5-chat-latest" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 8 - 30)),
         },
         "gpt-oss-120b" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(131_072),
             max_output_tokens: Some(131_072),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "gpt-oss-20b" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(131_072),
             max_output_tokens: Some(131_072),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "o3-deep-research" | "o3-deep-research-2025-06-26" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         "o4-mini-deep-research" | "o4-mini-deep-research-2025-06-26" => ModelDetails {
-            provider: ProviderId::Openai,
+            provider: PROVIDER,
             slug: model.id,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
         id => {
             warn!(model = id, ?model, "Missing model details.");
 
             ModelDetails {
-                provider: ProviderId::Openai,
+                provider: PROVIDER,
                 slug: model.id,
                 context_window: None,
                 max_output_tokens: None,
@@ -502,7 +509,7 @@ fn convert_tools(tools: Vec<ToolDefinition>, strict: bool) -> Vec<types::Tool> {
 }
 
 fn convert_reasoning(
-    reasoning: ReasoningConfig,
+    reasoning: CustomReasoningConfig,
     max_tokens: Option<u32>,
 ) -> types::ReasoningConfig {
     types::ReasoningConfig {
@@ -513,7 +520,7 @@ fn convert_reasoning(
         },
         effort: match reasoning.effort.abs_to_rel(max_tokens) {
             ReasoningEffort::High => Some(types::ReasoningEffort::High),
-            ReasoningEffort::Medium => Some(types::ReasoningEffort::Medium),
+            ReasoningEffort::Auto | ReasoningEffort::Medium => Some(types::ReasoningEffort::Medium),
             ReasoningEffort::Low => Some(types::ReasoningEffort::Low),
             ReasoningEffort::Absolute(_) => {
                 debug_assert!(false, "Reasoning effort must be relative.");
@@ -703,14 +710,18 @@ fn assistant_message_to_messages(
     supports_reasoning: bool,
 ) -> Vec<types::InputItem> {
     let AssistantMessage {
+        provider,
         metadata,
-        reasoning: _,
+        reasoning,
         content,
         tool_calls,
     } = assistant;
 
     let mut items = vec![];
-    if supports_reasoning && let Some(value) = metadata.get("reasoning").cloned() {
+    if supports_reasoning
+        && provider == PROVIDER
+        && let Some(value) = metadata.get("reasoning").cloned()
+    {
         match serde_json::from_value::<types::Reasoning>(value) {
             // If we don't have encrypted content, it means the initial request
             // was made without the `reasoning.encrypted_content` include. Since
@@ -727,6 +738,12 @@ fn assistant_message_to_messages(
             Ok(reasoning) => items.push(types::InputItem::Reasoning(reasoning)),
             Err(error) => warn!(?error, "Failed to parse OpenAI reasoning data. Ignoring."),
         }
+    } else if let Some(reasoning) = reasoning {
+        items.push(types::InputItem::InputMessage(types::APIInputMessage {
+            role: types::Role::Assistant,
+            content: types::ContentInput::Text(format!("<think>\n{reasoning}\n</think>\n\n")),
+            status: None,
+        }));
     }
 
     if let Some(text) = content {

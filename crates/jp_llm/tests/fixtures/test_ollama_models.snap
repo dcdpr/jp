@@ -6,7 +6,7 @@ Ok(
     [
         ModelDetails {
             provider: Ollama,
-            slug: "llama3:latest",
+            slug: "llama3.1:8b",
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
@@ -14,7 +14,7 @@ Ok(
         },
         ModelDetails {
             provider: Ollama,
-            slug: "qwen3:32b",
+            slug: "llama3:latest",
             context_window: None,
             max_output_tokens: None,
             reasoning: None,

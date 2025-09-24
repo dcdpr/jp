@@ -547,6 +547,7 @@ impl Query {
         }
 
         let message = MessagePair::new(message, AssistantMessage {
+            provider: model_id.provider,
             metadata,
             content,
             reasoning,
@@ -718,7 +719,10 @@ async fn handle_structured_output(
         serde_json::to_string(&value)?
     };
 
-    Ok(MessagePair::new(message, AssistantMessage::from(content)))
+    Ok(MessagePair::new(
+        message,
+        AssistantMessage::from((model_id.provider, content)),
+    ))
 }
 
 #[expect(clippy::needless_pass_by_value)]

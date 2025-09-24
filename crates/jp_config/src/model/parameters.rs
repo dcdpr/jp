@@ -1,6 +1,6 @@
 //! LLM model parameters configuration.
 
-use std::fmt;
+use std::{fmt, str::FromStr};
 
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
@@ -27,9 +27,11 @@ pub struct ParametersConfig {
 
     /// Reasoning configuration.
     ///
-    /// Should be `None` if the model does not support reasoning.
+    /// If `None`, the model uses reasoning with reasonable defaults if it
+    /// supports it, otherwise disabled. If set to `Some`, the model uses the
+    /// provided configuration.
     #[setting(nested)]
-    pub reasoning: Option<ReasoningConfig>,
+    reasoning: Option<ReasoningConfig>,
 
     /// Temperature of the model.
     ///
@@ -88,9 +90,79 @@ impl AssignKeyValue for PartialParametersConfig {
     }
 }
 
-/// Configuration for reasoning.
+impl ParametersConfig {
+    /// Returns the reasoning configuration.
+    ///
+    /// If `None`, no reasoning is configured.
+    #[must_use]
+    pub const fn reasoning(&self) -> Option<ReasoningConfig> {
+        self.reasoning
+    }
+
+    /// Sets the reasoning configuration.
+    pub const fn set_reasoning(&mut self, reasoning: ReasoningConfig) {
+        self.reasoning = Some(reasoning);
+    }
+}
+
+/// Define the name to serialize and deserialize for a unit variant.
+mod strings {
+    use crate::named_unit_variant;
+
+    named_unit_variant!(off);
+    named_unit_variant!(auto);
+}
+
+/// Reasoning configuration.
+#[derive(Debug, Clone, Copy, Config)]
+#[config(serde(untagged))]
+pub enum ReasoningConfig {
+    /// Reasoning is disabled, regardless of the model's capabilities.
+    #[setting(with = "strings::off")]
+    Off,
+
+    /// Reasoning is enabled with reasonable defaults if the model supports it,
+    /// otherwise disabled.
+    #[setting(default, with = "strings::auto")]
+    Auto,
+
+    /// Reasoning is enabled with custom configuration, unless the model is
+    /// known to not support reasoning.
+    #[setting(nested)]
+    Custom(CustomReasoningConfig),
+}
+
+impl AssignKeyValue for PartialReasoningConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        #[expect(clippy::single_match_else)]
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object_or_from_str()?,
+            _ => {
+                let mut custom = PartialCustomReasoningConfig::default();
+                custom.assign(kv)?;
+                *self = Self::Custom(custom);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl FromStr for PartialReasoningConfig {
+    type Err = BoxedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "off" => Self::Off,
+            "auto" => Self::Auto,
+            _ => Self::Custom(PartialCustomReasoningConfig::from_str(s)?),
+        })
+    }
+}
+
+/// Custom reasoning configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Config)]
-pub struct ReasoningConfig {
+pub struct CustomReasoningConfig {
     /// Effort to use for reasoning.
     #[setting(default)]
     pub effort: ReasoningEffort,
@@ -102,7 +174,7 @@ pub struct ReasoningConfig {
     pub exclude: bool,
 }
 
-impl AssignKeyValue for PartialReasoningConfig {
+impl AssignKeyValue for PartialCustomReasoningConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
@@ -115,17 +187,34 @@ impl AssignKeyValue for PartialReasoningConfig {
     }
 }
 
+impl FromStr for PartialCustomReasoningConfig {
+    type Err = BoxedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self {
+            effort: Some(s.parse()?),
+            exclude: None,
+        })
+    }
+}
+
 /// Effort to use for reasoning.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningEffort {
+    /// Allows the model to decide the effort to use. If the model does not
+    /// support auto-mode, it will fall back to `Medium`.
+    Auto,
+
     /// Allocates a large portion of tokens for reasoning (approximately 80% of
     /// `max_tokens`)
     High,
+
     /// Allocates a moderate portion of tokens (approximately 50% of
     /// `max_tokens`)
     #[default]
     Medium,
+
     /// Allocates a smaller portion of tokens (approximately 20% of
     /// `max_tokens`)
     Low,
@@ -141,7 +230,7 @@ impl ReasoningEffort {
     pub const fn to_tokens(self, max_tokens: u32) -> u32 {
         match self {
             Self::High => max_tokens.saturating_mul(80) / 100,
-            Self::Medium => max_tokens.saturating_mul(50) / 100,
+            Self::Auto | Self::Medium => max_tokens.saturating_mul(50) / 100,
             Self::Low => max_tokens.saturating_mul(20) / 100,
             Self::Absolute(Tokens(tokens)) => tokens,
         }
@@ -182,5 +271,11 @@ impl TryFrom<&str> for Tokens {
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         Ok(Self(s.parse()?))
+    }
+}
+
+impl From<u32> for Tokens {
+    fn from(v: u32) -> Self {
+        Self(v)
     }
 }

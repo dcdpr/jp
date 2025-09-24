@@ -5,7 +5,7 @@ expression: expr
 Ok(
     Array [
         String("Testing Conversation"),
-        String("User Sent Test Message"),
-        String("Conversational Test Response"),
+        String("Assistance Provided"),
+        String("Helpful Assistant"),
     ],
 )

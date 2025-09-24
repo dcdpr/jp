@@ -7,7 +7,7 @@ use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
         id::{ModelIdConfig, ProviderId},
-        parameters::ParametersConfig,
+        parameters::{ParametersConfig, ReasoningConfig},
     },
     providers::llm::ollama::OllamaConfig,
 };
@@ -37,6 +37,8 @@ use crate::{
     CompletionChunk,
 };
 
+static PROVIDER: ProviderId = ProviderId::Ollama;
+
 #[derive(Debug, Clone)]
 pub struct Ollama {
     client: Client,
@@ -62,7 +64,10 @@ impl Provider for Ollama {
             .await
             .map_err(Into::into)
             .and_then(map_response)
-            .map(Reply)
+            .map(|events| Reply {
+                provider: PROVIDER,
+                events,
+            })
     }
 
     async fn chat_completion_stream(
@@ -107,7 +112,7 @@ impl Provider for Ollama {
 
 fn map_model(model: LocalModel) -> ModelDetails {
     ModelDetails {
-        provider: ProviderId::Ollama,
+        provider: PROVIDER,
         slug: model.name,
         context_window: None,
         max_output_tokens: None,
@@ -127,7 +132,7 @@ fn map_response(response: ChatMessageResponse) -> Result<Vec<Event>> {
             v.map(|e| match e {
                 StreamEvent::ChatChunk(content) => match content {
                     CompletionChunk::Content(s) => Event::Content(s),
-                    CompletionChunk::Reasoning(s) => Event::Reasoning(s),
+                    CompletionChunk::Reasoning(content) => Event::Reasoning(content),
                 },
                 StreamEvent::ToolCall(request) => Event::ToolCall(request),
                 StreamEvent::Metadata(key, metadata) => Event::Metadata(key, metadata),
@@ -248,7 +253,11 @@ fn create_request(
 
     request = request.options(options);
 
-    if parameters.reasoning.is_some() {
+    // Reasoning for local models has to be explicitly enabled. This is because
+    // there are too many models that do not support reasoning, and we have no
+    // way (currently) to detect whether a model supports reasoning or not,
+    // resulting in an error if the default reasoning of "auto" is used.
+    if !matches!(parameters.reasoning(), None | Some(ReasoningConfig::Off)) {
         request = request.think(true);
     }
 
@@ -286,11 +295,11 @@ fn convert_tools(tools: Vec<ToolDefinition>, _strict: bool) -> Result<Vec<ToolIn
 }
 //
 fn convert_thread(thread: Thread, tool_choice: ToolChoice) -> Result<Vec<ChatMessage>> {
-    Messages::try_from((thread, tool_choice)).map(|v| v.0)
+    OllamaMessages::try_from((thread, tool_choice)).map(|v| v.0)
 }
-struct Messages(Vec<ChatMessage>);
+struct OllamaMessages(Vec<ChatMessage>);
 
-impl TryFrom<(Thread, ToolChoice)> for Messages {
+impl TryFrom<(Thread, ToolChoice)> for OllamaMessages {
     type Error = Error;
 
     #[expect(clippy::too_many_lines)]
@@ -649,7 +658,7 @@ mod tests {
         let model_id = "ollama/llama3.1:8b".parse().unwrap();
 
         let message = UserMessage::Query("Test message".to_string());
-        let history = vec![MessagePair::new(message, AssistantMessage::default())];
+        let history = vec![MessagePair::new(message, AssistantMessage::new(PROVIDER))];
 
         let vcr = vcr(&config.base_url);
         vcr.cassette(

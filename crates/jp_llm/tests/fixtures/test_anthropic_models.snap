@@ -14,8 +14,7 @@ Ok(
                 32000,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: None,
                 },
@@ -34,8 +33,7 @@ Ok(
                 32000,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: None,
                 },
@@ -54,8 +52,7 @@ Ok(
                 64000,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: None,
                 },
@@ -74,8 +71,7 @@ Ok(
                 64000,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: None,
                 },
@@ -94,11 +90,7 @@ Ok(
                 8192,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
-                    min_tokens: 0,
-                    max_tokens: None,
-                },
+                Unsupported,
             ),
             knowledge_cutoff: Some(
                 2024-04-01,
@@ -114,11 +106,7 @@ Ok(
                 8192,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
-                    min_tokens: 0,
-                    max_tokens: None,
-                },
+                Unsupported,
             ),
             knowledge_cutoff: Some(
                 2024-07-01,
@@ -134,11 +122,7 @@ Ok(
                 8192,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
-                    min_tokens: 0,
-                    max_tokens: None,
-                },
+                Unsupported,
             ),
             knowledge_cutoff: Some(
                 2024-04-01,
@@ -154,11 +138,7 @@ Ok(
                 4096,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
-                    min_tokens: 0,
-                    max_tokens: None,
-                },
+                Unsupported,
             ),
             knowledge_cutoff: Some(
                 2024-08-01,
@@ -174,11 +154,7 @@ Ok(
                 4096,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
-                    min_tokens: 0,
-                    max_tokens: None,
-                },
+                Unsupported,
             ),
             knowledge_cutoff: Some(
                 2023-08-01,

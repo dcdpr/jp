@@ -26,6 +26,8 @@ use crate::{
     tool::ToolDefinition,
 };
 
+static PROVIDER: ProviderId = ProviderId::Google;
+
 #[derive(Debug, Clone)]
 pub struct Google {
     client: GeminiClient,
@@ -45,7 +47,7 @@ impl Google {
             tool_call_strict_mode,
         } = query;
 
-        let details = self
+        let model_details = self
             .models()
             .await?
             .into_iter()
@@ -57,25 +59,33 @@ impl Google {
         #[expect(clippy::cast_possible_wrap)]
         let max_output_tokens = parameters
             .max_tokens
-            .or_else(|| details.as_ref().and_then(|d| d.max_output_tokens))
+            .or_else(|| model_details.as_ref().and_then(|d| d.max_output_tokens))
             .map(|v| v as i32);
 
         let tool_config = (!tools.is_empty()).then_some(convert_tool_choice(tool_choice));
 
+        let reasoning = model_details
+            .as_ref()
+            .and_then(|m| m.custom_reasoning_config(parameters.reasoning()));
+
         // Add thinking config if the model requires it, or if it supports it,
         // and we have the parameters configured.
-        let thinking_config = details
+        let thinking_config = model_details
             .as_ref()
             .and_then(|d| d.reasoning)
-            .filter(|details| (details.min_tokens > 0) || parameters.reasoning.is_some())
+            .filter(|details| (details.min_tokens() > 0) || reasoning.is_some())
             .map(|details| types::ThinkingConfig {
-                include_thoughts: parameters.reasoning.is_some_and(|v| !v.exclude),
-                thinking_budget: parameters.reasoning.map(|v| {
+                include_thoughts: reasoning.is_some_and(|v| !v.exclude),
+                thinking_budget: reasoning.map(|v| {
+                    // TODO: Once the `gemini` crate supports `-1` for "auto"
+                    // thinking, use that here if `effort` is `Auto`.
+                    //
+                    // See: <https://ai.google.dev/gemini-api/docs/thinking#set-budget>
                     #[expect(clippy::cast_sign_loss)]
                     v.effort
                         .to_tokens(max_output_tokens.unwrap_or(32_000) as u32)
-                        .min(details.max_tokens.unwrap_or(u32::MAX))
-                        .max(details.min_tokens)
+                        .min(details.max_tokens().unwrap_or(u32::MAX))
+                        .max(details.min_tokens())
                 }),
             });
 
@@ -127,7 +137,10 @@ impl Provider for Google {
             .await
             .map_err(Into::into)
             .and_then(map_response)
-            .map(Reply)
+            .map(|events| Reply {
+                provider: PROVIDER,
+                events,
+            })
     }
 
     async fn chat_completion_stream(
@@ -160,27 +173,19 @@ impl Provider for Google {
 #[expect(clippy::needless_pass_by_value)]
 fn map_model(model: types::Model) -> ModelDetails {
     ModelDetails {
-        provider: ProviderId::Google,
+        provider: PROVIDER,
         slug: model.base_model_id.clone(),
         context_window: Some(model.input_token_limit),
         max_output_tokens: Some(model.output_token_limit),
         reasoning: model
             .base_model_id
             .starts_with("gemini-2.5-pro")
-            .then_some(ReasoningDetails {
-                supported: true,
-                min_tokens: 128,
-                max_tokens: Some(32768),
-            })
+            .then_some(ReasoningDetails::supported(128, Some(32768)))
             .or_else(|| {
                 model
                     .base_model_id
                     .starts_with("gemini-2.5-flash")
-                    .then_some(ReasoningDetails {
-                        supported: true,
-                        min_tokens: 0,
-                        max_tokens: Some(32768),
-                    })
+                    .then_some(ReasoningDetails::supported(0, Some(24576)))
             }),
         knowledge_cutoff: None,
     }

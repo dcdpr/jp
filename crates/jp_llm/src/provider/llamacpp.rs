@@ -37,6 +37,8 @@ use crate::{
     tool::ToolDefinition,
 };
 
+static PROVIDER: ProviderId = ProviderId::Llamacpp;
+
 #[derive(Debug, Clone)]
 pub struct Llamacpp {
     reqwest_client: reqwest::Client,
@@ -200,7 +202,7 @@ fn map_content(
 
 fn map_model(model: &ModelResponse) -> ModelDetails {
     ModelDetails {
-        provider: ProviderId::Llamacpp,
+        provider: PROVIDER,
         slug: model
             .id
             .rsplit_once('/')
