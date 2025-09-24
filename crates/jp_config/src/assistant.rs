@@ -1,154 +1,196 @@
-pub mod provider;
+//! Assistant-specific configuration for Jean-Pierre.
+//!
+//! These configuration options tweak the behavior of the assistant. The
+//! "assistant" is defined as the technique powering the response generation
+//! (typically a GPT/LLM model), with additional options built on top for
+//! improved performance.
 
-use confique::Config as Confique;
-use jp_mcp::tool::ToolChoice;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+pub mod instructions;
+pub mod tool_choice;
+
+use instructions::{InstructionsConfig, PartialInstructionsConfig};
+use schematic::{Config, TransformResult};
 
 use crate::{
-    assignment::{set_error, AssignKeyValue, KvAssignment},
-    error::Result,
-    model,
-    serde::{de_from_str_opt, is_default, is_nested_default_or_empty, is_none_or_default},
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    assistant::tool_choice::ToolChoice,
+    model::{ModelConfig, PartialModelConfig},
 };
-
-pub type AssistantPartial = <Assistant as Confique>::Partial;
-
-/// LLM configuration.
-#[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
-#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
-#[config(partial_attr(serde(deny_unknown_fields)))]
-pub struct Assistant {
+/// Assistant-specific configuration.
+#[derive(Debug, Clone, Config)]
+#[config(rename_all = "snake_case")]
+pub struct AssistantConfig {
     /// Optional name of the assistant.
-    #[config(partial_attr(serde(skip_serializing_if = "is_default")))]
     pub name: Option<String>,
 
     /// The system prompt to use for the assistant.
-    #[config(default = "You are a helpful assistant.")]
+    #[setting(default = "You are a helpful assistant.")]
     pub system_prompt: String,
 
     /// A list of instructions for the assistant.
-    #[config(
-        default = [],
-        partial_attr(serde(skip_serializing_if = "is_none_or_default"))
-    )]
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub instructions: Vec<Instructions>,
+    #[setting(nested, default = default_instructions, merge = schematic::merge::append_vec)]
+    pub instructions: Vec<InstructionsConfig>,
 
-    /// How the LLM should choose tools, if any are available.
-    #[config(partial_attr(serde(
-        default,
-        deserialize_with = "de_from_str_opt",
-        skip_serializing_if = "is_none_or_default"
-    )))]
-    pub tool_choice: Option<ToolChoice>,
+    /// How the assistant should choose tools to call.
+    #[setting(default)]
+    pub tool_choice: ToolChoice,
 
-    /// Provider configuration.
-    #[config(
-        nested,
-        partial_attr(serde(skip_serializing_if = "is_nested_default_or_empty"))
-    )]
-    pub provider: provider::Provider,
-
-    /// Model configuration.
-    #[config(
-        nested,
-        partial_attr(serde(skip_serializing_if = "is_nested_default_or_empty"))
-    )]
-    pub model: model::Model,
+    /// LLM model configuration.
+    #[setting(nested)]
+    pub model: ModelConfig,
 }
 
-impl AssignKeyValue for <Assistant as Confique>::Partial {
-    fn assign(&mut self, mut kv: KvAssignment) -> Result<()> {
-        let k = kv.key().as_str().to_owned();
-        match k.as_str() {
-            "provider" => self.provider = kv.try_into_object()?,
-            "model" => self.model = kv.try_into_object()?,
-            "name" => self.name = Some(kv.try_into_string()?),
-            "system_prompt" => self.system_prompt = Some(kv.try_into_string()?),
-            "instructions" => {
-                kv.try_set_or_merge_vec(self.instructions.get_or_insert_default(), |v| match v {
-                    Value::String(v) => Ok(Instructions::new(v)),
-                    v @ Value::Object(_) => Ok(serde_json::from_value(v)?),
-                    _ => Err("Expected string or object".into()),
-                })?;
-            }
-            "tool_choice" => self.tool_choice = Some(kv.try_into_string()?.parse()?),
-
-            _ if kv.trim_prefix("provider") => self.provider.assign(kv)?,
-            _ if kv.trim_prefix("model") => self.model.assign(kv)?,
-
-            _ => return Err(set_error(kv.key())),
+impl AssignKeyValue for PartialAssistantConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            "name" => self.name = kv.try_some_string()?,
+            "system_prompt" => self.system_prompt = kv.try_some_string()?,
+            _ if kv.p("instructions") => kv.try_vec_of_nested(&mut self.instructions)?,
+            "tool_choice" => self.tool_choice = kv.try_some_from_str()?,
+            _ if kv.p("model") => self.model.assign(kv)?,
+            _ => return missing_key(&kv),
         }
 
         Ok(())
     }
 }
 
-/// A list of instructions for a persona.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct Instructions {
-    /// The title of the instructions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-
-    /// An optional description of the instructions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-
-    /// The list of instructions.
-    #[serde(default)]
-    pub items: Vec<String>,
-
-    /// A list of examples to go with the instructions.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub examples: Vec<Example>,
+/// The default instructions for the assistant.
+#[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
+fn default_instructions(_: &()) -> TransformResult<Vec<PartialInstructionsConfig>> {
+    Ok(vec![PartialInstructionsConfig {
+        title: Some("How to respond to the user".into()),
+        items: Some(vec![
+            "Be concise".into(),
+            "Use simple sentences. But feel free to use technical jargon.".into(),
+            "Do NOT overexplain basic concepts. Assume the user is technically proficient.".into(),
+            "AVOID flattering, corporate-ish or marketing language. Maintain a neutral viewpoint."
+                .into(),
+            "AVOID vague and / or generic claims which may seem correct but are not substantiated \
+             by the context."
+                .into(),
+        ]),
+        ..Default::default()
+    }])
 }
 
-impl Instructions {
-    pub fn try_to_xml(&self) -> Result<String> {
-        let mut buffer = String::new();
-        let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
-        serializer.indent(' ', 2);
-        self.serialize(serializer)?;
-        Ok(buffer)
+#[cfg(test)]
+mod tests {
+    use schematic::PartialConfig as _;
+
+    use super::*;
+    use crate::model::id::{PartialModelIdConfig, ProviderId};
+
+    #[test]
+    fn test_assistant_config_instructions() {
+        let mut p = PartialAssistantConfig::default_values(&())
+            .unwrap()
+            .unwrap();
+
+        assert!(p.instructions[0].title.as_deref() == Some("How to respond to the user"));
+
+        let kv = KvAssignment::try_from_cli("instructions:", r#"[{"title":"foo"}]"#).unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.instructions, vec![PartialInstructionsConfig {
+            title: Some("foo".into()),
+            ..Default::default()
+        }]);
+
+        let kv = KvAssignment::try_from_cli(
+            "instructions+:",
+            r#"[{"title":"bar", "description":"hello"}]"#,
+        )
+        .unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.instructions, vec![
+            PartialInstructionsConfig {
+                title: Some("foo".into()),
+                ..Default::default()
+            },
+            PartialInstructionsConfig {
+                title: Some("bar".into()),
+                description: Some("hello".into()),
+                ..Default::default()
+            }
+        ]);
+
+        let kv = KvAssignment::try_from_cli("instructions+", "baz").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.instructions, vec![
+            PartialInstructionsConfig {
+                title: Some("foo".into()),
+                ..Default::default()
+            },
+            PartialInstructionsConfig {
+                title: Some("bar".into()),
+                description: Some("hello".into()),
+                ..Default::default()
+            },
+            PartialInstructionsConfig {
+                title: Some("baz".into()),
+                ..Default::default()
+            }
+        ]);
+
+        let kv = KvAssignment::try_from_cli("instructions", "qux").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.instructions, vec![PartialInstructionsConfig {
+            title: Some("qux".into()),
+            ..Default::default()
+        }]);
+
+        let kv = KvAssignment::try_from_cli("instructions.0.title", "boop").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.instructions, vec![PartialInstructionsConfig {
+            title: Some("boop".into()),
+            ..Default::default()
+        }]);
+
+        let kv =
+            KvAssignment::try_from_cli("instructions.0:", r#"{"title":"quux","items":["one"]}"#)
+                .unwrap();
+
+        p.assign(kv).unwrap();
+        assert_eq!(p.instructions, vec![PartialInstructionsConfig {
+            title: Some("quux".into()),
+            items: Some(vec!["one".into()]),
+            ..Default::default()
+        }]);
+
+        let kv = KvAssignment::try_from_cli("instructions.0.items.0", "two").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.instructions, vec![PartialInstructionsConfig {
+            title: Some("quux".into()),
+            items: Some(vec!["two".into()]),
+            ..Default::default()
+        }]);
+
+        let kv = KvAssignment::try_from_cli("instructions:", r#"[{title:"foo"}]"#).unwrap_err();
+        assert_eq!(
+            &kv.to_string(),
+            "instructions: key must be a string at line 1 column 3"
+        );
     }
 
-    pub fn new(title: impl Into<String>) -> Self {
-        Self {
-            title: Some(title.into()),
-            description: None,
-            items: vec![],
-            examples: vec![],
-        }
-    }
+    #[test]
+    fn test_assistant_config_model() {
+        let mut p = PartialAssistantConfig::default_values(&())
+            .unwrap()
+            .unwrap();
 
-    #[must_use]
-    pub fn with_title(mut self, title: impl Into<String>) -> Self {
-        self.title = Some(title.into());
-        self
-    }
+        assert!(p.model.id.provider.is_none());
 
-    #[must_use]
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
+        let kv =
+            KvAssignment::try_from_cli("model:", r#"{"id":{"provider":"anthropic","name":"foo"}}"#)
+                .unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.model, PartialModelConfig {
+            id: PartialModelIdConfig {
+                provider: Some(ProviderId::Anthropic),
+                name: Some("foo".parse().unwrap()),
+            },
+            ..Default::default()
+        });
     }
-
-    #[must_use]
-    pub fn with_item(mut self, item: impl Into<String>) -> Self {
-        self.items.push(item.into());
-        self
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Example {
-    Generic(String),
-    Contrast {
-        right: String,
-        wrong: String,
-        reason: Option<String>,
-    },
 }

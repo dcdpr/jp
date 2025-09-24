@@ -2,7 +2,7 @@ use std::fs;
 
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
-    PartialConfig,
+    PartialAppConfig,
 };
 
 use super::TargetWithConversation;
@@ -62,7 +62,7 @@ impl Set {
             unreachable!("target is either a path, or a conversation")
         };
 
-        config.edit_content(|partial: &mut PartialConfig| {
+        config.edit_content(|partial: &mut PartialAppConfig| {
             partial.assign(assignment)?;
             Ok(())
         })?;

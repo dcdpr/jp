@@ -11,14 +11,18 @@ use async_anthropic::{
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
-use jp_config::{assistant, model::parameters::Parameters};
+use jp_config::{
+    assistant::tool_choice::ToolChoice,
+    model::{
+        id::{ModelIdConfig, ProviderId},
+        parameters::ParametersConfig,
+    },
+    providers::llm::anthropic::AnthropicConfig,
+};
 use jp_conversation::{
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
 };
-use jp_mcp::tool;
-use jp_model::{ModelId, ProviderId};
-use jp_query::query::ChatQuery;
 use serde_json::Value;
 use time::macros::date;
 use tracing::{info, trace, warn};
@@ -27,6 +31,8 @@ use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply,
 use crate::{
     error::{Error, Result},
     provider::{handle_delta, AccumulationState, Delta},
+    query::ChatQuery,
+    tool::ToolDefinition,
 };
 
 /// Anthropic limits the number of cache points to 4 per request. Returning an API error if the
@@ -66,8 +72,8 @@ impl Provider for Anthropic {
 
     async fn chat_completion(
         &self,
-        model: &ModelId,
-        parameters: &Parameters,
+        model: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
         let details = self.models().await?;
@@ -85,8 +91,8 @@ impl Provider for Anthropic {
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
@@ -117,9 +123,9 @@ impl Provider for Anthropic {
 
 #[expect(clippy::too_many_lines)]
 fn create_request(
-    model_id: &ModelId,
+    model_id: &ModelIdConfig,
     model_details: Option<&ModelDetails>,
-    parameters: &Parameters,
+    parameters: &ParametersConfig,
     query: ChatQuery,
 ) -> Result<types::CreateMessagesRequest> {
     let ChatQuery {
@@ -142,7 +148,7 @@ fn create_request(
     let mut cache_control_count = MAX_CACHE_CONTROL_COUNT;
 
     builder
-        .model(model_id.slug())
+        .model(model_id.name.clone())
         .messages(Messages::build(history, message, &mut cache_control_count).0);
 
     let tools = convert_tools(tools, tool_call_strict_mode, &mut cache_control_count);
@@ -202,7 +208,7 @@ fn create_request(
         builder.system(System::Content(system_content));
     }
 
-    let tool_choice_function = matches!(tool_choice, tool::ToolChoice::Function(_));
+    let tool_choice_function = matches!(tool_choice, ToolChoice::Function(_));
     let tool_choice = convert_tool_choice(tool_choice);
     if !tools.is_empty() {
         builder.tools(tools).tool_choice(tool_choice);
@@ -277,11 +283,11 @@ fn create_request(
 }
 
 fn get_details_for_model<'a>(
-    model_id: &ModelId,
+    model_id: &ModelIdConfig,
     details: &'a [ModelDetails],
 ) -> Option<&'a ModelDetails> {
     // see: <https://docs.anthropic.com/en/docs/about-claude/models/overview#model-aliases>
-    let details_slug = match model_id.slug() {
+    let details_slug = match model_id.name.as_ref() {
         "claude-opus-4-0" => "claude-opus-4-20250514",
         "claude-sonnet-4-0" => "claude-sonnet-4-20250514",
         "claude-3-7-sonnet-latest" => "claude-3-7-sonnet-20250219",
@@ -293,8 +299,17 @@ fn get_details_for_model<'a>(
     details.iter().find(|m| m.slug == details_slug)
 }
 
+#[expect(clippy::match_same_arms)]
 fn map_model(model: types::Model) -> ModelDetails {
     match model.id.as_str() {
+        "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelDetails {
+            provider: ProviderId::Anthropic,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(32_000),
+            reasoning: Some(ReasoningDetails::supported()),
+            knowledge_cutoff: Some(date!(2025 - 3 - 1)),
+        },
         "claude-opus-4-0" | "claude-opus-4-20250514" => ModelDetails {
             provider: ProviderId::Anthropic,
             slug: model.id,
@@ -306,6 +321,12 @@ fn map_model(model: types::Model) -> ModelDetails {
         "claude-sonnet-4-0" | "claude-sonnet-4-20250514" => ModelDetails {
             provider: ProviderId::Anthropic,
             slug: model.id,
+            // TODO: The context window is 1_000_000 *IF* the
+            // `context-1m-2025-08-07` beta header is set.
+            //
+            // We should probably update this method signature to take in the
+            // final configuration, and change this value based on which header
+            // is configured.
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
             reasoning: Some(ReasoningDetails::supported()),
@@ -445,10 +466,10 @@ fn map_event(
     }
 }
 
-impl TryFrom<&assistant::provider::anthropic::Anthropic> for Anthropic {
+impl TryFrom<&AnthropicConfig> for Anthropic {
     type Error = Error;
 
-    fn try_from(config: &assistant::provider::anthropic::Anthropic) -> Result<Self> {
+    fn try_from(config: &AnthropicConfig) -> Result<Self> {
         let api_key = env::var(&config.api_key_env)
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
@@ -472,17 +493,17 @@ impl TryFrom<&assistant::provider::anthropic::Anthropic> for Anthropic {
     }
 }
 
-fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolChoice {
+fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {
     match choice {
-        tool::ToolChoice::None => types::ToolChoice::none(),
-        tool::ToolChoice::Auto => types::ToolChoice::auto(),
-        tool::ToolChoice::Required => types::ToolChoice::any(),
-        tool::ToolChoice::Function(name) => types::ToolChoice::tool(name),
+        ToolChoice::None => types::ToolChoice::none(),
+        ToolChoice::Auto => types::ToolChoice::auto(),
+        ToolChoice::Required => types::ToolChoice::any(),
+        ToolChoice::Function(name) => types::ToolChoice::tool(name),
     }
 }
 
 fn convert_tools(
-    tools: Vec<jp_mcp::Tool>,
+    tools: Vec<ToolDefinition>,
     _strict: bool,
     cache_controls: &mut usize,
 ) -> Vec<types::Tool> {
@@ -490,33 +511,21 @@ fn convert_tools(
         .into_iter()
         .map(|tool| {
             types::Tool::Custom(types::CustomTool {
-                name: tool.name.into(),
-                description: tool.description.map(Into::into),
+                name: tool.name,
+                description: tool.description,
                 input_schema: {
-                    let mut map = tool.input_schema.as_ref().clone();
-                    map.remove("type");
+                    let required = tool
+                        .parameters
+                        .iter()
+                        .filter(|(_, cfg)| cfg.required)
+                        .map(|(key, _)| key.clone())
+                        .collect();
 
-                    let required = map
-                        .remove("required")
-                        .map(|v| match v {
-                            Value::Array(v) => v
-                                .into_iter()
-                                .filter_map(|v| match v {
-                                    Value::String(v) => Some(v),
-                                    _ => None,
-                                })
-                                .collect(),
-                            _ => vec![],
-                        })
-                        .unwrap_or_default();
-
-                    let properties = map
-                        .remove("properties")
-                        .map(|v| match v {
-                            Value::Object(v) => v,
-                            _ => serde_json::Map::default(),
-                        })
-                        .unwrap_or_default();
+                    let properties = tool
+                        .parameters
+                        .into_iter()
+                        .map(|(key, cfg)| (key, cfg.to_json_schema()))
+                        .collect();
 
                     types::ToolInputSchema {
                         kind: types::ToolInputSchemaKind::Object,
@@ -731,9 +740,11 @@ impl From<types::MessageContent> for Delta {
 mod tests {
     use std::path::PathBuf;
 
+    use indexmap::IndexMap;
     use jp_config::{
-        model::parameters::{Reasoning, ReasoningEffort},
-        Configurable as _, Partial as _,
+        conversation::tool::{OneOrManyTypes, ToolParameterConfig, ToolParameterItemsConfig},
+        model::parameters::{ReasoningConfig, ReasoningEffort},
+        providers::llm::LlmProviderConfig,
     };
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
@@ -747,11 +758,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_anthropic_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .anthropic;
+        let mut config = LlmProviderConfig::default().anthropic;
 
         let vcr = vcr();
         vcr.cassette(
@@ -777,11 +784,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_anthropic_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
     {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .anthropic;
+        let mut config = LlmProviderConfig::default().anthropic;
         let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
@@ -808,7 +811,68 @@ mod tests {
 
                 Anthropic::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &Parameters::default(), query)
+                    .chat_completion(&model_id, &ParametersConfig::default(), query)
+                    .await
+            },
+        )
+        .await
+    }
+
+    #[test(tokio::test)]
+    async fn test_anthropic_tool_call() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = LlmProviderConfig::default().anthropic;
+        let model_id = "anthropic/claude-3-7-sonnet-latest".parse().unwrap();
+        let query = ChatQuery {
+            thread: Thread {
+                message: "Test message".into(),
+                ..Default::default()
+            },
+            tool_choice: ToolChoice::Function("run_me".to_owned()),
+            tools: vec![ToolDefinition {
+                name: "run_me".to_owned(),
+                description: None,
+                parameters: IndexMap::from_iter([
+                    ("foo".to_owned(), ToolParameterConfig {
+                        kind: OneOrManyTypes::One("string".into()),
+                        default: Some("foo".into()),
+                        description: None,
+                        required: false,
+                        enumeration: vec![],
+                        items: None,
+                    }),
+                    ("bar".to_owned(), ToolParameterConfig {
+                        kind: OneOrManyTypes::Many(vec!["string".into(), "array".into()]),
+                        default: None,
+                        description: None,
+                        required: true,
+                        enumeration: vec!["foo".into(), vec!["foo", "bar"].into()],
+                        items: Some(ToolParameterItemsConfig {
+                            kind: "string".to_owned(),
+                        }),
+                    }),
+                ]),
+            }],
+            ..Default::default()
+        };
+
+        let vcr = vcr();
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
+                });
+            },
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Anthropic::try_from(&config)
+                    .unwrap()
+                    .chat_completion(&model_id, &ParametersConfig::default(), query)
                     .await
             },
         )
@@ -818,11 +882,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_anthropic_redacted_thinking(
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .anthropic;
+        let mut config = LlmProviderConfig::default().anthropic;
         let model_id = "anthropic/claude-3-7-sonnet-latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
@@ -848,8 +908,8 @@ mod tests {
                     config.api_key_env = "USER".to_owned();
                 }
 
-                let parameters = Parameters {
-                    reasoning: Some(Reasoning {
+                let parameters = ParametersConfig {
+                    reasoning: Some(ReasoningConfig {
                         effort: ReasoningEffort::Medium,
                         exclude: false,
                     }),
@@ -884,8 +944,8 @@ mod tests {
             ..Default::default()
         };
 
-        let parameters = Parameters {
-            reasoning: Some(Reasoning {
+        let parameters = ParametersConfig {
+            reasoning: Some(ReasoningConfig {
                 effort: ReasoningEffort::Medium,
                 exclude: false,
             }),

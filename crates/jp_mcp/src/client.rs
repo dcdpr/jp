@@ -1,5 +1,8 @@
-use std::{collections::HashMap, env, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, path::Path, process::Stdio, sync::Arc, time::Duration};
 
+use hex::ToHex as _;
+use indexmap::IndexMap;
+use jp_config::providers::mcp::{AlgorithmConfig, McpProviderConfig};
 use rmcp::{
     model::{
         CallToolRequestParam, CallToolResult, ReadResourceRequestParam, Resource, ResourceContents,
@@ -8,84 +11,94 @@ use rmcp::{
     service::{RoleClient, RunningService, ServiceExt},
     transport::TokioChildProcess,
 };
+use sha1::{Digest as _, Sha1};
+use sha2::Sha256;
 use tokio::{process::Command, sync::Mutex};
 use tracing::trace;
 
 use crate::{
-    config::{McpServer, McpServerId},
     error::Result,
-    server::embedded::EmbeddedServer,
-    tool::McpToolId,
-    transport::Transport,
+    id::{McpServerId, McpToolId},
     Error,
 };
 
 /// Manages multiple MCP clients and delegates operations to them
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Client {
-    clients: Arc<Mutex<HashMap<McpServerId, RunningService<RoleClient, ()>>>>,
-    embedded_server: Option<Arc<EmbeddedServer>>,
+    /// All MCP servers known to the client.
+    servers: IndexMap<McpServerId, McpProviderConfig>,
+
+    /// Running MCP services.
+    services: Arc<Mutex<HashMap<McpServerId, RunningService<RoleClient, ()>>>>,
 }
 
 impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client")
-            .field("clients", &self.clients.blocking_lock().keys())
-            .field("embedded_server", &self.embedded_server)
+            .field("servers", &self.servers)
+            .field("services", &self.services.blocking_lock().keys())
             .finish()
     }
 }
 
 impl Client {
+    /// Create a new MCP client.
     #[must_use]
-    pub fn with_embedded_server(mut self, server: EmbeddedServer) -> Self {
-        self.embedded_server = Some(Arc::new(server));
-        self
+    pub fn new(providers: IndexMap<String, McpProviderConfig>) -> Self {
+        let servers = providers
+            .into_iter()
+            .map(|(name, config)| (McpServerId::new(name), config))
+            .collect();
+
+        Self {
+            services: Arc::new(Mutex::new(HashMap::new())),
+            servers,
+        }
     }
 
-    /// Get all available tools from all connected MCP servers
-    pub async fn list_tools(&self) -> Result<Vec<Tool>> {
-        let mut tools = vec![];
+    pub async fn get_tool(&self, id: &McpToolId, server_id: Option<&McpServerId>) -> Result<Tool> {
+        let server_ids = match server_id {
+            Some(server_id) => vec![server_id],
+            None => self.servers.keys().collect(),
+        };
 
-        if let Some(server) = self.embedded_server.as_ref() {
-            tools.extend(server.list_all_tools().await?);
+        for server_id in server_ids {
+            let Some(server) = self.servers.get(server_id) else {
+                continue;
+            };
+
+            let tools = match self.services.lock().await.get(server_id) {
+                Some(client) => client.peer().list_all_tools().await?,
+                None => {
+                    Self::create_client(server_id, server)
+                        .await?
+                        .list_all_tools()
+                        .await?
+                }
+            };
+
+            if let Some(tool) = tools.iter().find(|t| t.name == id.as_str()) {
+                return Ok(tool.clone());
+            }
         }
 
-        for (server_id, client) in self.clients.lock().await.iter() {
-            let client_tools = client
-                .peer()
-                .list_all_tools()
-                .await?
-                .into_iter()
-                .map(|mut tool| {
-                    if !tools.iter().any(|t| t.name == tool.name) {
-                        return Ok(tool);
-                    }
-
-                    // If the tool name is already taken, append the server ID to
-                    // the name.
-                    tool.name = format!("{server_id}_{}", tool.name).into();
-                    if !tools.iter().any(|t| t.name == tool.name) {
-                        return Ok(tool);
-                    }
-
-                    // If the tool name is still taken, return an error.
-                    Err(Error::DuplicateTool(tool.name.to_string()))
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            tools.extend(client_tools);
-        }
-
-        Ok(tools)
+        Err(Error::UnknownTool(id.to_string()))
     }
 
     /// Get the server ID of the given tool ID.
-    pub async fn get_tool_server_id(&self, id: &McpToolId) -> Result<McpServerId> {
-        let server_ids = self.list_server_ids().await;
+    pub async fn get_tool_server_id(
+        &self,
+        id: &McpToolId,
+        server_name: Option<&McpServerId>,
+    ) -> Result<&McpServerId> {
+        for server_id in self.servers.keys() {
+            if let Some(name) = server_name
+                && name != server_id
+            {
+                continue;
+            }
 
-        for server_id in server_ids {
-            let tools = self.list_tools_by_server_id(&server_id).await?;
+            let tools = self.list_tools_by_server_id(server_id).await?;
             if tools.iter().any(|t| t.name == id.as_str()) {
                 return Ok(server_id);
             }
@@ -98,22 +111,16 @@ impl Client {
     pub async fn call_tool(
         &self,
         tool_name: &str,
-        params: serde_json::Value,
+        server_name: Option<&str>,
+        params: &serde_json::Value,
     ) -> Result<CallToolResult> {
-        if let Some(server) = self.embedded_server.as_ref() {
-            let tools = server.list_all_tools().await?;
-            if tools.iter().any(|t| t.name == tool_name) {
-                return server
-                    .run_tool(CallToolRequestParam {
-                        name: tool_name.to_owned().into(),
-                        arguments: params.as_object().cloned(),
-                    })
-                    .await
-                    .map_err(Into::into);
+        for (server_id, client) in self.services.lock().await.iter() {
+            if let Some(server) = server_name
+                && server_id.as_str() != server
+            {
+                continue;
             }
-        }
 
-        for client in self.clients.lock().await.values() {
             let tools = client.peer().list_all_tools().await?;
             if !tools.iter().any(|t| t.name == tool_name) {
                 continue;
@@ -138,7 +145,7 @@ impl Client {
     /// a list of URIs which can be sent to [`Self::get_resource_contents`] to
     /// retrieve the contents.
     pub async fn list_resources(&self, id: &McpServerId) -> Result<Vec<Resource>> {
-        let clients = self.clients.lock().await;
+        let clients = self.services.lock().await;
         let client = clients.get(id).ok_or(Error::UnknownServer(id.clone()))?;
 
         Ok(client.peer().list_all_resources().await?)
@@ -153,7 +160,7 @@ impl Client {
         id: &McpServerId,
         uri: impl Into<String>,
     ) -> Result<Vec<ResourceContents>> {
-        let clients = self.clients.lock().await;
+        let clients = self.services.lock().await;
         let client = clients.get(id).ok_or(Error::UnknownServer(id.clone()))?;
 
         Ok(client
@@ -163,60 +170,68 @@ impl Client {
             .contents)
     }
 
-    pub async fn handle_servers(&mut self, configs: &[McpServer]) -> Result<()> {
-        let mut clients = self.clients.lock().await;
+    pub async fn run_services(&mut self, server_ids: &[McpServerId]) -> Result<()> {
+        let mut clients = self.services.lock().await;
         let servers_to_stop: Vec<_> = clients
             .keys()
-            .filter(|&name| configs.iter().all(|s| &s.id != name))
+            .filter(|&name| server_ids.iter().all(|s| s != name))
             .cloned()
             .collect();
 
         // Stop servers that are no longer needed
-        for id in &servers_to_stop {
-            trace!(id = %id, "Stopping MCP server.");
-            clients.remove(id);
+        for server_id in &servers_to_stop {
+            trace!(id = %server_id, "Stopping MCP server.");
+            clients.remove(server_id);
         }
 
-        for server in configs {
+        for server_id in server_ids {
             // Determine which servers to start (in configs but not currently
             // active)
-            if clients.contains_key(&server.id) {
+            if clients.contains_key(server_id) {
                 continue;
             }
 
-            trace!(id = %server.id, "Starting MCP server.");
+            trace!(id = %server_id, "Starting MCP server.");
 
-            let client = Self::create_client(server).await?;
-            clients.insert(server.id.clone(), client);
+            let server = self
+                .servers
+                .get(server_id)
+                .ok_or(Error::UnknownServer(server_id.clone()))?;
+
+            let client = Self::create_client(server_id, server).await?;
+            clients.insert(server_id.clone(), client);
         }
 
         Ok(())
     }
 
-    /// Get the path to the tool binary for the embedded server.
-    pub async fn get_embedded_tool_path(&self, id: &McpToolId) -> Result<PathBuf> {
-        let Some(server) = self.embedded_server.as_ref() else {
-            return Err(Error::UnknownTool(id.to_string()));
-        };
-
-        server.get_command_path(id).await.map_err(Into::into)
-    }
-
     /// Create a new MCP client for a server configuration
-    async fn create_client(config: &McpServer) -> Result<RunningService<RoleClient, ()>> {
-        match config.transport {
-            Transport::Stdio(ref config) => {
+    async fn create_client(
+        id: &McpServerId,
+        config: &McpProviderConfig,
+    ) -> Result<RunningService<RoleClient, ()>> {
+        match config {
+            McpProviderConfig::Stdio(config) => {
+                if let Some(checksum) = &config.checksum {
+                    verify_file_checksum(
+                        id.as_str(),
+                        &config.command,
+                        &checksum.value,
+                        checksum.algorithm,
+                    )?;
+                }
+
                 // Build environment variables
                 let vars = config
-                    .environment_variables
+                    .variables
                     .iter()
-                    .filter_map(|key| Some((key.to_owned(), env::var(key).ok()?)))
-                    .collect::<HashMap<_, _>>();
+                    .map(|key| Ok((key.to_owned(), env::var(key)?)))
+                    .collect::<Result<HashMap<_, _>>>()?;
 
                 // Create command
                 let mut cmd = Command::new(&config.command);
                 cmd.stderr(Stdio::null());
-                cmd.args(&config.args);
+                cmd.args(&config.arguments);
 
                 // Add environment variables
                 for (key, value) in vars {
@@ -224,14 +239,23 @@ impl Client {
                 }
 
                 // Create the child process transport
-                let child_process = TokioChildProcess::new(&mut cmd)?;
+                let child_process = TokioChildProcess::new(&mut cmd).map_err(|error| {
+                    Error::CannotSpawnProcess {
+                        cmd: cmd.as_std().get_program().to_string_lossy().to_string(),
+                        error,
+                    }
+                })?;
 
                 // Create a timeout for the connection
                 let timeout = Duration::from_secs(60);
 
                 // Serve the client with timeout
                 let client = tokio::time::timeout(timeout, async { ().serve(child_process).await })
-                    .await??;
+                    .await?
+                    .map_err(|error| Error::ProcessError {
+                        cmd: cmd.as_std().get_program().to_string_lossy().to_string(),
+                        error,
+                    })?;
 
                 Ok(client)
             }
@@ -239,36 +263,52 @@ impl Client {
     }
 
     /// List tools available on a specific server.
-    async fn list_tools_by_server_id(&self, id: &McpServerId) -> Result<Vec<Tool>> {
-        if id.as_str() == "embedded" {
-            return self.list_embedded_tools().await;
-        }
+    async fn list_tools_by_server_id(&self, server_id: &McpServerId) -> Result<Vec<Tool>> {
+        let Some(server) = self.servers.get(server_id) else {
+            return Err(Error::UnknownServer(server_id.clone()));
+        };
 
-        let mut tools = vec![];
-        if let Some(client) = self.clients.lock().await.get(id) {
-            tools.extend(client.peer().list_all_tools().await?);
-        }
+        Ok(match self.services.lock().await.get(server_id) {
+            Some(client) => client.peer().list_all_tools().await?,
+            None => {
+                Self::create_client(server_id, server)
+                    .await?
+                    .list_all_tools()
+                    .await?
+            }
+        })
+    }
+}
 
-        Ok(tools)
+pub fn verify_file_checksum(
+    server: &str,
+    command: &Path,
+    hash: &str,
+    algo: AlgorithmConfig,
+) -> Result<()> {
+    let path = which::which(command).map_err(|error| Error::CannotLocateBinary {
+        path: command.to_path_buf(),
+        error: Box::new(error),
+    })?;
+
+    let contents = std::fs::read(&path).map_err(|error| Error::CannotReadFile {
+        path: path.clone(),
+        error: Box::new(error),
+    })?;
+
+    let digest = match algo {
+        AlgorithmConfig::Sha256 => format!("{:x}", Sha256::digest(&contents)),
+        AlgorithmConfig::Sha1 => format!("{:x}", Sha1::digest(&contents)),
+    };
+
+    if digest.eq_ignore_ascii_case(hash) {
+        return Ok(());
     }
 
-    /// List all server IDs.
-    async fn list_server_ids(&self) -> Vec<McpServerId> {
-        self.clients
-            .lock()
-            .await
-            .keys()
-            .cloned()
-            .chain(std::iter::once(McpServerId::new("embedded")))
-            .collect()
-    }
-
-    async fn list_embedded_tools(&self) -> Result<Vec<Tool>> {
-        let mut tools = vec![];
-        if let Some(server) = self.embedded_server.as_ref() {
-            tools.extend(server.list_all_tools().await?);
-        }
-
-        Ok(tools)
-    }
+    Err(Error::ChecksumMismatch {
+        server: server.to_string(),
+        path,
+        expected: hash.to_string(),
+        got: digest.encode_hex(),
+    })
 }

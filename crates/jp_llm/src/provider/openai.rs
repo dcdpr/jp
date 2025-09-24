@@ -3,24 +3,27 @@ use std::env;
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
+use indexmap::IndexMap;
 use jp_config::{
-    assistant,
-    model::parameters::{Parameters, Reasoning, ReasoningEffort},
+    assistant::tool_choice::ToolChoice,
+    conversation::tool::ToolParameterConfig,
+    model::{
+        id::{ModelIdConfig, ProviderId},
+        parameters::{ParametersConfig, ReasoningConfig, ReasoningEffort},
+    },
+    providers::llm::openai::OpenaiConfig,
 };
 use jp_conversation::{
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
 };
-use jp_mcp::tool;
-use jp_model::{ModelId, ProviderId};
-use jp_query::query::ChatQuery;
 use openai_responses::{
     types::{self, Include, Request, SummaryConfig},
     Client, CreateError, StreamError,
 };
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use time::{macros::date, OffsetDateTime};
 use tracing::{debug, trace, warn};
 
@@ -31,6 +34,8 @@ use super::{
 use crate::{
     error::{Error, Result},
     provider::AccumulationState,
+    query::ChatQuery,
+    tool::ToolDefinition,
 };
 
 #[derive(Debug, Clone)]
@@ -43,8 +48,8 @@ pub struct Openai {
 impl Openai {
     async fn create_request(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Request> {
         let ChatQuery {
@@ -58,14 +63,14 @@ impl Openai {
             .models()
             .await?
             .into_iter()
-            .find(|m| m.slug == model_id.slug());
+            .find(|m| *m.slug == *model_id.name);
 
         let supports_reasoning = model_details
             .as_ref()
             .is_some_and(|d| d.reasoning.is_some());
 
         let request = Request {
-            model: types::Model::Other(model_id.slug().to_owned()),
+            model: types::Model::Other(model_id.name.to_string()),
             input: convert_thread(thread, supports_reasoning)?,
             include: supports_reasoning.then_some(vec![Include::ReasoningEncryptedContent]),
             store: Some(false),
@@ -80,6 +85,8 @@ impl Openai {
             top_p: parameters.top_p,
             ..Default::default()
         };
+
+        trace!(?request, "Sending request to OpenAI.");
 
         Ok(request)
     }
@@ -104,8 +111,8 @@ impl Provider for Openai {
 
     async fn chat_completion(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
         let client = self.client.clone();
@@ -120,8 +127,8 @@ impl Provider for Openai {
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
@@ -161,7 +168,7 @@ pub(crate) struct ModelResponse {
     owned_by: String,
 }
 
-#[expect(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines, clippy::match_same_arms)]
 fn map_model(model: ModelResponse) -> ModelDetails {
     match model.id.as_str() {
         "o4-mini" | "o4-mini-2025-04-16" => ModelDetails {
@@ -189,6 +196,14 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
         },
         "o3" | "o3-2025-04-16" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            reasoning: Some(ReasoningDetails::supported()),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+        },
+        "o3-pro" | "o3-pro-2025-06-10" => ModelDetails {
             provider: ProviderId::Openai,
             slug: model.id,
             context_window: Some(200_000),
@@ -260,6 +275,70 @@ fn map_model(model: ModelResponse) -> ModelDetails {
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
         },
+        "gpt-5-nano" | "gpt-5-nano-2025-08-07" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(400_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::supported()),
+            knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+        },
+        "gpt-5-mini" | "gpt-5-mini-2025-08-07" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(400_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::supported()),
+            knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+        },
+        "gpt-5" | "gpt-5-2025-08-07" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(400_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::supported()),
+            knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+        },
+        "gpt-5-chat-latest" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(128_000),
+            max_output_tokens: Some(16_384),
+            reasoning: Some(ReasoningDetails::supported()),
+            knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+        },
+        "gpt-oss-120b" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(131_072),
+            max_output_tokens: Some(131_072),
+            reasoning: Some(ReasoningDetails::supported()),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+        },
+        "gpt-oss-20b" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(131_072),
+            max_output_tokens: Some(131_072),
+            reasoning: Some(ReasoningDetails::supported()),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+        },
+        "o3-deep-research" | "o3-deep-research-2025-06-26" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            reasoning: Some(ReasoningDetails::supported()),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+        },
+        "o4-mini-deep-research" | "o4-mini-deep-research-2025-06-26" => ModelDetails {
+            provider: ProviderId::Openai,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            reasoning: Some(ReasoningDetails::supported()),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+        },
         id => {
             warn!(model = id, ?model, "Missing model details.");
 
@@ -329,10 +408,10 @@ fn map_event(event: types::Event, state: &mut AccumulationState) -> Option<Resul
     handle_delta(delta, state).transpose()
 }
 
-impl TryFrom<&assistant::provider::openai::Openai> for Openai {
+impl TryFrom<&OpenaiConfig> for Openai {
     type Error = Error;
 
-    fn try_from(config: &assistant::provider::openai::Openai) -> Result<Self> {
+    fn try_from(config: &OpenaiConfig) -> Result<Self> {
         let api_key = env::var(&config.api_key_env)
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
@@ -357,28 +436,75 @@ impl TryFrom<&assistant::provider::openai::Openai> for Openai {
     }
 }
 
-fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolChoice {
+fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {
     match choice {
-        tool::ToolChoice::Auto => types::ToolChoice::Auto,
-        tool::ToolChoice::None => types::ToolChoice::None,
-        tool::ToolChoice::Required => types::ToolChoice::Required,
-        tool::ToolChoice::Function(name) => types::ToolChoice::Function(name),
+        ToolChoice::Auto => types::ToolChoice::Auto,
+        ToolChoice::None => types::ToolChoice::None,
+        ToolChoice::Required => types::ToolChoice::Required,
+        ToolChoice::Function(name) => types::ToolChoice::Function(name),
     }
 }
 
-fn convert_tools(tools: Vec<jp_mcp::Tool>, strict: bool) -> Vec<types::Tool> {
+pub(crate) fn parameters_with_strict_mode(
+    parameters: IndexMap<String, ToolParameterConfig>,
+    strict: bool,
+) -> Map<String, Value> {
+    let required = parameters
+        .iter()
+        .filter(|(_, cfg)| strict || cfg.required)
+        .map(|(k, _)| k.clone())
+        .collect::<Vec<_>>();
+
+    let mut properties = parameters
+        .into_iter()
+        .map(|(k, v)| (k, v.to_json_schema()))
+        .collect::<Map<_, _>>();
+
+    // If `strict` mode is enabled, we have to adhere to the
+    // following rules:
+    //
+    // - `additionalProperties` must be set to `false` for each
+    // object in the `parameters`.
+    // - All fields in `properties` must be marked as `required`.
+    //
+    // See: <https://platform.openai.com/docs/guides/function-calling#strict-mode>
+    if strict {
+        properties.iter_mut().for_each(|(_, v)| {
+            let current = match v["type"].take() {
+                Value::String(s) if s != "null" => vec![s.into(), "null".into()],
+                v @ Value::String(_) => vec![v],
+                Value::Array(v) => std::iter::once("null".into()).chain(v).collect(),
+                _ => vec![],
+            };
+
+            v["type"] = Value::Array(current);
+        });
+    }
+
+    Map::from_iter([
+        ("type".to_owned(), "object".into()),
+        ("properties".to_owned(), properties.into()),
+        ("additionalProperties".to_owned(), (!strict).into()),
+        ("required".to_owned(), required.into()),
+    ])
+}
+
+fn convert_tools(tools: Vec<ToolDefinition>, strict: bool) -> Vec<types::Tool> {
     tools
         .into_iter()
         .map(|tool| types::Tool::Function {
-            name: tool.name.into(),
-            parameters: Value::Object(tool.input_schema.as_ref().clone()),
+            name: tool.name,
             strict,
-            description: tool.description.map(|v| v.to_string()),
+            description: tool.description,
+            parameters: parameters_with_strict_mode(tool.parameters, strict).into(),
         })
         .collect()
 }
 
-fn convert_reasoning(reasoning: Reasoning, max_tokens: Option<u32>) -> types::ReasoningConfig {
+fn convert_reasoning(
+    reasoning: ReasoningConfig,
+    max_tokens: Option<u32>,
+) -> types::ReasoningConfig {
     types::ReasoningConfig {
         summary: if reasoning.exclude {
             None
@@ -660,7 +786,7 @@ impl From<types::OutputItem> for Delta {
 mod tests {
     use std::path::PathBuf;
 
-    use jp_config::{Configurable as _, Partial as _};
+    use jp_config::providers::llm::LlmProviderConfig;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -673,12 +799,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_openai_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .openai;
-
+        let mut config = LlmProviderConfig::default().openai;
         let vcr = vcr();
         vcr.cassette(
             function_name!(),
@@ -709,12 +830,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_openai_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .openai;
-
+        let mut config = LlmProviderConfig::default().openai;
         let model_id = "openai/o4-mini".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
@@ -741,7 +857,7 @@ mod tests {
 
                 Openai::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &Parameters::default(), query)
+                    .chat_completion(&model_id, &ParametersConfig::default(), query)
                     .await
             },
         )

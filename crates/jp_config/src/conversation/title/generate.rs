@@ -1,40 +1,32 @@
-use confique::Config as Confique;
-use serde::{Deserialize, Serialize};
+//! Title generation configuration.
+
+use schematic::Config;
 
 use crate::{
-    assignment::{set_error, AssignKeyValue, KvAssignment},
-    error::Result,
-    model,
-    serde::{is_default, is_nested_default},
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    model::{ModelConfig, PartialModelConfig},
 };
 
-/// LLM configuration.
-#[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
-#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
-#[config(partial_attr(serde(deny_unknown_fields)))]
-pub struct Generate {
-    /// Model configuration for title generation.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_default")))]
-    pub model: model::Model,
-
-    /// Whether to generate a title automatically for new conversations.
-    #[config(
-        default = true,
-        partial_attr(serde(skip_serializing_if = "is_default"))
-    )]
+/// Title generation configuration.
+#[derive(Debug, Config)]
+#[config(rename_all = "snake_case")]
+pub struct GenerateConfig {
+    /// Whether to automatically generate titles for conversations.
+    #[setting(default = true)]
     pub auto: bool,
+
+    /// Model configuration specific to title generation.
+    #[setting(nested)]
+    pub model: Option<ModelConfig>,
 }
 
-impl AssignKeyValue for <Generate as Confique>::Partial {
-    fn assign(&mut self, mut kv: KvAssignment) -> Result<()> {
-        let k = kv.key().as_str().to_owned();
-        match k.as_str() {
-            "model" => self.model = kv.try_into_object()?,
-            "auto" => self.auto = Some(kv.try_into_bool()?),
-
-            _ if kv.trim_prefix("model") => self.model.assign(kv)?,
-
-            _ => return Err(set_error(kv.key())),
+impl AssignKeyValue for PartialGenerateConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            "auto" => self.auto = kv.try_some_bool()?,
+            _ if kv.p("model") => self.model.assign(kv)?,
+            _ => return missing_key(&kv),
         }
 
         Ok(())

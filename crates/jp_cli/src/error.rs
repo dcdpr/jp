@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, path::PathBuf};
 
 use crate::cmd;
 
@@ -16,6 +16,13 @@ pub(crate) enum Error {
     #[error("unable to load configuration file")]
     ConfigLoader(#[from] jp_config::fs::ConfigLoaderError),
 
+    #[error(transparent)]
+    KeyValue(#[from] jp_config::assignment::KvAssignmentError),
+
+    /// Missing config file.
+    #[error("Config file not found: {0}")]
+    MissingConfigFile(PathBuf),
+
     #[error("CLI Config error: {0}")]
     CliConfig(String),
 
@@ -31,9 +38,6 @@ pub(crate) enum Error {
     #[error("LLM error")]
     Llm(#[from] jp_llm::Error),
 
-    #[error("Model error")]
-    Model(#[from] jp_model::Error),
-
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
 
@@ -42,6 +46,9 @@ pub(crate) enum Error {
 
     #[error("URL error")]
     Url(#[from] url::ParseError),
+
+    #[error("Tool error")]
+    Tool(#[from] jp_llm::ToolError),
 
     #[error("Bat error")]
     Bat(#[from] bat::error::Error),
@@ -54,9 +61,6 @@ pub(crate) enum Error {
 
     #[error("Missing editor")]
     MissingEditor,
-
-    #[error("No model configured. Use `--model` to specify a model.")]
-    UndefinedModel,
 
     #[error("Task error: {0}")]
     Task(Box<dyn std::error::Error + Send + Sync>),
@@ -72,9 +76,6 @@ pub(crate) enum Error {
 
     #[error("JSON error")]
     Json(#[from] serde_json::Error),
-
-    #[error("Invalid JSON schema: {0}")]
-    Schema(String),
 
     #[error("Cannot locate binary: {0}")]
     Which(#[from] which::Error),

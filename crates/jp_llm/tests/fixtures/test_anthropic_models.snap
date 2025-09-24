@@ -6,6 +6,26 @@ Ok(
     [
         ModelDetails {
             provider: Anthropic,
+            slug: "claude-opus-4-1-20250805",
+            context_window: Some(
+                200000,
+            ),
+            max_output_tokens: Some(
+                32000,
+            ),
+            reasoning: Some(
+                ReasoningDetails {
+                    supported: true,
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+            ),
+            knowledge_cutoff: Some(
+                2025-03-01,
+            ),
+        },
+        ModelDetails {
+            provider: Anthropic,
             slug: "claude-opus-4-20250514",
             context_window: Some(
                 200000,
@@ -163,30 +183,6 @@ Ok(
             knowledge_cutoff: Some(
                 2023-08-01,
             ),
-        },
-        ModelDetails {
-            provider: Anthropic,
-            slug: "claude-3-sonnet-20240229",
-            context_window: None,
-            max_output_tokens: None,
-            reasoning: None,
-            knowledge_cutoff: None,
-        },
-        ModelDetails {
-            provider: Anthropic,
-            slug: "claude-2.1",
-            context_window: None,
-            max_output_tokens: None,
-            reasoning: None,
-            knowledge_cutoff: None,
-        },
-        ModelDetails {
-            provider: Anthropic,
-            slug: "claude-2.0",
-            context_window: None,
-            max_output_tokens: None,
-            reasoning: None,
-            knowledge_cutoff: None,
         },
     ],
 )

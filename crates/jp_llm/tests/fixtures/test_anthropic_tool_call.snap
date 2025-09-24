@@ -1,0 +1,19 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    Reply(
+        [
+            ToolCall(
+                ToolCallRequest {
+                    id: "toolu_01QvbD7j6J2mCdwdnmfYhrU1",
+                    name: "run_me",
+                    arguments: Object {
+                        "bar": String("foo"),
+                    },
+                },
+            ),
+        ],
+    ),
+)

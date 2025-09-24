@@ -16,7 +16,6 @@ version.workspace = true
 jp_config = { workspace = true }
 jp_conversation = { workspace = true }
 jp_id = { workspace = true }
-jp_mcp = { workspace = true }
 jp_storage = { workspace = true }
 jp_tombmap = { workspace = true }
 

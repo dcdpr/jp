@@ -115,6 +115,12 @@ impl Default for UserMessage {
     }
 }
 
+// TODO: An assistant message cannot be empty, so we should model this type such
+// that either `content` or `tool_calls` is present, or both, with optional
+// `reasoning`.
+//
+// E.g. make `Content` an enum, containing either `Text`, `ToolCalls` or
+// `TextWithToolCalls`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct AssistantMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]

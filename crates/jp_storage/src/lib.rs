@@ -2,7 +2,6 @@ pub mod error;
 pub mod value;
 
 use std::{
-    ffi::OsStr,
     fs, iter,
     path::{Path, PathBuf},
 };
@@ -10,18 +9,12 @@ use std::{
 pub use error::Error;
 use jp_conversation::{Conversation, ConversationId, ConversationsMetadata, MessagePair};
 use jp_id::Id as _;
-use jp_mcp::{
-    config::{McpServer, McpServerId},
-    tool::{McpTool, McpToolId, McpToolsMetadata},
-};
 use jp_tombmap::TombMap;
-use serde::Serialize;
-use serde_json::Value;
 use tracing::{trace, warn};
 
 use crate::{
     error::Result,
-    value::{deep_merge, read_json, write_json},
+    value::{read_json, write_json},
 };
 
 type ConversationsAndMessages = (
@@ -33,8 +26,6 @@ pub const DEFAULT_STORAGE_DIR: &str = ".jp";
 pub const METADATA_FILE: &str = "metadata.json";
 const MESSAGES_FILE: &str = "messages.json";
 pub const CONVERSATIONS_DIR: &str = "conversations";
-pub const MCP_SERVERS_DIR: &str = "mcp/servers";
-pub const MCP_TOOLS_DIR: &str = "mcp/tools";
 
 #[derive(Debug)]
 pub struct Storage {
@@ -76,7 +67,8 @@ impl Storage {
     ) -> Result<Self> {
         let name: String = name.into();
         let id: String = id.into();
-        let mut path = root.join(format!("{name}-{id}"));
+        let dirname = format!("{name}-{id}");
+        let mut path = root.join(&dirname);
 
         // Create user storage directory, if needed.
         if root.exists()
@@ -162,66 +154,6 @@ impl Storage {
         read_json(&metadata_path)
     }
 
-    /// Loads all MCP Servers from the (copied) storage.
-    pub fn load_mcp_servers(&self) -> Result<TombMap<McpServerId, McpServer>> {
-        let mcp_path = self.root.join(MCP_SERVERS_DIR);
-        let user_mcp_path = self.user.as_ref().map(|p| p.join(MCP_SERVERS_DIR));
-        trace!(path = %mcp_path.display(), "Loading MCP servers.");
-
-        let mut servers = TombMap::new();
-
-        for entry in fs::read_dir(&mcp_path).ok().into_iter().flatten() {
-            let path = entry?.path();
-            if !path.is_file() || path.extension().is_some_and(|ext| ext != "json") {
-                continue;
-            }
-            let Some(filename) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            let Some(id_str) = filename.strip_suffix(".json") else {
-                continue;
-            };
-            let server = match read_json::<Value>(&path) {
-                Ok(value) => value,
-                Err(error) => {
-                    warn!(?path, ?error, "Failed to read MCP server file. Skipping.");
-                    continue;
-                }
-            };
-
-            // Merge user server config on top of workspace server config.
-            let mut server: McpServer = match user_mcp_path.as_ref().map(|p| p.join(filename)) {
-                Some(p) if p.is_file() => match read_json::<Value>(&p) {
-                    Err(error) => {
-                        warn!(?path, ?error, "Failed to read MCP server file. Skipping.");
-                        continue;
-                    }
-                    Ok(user) => deep_merge(server, user)?,
-                },
-                _ => serde_json::from_value(server)?,
-            };
-
-            let id = McpServerId::new(id_str);
-            server.id = id.clone();
-            servers.insert(id, server);
-        }
-
-        Ok(servers)
-    }
-
-    /// Loads all MCP tools from the storage.
-    pub fn load_mcp_tools(&self) -> Result<TombMap<McpToolId, McpTool>> {
-        let tools_path = self.root.join(MCP_TOOLS_DIR);
-        trace!(path = %tools_path.display(), "Loading MCP tools.");
-
-        let mut tools = TombMap::new();
-        for entry in fs::read_dir(&tools_path).ok().into_iter().flatten() {
-            recurse_mcp_tools_dirs(&tools_path, &entry?.path(), &mut tools)?;
-        }
-
-        Ok(tools)
-    }
-
     /// Loads all conversations and their associated messages, including user
     /// conversations.
     pub fn load_conversations_and_messages(&self) -> Result<ConversationsAndMessages> {
@@ -241,16 +173,6 @@ impl Storage {
         }
 
         Ok((conversations, messages))
-    }
-
-    pub fn persist_mcp_servers(&mut self, servers: &TombMap<McpServerId, McpServer>) -> Result<()> {
-        let root = self.root.as_path();
-        let mcp_servers_dir = root.join(MCP_SERVERS_DIR);
-        trace!(path = %mcp_servers_dir.display(), "Persisting MCP servers.");
-
-        persist_inner(root, &mcp_servers_dir, servers, |id| {
-            format!("{id}.json").into()
-        })
     }
 
     pub fn persist_conversations_and_messages(
@@ -349,74 +271,6 @@ impl Storage {
 
         Ok(())
     }
-}
-
-fn recurse_mcp_tools_dirs(
-    root: &Path,
-    path: &Path,
-    tools: &mut TombMap<McpToolId, McpTool>,
-) -> Result<()> {
-    let metadata = read_json::<McpToolsMetadata>(&root.join(METADATA_FILE))?;
-    for entry in fs::read_dir(path).ok().into_iter().flatten() {
-        let path = entry?.path();
-        if path.is_dir() {
-            return recurse_mcp_tools_dirs(root, &path, tools);
-        }
-        if path.extension().is_none_or(|ext| ext != "toml") {
-            continue;
-        }
-        let Some(filename) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        let Some(name) = filename.strip_suffix(".toml") else {
-            continue;
-        };
-
-        let name = path
-            .parent()
-            .unwrap_or(&path)
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .join(name)
-            .iter()
-            .filter_map(OsStr::to_str)
-            .collect::<Vec<_>>()
-            .join("_");
-
-        let contents = fs::read_to_string(path)?;
-        let mut contents: toml::Table = toml::from_str(&contents)?;
-
-        let command = contents
-            .get("command")
-            .and_then(toml::Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|v| v.as_str());
-
-        if let Some(template) = contents
-            .get("inherit")
-            .and_then(toml::Value::as_str)
-            .and_then(|s| metadata.templates.get(s))
-        {
-            contents.insert(
-                "command".to_owned(),
-                template
-                    .command
-                    .iter()
-                    .map(String::as_str)
-                    .chain(command)
-                    .collect::<Vec<_>>()
-                    .into(),
-            );
-        }
-
-        let mut tool: McpTool = contents.try_into()?;
-        tool.id = McpToolId::new(name.clone());
-
-        tools.insert(McpToolId::new(name), tool);
-    }
-
-    Ok(())
 }
 
 fn load_conversations_and_messages_from_dir(path: &Path) -> Result<ConversationsAndMessages> {
@@ -518,33 +372,6 @@ fn remove_unused_conversation_dirs(
     Ok(())
 }
 
-fn persist_inner<'a, K, V>(
-    root: &Path,
-    source: &Path,
-    data: &'a TombMap<K, V>,
-    to_path: impl Fn(&K) -> PathBuf,
-) -> Result<()>
-where
-    K: Eq + std::hash::Hash + 'a,
-    V: Serialize + 'a,
-{
-    fs::create_dir_all(source)?;
-
-    let deleted = data.removed_keys().map(&to_path);
-    remove_deleted(root, source, deleted)?;
-
-    for (id, value) in data {
-        let dest = source.join(to_path(id));
-
-        // Only write if the file doesn't exist or the value has changed.
-        if !dest.exists() || data.is_modified(id) {
-            write_json(&dest, value)?;
-        }
-    }
-
-    Ok(())
-}
-
 fn remove_deleted(root: &Path, dir: &Path, deleted: impl Iterator<Item = PathBuf>) -> Result<()> {
     for entry in deleted {
         let mut path = dir.join(entry);
@@ -584,7 +411,6 @@ mod tests {
     };
 
     use jp_conversation::ConversationId;
-    use jp_mcp::transport::{self, Transport};
     use tempfile::tempdir;
     use test_log::test;
 
@@ -680,58 +506,5 @@ mod tests {
             id.to_dirname(Some("")).unwrap(), // Empty title
             "17457886043"
         );
-    }
-
-    #[test]
-    fn test_load_mcp_servers() {
-        let original_dir = tempdir().unwrap();
-        let storage = Storage::new(original_dir.path()).unwrap();
-        let mcp_path = storage.root.join(MCP_SERVERS_DIR);
-        fs::create_dir_all(&mcp_path).unwrap();
-
-        let id1 = McpServerId::new("server1");
-        let server1 = McpServer {
-            id: id1.clone(),
-            transport: Transport::Stdio(transport::Stdio {
-                command: "/bin/echo".into(),
-                args: vec!["hello".into()],
-                environment_variables: vec![],
-            }),
-        };
-        write_json(&mcp_path.join(format!("{id1}.json")), &server1).unwrap();
-
-        let loaded = storage.load_mcp_servers().unwrap();
-        assert_eq!(loaded.len(), 1);
-        assert!(loaded.contains_key(&id1));
-    }
-
-    #[test]
-    fn test_persist_mcp_servers() {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let mut storage = Storage::new(root).unwrap();
-
-        let id = McpServerId::new("foo");
-        let server = McpServer {
-            id: id.clone(),
-            transport: Transport::Stdio(transport::Stdio {
-                command: "/usr/bin/tool".into(),
-                args: vec![],
-                environment_variables: vec![],
-            }),
-        };
-
-        storage
-            .persist_mcp_servers(&TombMap::from([(id.clone(), server.clone())]))
-            .unwrap();
-
-        let servers_path = root.join(MCP_SERVERS_DIR);
-        assert!(servers_path.is_dir());
-        assert!(servers_path.join(format!("{id}.json")).is_file());
-
-        let storage = Storage::new(root).unwrap();
-        let servers = storage.load_mcp_servers().unwrap();
-        assert_eq!(servers.len(), 1);
-        assert!(servers.contains_key(&id));
     }
 }

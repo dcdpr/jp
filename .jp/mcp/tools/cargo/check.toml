@@ -1,7 +1,8 @@
-inherit = "cargo"
+[conversation.tools.cargo_check]
+source = "local"
+command = "just serve-tools {{workspace}} {{tool}}"
 description = "Run `cargo check` for the given package, validating if the code compiles."
 
-[[properties]]
-name = "package"
+[conversation.tools.cargo_check.arguments.package]
 description = "Package to run check for, if unspecified, all workspace packages will be checked."
 type = "string"

@@ -13,10 +13,14 @@ use anthropic::Anthropic;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt as _};
 use google::Google;
-use jp_config::{assistant::provider, model::parameters::Parameters};
+use jp_config::{
+    model::{
+        id::{ModelIdConfig, ProviderId},
+        parameters::ParametersConfig,
+    },
+    providers::llm::LlmProviderConfig,
+};
 use jp_conversation::{message::ToolCallRequest, AssistantMessage};
-use jp_model::{ModelId, ProviderId};
-use jp_query::query::{ChatQuery, StructuredQuery};
 use llamacpp::Llamacpp;
 use ollama::Ollama;
 use openai::Openai;
@@ -25,7 +29,12 @@ use serde_json::Value;
 use time::Date;
 use tracing::warn;
 
-use crate::{error::Result, structured::SCHEMA_TOOL_NAME, Error};
+use crate::{
+    error::Result,
+    query::{ChatQuery, StructuredQuery},
+    structured::SCHEMA_TOOL_NAME,
+    Error,
+};
 
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>;
 
@@ -267,8 +276,8 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     /// Perform a streaming chat completion.
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream>;
 
@@ -277,8 +286,8 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     /// Default implementation collects results from the streaming version.
     async fn chat_completion(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
         let mut stream = self
@@ -330,13 +339,13 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     /// override this method.
     async fn structured_completion(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: StructuredQuery,
     ) -> Result<Value> {
         let mut chat_query = ChatQuery {
             thread: query.thread.clone(),
-            tools: vec![query.tool()],
+            tools: vec![query.tool_definition()],
             tool_choice: query.tool_choice(),
             tool_call_strict_mode: true,
         };
@@ -377,7 +386,7 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     }
 }
 
-pub fn get_provider(id: ProviderId, config: &provider::Provider) -> Result<Box<dyn Provider>> {
+pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dyn Provider>> {
     let provider: Box<dyn Provider> = match id {
         ProviderId::Anthropic => Box::new(Anthropic::try_from(&config.anthropic)?),
         ProviderId::Deepseek => todo!(),

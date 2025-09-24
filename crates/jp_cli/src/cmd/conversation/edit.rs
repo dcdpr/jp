@@ -1,8 +1,7 @@
 use crossterm::style::Stylize as _;
-use jp_config::Config;
+use jp_config::AppConfig;
 use jp_conversation::{ConversationId, MessagePair};
-use jp_llm::{provider, structured_completion};
-use jp_query::structured::conversation_titles;
+use jp_llm::{provider, structured};
 
 use crate::{cmd::Success, ctx::Ctx, Output};
 
@@ -36,51 +35,57 @@ impl Edit {
         let active_id = ctx.workspace.active_conversation_id();
         let id = self.id.unwrap_or(active_id);
         let messages = ctx.workspace.get_messages(&id).to_vec();
-        let Some(conversation) = ctx.workspace.get_conversation_mut(&id) else {
-            return Err(
-                format!("Conversation {} not found", id.to_string().bold().yellow()).into(),
-            );
-        };
 
         if let Some(user) = self.local {
-            conversation.user = user.unwrap_or(!conversation.user);
+            match ctx.workspace.get_conversation_mut(&id) {
+                Some(conversation) => conversation.user = user.unwrap_or(!conversation.user),
+                None => return missing_conversation(&id),
+            }
         }
 
         if let Some(title) = self.title {
             let title = match title {
                 Some(title) => title,
-                None => generate_titles(&ctx.config, messages, vec![]).await?,
+                None => generate_titles(ctx.config(), messages, vec![]).await?,
             };
 
-            conversation.title = Some(title);
+            match ctx.workspace.get_conversation_mut(&id) {
+                Some(conversation) => conversation.title = Some(title),
+                None => return missing_conversation(&id),
+            }
         } else if self.no_title {
-            conversation.title = None;
+            match ctx.workspace.get_conversation_mut(&id) {
+                Some(conversation) => conversation.title = None,
+                None => return missing_conversation(&id),
+            }
         }
 
         Ok(Success::Message("Conversation updated.".into()))
     }
 }
 
+fn missing_conversation(id: &ConversationId) -> Output {
+    Err(format!("Conversation {} not found", id.to_string().bold().yellow()).into())
+}
+
 async fn generate_titles(
-    config: &Config,
+    config: &AppConfig,
     messages: Vec<MessagePair>,
     mut rejected: Vec<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;
-    let parameters = &config.conversation.title.generate.model.parameters;
-    let model_id = &config
+    let model = config
         .conversation
         .title
         .generate
         .model
-        .id
         .clone()
-        .ok_or(jp_model::Error::MissingId)?;
+        .unwrap_or_else(|| config.assistant.model.clone());
 
-    let provider = provider::get_provider(model_id.provider(), &config.assistant.provider)?;
-    let query = conversation_titles(count, messages.clone(), &rejected)?;
+    let provider = provider::get_provider(model.id.provider, &config.providers.llm)?;
+    let query = structured::titles::titles(count, messages.clone(), &rejected)?;
     let titles: Vec<String> =
-        structured_completion(provider.as_ref(), model_id, parameters, query).await?;
+        structured::completion(provider.as_ref(), &model.id, &model.parameters, query).await?;
 
     let mut choices = titles.clone();
     choices.extend(rejected.clone());

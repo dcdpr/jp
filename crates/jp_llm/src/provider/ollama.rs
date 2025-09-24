@@ -3,14 +3,18 @@ use std::{mem, str::FromStr as _};
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::StreamExt as _;
-use jp_config::{assistant, model::parameters::Parameters};
+use jp_config::{
+    assistant::tool_choice::ToolChoice,
+    model::{
+        id::{ModelIdConfig, ProviderId},
+        parameters::ParametersConfig,
+    },
+    providers::llm::ollama::OllamaConfig,
+};
 use jp_conversation::{
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
 };
-use jp_mcp::tool::ToolChoice;
-use jp_model::{ModelId, ProviderId};
-use jp_query::query::ChatQuery;
 use ollama_rs::{
     generation::{
         chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse, MessageRole},
@@ -28,6 +32,8 @@ use super::{handle_delta, Event, EventStream, ModelDetails, Provider, Reply, Str
 use crate::{
     error::{Error, Result},
     provider::{AccumulationState, Delta, ReasoningExtractor},
+    query::ChatQuery,
+    tool::ToolDefinition,
     CompletionChunk,
 };
 
@@ -46,8 +52,8 @@ impl Provider for Ollama {
 
     async fn chat_completion(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
         let request = create_request(model_id, parameters, query)?;
@@ -61,8 +67,8 @@ impl Provider for Ollama {
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
@@ -171,8 +177,8 @@ fn map_content(
 }
 
 fn create_request(
-    model_id: &ModelId,
-    parameters: &Parameters,
+    model_id: &ModelIdConfig,
+    parameters: &ParametersConfig,
     query: ChatQuery,
 ) -> Result<ChatMessageRequest> {
     let ChatQuery {
@@ -183,7 +189,7 @@ fn create_request(
     } = query;
 
     let mut request = ChatMessageRequest::new(
-        model_id.slug().to_owned(),
+        model_id.name.to_string(),
         convert_thread(thread, tool_choice)?,
     );
 
@@ -249,10 +255,10 @@ fn create_request(
     Ok(request)
 }
 
-impl TryFrom<&assistant::provider::ollama::Ollama> for Ollama {
+impl TryFrom<&OllamaConfig> for Ollama {
     type Error = Error;
 
-    fn try_from(config: &assistant::provider::ollama::Ollama) -> Result<Self> {
+    fn try_from(config: &OllamaConfig) -> Result<Self> {
         let url = Url::from_str(&config.base_url)?;
         let port = url.port().unwrap_or(11434);
         let client = reqwest::Client::new();
@@ -263,18 +269,16 @@ impl TryFrom<&assistant::provider::ollama::Ollama> for Ollama {
     }
 }
 
-fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Result<Vec<ToolInfo>> {
+fn convert_tools(tools: Vec<ToolDefinition>, _strict: bool) -> Result<Vec<ToolInfo>> {
     tools
         .into_iter()
         .map(|tool| {
             Ok(ToolInfo {
                 tool_type: ToolType::Function,
                 function: ToolFunctionInfo {
-                    name: tool.name.to_string(),
-                    description: tool.description.unwrap_or_default().to_string(),
-                    parameters: serde_json::from_value(serde_json::Value::Object(
-                        tool.input_schema.as_ref().clone(),
-                    ))?,
+                    parameters: tool.to_parameters_map().into(),
+                    name: tool.name,
+                    description: tool.description.unwrap_or_default(),
                 },
             })
         })
@@ -530,12 +534,12 @@ impl From<ToolCall> for Delta {
 mod tests {
     use std::{path::PathBuf, result::Result};
 
-    use jp_config::{Configurable as _, Partial as _};
-    use jp_query::structured::conversation_titles;
+    use jp_config::providers::llm::LlmProviderConfig;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
     use super::*;
+    use crate::structured;
 
     fn vcr(url: &str) -> Vcr {
         let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
@@ -544,11 +548,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_ollama_models() -> Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .ollama;
+        let mut config = LlmProviderConfig::default().ollama;
         let vcr = vcr(&config.base_url);
         vcr.cassette(
             function_name!(),
@@ -575,11 +575,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_ollama_chat_completion() -> Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .ollama;
+        let mut config = LlmProviderConfig::default().ollama;
         let model_id = "ollama/llama3:latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
@@ -602,7 +598,7 @@ mod tests {
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &Parameters::default(), query)
+                    .chat_completion(&model_id, &ParametersConfig::default(), query)
                     .await
             },
         )
@@ -611,11 +607,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_ollama_chat_completion_stream() -> Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .ollama;
+        let mut config = LlmProviderConfig::default().ollama;
         let model_id = "ollama/llama3:latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
@@ -638,7 +630,7 @@ mod tests {
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .chat_completion_stream(&model_id, &Parameters::default(), query)
+                    .chat_completion_stream(&model_id, &ParametersConfig::default(), query)
                     .await
                     .unwrap()
                     .filter_map(
@@ -653,11 +645,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_ollama_structured_completion() -> Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .ollama;
+        let mut config = LlmProviderConfig::default().ollama;
         let model_id = "ollama/llama3.1:8b".parse().unwrap();
 
         let message = UserMessage::Query("Test message".to_string());
@@ -673,11 +661,11 @@ mod tests {
             },
             |_, url| async move {
                 config.base_url = url;
-                let query = conversation_titles(3, history, &[]).unwrap();
+                let query = structured::titles::titles(3, history, &[]).unwrap();
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .structured_completion(&model_id, &Parameters::default(), query)
+                    .structured_completion(&model_id, &ParametersConfig::default(), query)
                     .await
             },
         )

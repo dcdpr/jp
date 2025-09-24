@@ -1,4 +1,6 @@
-inherit = "cargo"
+[conversation.tools.github_create_issue_bug]
+source = "local"
+command = "just serve-tools {{workspace}} {{tool}}"
 description = """
 Track a new bug in the project's GitHub repository.
 
@@ -26,8 +28,7 @@ Track a new bug in the project's GitHub repository.
   using lists, unless they are necessary to convey details about the issue.
 """
 
-[[properties]]
-name = "title"
+[conversation.tools.github_create_issue_bug.arguments.title]
 type = "string"
 required = true
 description = """
@@ -37,25 +38,22 @@ Should be a single line, not include any markdown except for backticks (`) where
 applicable. Keep the title short and descriptive.
 """
 
-[[properties]]
-name = "description"
+[conversation.tools.github_create_issue_bug.arguments.description]
 type = "string"
 required = true
 description = "A clear and concise description of what the issue is about."
 
-[[properties]]
-name = "expected_behavior"
+[conversation.tools.github_create_issue_bug.arguments.expected_behavior]
 type = "string"
 required = true
 description = "A description of the expected behavior."
 
-[[properties]]
-name = "actual_behavior"
+[conversation.tools.github_create_issue_bug.arguments.actual_behavior]
 type = "string"
 required = true
 description = "A description of the actual behavior."
 
-[[properties]]
+[conversation.tools.github_create_issue_bug.arguments.complexity]
 name = "complexity"
 type = "string"
 enum = ["low", "medium", "high"]
@@ -66,8 +64,7 @@ Complexity of the issue.
 This is used to estimate the effort required to fix the issue.
 """
 
-[[properties]]
-name = "reproduce"
+[conversation.tools.github_create_issue_bug.arguments.reproduce]
 type = "string"
 description = """
 Optional notes on how to reproduce the issue.
@@ -76,8 +73,7 @@ This is only needed if the combination of `description`, `expected_behavior`,
 and `actual_behavior` is not sufficient to explain the issue.
 """
 
-[[properties]]
-name = "proposed_solution"
+[conversation.tools.github_create_issue_bug.arguments.proposed_solution]
 type = "string"
 description = """
 Optional proposed solution to the issue.
@@ -88,8 +84,7 @@ it should be limited in size, and optionally be pseudo-code to avoid making the
 solution obsolete if the code is later changed.
 """
 
-[[properties]]
-name = "tasks"
+[conversation.tools.github_create_issue_bug.arguments.tasks]
 type = "array"
 items.type = "string"
 description = """
@@ -97,8 +92,7 @@ Optional tasks in the order they need to be done in to resolve the bug. Include
 links to specific lines of code where the task should happen at.
 """
 
-[[properties]]
-name = "resource_links"
+[conversation.tools.github_create_issue_bug.arguments.resource_links]
 type = "array"
 items.type = "string"
 description = """
@@ -119,8 +113,7 @@ The following resource links are supported:
 - lines: blob/{commit hash}/{file path}#L{start line}-L{end line}
 """
 
-[[properties]]
-name = "labels"
+[conversation.tools.github_create_issue_bug.arguments.labels]
 type = "array"
 items.type = "string"
 description = """
@@ -132,8 +125,7 @@ Additional labels to add to the issue.
   result in an error with a list of valid labels, so you can retry again.
 """
 
-[[properties]]
-name = "assignees"
+[conversation.tools.github_create_issue_bug.arguments.assignees]
 type = "array"
 items.type = "string"
 description = """

@@ -1,7 +1,9 @@
-inherit = "cargo"
+[conversation.tools.fs_list_files]
+source = "local"
+command = "just serve-tools {{workspace}} {{tool}}"
 description = "List files in the project's local filesystem."
 
-[[properties]]
+[conversation.tools.fs_list_files.arguments.prefixes]
 name = "prefixes"
 type = "array"
 items.type = "string"
@@ -11,8 +13,7 @@ Optional list of path prefixes to filter the results by.
 If unspecified, all files in the project will be returned.
 """
 
-[[properties]]
-name = "extensions"
+[conversation.tools.fs_list_files.arguments.extensions]
 type = "array"
 items.type = "string"
 description = """

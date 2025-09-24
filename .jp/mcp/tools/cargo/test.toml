@@ -1,12 +1,12 @@
-inherit = "cargo"
+[conversation.tools.cargo_test]
+source = "local"
+command = "just serve-tools {{workspace}} {{tool}}"
 description = "Execute all unit and integration tests and build examples of the project."
 
-[[properties]]
-name = "package"
+[conversation.tools.cargo_test.arguments.package]
 description = "Package to run tests for, if unspecified, all workspace packages will be tested."
 type = "string"
 
-[[properties]]
-name = "testname"
+[conversation.tools.cargo_test.arguments.testname]
 description = "If specified, only run tests containing this string in their names."
 type = "string"

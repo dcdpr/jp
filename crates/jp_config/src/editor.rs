@@ -1,60 +1,177 @@
-use std::env;
+//! Editor configuration for Jean-Pierre.
 
-use confique::Config as Confique;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use std::{env, path::PathBuf};
 
-use crate::{
-    assignment::{set_error, AssignKeyValue, KvAssignment},
-    error::Result,
-};
+use duct::Expression;
+use schematic::Config;
 
-/// LLM configuration.
-#[derive(Debug, Clone, Default, PartialEq, Confique, Serialize, Deserialize)]
-#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
-#[config(partial_attr(serde(deny_unknown_fields)))]
-pub struct Editor {
+use crate::assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment};
+
+/// Editor configuration.
+#[derive(Debug, Config)]
+#[config(rename_all = "snake_case")]
+pub struct EditorConfig {
     /// The command to use for editing text.
     ///
-    /// If unset, falls back to `env_vars`.
-    #[config(partial_attr(serde(skip_serializing_if = "Option::is_none")))]
+    /// If unset, falls back to `envs`.
     pub cmd: Option<String>,
 
     /// The environment variables to use for editing text. Used if `cmd` is
     /// unset.
     ///
     /// Defaults to `JP_EDITOR`, `VISUAL`, and `EDITOR`.
-    #[config(default = ["JP_EDITOR", "VISUAL", "EDITOR"])]
-    pub env_vars: Vec<String>,
+    ///
+    /// # Safety
+    ///
+    /// Note that for security reasons, the value of these environment variables
+    /// are split by whitespace, and only the first element is used for the
+    /// command. Meaning, you cannot set `JP_EDITOR="subl -w"`, because it will
+    /// only run `subl`. You can either create your own wrapper script, and call
+    /// that directly (e.g. `sublw`), or set the `cmd` option to `subl -w`, as
+    /// that will use all elements of the command.
+    #[setting(
+        default = vec!["JP_EDITOR".into(), "VISUAL".into(), "EDITOR".into()],
+        merge = schematic::merge::append_vec,
+    )]
+    pub envs: Vec<String>,
 }
 
-impl Editor {
+impl EditorConfig {
     /// The command to use for editing text.
     ///
     /// If no command is configured, and no configured environment variables are
     /// set, returns `None`.
     #[must_use]
-    pub fn command(&self) -> Option<String> {
-        self.cmd
-            .clone()
-            .or_else(|| self.env_vars.iter().find_map(|v| env::var(v).ok()))
+    pub fn command(&self) -> Option<Expression> {
+        self.cmd.clone().map(duct_sh::sh_dangerous).or_else(|| {
+            self.envs.iter().find_map(|v| {
+                env::var(v)
+                    .ok()
+                    .filter(|s| {
+                        s.split_ascii_whitespace()
+                            .next()
+                            .is_some_and(|c| which::which(c).is_ok())
+                    })
+                    .map(|s| {
+                        duct::cmd::<&str, &[&str]>(
+                            s.split_ascii_whitespace().next().unwrap_or(&s),
+                            &[],
+                        )
+                    })
+            })
+        })
+    }
+
+    /// Return the path to the editor, if any.
+    #[must_use]
+    pub fn path(&self) -> Option<PathBuf> {
+        self.cmd.as_ref().map(PathBuf::from).or_else(|| {
+            self.envs.iter().find_map(|v| {
+                env::var(v).ok().and_then(|s| {
+                    s.split_ascii_whitespace()
+                        .next()
+                        .and_then(|c| which::which(c).ok())
+                })
+            })
+        })
     }
 }
 
-impl AssignKeyValue for <Editor as Confique>::Partial {
-    fn assign(&mut self, kv: KvAssignment) -> Result<()> {
-        match kv.key().as_str() {
-            "cmd" => self.cmd = kv.try_into_string().map(|v| (!v.is_empty()).then_some(v))?,
-            "env_vars" => {
-                kv.try_set_or_merge_vec(self.env_vars.get_or_insert_default(), |v| match v {
-                    Value::String(v) => Ok(v),
-                    _ => Err("Expected string".into()),
-                })?;
-            }
-
-            _ => return Err(set_error(kv.key())),
+impl AssignKeyValue for PartialEditorConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            "cmd" => self.cmd = kv.try_some_string()?,
+            _ if kv.p("envs") => kv.try_some_vec_of_strings(&mut self.envs)?,
+            _ => return missing_key(&kv),
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serial_test::serial;
+
+    use super::*;
+    use crate::{assignment::KvAssignment, util::EnvVarGuard};
+
+    #[test]
+    fn test_editor_config_cmd() {
+        let mut p = PartialEditorConfig::default();
+
+        let kv = KvAssignment::try_from_cli("cmd", "vim").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.cmd, Some("vim".into()));
+
+        let kv = KvAssignment::try_from_cli("cmd", "subl -w").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.cmd, Some("subl -w".into()));
+    }
+
+    #[test]
+    fn test_editor_config_envs() {
+        let mut p = PartialEditorConfig::default();
+
+        let kv = KvAssignment::try_from_cli("envs", "EDITOR,VISUAL").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.envs, Some(vec!["EDITOR".into(), "VISUAL".into()]));
+
+        let kv = KvAssignment::try_from_cli("envs:", r#"["EDITOR","VISUAL"]"#).unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.envs, Some(vec!["EDITOR".into(), "VISUAL".into()]));
+
+        let kv = KvAssignment::try_from_cli("envs.0", "EDIT").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.envs, Some(vec!["EDIT".into(), "VISUAL".into()]));
+
+        let kv = KvAssignment::try_from_cli("envs+:", r#"["OTHER"]"#).unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.envs,
+            Some(vec!["EDIT".into(), "VISUAL".into(), "OTHER".into()])
+        );
+
+        let kv = KvAssignment::try_from_cli("envs+", "LAST").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.envs,
+            Some(vec![
+                "EDIT".into(),
+                "VISUAL".into(),
+                "OTHER".into(),
+                "LAST".into()
+            ])
+        );
+    }
+
+    #[test]
+    #[serial(env_vars)]
+    fn test_editor_config_path() {
+        let mut p = EditorConfig {
+            cmd: Some("vim".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(p.path(), Some(PathBuf::from("vim")));
+
+        p.cmd = Some("subl -w".into());
+        assert_eq!(p.path(), Some(PathBuf::from("subl -w")));
+
+        p.cmd = Some("/usr/bin/vim".into());
+        assert_eq!(p.path(), Some(PathBuf::from("/usr/bin/vim")));
+
+        p.cmd = None;
+        p.envs = vec![];
+        assert_eq!(p.path(), None);
+
+        let _env = EnvVarGuard::set("JP_EDITOR1", "vi");
+        p.envs = vec!["JP_EDITOR1".into()];
+        assert!(p.path().unwrap().to_string_lossy().ends_with("/bin/vi"));
+
+        let _env = EnvVarGuard::set("JP_EDITOR2", "doesnotexist");
+        p.envs = vec!["JP_EDITOR2".into()];
+        assert_eq!(p.path(), None);
     }
 }

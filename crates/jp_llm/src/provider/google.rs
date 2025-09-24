@@ -4,20 +4,26 @@ use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use gemini_client_rs::{types, GeminiClient};
-use jp_config::{assistant, model::parameters::Parameters};
+use jp_config::{
+    assistant::tool_choice::ToolChoice,
+    model::{
+        id::{ModelIdConfig, ProviderId},
+        parameters::ParametersConfig,
+    },
+    providers::llm::google::GoogleConfig,
+};
 use jp_conversation::{
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
 };
-use jp_mcp::tool;
-use jp_model::{ModelId, ProviderId};
-use jp_query::query::ChatQuery;
 use tracing::trace;
 
 use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply};
 use crate::{
     error::{Error, Result},
     provider::Delta,
+    query::ChatQuery,
+    tool::ToolDefinition,
 };
 
 #[derive(Debug, Clone)]
@@ -28,8 +34,8 @@ pub struct Google {
 impl Google {
     async fn create_request(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<types::GenerateContentRequest> {
         let ChatQuery {
@@ -43,7 +49,7 @@ impl Google {
             .models()
             .await?
             .into_iter()
-            .find(|m| m.slug == model_id.slug());
+            .find(|m| *m.slug == *model_id.name);
 
         let system_prompt = thread.system_prompt.clone();
         let tools = convert_tools(tools, tool_call_strict_mode);
@@ -110,14 +116,14 @@ impl Provider for Google {
 
     async fn chat_completion(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
         let request = self.create_request(model_id, parameters, query).await?;
 
         self.client
-            .generate_content(model_id.slug(), &request)
+            .generate_content(&model_id.name, &request)
             .await
             .map_err(Into::into)
             .and_then(map_response)
@@ -126,13 +132,13 @@ impl Provider for Google {
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
         let request = self.create_request(model_id, parameters, query).await?;
-        let slug = model_id.slug().to_owned();
+        let slug = model_id.name.clone();
         let stream = Box::pin(stream! {
             let stream = client
                 .stream_content(&slug, &request)
@@ -189,10 +195,10 @@ fn map_response(response: types::GenerateContentResponse) -> Result<Vec<Event>> 
         .collect::<Result<_>>()
 }
 
-impl TryFrom<&assistant::provider::google::Google> for Google {
+impl TryFrom<&GoogleConfig> for Google {
     type Error = Error;
 
-    fn try_from(config: &assistant::provider::google::Google) -> Result<Self> {
+    fn try_from(config: &GoogleConfig) -> Result<Self> {
         let api_key = env::var(&config.api_key_env)
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
@@ -202,12 +208,12 @@ impl TryFrom<&assistant::provider::google::Google> for Google {
     }
 }
 
-fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolConfig {
+fn convert_tool_choice(choice: ToolChoice) -> types::ToolConfig {
     let (mode, allowed_function_names) = match choice {
-        tool::ToolChoice::None => (types::FunctionCallingMode::None, vec![]),
-        tool::ToolChoice::Auto => (types::FunctionCallingMode::Auto, vec![]),
-        tool::ToolChoice::Required => (types::FunctionCallingMode::Any, vec![]),
-        tool::ToolChoice::Function(name) => (types::FunctionCallingMode::Any, vec![name]),
+        ToolChoice::None => (types::FunctionCallingMode::None, vec![]),
+        ToolChoice::Auto => (types::FunctionCallingMode::Auto, vec![]),
+        ToolChoice::Required => (types::FunctionCallingMode::Any, vec![]),
+        ToolChoice::Function(name) => (types::FunctionCallingMode::Any, vec![name]),
     };
 
     types::ToolConfig {
@@ -218,7 +224,7 @@ fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolConfig {
     }
 }
 
-fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
+fn convert_tools(tools: Vec<ToolDefinition>, _strict: bool) -> Vec<types::Tool> {
     let supported_properties = [
         "type",
         "properties",
@@ -251,16 +257,14 @@ fn convert_tools(tools: Vec<jp_mcp::Tool>, _strict: bool) -> Vec<types::Tool> {
         .map(|tool| {
             types::Tool::FunctionDeclaration(types::ToolConfigFunctionDeclaration {
                 function_declarations: vec![types::FunctionDeclaration {
-                    name: tool.name.to_string(),
-                    description: tool.description.unwrap_or_default().to_string(),
                     parameters: Some(
-                        tool.input_schema
-                            .as_ref()
-                            .clone()
+                        tool.to_parameters_map()
                             .into_iter()
                             .filter(|(k, _)| supported_properties.contains(&k.as_str()))
                             .collect(),
                     ),
+                    name: tool.name,
+                    description: tool.description.unwrap_or_default(),
                     response: None,
                 }],
             })
@@ -486,7 +490,7 @@ impl From<types::ContentPart> for Delta {
 mod tests {
     use std::path::PathBuf;
 
-    use jp_config::{Configurable as _, Partial as _};
+    use jp_config::providers::llm::LlmProviderConfig;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -499,12 +503,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_google_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .google;
-
+        let mut config = LlmProviderConfig::default().google;
         let vcr = vcr();
         vcr.cassette(
             function_name!(),
@@ -528,12 +527,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_google_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .google;
-
+        let mut config = LlmProviderConfig::default().google;
         let model_id = "google/gemini-2.5-flash-preview-05-20".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
@@ -560,7 +554,7 @@ mod tests {
 
                 Google::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &Parameters::default(), query)
+                    .chat_completion(&model_id, &ParametersConfig::default(), query)
                     .await
                     .map(|mut v| {
                         v.truncate(10);
@@ -574,12 +568,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_google_chat_completion_stream(
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .google;
-
+        let mut config = LlmProviderConfig::default().google;
         let model_id = "google/gemini-2.5-flash-preview-05-20".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
@@ -606,7 +595,7 @@ mod tests {
 
                 Google::try_from(&config)
                     .unwrap()
-                    .chat_completion_stream(&model_id, &Parameters::default(), query)
+                    .chat_completion_stream(&model_id, &ParametersConfig::default(), query)
                     .await
                     .unwrap()
                     .filter_map(

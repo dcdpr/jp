@@ -1,0 +1,110 @@
+---
+source: crates/jp_config/src/lib.rs
+expression: "PartialAppConfig::empty()"
+---
+PartialAppConfig {
+    inherit: None,
+    config_load_paths: None,
+    extends: None,
+    assistant: PartialAssistantConfig {
+        name: None,
+        system_prompt: None,
+        instructions: [],
+        tool_choice: None,
+        model: PartialModelConfig {
+            id: PartialModelIdConfig {
+                provider: None,
+                name: None,
+            },
+            parameters: PartialParametersConfig {
+                max_tokens: None,
+                reasoning: None,
+                temperature: None,
+                top_p: None,
+                top_k: None,
+                stop_words: None,
+                other: None,
+            },
+        },
+    },
+    conversation: PartialConversationConfig {
+        title: PartialTitleConfig {
+            generate: PartialGenerateConfig {
+                auto: None,
+                model: None,
+            },
+        },
+        tools: PartialToolsConfig {
+            defaults: PartialToolsDefaultsConfig {
+                run: None,
+                result: None,
+                style: PartialDisplayStyleConfig {
+                    inline_results: None,
+                    results_file_link: None,
+                },
+            },
+            tools: {},
+        },
+        attachments: None,
+    },
+    style: PartialStyleConfig {
+        code: PartialCodeConfig {
+            theme: None,
+            color: None,
+            line_numbers: None,
+            file_link: None,
+            copy_link: None,
+        },
+        reasoning: PartialReasoningConfig {
+            show: None,
+        },
+        tool_call: PartialToolCallConfig {
+            show: None,
+        },
+        typewriter: PartialTypewriterConfig {
+            text_delay: None,
+            code_delay: None,
+        },
+    },
+    editor: PartialEditorConfig {
+        cmd: None,
+        envs: None,
+    },
+    template: PartialTemplateConfig {
+        values: None,
+    },
+    providers: PartialProviderConfig {
+        llm: PartialLlmProviderConfig {
+            anthropic: PartialAnthropicConfig {
+                api_key_env: None,
+                base_url: None,
+                beta_headers: None,
+            },
+            deepseek: PartialDeepseekConfig {
+                api_key_env: None,
+            },
+            google: PartialGoogleConfig {
+                api_key_env: None,
+                base_url: None,
+            },
+            llamacpp: PartialLlamacppConfig {
+                base_url: None,
+            },
+            ollama: PartialOllamaConfig {
+                base_url: None,
+            },
+            openai: PartialOpenaiConfig {
+                api_key_env: None,
+                base_url: None,
+                base_url_env: None,
+            },
+            openrouter: PartialOpenrouterConfig {
+                api_key_env: None,
+                app_name: None,
+                app_referrer: None,
+                base_url: None,
+            },
+        },
+        mcp: {},
+    },
+}

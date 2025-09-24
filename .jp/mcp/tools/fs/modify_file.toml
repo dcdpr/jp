@@ -1,43 +1,29 @@
-inherit = "cargo"
+[conversation.tools.fs_modify_file]
+source = "local"
+command = "just serve-tools {{workspace}} {{tool}}"
 description = """
 Modify a file in the project's local filesystem.
 
 The file must exist, be a regular file, and have no uncommitted changes.
 """
 
-[[properties]]
-name = "path"
+[conversation.tools.fs_modify_file.arguments.path]
 required = true
 type = "string"
 description = """
 The path to the file to delete. The path must be relative to the project's root.
 """
 
-[[properties]]
-name = "changes"
+[conversation.tools.fs_modify_file.arguments.string_to_replace]
 required = true
+type = "string"
 description = """
-The contents of the file to create. If not specified, the file will be empty.
-
-# Example: Add content after line 2
-
-{ "start_line": 2, "lines_to_replace": 0, "new_content": "use std::collections::HashMap;" }
-
-# Example: Change lines 10-12
-
-{ "start_line": 10, "lines_to_replace": 3, "new_content": "fn new_implementation() { println!(\"Updated function\"); }" }
-
-# Example: Delete lines 10-12
-
-{ "start_line": 5, "lines_to_replace": 3, "new_content": "" }
-
-# Example: Insert at beginning
-
-{ "start_line": 1, "lines_to_replace": 0, "new_content": "# Project Title\n\nThis is a new header section." }
+The string to replace in the file. The string may span multiple lines.
 """
-type = "array"
-items.type = "object"
-items.properties.start_line = { type = "integer", description = "Line number where modification starts (1-indexed)" }
-items.properties.lines_to_replace = { type = "integer", description = "Number of existing lines to replace (0 means insert)" }
-items.properties.new_content = { type = "string", description = "New content to insert (empty string means delete)" }
-items.required = ["start_line", "lines_to_replace", "new_content"]
+
+[conversation.tools.fs_modify_file.arguments.new_string]
+type = "string"
+description = """
+Optional new string to replace the `string_to_replace` with. The string may span
+multiple lines. If not specified, the `string_tp_replace` will be deleted.
+"""

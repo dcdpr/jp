@@ -1,20 +1,16 @@
+//! Typewriter effect styling configuration.
+
 use std::time::Duration;
 
-use confique::Config as Confique;
+use schematic::{Config, Schematic};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-use crate::{
-    assignment::{set_error, AssignKeyValue, KvAssignment, KvValue},
-    error::Result,
-    Error,
-};
+use crate::assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment};
 
 /// Typewriter style configuration.
-#[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
-#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
-#[config(partial_attr(serde(deny_unknown_fields)))]
-pub struct Typewriter {
+#[derive(Debug, Config)]
+#[config(rename_all = "snake_case")]
+pub struct TypewriterConfig {
     /// Delay between printing characters.
     ///
     /// You can use one of the following formats:
@@ -22,12 +18,8 @@ pub struct Typewriter {
     /// - `5m` for 5 milliseconds
     /// - `1u` for 1 microsecond
     /// - `0` to disable
-    #[config(
-        default = "3",
-        partial_attr(serde(serialize_with = "ser_delay")),
-        deserialize_with = de_delay
-    )]
-    pub text_delay: Duration,
+    #[config(default = "3")]
+    pub text_delay: DelayDuration,
 
     /// Delay between printing characters.
     ///
@@ -36,80 +28,49 @@ pub struct Typewriter {
     /// - `5m` for 5 milliseconds
     /// - `1u` for 1 microsecond
     /// - `0` to disable
-    #[config(
-        default = "500u",
-        partial_attr(serde(serialize_with = "ser_delay")),
-        deserialize_with = de_delay
-    )]
-    pub code_delay: Duration,
+    #[config(default = "500u")]
+    pub code_delay: DelayDuration,
 }
 
-impl AssignKeyValue for <Typewriter as Confique>::Partial {
-    fn assign(&mut self, kv: KvAssignment) -> Result<()> {
-        let k = kv.key().as_str().to_owned();
-        match k.as_str() {
-            "text_delay" => {
-                let path = kv.key().path().to_owned();
-                self.text_delay = Some(match kv.value() {
-                    KvValue::Json(Value::Object(_)) => kv.try_into_object()?,
-                    _ => parse_delay_config(&path, &kv.try_into_string()?)?,
-                });
-            }
-            "code_delay" => {
-                let path = kv.key().path().to_owned();
-                self.code_delay = Some(match kv.value() {
-                    KvValue::Json(Value::Object(_)) => kv.try_into_object()?,
-                    _ => parse_delay_config(&path, &kv.try_into_string()?)?,
-                });
-            }
-
-            _ => return Err(set_error(kv.key())),
+impl AssignKeyValue for PartialTypewriterConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            "text_delay" => self.text_delay = kv.try_some_from_str()?,
+            "code_delay" => self.code_delay = kv.try_some_from_str()?,
+            _ => return missing_key(&kv),
         }
 
         Ok(())
     }
 }
 
-pub fn de_delay<'de, D>(deserializer: D) -> std::result::Result<Duration, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    parse_delay(&s).map_err(serde::de::Error::custom)
-}
+/// Typewriter delay duration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Schematic)]
+pub struct DelayDuration(Duration);
 
-pub fn ser_delay<S>(
-    datetime: &Option<Duration>,
-    serializer: S,
-) -> std::result::Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    datetime
-        .map(|v| format!("{}u", v.as_micros()))
-        .serialize(serializer)
-}
+impl std::str::FromStr for DelayDuration {
+    type Err = String;
 
-fn parse_delay(s: &str) -> std::result::Result<Duration, String> {
-    s.rsplit_once(|c: char| c.is_ascii_digit())
-        .and_then(|(s, u)| match u {
-            "m" => s.parse::<u64>().map(Duration::from_millis).ok(),
-            "u" => s.parse::<u64>().map(Duration::from_micros).ok(),
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let num = s
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>();
+
+        let num = match s.get(num.len()..).unwrap_or_default() {
+            "m" | "" => num.parse::<u64>().map(Duration::from_millis).ok(),
+            "u" => num.parse::<u64>().map(Duration::from_micros).ok(),
             _ => None,
-        })
-        .or_else(|| s.parse::<u64>().map(Duration::from_millis).ok())
-        .ok_or(format!("invalid duration: {s}"))
+        };
+
+        num.map(Self)
+            .ok_or_else(|| format!("invalid duration: {s}"))
+    }
 }
 
-fn parse_delay_config(k: &str, s: &str) -> std::result::Result<Duration, Error> {
-    parse_delay(s).map_err(|_| Error::InvalidConfigValueType {
-        key: k.to_owned(),
-        value: s.to_string(),
-        need: vec![
-            "0".to_owned(),
-            "10".to_owned(),
-            "5m".to_owned(),
-            "1u".to_owned(),
-        ],
-    })
+impl From<DelayDuration> for Duration {
+    fn from(delay: DelayDuration) -> Self {
+        delay.0
+    }
 }

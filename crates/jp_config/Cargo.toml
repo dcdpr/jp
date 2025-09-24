@@ -13,27 +13,39 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-jp_mcp = { workspace = true }
-jp_model = { workspace = true }
+jp_id = { workspace = true }
 
-confique = { workspace = true, features = ["toml", "yaml", "json5"] }
 directories = { workspace = true }
-indexmap = { workspace = true, features = ["serde"] }
+duct = { workspace = true }
+duct_sh = { workspace = true }
+glob = { workspace = true }
+indexmap = { workspace = true }
 json5 = { workspace = true }
 path-clean = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
-serde = { workspace = true, features = ["std"] }
+relative-path = { workspace = true, features = ["serde", "alloc", "std"] }
+schematic = { workspace = true, features = [
+    "config",
+    "env",
+    "json",
+    "toml",
+    "yaml",
+    "schema",
+    "type_relative_path",
+    "type_indexmap",
+    "type_url",
+] }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true, features = ["parse", "serde", "display", "preserve_order"] }
 tracing = { workspace = true }
 url = { workspace = true, features = ["serde"] }
+which = { workspace = true, features = ["real-sys"] }
 
 [dev-dependencies]
-indoc = { workspace = true }
-insta = { workspace = true, features = ["json", "toml", "colors"] }
-pretty_assertions = { workspace = true, features = ["std"] }
+insta = { workspace = true }
 serial_test = { workspace = true }
 tempfile = { workspace = true }
 test-log = { workspace = true }

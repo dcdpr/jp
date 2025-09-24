@@ -2,14 +2,18 @@ use std::mem;
 
 use async_stream::stream;
 use async_trait::async_trait;
-use jp_config::{assistant, model::parameters::Parameters};
+use jp_config::{
+    assistant::tool_choice::ToolChoice,
+    model::{
+        id::{ModelIdConfig, ProviderId},
+        parameters::ParametersConfig,
+    },
+    providers::llm::llamacpp::LlamacppConfig,
+};
 use jp_conversation::{
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
 };
-use jp_mcp::tool::{self, ToolChoice};
-use jp_model::{ModelId, ProviderId};
-use jp_query::query::ChatQuery;
 use openai::{
     chat::{
         self, structured_output::ToolCallFunctionDefinition, ChatCompletionBuilder,
@@ -29,6 +33,8 @@ use super::{
 use crate::{
     error::{Error, Result},
     provider::{handle_delta, AccumulationState, Provider, ReasoningExtractor},
+    query::ChatQuery,
+    tool::ToolDefinition,
 };
 
 #[derive(Debug, Clone)]
@@ -42,11 +48,11 @@ impl Llamacpp {
     /// Build request for Llama.cpp API.
     fn build_request(
         &self,
-        model_id: &ModelId,
-        _parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        _parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<ChatCompletionBuilder> {
-        let slug = model_id.slug();
+        let slug = model_id.name.to_string();
         let ChatQuery {
             thread,
             tools,
@@ -65,7 +71,7 @@ impl Llamacpp {
             "Built Llamacpp request."
         );
 
-        Ok(ChatCompletionDelta::builder(slug, messages)
+        Ok(ChatCompletionDelta::builder(&slug, messages)
             .credentials(self.credentials.clone())
             .tools(tools)
             .tool_choice(tool_choice))
@@ -91,12 +97,12 @@ impl Provider for Llamacpp {
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model_id: &ModelIdConfig,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         debug!(
-            model = model_id.slug(),
+            model = %model_id.name,
             "Starting Llamacpp chat completion stream."
         );
 
@@ -207,10 +213,10 @@ fn map_model(model: &ModelResponse) -> ModelDetails {
     }
 }
 
-impl TryFrom<&assistant::provider::llamacpp::Llamacpp> for Llamacpp {
+impl TryFrom<&LlamacppConfig> for Llamacpp {
     type Error = Error;
 
-    fn try_from(config: &assistant::provider::llamacpp::Llamacpp) -> Result<Self> {
+    fn try_from(config: &LlamacppConfig) -> Result<Self> {
         let reqwest_client = reqwest::Client::builder().build()?;
         let base_url = config.base_url.clone();
         let credentials = Credentials::new("", &base_url);
@@ -244,7 +250,7 @@ impl From<ChatCompletionGeneric<ChatCompletionChoiceDelta>> for CompletionChunk 
 /// specific tool, by limiting the list of tools to the ones that we want to be
 /// called.
 fn convert_tools(
-    tools: Vec<jp_mcp::Tool>,
+    tools: Vec<ToolDefinition>,
     strict: bool,
     tool_choice: &ToolChoice,
 ) -> Vec<chat::ChatCompletionTool> {
@@ -252,11 +258,9 @@ fn convert_tools(
         .into_iter()
         .map(|tool| chat::ChatCompletionTool::Function {
             function: ToolCallFunctionDefinition {
-                name: tool.name.to_string(),
-                description: tool.description.map(|v| v.to_string()),
-                parameters: Some(serde_json::Value::Object(
-                    tool.input_schema.as_ref().clone(),
-                )),
+                parameters: Some(tool.to_parameters_map().into()),
+                name: tool.name,
+                description: tool.description,
                 strict: Some(strict),
             },
         })
@@ -272,11 +276,11 @@ fn convert_tools(
         .collect::<Vec<_>>()
 }
 
-fn convert_tool_choice(choice: &tool::ToolChoice) -> chat::ToolChoice {
+fn convert_tool_choice(choice: &ToolChoice) -> chat::ToolChoice {
     match choice {
-        tool::ToolChoice::Auto => chat::ToolChoice::mode(chat::ToolChoiceMode::Auto),
-        tool::ToolChoice::None => chat::ToolChoice::mode(chat::ToolChoiceMode::None),
-        tool::ToolChoice::Required | tool::ToolChoice::Function(_) => {
+        ToolChoice::Auto => chat::ToolChoice::mode(chat::ToolChoiceMode::Auto),
+        ToolChoice::None => chat::ToolChoice::mode(chat::ToolChoiceMode::None),
+        ToolChoice::Required | ToolChoice::Function(_) => {
             chat::ToolChoice::mode(chat::ToolChoiceMode::Required)
         }
     }
@@ -481,7 +485,7 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> ChatCompletionMe
 mod tests {
     use std::path::PathBuf;
 
-    use jp_config::{Configurable as _, Partial as _};
+    use jp_config::providers::llm::LlmProviderConfig;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -494,12 +498,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_llamacpp_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .llamacpp;
-
+        let mut config = LlmProviderConfig::default().llamacpp;
         let vcr = vcr();
         vcr.cassette(
             function_name!(),
@@ -519,12 +518,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_llamacpp_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
     {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .llamacpp;
-
+        let mut config = LlmProviderConfig::default().llamacpp;
         let model_id = "llamacpp/llama3:latest".parse().unwrap();
         let query = ChatQuery {
             thread: Thread {
@@ -547,7 +541,7 @@ mod tests {
 
                 Llamacpp::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &Parameters::default(), query)
+                    .chat_completion(&model_id, &ParametersConfig::default(), query)
                     .await
             },
         )

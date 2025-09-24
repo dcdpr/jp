@@ -30,7 +30,7 @@ Ok(
         },
         ModelDetails {
             provider: Openai,
-            slug: "gpt-4o-audio-preview-2025-06-03",
+            slug: "gpt-audio",
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
@@ -38,12 +38,12 @@ Ok(
         },
         ModelDetails {
             provider: Openai,
-            slug: "gpt-4.1-nano",
+            slug: "gpt-5-nano",
             context_window: Some(
-                1047576,
+                400000,
             ),
             max_output_tokens: Some(
-                32768,
+                128000,
             ),
             reasoning: Some(
                 ReasoningDetails {
@@ -53,12 +53,12 @@ Ok(
                 },
             ),
             knowledge_cutoff: Some(
-                2024-06-01,
+                2024-08-30,
             ),
         },
         ModelDetails {
             provider: Openai,
-            slug: "gpt-image-1",
+            slug: "gpt-audio-2025-08-28",
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
@@ -66,7 +66,7 @@ Ok(
         },
         ModelDetails {
             provider: Openai,
-            slug: "codex-mini-latest",
+            slug: "gpt-realtime",
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
@@ -74,7 +74,7 @@ Ok(
         },
         ModelDetails {
             provider: Openai,
-            slug: "gpt-4o-realtime-preview-2025-06-03",
+            slug: "gpt-realtime-2025-08-28",
             context_window: None,
             max_output_tokens: None,
             reasoning: None,

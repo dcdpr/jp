@@ -16,8 +16,6 @@ version.workspace = true
 jp_config = { workspace = true }
 jp_conversation = { workspace = true }
 jp_llm = { workspace = true }
-jp_model = { workspace = true }
-jp_query = { workspace = true }
 jp_workspace = { workspace = true }
 
 async-trait = { workspace = true }

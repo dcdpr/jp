@@ -1,4 +1,15 @@
+extends = [
+    "mcp/tools/fs/read_file.toml",
+    "mcp/tools/fs/list_files.toml",
+    "mcp/tools/fs/list_files.toml",
+    "mcp/tools/fs/grep_files.toml",
+    "mcp/tools/fs/grep_user_docs.toml",
+    "mcp/tools/github/pulls.toml",
+    "mcp/tools/github/issues.toml",
+]
+
 [conversation]
+tools.'*'.run = "always"
 # Add `git diff --cached` output as an attachment.
 attachments = [
     "cmd://git?arg=diff&arg=--cached",
@@ -9,24 +20,6 @@ attachments = [
 reasoning.show = false
 tool_call.show = false
 
-# Disable all MCP servers.
-[mcp.servers."*".tools."*"]
-enable = false
-
-[mcp.servers.embedded.tools."*"]
-enable = false
-run = "always"
-result = "always"
-
-# Enable only the tools we need.
-[mcp.servers.embedded.tools]
-fs_read_file.enable = true
-fs_list_files.enable = true
-fs_grep_files.enable = true
-fs_grep_user_docs.enable = true
-github_pulls.enable = true
-github_issues.enable = true
-
 [assistant]
 name = "Commit Writer"
 
@@ -36,7 +29,7 @@ system_prompt = """
 """
 
 [assistant.model]
-id = "anthropic/claude-sonnet-4-0"
+id = { provider = "anthropic", name = "claude-sonnet-4-0" }
 parameters.reasoning.effort = "high"
 
 [[assistant.instructions]]

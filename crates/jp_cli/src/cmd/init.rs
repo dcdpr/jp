@@ -1,13 +1,16 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::PathBuf, str::FromStr as _};
 
 use crossterm::style::Stylize as _;
 use duct::cmd;
-use jp_config::{Partial, PartialConfig};
-use jp_model::ModelId;
+use jp_config::{
+    conversation::tool::RunMode,
+    model::id::{ModelIdConfig, PartialModelIdConfig},
+    PartialAppConfig,
+};
 use jp_workspace::Workspace;
 use path_clean::PathClean as _;
 
-use crate::{ctx::IntoPartialConfig, Output, DEFAULT_STORAGE_DIR};
+use crate::{ctx::IntoPartialAppConfig, Output, DEFAULT_STORAGE_DIR};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Init {
@@ -42,11 +45,15 @@ impl Init {
         workspace = workspace.with_local_storage()?;
 
         let mut config = default_config();
-        config.assistant.model.id = default_model();
-        if let Some(id) = config.assistant.model.id.as_ref() {
+        if let Some(id) = default_model() {
             print!("Using model {}", id.to_string().bold().blue());
             let note = "  (to use a different model, update `.jp/config.toml`)".to_owned();
             println!("{}\n", note.grey().italic());
+
+            config.assistant.model.id = PartialModelIdConfig {
+                provider: Some(id.provider),
+                name: Some(id.name),
+            };
         }
 
         let data = toml::to_string_pretty(&config)?;
@@ -55,33 +62,38 @@ impl Init {
 
         workspace.persist()?;
 
-        Ok(format!("Initialized workspace at {}", root.to_string_lossy().bold()).into())
+        let loc = if root == cwd {
+            "current directory".to_owned()
+        } else {
+            root.to_string_lossy().bold().to_string()
+        };
+
+        Ok(format!("Initialized workspace at {loc}").into())
     }
 }
 
-fn default_config() -> jp_config::PartialConfig {
-    let mut cfg = jp_config::PartialConfig::default_values();
-    cfg.assistant.provider.anthropic.base_url = None;
-    cfg.assistant.provider.google.base_url = None;
-    cfg.assistant.provider.openrouter.base_url = None;
-    cfg.assistant.provider.openrouter.app_name = None;
-    cfg.assistant.provider.openai.base_url = None;
-    cfg.assistant.provider.openai.base_url_env = None;
-    cfg.assistant.instructions = None;
-    cfg.assistant.model.parameters = <_>::empty();
-    cfg.conversation = <_>::empty();
-    cfg.style = <_>::empty();
-    cfg.template = <_>::empty();
-    cfg.editor = <_>::empty();
-    cfg.mcp = <_>::empty();
+fn default_config() -> jp_config::PartialAppConfig {
+    let mut cfg = jp_config::PartialAppConfig::default();
+    cfg.extends
+        .get_or_insert_default()
+        .push("config.d/**/*".into());
+
+    // This is a required field without a default value (that is, the
+    // `ToolsDefaultsConfig` type does not set a default value for `run`).
+    //
+    // By setting it explicitly, we ensure that the default generated config
+    // file has this value set, which exposes it to the user. This is desired,
+    // as this is an important security feature, which we don't want users to
+    // have to rely on a default value that might change in the future.
+    cfg.conversation.tools.defaults.run = Some(RunMode::Ask);
 
     cfg
 }
 
-fn default_model() -> Option<ModelId> {
-    env::var("JP_ASSISTANT_MODEL_ID")
+fn default_model() -> Option<ModelIdConfig> {
+    env::var("JP_CFG_ASSISTANT_MODEL_ID")
         .ok()
-        .and_then(|v| ModelId::try_from(v).ok())
+        .and_then(|v| ModelIdConfig::from_str(&v).ok())
         .or_else(|| {
             let models = cmd!("ollama", "list")
                 .pipe(cmd!("cut", "-d", " ", "-f1"))
@@ -123,12 +135,12 @@ fn default_model() -> Option<ModelId> {
         })
 }
 
-impl IntoPartialConfig for Init {
+impl IntoPartialAppConfig for Init {
     fn apply_cli_config(
         &self,
         _workspace: Option<&Workspace>,
-        partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        partial: PartialAppConfig,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         Ok(partial)
     }
 }
