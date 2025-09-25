@@ -1,4 +1,5 @@
 [conversation.tools.fs_delete_file]
+enable = false
 source = "local"
 command = "just serve-tools {{workspace}} {{tool}}"
 description = """

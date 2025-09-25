@@ -1,4 +1,8 @@
 [conversation.tools.cargo_expand]
+enable = false
+run = "always"
+style.inline_results = "off"
+
 source = "local"
 command = "just serve-tools {{workspace}} {{tool}}"
 description = "Expand the auto-generated Rust code for the given item."

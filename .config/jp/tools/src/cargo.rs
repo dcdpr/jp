@@ -1,8 +1,8 @@
 use crate::{Error, Tool, Workspace};
 
-pub(crate) mod check;
-pub(crate) mod expand;
-pub(crate) mod test;
+mod check;
+mod expand;
+mod test;
 
 use check::cargo_check;
 use expand::cargo_expand;

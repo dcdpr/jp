@@ -30,6 +30,13 @@ octocrab = { workspace = true, features = [
     "timeout",
 ] }
 quick-xml = { workspace = true, features = ["encoding", "serialize"] }
+reqwest = { workspace = true, features = [
+    "charset",
+    "http2",
+    "json",
+    "rustls-tls",
+    "stream",
+] }
 serde = { workspace = true, features = ["std", "derive", "alloc"] }
 serde_json = { workspace = true, features = ["std", "preserve_order", "alloc"] }
 time = { workspace = true, features = ["serde-human-readable"] }

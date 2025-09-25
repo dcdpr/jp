@@ -38,7 +38,7 @@ pub(crate) async fn fs_grep_files(
         let files = if path.is_dir() {
             super::fs_list_files(path.clone(), None, None)
                 .await?
-                .0
+                .into_files()
                 .into_iter()
                 .map(PathBuf::from)
                 .map(|p| root.join(&path).join(p))

@@ -1,16 +1,14 @@
-extends = [
-    "mcp/tools/fs/read_file.toml",
-    "mcp/tools/fs/list_files.toml",
-    "mcp/tools/fs/list_files.toml",
-    "mcp/tools/fs/grep_files.toml",
-    "mcp/tools/fs/grep_user_docs.toml",
-    "mcp/tools/github/pulls.toml",
-    "mcp/tools/github/issues.toml",
-]
+[conversation.tools]
+'*'.run = "always"
+fs_read_file.enable = true
+fs_list_files.enable = true
+fs_grep_files.enable = true
+fs_grep_user_docs.enable = true
+github_pulls.enable = true
+github_issues.enable = true
 
-[conversation]
-tools.'*'.run = "always"
 # Add `git diff --cached` output as an attachment.
+[conversation]
 attachments = [
     "cmd://git?arg=diff&arg=--cached",
 ]

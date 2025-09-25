@@ -1,23 +1,82 @@
+// TODO:
+//
+// Look into using (parts of) <https://github.com/jbr/semantic-edit-mcp> for
+// semantic edits with (in-memory) staged changes.
+
 use std::{
     fs::{self, File},
     io::Read as _,
+    ops::{Deref, DerefMut, Range},
     path::PathBuf,
 };
 
 use super::utils::is_file_dirty;
 use crate::Error;
 
-#[derive(serde::Deserialize)]
-pub struct Change {
-    start_line: usize,
-    lines_to_replace: usize,
-    new_content: String,
+pub struct Content(String);
+
+impl Deref for Content {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Content {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Content {
+    fn find_lines_to_replace(&self, pattern: &str) -> Option<Range<usize>> {
+        let start_idx = self
+            .find_exact_start_line(pattern)
+            .or_else(|| self.find_trimmed_start_line(pattern))
+            .or_else(|| self.find_fuzzy_start_line(pattern))?;
+
+        Some(start_idx..start_idx + pattern.lines().count())
+    }
+
+    fn find_exact_start_line(&self, pattern: &str) -> Option<usize> {
+        self.0.find(pattern)
+    }
+
+    fn find_trimmed_start_line(&self, pattern: &str) -> Option<usize> {
+        self.0.find(pattern.trim())
+    }
+
+    fn find_fuzzy_start_line(&self, pattern: &str) -> Option<usize> {
+        let first_line_to_replace = pattern
+            .lines()
+            .next()?
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let first_line_matches =
+            self.0
+                .lines()
+                .enumerate()
+                .fold::<Option<Vec<_>>, _>(None, |mut acc, (i, line)| {
+                    let fuzzy_line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+                    if fuzzy_line.contains(&first_line_to_replace) {
+                        acc.get_or_insert_default().push(i);
+                    }
+                    acc
+                })?;
+
+        // TODO: Handle multiple matches
+        first_line_matches.first().copied()
+    }
 }
 
 pub(crate) async fn fs_modify_file(
     root: PathBuf,
     path: String,
-    changes: Vec<Change>,
+    string_to_replace: String,
+    new_string: Option<String>,
 ) -> std::result::Result<String, Error> {
     let p = PathBuf::from(&path);
 
@@ -49,64 +108,29 @@ pub(crate) async fn fs_modify_file(
 
     // Read existing file content
     let mut file = File::open(&absolute_path)?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)?;
 
+    let contents = Content(content);
     let mut lines: Vec<String> = contents.lines().map(str::to_owned).collect();
-    let total_lines = lines.len();
 
-    // Validate all changes
-    for change in &changes {
-        if change.start_line == 0 {
-            return Err("Line numbers are 1-indexed, got 0.".into());
-        }
-        if change.start_line > total_lines + 1 {
-            return Err(format!(
-                "start_line {} exceeds file length {}",
-                change.start_line, total_lines
-            )
-            .into());
-        }
-        if change.start_line + change.lines_to_replace > total_lines + 1 {
-            return Err("Change would extend beyond file length".into());
-        }
-    }
+    let change_lines = contents
+        .find_lines_to_replace(&string_to_replace)
+        .ok_or("Cannot find lines to replace")?;
 
-    // Sort changes by start_line in descending order
-    let mut sorted_changes = changes;
-    sorted_changes.sort_by(|a, b| b.start_line.cmp(&a.start_line));
+    // Remove the lines to be replaced
+    lines.drain(change_lines.start..change_lines.end.min(lines.len()));
 
-    // Check for overlapping changes
-    for i in 0..sorted_changes.len() {
-        for j in i + 1..sorted_changes.len() {
-            let change_a = &sorted_changes[i];
-            let change_b = &sorted_changes[j];
-
-            let a_start = change_a.start_line;
-            let a_end = change_a.start_line + change_a.lines_to_replace;
-            let b_start = change_b.start_line;
-            let b_end = change_b.start_line + change_b.lines_to_replace;
-
-            // Check if ranges overlap
-            if a_start < b_end && b_start < a_end {
-                return Err("Overlapping changes are not allowed.".into());
-            }
-        }
-    }
-
-    // Apply changes from last to first
-    for change in sorted_changes {
-        let start_idx = change.start_line.saturating_sub(1);
-        let end_idx = start_idx + change.lines_to_replace;
-
-        // Remove the lines to be replaced
-        lines.drain(start_idx..end_idx.min(lines.len()));
-
-        // Insert new content if any
-        if !change.new_content.is_empty() {
-            let new_lines: Vec<String> = change.new_content.lines().map(str::to_owned).collect();
-            for (i, line) in new_lines.into_iter().enumerate() {
-                lines.insert(start_idx + i, line);
+    // Insert new content if any
+    if let Some(new_string) = &new_string
+        && !new_string.trim().is_empty()
+    {
+        let new_lines: Vec<String> = new_string.lines().map(str::to_owned).collect();
+        for (i, line) in new_lines.into_iter().enumerate() {
+            if lines.len() <= change_lines.start + i {
+                lines.push(line);
+            } else {
+                lines[change_lines.start + i] = line;
             }
         }
     }
@@ -138,32 +162,34 @@ mod tests {
     #[tokio::test]
     async fn test_modify_file_replace_word() {
         struct TestCase {
-            changes: Vec<Change>,
-            output: Result<&'static str, &'static str>,
             start_content: &'static str,
+            string_to_replace: &'static str,
+            new_string: Option<&'static str>,
             final_content: &'static str,
+            output: Result<&'static str, &'static str>,
         }
 
         let cases = vec![
             ("replace first line", TestCase {
-                changes: vec![Change {
-                    start_line: 1,
-                    lines_to_replace: 1,
-                    new_content: "hello universe".to_string(),
-                }],
-                output: Ok("File modified successfully."),
                 start_content: "hello world\n",
+                string_to_replace: "hello world",
+                new_string: Some("hello universe"),
                 final_content: "hello universe\n",
+                output: Ok("File modified successfully."),
             }),
             ("delete first line", TestCase {
-                changes: vec![Change {
-                    start_line: 1,
-                    lines_to_replace: 1,
-                    new_content: String::new(),
-                }],
-                output: Ok("File modified successfully."),
                 start_content: "hello world\n",
+                string_to_replace: "hello world",
+                new_string: None,
                 final_content: "\n",
+                output: Ok("File modified successfully."),
+            }),
+            ("replace first line with multiple lines", TestCase {
+                start_content: "hello world\n",
+                string_to_replace: "hello world",
+                new_string: Some("hello\nworld\n"),
+                final_content: "hello\nworld\n",
+                output: Ok("File modified successfully."),
             }),
         ];
 
@@ -177,9 +203,14 @@ mod tests {
             let absolute_file_path = root.join(file_path);
             fs::write(&absolute_file_path, test_case.start_content).unwrap();
 
-            let actual = fs_modify_file(root, file_path.to_owned(), test_case.changes)
-                .await
-                .map_err(|e| e.to_string());
+            let actual = fs_modify_file(
+                root,
+                file_path.to_owned(),
+                test_case.string_to_replace.to_owned(),
+                test_case.new_string.map(str::to_owned),
+            )
+            .await
+            .map_err(|e| e.to_string());
 
             assert_eq!(
                 actual,

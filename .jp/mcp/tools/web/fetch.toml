@@ -1,0 +1,14 @@
+[conversation.tools.web_fetch]
+enable = false
+source = "local"
+command = "just serve-tools {{workspace}} {{tool}}"
+description = """
+Fetch the contents of a web page over HTTP(S).
+"""
+
+[conversation.tools.web_fetch.parameters.url]
+type = "string"
+required = true
+description = """
+The URL of the web page to fetch.
+"""

@@ -150,7 +150,7 @@ async fn diff(number: u64, file_diffs: Vec<String>) -> Result<String> {
         })
         .collect();
 
-    to_xml_with_root(changed_files, "files")
+    to_xml_with_root(&changed_files, "files")
 }
 
 async fn list(state: Option<State>) -> Result<String> {
