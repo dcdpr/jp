@@ -11,6 +11,7 @@ use tracing::warn;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
+    BoxedError,
 };
 
 pub mod style;
@@ -155,17 +156,19 @@ pub struct ToolConfig {
 }
 
 impl AssignKeyValue for PartialToolConfig {
-    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        dbg!(&self, &kv);
+
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
             "source" => self.source = kv.try_some_from_str()?,
             "enable" => self.enable = kv.try_some_bool()?,
-            "command" => self.command.assign(kv)?,
+            _ if kv.p("command") => self.command.assign(kv)?,
             "description" => self.description = kv.try_some_string()?,
             "parameters" => self.parameters = kv.try_object()?,
             "run" => self.run = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
-            "style" => self.style.assign(kv)?,
+            _ if kv.p("style") => self.style.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -183,6 +186,28 @@ pub enum ToolCommandConfigOrString {
     /// A complete command configuration.
     #[setting(nested)]
     Config(ToolCommandConfig),
+}
+
+impl AssignKeyValue for PartialToolCommandConfigOrString {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object_or_from_str()?,
+            _ => match self {
+                Self::String(_) => return missing_key(&kv),
+                Self::Config(config) => config.assign(kv)?,
+            },
+        }
+
+        Ok(())
+    }
+}
+
+impl FromStr for PartialToolCommandConfigOrString {
+    type Err = BoxedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::String(s.to_owned()))
+    }
 }
 
 impl ToolCommandConfigOrString {
@@ -206,19 +231,8 @@ impl ToolCommandConfigOrString {
     }
 }
 
-impl AssignKeyValue for PartialToolCommandConfigOrString {
-    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
-        match self {
-            Self::String(v) => *v = kv.try_string()?,
-            Self::Config(v) => v.assign(kv)?,
-        }
-
-        Ok(())
-    }
-}
-
 /// Tool command configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolCommandConfig {
     /// The program to run.
@@ -621,5 +635,103 @@ impl ToolConfigWithDefaults {
     #[must_use]
     pub fn style(&self) -> &DisplayStyleConfig {
         self.tool.style.as_ref().unwrap_or(&self.defaults.style)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::assert_matches::assert_matches;
+
+    use schematic::PartialConfig as _;
+
+    use super::*;
+
+    #[test]
+    fn test_tools_config() {
+        assert_matches!(PartialToolsConfig::default_values(&()), Ok(Some(_)));
+        assert_matches!(PartialToolConfig::default_values(&()), Ok(Some(_)));
+
+        let mut p = PartialToolsConfig::default_values(&()).unwrap().unwrap();
+
+        p.tools.insert("cargo_check".to_owned(), PartialToolConfig {
+            enable: Some(false),
+            source: Some(ToolSource::Local { tool: None }),
+            ..Default::default()
+        });
+
+        let kv = KvAssignment::try_from_cli("cargo_check.enable", "true").unwrap();
+        p.assign(kv).unwrap();
+
+        assert_eq!(
+            p.tools,
+            IndexMap::<_, _>::from_iter(vec![("cargo_check".to_owned(), PartialToolConfig {
+                enable: Some(true),
+                source: Some(ToolSource::Local { tool: None }),
+                ..Default::default()
+            })])
+        );
+
+        let kv = KvAssignment::try_from_cli("foo:", r#"{"source":"builtin"}"#).unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.tools,
+            IndexMap::<_, _>::from_iter(vec![
+                ("cargo_check".to_owned(), PartialToolConfig {
+                    enable: Some(true),
+                    source: Some(ToolSource::Local { tool: None }),
+                    ..Default::default()
+                }),
+                ("foo".to_owned(), PartialToolConfig {
+                    source: Some(ToolSource::Builtin { tool: None }),
+                    ..Default::default()
+                })
+            ])
+        );
+    }
+
+    #[test]
+    fn test_tool_config_command() {
+        let mut p = PartialToolConfig::default_values(&()).unwrap().unwrap();
+        assert!(p.command.is_none());
+
+        let kv = KvAssignment::try_from_cli("command", "cargo check").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.command,
+            Some(PartialToolCommandConfigOrString::String(
+                "cargo check".to_owned()
+            ))
+        );
+
+        let cfg = ToolCommandConfigOrString::from_partial(p.command.clone().unwrap()).unwrap();
+        assert_eq!(cfg.command(), ToolCommandConfig {
+            program: "cargo".to_owned(),
+            args: vec!["check".to_owned()],
+            shell: false,
+        });
+
+        let kv = KvAssignment::try_from_cli(
+            "command:",
+            r#"{"program":"cargo","args":["check", "--verbose"],"shell":true}"#,
+        )
+        .unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.command,
+            Some(PartialToolCommandConfigOrString::Config(
+                PartialToolCommandConfig {
+                    program: Some("cargo".to_owned()),
+                    args: Some(vec!["check".to_owned(), "--verbose".to_owned()]),
+                    shell: Some(true),
+                }
+            ))
+        );
+
+        let cfg = ToolCommandConfigOrString::from_partial(p.command.unwrap()).unwrap();
+        assert_eq!(cfg.command(), ToolCommandConfig {
+            program: "cargo".to_owned(),
+            args: vec!["check".to_owned(), "--verbose".to_owned()],
+            shell: true,
+        });
     }
 }
