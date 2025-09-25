@@ -174,23 +174,23 @@ fn default_config() -> jp_config::PartialAppConfig {
         cfg.providers.llm.aliases.extend([
             ("google".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Google),
-                name: Some(Name("gemini-2.5-pro".into())),
+                name: Some(Name("gemini-pro-latest".into())),
             }),
             ("gemini".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Google),
-                name: Some(Name("gemini-2.5-pro".into())),
+                name: Some(Name("gemini-pro-latest".into())),
             }),
             ("gemini-pro".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Google),
-                name: Some(Name("gemini-2.5-pro".into())),
+                name: Some(Name("gemini-pro-latest".into())),
             }),
             ("gemini-flash".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Google),
-                name: Some(Name("gemini-2.5-flash".into())),
+                name: Some(Name("gemini-flash-latest".into())),
             }),
             ("gemini-lite".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Google),
-                name: Some(Name("gemini-2.5-flash-lite".into())),
+                name: Some(Name("gemini-flash-lite-latest".into())),
             }),
         ]);
     }

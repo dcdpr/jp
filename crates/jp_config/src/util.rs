@@ -3,7 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use glob::glob;
-use schematic::{ConfigLoader, PartialConfig as _, TransformResult};
+use indexmap::IndexMap;
+use schematic::{ConfigLoader, MergeError, MergeResult, PartialConfig, TransformResult};
 use tracing::{debug, error, info, trace};
 
 use super::Config;
@@ -172,8 +173,9 @@ pub fn build(mut config: PartialAppConfig) -> Result<AppConfig, Error> {
         config = defaults;
     }
 
+    let partial_json = serde_json::to_string(&config).unwrap_or_default();
     let config = Config::from_partial(config)?;
-    debug!(?config, "Loaded configuration.");
+    debug!(config = partial_json, "Loaded configuration.");
 
     Ok(config)
 }
@@ -260,6 +262,36 @@ pub(crate) fn vec_dedup<T: PartialEq + Ord>(mut v: Vec<T>, _: &()) -> TransformR
     v.sort();
     v.dedup();
     Ok(v)
+}
+
+/// Merge [`IndexMap`]s of nested [`PartialConfig`]s.
+///
+/// # Errors
+///
+/// Returns an error if merging the partials fails, which returns a
+/// [`schematic::MergeError`].
+pub fn merge_nested_indexmap<V, C>(
+    prev: IndexMap<String, V>,
+    mut next: IndexMap<String, V>,
+    c: &C,
+) -> MergeResult<IndexMap<String, V>>
+where
+    V: PartialConfig<Context = C>,
+    C: Default,
+{
+    let mut prev = prev
+        .into_iter()
+        .map(|(name, mut prev)| {
+            if let Some(next) = next.shift_remove(&name) {
+                prev.merge(c, next).map_err(MergeError::new)?;
+            }
+
+            Ok((name, prev))
+        })
+        .collect::<Result<IndexMap<_, _>, _>>()?;
+
+    prev.append(&mut next);
+    Ok(Some(prev))
 }
 
 /// Define the name to serialize and deserialize for a unit variant.

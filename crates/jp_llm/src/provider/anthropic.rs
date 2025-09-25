@@ -27,7 +27,7 @@ use jp_conversation::{
 };
 use serde_json::Value;
 use time::macros::date;
-use tracing::{info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply, StreamEvent};
 use crate::{
@@ -84,7 +84,7 @@ impl Provider for Anthropic {
         let model_details = get_details_for_model(model, &details);
         let request = create_request(model, model_details, parameters, query, false)?;
 
-        trace!(
+        debug!(
             request = serde_json::to_string(&request).unwrap_or_default(),
             stream = false,
             "Anthropic chat completion request."
@@ -113,7 +113,7 @@ impl Provider for Anthropic {
         let model_details = get_details_for_model(model_id, &details);
         let request = create_request(model_id, model_details, parameters, query, true)?;
 
-        trace!(
+        debug!(
             request = serde_json::to_string(&request).unwrap_or_default(),
             stream = true,
             "Anthropic chat completion stream request."
@@ -445,7 +445,7 @@ fn map_model(model: types::Model) -> ModelDetails {
 }
 
 fn map_response(response: types::CreateMessagesResponse) -> Result<Vec<Event>> {
-    trace!(
+    debug!(
         response = serde_json::to_string(&response).unwrap_or_default(),
         "Received response from Anthropic API."
     );

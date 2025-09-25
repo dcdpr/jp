@@ -13,6 +13,7 @@ use crate::{
         llm::{LlmProviderConfig, PartialLlmProviderConfig},
         mcp::McpProviderConfig,
     },
+    util::merge_nested_indexmap,
 };
 
 /// Provider configuration.
@@ -24,7 +25,7 @@ pub struct ProviderConfig {
     pub llm: LlmProviderConfig,
 
     /// MCP provider configurations.
-    #[setting(nested, merge = schematic::merge::merge_iter)]
+    #[setting(nested, merge = merge_nested_indexmap)]
     pub mcp: IndexMap<String, McpProviderConfig>,
 }
 
