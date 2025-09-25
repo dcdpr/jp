@@ -173,16 +173,18 @@ fn build_tool_call_result(
         _ => content.lines().count(),
     };
 
-    let mut intro = "\nTool call result".to_owned();
-    match tool_config.style().inline_results {
-        InlineResults::Truncate(Truncate { lines }) if lines < content.lines().count() => {
-            intro.push_str(&format!(" _(truncated to {lines} lines)_"));
+    if handler.render_tool_calls {
+        let mut intro = "\nTool call result".to_owned();
+        match tool_config.style().inline_results {
+            InlineResults::Truncate(Truncate { lines }) if lines < content.lines().count() => {
+                intro.push_str(&format!(" _(truncated to {lines} lines)_"));
+            }
+            _ => {}
         }
-        _ => {}
-    }
-    intro.push_str(":\n");
+        intro.push_str(":\n");
 
-    handler.handle(&intro, ctx, false)?;
+        handler.handle(&intro, ctx, false)?;
+    }
 
     let mut data = "\n".to_owned();
 
