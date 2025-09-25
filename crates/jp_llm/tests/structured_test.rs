@@ -21,7 +21,10 @@ async fn test_conversation_titles() -> Result<(), Box<dyn std::error::Error>> {
     let model_id = "openrouter/openai/o3-mini-high".parse().unwrap();
     let mut config = LlmProviderConfig::default().openrouter;
     let message = UserMessage::Query("Test message".to_string());
-    let history = vec![MessagePair::new(message, AssistantMessage::new(ProviderId::Openrouter))];
+    let history = vec![MessagePair::new(
+        message,
+        AssistantMessage::new(ProviderId::Openrouter),
+    )];
 
     let vcr = vcr();
     vcr.cassette(
