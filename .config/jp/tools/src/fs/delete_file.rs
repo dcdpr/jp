@@ -31,7 +31,7 @@ pub(crate) async fn fs_delete_file(
     };
 
     if is_file_dirty(&root, &p)? {
-        return Err("File has uncommitted changes. Please commit or discard first.".into());
+        return Err("File has uncommitted changes. Please stage or discard first.".into());
     }
 
     fs::remove_file(&absolute_path)?;

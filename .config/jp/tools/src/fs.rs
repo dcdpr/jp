@@ -47,7 +47,15 @@ pub async fn run(ws: Workspace, t: Tool) -> std::result::Result<String, Error> {
 
         "delete_file" => fs_delete_file(ws.path, t.req("path")?).await,
 
-        "modify_file" => fs_modify_file(ws.path, t.req("path")?, t.req("changes")?).await,
+        "modify_file" => {
+            fs_modify_file(
+                ws.path,
+                t.req("path")?,
+                t.req("string_to_replace")?,
+                t.opt("new_string")?,
+            )
+            .await
+        }
 
         _ => Err(format!("Unknown tool '{}'", t.name).into()),
     }

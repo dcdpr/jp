@@ -24,11 +24,16 @@ pub(crate) async fn cargo_check(workspace: &Workspace, package: Option<String>) 
     }
 
     let content = String::from_utf8_lossy(&result.stderr);
-    Ok(indoc::formatdoc! {"
+    let content = content.trim();
+    if content.is_empty() {
+        Ok("Check succeeded. No warnings or errors found.".to_owned())
+    } else {
+        Ok(indoc::formatdoc! {"
         ```
-        {}
+        {content}
         ```
-    ", content.trim()})
+    "})
+    }
 }
 
 #[cfg(test)]

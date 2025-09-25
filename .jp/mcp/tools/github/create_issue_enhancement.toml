@@ -1,4 +1,5 @@
 [conversation.tools.github_create_issue_enhancement]
+enable = false
 source = "local"
 command = "just serve-tools {{workspace}} {{tool}}"
 description = """

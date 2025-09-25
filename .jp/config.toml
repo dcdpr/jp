@@ -1,3 +1,7 @@
+extends = [
+    "mcp/tools/**/*.toml",
+]
+
 config_load_paths = [".config/jp"]
 
 [providers.llm]

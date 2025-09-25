@@ -1,10 +1,10 @@
 use crate::{Error, Tool, Workspace};
 
-pub(crate) mod create_issue_bug;
-pub(crate) mod create_issue_enhancement;
-pub(crate) mod issues;
-pub(crate) mod pulls;
-pub(crate) mod repo;
+mod create_issue_bug;
+mod create_issue_enhancement;
+mod issues;
+mod pulls;
+mod repo;
 
 use create_issue_bug::github_create_issue_bug;
 use create_issue_enhancement::github_create_issue_enhancement;
@@ -17,7 +17,7 @@ const REPO: &str = "jp";
 
 pub async fn run(_: Workspace, t: Tool) -> std::result::Result<String, Error> {
     match t.name.trim_start_matches("github_") {
-        "issues" => github_issues(t.opt("number")?).await,
+        "issues" => github_issues(t.opt_or_empty("number")?).await,
         "create_issue_bug" => {
             github_create_issue_bug(
                 t.req("title")?,
