@@ -59,8 +59,10 @@ pub enum Error {
     #[error("Anthropic request builder error: {0}")]
     AnthropicRequestBuilder(#[from] async_anthropic::types::CreateMessagesRequestBuilderError),
 
-    #[error("request rate limited (retry after {} seconds)", retry_after.unwrap_or_default())]
-    RateLimit { retry_after: Option<u64> },
+    #[error("request rate limited (retry after {} seconds)", retry_after.unwrap_or_default().as_secs())]
+    RateLimit {
+        retry_after: Option<std::time::Duration>,
+    },
 
     #[error("Failed to serialize XML")]
     XmlSerialization(#[from] quick_xml::SeError),

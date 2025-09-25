@@ -444,7 +444,10 @@ impl From<jp_llm::Error> for Error {
             .into(),
             RateLimit { retry_after } => [
                 ("message", "Rate limited".into()),
-                ("retry_after", retry_after.unwrap_or_default().to_string()),
+                (
+                    "retry_after",
+                    retry_after.unwrap_or_default().as_secs().to_string(),
+                ),
             ]
             .into(),
             UnknownModel(model) => [("message", "Unknown model".into()), ("model", model)].into(),

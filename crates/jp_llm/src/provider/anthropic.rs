@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, time::Duration};
 
 use async_anthropic::{
     errors::AnthropicError,
@@ -82,7 +82,7 @@ impl Provider for Anthropic {
     ) -> Result<Reply> {
         let details = self.models().await?;
         let model_details = get_details_for_model(model, &details);
-        let request = create_request(model, model_details, parameters, query)?;
+        let request = create_request(model, model_details, parameters, query, false)?;
 
         trace!(
             request = serde_json::to_string(&request).unwrap_or_default(),
@@ -111,7 +111,7 @@ impl Provider for Anthropic {
         let client = self.client.clone();
         let details = self.models().await?;
         let model_details = get_details_for_model(model_id, &details);
-        let request = create_request(model_id, model_details, parameters, query)?;
+        let request = create_request(model_id, model_details, parameters, query, true)?;
 
         trace!(
             request = serde_json::to_string(&request).unwrap_or_default(),
@@ -125,8 +125,18 @@ impl Provider for Anthropic {
                 .messages()
                 .create_stream(request).await
                 .map_err(|e| match e {
-                    async_anthropic::errors::AnthropicError::RateLimit { retry_after } =>
-                        Error::RateLimit { retry_after },
+                    AnthropicError::RateLimit { retry_after } =>
+                        Error::RateLimit { retry_after: retry_after.map(Duration::from_secs) },
+
+                    // Anthropic's API is notoriously unreliable, so we
+                    // special-case the "overloaded" error, which is returned
+                    // when their API is experiencing a high load.
+                    //
+                    // See: <https://docs.claude.com/en/docs/build-with-claude/streaming#error-events>
+                    // See: <https://docs.claude.com/en/api/errors#http-errors>
+                    AnthropicError::StreamError(e) if &e.error_type == "overloaded_error" =>
+                        Error::RateLimit { retry_after: Some(Duration::from_secs(3)) },
+
                     _ => Error::from(e),
                 });
 
@@ -146,6 +156,7 @@ fn create_request(
     model_details: Option<&ModelDetails>,
     parameters: &ParametersConfig,
     query: ChatQuery,
+    stream: bool,
 ) -> Result<types::CreateMessagesRequest> {
     let ChatQuery {
         thread,
@@ -155,6 +166,8 @@ fn create_request(
     } = query;
 
     let mut builder = types::CreateMessagesRequestBuilder::default();
+
+    builder.stream(stream);
 
     let Thread {
         system_prompt,
@@ -1013,7 +1026,7 @@ mod tests {
             model_type: String::new(),
         });
 
-        let request = create_request(&model_id, Some(&model_details), &parameters, query);
+        let request = create_request(&model_id, Some(&model_details), &parameters, query, false);
 
         insta::assert_debug_snapshot!(request);
     }
