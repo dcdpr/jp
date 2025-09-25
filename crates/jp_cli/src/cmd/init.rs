@@ -267,10 +267,44 @@ impl IntoPartialAppConfig for Init {
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use super::*;
 
+    pub(crate) struct EnvVarGuard {
+        name: String,
+        original_value: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        pub fn set(name: &str, value: &str) -> Self {
+            let name = name.to_string();
+            let original_value = std::env::var(&name).ok();
+            unsafe { std::env::set_var(&name, value) };
+            Self {
+                name,
+                original_value,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(ref original) = self.original_value {
+                unsafe { std::env::set_var(&self.name, original) };
+            } else {
+                unsafe { std::env::remove_var(&self.name) };
+            }
+        }
+    }
+
     #[test]
+    #[serial(env_vars)]
     fn test_default_config() {
+        let _env1 = EnvVarGuard::set("ANTHROPIC_API_KEY", "foo");
+        let _env2 = EnvVarGuard::set("OPENAI_API_KEY", "bar");
+        let _env3 = EnvVarGuard::set("GOOGLE_API_KEY", "baz");
+
         let config = default_config();
 
         insta::assert_toml_snapshot!(config);

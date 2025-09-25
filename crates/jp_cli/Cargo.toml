@@ -77,6 +77,7 @@ which = { workspace = true, features = ["real-sys"] }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["toml"] }
+serial_test = { workspace = true }
 test-log = { workspace = true }
 
 [lints]
