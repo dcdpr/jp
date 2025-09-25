@@ -24,6 +24,7 @@ impl IntoPartialAppConfig for Rm {
         &self,
         _: Option<&Workspace>,
         mut partial: PartialAppConfig,
+        _: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         partial
             .conversation

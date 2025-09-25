@@ -1,7 +1,6 @@
 use std::{fs, path::PathBuf, str::FromStr};
 
 use duct::Expression;
-use jp_config::editor::EditorConfig;
 use jp_conversation::{ConversationId, UserMessage};
 use time::{macros::format_description, UtcOffset};
 
@@ -20,56 +19,17 @@ const CUT_MARKER: &[&str] = &[
 ];
 
 /// How to edit the query.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) enum Editor {
     /// Use whatever editor is configured.
     #[default]
     Default,
 
     /// Use the given command.
-    Command(Expression),
+    Command(String),
 
     /// Do not edit the query.
     Disabled,
-}
-
-impl Editor {
-    /// Get the editor from the CLI, or the config, or `None`.
-    pub(crate) fn from_cli_or_config(
-        cli: Option<Option<Self>>,
-        config: &EditorConfig,
-    ) -> Option<Self> {
-        // If no CLI editor is configured, use the config editor, if any.
-        let Some(editor) = cli else {
-            return config.try_into().ok();
-        };
-
-        // `--edit` equals `None` in this case, which we treat as `Default`.
-        match editor.unwrap_or_default() {
-            // For the default editor, use the config editor, if any.
-            Editor::Default => config.try_into().ok(),
-
-            // Otherwise, use whatever is configured.
-            editor => Some(editor),
-        }
-    }
-
-    pub(crate) fn command(&self) -> Option<Expression> {
-        match self {
-            Editor::Disabled | Editor::Default => None,
-            Editor::Command(cmd) => Some(cmd.clone()),
-        }
-    }
-}
-
-impl TryFrom<&EditorConfig> for Editor {
-    type Error = Error;
-
-    fn try_from(cfg: &EditorConfig) -> Result<Self> {
-        cfg.command()
-            .map(Editor::Command)
-            .ok_or(Error::MissingEditor)
-    }
 }
 
 impl FromStr for Editor {
@@ -79,14 +39,7 @@ impl FromStr for Editor {
         match s {
             "true" => Ok(Self::Default),
             "false" => Ok(Self::Disabled),
-            s => {
-                let cfg = EditorConfig {
-                    cmd: Some(s.to_owned()),
-                    ..Default::default()
-                };
-
-                cfg.command().map(Self::Command).ok_or(Error::MissingEditor)
-            }
+            s => Ok(Self::Command(s.to_owned())),
         }
     }
 }
@@ -243,7 +196,7 @@ pub(crate) fn edit_query(
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
 
     let mut initial_text = vec![];
-    for message in history {
+    for message in history.iter() {
         let mut buf = String::new();
         buf.push_str("# ");
         buf.push_str(

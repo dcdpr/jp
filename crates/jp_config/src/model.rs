@@ -7,6 +7,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::PartialConfigDelta,
     model::{
         id::{ModelIdConfig, PartialModelIdConfig},
         parameters::{ParametersConfig, PartialParametersConfig},
@@ -36,6 +37,15 @@ impl AssignKeyValue for PartialModelConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialModelConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            id: self.id.delta(next.id),
+            parameters: self.parameters.delta(next.parameters),
+        }
     }
 }
 

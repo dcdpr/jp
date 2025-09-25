@@ -1929,6 +1929,7 @@ dependencies = [
  "crossterm",
  "duct",
  "futures",
+ "indexmap",
  "inquire",
  "insta",
  "jp_attachment",
@@ -2002,6 +2003,7 @@ dependencies = [
 name = "jp_conversation"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
  "insta",
  "jp_attachment",
  "jp_config",
@@ -2011,6 +2013,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.16",
  "time",
+ "tracing",
 ]
 
 [[package]]

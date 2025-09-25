@@ -27,10 +27,10 @@ use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     fs::{load_partial, user_global_config_path},
     util::{
-        build, find_file_in_load_path, load_envs, load_partial_at_path,
-        load_partial_at_path_recursive, load_partials_with_inheritance,
+        find_file_in_load_path, load_envs, load_partial_at_path, load_partial_at_path_recursive,
+        load_partials_with_inheritance,
     },
-    AppConfig, PartialAppConfig,
+    PartialAppConfig,
 };
 use jp_workspace::{user_data_dir, Workspace};
 use serde_json::Value;
@@ -245,8 +245,8 @@ async fn run_inner(cli: Cli) -> Result<Success> {
 
             workspace.load()?;
 
-            let config = load_config(&cmd, Some(&workspace), &cli.globals.config)?;
-            let mut ctx = Ctx::new(workspace, cli.globals, config);
+            let partial = load_partial_config(&cmd, Some(&workspace), &cli.globals.config)?;
+            let mut ctx = Ctx::new(workspace, cli.globals, partial)?;
             let output = cmd.run(&mut ctx).await;
             if output.is_err() {
                 tracing::info!("Error running command. Disabling workspace persistence.");
@@ -375,18 +375,33 @@ fn load_partial_config(
     // Apply conversation-specific config, if needed.
     if let Some(workspace) = workspace {
         partial = cmd
-            .apply_conversation_config(Some(workspace), partial)
+            .apply_conversation_config(Some(workspace), partial, None)
             .map_err(|e| Error::CliConfig(e.to_string()))?;
     }
 
     // Load CLI-provided `--cfg` arguments. These are different from
     // command-specific CLI arguments, in that they are global, and allow you to
     // change any field in the [`Config`] struct.
+    partial = load_cli_cfg_args(partial, overrides, workspace)?;
+
+    // Load command-specific CLI arguments last (e.g. `jp query --model`).
+    partial = cmd
+        .apply_cli_config(workspace, partial, None)
+        .map_err(|e| Error::CliConfig(e.to_string()))?;
+
+    Ok(partial)
+}
+
+fn load_cli_cfg_args(
+    mut partial: PartialAppConfig,
+    overrides: &[KeyValueOrPath],
+    workspace: Option<&Workspace>,
+) -> Result<PartialAppConfig> {
     for field in overrides {
         match field {
             KeyValueOrPath::Path(path) if path.exists() => {
                 if let Some(p) = load_partial_at_path(path)? {
-                    partial = load_partial(p, partial)?;
+                    partial = load_partial(partial, p)?;
                 }
             }
             KeyValueOrPath::Path(path) => {
@@ -429,11 +444,6 @@ fn load_partial_config(
         }
     }
 
-    // Load command-specific CLI arguments last (e.g. `jp query --model`).
-    partial = cmd
-        .apply_cli_config(workspace, partial)
-        .map_err(|e| Error::CliConfig(e.to_string()))?;
-
     Ok(partial)
 }
 
@@ -443,15 +453,15 @@ fn load_partial_configs_from_files(
 ) -> Result<Vec<PartialAppConfig>> {
     let mut partials = vec![];
 
-    // Load `$XDG_CONFIG_HOME/jp/config.toml`.
+    // Load `$XDG_CONFIG_HOME/jp/config.{toml,json,yaml}`.
     if let Some(user_global_config) = user_global_config_path(std::env::home_dir().as_deref())
-        .and_then(|p| load_partial_at_path(p).transpose())
+        .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
         .transpose()?
     {
         partials.push(user_global_config);
     }
 
-    // Load `$WORKSPACE_ROOT/.jp/config.toml`.
+    // Load `$WORKSPACE_ROOT/.jp/config.{toml,json,yaml}`.
     if let Some(workspace_config) = workspace
         .and_then(Workspace::storage_path)
         .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
@@ -460,8 +470,8 @@ fn load_partial_configs_from_files(
         partials.push(workspace_config);
     }
 
-    // Load `$CWD/.jp.toml`, recursing up the directory tree until either the
-    // root of the workspace, or filesystem is reached.
+    // Load `$CWD/.jp.{toml,json,yaml}`, recursing up the directory tree until
+    // either the root of the workspace, or filesystem is reached.
     if let Some(cwd_config) = cwd
         .and_then(|cwd| {
             load_partial_at_path_recursive(
@@ -475,7 +485,7 @@ fn load_partial_configs_from_files(
         partials.push(cwd_config);
     }
 
-    // Load `$XDG_DATA_HOME/jp/<workspace_the id>config.toml`.
+    // Load `$XDG_DATA_HOME/jp/<workspace_the id>config.{toml,json,yaml}`.
     if let Some(user_workspace_config) = workspace
         .and_then(Workspace::user_storage_path)
         .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
@@ -485,17 +495,6 @@ fn load_partial_configs_from_files(
     }
 
     Ok(partials)
-}
-
-/// Load the workspace configuration.
-fn load_config(
-    cmd: &Commands,
-    workspace: Option<&Workspace>,
-    overrides: &[KeyValueOrPath],
-) -> Result<AppConfig> {
-    let partial = load_partial_config(cmd, workspace, overrides)?;
-
-    build(partial).map_err(Into::into)
 }
 
 /// Find the workspace for the current directory.

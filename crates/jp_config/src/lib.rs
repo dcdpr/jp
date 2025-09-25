@@ -37,6 +37,7 @@
 pub mod assignment;
 pub mod assistant;
 pub mod conversation;
+mod delta;
 pub mod editor;
 pub mod error;
 pub mod fs;
@@ -48,13 +49,15 @@ pub mod util; // TODO: Rename
 
 pub use error::Error;
 use relative_path::RelativePathBuf;
-use schematic::{Config, PartialConfig as _};
+use schematic::Config;
+pub use schematic::PartialConfig;
 use serde_json::Value;
 
 use crate::{
     assignment::{missing_key, type_error, AssignKeyValue, AssignResult, KvAssignment},
     assistant::{AssistantConfig, PartialAssistantConfig},
     conversation::{ConversationConfig, PartialConversationConfig},
+    delta::{delta_opt_vec, PartialConfigDelta},
     editor::{EditorConfig, PartialEditorConfig},
     providers::{PartialProviderConfig, ProviderConfig},
     style::{PartialStyleConfig, StyleConfig},
@@ -95,7 +98,7 @@ pub struct AppConfig {
     /// referenced by their basename, optionally without a file extension. For
     /// example, a file named `my-agent.toml` in a config load path can be
     /// loaded using `--cfg my-agent`.
-    #[setting(default = vec![], merge = schematic::merge::append_vec)]
+    #[setting(default = vec![], merge = schematic::merge::append_vec, transform = util::vec_dedup)]
     pub config_load_paths: Vec<RelativePathBuf>,
 
     /// Extends the configuration from the given files.
@@ -181,6 +184,35 @@ impl AssignKeyValue for PartialAppConfig {
     }
 }
 
+impl PartialConfigDelta for PartialAppConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            // Any `extends` paths are interpreted at runtime, so we don't need to
+            // store this information again, since the extended configuration is
+            // already merged into the current one.
+            extends: None,
+
+            // Any `inherit` value is interpreted at runtime, so we don't need to
+            // store this information again, since the config load logic will
+            // already have stopped the merge process when it encounters an
+            // `inherit` value of `true`.
+            inherit: None,
+
+            config_load_paths: delta_opt_vec(
+                self.config_load_paths.as_ref(),
+                next.config_load_paths,
+            ),
+
+            assistant: self.assistant.delta(next.assistant),
+            conversation: self.conversation.delta(next.conversation),
+            style: self.style.delta(next.style),
+            editor: self.editor.delta(next.editor),
+            template: self.template.delta(next.template),
+            providers: self.providers.delta(next.providers),
+        }
+    }
+}
+
 impl AppConfig {
     /// Return a list of all fields in the configuration.
     ///
@@ -234,18 +266,7 @@ impl PartialAppConfig {
     #[expect(clippy::missing_panics_doc)]
     #[must_use]
     pub fn empty() -> Self {
-        Self {
-            inherit: None,
-            config_load_paths: None,
-            extends: None,
-            assistant: PartialAssistantConfig::empty().expect("always works for non-enum types"),
-            conversation: PartialConversationConfig::empty()
-                .expect("always works for non-enum types"),
-            style: PartialStyleConfig::empty().expect("always works for non-enum types"),
-            editor: PartialEditorConfig::empty().expect("always works for non-enum types"),
-            template: PartialTemplateConfig::empty().expect("always works for non-enum types"),
-            providers: PartialProviderConfig::empty().expect("always works for non-enum types"),
-        }
+        <Self as PartialConfig>::empty().expect("always works for non-enum types")
     }
 
     /// Create a new partial configuration from environment variables.
@@ -269,6 +290,12 @@ impl PartialAppConfig {
         }
 
         Ok(partial)
+    }
+
+    /// See [`PartialConfigDelta::delta`].
+    #[must_use]
+    pub fn delta(&self, next: Self) -> Self {
+        <Self as PartialConfigDelta>::delta(self, next)
     }
 }
 

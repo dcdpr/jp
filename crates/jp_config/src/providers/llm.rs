@@ -13,6 +13,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::PartialConfigDelta,
     model::id::ModelIdConfig,
     providers::llm::{
         anthropic::{AnthropicConfig, PartialAnthropicConfig},
@@ -78,6 +79,37 @@ impl AssignKeyValue for PartialLlmProviderConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialLlmProviderConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            aliases: next
+                .aliases
+                .into_iter()
+                .filter_map(|(k, next)| {
+                    let prev = self.aliases.get(&k);
+                    if prev.is_some_and(|prev| prev == &next) {
+                        return None;
+                    }
+
+                    let next = match prev {
+                        Some(prev) => prev.delta(next),
+                        None => next,
+                    };
+
+                    Some((k, next))
+                })
+                .collect(),
+            anthropic: self.anthropic.delta(next.anthropic),
+            deepseek: self.deepseek.delta(next.deepseek),
+            google: self.google.delta(next.google),
+            llamacpp: self.llamacpp.delta(next.llamacpp),
+            ollama: self.ollama.delta(next.ollama),
+            openai: self.openai.delta(next.openai),
+            openrouter: self.openrouter.delta(next.openrouter),
+        }
     }
 }
 

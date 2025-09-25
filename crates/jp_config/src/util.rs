@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use glob::glob;
-use schematic::{ConfigLoader, PartialConfig as _};
+use schematic::{ConfigLoader, PartialConfig as _, TransformResult};
 use tracing::{debug, error, info, trace};
 
 use super::Config;
@@ -95,7 +95,7 @@ pub fn find_file_in_load_path(
 ///
 /// # Errors
 ///
-/// See [`load_config_file_at_path`].
+/// See `load_config_file_at_path`.
 pub fn load_partial_at_path<P: Into<PathBuf>>(path: P) -> Result<Option<PartialAppConfig>, Error> {
     let mut loader = ConfigLoader::<AppConfig>::new();
     match load_config_file_at_path(path, &mut loader, false) {
@@ -252,6 +252,14 @@ fn load_config_file_with_extends(
     }
 
     Ok(())
+}
+
+/// Deduplicate a vector using `transform = vec_dedup`.
+#[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
+pub(crate) fn vec_dedup<T: PartialEq + Ord>(mut v: Vec<T>, _: &()) -> TransformResult<Vec<T>> {
+    v.sort();
+    v.dedup();
+    Ok(v)
 }
 
 /// Define the name to serialize and deserialize for a unit variant.

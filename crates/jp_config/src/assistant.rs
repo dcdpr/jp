@@ -14,6 +14,7 @@ use schematic::{Config, TransformResult};
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     assistant::tool_choice::ToolChoice,
+    delta::{delta_opt, PartialConfigDelta},
     model::{ModelConfig, PartialModelConfig},
 };
 /// Assistant-specific configuration.
@@ -53,6 +54,23 @@ impl AssignKeyValue for PartialAssistantConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialAssistantConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            name: delta_opt(self.name.as_ref(), next.name),
+            system_prompt: delta_opt(self.system_prompt.as_ref(), next.system_prompt),
+            instructions: {
+                next.instructions
+                    .into_iter()
+                    .filter(|v| !self.instructions.contains(v))
+                    .collect()
+            },
+            tool_choice: delta_opt(self.tool_choice.as_ref(), next.tool_choice),
+            model: self.model.delta(next.model),
+        }
     }
 }
 

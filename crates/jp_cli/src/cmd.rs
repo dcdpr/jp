@@ -68,11 +68,14 @@ impl IntoPartialAppConfig for Commands {
         &self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
+        merged_config: Option<&PartialAppConfig>,
     ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         match self {
-            Commands::Query(args) => args.apply_cli_config(workspace, partial),
-            Commands::Attachment(args) => args.apply_cli_config(workspace, partial),
-            Commands::AttachmentAdd(args) => args.apply_cli_config(workspace, partial),
+            Commands::Query(args) => args.apply_cli_config(workspace, partial, merged_config),
+            Commands::Attachment(args) => args.apply_cli_config(workspace, partial, merged_config),
+            Commands::AttachmentAdd(args) => {
+                args.apply_cli_config(workspace, partial, merged_config)
+            }
             _ => Ok(partial),
         }
     }
@@ -81,9 +84,12 @@ impl IntoPartialAppConfig for Commands {
         &self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
+        merged_config: Option<&PartialAppConfig>,
     ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         match self {
-            Commands::Query(args) => args.apply_conversation_config(workspace, partial),
+            Commands::Query(args) => {
+                args.apply_conversation_config(workspace, partial, merged_config)
+            }
             _ => Ok(partial),
         }
     }

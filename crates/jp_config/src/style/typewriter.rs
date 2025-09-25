@@ -5,7 +5,10 @@ use std::time::Duration;
 use schematic::{Config, Schematic};
 use serde::{Deserialize, Serialize};
 
-use crate::assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment};
+use crate::{
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::{delta_opt, PartialConfigDelta},
+};
 
 /// Typewriter style configuration.
 #[derive(Debug, Config)]
@@ -42,6 +45,15 @@ impl AssignKeyValue for PartialTypewriterConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialTypewriterConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            text_delay: delta_opt(self.text_delay.as_ref(), next.text_delay),
+            code_delay: delta_opt(self.code_delay.as_ref(), next.code_delay),
+        }
     }
 }
 

@@ -5,7 +5,10 @@ use std::{env, path::PathBuf};
 use duct::Expression;
 use schematic::Config;
 
-use crate::assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment};
+use crate::{
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::{delta_opt, delta_opt_vec, PartialConfigDelta},
+};
 
 /// Editor configuration.
 #[derive(Debug, Config)]
@@ -34,6 +37,28 @@ pub struct EditorConfig {
         merge = schematic::merge::append_vec,
     )]
     pub envs: Vec<String>,
+}
+
+impl AssignKeyValue for PartialEditorConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            "cmd" => self.cmd = kv.try_some_string()?,
+            _ if kv.p("envs") => kv.try_some_vec_of_strings(&mut self.envs)?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialEditorConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            cmd: delta_opt(self.cmd.as_ref(), next.cmd),
+            envs: delta_opt_vec(self.envs.as_ref(), next.envs),
+        }
+    }
 }
 
 impl EditorConfig {
@@ -74,19 +99,6 @@ impl EditorConfig {
                 })
             })
         })
-    }
-}
-
-impl AssignKeyValue for PartialEditorConfig {
-    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
-        match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
-            "cmd" => self.cmd = kv.try_some_string()?,
-            _ if kv.p("envs") => kv.try_some_vec_of_strings(&mut self.envs)?,
-            _ => return missing_key(&kv),
-        }
-
-        Ok(())
     }
 }
 

@@ -8,6 +8,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::PartialConfigDelta,
     providers::{
         llm::{LlmProviderConfig, PartialLlmProviderConfig},
         mcp::McpProviderConfig,
@@ -36,9 +37,35 @@ impl AssignKeyValue for PartialProviderConfig {
                 Some(name) => self.mcp.entry(name).or_default().assign(kv)?,
                 None => return missing_key(&kv),
             },
+            // _ if kv.p("tts") => self.tts.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialProviderConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            llm: self.llm.delta(next.llm),
+            mcp: next
+                .mcp
+                .into_iter()
+                .filter_map(|(k, next)| {
+                    let prev = self.mcp.get(&k);
+                    if prev.is_some_and(|prev| prev == &next) {
+                        return None;
+                    }
+
+                    let next = match prev {
+                        Some(prev) => prev.delta(next),
+                        None => next,
+                    };
+
+                    Some((k, next))
+                })
+                .collect(),
+        }
     }
 }

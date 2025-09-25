@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
-use jp_config::model::id::ProviderId;
+use jp_config::{model::id::ProviderId, PartialAppConfig, PartialConfig as _};
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id, NANOSECONDS_PER_DECISECOND,
@@ -10,8 +10,147 @@ use jp_id::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::UtcDateTime;
+use tracing::warn;
 
 use crate::error::{Error, Result};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Messages(Vec<MessagePairWithConfig>);
+
+impl Messages {
+    pub fn iter(&self) -> impl Iterator<Item = &MessagePair> {
+        self.0.iter().map(|m| &m.pair)
+    }
+
+    #[expect(clippy::should_implement_trait)]
+    pub fn into_iter(self) -> impl Iterator<Item = MessagePair> {
+        self.0.into_iter().map(|m| m.pair)
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Removes the last message from the list, or [`None`] if the list is
+    /// empty.
+    pub fn pop(&mut self) -> Option<MessagePair> {
+        self.0.pop().map(|m| m.pair)
+    }
+
+    /// Adds a message to the list.
+    pub fn push(&mut self, pair: MessagePair, config: Option<PartialAppConfig>) {
+        let config_delta = self
+            .config()
+            .delta(config.unwrap_or_else(PartialAppConfig::empty));
+
+        self.0.push(MessagePairWithConfig { pair, config_delta });
+    }
+
+    pub fn extend(&mut self, other: Messages) {
+        self.0.extend(other.0);
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    #[must_use]
+    pub fn as_ref(&self) -> MessagesRef<'_> {
+        MessagesRef(self.0.as_slice())
+    }
+
+    pub fn config(&self) -> PartialAppConfig {
+        self.0
+            .iter()
+            .map(|m| m.config_delta.clone())
+            .reduce(|mut a, b| {
+                if let Err(error) = a.merge(&(), b) {
+                    warn!(?error, "Failed to merge configuration partial.");
+                }
+
+                a
+            })
+            .unwrap_or_else(PartialAppConfig::empty)
+    }
+
+    pub fn set_config(&mut self, next: PartialAppConfig) {
+        let config_delta = self.config().delta(next);
+
+        if let Some(v) = self.0.last_mut() {
+            v.config_delta = config_delta;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MessagesRef<'a>(&'a [MessagePairWithConfig]);
+
+impl MessagesRef<'_> {
+    pub fn iter(&self) -> impl Iterator<Item = &MessagePairWithConfig> {
+        self.0.iter()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    #[must_use]
+    pub fn last(&self) -> Option<&MessagePair> {
+        self.0.last().map(|m| &m.pair)
+    }
+
+    #[must_use]
+    pub fn to_messages(&self) -> Messages {
+        Messages(self.0.to_vec())
+    }
+
+    pub fn config(&self) -> PartialAppConfig {
+        self.0
+            .iter()
+            .map(|m| m.config_delta.clone())
+            .reduce(|mut a, b| {
+                if let Err(error) = a.merge(&(), b) {
+                    warn!(?error, "Failed to merge configuration partial.");
+                }
+
+                a
+            })
+            .unwrap_or_else(PartialAppConfig::empty)
+    }
+}
+
+/// A message pair with the configuration delta.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessagePairWithConfig {
+    /// The message pair.
+    #[serde(flatten)]
+    pair: MessagePair,
+
+    /// The delta of the configuration, relative to the previous message. The
+    /// first message in the list contains a full copy of the configuration at
+    /// the time of the message.
+    ///
+    /// If the config delta is empty, it means that the configuration has not
+    /// changed since the last message.
+    #[serde(default, skip_serializing_if = "PartialAppConfig::is_empty")]
+    config_delta: PartialAppConfig,
+}
+
+impl std::ops::Deref for MessagePairWithConfig {
+    type Target = MessagePair;
+
+    fn deref(&self) -> &Self::Target {
+        &self.pair
+    }
+}
 
 /// A single exchange between user and LLM.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

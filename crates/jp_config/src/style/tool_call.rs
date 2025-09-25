@@ -2,7 +2,10 @@
 
 use schematic::Config;
 
-use crate::assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment};
+use crate::{
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::{delta_opt, PartialConfigDelta},
+};
 
 /// Tool call content style configuration.
 #[derive(Debug, Config)]
@@ -25,5 +28,13 @@ impl AssignKeyValue for PartialToolCallConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialToolCallConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            show: delta_opt(self.show.as_ref(), next.show),
+        }
     }
 }

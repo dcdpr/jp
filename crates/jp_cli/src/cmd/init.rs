@@ -260,6 +260,7 @@ impl IntoPartialAppConfig for Init {
         &self,
         _workspace: Option<&Workspace>,
         partial: PartialAppConfig,
+        _: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         Ok(partial)
     }

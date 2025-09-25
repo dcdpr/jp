@@ -4,6 +4,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::{delta_opt, PartialConfigDelta},
     style::LinkStyle,
 };
 
@@ -70,5 +71,17 @@ impl AssignKeyValue for PartialCodeConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialCodeConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            theme: delta_opt(self.theme.as_ref(), next.theme),
+            color: delta_opt(self.color.as_ref(), next.color),
+            line_numbers: delta_opt(self.line_numbers.as_ref(), next.line_numbers),
+            file_link: delta_opt(self.file_link.as_ref(), next.file_link),
+            copy_link: delta_opt(self.copy_link.as_ref(), next.copy_link),
+        }
     }
 }

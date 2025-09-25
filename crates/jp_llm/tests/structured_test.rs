@@ -4,7 +4,7 @@ use jp_config::{
     model::{id::ProviderId, parameters::ParametersConfig},
     providers::llm::LlmProviderConfig,
 };
-use jp_conversation::{AssistantMessage, MessagePair, UserMessage};
+use jp_conversation::{message::Messages, AssistantMessage, MessagePair, UserMessage};
 use jp_llm::{provider::openrouter::Openrouter, structured};
 use jp_test::{function_name, mock::Vcr};
 
@@ -21,10 +21,14 @@ async fn test_conversation_titles() -> Result<(), Box<dyn std::error::Error>> {
     let model_id = "openrouter/openai/o3-mini-high".parse().unwrap();
     let mut config = LlmProviderConfig::default().openrouter;
     let message = UserMessage::Query("Test message".to_string());
-    let history = vec![MessagePair::new(
-        message,
-        AssistantMessage::new(ProviderId::Openrouter),
-    )];
+    let history = {
+        let mut messages = Messages::default();
+        messages.push(
+            MessagePair::new(message, AssistantMessage::new(ProviderId::Openrouter)),
+            None,
+        );
+        messages
+    };
 
     let vcr = vcr();
     vcr.cassette(

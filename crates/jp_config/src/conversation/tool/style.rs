@@ -5,7 +5,10 @@ use std::{fmt, num::ParseIntError};
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 
-use crate::assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment};
+use crate::{
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::{delta_opt, PartialConfigDelta},
+};
 
 /// Display style configuration.
 #[derive(Debug, Clone, PartialEq, Config)]
@@ -30,6 +33,15 @@ impl AssignKeyValue for PartialDisplayStyleConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialDisplayStyleConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            inline_results: delta_opt(self.inline_results.as_ref(), next.inline_results),
+            results_file_link: delta_opt(self.results_file_link.as_ref(), next.results_file_link),
+        }
     }
 }
 

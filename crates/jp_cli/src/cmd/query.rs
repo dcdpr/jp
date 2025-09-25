@@ -2,7 +2,7 @@ mod event;
 mod response_handler;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     env, fs,
     path::{Path, PathBuf},
     str::FromStr,
@@ -16,7 +16,10 @@ use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::{instructions::InstructionsConfig, tool_choice::ToolChoice},
     fs::{expand_tilde, load_partial},
-    model::id::{ModelIdConfig, PartialModelIdConfig},
+    model::{
+        id::PartialModelIdConfig,
+        parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig},
+    },
     PartialAppConfig,
 };
 use jp_conversation::{
@@ -26,7 +29,8 @@ use jp_conversation::{
 use jp_llm::{
     provider::{self, StreamEvent},
     query::{ChatQuery, StructuredQuery},
-    tool::tool_definitions,
+    tool::{tool_definitions, ToolDefinition},
+    ToolError,
 };
 use jp_task::task::TitleGeneratorTask;
 use jp_term::stdout;
@@ -42,10 +46,10 @@ use crate::{
     ctx::IntoPartialAppConfig,
     editor::{self, Editor},
     error::{Error, Result},
-    parser, Ctx, PATH_STRING_PREFIX,
+    load_cli_cfg_args, parser, Ctx, PATH_STRING_PREFIX,
 };
 
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub(crate) struct Query {
     /// The query to send. If not provided, uses `$JP_EDITOR`, `$VISUAL` or
     /// `$EDITOR` to open edit the query in an editor.
@@ -83,20 +87,40 @@ pub(crate) struct Query {
     attachments: Vec<Url>,
 
     /// Whether and how to edit the query.
+    ///
+    /// Setting this flag to `true`, omitting it, or using it as a boolean flag
+    /// (e.g. `--edit`) will use the default editor configured elsewhere, or
+    /// return an error if no editor is configured and one is required.
+    ///
+    /// If set to `false`, the editor will be disabled (similar to `--no-edit`),
+    /// which might result in an error if the editor is required.
+    ///
+    /// If set to any other value, it will be used as the command to open the
+    /// editor.
     #[arg(short = 'e', long = "edit", conflicts_with = "no_edit")]
     edit: Option<Option<Editor>>,
 
     /// Do not edit the query.
+    ///
+    /// See `--edit` for more details.
     #[arg(short = 'E', long = "no-edit", conflicts_with = "edit")]
     no_edit: bool,
 
     /// The model to use.
-    #[arg(short = 'o', long = "model", value_parser = ModelIdConfig::from_str)]
-    model: Option<ModelIdConfig>,
+    #[arg(short = 'o', long = "model")]
+    model: Option<String>,
 
     /// The model parameters to use.
-    #[arg(short = 'r', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KvAssignment::from_str)]
+    #[arg(short = 'p', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KvAssignment::from_str)]
     parameters: Vec<KvAssignment>,
+
+    /// Enable reasoning.
+    #[arg(short = 'r', long = "reasoning")]
+    reasoning: Option<ReasoningConfig>,
+
+    /// Disable reasoning.
+    #[arg(short = 'R', long = "no-reasoning")]
+    no_reasoning: bool,
 
     /// Do not display the reasoning content.
     ///
@@ -126,6 +150,46 @@ pub(crate) struct Query {
     #[arg(short = 'S', long = "no-stream", conflicts_with = "stream")]
     no_stream: bool,
 
+    /// The tool(s) to enable.
+    ///
+    /// If an existing tool is configured with a matching name, it will be
+    /// enabled for the duration of the query.
+    ///
+    /// If no arguments are provided, all configured tools will be enabled.
+    ///
+    /// You can provide this flag multiple times to enable multiple tools. It
+    /// can be combined with `--no-tools` to disable all enabled tools before
+    /// enabling a specific one.
+    #[arg(
+        short = 't',
+        long = "tool",
+        action = ArgAction::Append,
+        num_args = 0..=1,
+        value_parser = |s: &str| -> Result<Option<String>> {
+            if s.is_empty() { Ok(None) } else { Ok(Some(s.to_string())) }
+        },
+        default_missing_value = "",
+    )]
+    tools: Vec<Option<String>>,
+
+    /// Disable tools.
+    ///
+    /// If provided without a value, all enabled tools will be disabled,
+    /// otherwise pass the argument multiple times to disable one or more tools.
+    ///
+    /// Any tools that were enabled before this flag is set will be disabled.
+    #[arg(
+        short = 'T',
+        long = "no-tools",
+        action = ArgAction::Append,
+        num_args = 0..=1,
+        value_parser = |s: &str| -> Result<Option<String>> {
+            if s.is_empty() { Ok(None) } else { Ok(Some(s.to_string())) }
+        },
+        default_missing_value = "",
+    )]
+    no_tools: Vec<Option<String>>,
+
     /// The tool to use.
     ///
     /// If a value is provided, the tool matching the value will be used.
@@ -133,12 +197,12 @@ pub(crate) struct Query {
     /// Note that this setting is *not* persisted across queries. To persist
     /// tool choice behavior, set the `assistant.tool_choice` field in a
     /// configuration file.
-    #[arg(short = 't', long = "tool")]
-    tool_choice: Option<Option<String>>,
+    #[arg(short = 'u', long = "tool-use")]
+    tool_use: Option<Option<String>>,
 
     /// Disable tool use by the assistant.
-    #[arg(short = 'T', long = "no-tool")]
-    no_tool_choice: bool,
+    #[arg(short = 'U', long = "no-tool-use")]
+    no_tool_use: bool,
 }
 
 /// How to render the response to the user.
@@ -190,14 +254,23 @@ impl Query {
             }
         }
 
-        let thread = self.build_thread(ctx, message.clone()).await?;
+        let tools =
+            tool_definitions(ctx.config().conversation.tools.iter(), &ctx.mcp_client).await?;
+
+        let thread = self.build_thread(ctx, message.clone(), &tools).await?;
 
         let mut messages = vec![];
         if let Some(schema) = self.schema.clone() {
             messages.push(handle_structured_output(ctx, thread, schema).await?);
         } else {
-            self.handle_stream(ctx, thread, self.tool_choice(ctx), &mut messages)
-                .await?;
+            self.handle_stream(
+                ctx,
+                thread,
+                ctx.config().assistant.tool_choice.clone(),
+                tools,
+                &mut messages,
+            )
+            .await?;
         }
 
         let mut reply = String::new();
@@ -220,7 +293,29 @@ impl Query {
             if let Some(content) = &message.reply.content {
                 reply.push_str(content);
             }
-            ctx.workspace.add_message(conversation_id, message.clone());
+            ctx.workspace.add_message(
+                conversation_id,
+                message.clone(),
+                if self.new_conversation {
+                    Some(ctx.partial_config().clone())
+                } else {
+                    let global = ctx.term.args.config.clone();
+                    let partial = load_cli_cfg_args(
+                        PartialAppConfig::empty(),
+                        &global,
+                        Some(&ctx.workspace),
+                    )?;
+
+                    let partial = IntoPartialAppConfig::apply_cli_config(
+                        &self,
+                        None,
+                        partial,
+                        Some(ctx.partial_config()),
+                    )?;
+
+                    Some(partial)
+                },
+            );
         }
 
         // Clean up the query file.
@@ -253,7 +348,8 @@ impl Query {
         // If replaying a tool call, re-run the requested tool(s) and return the
         // new results.
         if let UserMessage::ToolCallResults(_) = &mut message {
-            let Some(response) = ctx.workspace.get_messages(&conversation_id).last() else {
+            let messages = ctx.workspace.get_messages(&conversation_id);
+            let Some(response) = messages.last() else {
                 return Err(Error::Replay("No assistant response found".into()));
             };
 
@@ -319,14 +415,6 @@ impl Query {
             ctx.workspace.set_active_conversation_id(id)?;
         }
 
-        // Persist specific CLI configurations for the active conversation.
-        let mut config = ctx.workspace.get_active_conversation().config().clone();
-        self.apply_persistent_cli_config(Some(&ctx.workspace), &mut config)
-            .map_err(|e| Error::CliConfig(e.to_string()))?;
-        ctx.workspace
-            .get_active_conversation_mut()
-            .set_config(config);
-
         Ok(last_active_conversation_id)
     }
 
@@ -337,35 +425,29 @@ impl Query {
         ctx: &mut Ctx,
         conversation_id: ConversationId,
     ) -> Result<Option<PathBuf>> {
+        // Editing only applies to queries, not tool-call results.
         let UserMessage::Query(query) = message else {
             return Ok(None);
         };
 
-        let mut editor = Editor::from_cli_or_config(self.edit.clone(), &ctx.config().editor);
-
-        // Explicitly disable editing if the `--no-edit` flag is set.
-        if self.no_edit || self.query.as_ref().is_some_and(|_| self.edit.is_none()) {
-            editor = Some(Editor::Disabled);
+        // If there is no query provided, but the user explicitly requested not
+        // to edit the query, we populate the query with a default message,
+        // since most LLM providers do not support empty queries.
+        if query.is_empty() && self.force_no_edit() {
+            "<no content>".clone_into(query);
         }
 
-        let editor = match editor {
-            None => return Ok(None),
-            Some(Editor::Default) => unreachable!("handled in `from_cli_or_config`"),
-            // If editing is disabled, we set the query as a single whitespace,
-            // which allows the query to pass through to the assistant.
-            //
-            // FIXME: Some models (such as Anthropic) do not accept empty
-            // queries.
-            Some(Editor::Disabled) => {
-                if query.is_empty() {
-                    " ".clone_into(query);
-                }
-                return Ok(None);
-            }
-            Some(cmd @ Editor::Command(_)) => match cmd.command() {
-                Some(cmd) => cmd,
-                None => return Ok(None),
-            },
+        // If a query is provided, and editing is not explicitly requested, we
+        // omit opening the editor.
+        if !query.is_empty() && !self.force_edit() {
+            return Ok(None);
+        }
+
+        let cmd = ctx.config().editor.command();
+        let editor = match cmd {
+            None if !query.is_empty() => return Ok(None),
+            None => return Err(Error::MissingEditor),
+            Some(cmd) => cmd,
         };
 
         let initial_message = if query.is_empty() {
@@ -384,18 +466,13 @@ impl Query {
         Ok(query_file_path)
     }
 
-    fn tool_choice(&self, ctx: &Ctx) -> ToolChoice {
-        if self.no_tool_choice {
-            ToolChoice::None
-        } else {
-            ctx.config().assistant.tool_choice.clone()
-        }
-    }
-
-    async fn build_thread(&self, ctx: &Ctx, message: UserMessage) -> Result<Thread> {
+    async fn build_thread(
+        &self,
+        ctx: &Ctx,
+        message: UserMessage,
+        tools: &[ToolDefinition],
+    ) -> Result<Thread> {
         let conversation_id = ctx.workspace.active_conversation_id();
-        let tools =
-            tool_definitions(ctx.config().conversation.tools.iter(), &ctx.mcp_client).await?;
         let mut attachments = vec![];
         for attachment in &ctx.config().conversation.attachments {
             register_attachment(ctx, attachment, &mut attachments).await?;
@@ -405,7 +482,7 @@ impl Query {
             .with_system_prompt(ctx.config().assistant.system_prompt.clone())
             .with_instructions(ctx.config().assistant.instructions.clone())
             .with_attachments(attachments)
-            .with_history(ctx.workspace.get_messages(&conversation_id).to_vec())
+            .with_history(ctx.workspace.get_messages(&conversation_id).to_messages())
             .with_message(message);
 
         if !tools.is_empty() {
@@ -431,11 +508,9 @@ impl Query {
         ctx: &mut Ctx,
         mut thread: Thread,
         tool_choice: ToolChoice,
+        tools: Vec<ToolDefinition>,
         messages: &mut Vec<MessagePair>,
     ) -> Result<()> {
-        let tools =
-            tool_definitions(ctx.config().conversation.tools.iter(), &ctx.mcp_client).await?;
-
         let model_id = &ctx.config().assistant.model.id.clone();
 
         let parameters = &ctx.config().assistant.model.parameters;
@@ -480,7 +555,8 @@ impl Query {
                         retry_after.unwrap_or(0)
                     );
                     tokio::time::sleep(Duration::from_secs(retry_after.unwrap_or(0))).await;
-                    return Box::pin(self.handle_stream(ctx, thread, tool_choice, messages)).await;
+                    return Box::pin(self.handle_stream(ctx, thread, tool_choice, tools, messages))
+                        .await;
                 }
                 Err(jp_llm::Error::UnknownModel(model)) => {
                     let available = provider
@@ -559,7 +635,7 @@ impl Query {
         // "conversation turn", essentially going into a "loop" until no more
         // tool calls are requested.
         if !event_handler.tool_call_results.is_empty() {
-            thread.history.push(message);
+            thread.history.push(message, None);
             thread.message = UserMessage::ToolCallResults(event_handler.tool_call_results);
 
             Box::pin(self.handle_stream(
@@ -568,6 +644,7 @@ impl Query {
                 // After the first tool call, we revert back to letting the LLM
                 // decide if/which tool to use.
                 ToolChoice::Auto,
+                tools,
                 messages,
             ))
             .await?;
@@ -586,66 +663,80 @@ impl Query {
         RenderMode::Auto
     }
 
-    /// Apply the CLI configurations that should be persisted in the conversation's
-    /// state.
-    fn apply_persistent_cli_config(
-        &self,
-        _workspace: Option<&Workspace>,
-        partial: &mut PartialAppConfig,
-    ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Update the model.
-        if let Some(id) = self.model.as_ref() {
-            partial.assistant.model.id = PartialModelIdConfig {
-                provider: Some(id.provider),
-                name: Some(id.name.clone()),
-            };
-        }
+    /// Returns `true` if editing is explicitly disabled.
+    ///
+    /// This signals that even if no query is provided, no editor should be
+    /// opened, but instead an empty query should be used.
+    ///
+    /// This can be used for example when requesting a tool call without needing
+    /// additional context to be provided.
+    fn force_no_edit(&self) -> bool {
+        self.no_edit || matches!(self.edit, Some(Some(Editor::Disabled)))
+    }
 
-        // Update the model parameters.
-        for kv in self.parameters.clone() {
-            partial.assistant.model.parameters.assign(kv)?;
-        }
-
-        // Add attachments.
-        partial
-            .conversation
-            .attachments
-            .get_or_insert_default()
-            .extend(self.attachments.iter().cloned());
-
-        Ok(())
+    /// Returns `true` if editing is explicitly enabled.
+    ///
+    /// This means the `--edit` flag was provided (but not `--edit=false`),
+    /// which means the editor should be opened, regardless of whether a query
+    /// is provided as an argument.
+    fn force_edit(&self) -> bool {
+        !self.force_no_edit() && self.edit.is_some()
     }
 }
 
 impl IntoPartialAppConfig for Query {
     fn apply_cli_config(
         &self,
-        workspace: Option<&Workspace>,
+        _workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
+        merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
-        // 1. First apply CLI configurations that we also want to persist in the
-        //    conversation configuration state.
-        self.apply_persistent_cli_config(workspace, &mut partial)?;
+        let Self {
+            model,
+            template: _,
+            schema: _,
+            replay: _,
+            new_conversation: _,
+            local: _,
+            attachments,
+            edit,
+            no_edit,
+            tool_use,
+            no_tool_use,
+            query: _,
+            parameters,
+            hide_reasoning,
+            hide_tool_calls,
+            stream: _,
+            no_stream: _,
+            tools: raw_tools,
+            no_tools: raw_no_tools,
+            reasoning,
+            no_reasoning,
+        } = &self;
 
-        // 2. Then apply CLI configurations that we do not want to persist
-        //    between queries.
-        //
-        // Hide reasoning.
-        if self.hide_reasoning {
+        apply_model(&mut partial, model.as_deref(), merged_config)?;
+        apply_editor(&mut partial, edit.as_ref().map(|v| v.as_ref()), *no_edit);
+        apply_enable_tools(&mut partial, raw_tools, raw_no_tools, merged_config)?;
+        apply_tool_use(
+            &mut partial,
+            tool_use.as_ref().map(|v| v.as_deref()),
+            *no_tool_use,
+        )?;
+        apply_attachments(&mut partial, attachments);
+        apply_reasoning(&mut partial, reasoning.as_ref(), *no_reasoning);
+
+        for kv in parameters.clone() {
+            partial.assistant.model.parameters.assign(kv)?;
+        }
+
+        if *hide_reasoning {
             partial.style.reasoning.show = Some(false);
         }
-        // Hide tool calls.
-        if self.hide_tool_calls {
+
+        if *hide_tool_calls {
             partial.style.tool_call.show = Some(false);
         }
-        // Tool choice.
-        partial.assistant.tool_choice = self.tool_choice.as_ref().map(|v| match v.as_deref() {
-            None | Some("true") => ToolChoice::Required,
-            Some(v) => match v {
-                "false" => ToolChoice::None,
-                _ => ToolChoice::Function(v.to_owned()),
-            },
-        });
 
         Ok(partial)
     }
@@ -654,6 +745,7 @@ impl IntoPartialAppConfig for Query {
         &self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
+        _: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         // New conversations do not apply any existing conversation
         // configurations. This is handled by the other configuration layers
@@ -668,12 +760,206 @@ impl IntoPartialAppConfig for Query {
             return Ok(partial);
         };
 
-        load_partial(
-            workspace.get_active_conversation().config().clone(),
-            partial,
-        )
-        .map_err(Into::into)
+        let id = workspace.active_conversation_id();
+
+        load_partial(workspace.get_messages(&id).config().clone(), partial).map_err(Into::into)
     }
+}
+
+type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+/// Apply the CLI model configuration to the partial configuration.
+fn apply_model(
+    partial: &mut PartialAppConfig,
+    model: Option<&str>,
+    context: Option<&PartialAppConfig>,
+) -> BoxedResult<()> {
+    let Some(id) = model else {
+        return Ok(());
+    };
+
+    partial.assistant.model.id = context
+        .unwrap_or(partial)
+        .providers
+        .llm
+        .aliases
+        .get(id)
+        .cloned()
+        .map_or_else(|| PartialModelIdConfig::from_str(id), Ok)?;
+
+    Ok(())
+}
+
+/// Apply the CLI editor configuration to the partial configuration.
+fn apply_editor(partial: &mut PartialAppConfig, editor: Option<Option<&Editor>>, no_edit: bool) {
+    let Some(Some(editor)) = editor else {
+        return;
+    };
+
+    match (no_edit, editor) {
+        (true, _) | (_, Editor::Disabled) => {
+            partial.editor.cmd = None;
+            partial.editor.envs = None;
+        }
+        (_, Editor::Default) => {}
+        (_, Editor::Command(cmd)) => partial.editor.cmd = Some(cmd.clone()),
+    }
+}
+
+fn apply_enable_tools(
+    partial: &mut PartialAppConfig,
+    raw_tools: &[Option<String>],
+    raw_no_tools: &[Option<String>],
+    merged_config: Option<&PartialAppConfig>,
+) -> BoxedResult<()> {
+    let tools = if raw_tools.is_empty() {
+        None
+    } else if raw_tools.iter().any(Option::is_none) {
+        Some(vec![])
+    } else {
+        Some(raw_tools.iter().filter_map(|v| v.as_deref()).collect())
+    };
+
+    let no_tools = if raw_no_tools.is_empty() {
+        None
+    } else if raw_no_tools.iter().any(Option::is_none) {
+        Some(vec![])
+    } else {
+        Some(raw_no_tools.iter().filter_map(|v| v.as_deref()).collect())
+    };
+
+    let enable_all = tools.as_ref().is_some_and(Vec::is_empty);
+    let disable_all = no_tools.as_ref().is_some_and(Vec::is_empty);
+
+    if enable_all && disable_all {
+        return Err("cannot pass both --no-tools and --tools without arguments".into());
+    }
+
+    let existing_tools = merged_config.map_or(&partial.conversation.tools.tools, |v| {
+        &v.conversation.tools.tools
+    });
+
+    let missing = tools
+        .iter()
+        .flatten()
+        .chain(no_tools.iter().flatten())
+        .filter(|name| !existing_tools.contains_key(**name))
+        .collect::<HashSet<_>>();
+
+    if missing.len() == 1 {
+        return Err(ToolError::NotFound {
+            name: missing.iter().next().unwrap().to_string(),
+        }
+        .into());
+    } else if !missing.is_empty() {
+        return Err(ToolError::NotFoundN {
+            names: missing.into_iter().map(ToString::to_string).collect(),
+        }
+        .into());
+    }
+
+    // Disable tools.
+    if let Some(no_tools) = no_tools {
+        partial
+            .conversation
+            .tools
+            .tools
+            .iter_mut()
+            .filter(|(name, _)| disable_all || no_tools.iter().any(|v| v == name))
+            .for_each(|(_, v)| v.enable = Some(false));
+    }
+
+    // Enable tools.
+    if let Some(tools) = tools {
+        partial
+            .conversation
+            .tools
+            .tools
+            .iter_mut()
+            .filter(|(name, _)| enable_all || tools.iter().any(|v| v == *name))
+            .for_each(|(_, v)| v.enable = Some(true));
+    }
+
+    Ok(())
+}
+
+/// Apply the CLI tool use configuration to the partial configuration.
+///
+/// NOTE: This has to run *after* `apply_enable_tools` because it will return an
+/// error if the tool of choice is not enabled.
+fn apply_tool_use(
+    partial: &mut PartialAppConfig,
+    tool_choice: Option<Option<&str>>,
+    no_tool_choice: bool,
+) -> BoxedResult<()> {
+    if no_tool_choice || matches!(tool_choice, Some(Some("false"))) {
+        partial.assistant.tool_choice = Some(ToolChoice::None);
+        return Ok(());
+    }
+
+    let Some(tool) = tool_choice else {
+        return Ok(());
+    };
+
+    partial.assistant.tool_choice = match tool {
+        None | Some("true") => Some(ToolChoice::Required),
+        Some(v) => {
+            if !partial
+                .conversation
+                .tools
+                .tools
+                .iter()
+                .filter(|(_, cfg)| cfg.enable.is_some_and(|v| v))
+                .any(|(name, _)| name == v)
+            {
+                return Err(format!("tool choice '{v}' does not match any enabled tools").into());
+            }
+
+            Some(ToolChoice::Function(v.to_owned()))
+        }
+    };
+
+    Ok(())
+}
+
+/// Apply the CLI attachments to the partial configuration.
+fn apply_attachments(partial: &mut PartialAppConfig, attachments: &[Url]) {
+    if attachments.is_empty() {
+        return;
+    }
+
+    partial
+        .conversation
+        .attachments
+        .get_or_insert_default()
+        .extend(attachments.iter().cloned());
+}
+
+/// Apply the CLI reasoning configuration to the partial configuration.
+fn apply_reasoning(
+    partial: &mut PartialAppConfig,
+    reasoning: Option<&ReasoningConfig>,
+    no_reasoning: bool,
+) {
+    if no_reasoning {
+        partial.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Off);
+        return;
+    }
+
+    let Some(reasoning) = reasoning else {
+        return;
+    };
+
+    partial.assistant.model.parameters.reasoning = Some(match reasoning {
+        ReasoningConfig::Off => PartialReasoningConfig::Off,
+        ReasoningConfig::Auto => PartialReasoningConfig::Auto,
+        ReasoningConfig::Custom(custom) => {
+            PartialReasoningConfig::Custom(PartialCustomReasoningConfig {
+                effort: Some(custom.effort),
+                exclude: Some(custom.exclude),
+            })
+        }
+    });
 }
 
 /// Clean up empty queries.
@@ -786,5 +1072,187 @@ impl Line {
         };
 
         Line { content, variant }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use indexmap::IndexMap;
+    use jp_config::conversation::tool::PartialToolConfig;
+
+    use super::*;
+
+    #[test]
+    #[expect(clippy::too_many_lines)]
+    fn test_query_tools_and_no_tools() {
+        // Create a partial configuration with a few tools.
+        let mut partial = PartialAppConfig::default();
+        partial.conversation.tools.tools = IndexMap::from_iter([
+            ("implicitly_enabled_tool".into(), PartialToolConfig {
+                enable: None,
+                ..Default::default()
+            }),
+            ("explicitly_enabled_tool".into(), PartialToolConfig {
+                enable: Some(true),
+                ..Default::default()
+            }),
+            ("explicitly_disabled_tool".into(), PartialToolConfig {
+                enable: Some(false),
+                ..Default::default()
+            }),
+        ]);
+
+        // Keep all tools as-is.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                no_tools: vec![],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            None,
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(true)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(false)
+        );
+
+        // Disable one tool.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                no_tools: vec![Some("implicitly_enabled_tool".into())],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            Some(false),
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(true)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(false)
+        );
+
+        // Enable one tool.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                tools: vec![Some("explicitly_disabled_tool".into())],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            Some(false),
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(true)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(true)
+        );
+
+        // Enable all tools.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                tools: vec![None],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            Some(true),
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(true)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(true)
+        );
+
+        // Disable all tools.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                no_tools: vec![None],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            Some(false),
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(false)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(false)
+        );
+
+        // Enable multiple tools.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                tools: vec![
+                    Some("explicitly_disabled_tool".into()),
+                    Some("explicitly_enabled_tool".into()),
+                ],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            Some(false),
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(true)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(true)
+        );
     }
 }

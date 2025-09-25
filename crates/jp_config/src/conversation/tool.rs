@@ -11,6 +11,7 @@ use tracing::warn;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
+    delta::{delta_opt, delta_opt_partial, delta_opt_vec, delta_vec, PartialConfigDelta},
     BoxedError,
 };
 
@@ -41,6 +42,31 @@ impl AssignKeyValue for PartialToolsConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialToolsConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            defaults: self.defaults.delta(next.defaults),
+            tools: next
+                .tools
+                .into_iter()
+                .filter_map(|(name, next)| {
+                    let prev = self.tools.get(&name);
+                    if prev.is_some_and(|prev| prev == &next) {
+                        return None;
+                    }
+
+                    let next = match prev {
+                        Some(prev) => prev.delta(next),
+                        None => next,
+                    };
+
+                    Some((name, next))
+                })
+                .collect(),
+        }
     }
 }
 
@@ -110,6 +136,16 @@ impl AssignKeyValue for PartialToolsDefaultsConfig {
     }
 }
 
+impl PartialConfigDelta for PartialToolsDefaultsConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            run: delta_opt(self.run.as_ref(), next.run),
+            result: delta_opt(self.result.as_ref(), next.result),
+            style: self.style.delta(next.style),
+        }
+    }
+}
+
 /// Tool configuration.
 #[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case", allow_unknown_fields)]
@@ -176,6 +212,37 @@ impl AssignKeyValue for PartialToolConfig {
     }
 }
 
+impl PartialConfigDelta for PartialToolConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            source: delta_opt(self.source.as_ref(), next.source),
+            enable: delta_opt(self.enable.as_ref(), next.enable),
+            command: delta_opt_partial(self.command.as_ref(), next.command),
+            description: delta_opt(self.description.as_ref(), next.description),
+            parameters: next
+                .parameters
+                .into_iter()
+                .filter_map(|(k, next)| {
+                    let prev = self.parameters.get(&k);
+                    if prev.is_some_and(|prev| prev == &next) {
+                        return None;
+                    }
+
+                    let next = match prev {
+                        Some(prev) => prev.delta(next),
+                        None => next,
+                    };
+
+                    Some((k, next))
+                })
+                .collect(),
+            run: delta_opt(self.run.as_ref(), next.run),
+            result: delta_opt(self.result.as_ref(), next.result),
+            style: delta_opt_partial(self.style.as_ref(), next.style),
+        }
+    }
+}
+
 /// Tool command configuration, either as a string or a complete configuration.
 #[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case", serde(untagged))]
@@ -199,6 +266,15 @@ impl AssignKeyValue for PartialToolCommandConfigOrString {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialToolCommandConfigOrString {
+    fn delta(&self, next: Self) -> Self {
+        match (self, next) {
+            (Self::Config(prev), Self::Config(next)) => Self::Config(prev.delta(next)),
+            (_, next) => next,
+        }
     }
 }
 
@@ -267,13 +343,23 @@ impl AssignKeyValue for PartialToolCommandConfig {
     }
 }
 
+impl PartialConfigDelta for PartialToolCommandConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            program: delta_opt(self.program.as_ref(), next.program),
+            args: delta_opt_vec(self.args.as_ref(), next.args),
+            shell: delta_opt(self.shell.as_ref(), next.shell),
+        }
+    }
+}
+
 /// Tool parameter configuration.
 #[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolParameterConfig {
     /// The type of the parameter.
     // TODO: Support `type` as an array of types.
-    #[setting(rename = "type")]
+    #[setting(nested, rename = "type")]
     pub kind: OneOrManyTypes,
 
     /// The default value of the parameter.
@@ -294,6 +380,19 @@ pub struct ToolParameterConfig {
     pub items: Option<ToolParameterItemsConfig>,
 }
 
+impl PartialConfigDelta for PartialToolParameterConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            kind: self.kind.delta(next.kind),
+            default: delta_opt(self.default.as_ref(), next.default),
+            required: delta_opt(self.required.as_ref(), next.required),
+            description: delta_opt(self.description.as_ref(), next.description),
+            enumeration: delta_opt(self.enumeration.as_ref(), next.enumeration),
+            items: delta_opt_partial(self.items.as_ref(), next.items),
+        }
+    }
+}
+
 /// A type that can be either a single type or a list of types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
 #[serde(untagged)]
@@ -303,6 +402,15 @@ pub enum OneOrManyTypes {
 
     /// A list of types.
     Many(Vec<String>),
+}
+
+impl PartialConfigDelta for PartialOneOrManyTypes {
+    fn delta(&self, next: Self) -> Self {
+        match (self, next) {
+            (Self::Many(prev), Self::Many(next)) => Self::Many(delta_vec(prev, next)),
+            (_, next) => next,
+        }
+    }
 }
 
 impl From<String> for OneOrManyTypes {
@@ -387,6 +495,14 @@ pub struct ToolParameterItemsConfig {
     /// The type of the parameter array items.
     #[serde(rename = "type")]
     pub kind: String,
+}
+
+impl PartialConfigDelta for PartialToolParameterItemsConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            kind: delta_opt(self.kind.as_ref(), next.kind),
+        }
+    }
 }
 
 /// The source of a tool.

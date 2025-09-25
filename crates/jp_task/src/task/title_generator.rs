@@ -7,7 +7,7 @@ use jp_config::{
     providers::llm::LlmProviderConfig,
     AppConfig,
 };
-use jp_conversation::{AssistantMessage, ConversationId, MessagePair};
+use jp_conversation::{message::Messages, AssistantMessage, ConversationId, MessagePair};
 use jp_llm::{provider, structured};
 use jp_workspace::Workspace;
 use tokio_util::sync::CancellationToken;
@@ -21,7 +21,7 @@ pub struct TitleGeneratorTask {
     pub model_id: ModelIdConfig,
     pub assistant: AssistantConfig,
     pub providers: LlmProviderConfig,
-    pub messages: Vec<MessagePair>,
+    pub messages: Messages,
     pub title: Option<String>,
 }
 
@@ -32,18 +32,21 @@ impl TitleGeneratorTask {
         workspace: &Workspace,
         query: Option<String>,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let mut messages = workspace.get_messages(&conversation_id).to_vec();
+        let mut messages = workspace.get_messages(&conversation_id).to_messages();
         if let Some(query) = query {
-            messages.push(MessagePair::new(
-                query.into(),
-                // TODO: We have to use a placeholder here, because the
-                // assistant message is not yet generated, while some LLM
-                // providers (such as Anthropic) require a non-empty message to
-                // generate a response.
-                //
-                // Is there a better way to do this?
-                AssistantMessage::from((ProviderId::Anthropic, "<RESPONSE PENDING>")),
-            ));
+            messages.push(
+                MessagePair::new(
+                    query.into(),
+                    // TODO: We have to use a placeholder here, because the
+                    // assistant message is not yet generated, while some LLM
+                    // providers (such as Anthropic) require a non-empty message to
+                    // generate a response.
+                    //
+                    // Is there a better way to do this?
+                    AssistantMessage::from((ProviderId::Anthropic, "<RESPONSE PENDING>")),
+                ),
+                None,
+            );
         }
 
         let model_id = config.assistant.model.id.clone();

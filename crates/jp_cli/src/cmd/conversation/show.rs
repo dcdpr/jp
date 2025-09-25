@@ -20,7 +20,7 @@ impl Show {
         };
         let messages = ctx.workspace.get_messages(&id);
         let user = conversation.user;
-        let details = DetailsFmt::new(id, conversation, messages)
+        let details = DetailsFmt::new(id, conversation, &messages)
             .with_local_flag(user)
             .with_active_conversation(active_id)
             .with_hyperlinks(ctx.term.args.hyperlinks)

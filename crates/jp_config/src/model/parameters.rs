@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::{delta_opt, delta_opt_partial, delta_opt_vec, PartialConfigDelta},
     BoxedError,
 };
 
@@ -90,6 +91,20 @@ impl AssignKeyValue for PartialParametersConfig {
     }
 }
 
+impl PartialConfigDelta for PartialParametersConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            max_tokens: delta_opt(self.max_tokens.as_ref(), next.max_tokens),
+            reasoning: delta_opt_partial(self.reasoning.as_ref(), next.reasoning),
+            temperature: delta_opt(self.temperature.as_ref(), next.temperature),
+            top_p: delta_opt(self.top_p.as_ref(), next.top_p),
+            top_k: delta_opt(self.top_k.as_ref(), next.top_k),
+            stop_words: delta_opt_vec(self.stop_words.as_ref(), next.stop_words),
+            other: delta_opt(self.other.as_ref(), next.other),
+        }
+    }
+}
+
 impl ParametersConfig {
     /// Returns the reasoning configuration.
     ///
@@ -148,6 +163,15 @@ impl AssignKeyValue for PartialReasoningConfig {
     }
 }
 
+impl PartialConfigDelta for PartialReasoningConfig {
+    fn delta(&self, next: Self) -> Self {
+        match (self, next) {
+            (Self::Custom(prev), Self::Custom(next)) => Self::Custom(prev.delta(next)),
+            (_, next) => next,
+        }
+    }
+}
+
 impl FromStr for PartialReasoningConfig {
     type Err = BoxedError;
 
@@ -157,6 +181,15 @@ impl FromStr for PartialReasoningConfig {
             "auto" => Self::Auto,
             _ => Self::Custom(PartialCustomReasoningConfig::from_str(s)?),
         })
+    }
+}
+
+impl FromStr for ReasoningConfig {
+    type Err = BoxedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let partial = PartialReasoningConfig::from_str(s)?;
+        Self::from_partial(partial).map_err(Into::into)
     }
 }
 
@@ -184,6 +217,15 @@ impl AssignKeyValue for PartialCustomReasoningConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialCustomReasoningConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            effort: delta_opt(self.effort.as_ref(), next.effort),
+            exclude: delta_opt(self.exclude.as_ref(), next.exclude),
+        }
     }
 }
 
