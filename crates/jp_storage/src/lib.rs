@@ -72,13 +72,29 @@ impl Storage {
 
         // Create user storage directory, if needed.
         if root.exists()
-            && let Some(existing_path) = fs::read_dir(root)?.find_map(|entry| {
+            && let Some(mut existing_path) = fs::read_dir(root)?.find_map(|entry| {
                 let path = entry.ok()?.path();
                 path.to_string_lossy().ends_with(&id).then_some(path)
             })
         {
             if !existing_path.is_dir() {
                 return Err(Error::NotDir(existing_path));
+            }
+
+            // At this point we know we have a user workspace directory ending
+            // with the correct ID, but it might not have the correct name. This
+            // can happen if the user has renamed the workspace directory.
+            if let Some(suffix) = existing_path.file_name()
+                && suffix != dirname.as_str()
+            {
+                let new_path = existing_path.with_file_name(dirname);
+                trace!(
+                    old = %existing_path.display(),
+                    new = %new_path.display(),
+                    "Renaming existing user storage directory to match new name."
+                );
+                fs::rename(&existing_path, &new_path)?;
+                existing_path = new_path;
             }
 
             // If the symlink already exists, but points to a different instance
