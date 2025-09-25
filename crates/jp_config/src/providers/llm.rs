@@ -8,10 +8,12 @@ pub mod ollama;
 pub mod openai;
 pub mod openrouter;
 
+use indexmap::IndexMap;
 use schematic::Config;
 
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    model::id::ModelIdConfig,
     providers::llm::{
         anthropic::{AnthropicConfig, PartialAnthropicConfig},
         deepseek::{DeepseekConfig, PartialDeepseekConfig},
@@ -27,6 +29,10 @@ use crate::{
 #[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case")]
 pub struct LlmProviderConfig {
+    /// Aliases for specific provider/model combinations.
+    #[setting(nested)]
+    pub aliases: IndexMap<String, ModelIdConfig>,
+
     /// Anthropic API configuration.
     #[setting(nested)]
     pub anthropic: AnthropicConfig,
@@ -60,6 +66,7 @@ impl AssignKeyValue for PartialLlmProviderConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
+            _ if kv.p("aliases") => kv.try_object()?,
             _ if kv.p("anthropic") => self.anthropic.assign(kv)?,
             _ if kv.p("deepseek") => self.deepseek.assign(kv)?,
             _ if kv.p("google") => self.google.assign(kv)?,

@@ -126,6 +126,7 @@ Ok(
             },
             providers: PartialProviderConfig {
                 llm: PartialLlmProviderConfig {
+                    aliases: {},
                     anthropic: PartialAnthropicConfig {
                         api_key_env: Some(
                             "ANTHROPIC_API_KEY",

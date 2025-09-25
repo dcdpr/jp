@@ -5,3 +5,74 @@ expression: config
 extends = ['config.d/**/*']
 [conversation.tools."*"]
 run = 'ask'
+[providers.llm.aliases.anthropic]
+provider = 'anthropic'
+name = 'claude-sonnet-4-0'
+
+[providers.llm.aliases.claude]
+provider = 'anthropic'
+name = 'claude-sonnet-4-0'
+
+[providers.llm.aliases.sonnet]
+provider = 'anthropic'
+name = 'claude-sonnet-4-0'
+
+[providers.llm.aliases.opus]
+provider = 'anthropic'
+name = 'claude-opus-4-1'
+
+[providers.llm.aliases.haiku]
+provider = 'anthropic'
+name = 'claude-3-5-haiku-latest'
+
+[providers.llm.aliases.openai]
+provider = 'openai'
+name = 'gpt-5'
+
+[providers.llm.aliases.chatgpt]
+provider = 'openai'
+name = 'gpt-5'
+
+[providers.llm.aliases.gpt]
+provider = 'openai'
+name = 'gpt-5'
+
+[providers.llm.aliases.gpt5]
+provider = 'openai'
+name = 'gpt-5'
+
+[providers.llm.aliases.gpt5-mini]
+provider = 'openai'
+name = 'gpt-5-mini'
+
+[providers.llm.aliases.gpt-mini]
+provider = 'openai'
+name = 'gpt-5-mini'
+
+[providers.llm.aliases.gpt5-nano]
+provider = 'openai'
+name = 'gpt-5-nano'
+
+[providers.llm.aliases.gpt-nano]
+provider = 'openai'
+name = 'gpt-5-nano'
+
+[providers.llm.aliases.o3-research]
+provider = 'openai'
+name = 'o3-deep-research'
+
+[providers.llm.aliases.o4-mini-research]
+provider = 'openai'
+name = 'o4-mini-deep-research'
+
+[providers.llm.aliases.codex]
+provider = 'openai'
+name = 'gpt-5-codex'
+
+[providers.llm.aliases.gpt-5-codex]
+provider = 'openai'
+name = 'gpt-5-codex'
+
+[providers.llm.aliases.codex-mini]
+provider = 'openai'
+name = 'codex-mini-latest'

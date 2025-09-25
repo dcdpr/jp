@@ -17,6 +17,7 @@ expression: "AppConfig::fields()"
     "style.code.line_numbers",
     "style.code.theme",
     "providers.mcp",
+    "providers.llm.aliases",
     "providers.llm.openrouter.api_key_env",
     "providers.llm.openrouter.app_name",
     "providers.llm.openrouter.app_referrer",

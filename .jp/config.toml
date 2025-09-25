@@ -9,6 +9,32 @@ anthropic.beta_headers = [
     "context-1m-2025-08-07",
     "interleaved-thinking-2025-05-14",
 ]
+[providers.llm.aliases]
+anthropic = { provider = "anthropic", name = "claude-sonnet-4-0" }
+claude = { provider = "anthropic", name = "claude-sonnet-4-0" }
+sonnet = { provider = "anthropic", name = "claude-sonnet-4-0" }
+opus = { provider = "anthropic", name = "claude-opus-4-1" }
+haiku = { provider = "anthropic", name = "claude-3-5-haiku-latest" }
+
+openai = { provider = "openai", name = "gpt-5" }
+chatgpt = { provider = "openai", name = "gpt-5" }
+gpt = { provider = "openai", name = "gpt-5" }
+gpt5 = { provider = "openai", name = "gpt-5" }
+gpt5-mini = { provider = "openai", name = "gpt-5-mini" }
+gpt-mini = { provider = "openai", name = "gpt-5-mini" }
+gpt5-nano = { provider = "openai", name = "gpt-5-nano" }
+gpt-nano = { provider = "openai", name = "gpt-5-nano" }
+o3-research = { provider = "openai", name = "o3-deep-research" }
+o4-mini-research = { provider = "openai", name = "o4-mini-deep-research" }
+codex = { provider = "openai", name = "gpt-5-codex" }
+gpt-5-codex = { provider = "openai", name = "gpt-5-codex" }
+codex-mini = { provider = "openai", name = "codex-mini-latest" }
+
+google = { provider = "google", name = "gemini-2.5-pro" }
+gemini = { provider = "google", name = "gemini-2.5-pro" }
+gemini-pro = { provider = "google", name = "gemini-2.5-pro" }
+gemini-flash = { provider = "google", name = "gemini-2.5-flash" }
+gemini-lite = { provider = "google", name = "gemini-2.5-flash-lite" }
 
 [assistant]
 model.id = { provider = "anthropic", name = "claude-sonnet-4-0" }
