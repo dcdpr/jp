@@ -551,23 +551,34 @@ fn configure_logging(verbose: u8, quiet: bool) {
     use tracing::level_filters::LevelFilter;
     use tracing_subscriber::fmt;
 
-    let (mut level, all) = match verbose {
-        0 => (LevelFilter::ERROR, false),
-        1 => (LevelFilter::WARN, false),
-        2 => (LevelFilter::INFO, false),
-        3 => (LevelFilter::DEBUG, false),
-        4 => (LevelFilter::TRACE, false),
-        _ => (LevelFilter::TRACE, true),
+    let (mut level, more) = match verbose {
+        0 => (LevelFilter::ERROR, 0),
+        1 => (LevelFilter::WARN, 0),
+        2 => (LevelFilter::INFO, 0),
+        3 => (LevelFilter::DEBUG, 0),
+        4 => (LevelFilter::TRACE, 0),
+        5 => (LevelFilter::TRACE, 1),
+        _ => (LevelFilter::TRACE, 2),
     };
 
     if quiet {
         level = LevelFilter::OFF;
     }
 
-    let mut filter = if all {
-        vec!["trace".to_owned()]
-    } else {
-        vec!["off".to_owned()]
+    let mut filter: Vec<_> = match more {
+        0 => vec!["off".to_owned()],
+        1 => vec![[
+            "trace",
+            "mio=off",
+            "tokio=off",
+            "h2=off",
+            "rustls=off",
+            "hyper_util=off",
+            "reqwest=off",
+        ]
+        .to_vec()
+        .join(",")],
+        _ => vec!["trace".to_owned()],
     };
 
     for krate in [
@@ -595,14 +606,13 @@ fn configure_logging(verbose: u8, quiet: bool) {
         filter.push(format!("jp_{krate}={level}"));
     }
 
-    let format = fmt::format().with_target(false).compact();
+    let format = fmt::format().with_target(more > 0).compact();
 
     if level < LevelFilter::DEBUG {
         tracing_subscriber::fmt()
             .event_format(format)
             .without_time()
             .with_ansi(true)
-            .with_target(false)
             .with_writer(std::io::stderr)
             .with_env_filter(filter.join(","))
             .init();
@@ -610,7 +620,6 @@ fn configure_logging(verbose: u8, quiet: bool) {
         tracing_subscriber::fmt()
             .event_format(format)
             .with_ansi(true)
-            .with_target(false)
             .with_writer(std::io::stderr)
             .with_env_filter(filter.join(","))
             .init();
