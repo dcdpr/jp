@@ -12,6 +12,7 @@ use crate::{
         title::{PartialTitleConfig, TitleConfig},
         tool::{PartialToolsConfig, ToolsConfig},
     },
+    delta::{delta_opt_vec, PartialConfigDelta},
 };
 
 /// Conversation-specific configuration.
@@ -27,7 +28,7 @@ pub struct ConversationConfig {
     pub tools: ToolsConfig,
 
     /// Attachment configuration.
-    #[setting(default, merge = schematic::merge::append_vec)]
+    #[setting(default, merge = schematic::merge::append_vec, transform = util::vec_dedup)]
     pub attachments: Vec<url::Url>,
 }
 
@@ -49,5 +50,15 @@ impl AssignKeyValue for PartialConversationConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialConversationConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            title: self.title.delta(next.title),
+            tools: self.tools.delta(next.tools),
+            attachments: delta_opt_vec(self.attachments.as_ref(), next.attachments),
+        }
     }
 }

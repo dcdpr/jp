@@ -18,9 +18,11 @@ use crate::{
 #[config(rename_all = "snake_case")]
 pub struct InstructionsConfig {
     /// The title of the instructions.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 
     /// An optional description of the instructions.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
     /// The list of instructions.

@@ -17,7 +17,11 @@ use std::{
 pub use error::Error;
 use error::Result;
 pub use id::Id;
-use jp_conversation::{Conversation, ConversationId, MessagePair};
+use jp_config::PartialAppConfig;
+use jp_conversation::{
+    message::{Messages, MessagesRef},
+    Conversation, ConversationId, MessagePair,
+};
 use jp_storage::{Storage, DEFAULT_STORAGE_DIR};
 use state::{LocalState, State, UserState};
 use tracing::{debug, info, trace};
@@ -342,27 +346,49 @@ impl Workspace {
 
     /// Gets the messages for a specific conversation. Returns an empty slice if not found.
     #[must_use]
-    pub fn get_messages(&self, id: &ConversationId) -> &[MessagePair] {
+    pub fn get_messages(&self, id: &ConversationId) -> MessagesRef<'_> {
         self.state
             .local
             .messages
             .get(id)
-            .map_or(&[], |v| v.as_slice())
+            .map_or_else(MessagesRef::default, |v| v.as_ref())
     }
 
     /// Removes the last message from a conversation.
     pub fn pop_message(&mut self, id: &ConversationId) -> Option<MessagePair> {
-        self.state.local.messages.get_mut(id).and_then(Vec::pop)
+        self.state
+            .local
+            .messages
+            .get_mut(id)
+            .and_then(Messages::pop)
+    }
+
+    pub fn set_conversation_config(
+        &mut self,
+        id: &ConversationId,
+        config: PartialAppConfig,
+    ) -> Result<()> {
+        match self.state.local.messages.get_mut(id) {
+            Some(messages) => messages.set_config(config),
+            None => return Err(Error::NotFound("Conversation", id.to_string())),
+        }
+
+        Ok(())
     }
 
     /// Adds a message to a conversation.
-    pub fn add_message(&mut self, id: ConversationId, message: MessagePair) {
+    pub fn add_message(
+        &mut self,
+        id: ConversationId,
+        message: MessagePair,
+        config: Option<PartialAppConfig>,
+    ) {
         self.state
             .local
             .messages
             .entry(id)
             .or_default()
-            .push(message);
+            .push(message, config);
     }
 
     /// Returns an iterator over all conversations, including the active one.

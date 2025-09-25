@@ -2,7 +2,6 @@
 
 use std::{fmt, str::FromStr};
 
-use jp_config::PartialAppConfig;
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id, NANOSECONDS_PER_DECISECOND,
@@ -25,10 +24,6 @@ pub struct Conversation {
     /// Whether the conversation is stored in the user or workspace storage.
     #[serde(skip)]
     pub user: bool,
-
-    /// The partial configuration persisted for this conversation.
-    #[serde(default = "PartialAppConfig::empty")]
-    config: PartialAppConfig,
 }
 
 impl Serialize for Conversation {
@@ -36,9 +31,7 @@ impl Serialize for Conversation {
     where
         S: serde::Serializer,
     {
-        use serde::ser::Error as _;
-
-        let mut n = 3;
+        let mut n = 2;
         if self.title.is_some() {
             n += 1;
         }
@@ -51,14 +44,6 @@ impl Serialize for Conversation {
 
         state.serialize_field("last_activated_at", &self.last_activated_at)?;
         state.serialize_field("local", &self.user)?;
-
-        let config = trim_config(self.config.clone()).map_err(S::Error::custom)?;
-        if let serde_json::Value::Object(v) = &config
-            && !v.is_empty()
-        {
-            state.serialize_field("config", &config)?;
-        }
-
         state.end()
     }
 }
@@ -68,7 +53,6 @@ impl Default for Conversation {
         Self {
             last_activated_at: UtcDateTime::now(),
             title: None,
-            config: PartialAppConfig::default(),
             user: false,
         }
     }
@@ -87,20 +71,6 @@ impl Conversation {
     pub fn with_local(mut self, local: bool) -> Self {
         self.user = local;
         self
-    }
-
-    #[must_use]
-    pub fn config(&self) -> &PartialAppConfig {
-        &self.config
-    }
-
-    #[must_use]
-    pub fn config_mut(&mut self) -> &mut PartialAppConfig {
-        &mut self.config
-    }
-
-    pub fn set_config(&mut self, config: PartialAppConfig) {
-        self.config = config;
     }
 }
 
@@ -257,39 +227,6 @@ impl Default for ConversationsMetadata {
     }
 }
 
-fn trim_config(
-    cfg: jp_config::PartialAppConfig,
-) -> std::result::Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
-    Ok(match serde_json::to_value(cfg)? {
-        serde_json::Value::Object(v) => v
-            .into_iter()
-            .filter_map(|(k, v)| compact_value(v).map(|v| (k, v)))
-            .collect::<serde_json::Map<String, serde_json::Value>>()
-            .into(),
-        v => v,
-    })
-}
-
-fn compact_value(v: serde_json::Value) -> Option<serde_json::Value> {
-    match v {
-        serde_json::Value::Object(v) => {
-            let map = v
-                .into_iter()
-                .filter_map(|(k, v)| compact_value(v).map(|v| (k, v)))
-                .collect::<serde_json::Map<_, _>>();
-
-            (!map.is_empty()).then(|| map.into())
-        }
-        serde_json::Value::Array(v) => {
-            let vec = v.into_iter().filter_map(compact_value).collect::<Vec<_>>();
-
-            (!vec.is_empty()).then(|| vec.into())
-        }
-        serde_json::Value::Null => None,
-        _ => Some(v),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,7 +240,6 @@ mod tests {
                 time::Time::MIDNIGHT,
             ),
             user: true,
-            config: PartialAppConfig::default(),
         };
 
         insta::assert_json_snapshot!(conv);

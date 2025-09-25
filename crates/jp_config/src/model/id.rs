@@ -9,7 +9,10 @@ use jp_id::{
 use schematic::{Config, ConfigEnum, Schematic};
 use serde::{Deserialize, Serialize};
 
-use crate::assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment};
+use crate::{
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::{delta_opt, PartialConfigDelta},
+};
 
 /// Assistant-specific configuration.
 #[derive(Debug, Clone, Config)]
@@ -34,6 +37,15 @@ impl AssignKeyValue for PartialModelIdConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialModelIdConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            provider: delta_opt(self.provider.as_ref(), next.provider),
+            name: delta_opt(self.name.as_ref(), next.name),
+        }
     }
 }
 

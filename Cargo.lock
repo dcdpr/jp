@@ -1929,6 +1929,7 @@ dependencies = [
  "crossterm",
  "duct",
  "futures",
+ "indexmap",
  "inquire",
  "insta",
  "jp_attachment",
@@ -2011,6 +2012,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.16",
  "time",
+ "tracing",
 ]
 
 [[package]]

@@ -32,6 +32,7 @@ impl IntoPartialAppConfig for Add {
         &self,
         _: Option<&Workspace>,
         mut partial: PartialAppConfig,
+        _: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         for uri in &self.attachments {
             validate_attachment(uri)?;

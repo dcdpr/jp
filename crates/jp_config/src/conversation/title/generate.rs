@@ -4,6 +4,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::{delta_opt, delta_opt_partial, PartialConfigDelta},
     model::{ModelConfig, PartialModelConfig},
 };
 
@@ -30,5 +31,14 @@ impl AssignKeyValue for PartialGenerateConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialGenerateConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            auto: delta_opt(self.auto.as_ref(), next.auto),
+            model: delta_opt_partial(self.model.as_ref(), next.model),
+        }
     }
 }

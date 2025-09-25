@@ -4,7 +4,8 @@ use serde::Serialize;
 
 use crate::{
     error::{Error, Result},
-    MessagePair, UserMessage,
+    message::Messages,
+    UserMessage,
 };
 
 /// A wrapper for multiple messages, with convenience methods for adding
@@ -14,7 +15,7 @@ pub struct ThreadBuilder {
     pub system_prompt: Option<String>,
     pub instructions: Vec<InstructionsConfig>,
     pub attachments: Vec<Attachment>,
-    pub history: Vec<MessagePair>,
+    pub history: Messages,
     pub message: Option<UserMessage>,
 }
 
@@ -44,7 +45,7 @@ impl ThreadBuilder {
     }
 
     #[must_use]
-    pub fn with_history(mut self, history: Vec<MessagePair>) -> Self {
+    pub fn with_history(mut self, history: Messages) -> Self {
         self.history.extend(history);
         self
     }
@@ -81,7 +82,7 @@ pub struct Thread {
     pub system_prompt: Option<String>,
     pub instructions: Vec<InstructionsConfig>,
     pub attachments: Vec<Attachment>,
-    pub history: Vec<MessagePair>,
+    pub history: Messages,
     pub message: UserMessage,
 }
 

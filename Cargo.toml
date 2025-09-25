@@ -123,6 +123,7 @@ all = { level = "warn", priority = -1 }
 assigning_clones = "allow"
 enum_glob_use = "allow"
 format_push_string = "allow"
+inefficient_to_string = "allow"
 missing_errors_doc = "allow" # Temporary
 option_option = "allow"
 pedantic = { level = "warn", priority = -1 }

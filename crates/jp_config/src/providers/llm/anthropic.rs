@@ -2,7 +2,11 @@
 
 use schematic::Config;
 
-use crate::assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment};
+use crate::{
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::{delta_opt, delta_opt_vec, PartialConfigDelta},
+    util,
+};
 
 /// Anthropic API configuration.
 #[derive(Debug, Clone, Config)]
@@ -22,7 +26,7 @@ pub struct AnthropicConfig {
     ///
     /// To find out which beta headers are available, see:
     /// <https://docs.anthropic.com/en/release-notes/api>
-    #[setting(default = vec![], merge = schematic::merge::append_vec)]
+    #[setting(default = vec![], merge = schematic::merge::append_vec, transform = util::vec_dedup)]
     pub beta_headers: Vec<String>,
 }
 
@@ -37,5 +41,15 @@ impl AssignKeyValue for PartialAnthropicConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialAnthropicConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
+            base_url: delta_opt(self.base_url.as_ref(), next.base_url),
+            beta_headers: delta_opt_vec(self.beta_headers.as_ref(), next.beta_headers),
+        }
     }
 }

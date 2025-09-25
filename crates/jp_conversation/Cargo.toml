@@ -22,6 +22,7 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
 time = { workspace = true, features = ["serde-human-readable"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["json"] }

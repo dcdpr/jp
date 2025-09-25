@@ -1,6 +1,6 @@
 use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
-use jp_conversation::{ConversationId, MessagePair};
+use jp_conversation::{message::Messages, ConversationId};
 use jp_llm::{provider, structured};
 
 use crate::{cmd::Success, ctx::Ctx, Output};
@@ -34,7 +34,7 @@ impl Edit {
     pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
         let id = self.id.unwrap_or(active_id);
-        let messages = ctx.workspace.get_messages(&id).to_vec();
+        let messages = ctx.workspace.get_messages(&id).to_messages();
 
         if let Some(user) = self.local {
             match ctx.workspace.get_conversation_mut(&id) {
@@ -70,7 +70,7 @@ fn missing_conversation(id: &ConversationId) -> Output {
 
 async fn generate_titles(
     config: &AppConfig,
-    messages: Vec<MessagePair>,
+    messages: Messages,
     mut rejected: Vec<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;

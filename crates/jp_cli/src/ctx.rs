@@ -1,6 +1,6 @@
 use std::io::{self, IsTerminal as _};
 
-use jp_config::{conversation::tool::ToolSource, AppConfig, PartialAppConfig};
+use jp_config::{conversation::tool::ToolSource, util::build, AppConfig, PartialAppConfig};
 use jp_mcp::id::{McpServerId, McpToolId};
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
@@ -14,6 +14,9 @@ pub(crate) struct Ctx {
 
     /// Merged file/CLI configuration.
     config: AppConfig,
+
+    /// Partial configuration, without defaults.
+    partial: PartialAppConfig,
 
     /// Global CLI arguments.
     pub(crate) term: Term,
@@ -38,11 +41,17 @@ pub(crate) struct Term {
 
 impl Ctx {
     /// Create a new context with the given workspace
-    pub(crate) fn new(workspace: Workspace, args: Globals, config: AppConfig) -> Self {
+    pub(crate) fn new(
+        workspace: Workspace,
+        args: Globals,
+        partial: PartialAppConfig,
+    ) -> Result<Self> {
+        let config = build(partial.clone())?;
         let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
-        Self {
+        Ok(Self {
             workspace,
+            partial,
             config,
             term: Term {
                 args,
@@ -50,7 +59,7 @@ impl Ctx {
             },
             mcp_client,
             task_handler: TaskHandler::default(),
-        }
+        })
     }
 
     /// Get immutable access to the configuration.
@@ -65,6 +74,11 @@ impl Ctx {
     /// [`AppConfig`] object.
     pub(crate) fn config(&self) -> &AppConfig {
         &self.config
+    }
+
+    /// Get the partial configuration.
+    pub(crate) fn partial_config(&self) -> &PartialAppConfig {
+        &self.partial
     }
 
     /// Activate and deactivate MCP servers based on the active conversation
@@ -106,6 +120,14 @@ pub(crate) trait IntoPartialAppConfig {
         &self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
+
+        // Whenever called the `partial` argument might be empty, or contain
+        // any subset of the full configuration. This might prevent validating
+        // certain fields before applying them. In these situations, the
+        // `merged_config` argument can be used to provide the full
+        // configuration, and the partial configuration can be validated against
+        // it.
+        merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>>;
 
     #[expect(unused_variables)]
@@ -113,6 +135,14 @@ pub(crate) trait IntoPartialAppConfig {
         &self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
+
+        // Whenever called the `partial` argument might be empty, or contain
+        // any subset of the full configuration. This might prevent validating
+        // certain fields before applying them. In these situations, the
+        // `merged_config` argument can be used to provide the full
+        // configuration, and the partial configuration can be validated against
+        // it.
+        merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         Ok(partial)
     }

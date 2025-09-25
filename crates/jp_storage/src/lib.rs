@@ -7,7 +7,7 @@ use std::{
 };
 
 pub use error::Error;
-use jp_conversation::{Conversation, ConversationId, ConversationsMetadata, MessagePair};
+use jp_conversation::{message::Messages, Conversation, ConversationId, ConversationsMetadata};
 use jp_id::Id as _;
 use jp_tombmap::TombMap;
 use tracing::{trace, warn};
@@ -19,7 +19,7 @@ use crate::{
 
 type ConversationsAndMessages = (
     TombMap<ConversationId, Conversation>,
-    TombMap<ConversationId, Vec<MessagePair>>,
+    TombMap<ConversationId, Messages>,
 );
 
 pub const DEFAULT_STORAGE_DIR: &str = ".jp";
@@ -178,7 +178,7 @@ impl Storage {
     pub fn persist_conversations_and_messages(
         &mut self,
         conversations: &TombMap<ConversationId, Conversation>,
-        messages: &TombMap<ConversationId, Vec<MessagePair>>,
+        messages: &TombMap<ConversationId, Messages>,
         active_conversation_id: &ConversationId,
         active_conversation: &Conversation,
     ) -> Result<()> {
@@ -221,7 +221,9 @@ impl Storage {
             let meta_path = conv_dir.join(METADATA_FILE);
             write_json(&meta_path, conversation)?;
 
-            let messages = messages.get(id).map_or(vec![], Vec::clone);
+            let messages = messages
+                .get(id)
+                .map_or_else(Messages::default, Messages::clone);
             let messages_path = conv_dir.join(MESSAGES_FILE);
             write_json(&messages_path, &messages)?;
         }
@@ -317,12 +319,13 @@ fn load_conversations_and_messages_from_dir(path: &Path) -> Result<Conversations
         };
 
         let messages_path = path.join(MESSAGES_FILE);
-        match read_json::<Vec<MessagePair>>(&messages_path) {
+        match read_json::<Messages>(&messages_path) {
             Ok(data) => {
                 messages.insert(conversation_id, data);
             }
             Err(error) => {
-                warn!(%error, ?messages_path, "Failed to load messages. Skipping.");
+                let data = fs::read_to_string(&messages_path).unwrap_or_default();
+                warn!(%error, ?messages_path, data, "Failed to load messages. Skipping.");
             }
         }
     }

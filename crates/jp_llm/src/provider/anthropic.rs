@@ -1,6 +1,7 @@
 use std::env;
 
 use async_anthropic::{
+    errors::AnthropicError,
     messages::DEFAULT_MAX_TOKENS,
     types::{
         self, ListModelsResponse, System, Thinking, ToolBash, ToolCodeExecution, ToolComputerUse,
@@ -20,6 +21,7 @@ use jp_config::{
     providers::llm::anthropic::AnthropicConfig,
 };
 use jp_conversation::{
+    message::Messages,
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
 };
@@ -166,7 +168,7 @@ fn create_request(
 
     builder
         .model(model_id.name.clone())
-        .messages(Messages::build(history, message, &mut cache_control_count).0);
+        .messages(AnthropicMessages::build(history, message, &mut cache_control_count).0);
 
     let tools = convert_tools(tools, tool_call_strict_mode, &mut cache_control_count);
 
@@ -535,11 +537,9 @@ impl TryFrom<&AnthropicConfig> for Anthropic {
         }
 
         Ok(Anthropic {
-            client: builder.build().map_err(|e| {
-                Error::Anthropic(async_anthropic::errors::AnthropicError::Unknown(
-                    e.to_string(),
-                ))
-            })?,
+            client: builder
+                .build()
+                .map_err(|e| Error::Anthropic(AnthropicError::Unknown(e.to_string())))?,
         })
     }
 }
@@ -627,10 +627,10 @@ fn convert_tools(
     tools
 }
 
-struct Messages(Vec<types::Message>);
+struct AnthropicMessages(Vec<types::Message>);
 
-impl Messages {
-    fn build(history: Vec<MessagePair>, message: UserMessage, cache_controls: &mut usize) -> Self {
+impl AnthropicMessages {
+    fn build(history: Messages, message: UserMessage, cache_controls: &mut usize) -> Self {
         let mut items = vec![];
 
         // Historical messages.

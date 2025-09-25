@@ -7,6 +7,7 @@ use schematic::Config;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     conversation::title::generate::{GenerateConfig, PartialGenerateConfig},
+    delta::PartialConfigDelta,
 };
 
 /// Title configuration.
@@ -27,5 +28,13 @@ impl AssignKeyValue for PartialTitleConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialTitleConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            generate: self.generate.delta(next.generate),
+        }
     }
 }

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::PartialConfigDelta,
     style::{
         code::{CodeConfig, PartialCodeConfig},
         reasoning::{PartialReasoningConfig, ReasoningConfig},
@@ -51,6 +52,17 @@ impl AssignKeyValue for PartialStyleConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialStyleConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            code: self.code.delta(next.code),
+            reasoning: self.reasoning.delta(next.reasoning),
+            tool_call: self.tool_call.delta(next.tool_call),
+            typewriter: self.typewriter.delta(next.typewriter),
+        }
     }
 }
 

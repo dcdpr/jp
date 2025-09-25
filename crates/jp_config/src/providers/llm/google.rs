@@ -2,7 +2,10 @@
 
 use schematic::Config;
 
-use crate::assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment};
+use crate::{
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::{delta_opt, PartialConfigDelta},
+};
 
 /// Google API configuration.
 #[derive(Debug, Clone, Config)]
@@ -27,5 +30,14 @@ impl AssignKeyValue for PartialGoogleConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialGoogleConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
+            base_url: delta_opt(self.base_url.as_ref(), next.base_url),
+        }
     }
 }

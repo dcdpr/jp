@@ -6,7 +6,7 @@ use jp_config::{
 };
 
 use super::TargetWithConversation;
-use crate::{ctx::Ctx, Error, Output};
+use crate::{ctx::Ctx, Output};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Set {
@@ -45,11 +45,9 @@ impl Set {
                 None => ctx.workspace.active_conversation_id(),
             };
 
-            ctx.workspace
-                .get_conversation_mut(&id)
-                .ok_or(Error::NotFound("Conversation", id.to_string()))?
-                .config_mut()
-                .assign(assignment)?;
+            let mut config = ctx.workspace.get_messages(&id).config();
+            config.assign(assignment)?;
+            ctx.workspace.set_conversation_config(&id, config)?;
 
             return Ok(format!(
                 "Set configuration value for {} in conversation {id:?}",

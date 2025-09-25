@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 
-use crate::assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment};
+use crate::{
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    delta::{delta_opt, delta_opt_partial, delta_opt_vec, PartialConfigDelta},
+};
 
 /// MCP provider configuration.
 #[derive(Debug, Clone, Config)]
@@ -20,6 +23,19 @@ impl AssignKeyValue for PartialMcpProviderConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match self {
             Self::Stdio(config) => config.assign(kv),
+        }
+    }
+}
+
+impl PartialConfigDelta for PartialMcpProviderConfig {
+    fn delta(&self, next: Self) -> Self {
+        match (self, next) {
+            (Self::Stdio(prev), Self::Stdio(next)) => Self::Stdio(PartialStdioConfig {
+                command: delta_opt(prev.command.as_ref(), next.command),
+                arguments: delta_opt_vec(prev.arguments.as_ref(), next.arguments),
+                variables: delta_opt_vec(prev.variables.as_ref(), next.variables),
+                checksum: delta_opt_partial(prev.checksum.as_ref(), next.checksum),
+            }),
         }
     }
 }
@@ -81,6 +97,15 @@ impl AssignKeyValue for PartialChecksumConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialChecksumConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            algorithm: delta_opt(self.algorithm.as_ref(), next.algorithm),
+            value: delta_opt(self.value.as_ref(), next.value),
+        }
     }
 }
 
