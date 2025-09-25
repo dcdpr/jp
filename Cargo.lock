@@ -2003,7 +2003,6 @@ dependencies = [
 name = "jp_conversation"
 version = "0.1.0"
 dependencies = [
- "indexmap",
  "insta",
  "jp_attachment",
  "jp_config",

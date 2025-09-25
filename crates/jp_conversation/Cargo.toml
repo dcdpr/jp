@@ -17,7 +17,6 @@ jp_attachment = { workspace = true }
 jp_config = { workspace = true }
 jp_id = { workspace = true }
 
-indexmap = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
