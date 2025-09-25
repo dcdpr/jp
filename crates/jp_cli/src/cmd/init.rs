@@ -4,7 +4,7 @@ use crossterm::style::Stylize as _;
 use duct::cmd;
 use jp_config::{
     conversation::tool::RunMode,
-    model::id::{ModelIdConfig, PartialModelIdConfig},
+    model::id::{ModelIdConfig, Name, PartialModelIdConfig, ProviderId},
     PartialAppConfig,
 };
 use jp_workspace::Workspace;
@@ -72,6 +72,7 @@ impl Init {
     }
 }
 
+#[expect(clippy::too_many_lines)]
 fn default_config() -> jp_config::PartialAppConfig {
     let mut cfg = jp_config::PartialAppConfig::default();
     cfg.extends
@@ -87,7 +88,126 @@ fn default_config() -> jp_config::PartialAppConfig {
     // have to rely on a default value that might change in the future.
     cfg.conversation.tools.defaults.run = Some(RunMode::Ask);
 
+    if has_anthropic() {
+        cfg.providers.llm.aliases.extend([
+            ("anthropic".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Anthropic),
+                name: Some(Name("claude-sonnet-4-0".into())),
+            }),
+            ("claude".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Anthropic),
+                name: Some(Name("claude-sonnet-4-0".into())),
+            }),
+            ("sonnet".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Anthropic),
+                name: Some(Name("claude-sonnet-4-0".into())),
+            }),
+            ("opus".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Anthropic),
+                name: Some(Name("claude-opus-4-1".into())),
+            }),
+            ("haiku".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Anthropic),
+                name: Some(Name("claude-3-5-haiku-latest".into())),
+            }),
+        ]);
+    }
+
+    if has_openai() {
+        cfg.providers.llm.aliases.extend([
+            ("openai".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("gpt-5".into())),
+            }),
+            ("chatgpt".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("gpt-5".into())),
+            }),
+            ("gpt".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("gpt-5".into())),
+            }),
+            ("gpt5".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("gpt-5".into())),
+            }),
+            ("gpt5-mini".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("gpt-5-mini".into())),
+            }),
+            ("gpt-mini".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("gpt-5-mini".into())),
+            }),
+            ("gpt5-nano".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("gpt-5-nano".into())),
+            }),
+            ("gpt-nano".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("gpt-5-nano".into())),
+            }),
+            ("o3-research".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("o3-deep-research".into())),
+            }),
+            ("o4-mini-research".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("o4-mini-deep-research".into())),
+            }),
+            ("codex".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("gpt-5-codex".into())),
+            }),
+            ("gpt-5-codex".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("gpt-5-codex".into())),
+            }),
+            ("codex-mini".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("codex-mini-latest".into())),
+            }),
+        ]);
+    }
+
+    if has_google() {
+        cfg.providers.llm.aliases.extend([
+            ("google".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Google),
+                name: Some(Name("gemini-2.5-pro".into())),
+            }),
+            ("gemini".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Google),
+                name: Some(Name("gemini-2.5-pro".into())),
+            }),
+            ("gemini-pro".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Google),
+                name: Some(Name("gemini-2.5-pro".into())),
+            }),
+            ("gemini-flash".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Google),
+                name: Some(Name("gemini-2.5-flash".into())),
+            }),
+            ("gemini-lite".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Google),
+                name: Some(Name("gemini-2.5-flash-lite".into())),
+            }),
+        ]);
+    }
+
     cfg
+}
+
+fn has_anthropic() -> bool {
+    env::var("ANTHROPIC_API_KEY").is_ok()
+}
+
+fn has_openai() -> bool {
+    env::var("OPENAI_API_KEY").is_ok()
+}
+
+fn has_google() -> bool {
+    env::var("GOOGLE_API_KEY").is_ok()
 }
 
 fn default_model() -> Option<ModelIdConfig> {
@@ -147,10 +267,44 @@ impl IntoPartialAppConfig for Init {
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use super::*;
 
+    pub(crate) struct EnvVarGuard {
+        name: String,
+        original_value: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        pub fn set(name: &str, value: &str) -> Self {
+            let name = name.to_string();
+            let original_value = std::env::var(&name).ok();
+            unsafe { std::env::set_var(&name, value) };
+            Self {
+                name,
+                original_value,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(ref original) = self.original_value {
+                unsafe { std::env::set_var(&self.name, original) };
+            } else {
+                unsafe { std::env::remove_var(&self.name) };
+            }
+        }
+    }
+
     #[test]
+    #[serial(env_vars)]
     fn test_default_config() {
+        let _env1 = EnvVarGuard::set("ANTHROPIC_API_KEY", "foo");
+        let _env2 = EnvVarGuard::set("OPENAI_API_KEY", "bar");
+        let _env3 = EnvVarGuard::set("GOOGLE_API_KEY", "baz");
+
         let config = default_config();
 
         insta::assert_toml_snapshot!(config);

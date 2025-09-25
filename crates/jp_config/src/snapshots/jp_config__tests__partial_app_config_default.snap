@@ -75,6 +75,7 @@ PartialAppConfig {
     },
     providers: PartialProviderConfig {
         llm: PartialLlmProviderConfig {
+            aliases: {},
             anthropic: PartialAnthropicConfig {
                 api_key_env: None,
                 base_url: None,
