@@ -73,17 +73,22 @@ impl ToolDefinition {
         parameters: IndexMap<String, ToolParameterConfig>,
         mcp_client: &jp_mcp::Client,
     ) -> Result<Self, ToolError> {
-        let name = source.tool_name().unwrap_or(name);
-
         match &source {
             ToolSource::Local { .. } => Ok(local_tool_definition(
                 name.to_owned(),
                 description,
                 parameters,
             )),
-            ToolSource::Mcp { server, .. } => {
-                mcp_tool_definition(server.as_ref(), name, description, parameters, mcp_client)
-                    .await
+            ToolSource::Mcp { server, tool } => {
+                mcp_tool_definition(
+                    server.as_ref(),
+                    name,
+                    tool.as_deref(),
+                    description,
+                    parameters,
+                    mcp_client,
+                )
+                .await
             }
             ToolSource::Builtin { .. } => todo!(),
         }
@@ -429,6 +434,7 @@ fn local_tool_definition(
 async fn mcp_tool_definition(
     server: Option<&String>,
     name: &str,
+    source_name: Option<&str>,
     mut description: Option<String>,
     parameters: IndexMap<String, ToolParameterConfig>,
     mcp_client: &jp_mcp::Client,
@@ -438,7 +444,10 @@ async fn mcp_tool_definition(
 
         let server_id = server.as_ref().map(|s| McpServerId::new(s.to_owned()));
         mcp_client
-            .get_tool(&McpToolId::new(name), server_id.as_ref())
+            .get_tool(
+                &McpToolId::new(source_name.unwrap_or(name)),
+                server_id.as_ref(),
+            )
             .await
             .map_err(ToolError::McpGetToolError)
     }?;
@@ -482,11 +491,28 @@ async fn mcp_tool_definition(
                         .map(str::to_owned)
                         .collect(),
                 ),
-                _ => {
-                    return Err(ToolError::InvalidType {
-                        key: name.to_owned(),
-                        need: vec!["string", "array"],
-                    })
+                value => {
+                    if value.is_null()
+                        && let Some(any) = opts
+                            .get("anyOf")
+                            .and_then(Value::as_array)
+                            .map(|v| {
+                                v.iter()
+                                    .filter_map(|v| {
+                                        v.get("type").and_then(Value::as_str).map(str::to_owned)
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .filter(|v| !v.is_empty())
+                    {
+                        OneOrManyTypes::Many(any)
+                    } else {
+                        return Err(ToolError::InvalidType {
+                            key: name.to_owned(),
+                            value: value.to_owned(),
+                            need: vec!["string", "array"],
+                        });
+                    }
                 }
             },
         };

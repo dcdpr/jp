@@ -316,13 +316,13 @@ pub fn expand_tilde<T: AsRef<str>>(path: impl AsRef<str>, home: Option<T>) -> Op
 /// Returns an error if merging the partials fails, which returns a
 /// [`schematic::MergeError`].
 pub fn load_partial(
-    mut partial: PartialAppConfig,
-    fallback: PartialAppConfig,
+    mut prev: PartialAppConfig,
+    next: PartialAppConfig,
 ) -> Result<PartialAppConfig, Error> {
     use schematic::PartialConfig as _;
 
-    partial.merge(&(), fallback)?;
-    Ok(partial)
+    prev.merge(&(), next)?;
+    Ok(prev)
 }
 
 #[cfg(test)]

@@ -59,6 +59,12 @@ impl ToolsConfig {
             })
     }
 
+    /// Returns `true` if a tool with the given name is configured.
+    #[must_use]
+    pub fn contains(&self, name: &str) -> bool {
+        self.tools.contains_key(name)
+    }
+
     /// Iterate tool configurations.
     ///
     /// This returns `(&str, [ToolConfigWithDefaults])`, merging the global
@@ -105,7 +111,7 @@ impl AssignKeyValue for PartialToolsDefaultsConfig {
 
 /// Tool configuration.
 #[derive(Debug, Clone, Config)]
-#[config(rename_all = "snake_case")]
+#[config(rename_all = "snake_case", allow_unknown_fields)]
 pub struct ToolConfig {
     /// The source of the tool.
     #[setting(required)]
@@ -116,7 +122,7 @@ pub struct ToolConfig {
 
     /// The command to run. Only used for local tools.
     #[setting(nested)]
-    pub command: Option<ToolCommandConfig>,
+    pub command: Option<ToolCommandConfigOrString>,
 
     /// The description of the tool. This will override any existing
     /// description, such as the one from an MCP server, or a built-in tool.
@@ -161,6 +167,50 @@ impl AssignKeyValue for PartialToolConfig {
             "result" => self.result = kv.try_some_from_str()?,
             "style" => self.style.assign(kv)?,
             _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+/// Tool command configuration, either as a string or a complete configuration.
+#[derive(Debug, Clone, Config)]
+#[config(rename_all = "snake_case", serde(untagged))]
+pub enum ToolCommandConfigOrString {
+    /// A single string, which is interpreted as the command to run.
+    String(String),
+
+    /// A complete command configuration.
+    #[setting(nested)]
+    Config(ToolCommandConfig),
+}
+
+impl ToolCommandConfigOrString {
+    /// Return the command configuration.
+    ///
+    /// If the configuration is a string, it is interpreted as a shell command.
+    #[must_use]
+    fn command(self) -> ToolCommandConfig {
+        match self {
+            Self::String(v) => {
+                let mut iter = v.split_whitespace().map(str::to_owned);
+
+                ToolCommandConfig {
+                    program: iter.next().unwrap_or_default(),
+                    args: iter.collect(),
+                    shell: false,
+                }
+            }
+            Self::Config(v) => v,
+        }
+    }
+}
+
+impl AssignKeyValue for PartialToolCommandConfigOrString {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match self {
+            Self::String(v) => *v = kv.try_string()?,
+            Self::Config(v) => v.assign(kv)?,
         }
 
         Ok(())
@@ -326,7 +376,7 @@ pub struct ToolParameterItemsConfig {
 }
 
 /// The source of a tool.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ToolSource {
     /// Use a built-in tool.
     Builtin {
@@ -376,6 +426,35 @@ impl<'de> Deserialize<'de> for ToolSource {
         String::deserialize(deserializer)?
             .parse()
             .map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for ToolSource {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = match self {
+            Self::Builtin { tool } => tool
+                .as_ref()
+                .map_or_else(|| "builtin".to_string(), |tool| format!("builtin.{tool}")),
+            Self::Local { tool } => tool
+                .as_ref()
+                .map_or_else(|| "local".to_string(), |tool| format!("local.{tool}")),
+            Self::Mcp { server, tool } => {
+                let mut s = "mcp".to_string();
+                if let Some(server) = server {
+                    s.push('.');
+                    s.push_str(server);
+                    if let Some(tool) = tool {
+                        s.push('.');
+                        s.push_str(tool);
+                    }
+                }
+                s
+            }
+        };
+        serializer.serialize_str(&s)
     }
 }
 
@@ -489,8 +568,11 @@ impl ToolConfigWithDefaults {
 
     /// Return the command to run the tool.
     #[must_use]
-    pub const fn command(&self) -> Option<&ToolCommandConfig> {
-        self.tool.command.as_ref()
+    pub fn command(&self) -> Option<ToolCommandConfig> {
+        self.tool
+            .command
+            .clone()
+            .map(ToolCommandConfigOrString::command)
     }
 
     /// Return the source of the tool.
