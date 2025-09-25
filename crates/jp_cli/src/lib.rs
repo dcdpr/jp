@@ -427,7 +427,7 @@ fn load_cli_cfg_args(
 
                     if let Some(path) = find_file_in_load_path(path, &load_path) {
                         if let Some(p) = load_partial_at_path(path)? {
-                            partial = load_partial(p, partial)?;
+                            partial = load_partial(partial, p)?;
                         }
                         found = true;
                         break;

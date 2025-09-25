@@ -12,6 +12,7 @@ use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     delta::{delta_opt, delta_opt_partial, delta_opt_vec, delta_vec, PartialConfigDelta},
+    util::merge_nested_indexmap,
     BoxedError,
 };
 
@@ -26,7 +27,7 @@ pub struct ToolsConfig {
     pub defaults: ToolsDefaultsConfig,
 
     /// Tool config
-    #[setting(nested, flatten, merge = schematic::merge::merge_iter)]
+    #[setting(nested, flatten, merge = merge_nested_indexmap)]
     tools: IndexMap<String, ToolConfig>,
 }
 
@@ -53,12 +54,8 @@ impl PartialConfigDelta for PartialToolsConfig {
                 .tools
                 .into_iter()
                 .filter_map(|(name, next)| {
-                    let prev = self.tools.get(&name);
-                    if prev.is_some_and(|prev| prev == &next) {
-                        return None;
-                    }
-
-                    let next = match prev {
+                    let next = match self.tools.get(&name) {
+                        Some(prev) if prev == &next => return None,
                         Some(prev) => prev.delta(next),
                         None => next,
                     };
@@ -177,7 +174,7 @@ pub struct ToolConfig {
     /// values, or forcing a specific value by setting a single enum value. You
     /// CANNOT change the type of the argument, its name, or any other
     /// properties that would break the tool's original argument expectations.
-    #[setting(nested, merge = schematic::merge::merge_iter)]
+    #[setting(nested, merge = merge_nested_indexmap)]
     pub parameters: IndexMap<String, ToolParameterConfig>,
 
     /// How to run the tool.
@@ -193,8 +190,6 @@ pub struct ToolConfig {
 
 impl AssignKeyValue for PartialToolConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
-        dbg!(&self, &kv);
-
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
             "source" => self.source = kv.try_some_from_str()?,
