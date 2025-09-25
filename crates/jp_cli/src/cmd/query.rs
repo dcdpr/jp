@@ -37,7 +37,7 @@ use jp_term::stdout;
 use jp_workspace::Workspace;
 use minijinja::{Environment, UndefinedBehavior};
 use response_handler::ResponseHandler;
-use tracing::{debug, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use url::Url;
 
 use super::{attachment::register_attachment, Output};
@@ -269,6 +269,7 @@ impl Query {
                 ctx.config().assistant.tool_choice.clone(),
                 tools,
                 &mut messages,
+                0,
             )
             .await?;
         }
@@ -510,7 +511,10 @@ impl Query {
         tool_choice: ToolChoice,
         tools: Vec<ToolDefinition>,
         messages: &mut Vec<MessagePair>,
+        mut tries: usize,
     ) -> Result<()> {
+        tries += 1;
+
         let model_id = &ctx.config().assistant.model.id.clone();
 
         let parameters = &ctx.config().assistant.model.parameters;
@@ -550,13 +554,27 @@ impl Query {
         while let Some(event) = stream.next().await {
             let event = match event {
                 Err(jp_llm::Error::RateLimit { retry_after }) => {
-                    println!(
-                        "Rate limited, retrying in {} seconds.",
-                        retry_after.unwrap_or(0)
+                    let max_tries = 5;
+                    if tries > max_tries {
+                        error!(tries, "Failed to get a non-rate-limited response.");
+                        return Err(Error::Llm(jp_llm::Error::RateLimit { retry_after: None }));
+                    }
+
+                    let retry_after = retry_after.unwrap_or(Duration::from_secs(2));
+                    warn!(
+                        retry_after_secs = retry_after.as_secs(),
+                        tries, max_tries, "Rate limited, retrying..."
                     );
-                    tokio::time::sleep(Duration::from_secs(retry_after.unwrap_or(0))).await;
-                    return Box::pin(self.handle_stream(ctx, thread, tool_choice, tools, messages))
-                        .await;
+                    tokio::time::sleep(retry_after).await;
+                    return Box::pin(self.handle_stream(
+                        ctx,
+                        thread,
+                        tool_choice,
+                        tools,
+                        messages,
+                        tries,
+                    ))
+                    .await;
                 }
                 Err(jp_llm::Error::UnknownModel(model)) => {
                     let available = provider
@@ -603,6 +621,22 @@ impl Query {
         let content = if !content_tokens.is_empty() {
             Some(content_tokens)
         } else if content_tokens.is_empty() && event_handler.tool_calls.is_empty() {
+            let max_tries = 3;
+            if tries <= max_tries {
+                warn!(tries, max_tries, "Empty response received, retrying...");
+
+                return Box::pin(self.handle_stream(
+                    ctx,
+                    thread,
+                    tool_choice,
+                    tools,
+                    messages,
+                    tries,
+                ))
+                .await;
+            }
+
+            error!(tries, "Failed to get a non-empty response.");
             Some("<no reply>".to_string())
         } else {
             None
@@ -646,6 +680,7 @@ impl Query {
                 ToolChoice::Auto,
                 tools,
                 messages,
+                0,
             ))
             .await?;
         }
