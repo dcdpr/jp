@@ -2,7 +2,9 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use jp_config::{
-    assistant::AssistantConfig, model::id::ModelIdConfig, providers::llm::LlmProviderConfig,
+    assistant::AssistantConfig,
+    model::id::{ModelIdConfig, ProviderId},
+    providers::llm::LlmProviderConfig,
     AppConfig,
 };
 use jp_conversation::{AssistantMessage, ConversationId, MessagePair};
@@ -40,7 +42,7 @@ impl TitleGeneratorTask {
                 // generate a response.
                 //
                 // Is there a better way to do this?
-                AssistantMessage::from("<RESPONSE PENDING>"),
+                AssistantMessage::from((ProviderId::Anthropic, "<RESPONSE PENDING>")),
             ));
         }
 

@@ -16,7 +16,7 @@ use google::Google;
 use jp_config::{
     model::{
         id::{ModelIdConfig, ProviderId},
-        parameters::ParametersConfig,
+        parameters::{CustomReasoningConfig, ParametersConfig, ReasoningConfig, ReasoningEffort},
     },
     providers::llm::LlmProviderConfig,
 };
@@ -53,51 +53,115 @@ pub struct ModelDetails {
     /// The maximum output tokens, if known.
     pub max_output_tokens: Option<u32>,
 
-    /// Whether the model supports reasoning, if unknown, it is assumed to not
-    /// be supported.
+    /// Whether the model supports reasoning, if unknown, this value is left to
+    /// `None`.
     pub reasoning: Option<ReasoningDetails>,
 
     /// The knowledge cutoff date, if known.
     pub knowledge_cutoff: Option<Date>,
 }
 
+impl ModelDetails {
+    #[must_use]
+    pub fn custom_reasoning_config(
+        &self,
+        config: Option<ReasoningConfig>,
+    ) -> Option<CustomReasoningConfig> {
+        match self.reasoning {
+            // Unknown support
+            None => match config {
+                // Unconfigured or off, so disabled.
+                None | Some(ReasoningConfig::Off) => None,
+
+                // Auto configured, so use medium effort.
+                Some(ReasoningConfig::Auto) => Some(CustomReasoningConfig {
+                    effort: ReasoningEffort::Medium,
+                    exclude: false,
+                }),
+
+                // Custom configuration, so use it.
+                Some(ReasoningConfig::Custom(custom)) => Some(custom),
+            },
+
+            // Unsupported
+            Some(ReasoningDetails::Unsupported) => match config {
+                // Unconfigured, auto or off, so disabled.
+                None | Some(ReasoningConfig::Auto | ReasoningConfig::Off) => None,
+
+                // Custom configuration, invalid, so warn + disabled.
+                Some(ReasoningConfig::Custom(config)) => {
+                    warn!(
+                        provider = %self.provider,
+                        model = %self.slug,
+                        ?config,
+                        "Model does not support reasoning, but the configuration explicitly enabled \
+                        it. This can lead to unexpected behavior."
+                    );
+
+                    Some(config)
+                }
+            },
+
+            // Supported
+            Some(ReasoningDetails::Supported { .. }) => match config {
+                // Off, so disabled.
+                Some(ReasoningConfig::Off) => None,
+
+                // Unconfigured, or auto, so medium effort.
+                None | Some(ReasoningConfig::Auto) => Some(CustomReasoningConfig {
+                    effort: ReasoningEffort::Medium,
+                    exclude: false,
+                }),
+
+                // Custom configuration, so use it.
+                Some(ReasoningConfig::Custom(custom)) => Some(custom),
+            },
+        }
+    }
+}
+
 /// Details about the reasoning capabilities of a model.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ReasoningDetails {
-    pub supported: bool,
-    pub min_tokens: u32,
-    pub max_tokens: Option<u32>,
+pub enum ReasoningDetails {
+    Unsupported,
+    Supported {
+        /// The minimum number of reasoning tokens required to generate a
+        /// response. Usually zero, but can be non-zero for certain models.
+        min_tokens: u32,
+
+        /// The maximum number of reasoning tokens that can be generated.
+        max_tokens: Option<u32>,
+    },
 }
 
 impl ReasoningDetails {
     #[must_use]
-    pub fn supported() -> Self {
-        Self {
-            supported: true,
-            min_tokens: 0,
-            max_tokens: None,
+    pub fn supported(min_tokens: u32, max_tokens: Option<u32>) -> Self {
+        Self::Supported {
+            min_tokens,
+            max_tokens,
         }
     }
 
     #[must_use]
     pub fn unsupported() -> Self {
-        Self {
-            supported: true,
-            min_tokens: 0,
-            max_tokens: None,
+        Self::Unsupported
+    }
+
+    #[must_use]
+    pub fn min_tokens(&self) -> u32 {
+        match self {
+            Self::Supported { min_tokens, .. } => *min_tokens,
+            Self::Unsupported => 0,
         }
     }
 
     #[must_use]
-    pub fn min_tokens(mut self, min_tokens: u32) -> Self {
-        self.min_tokens = min_tokens;
-        self
-    }
-
-    #[must_use]
-    pub fn max_tokens(mut self, max_tokens: u32) -> Self {
-        self.max_tokens = Some(max_tokens);
-        self
+    pub fn max_tokens(&self) -> Option<u32> {
+        match self {
+            Self::Supported { max_tokens, .. } => *max_tokens,
+            Self::Unsupported => None,
+        }
     }
 }
 
@@ -131,13 +195,22 @@ impl StreamEvent {
 
 /// A collection of events in a single reply.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Reply(Vec<Event>);
+pub struct Reply {
+    /// The provider that generated the reply.
+    ///
+    /// This is needed because certain events such as reasoning are interpreted
+    /// differently between LLM providers, and some providers don't support
+    /// reasoning from other models (e.g. Anthropic, which uses opaque
+    /// signatures to validate reasoning).
+    pub provider: ProviderId,
+    events: Vec<Event>,
+}
 
 impl Reply {
     /// Returns the list of events in the reply.
     #[must_use]
     pub fn into_inner(self) -> Vec<Event> {
-        self.0
+        self.events
     }
 }
 
@@ -145,29 +218,28 @@ impl std::ops::Deref for Reply {
     type Target = Vec<Event>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.events
     }
 }
 
 impl std::ops::DerefMut for Reply {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.events
     }
 }
 
 impl From<Reply> for AssistantMessage {
     fn from(reply: Reply) -> Self {
-        let mut message = AssistantMessage::default();
+        let mut message = AssistantMessage::new(reply.provider);
 
-        for event in reply.0 {
+        for event in reply.events {
             match event {
                 Event::Content(content) => {
                     message.content.get_or_insert_default().push_str(&content);
                 }
-                Event::Reasoning(reasoning) => message
-                    .reasoning
-                    .get_or_insert_default()
-                    .push_str(&reasoning),
+                Event::Reasoning(content) => {
+                    message.reasoning.get_or_insert_default().push_str(&content);
+                }
                 Event::ToolCall(call) => message.tool_calls.push(call),
                 Event::Metadata(key, metadata) => {
                     message.metadata.insert(key, metadata);
@@ -206,8 +278,8 @@ impl From<Event> for StreamEvent {
     fn from(event: Event) -> Self {
         match event {
             Event::Content(content) => StreamEvent::ChatChunk(CompletionChunk::Content(content)),
-            Event::Reasoning(reasoning) => {
-                StreamEvent::ChatChunk(CompletionChunk::Reasoning(reasoning))
+            Event::Reasoning(content) => {
+                StreamEvent::ChatChunk(CompletionChunk::Reasoning(content))
             }
             Event::ToolCall(call) => StreamEvent::ToolCall(call),
             Event::Metadata(key, metadata) => StreamEvent::Metadata(key, metadata),
@@ -221,8 +293,8 @@ impl From<Delta> for Option<Result<Event>> {
             return Some(Ok(Event::Content(content)));
         }
 
-        if let Some(reasoning) = delta.reasoning {
-            return Some(Ok(Event::Reasoning(reasoning)));
+        if let Some(content) = delta.reasoning {
+            return Some(Ok(Event::Reasoning(content)));
         }
 
         if let Some(args) = delta.tool_call_arguments {
@@ -327,7 +399,10 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
             events.push(Event::Content(content));
         }
 
-        Ok(Reply(events))
+        Ok(Reply {
+            provider: model_id.provider,
+            events,
+        })
     }
 
     /// Perform a structured completion.

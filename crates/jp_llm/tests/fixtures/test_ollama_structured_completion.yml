@@ -7,4 +7,4 @@ then:
   header:
     - name: content-type
       value: application/json; charset=utf-8
-  body: "{\"model\":\"llama3.1:8b\",\"created_at\":\"2025-09-17T07:50:27.557116Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"generate_structured_data\",\"arguments\":{\"titles\":[\"Testing Conversation\",\"User Sent Test Message\",\"Conversational Test Response\"]}}}]},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":828617042,\"load_duration\":83049917,\"prompt_eval_count\":205,\"prompt_eval_duration\":141959375,\"eval_count\":31,\"eval_duration\":602947375}"
+  body: "{\"model\":\"llama3.1:8b\",\"created_at\":\"2025-09-24T22:33:23.101019Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"generate_structured_data\",\"arguments\":{\"titles\":[\"Testing Conversation\",\"Assistance Provided\",\"Helpful Assistant\"]}}}]},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":5411443250,\"load_duration\":4175614250,\"prompt_eval_count\":205,\"prompt_eval_duration\":668377625,\"eval_count\":30,\"eval_duration\":566642625}"

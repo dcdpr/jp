@@ -17,4 +17,4 @@ then:
   header:
     - name: content-type
       value: application/json
-  body: "{\"id\":\"msg_01DwH8LUSnNP3JGU2AgbwWAh\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-5-haiku-20241022\",\"content\":[{\"type\":\"text\",\"text\":\"I'm here and ready to help! How can I assist you today?\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":9,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":18,\"service_tier\":\"standard\"}}"
+  body: "{\"id\":\"msg_01QHYJn5PAkVskLRsQpwKaF5\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-5-haiku-20241022\",\"content\":[{\"type\":\"text\",\"text\":\"Hello! I'm ready to help you. What can I do for you today?\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":9,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":20,\"service_tier\":\"standard\"}}"

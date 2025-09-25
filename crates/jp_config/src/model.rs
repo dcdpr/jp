@@ -42,13 +42,15 @@ impl AssignKeyValue for PartialModelConfig {
 #[cfg(test)]
 mod tests {
 
+    use std::assert_matches::assert_matches;
+
     use schematic::PartialConfig as _;
     use serde_json::Value;
 
     use super::*;
     use crate::model::{
         id::{PartialModelIdConfig, ProviderId},
-        parameters::ReasoningEffort,
+        parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
     };
 
     #[test]
@@ -112,9 +114,14 @@ mod tests {
 
         let kv = KvAssignment::try_from_cli("parameters.reasoning.effort", "low").unwrap();
         p.assign(kv).unwrap();
-        assert_eq!(
-            p.parameters.reasoning.as_ref().unwrap().effort,
-            Some(ReasoningEffort::Low)
+        assert_matches!(
+            p.parameters.reasoning,
+            Some(PartialReasoningConfig::Custom(
+                PartialCustomReasoningConfig {
+                    effort: Some(ReasoningEffort::Low),
+                    ..
+                }
+            ))
         );
 
         let kv = KvAssignment::try_from_cli("parameters.temperature", "0.42").unwrap();
@@ -139,9 +146,14 @@ mod tests {
         let kv = KvAssignment::try_from_cli("parameters:", r#"{"max_tokens":42,"reasoning":{"effort":"low"},"temperature":0.42,"top_p":0.42,"top_k":42,"stop_words":["foo","bar"]}"#).unwrap();
         p.assign(kv).unwrap();
         assert_eq!(p.parameters.max_tokens, Some(42));
-        assert_eq!(
-            p.parameters.reasoning.as_ref().unwrap().effort,
-            Some(ReasoningEffort::Low)
+        assert_matches!(
+            p.parameters.reasoning,
+            Some(PartialReasoningConfig::Custom(
+                PartialCustomReasoningConfig {
+                    effort: Some(ReasoningEffort::Low),
+                    ..
+                }
+            ))
         );
         assert_eq!(p.parameters.temperature, Some(0.42));
         assert_eq!(p.parameters.top_p, Some(0.42));
@@ -150,6 +162,10 @@ mod tests {
             p.parameters.stop_words,
             Some(vec!["foo".into(), "bar".into()])
         );
+
+        let kv = KvAssignment::try_from_cli("parameters:", r#"{"reasoning":"off"}"#).unwrap();
+        p.assign(kv).unwrap();
+        assert_matches!(p.parameters.reasoning, Some(PartialReasoningConfig::Off));
 
         let kv = KvAssignment::try_from_cli("parameters.foo", "bar").unwrap();
         p.assign(kv).unwrap();

@@ -3,11 +3,12 @@ source: crates/jp_test/src/mock.rs
 expression: expr
 ---
 Ok(
-    Reply(
-        [
+    Reply {
+        provider: Ollama,
+        events: [
             Content(
-                "This is a test message. It's working! How can I assist you today?",
+                "This is an automated response. You just sent a test message! Is there anything else I can help you with?",
             ),
         ],
-    ),
+    },
 )

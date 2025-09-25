@@ -40,6 +40,8 @@ use crate::{
     Error,
 };
 
+static PROVIDER: ProviderId = ProviderId::Openrouter;
+
 #[derive(Debug, Clone)]
 pub struct Openrouter {
     client: Client,
@@ -79,7 +81,10 @@ impl Openrouter {
             .find(|m| *m.slug == *model_id.name);
 
         let slug = model_id.name.to_string();
-        let reasoning = parameters.reasoning;
+        let reasoning = model_details
+            .as_ref()
+            .and_then(|m| m.custom_reasoning_config(parameters.reasoning()));
+
         let messages: RequestMessages = (model_id, thread).try_into()?;
         let tools = tools
             .into_iter()
@@ -120,7 +125,9 @@ impl Openrouter {
                     .abs_to_rel(model_details.and_then(|d| d.max_output_tokens))
                 {
                     ReasoningEffort::High => request::ReasoningEffort::High,
-                    ReasoningEffort::Medium => request::ReasoningEffort::Medium,
+                    ReasoningEffort::Auto | ReasoningEffort::Medium => {
+                        request::ReasoningEffort::Medium
+                    }
                     ReasoningEffort::Low => request::ReasoningEffort::Low,
                     ReasoningEffort::Absolute(_) => {
                         debug_assert!(false, "Reasoning effort must be relative.");
@@ -242,8 +249,8 @@ impl Provider for Openrouter {
         }
 
         let mut events = vec![];
-        if let Some(reasoning) = choice.message.reasoning {
-            events.push(Event::Reasoning(reasoning));
+        if let Some(content) = choice.message.reasoning {
+            events.push(Event::Reasoning(content));
         }
         if let Some(content) = choice.message.content {
             events.push(Event::Content(content));
@@ -257,14 +264,17 @@ impl Provider for Openrouter {
             }));
         }
 
-        Ok(Reply(events))
+        Ok(Reply {
+            provider: PROVIDER,
+            events,
+        })
     }
 }
 
 // TODO: Manually add a bunch of often-used models.
 fn map_model(model: response::Model) -> ModelDetails {
     ModelDetails {
-        provider: ProviderId::Openrouter,
+        provider: PROVIDER,
         slug: model.id,
         context_window: Some(model.context_length),
         max_output_tokens: None,
@@ -537,6 +547,7 @@ fn user_message_to_messages(user: UserMessage) -> Vec<RequestMessage> {
 
 fn assistant_message_to_message(assistant: AssistantMessage) -> RequestMessage {
     let AssistantMessage {
+        provider: _,
         metadata: _,
         reasoning,
         content,

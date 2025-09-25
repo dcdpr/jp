@@ -134,8 +134,7 @@ Ok(
                 65536,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 128,
                     max_tokens: Some(
                         32768,
@@ -154,11 +153,10 @@ Ok(
                 65536,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: Some(
-                        32768,
+                        24576,
                     ),
                 },
             ),
@@ -174,11 +172,10 @@ Ok(
                 65536,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: Some(
-                        32768,
+                        24576,
                     ),
                 },
             ),
@@ -194,11 +191,10 @@ Ok(
                 65536,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: Some(
-                        32768,
+                        24576,
                     ),
                 },
             ),
@@ -214,8 +210,7 @@ Ok(
                 65536,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 128,
                     max_tokens: Some(
                         32768,
@@ -234,8 +229,7 @@ Ok(
                 65536,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 128,
                     max_tokens: Some(
                         32768,
@@ -254,8 +248,7 @@ Ok(
                 65536,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 128,
                     max_tokens: Some(
                         32768,
@@ -430,11 +423,10 @@ Ok(
                 16384,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: Some(
-                        32768,
+                        24576,
                     ),
                 },
             ),
@@ -450,8 +442,7 @@ Ok(
                 16384,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 128,
                     max_tokens: Some(
                         32768,
@@ -554,11 +545,10 @@ Ok(
                 65536,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: Some(
-                        32768,
+                        24576,
                     ),
                 },
             ),
@@ -574,11 +564,10 @@ Ok(
                 8192,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: Some(
-                        32768,
+                        24576,
                     ),
                 },
             ),
@@ -798,11 +787,10 @@ Ok(
                 8192,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: Some(
-                        32768,
+                        24576,
                     ),
                 },
             ),
@@ -818,11 +806,10 @@ Ok(
                 8192,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: Some(
-                        32768,
+                        24576,
                     ),
                 },
             ),
@@ -862,11 +849,48 @@ Ok(
                 65536,
             ),
             reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
+                Supported {
                     min_tokens: 0,
                     max_tokens: Some(
-                        32768,
+                        24576,
+                    ),
+                },
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-flash-native-audio-latest",
+            context_window: Some(
+                131072,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: Some(
+                Supported {
+                    min_tokens: 0,
+                    max_tokens: Some(
+                        24576,
+                    ),
+                },
+            ),
+            knowledge_cutoff: None,
+        },
+        ModelDetails {
+            provider: Google,
+            slug: "gemini-2.5-flash-native-audio-preview-09-2025",
+            context_window: Some(
+                131072,
+            ),
+            max_output_tokens: Some(
+                8192,
+            ),
+            reasoning: Some(
+                Supported {
+                    min_tokens: 0,
+                    max_tokens: Some(
+                        24576,
                     ),
                 },
             ),
