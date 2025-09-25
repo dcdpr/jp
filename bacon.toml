@@ -22,6 +22,9 @@ command = [
 need_stdout = true
 analyzer = "nextest"
 
+[jobs.test-doctests]
+command = ["cargo", "test", "--workspace", "--all-features", "--doc", "--target-dir=target/bacon"]
+
 [jobs.doc]
 command = ["cargo", "doc", "--no-deps", "--target-dir=target/doc"]
 need_stdout = false
