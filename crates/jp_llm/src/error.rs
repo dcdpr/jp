@@ -154,9 +154,10 @@ pub enum ToolError {
         error: minijinja::Error,
     },
 
-    #[error("Invalid `type` property for {key}, expected one of {need:?}")]
+    #[error("Invalid `type` property for {key}, got {value:?}, expected one of {need:?}")]
     InvalidType {
         key: String,
+        value: serde_json::Value,
         need: Vec<&'static str>,
     },
 }

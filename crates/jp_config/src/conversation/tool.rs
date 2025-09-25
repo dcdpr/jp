@@ -11,6 +11,7 @@ use tracing::warn;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
+    BoxedError,
 };
 
 pub mod style;
@@ -59,6 +60,12 @@ impl ToolsConfig {
             })
     }
 
+    /// Returns `true` if a tool with the given name is configured.
+    #[must_use]
+    pub fn contains(&self, name: &str) -> bool {
+        self.tools.contains_key(name)
+    }
+
     /// Iterate tool configurations.
     ///
     /// This returns `(&str, [ToolConfigWithDefaults])`, merging the global
@@ -105,7 +112,7 @@ impl AssignKeyValue for PartialToolsDefaultsConfig {
 
 /// Tool configuration.
 #[derive(Debug, Clone, Config)]
-#[config(rename_all = "snake_case")]
+#[config(rename_all = "snake_case", allow_unknown_fields)]
 pub struct ToolConfig {
     /// The source of the tool.
     #[setting(required)]
@@ -116,7 +123,7 @@ pub struct ToolConfig {
 
     /// The command to run. Only used for local tools.
     #[setting(nested)]
-    pub command: Option<ToolCommandConfig>,
+    pub command: Option<ToolCommandConfigOrString>,
 
     /// The description of the tool. This will override any existing
     /// description, such as the one from an MCP server, or a built-in tool.
@@ -149,17 +156,19 @@ pub struct ToolConfig {
 }
 
 impl AssignKeyValue for PartialToolConfig {
-    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        dbg!(&self, &kv);
+
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
             "source" => self.source = kv.try_some_from_str()?,
             "enable" => self.enable = kv.try_some_bool()?,
-            "command" => self.command.assign(kv)?,
+            _ if kv.p("command") => self.command.assign(kv)?,
             "description" => self.description = kv.try_some_string()?,
             "parameters" => self.parameters = kv.try_object()?,
             "run" => self.run = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
-            "style" => self.style.assign(kv)?,
+            _ if kv.p("style") => self.style.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -167,8 +176,63 @@ impl AssignKeyValue for PartialToolConfig {
     }
 }
 
-/// Tool command configuration.
+/// Tool command configuration, either as a string or a complete configuration.
 #[derive(Debug, Clone, Config)]
+#[config(rename_all = "snake_case", serde(untagged))]
+pub enum ToolCommandConfigOrString {
+    /// A single string, which is interpreted as the command to run.
+    String(String),
+
+    /// A complete command configuration.
+    #[setting(nested)]
+    Config(ToolCommandConfig),
+}
+
+impl AssignKeyValue for PartialToolCommandConfigOrString {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object_or_from_str()?,
+            _ => match self {
+                Self::String(_) => return missing_key(&kv),
+                Self::Config(config) => config.assign(kv)?,
+            },
+        }
+
+        Ok(())
+    }
+}
+
+impl FromStr for PartialToolCommandConfigOrString {
+    type Err = BoxedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::String(s.to_owned()))
+    }
+}
+
+impl ToolCommandConfigOrString {
+    /// Return the command configuration.
+    ///
+    /// If the configuration is a string, it is interpreted as a shell command.
+    #[must_use]
+    fn command(self) -> ToolCommandConfig {
+        match self {
+            Self::String(v) => {
+                let mut iter = v.split_whitespace().map(str::to_owned);
+
+                ToolCommandConfig {
+                    program: iter.next().unwrap_or_default(),
+                    args: iter.collect(),
+                    shell: false,
+                }
+            }
+            Self::Config(v) => v,
+        }
+    }
+}
+
+/// Tool command configuration.
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolCommandConfig {
     /// The program to run.
@@ -326,7 +390,7 @@ pub struct ToolParameterItemsConfig {
 }
 
 /// The source of a tool.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ToolSource {
     /// Use a built-in tool.
     Builtin {
@@ -376,6 +440,35 @@ impl<'de> Deserialize<'de> for ToolSource {
         String::deserialize(deserializer)?
             .parse()
             .map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for ToolSource {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = match self {
+            Self::Builtin { tool } => tool
+                .as_ref()
+                .map_or_else(|| "builtin".to_string(), |tool| format!("builtin.{tool}")),
+            Self::Local { tool } => tool
+                .as_ref()
+                .map_or_else(|| "local".to_string(), |tool| format!("local.{tool}")),
+            Self::Mcp { server, tool } => {
+                let mut s = "mcp".to_string();
+                if let Some(server) = server {
+                    s.push('.');
+                    s.push_str(server);
+                    if let Some(tool) = tool {
+                        s.push('.');
+                        s.push_str(tool);
+                    }
+                }
+                s
+            }
+        };
+        serializer.serialize_str(&s)
     }
 }
 
@@ -489,8 +582,11 @@ impl ToolConfigWithDefaults {
 
     /// Return the command to run the tool.
     #[must_use]
-    pub const fn command(&self) -> Option<&ToolCommandConfig> {
-        self.tool.command.as_ref()
+    pub fn command(&self) -> Option<ToolCommandConfig> {
+        self.tool
+            .command
+            .clone()
+            .map(ToolCommandConfigOrString::command)
     }
 
     /// Return the source of the tool.
@@ -539,5 +635,103 @@ impl ToolConfigWithDefaults {
     #[must_use]
     pub fn style(&self) -> &DisplayStyleConfig {
         self.tool.style.as_ref().unwrap_or(&self.defaults.style)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::assert_matches::assert_matches;
+
+    use schematic::PartialConfig as _;
+
+    use super::*;
+
+    #[test]
+    fn test_tools_config() {
+        assert_matches!(PartialToolsConfig::default_values(&()), Ok(Some(_)));
+        assert_matches!(PartialToolConfig::default_values(&()), Ok(Some(_)));
+
+        let mut p = PartialToolsConfig::default_values(&()).unwrap().unwrap();
+
+        p.tools.insert("cargo_check".to_owned(), PartialToolConfig {
+            enable: Some(false),
+            source: Some(ToolSource::Local { tool: None }),
+            ..Default::default()
+        });
+
+        let kv = KvAssignment::try_from_cli("cargo_check.enable", "true").unwrap();
+        p.assign(kv).unwrap();
+
+        assert_eq!(
+            p.tools,
+            IndexMap::<_, _>::from_iter(vec![("cargo_check".to_owned(), PartialToolConfig {
+                enable: Some(true),
+                source: Some(ToolSource::Local { tool: None }),
+                ..Default::default()
+            })])
+        );
+
+        let kv = KvAssignment::try_from_cli("foo:", r#"{"source":"builtin"}"#).unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.tools,
+            IndexMap::<_, _>::from_iter(vec![
+                ("cargo_check".to_owned(), PartialToolConfig {
+                    enable: Some(true),
+                    source: Some(ToolSource::Local { tool: None }),
+                    ..Default::default()
+                }),
+                ("foo".to_owned(), PartialToolConfig {
+                    source: Some(ToolSource::Builtin { tool: None }),
+                    ..Default::default()
+                })
+            ])
+        );
+    }
+
+    #[test]
+    fn test_tool_config_command() {
+        let mut p = PartialToolConfig::default_values(&()).unwrap().unwrap();
+        assert!(p.command.is_none());
+
+        let kv = KvAssignment::try_from_cli("command", "cargo check").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.command,
+            Some(PartialToolCommandConfigOrString::String(
+                "cargo check".to_owned()
+            ))
+        );
+
+        let cfg = ToolCommandConfigOrString::from_partial(p.command.clone().unwrap()).unwrap();
+        assert_eq!(cfg.command(), ToolCommandConfig {
+            program: "cargo".to_owned(),
+            args: vec!["check".to_owned()],
+            shell: false,
+        });
+
+        let kv = KvAssignment::try_from_cli(
+            "command:",
+            r#"{"program":"cargo","args":["check", "--verbose"],"shell":true}"#,
+        )
+        .unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.command,
+            Some(PartialToolCommandConfigOrString::Config(
+                PartialToolCommandConfig {
+                    program: Some("cargo".to_owned()),
+                    args: Some(vec!["check".to_owned(), "--verbose".to_owned()]),
+                    shell: Some(true),
+                }
+            ))
+        );
+
+        let cfg = ToolCommandConfigOrString::from_partial(p.command.unwrap()).unwrap();
+        assert_eq!(cfg.command(), ToolCommandConfig {
+            program: "cargo".to_owned(),
+            args: vec!["check".to_owned(), "--verbose".to_owned()],
+            shell: true,
+        });
     }
 }
