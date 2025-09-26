@@ -298,7 +298,7 @@ impl Query {
                 conversation_id,
                 message.clone(),
                 if self.new_conversation {
-                    Some(ctx.partial_config().clone())
+                    Some(ctx.config().to_partial())
                 } else {
                     let global = ctx.term.args.config.clone();
                     let partial = load_cli_cfg_args(
@@ -307,11 +307,12 @@ impl Query {
                         Some(&ctx.workspace),
                     )?;
 
+                    let partial_config = ctx.config().to_partial();
                     let partial = IntoPartialAppConfig::apply_cli_config(
                         &self,
                         None,
                         partial,
-                        Some(ctx.partial_config()),
+                        Some(&partial_config),
                     )?;
 
                     Some(partial)

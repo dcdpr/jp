@@ -42,6 +42,7 @@ pub mod editor;
 pub mod error;
 pub mod fs;
 pub mod model;
+mod partial;
 pub mod providers;
 pub mod style;
 pub mod template;
@@ -59,6 +60,7 @@ use crate::{
     conversation::{ConversationConfig, PartialConversationConfig},
     delta::{delta_opt_vec, PartialConfigDelta},
     editor::{EditorConfig, PartialEditorConfig},
+    partial::{partial_opt, ToPartial},
     providers::{PartialProviderConfig, ProviderConfig},
     style::{PartialStyleConfig, StyleConfig},
     template::{PartialTemplateConfig, TemplateConfig},
@@ -213,6 +215,24 @@ impl PartialConfigDelta for PartialAppConfig {
     }
 }
 
+impl ToPartial for AppConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            inherit: partial_opt(&self.inherit, defaults.inherit),
+            config_load_paths: partial_opt(&self.config_load_paths, defaults.config_load_paths),
+            extends: partial_opt(&self.extends, defaults.extends),
+            assistant: self.assistant.to_partial(),
+            conversation: self.conversation.to_partial(),
+            style: self.style.to_partial(),
+            editor: self.editor.to_partial(),
+            template: self.template.to_partial(),
+            providers: self.providers.to_partial(),
+        }
+    }
+}
+
 impl AppConfig {
     /// Return a list of all fields in the configuration.
     ///
@@ -258,6 +278,16 @@ impl AppConfig {
         }
 
         output
+    }
+
+    /// Convert this configuration to a partial configuration containing only
+    /// values that differ from the default configuration.
+    ///
+    /// This is useful for serializing only the user-specified configuration
+    /// values, excluding any defaults.
+    #[must_use]
+    pub fn to_partial(&self) -> PartialAppConfig {
+        <Self as ToPartial>::to_partial(self)
     }
 }
 

@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, PartialConfigDelta},
+    partial::{partial_opt, ToPartial},
 };
 
 /// Tool call content style configuration.
@@ -35,6 +36,16 @@ impl PartialConfigDelta for PartialToolCallConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             show: delta_opt(self.show.as_ref(), next.show),
+        }
+    }
+}
+
+impl ToPartial for ToolCallConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            show: partial_opt(&self.show, defaults.show),
         }
     }
 }

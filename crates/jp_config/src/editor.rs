@@ -8,6 +8,7 @@ use schematic::Config;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, delta_opt_vec, PartialConfigDelta},
+    partial::{partial_opt, partial_opts, ToPartial},
 };
 
 /// Editor configuration.
@@ -57,6 +58,17 @@ impl PartialConfigDelta for PartialEditorConfig {
         Self {
             cmd: delta_opt(self.cmd.as_ref(), next.cmd),
             envs: delta_opt_vec(self.envs.as_ref(), next.envs),
+        }
+    }
+}
+
+impl ToPartial for EditorConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            cmd: partial_opts(self.cmd.as_ref(), defaults.cmd),
+            envs: partial_opt(&self.envs, defaults.envs),
         }
     }
 }

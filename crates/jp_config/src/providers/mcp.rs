@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, delta_opt_partial, delta_opt_vec, PartialConfigDelta},
+    partial::{partial_opt, partial_opt_config, ToPartial},
 };
 
 /// MCP provider configuration.
@@ -36,6 +37,14 @@ impl PartialConfigDelta for PartialMcpProviderConfig {
                 variables: delta_opt_vec(prev.variables.as_ref(), next.variables),
                 checksum: delta_opt_partial(prev.checksum.as_ref(), next.checksum),
             }),
+        }
+    }
+}
+
+impl ToPartial for McpProviderConfig {
+    fn to_partial(&self) -> Self::Partial {
+        match self {
+            Self::Stdio(config) => Self::Partial::Stdio(config.to_partial()),
         }
     }
 }
@@ -75,6 +84,19 @@ impl AssignKeyValue for PartialStdioConfig {
     }
 }
 
+impl ToPartial for StdioConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        PartialStdioConfig {
+            command: partial_opt(&self.command, defaults.command),
+            arguments: partial_opt(&self.arguments, defaults.arguments),
+            variables: partial_opt(&self.variables, defaults.variables),
+            checksum: partial_opt_config(self.checksum.as_ref(), defaults.checksum),
+        }
+    }
+}
+
 /// The checksum for the MCP server binary.
 #[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case")]
@@ -105,6 +127,17 @@ impl PartialConfigDelta for PartialChecksumConfig {
         Self {
             algorithm: delta_opt(self.algorithm.as_ref(), next.algorithm),
             value: delta_opt(self.value.as_ref(), next.value),
+        }
+    }
+}
+
+impl ToPartial for ChecksumConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            algorithm: partial_opt(&self.algorithm, defaults.algorithm),
+            value: partial_opt(&self.value, defaults.value),
         }
     }
 }

@@ -6,6 +6,7 @@ use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, delta_opt_partial, PartialConfigDelta},
     model::{ModelConfig, PartialModelConfig},
+    partial::{partial_opt, partial_opt_config, ToPartial},
 };
 
 /// Title generation configuration.
@@ -39,6 +40,15 @@ impl PartialConfigDelta for PartialGenerateConfig {
         Self {
             auto: delta_opt(self.auto.as_ref(), next.auto),
             model: delta_opt_partial(self.model.as_ref(), next.model),
+        }
+    }
+}
+
+impl ToPartial for GenerateConfig {
+    fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            auto: partial_opt(&self.auto, None),
+            model: partial_opt_config(self.model.as_ref(), None),
         }
     }
 }

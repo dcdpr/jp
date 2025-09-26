@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, PartialConfigDelta},
+    partial::{partial_opt, ToPartial},
 };
 
 /// Deepseek API configuration.
@@ -32,6 +33,16 @@ impl PartialConfigDelta for PartialDeepseekConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
+        }
+    }
+}
+
+impl ToPartial for DeepseekConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            api_key_env: partial_opt(&self.api_key_env, defaults.api_key_env),
         }
     }
 }

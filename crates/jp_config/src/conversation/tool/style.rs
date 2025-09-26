@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, PartialConfigDelta},
+    partial::{partial_opt, ToPartial},
 };
 
 /// Display style configuration.
@@ -41,6 +42,17 @@ impl PartialConfigDelta for PartialDisplayStyleConfig {
         Self {
             inline_results: delta_opt(self.inline_results.as_ref(), next.inline_results),
             results_file_link: delta_opt(self.results_file_link.as_ref(), next.results_file_link),
+        }
+    }
+}
+
+impl ToPartial for DisplayStyleConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            inline_results: partial_opt(&self.inline_results, defaults.inline_results),
+            results_file_link: partial_opt(&self.results_file_link, defaults.results_file_link),
         }
     }
 }

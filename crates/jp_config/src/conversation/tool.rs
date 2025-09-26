@@ -12,6 +12,7 @@ use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     delta::{delta_opt, delta_opt_partial, delta_opt_vec, delta_vec, PartialConfigDelta},
+    partial::{partial_opt, partial_opt_config, partial_opts, ToPartial},
     util::merge_nested_indexmap,
     BoxedError,
 };
@@ -62,6 +63,19 @@ impl PartialConfigDelta for PartialToolsConfig {
 
                     Some((name, next))
                 })
+                .collect(),
+        }
+    }
+}
+
+impl ToPartial for ToolsConfig {
+    fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            defaults: self.defaults.to_partial(),
+            tools: self
+                .tools
+                .iter()
+                .map(|(k, v)| (k.clone(), v.to_partial()))
                 .collect(),
         }
     }
@@ -139,6 +153,18 @@ impl PartialConfigDelta for PartialToolsDefaultsConfig {
             run: delta_opt(self.run.as_ref(), next.run),
             result: delta_opt(self.result.as_ref(), next.result),
             style: self.style.delta(next.style),
+        }
+    }
+}
+
+impl ToPartial for ToolsDefaultsConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            run: partial_opt(&self.run, defaults.run),
+            result: partial_opt(&self.result, defaults.result),
+            style: self.style.to_partial(),
         }
     }
 }
@@ -238,6 +264,27 @@ impl PartialConfigDelta for PartialToolConfig {
     }
 }
 
+impl ToPartial for ToolConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            source: partial_opt(&self.source, defaults.source),
+            enable: partial_opts(self.enable.as_ref(), defaults.enable),
+            command: partial_opt_config(self.command.as_ref(), defaults.command),
+            description: partial_opts(self.description.as_ref(), defaults.description),
+            parameters: self
+                .parameters
+                .iter()
+                .map(|(k, v)| (k.clone(), v.to_partial()))
+                .collect(),
+            run: partial_opts(self.run.as_ref(), defaults.run),
+            result: partial_opts(self.result.as_ref(), defaults.result),
+            style: partial_opt_config(self.style.as_ref(), defaults.style),
+        }
+    }
+}
+
 /// Tool command configuration, either as a string or a complete configuration.
 #[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case", serde(untagged))]
@@ -269,6 +316,15 @@ impl PartialConfigDelta for PartialToolCommandConfigOrString {
         match (self, next) {
             (Self::Config(prev), Self::Config(next)) => Self::Config(prev.delta(next)),
             (_, next) => next,
+        }
+    }
+}
+
+impl ToPartial for ToolCommandConfigOrString {
+    fn to_partial(&self) -> Self::Partial {
+        match self {
+            Self::String(v) => Self::Partial::String(v.to_owned()),
+            Self::Config(v) => Self::Partial::Config(v.to_partial()),
         }
     }
 }
@@ -348,6 +404,18 @@ impl PartialConfigDelta for PartialToolCommandConfig {
     }
 }
 
+impl ToPartial for ToolCommandConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            program: partial_opt(&self.program, defaults.program),
+            args: partial_opt(&self.args, defaults.args),
+            shell: partial_opt(&self.shell, defaults.shell),
+        }
+    }
+}
+
 /// Tool parameter configuration.
 #[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case")]
@@ -388,6 +456,21 @@ impl PartialConfigDelta for PartialToolParameterConfig {
     }
 }
 
+impl ToPartial for ToolParameterConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            kind: self.kind.to_partial(),
+            default: partial_opts(self.default.as_ref(), defaults.default),
+            required: partial_opt(&self.required, defaults.required),
+            description: partial_opts(self.description.as_ref(), defaults.description),
+            enumeration: partial_opt(&self.enumeration, defaults.enumeration),
+            items: partial_opt_config(self.items.as_ref(), defaults.items),
+        }
+    }
+}
+
 /// A type that can be either a single type or a list of types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
 #[serde(untagged)]
@@ -404,6 +487,15 @@ impl PartialConfigDelta for PartialOneOrManyTypes {
         match (self, next) {
             (Self::Many(prev), Self::Many(next)) => Self::Many(delta_vec(prev, next)),
             (_, next) => next,
+        }
+    }
+}
+
+impl ToPartial for OneOrManyTypes {
+    fn to_partial(&self) -> Self::Partial {
+        match self {
+            Self::One(v) => Self::Partial::One(v.to_owned()),
+            Self::Many(v) => Self::Partial::Many(v.to_owned()),
         }
     }
 }
@@ -496,6 +588,16 @@ impl PartialConfigDelta for PartialToolParameterItemsConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             kind: delta_opt(self.kind.as_ref(), next.kind),
+        }
+    }
+}
+
+impl ToPartial for ToolParameterItemsConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            kind: partial_opt(&self.kind, defaults.kind),
         }
     }
 }

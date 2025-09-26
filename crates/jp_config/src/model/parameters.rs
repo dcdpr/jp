@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, delta_opt_partial, delta_opt_vec, PartialConfigDelta},
+    partial::{partial_opt, partial_opt_config, partial_opts, ToPartial},
     BoxedError,
 };
 
@@ -105,6 +106,20 @@ impl PartialConfigDelta for PartialParametersConfig {
     }
 }
 
+impl ToPartial for ParametersConfig {
+    fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            max_tokens: partial_opts(self.max_tokens.as_ref(), None),
+            reasoning: partial_opt_config(self.reasoning.as_ref(), None),
+            temperature: partial_opts(self.temperature.as_ref(), None),
+            top_p: partial_opts(self.top_p.as_ref(), None),
+            top_k: partial_opts(self.top_k.as_ref(), None),
+            stop_words: partial_opt(&self.stop_words, None),
+            other: partial_opt(&self.other, None),
+        }
+    }
+}
+
 impl ParametersConfig {
     /// Returns the reasoning configuration.
     ///
@@ -172,6 +187,16 @@ impl PartialConfigDelta for PartialReasoningConfig {
     }
 }
 
+impl ToPartial for ReasoningConfig {
+    fn to_partial(&self) -> Self::Partial {
+        match self {
+            Self::Off => Self::Partial::Off,
+            Self::Auto => Self::Partial::Auto,
+            Self::Custom(v) => Self::Partial::Custom(v.to_partial()),
+        }
+    }
+}
+
 impl FromStr for PartialReasoningConfig {
     type Err = BoxedError;
 
@@ -225,6 +250,15 @@ impl PartialConfigDelta for PartialCustomReasoningConfig {
         Self {
             effort: delta_opt(self.effort.as_ref(), next.effort),
             exclude: delta_opt(self.exclude.as_ref(), next.exclude),
+        }
+    }
+}
+
+impl ToPartial for CustomReasoningConfig {
+    fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            effort: partial_opt(&self.effort, None),
+            exclude: partial_opt(&self.exclude, None),
         }
     }
 }

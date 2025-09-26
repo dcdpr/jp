@@ -13,6 +13,7 @@ use crate::{
         tool::{PartialToolsConfig, ToolsConfig},
     },
     delta::{delta_opt_vec, PartialConfigDelta},
+    partial::{partial_opt, ToPartial},
 };
 
 /// Conversation-specific configuration.
@@ -59,6 +60,18 @@ impl PartialConfigDelta for PartialConversationConfig {
             title: self.title.delta(next.title),
             tools: self.tools.delta(next.tools),
             attachments: delta_opt_vec(self.attachments.as_ref(), next.attachments),
+        }
+    }
+}
+
+impl ToPartial for ConversationConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            title: self.title.to_partial(),
+            tools: self.tools.to_partial(),
+            attachments: partial_opt(&self.attachments, defaults.attachments),
         }
     }
 }
