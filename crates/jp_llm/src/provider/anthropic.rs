@@ -269,13 +269,14 @@ fn create_request(
     let reasoning_support = model_details.as_ref().and_then(|m| m.reasoning);
     let reasoning_config = model_details
         .as_ref()
-        .and_then(|m| m.custom_reasoning_config(parameters.reasoning()));
+        .and_then(|m| m.custom_reasoning_config(parameters.reasoning));
 
     // See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#extended-thinking-with-tool-use>
     if reasoning_config.is_some()
         && let Some(tool) = tool_choice_function
     {
         info!(
+            tool,
             "Anthropic API does not support reasoning when tool_choice forces tool use. Switching \
              to soft-force mode."
         );
@@ -812,7 +813,7 @@ mod tests {
     use indexmap::IndexMap;
     use jp_config::{
         conversation::tool::{OneOrManyTypes, ToolParameterConfig, ToolParameterItemsConfig},
-        model::parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort},
+        model::parameters::{CustomReasoningConfig, ReasoningEffort},
         providers::llm::LlmProviderConfig,
     };
     use jp_test::{function_name, mock::Vcr};
@@ -977,11 +978,16 @@ mod tests {
                     config.api_key_env = "USER".to_owned();
                 }
 
-                let mut parameters = ParametersConfig::default();
-                parameters.set_reasoning(ReasoningConfig::Custom(CustomReasoningConfig {
-                    effort: ReasoningEffort::Medium,
-                    exclude: false,
-                }));
+                let parameters = ParametersConfig {
+                    reasoning: Some(
+                        CustomReasoningConfig {
+                            effort: ReasoningEffort::Medium,
+                            exclude: false,
+                        }
+                        .into(),
+                    ),
+                    ..Default::default()
+                };
 
                 let events = Anthropic::try_from(&config)
                     .unwrap()
@@ -1011,13 +1017,18 @@ mod tests {
             ..Default::default()
         };
 
-        let mut parameters = ParametersConfig::default();
-        parameters.top_p = Some(1.0);
-        parameters.top_k = Some(40);
-        parameters.set_reasoning(ReasoningConfig::Custom(CustomReasoningConfig {
-            effort: ReasoningEffort::Medium,
-            exclude: false,
-        }));
+        let parameters = ParametersConfig {
+            top_p: Some(1.0),
+            top_k: Some(40),
+            reasoning: Some(
+                CustomReasoningConfig {
+                    effort: ReasoningEffort::Medium,
+                    exclude: false,
+                }
+                .into(),
+            ),
+            ..Default::default()
+        };
 
         let model_details = map_model(types::Model {
             id: "claude-3-5-haiku-latest".to_owned(),

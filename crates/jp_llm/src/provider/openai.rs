@@ -72,7 +72,7 @@ impl Openai {
             reasoning_support.is_some_and(|v| matches!(v, ReasoningDetails::Supported { .. }));
         let reasoning = model_details
             .as_ref()
-            .and_then(|m| m.custom_reasoning_config(parameters.reasoning()));
+            .and_then(|m| m.custom_reasoning_config(parameters.reasoning));
 
         let request = Request {
             model: types::Model::Other(model_id.name.to_string()),

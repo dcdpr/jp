@@ -66,7 +66,7 @@ impl Google {
 
         let reasoning = model_details
             .as_ref()
-            .and_then(|m| m.custom_reasoning_config(parameters.reasoning()));
+            .and_then(|m| m.custom_reasoning_config(parameters.reasoning));
 
         // Add thinking config if the model requires it, or if it supports it,
         // and we have the parameters configured.

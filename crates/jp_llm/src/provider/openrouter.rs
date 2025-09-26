@@ -83,7 +83,7 @@ impl Openrouter {
         let slug = model_id.name.to_string();
         let reasoning = model_details
             .as_ref()
-            .and_then(|m| m.custom_reasoning_config(parameters.reasoning()));
+            .and_then(|m| m.custom_reasoning_config(parameters.reasoning));
 
         let messages: RequestMessages = (model_id, thread).try_into()?;
         let tools = tools

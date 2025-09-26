@@ -2,8 +2,11 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use jp_config::{
-    assistant::AssistantConfig,
-    model::id::{ModelIdConfig, ProviderId},
+    model::{
+        id::ProviderId,
+        parameters::{CustomReasoningConfig, ReasoningEffort},
+        ModelConfig,
+    },
     providers::llm::LlmProviderConfig,
     AppConfig,
 };
@@ -18,8 +21,7 @@ use crate::Task;
 #[derive(Debug)]
 pub struct TitleGeneratorTask {
     pub conversation_id: ConversationId,
-    pub model_id: ModelIdConfig,
-    pub assistant: AssistantConfig,
+    pub model: ModelConfig,
     pub providers: LlmProviderConfig,
     pub messages: Messages,
     pub title: Option<String>,
@@ -49,12 +51,34 @@ impl TitleGeneratorTask {
             );
         }
 
-        let model_id = config.assistant.model.id.clone();
+        // Prefer the title generation model id, otherwise use the assistant
+        // model id.
+        let mut model = config
+            .conversation
+            .title
+            .generate
+            .model
+            .clone()
+            .unwrap_or(ModelConfig {
+                id: config.assistant.model.id.clone(),
+                ..Default::default()
+            });
+
+        // If reasoning is explicitly enabled for title generation, use it,
+        // otherwise limit it to
+        if model.parameters.reasoning.is_none() {
+            model.parameters.reasoning = Some(
+                CustomReasoningConfig {
+                    effort: ReasoningEffort::Low,
+                    exclude: true,
+                }
+                .into(),
+            );
+        }
 
         Ok(Self {
             conversation_id,
-            model_id,
-            assistant: config.assistant.clone(),
+            model,
             providers: config.providers.llm.clone(),
             messages,
             title: None,
@@ -64,9 +88,9 @@ impl TitleGeneratorTask {
     async fn update_title(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!(conversation_id = %self.conversation_id, "Updating conversation title.");
 
-        let parameters = &self.assistant.model.parameters;
+        let parameters = &self.model.parameters;
         let provider_config = &self.providers;
-        let model_id = &self.model_id;
+        let model_id = &self.model.id;
         let provider_id = model_id.provider;
 
         let provider = provider::get_provider(provider_id, provider_config)?;
