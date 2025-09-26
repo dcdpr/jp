@@ -798,7 +798,7 @@ impl IntoPartialAppConfig for Query {
 
         let id = workspace.active_conversation_id();
 
-        load_partial(workspace.get_messages(&id).config().clone(), partial).map_err(Into::into)
+        load_partial(partial, workspace.get_messages(&id).config()).map_err(Into::into)
     }
 }
 
