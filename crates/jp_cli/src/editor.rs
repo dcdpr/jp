@@ -185,12 +185,12 @@ pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFil
 /// Open an editor for the user to input or edit text using a file in the workspace
 pub(crate) fn edit_query(
     ctx: &Ctx,
-    conversation_id: ConversationId,
+    conversation_id: &ConversationId,
     initial_message: Option<String>,
     cmd: Expression,
 ) -> Result<(String, PathBuf)> {
     let root = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
-    let history = ctx.workspace.get_messages(&conversation_id);
+    let history = ctx.workspace.get_messages(conversation_id);
 
     let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);

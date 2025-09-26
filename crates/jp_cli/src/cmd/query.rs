@@ -12,9 +12,10 @@ use std::{
 use clap::{builder::TypedValueParser as _, ArgAction};
 use event::{handle_tool_calls, StreamEventHandler};
 use futures::StreamExt as _;
+use jp_attachment::Attachment;
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
-    assistant::{instructions::InstructionsConfig, tool_choice::ToolChoice},
+    assistant::{instructions::InstructionsConfig, tool_choice::ToolChoice, AssistantConfig},
     fs::{expand_tilde, load_partial},
     model::{
         id::PartialModelIdConfig,
@@ -23,6 +24,7 @@ use jp_config::{
     PartialAppConfig,
 };
 use jp_conversation::{
+    message::Messages,
     thread::{Thread, ThreadBuilder},
     AssistantMessage, Conversation, ConversationId, MessagePair, UserMessage,
 };
@@ -48,6 +50,8 @@ use crate::{
     error::{Error, Result},
     load_cli_cfg_args, parser, Ctx, PATH_STRING_PREFIX,
 };
+
+type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Debug, Default, clap::Args)]
 pub(crate) struct Query {
@@ -226,29 +230,27 @@ impl Query {
         trace!(args = ?self, "Received arguments.");
 
         let previous_id = self.update_active_conversation(ctx)?;
+        let conversation_id = ctx.workspace.active_conversation_id();
 
         ctx.configure_active_mcp_servers().await?;
-        let (message, query_file) = self.build_message(ctx).await?;
+        let (user_query, query_file) = self.build_message(ctx, &conversation_id).await?;
+        let history = ctx.workspace.get_messages(&conversation_id).to_messages();
 
-        if let UserMessage::Query(query) = &message {
+        if let UserMessage::Query(query) = &user_query {
             if query.is_empty() {
                 return cleanup(ctx, previous_id, query_file.as_deref()).map_err(Into::into);
             }
 
-            let messages = ctx
-                .workspace
-                .get_messages(&ctx.workspace.active_conversation_id());
-
             // Generate title for new or empty conversations.
             if ctx.term.args.persist
-                && (self.new_conversation || messages.is_empty())
+                && (self.new_conversation || history.is_empty())
                 && ctx.config().conversation.title.generate.auto
             {
                 debug!("Generating title for new conversation");
                 ctx.task_handler.spawn(TitleGeneratorTask::new(
-                    ctx.workspace.active_conversation_id(),
+                    conversation_id,
+                    history.clone(),
                     ctx.config(),
-                    &ctx.workspace,
                     Some(query.clone()),
                 )?);
             }
@@ -257,68 +259,35 @@ impl Query {
         let tools =
             tool_definitions(ctx.config().conversation.tools.iter(), &ctx.mcp_client).await?;
 
-        let thread = self.build_thread(ctx, message.clone(), &tools).await?;
+        let mut attachments = vec![];
+        for attachment in &ctx.config().conversation.attachments {
+            register_attachment(ctx, &attachment.to_url()?, &mut attachments).await?;
+        }
 
-        let mut messages = vec![];
+        let thread = build_thread(
+            user_query.clone(),
+            history,
+            attachments,
+            &ctx.config().assistant,
+            &tools,
+        )?;
+
+        let mut new_messages = vec![];
         if let Some(schema) = self.schema.clone() {
-            messages.push(handle_structured_output(ctx, thread, schema).await?);
+            new_messages.push(handle_structured_output(ctx, thread, schema).await?);
         } else {
             self.handle_stream(
                 ctx,
                 thread,
                 ctx.config().assistant.tool_choice.clone(),
                 tools,
-                &mut messages,
+                &mut new_messages,
                 0,
             )
             .await?;
         }
 
-        let mut reply = String::new();
-        for message in messages {
-            let conversation_id = ctx.workspace.active_conversation_id();
-            trace!(
-                conversation = %conversation_id,
-                content_size_bytes = message.reply.content.as_deref().unwrap_or_default().len(),
-                reasoning_size_bytes = message
-                    .reply
-                    .reasoning
-                    .as_ref()
-                    .map(ToString::to_string)
-                    .unwrap_or_default()
-                    .len(),
-                tool_calls_count = message.reply.tool_calls.len(),
-                "Storing response message in conversation."
-            );
-
-            if let Some(content) = &message.reply.content {
-                reply.push_str(content);
-            }
-            ctx.workspace.add_message(
-                conversation_id,
-                message.clone(),
-                if self.new_conversation {
-                    Some(ctx.config().to_partial())
-                } else {
-                    let global = ctx.term.args.config.clone();
-                    let partial = load_cli_cfg_args(
-                        PartialAppConfig::empty(),
-                        &global,
-                        Some(&ctx.workspace),
-                    )?;
-
-                    let partial_config = ctx.config().to_partial();
-                    let partial = IntoPartialAppConfig::apply_cli_config(
-                        &self,
-                        None,
-                        partial,
-                        Some(&partial_config),
-                    )?;
-
-                    Some(partial)
-                },
-            );
-        }
+        let reply = self.store_messages(ctx, conversation_id, new_messages)?;
 
         // Clean up the query file.
         if let Some(path) = query_file {
@@ -336,21 +305,23 @@ impl Query {
         Ok(Success::Ok)
     }
 
-    async fn build_message(&self, ctx: &mut Ctx) -> Result<(UserMessage, Option<PathBuf>)> {
-        let conversation_id = ctx.workspace.active_conversation_id();
-
+    async fn build_message(
+        &self,
+        ctx: &mut Ctx,
+        conversation_id: &ConversationId,
+    ) -> Result<(UserMessage, Option<PathBuf>)> {
         // If replaying, remove the last message from the conversation, and use
         // its query message to build the new query.
         let mut message = self
             .replay
-            .then(|| ctx.workspace.pop_message(&conversation_id))
+            .then(|| ctx.workspace.pop_message(conversation_id))
             .flatten()
             .map_or(UserMessage::Query(String::new()), |m| m.message);
 
         // If replaying a tool call, re-run the requested tool(s) and return the
         // new results.
         if let UserMessage::ToolCallResults(_) = &mut message {
-            let messages = ctx.workspace.get_messages(&conversation_id);
+            let messages = ctx.workspace.get_messages(conversation_id);
             let Some(response) = messages.last() else {
                 return Err(Error::Replay("No assistant response found".into()));
             };
@@ -425,7 +396,7 @@ impl Query {
         &self,
         message: &mut UserMessage,
         ctx: &mut Ctx,
-        conversation_id: ConversationId,
+        conversation_id: &ConversationId,
     ) -> Result<Option<PathBuf>> {
         // Editing only applies to queries, not tool-call results.
         let UserMessage::Query(query) = message else {
@@ -466,42 +437,6 @@ impl Query {
                 .map(|(q, p)| (q, Some(p)))?;
 
         Ok(query_file_path)
-    }
-
-    async fn build_thread(
-        &self,
-        ctx: &Ctx,
-        message: UserMessage,
-        tools: &[ToolDefinition],
-    ) -> Result<Thread> {
-        let conversation_id = ctx.workspace.active_conversation_id();
-        let mut attachments = vec![];
-        for attachment in &ctx.config().conversation.attachments {
-            register_attachment(ctx, &attachment.to_url()?, &mut attachments).await?;
-        }
-
-        let mut thread_builder = ThreadBuilder::default()
-            .with_system_prompt(ctx.config().assistant.system_prompt.clone())
-            .with_instructions(ctx.config().assistant.instructions.clone())
-            .with_attachments(attachments)
-            .with_history(ctx.workspace.get_messages(&conversation_id).to_messages())
-            .with_message(message);
-
-        if !tools.is_empty() {
-            let instruction = InstructionsConfig::default()
-                .with_title("Tool Usage")
-                .with_description("How to leverage the tools available to you.".to_string())
-                .with_item("Use all the tools available to you to give the best possible answer.")
-                .with_item("Verify the tool name, description and parameters are correct.")
-                .with_item(
-                    "Even if you've reasoned yourself towards a solution, use any available tool \
-                     to verify your answer.",
-                );
-
-            thread_builder = thread_builder.with_instruction(instruction);
-        }
-
-        Ok(thread_builder.build()?)
     }
 
     #[expect(clippy::too_many_lines)]
@@ -718,6 +653,56 @@ impl Query {
     fn force_edit(&self) -> bool {
         !self.force_no_edit() && self.edit.is_some()
     }
+
+    fn store_messages(
+        &self,
+        ctx: &mut Ctx,
+        conversation_id: ConversationId,
+        new_messages: Vec<MessagePair>,
+    ) -> Result<String> {
+        let mut reply = String::new();
+
+        for message in new_messages {
+            debug!(
+                conversation = %conversation_id,
+                content_size_bytes = message.reply.content.as_deref().unwrap_or_default().len(),
+                reasoning_size_bytes = message.reply.reasoning.as_deref().unwrap_or_default().len(),
+                tool_calls_count = message.reply.tool_calls.len(),
+                "Storing response message in conversation."
+            );
+
+            if let Some(content) = &message.reply.content {
+                reply.push_str(content);
+            }
+            ctx.workspace.add_message(
+                conversation_id,
+                message,
+                if self.new_conversation {
+                    Some(ctx.config().to_partial())
+                } else {
+                    let global = ctx.term.args.config.clone();
+                    let partial = load_cli_cfg_args(
+                        PartialAppConfig::empty(),
+                        &global,
+                        Some(&ctx.workspace),
+                    )?;
+
+                    let partial_config = ctx.config().to_partial();
+                    let partial = IntoPartialAppConfig::apply_cli_config(
+                        self,
+                        None,
+                        partial,
+                        Some(&partial_config),
+                    )
+                    .map_err(|error| Error::CliConfig(error.to_string()))?;
+
+                    Some(partial)
+                },
+            );
+        }
+
+        Ok(reply)
+    }
 }
 
 impl IntoPartialAppConfig for Query {
@@ -802,7 +787,36 @@ impl IntoPartialAppConfig for Query {
     }
 }
 
-type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+fn build_thread(
+    user_message: UserMessage,
+    history: Messages,
+    attachments: Vec<Attachment>,
+    assistant: &AssistantConfig,
+    tools: &[ToolDefinition],
+) -> Result<Thread> {
+    let mut thread_builder = ThreadBuilder::default()
+        .with_system_prompt(assistant.system_prompt.clone())
+        .with_instructions(assistant.instructions.clone())
+        .with_attachments(attachments)
+        .with_history(history)
+        .with_message(user_message);
+
+    if !tools.is_empty() {
+        let instruction = InstructionsConfig::default()
+            .with_title("Tool Usage")
+            .with_description("How to leverage the tools available to you.".to_string())
+            .with_item("Use all the tools available to you to give the best possible answer.")
+            .with_item("Verify the tool name, description and parameters are correct.")
+            .with_item(
+                "Even if you've reasoned yourself towards a solution, use any available tool to \
+                 verify your answer.",
+            );
+
+        thread_builder = thread_builder.with_instruction(instruction);
+    }
+
+    Ok(thread_builder.build()?)
+}
 
 /// Apply the CLI model configuration to the partial configuration.
 fn apply_model(

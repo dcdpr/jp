@@ -30,11 +30,10 @@ pub struct TitleGeneratorTask {
 impl TitleGeneratorTask {
     pub fn new(
         conversation_id: ConversationId,
+        mut messages: Messages,
         config: &AppConfig,
-        workspace: &Workspace,
         query: Option<String>,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let mut messages = workspace.get_messages(&conversation_id).to_messages();
         if let Some(query) = query {
             messages.push(
                 MessagePair::new(
@@ -88,15 +87,15 @@ impl TitleGeneratorTask {
     async fn update_title(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!(conversation_id = %self.conversation_id, "Updating conversation title.");
 
-        let parameters = &self.model.parameters;
-        let provider_config = &self.providers;
-        let model_id = &self.model.id;
-        let provider_id = model_id.provider;
-
-        let provider = provider::get_provider(provider_id, provider_config)?;
+        let provider = provider::get_provider(self.model.id.provider, &self.providers)?;
         let query = structured::titles::titles(1, self.messages.clone(), &[])?;
-        let titles: Vec<String> =
-            structured::completion(provider.as_ref(), model_id, parameters, query).await?;
+        let titles: Vec<_> = structured::completion(
+            provider.as_ref(),
+            &self.model.id,
+            &self.model.parameters,
+            query,
+        )
+        .await?;
 
         trace!(titles = ?titles, "Received conversation titles.");
         if let Some(title) = titles.into_iter().next() {
