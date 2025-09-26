@@ -61,18 +61,9 @@ impl Messages {
         MessagesRef(self.0.as_slice())
     }
 
+    #[must_use]
     pub fn config(&self) -> PartialAppConfig {
-        self.0
-            .iter()
-            .map(|m| m.config_delta.clone())
-            .reduce(|mut a, b| {
-                if let Err(error) = a.merge(&(), b) {
-                    warn!(?error, "Failed to merge configuration partial.");
-                }
-
-                a
-            })
-            .unwrap_or_else(PartialAppConfig::empty)
+        self.as_ref().config()
     }
 
     pub fn set_config(&mut self, next: PartialAppConfig) {
@@ -112,6 +103,7 @@ impl MessagesRef<'_> {
         Messages(self.0.to_vec())
     }
 
+    #[must_use]
     pub fn config(&self) -> PartialAppConfig {
         self.0
             .iter()
