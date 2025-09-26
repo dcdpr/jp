@@ -148,6 +148,7 @@ impl Handler for BearNotes {
                 attachments.push(Attachment {
                     source: format!("{}://get/{}", self.scheme(), &note.id),
                     content: note.try_to_xml()?,
+                    description: Some("A note from the Bear note-taking app.".to_owned()),
                 });
             }
         }

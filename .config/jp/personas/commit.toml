@@ -10,11 +10,13 @@ github_issues.enable = true
 [[conversation.attachments]]
 type = "cmd"
 path = "git"
-param.arg = ["branch", "--show-current"]
+params.description = "Current branch name"
+params.arg = ["branch", "--show-current"]
 
 [[conversation.attachments]]
 type = "cmd"
 path = "git"
+params.description = "Diff of cached files"
 params.arg = ["diff", "--cached"]
 
 # Hide all content except the final response.

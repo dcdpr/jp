@@ -45,7 +45,7 @@ PartialAppConfig {
             },
             tools: {},
         },
-        attachments: None,
+        attachments: [],
     },
     style: PartialStyleConfig {
         code: PartialCodeConfig {

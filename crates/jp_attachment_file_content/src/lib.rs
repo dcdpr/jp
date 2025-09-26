@@ -133,6 +133,7 @@ impl Handler for FileContent {
                     let _result = tx.send(Attachment {
                         source: rel.to_string_lossy().to_string(),
                         content,
+                        ..Default::default()
                     });
 
                     WalkState::Continue

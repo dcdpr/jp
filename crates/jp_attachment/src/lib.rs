@@ -27,10 +27,13 @@ pub fn find_handler_by_scheme(scheme: &str) -> Option<BoxedHandler> {
 }
 
 /// A piece of data that can be attached to a conversation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Attachment {
     /// The source of the attachment, such as a URL or file path.
     pub source: String,
+
+    /// An optional description of the attachment.
+    pub description: Option<String>,
 
     /// The content of the attachment.
     ///
