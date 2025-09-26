@@ -88,7 +88,34 @@ impl Handler for FileContent {
 
         let mut builder = OverrideBuilder::new(cwd);
         for pattern in &self.includes {
-            builder.add(pattern.as_str())?;
+            let pattern = pattern.as_str();
+            // We are hiding hidden files or directories by default (see
+            // `hidden(true)`). If you were to add a pattern such as
+            // `/.foo/bar.txt`, then that file would still be ignored, because
+            // `/.foo` is a hidden directory and is not recursed. To fix this,
+            // we need to explicitly add the initial hidden directory, e.g.
+            // `/.foo`.
+            //
+            // The alternative is to never hide hidden files and directories by
+            // default, but that causes significant performance issues as we
+            // would traverse `.git` and other large hidden directories.
+            //
+            // We could just keep track of a large list of "potentially large"
+            // hidden directory patterns such as `.git` or `.hg`, but that would
+            // require ongoing maintenance and would be a bit of a hack.
+            //
+            // This too is a hack, but a more dynamic one that should hopefully
+            // work in most common cases, but either way, hopefully we can find
+            // a better solution in the future.
+            if (pattern.starts_with('.') || pattern.starts_with("/."))
+                // We only want to add the initial hidden directory if it's
+                // actually a directory, not a file.
+                && let Some((dir, _)) = pattern.split_once('.').and_then(|(_, dir)| dir.split_once('/'))
+            {
+                builder.add(&format!(".{dir}/"))?;
+            }
+
+            builder.add(pattern)?;
         }
         for p in &self.excludes {
             builder.add(&format!("!{p}"))?;
