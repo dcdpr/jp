@@ -9,6 +9,7 @@ use schematic::Config;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::PartialConfigDelta,
+    partial::ToPartial,
     providers::{
         llm::{LlmProviderConfig, PartialLlmProviderConfig},
         mcp::McpProviderConfig,
@@ -66,6 +67,19 @@ impl PartialConfigDelta for PartialProviderConfig {
 
                     Some((k, next))
                 })
+                .collect(),
+        }
+    }
+}
+
+impl ToPartial for ProviderConfig {
+    fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            llm: self.llm.to_partial(),
+            mcp: self
+                .mcp
+                .iter()
+                .map(|(k, v)| (k.clone(), v.to_partial()))
                 .collect(),
         }
     }

@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, PartialConfigDelta},
+    partial::{partial_opt, partial_opts, ToPartial},
 };
 
 /// Openrouter API configuration.
@@ -49,6 +50,19 @@ impl PartialConfigDelta for PartialOpenrouterConfig {
             app_name: delta_opt(self.app_name.as_ref(), next.app_name),
             app_referrer: delta_opt(self.app_referrer.as_ref(), next.app_referrer),
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
+        }
+    }
+}
+
+impl ToPartial for OpenrouterConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            api_key_env: partial_opt(&self.api_key_env, defaults.api_key_env),
+            app_name: partial_opt(&self.app_name, defaults.app_name),
+            app_referrer: partial_opts(self.app_referrer.as_ref(), defaults.app_referrer),
+            base_url: partial_opt(&self.base_url, defaults.base_url),
         }
     }
 }

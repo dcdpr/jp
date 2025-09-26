@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::PartialConfigDelta,
+    partial::ToPartial,
     style::{
         code::{CodeConfig, PartialCodeConfig},
         reasoning::{PartialReasoningConfig, ReasoningConfig},
@@ -62,6 +63,17 @@ impl PartialConfigDelta for PartialStyleConfig {
             reasoning: self.reasoning.delta(next.reasoning),
             tool_call: self.tool_call.delta(next.tool_call),
             typewriter: self.typewriter.delta(next.typewriter),
+        }
+    }
+}
+
+impl ToPartial for StyleConfig {
+    fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            code: self.code.to_partial(),
+            reasoning: self.reasoning.to_partial(),
+            tool_call: self.tool_call.to_partial(),
+            typewriter: self.typewriter.to_partial(),
         }
     }
 }

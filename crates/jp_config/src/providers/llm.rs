@@ -15,6 +15,7 @@ use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::PartialConfigDelta,
     model::id::ModelIdConfig,
+    partial::ToPartial,
     providers::llm::{
         anthropic::{AnthropicConfig, PartialAnthropicConfig},
         deepseek::{DeepseekConfig, PartialDeepseekConfig},
@@ -109,6 +110,25 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
             ollama: self.ollama.delta(next.ollama),
             openai: self.openai.delta(next.openai),
             openrouter: self.openrouter.delta(next.openrouter),
+        }
+    }
+}
+
+impl ToPartial for LlmProviderConfig {
+    fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            aliases: self
+                .aliases
+                .iter()
+                .map(|(k, v)| (k.clone(), v.to_partial()))
+                .collect(),
+            anthropic: self.anthropic.to_partial(),
+            deepseek: self.deepseek.to_partial(),
+            google: self.google.to_partial(),
+            llamacpp: self.llamacpp.to_partial(),
+            ollama: self.ollama.to_partial(),
+            openai: self.openai.to_partial(),
+            openrouter: self.openrouter.to_partial(),
         }
     }
 }

@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, delta_opt_vec, PartialConfigDelta},
+    partial::{partial_opt, ToPartial},
     util,
 };
 
@@ -50,6 +51,18 @@ impl PartialConfigDelta for PartialAnthropicConfig {
             api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
             beta_headers: delta_opt_vec(self.beta_headers.as_ref(), next.beta_headers),
+        }
+    }
+}
+
+impl ToPartial for AnthropicConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            api_key_env: partial_opt(&self.api_key_env, defaults.api_key_env),
+            base_url: partial_opt(&self.base_url, defaults.base_url),
+            beta_headers: partial_opt(&self.beta_headers, defaults.beta_headers),
         }
     }
 }

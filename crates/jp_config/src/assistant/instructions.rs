@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{missing_key, AssignKeyValue, KvAssignment},
+    partial::{partial_opt, partial_opts, ToPartial},
     BoxedError,
 };
 
@@ -31,6 +32,34 @@ pub struct InstructionsConfig {
     /// A list of examples to go with the instructions.
     #[setting(nested)]
     pub examples: Vec<ExampleConfig>,
+}
+
+impl AssignKeyValue for PartialInstructionsConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> Result<(), BoxedError> {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object_or_from_str()?,
+            "title" => self.title = kv.try_some_string()?,
+            "description" => self.description = kv.try_some_string()?,
+            _ if kv.p("items") => kv.try_some_vec_of_strings(&mut self.items)?,
+            _ if kv.p("examples") => kv.try_vec_of_nested(&mut self.examples)?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl ToPartial for InstructionsConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            title: partial_opts(self.title.as_ref(), defaults.title),
+            description: partial_opts(self.description.as_ref(), defaults.description),
+            items: partial_opt(&self.items, defaults.items),
+            examples: self.examples.iter().map(ToPartial::to_partial).collect(),
+        }
+    }
 }
 
 impl InstructionsConfig {
@@ -66,21 +95,6 @@ impl InstructionsConfig {
         serializer.indent(' ', 2);
         self.serialize(serializer)?;
         Ok(buffer)
-    }
-}
-
-impl AssignKeyValue for PartialInstructionsConfig {
-    fn assign(&mut self, mut kv: KvAssignment) -> Result<(), BoxedError> {
-        match kv.key_string().as_str() {
-            "" => *self = kv.try_object_or_from_str()?,
-            "title" => self.title = kv.try_some_string()?,
-            "description" => self.description = kv.try_some_string()?,
-            _ if kv.p("items") => kv.try_some_vec_of_strings(&mut self.items)?,
-            _ if kv.p("examples") => kv.try_vec_of_nested(&mut self.examples)?,
-            _ => return missing_key(&kv),
-        }
-
-        Ok(())
     }
 }
 
@@ -121,6 +135,15 @@ impl AssignKeyValue for PartialExampleConfig {
     }
 }
 
+impl ToPartial for ExampleConfig {
+    fn to_partial(&self) -> Self::Partial {
+        match self {
+            Self::Generic(v) => Self::Partial::Generic(v.to_owned()),
+            Self::Contrast(v) => Self::Partial::Contrast(v.to_partial()),
+        }
+    }
+}
+
 impl FromStr for PartialExampleConfig {
     type Err = BoxedError;
 
@@ -154,6 +177,18 @@ impl AssignKeyValue for PartialContrastConfig {
         }
 
         Ok(())
+    }
+}
+
+impl ToPartial for ContrastConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            good: partial_opt(&self.good, defaults.good),
+            bad: partial_opt(&self.bad, defaults.bad),
+            reason: partial_opts(self.reason.as_ref(), defaults.reason),
+        }
     }
 }
 

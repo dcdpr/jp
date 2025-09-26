@@ -12,6 +12,7 @@ use crate::{
         id::{ModelIdConfig, PartialModelIdConfig},
         parameters::{ParametersConfig, PartialParametersConfig},
     },
+    partial::ToPartial,
 };
 
 /// Assistant-specific configuration.
@@ -45,6 +46,15 @@ impl PartialConfigDelta for PartialModelConfig {
         Self {
             id: self.id.delta(next.id),
             parameters: self.parameters.delta(next.parameters),
+        }
+    }
+}
+
+impl ToPartial for ModelConfig {
+    fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            id: self.id.to_partial(),
+            parameters: self.parameters.to_partial(),
         }
     }
 }

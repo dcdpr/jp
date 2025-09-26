@@ -1,6 +1,6 @@
 use std::io::{self, IsTerminal as _};
 
-use jp_config::{conversation::tool::ToolSource, util::build, AppConfig, PartialAppConfig};
+use jp_config::{conversation::tool::ToolSource, AppConfig, PartialAppConfig};
 use jp_mcp::id::{McpServerId, McpToolId};
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
@@ -14,9 +14,6 @@ pub(crate) struct Ctx {
 
     /// Merged file/CLI configuration.
     config: AppConfig,
-
-    /// Partial configuration, without defaults.
-    partial: PartialAppConfig,
 
     /// Global CLI arguments.
     pub(crate) term: Term,
@@ -41,17 +38,11 @@ pub(crate) struct Term {
 
 impl Ctx {
     /// Create a new context with the given workspace
-    pub(crate) fn new(
-        workspace: Workspace,
-        args: Globals,
-        partial: PartialAppConfig,
-    ) -> Result<Self> {
-        let config = build(partial.clone())?;
+    pub(crate) fn new(workspace: Workspace, args: Globals, config: AppConfig) -> Self {
         let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
-        Ok(Self {
+        Self {
             workspace,
-            partial,
             config,
             term: Term {
                 args,
@@ -59,7 +50,7 @@ impl Ctx {
             },
             mcp_client,
             task_handler: TaskHandler::default(),
-        })
+        }
     }
 
     /// Get immutable access to the configuration.
@@ -74,11 +65,6 @@ impl Ctx {
     /// [`AppConfig`] object.
     pub(crate) fn config(&self) -> &AppConfig {
         &self.config
-    }
-
-    /// Get the partial configuration.
-    pub(crate) fn partial_config(&self) -> &PartialAppConfig {
-        &self.partial
     }
 
     /// Activate and deactivate MCP servers based on the active conversation

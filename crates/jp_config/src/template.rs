@@ -6,6 +6,7 @@ use serde_json::{Map, Value};
 use crate::{
     assignment::{missing_key, type_error, AssignKeyValue, KvAssignment, KvValue},
     delta::{delta_opt, PartialConfigDelta},
+    partial::{partial_opt, ToPartial},
     BoxedError,
 };
 
@@ -64,6 +65,16 @@ impl PartialConfigDelta for PartialTemplateConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             values: delta_opt(self.values.as_ref(), next.values),
+        }
+    }
+}
+
+impl ToPartial for TemplateConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            values: partial_opt(&self.values, defaults.values),
         }
     }
 }

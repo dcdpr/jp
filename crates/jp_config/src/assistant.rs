@@ -16,6 +16,7 @@ use crate::{
     assistant::tool_choice::ToolChoice,
     delta::{delta_opt, PartialConfigDelta},
     model::{ModelConfig, PartialModelConfig},
+    partial::{partial_opt, partial_opts, ToPartial},
 };
 /// Assistant-specific configuration.
 #[derive(Debug, Clone, Config)]
@@ -70,6 +71,24 @@ impl PartialConfigDelta for PartialAssistantConfig {
             },
             tool_choice: delta_opt(self.tool_choice.as_ref(), next.tool_choice),
             model: self.model.delta(next.model),
+        }
+    }
+}
+
+impl ToPartial for AssistantConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            name: partial_opts(self.name.as_ref(), defaults.name),
+            system_prompt: partial_opt(&self.system_prompt, defaults.system_prompt),
+            instructions: self
+                .instructions
+                .iter()
+                .map(ToPartial::to_partial)
+                .collect(),
+            tool_choice: partial_opt(&self.tool_choice, defaults.tool_choice),
+            model: self.model.to_partial(),
         }
     }
 }

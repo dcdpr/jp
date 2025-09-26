@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, PartialConfigDelta},
+    partial::{partial_opt, ToPartial},
     style::LinkStyle,
 };
 
@@ -82,6 +83,20 @@ impl PartialConfigDelta for PartialCodeConfig {
             line_numbers: delta_opt(self.line_numbers.as_ref(), next.line_numbers),
             file_link: delta_opt(self.file_link.as_ref(), next.file_link),
             copy_link: delta_opt(self.copy_link.as_ref(), next.copy_link),
+        }
+    }
+}
+
+impl ToPartial for CodeConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            theme: partial_opt(&self.theme, defaults.theme),
+            color: partial_opt(&self.color, defaults.color),
+            line_numbers: partial_opt(&self.line_numbers, defaults.line_numbers),
+            file_link: partial_opt(&self.file_link, defaults.file_link),
+            copy_link: partial_opt(&self.copy_link, defaults.copy_link),
         }
     }
 }

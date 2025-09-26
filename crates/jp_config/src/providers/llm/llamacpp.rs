@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, PartialConfigDelta},
+    partial::{partial_opt, ToPartial},
 };
 
 /// Llamacpp API configuration.
@@ -32,6 +33,16 @@ impl PartialConfigDelta for PartialLlamacppConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
+        }
+    }
+}
+
+impl ToPartial for LlamacppConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            base_url: partial_opt(&self.base_url, defaults.base_url),
         }
     }
 }

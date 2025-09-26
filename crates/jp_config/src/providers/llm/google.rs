@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, PartialConfigDelta},
+    partial::{partial_opt, ToPartial},
 };
 
 /// Google API configuration.
@@ -38,6 +39,17 @@ impl PartialConfigDelta for PartialGoogleConfig {
         Self {
             api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
+        }
+    }
+}
+
+impl ToPartial for GoogleConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            api_key_env: partial_opt(&self.api_key_env, defaults.api_key_env),
+            base_url: partial_opt(&self.base_url, defaults.base_url),
         }
     }
 }

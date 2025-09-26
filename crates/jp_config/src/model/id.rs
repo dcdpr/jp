@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::{delta_opt, PartialConfigDelta},
+    partial::{partial_opt, ToPartial},
 };
 
 /// Assistant-specific configuration.
@@ -45,6 +46,17 @@ impl PartialConfigDelta for PartialModelIdConfig {
         Self {
             provider: delta_opt(self.provider.as_ref(), next.provider),
             name: delta_opt(self.name.as_ref(), next.name),
+        }
+    }
+}
+
+impl ToPartial for ModelIdConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            provider: partial_opt(&self.provider, defaults.provider),
+            name: partial_opt(&self.name, defaults.name),
         }
     }
 }
