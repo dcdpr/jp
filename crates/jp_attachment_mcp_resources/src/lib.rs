@@ -93,6 +93,7 @@ impl Handler for McpResources {
             attachments.push(Attachment {
                 source: uri.to_string(),
                 content: Resource::from(resource).try_to_xml()?,
+                ..Default::default()
             });
         }
 
