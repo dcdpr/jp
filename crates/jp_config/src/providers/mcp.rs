@@ -144,7 +144,6 @@ impl ToPartial for ChecksumConfig {
 
 /// The algorithm to use for the checksum.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
-#[config]
 pub enum AlgorithmConfig {
     /// SHA-256 checksum.
     #[default]

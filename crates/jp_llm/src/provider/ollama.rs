@@ -257,7 +257,7 @@ fn create_request(
     // there are too many models that do not support reasoning, and we have no
     // way (currently) to detect whether a model supports reasoning or not,
     // resulting in an error if the default reasoning of "auto" is used.
-    if !matches!(parameters.reasoning(), None | Some(ReasoningConfig::Off)) {
+    if !matches!(parameters.reasoning, None | Some(ReasoningConfig::Off)) {
         request = request.think(true);
     }
 

@@ -33,7 +33,7 @@ pub struct ParametersConfig {
     /// supports it, otherwise disabled. If set to `Some`, the model uses the
     /// provided configuration.
     #[setting(nested)]
-    reasoning: Option<ReasoningConfig>,
+    pub reasoning: Option<ReasoningConfig>,
 
     /// Temperature of the model.
     ///
@@ -117,21 +117,6 @@ impl ToPartial for ParametersConfig {
             stop_words: partial_opt(&self.stop_words, None),
             other: partial_opt(&self.other, None),
         }
-    }
-}
-
-impl ParametersConfig {
-    /// Returns the reasoning configuration.
-    ///
-    /// If `None`, no reasoning is configured.
-    #[must_use]
-    pub const fn reasoning(&self) -> Option<ReasoningConfig> {
-        self.reasoning
-    }
-
-    /// Sets the reasoning configuration.
-    pub const fn set_reasoning(&mut self, reasoning: ReasoningConfig) {
-        self.reasoning = Some(reasoning);
     }
 }
 
@@ -271,6 +256,18 @@ impl FromStr for PartialCustomReasoningConfig {
             effort: Some(s.parse()?),
             exclude: None,
         })
+    }
+}
+
+impl From<CustomReasoningConfig> for ReasoningConfig {
+    fn from(config: CustomReasoningConfig) -> Self {
+        Self::Custom(config)
+    }
+}
+
+impl From<PartialCustomReasoningConfig> for PartialReasoningConfig {
+    fn from(config: PartialCustomReasoningConfig) -> Self {
+        Self::Custom(config)
     }
 }
 

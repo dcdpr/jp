@@ -988,12 +988,11 @@ fn apply_reasoning(
     partial.assistant.model.parameters.reasoning = Some(match reasoning {
         ReasoningConfig::Off => PartialReasoningConfig::Off,
         ReasoningConfig::Auto => PartialReasoningConfig::Auto,
-        ReasoningConfig::Custom(custom) => {
-            PartialReasoningConfig::Custom(PartialCustomReasoningConfig {
-                effort: Some(custom.effort),
-                exclude: Some(custom.exclude),
-            })
+        ReasoningConfig::Custom(custom) => PartialCustomReasoningConfig {
+            effort: Some(custom.effort),
+            exclude: Some(custom.exclude),
         }
+        .into(),
     });
 }
 
