@@ -37,11 +37,7 @@ impl IntoPartialAppConfig for Add {
         for uri in &self.attachments {
             validate_attachment(uri)?;
 
-            partial
-                .conversation
-                .attachments
-                .get_or_insert_default()
-                .push(uri.clone());
+            partial.conversation.attachments.push(uri.clone().into());
         }
 
         Ok(partial)

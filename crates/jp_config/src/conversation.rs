@@ -1,19 +1,20 @@
 //! Conversation-specific configuration for Jean-Pierre.
 
+pub mod attachment;
 pub mod title;
 pub mod tool;
 
 use schematic::Config;
-use serde_json::Value;
 
 use crate::{
-    assignment::{missing_key, type_error, AssignKeyValue, AssignResult, KvAssignment},
+    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     conversation::{
+        attachment::AttachmentConfig,
         title::{PartialTitleConfig, TitleConfig},
         tool::{PartialToolsConfig, ToolsConfig},
     },
-    delta::{delta_opt_vec, PartialConfigDelta},
-    partial::{partial_opt, ToPartial},
+    delta::PartialConfigDelta,
+    partial::ToPartial,
 };
 
 /// Conversation-specific configuration.
@@ -29,8 +30,8 @@ pub struct ConversationConfig {
     pub tools: ToolsConfig,
 
     /// Attachment configuration.
-    #[setting(default, merge = schematic::merge::append_vec, transform = util::vec_dedup)]
-    pub attachments: Vec<url::Url>,
+    #[setting(nested, merge = schematic::merge::append_vec)]
+    pub attachments: Vec<AttachmentConfig>,
 }
 
 impl AssignKeyValue for PartialConversationConfig {
@@ -39,14 +40,7 @@ impl AssignKeyValue for PartialConversationConfig {
             "" => *self = kv.try_object()?,
             _ if kv.p("title") => self.title.assign(kv)?,
             _ if kv.p("tools") => self.tools.assign(kv)?,
-            _ if kv.p("attachments") => {
-                let parser = |kv: KvAssignment| match kv.value.clone().into_value() {
-                    Value::String(v) => url::Url::parse(&v).map_err(Into::into),
-                    _ => type_error(kv.key(), &kv.value, &["string"]).map_err(Into::into),
-                };
-
-                kv.try_vec(self.attachments.get_or_insert_default(), parser)?;
-            }
+            _ if kv.p("attachments") => kv.try_vec_of_nested(&mut self.attachments)?,
             _ => return missing_key(&kv),
         }
 
@@ -59,19 +53,22 @@ impl PartialConfigDelta for PartialConversationConfig {
         Self {
             title: self.title.delta(next.title),
             tools: self.tools.delta(next.tools),
-            attachments: delta_opt_vec(self.attachments.as_ref(), next.attachments),
+            attachments: {
+                next.attachments
+                    .into_iter()
+                    .filter(|v| !self.attachments.contains(v))
+                    .collect()
+            },
         }
     }
 }
 
 impl ToPartial for ConversationConfig {
     fn to_partial(&self) -> Self::Partial {
-        let defaults = Self::Partial::default();
-
         Self::Partial {
             title: self.title.to_partial(),
             tools: self.tools.to_partial(),
-            attachments: partial_opt(&self.attachments, defaults.attachments),
+            attachments: self.attachments.iter().map(ToPartial::to_partial).collect(),
         }
     }
 }
