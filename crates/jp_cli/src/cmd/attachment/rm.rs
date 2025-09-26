@@ -1,4 +1,4 @@
-use jp_config::PartialAppConfig;
+use jp_config::{conversation::attachment::AttachmentConfig, Config as _, PartialAppConfig};
 use jp_workspace::Workspace;
 use url::Url;
 
@@ -26,12 +26,15 @@ impl IntoPartialAppConfig for Rm {
         mut partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
-        partial
-            .conversation
-            .attachments
-            .get_or_insert_default()
-            .retain(|v| !self.attachments.contains(v));
+        let mut attachments = vec![];
+        for attachment in partial.conversation.attachments {
+            let url = AttachmentConfig::from_partial(attachment.clone())?.to_url()?;
+            if !self.attachments.contains(&url) {
+                attachments.push(attachment);
+            }
+        }
 
+        partial.conversation.attachments = attachments;
         Ok(partial)
     }
 }

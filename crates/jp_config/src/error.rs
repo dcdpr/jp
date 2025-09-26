@@ -14,4 +14,10 @@ pub enum Error {
     /// A glob pattern parsing error.
     #[error(transparent)]
     Pattern(#[from] glob::PatternError),
+
+    /// A custom configuration error.
+    // TODO: Remove this once we can enable the `validation` feature for
+    // `schematic` (currently broken in our own fork).
+    #[error(transparent)]
+    Custom(Box<dyn std::error::Error + Send + Sync>),
 }

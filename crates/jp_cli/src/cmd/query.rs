@@ -477,7 +477,7 @@ impl Query {
         let conversation_id = ctx.workspace.active_conversation_id();
         let mut attachments = vec![];
         for attachment in &ctx.config().conversation.attachments {
-            register_attachment(ctx, attachment, &mut attachments).await?;
+            register_attachment(ctx, &attachment.to_url()?, &mut attachments).await?;
         }
 
         let mut thread_builder = ThreadBuilder::default()
@@ -967,8 +967,7 @@ fn apply_attachments(partial: &mut PartialAppConfig, attachments: &[Url]) {
     partial
         .conversation
         .attachments
-        .get_or_insert_default()
-        .extend(attachments.iter().cloned());
+        .extend(attachments.iter().cloned().map(Into::into));
 }
 
 /// Apply the CLI reasoning configuration to the partial configuration.

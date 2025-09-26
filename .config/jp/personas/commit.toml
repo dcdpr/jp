@@ -7,11 +7,15 @@ fs_grep_user_docs.enable = true
 github_pulls.enable = true
 github_issues.enable = true
 
-# Add `git diff --cached` output as an attachment.
-[conversation]
-attachments = [
-    "cmd://git?arg=diff&arg=--cached",
-]
+[[conversation.attachments]]
+type = "cmd"
+path = "git"
+param.arg = ["branch", "--show-current"]
+
+[[conversation.attachments]]
+type = "cmd"
+path = "git"
+params.arg = ["diff", "--cached"]
 
 # Hide all content except the final response.
 [style]

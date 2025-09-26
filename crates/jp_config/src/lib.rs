@@ -50,8 +50,7 @@ pub mod util; // TODO: Rename
 
 pub use error::Error;
 use relative_path::RelativePathBuf;
-use schematic::Config;
-pub use schematic::PartialConfig;
+pub use schematic::{Config, PartialConfig};
 use serde_json::Value;
 
 use crate::{
