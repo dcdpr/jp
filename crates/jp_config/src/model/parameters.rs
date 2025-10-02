@@ -15,7 +15,7 @@ use crate::{
 
 /// Assistant-specific configuration.
 #[derive(Debug, Clone, Config)]
-#[config(rename_all = "snake_case", allow_unknown_fields)]
+#[config(default, rename_all = "snake_case", allow_unknown_fields)]
 pub struct ParametersConfig {
     /// Maximum number of tokens to generate.
     ///

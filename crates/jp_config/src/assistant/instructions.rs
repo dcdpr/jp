@@ -16,7 +16,7 @@ use crate::{
 
 /// A list of instructions for a persona.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
-#[config(rename_all = "snake_case")]
+#[config(default, rename_all = "snake_case")]
 pub struct InstructionsConfig {
     /// The title of the instructions.
     #[serde(skip_serializing_if = "Option::is_none")]
