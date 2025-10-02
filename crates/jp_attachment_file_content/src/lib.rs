@@ -88,7 +88,12 @@ impl Handler for FileContent {
 
         let mut builder = OverrideBuilder::new(cwd);
         for pattern in &self.includes {
-            let pattern = pattern.as_str();
+            let mut pattern = pattern.as_str();
+
+            if pattern.starts_with('/') {
+                pattern = &pattern[1..];
+            }
+
             // We are hiding hidden files or directories by default (see
             // `hidden(true)`). If you were to add a pattern such as
             // `/.foo/bar.txt`, then that file would still be ignored, because
@@ -107,12 +112,22 @@ impl Handler for FileContent {
             // This too is a hack, but a more dynamic one that should hopefully
             // work in most common cases, but either way, hopefully we can find
             // a better solution in the future.
-            if (pattern.starts_with('.') || pattern.starts_with("/."))
+            if pattern.starts_with('.')
                 // We only want to add the initial hidden directory if it's
                 // actually a directory, not a file.
                 && let Some((dir, _)) = pattern.split_once('.').and_then(|(_, dir)| dir.split_once('/'))
             {
                 builder.add(&format!(".{dir}/"))?;
+            }
+
+            // If the pattern is a directory, add it recursively.
+            if cwd.join(pattern).is_dir() {
+                if pattern.ends_with('/') {
+                    pattern = &pattern[..pattern.len() - 1];
+                }
+
+                builder.add(&format!("{pattern}/**/*"))?;
+                continue;
             }
 
             builder.add(pattern)?;
