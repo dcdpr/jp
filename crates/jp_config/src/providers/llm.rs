@@ -29,7 +29,7 @@ use crate::{
 
 /// Provider configuration.
 #[derive(Debug, Clone, Config)]
-#[config(rename_all = "snake_case")]
+#[config(default, rename_all = "snake_case")]
 pub struct LlmProviderConfig {
     /// Aliases for specific provider/model combinations.
     #[setting(nested)]

@@ -19,6 +19,7 @@ use crate::{
 #[config(serde(untagged))]
 pub enum AttachmentConfig {
     /// A url-based attachment.
+    #[setting(is_empty = false)]
     Url(Url),
 
     /// Attachment defined as an object.

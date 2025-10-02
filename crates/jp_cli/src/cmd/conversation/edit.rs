@@ -82,10 +82,12 @@ async fn generate_titles(
         .clone()
         .unwrap_or_else(|| config.assistant.model.clone());
 
-    let provider = provider::get_provider(model.id.provider, &config.providers.llm)?;
+    let model_id = model.id.finalize(&config.providers.llm.aliases)?;
+
+    let provider = provider::get_provider(model_id.provider, &config.providers.llm)?;
     let query = structured::titles::titles(count, messages.clone(), &rejected)?;
     let titles: Vec<String> =
-        structured::completion(provider.as_ref(), &model.id, &model.parameters, query).await?;
+        structured::completion(provider.as_ref(), &model_id, &model.parameters, query).await?;
 
     let mut choices = titles.clone();
     choices.extend(rejected.clone());

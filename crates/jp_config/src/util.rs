@@ -471,7 +471,8 @@ mod tests {
         partial.assistant.model.id = PartialModelIdConfig {
             provider: Some(ProviderId::Openrouter),
             name: Some("foo".parse().unwrap()),
-        };
+        }
+        .into();
 
         partial.conversation.tools.defaults.run = Some(RunMode::Always);
 
@@ -493,7 +494,8 @@ mod tests {
         partial.assistant.model.id = PartialModelIdConfig {
             provider: Some(ProviderId::Openrouter),
             name: Some("foo".parse().unwrap()),
-        };
+        }
+        .into();
 
         let error = build(partial.clone()).unwrap_err();
         assert_matches!(error, Error::Schematic(MissingRequired(v)) if v == "run");

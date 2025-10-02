@@ -175,7 +175,7 @@ mod tests {
     fn test_editor_config_path() {
         let mut p = EditorConfig {
             cmd: Some("vim".into()),
-            ..Default::default()
+            envs: vec![],
         };
 
         assert_eq!(p.path(), Some(PathBuf::from("vim")));

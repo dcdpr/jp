@@ -85,4 +85,7 @@ pub(crate) enum Error {
         model: String,
         available: Vec<String>,
     },
+
+    #[error("Model ID error")]
+    ModelId(#[from] jp_config::model::id::ModelIdConfigError),
 }

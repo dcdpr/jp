@@ -3,8 +3,8 @@ use std::error::Error;
 use async_trait::async_trait;
 use jp_config::{
     model::{
-        id::ProviderId,
-        parameters::{CustomReasoningConfig, ReasoningEffort},
+        id::{ModelIdConfig, ProviderId},
+        parameters::{CustomReasoningConfig, ParametersConfig, ReasoningEffort},
         ModelConfig,
     },
     providers::llm::LlmProviderConfig,
@@ -21,7 +21,8 @@ use crate::Task;
 #[derive(Debug)]
 pub struct TitleGeneratorTask {
     pub conversation_id: ConversationId,
-    pub model: ModelConfig,
+    pub model_id: ModelIdConfig,
+    pub parameters: ParametersConfig,
     pub providers: LlmProviderConfig,
     pub messages: Messages,
     pub title: Option<String>,
@@ -58,10 +59,13 @@ impl TitleGeneratorTask {
             .generate
             .model
             .clone()
-            .unwrap_or(ModelConfig {
+            .unwrap_or_else(|| ModelConfig {
                 id: config.assistant.model.id.clone(),
-                ..Default::default()
+                parameters: ParametersConfig::default(),
             });
+
+        // Get the model ID from the model configuration.
+        let model_id = model.id.finalize(&config.providers.llm.aliases)?;
 
         // If reasoning is explicitly enabled for title generation, use it,
         // otherwise limit it to
@@ -77,7 +81,8 @@ impl TitleGeneratorTask {
 
         Ok(Self {
             conversation_id,
-            model,
+            model_id,
+            parameters: model.parameters,
             providers: config.providers.llm.clone(),
             messages,
             title: None,
@@ -87,15 +92,11 @@ impl TitleGeneratorTask {
     async fn update_title(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!(conversation_id = %self.conversation_id, "Updating conversation title.");
 
-        let provider = provider::get_provider(self.model.id.provider, &self.providers)?;
+        let provider = provider::get_provider(self.model_id.provider, &self.providers)?;
         let query = structured::titles::titles(1, self.messages.clone(), &[])?;
-        let titles: Vec<_> = structured::completion(
-            provider.as_ref(),
-            &self.model.id,
-            &self.model.parameters,
-            query,
-        )
-        .await?;
+        let titles: Vec<_> =
+            structured::completion(provider.as_ref(), &self.model_id, &self.parameters, query)
+                .await?;
 
         trace!(titles = ?titles, "Received conversation titles.");
         if let Some(title) = titles.into_iter().next() {

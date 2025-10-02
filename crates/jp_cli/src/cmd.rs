@@ -292,6 +292,7 @@ impl From<crate::error::Error> for Error {
             Which(error) => return error.into(),
             ConfigLoader(error) => return error.into(),
             Tool(error) => return error.into(),
+            ModelId(error) => return error.into(),
             NotFound(target, id) => [
                 ("message", "Not found".into()),
                 ("target", target.into()),
@@ -377,6 +378,7 @@ impl_from_error!(toml::de::Error, "Error while parsing TOML");
 impl_from_error!(toml::ser::Error, "Error while serializing TOML");
 impl_from_error!(url::ParseError, "Error while parsing URL");
 impl_from_error!(which::Error, "Which error");
+impl_from_error!(jp_config::model::id::ModelIdConfigError, "Model ID error");
 
 impl From<jp_llm::Error> for Error {
     fn from(error: jp_llm::Error) -> Self {

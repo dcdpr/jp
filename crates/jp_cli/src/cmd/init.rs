@@ -53,7 +53,8 @@ impl Init {
             config.assistant.model.id = PartialModelIdConfig {
                 provider: Some(id.provider),
                 name: Some(id.name),
-            };
+            }
+            .into();
         }
 
         let data = toml::to_string_pretty(&config)?;

@@ -476,6 +476,7 @@ impl ToPartial for ToolParameterConfig {
 #[serde(untagged)]
 pub enum OneOrManyTypes {
     /// A single type.
+    #[setting(empty)]
     One(String),
 
     /// A list of types.

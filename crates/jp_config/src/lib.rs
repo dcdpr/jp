@@ -292,10 +292,9 @@ impl AppConfig {
 
 impl PartialAppConfig {
     /// Create a new empty partial configuration.
-    #[expect(clippy::missing_panics_doc)]
     #[must_use]
     pub fn empty() -> Self {
-        <Self as PartialConfig>::empty().expect("always works for non-enum types")
+        <Self as PartialConfig>::empty()
     }
 
     /// Create a new partial configuration from environment variables.
