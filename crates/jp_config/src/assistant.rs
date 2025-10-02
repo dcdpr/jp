@@ -117,7 +117,7 @@ mod tests {
     use schematic::PartialConfig as _;
 
     use super::*;
-    use crate::model::id::{PartialModelIdConfig, ProviderId};
+    use crate::model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId};
 
     #[test]
     fn test_assistant_config_instructions() {
@@ -216,17 +216,17 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert!(p.model.id.provider.is_none());
+        assert!(p.model.id.is_empty());
 
         let kv =
             KvAssignment::try_from_cli("model:", r#"{"id":{"provider":"anthropic","name":"foo"}}"#)
                 .unwrap();
         p.assign(kv).unwrap();
         assert_eq!(p.model, PartialModelConfig {
-            id: PartialModelIdConfig {
+            id: PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
                 provider: Some(ProviderId::Anthropic),
                 name: Some("foo".parse().unwrap()),
-            },
+            }),
             ..Default::default()
         });
     }

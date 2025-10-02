@@ -12,10 +12,12 @@ PartialAppConfig {
         instructions: [],
         tool_choice: None,
         model: PartialModelConfig {
-            id: PartialModelIdConfig {
-                provider: None,
-                name: None,
-            },
+            id: Id(
+                PartialModelIdConfig {
+                    provider: None,
+                    name: None,
+                },
+            ),
             parameters: PartialParametersConfig {
                 max_tokens: None,
                 reasoning: None,

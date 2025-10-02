@@ -17,10 +17,7 @@ use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::{instructions::InstructionsConfig, tool_choice::ToolChoice, AssistantConfig},
     fs::{expand_tilde, load_partial},
-    model::{
-        id::PartialModelIdConfig,
-        parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig},
-    },
+    model::parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig},
     PartialAppConfig,
 };
 use jp_conversation::{
@@ -451,7 +448,12 @@ impl Query {
     ) -> Result<()> {
         tries += 1;
 
-        let model_id = &ctx.config().assistant.model.id.clone();
+        let model_id = &ctx
+            .config()
+            .assistant
+            .model
+            .id
+            .finalize(&ctx.config().providers.llm.aliases)?;
 
         let parameters = &ctx.config().assistant.model.parameters;
         let provider = provider::get_provider(model_id.provider, &ctx.config().providers.llm)?;
@@ -736,7 +738,7 @@ impl IntoPartialAppConfig for Query {
             no_reasoning,
         } = &self;
 
-        apply_model(&mut partial, model.as_deref(), merged_config)?;
+        apply_model(&mut partial, model.as_deref(), merged_config);
         apply_editor(&mut partial, edit.as_ref().map(|v| v.as_ref()), *no_edit);
         apply_enable_tools(&mut partial, raw_tools, raw_no_tools, merged_config)?;
         apply_tool_use(
@@ -819,25 +821,10 @@ fn build_thread(
 }
 
 /// Apply the CLI model configuration to the partial configuration.
-fn apply_model(
-    partial: &mut PartialAppConfig,
-    model: Option<&str>,
-    context: Option<&PartialAppConfig>,
-) -> BoxedResult<()> {
-    let Some(id) = model else {
-        return Ok(());
-    };
+fn apply_model(partial: &mut PartialAppConfig, model: Option<&str>, _: Option<&PartialAppConfig>) {
+    let Some(id) = model else { return };
 
-    partial.assistant.model.id = context
-        .unwrap_or(partial)
-        .providers
-        .llm
-        .aliases
-        .get(id)
-        .cloned()
-        .map_or_else(|| PartialModelIdConfig::from_str(id), Ok)?;
-
-    Ok(())
+    partial.assistant.model.id = id.into();
 }
 
 /// Apply the CLI editor configuration to the partial configuration.
@@ -1037,7 +1024,12 @@ async fn handle_structured_output(
     thread: Thread,
     schema: schemars::Schema,
 ) -> Result<MessagePair> {
-    let model_id = &ctx.config().assistant.model.id.clone();
+    let model_id = &ctx
+        .config()
+        .assistant
+        .model
+        .id
+        .finalize(&ctx.config().providers.llm.aliases)?;
 
     let parameters = &ctx.config().assistant.model.parameters;
     let provider = provider::get_provider(model_id.provider, &ctx.config().providers.llm)?;

@@ -2,6 +2,7 @@
 
 use std::{fmt, str::FromStr};
 
+use indexmap::IndexMap;
 use jp_id::{
     parts::{GlobalId, TargetId, Variant},
     Id,
@@ -14,6 +15,115 @@ use crate::{
     delta::{delta_opt, PartialConfigDelta},
     partial::{partial_opt, ToPartial},
 };
+
+/// Either a [`ModelIdConfig`] or a named alias for one.
+#[derive(Debug, Clone, Config)]
+#[config(serde(untagged))]
+pub enum ModelIdOrAliasConfig {
+    /// A model ID configuration.
+    #[setting(nested, empty)]
+    Id(ModelIdConfig),
+
+    /// A named alias for a model ID configuration.
+    ///
+    /// The matching [`ModelIdConfig`] be fetched using
+    /// [`LlmProviderConfig::aliases`].
+    ///
+    /// [`LlmProviderConfig::aliases`]: crate::providers::llm::LlmProviderConfig::aliases
+    Alias(String),
+}
+
+impl AssignKeyValue for PartialModelIdOrAliasConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object_or_from_str()?,
+            "provider" | "name" => match self {
+                Self::Id(id) => id.assign(kv)?,
+                Self::Alias(_) => return missing_key(&kv),
+            },
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialModelIdOrAliasConfig {
+    fn delta(&self, next: Self) -> Self {
+        match (self, next) {
+            (Self::Id(prev), Self::Id(next)) => Self::Id(prev.delta(next)),
+            (_, next) => next,
+        }
+    }
+}
+
+impl ToPartial for ModelIdOrAliasConfig {
+    fn to_partial(&self) -> Self::Partial {
+        match self {
+            Self::Id(id) => Self::Partial::Id(id.to_partial()),
+            Self::Alias(alias) => Self::Partial::Alias(alias.clone()),
+        }
+    }
+}
+
+impl FromStr for ModelIdOrAliasConfig {
+    type Err = ModelIdConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        ModelIdConfig::from_str(s)
+            .map(Self::Id)
+            .or_else(|_| Ok(Self::Alias(s.to_owned())))
+    }
+}
+
+impl From<&str> for PartialModelIdOrAliasConfig {
+    fn from(s: &str) -> Self {
+        PartialModelIdConfig::from_str(s).map_or_else(|_| Self::Alias(s.to_owned()), Self::Id)
+    }
+}
+
+impl FromStr for PartialModelIdOrAliasConfig {
+    type Err = ModelIdConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        PartialModelIdConfig::from_str(s)
+            .map(Self::Id)
+            .or_else(|_| Ok(Self::Alias(s.to_owned())))
+    }
+}
+
+impl fmt::Display for ModelIdOrAliasConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Id(id) => id.fmt(f),
+            Self::Alias(alias) => f.write_str(alias),
+        }
+    }
+}
+
+impl ModelIdOrAliasConfig {
+    /// Finalize the model ID configuration.
+    ///
+    /// This will resolve to a [`ModelIdConfig`] if the configuration has one
+    /// defined, has an alias that can be resolved to one, or a name that can be
+    /// parsed into one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration cannot be resolved.
+    pub fn finalize(
+        &self,
+        aliases: &IndexMap<String, ModelIdConfig>,
+    ) -> Result<ModelIdConfig, ModelIdConfigError> {
+        match &self {
+            Self::Id(id) => Ok(id.clone()),
+            Self::Alias(alias) => aliases
+                .get(alias)
+                .cloned()
+                .map_or_else(|| ModelIdConfig::from_str(alias), Ok),
+        }
+    }
+}
 
 /// Assistant-specific configuration.
 #[derive(Debug, Clone, Config)]
@@ -64,6 +174,12 @@ impl ToPartial for ModelIdConfig {
 impl fmt::Display for ModelIdConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.provider, self.name)
+    }
+}
+
+impl From<PartialModelIdConfig> for PartialModelIdOrAliasConfig {
+    fn from(v: PartialModelIdConfig) -> Self {
+        Self::Id(v)
     }
 }
 

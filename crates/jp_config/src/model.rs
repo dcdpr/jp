@@ -9,7 +9,7 @@ use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     delta::PartialConfigDelta,
     model::{
-        id::{ModelIdConfig, PartialModelIdConfig},
+        id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig},
         parameters::{ParametersConfig, PartialParametersConfig},
     },
     partial::ToPartial,
@@ -21,7 +21,7 @@ use crate::{
 pub struct ModelConfig {
     /// The model ID.
     #[setting(nested)]
-    pub id: ModelIdConfig,
+    pub id: ModelIdOrAliasConfig,
 
     /// The model parameters.
     #[setting(nested)]
@@ -77,44 +77,64 @@ mod tests {
     fn test_model_config_id() {
         let mut p = PartialModelConfig::default_values(&()).unwrap().unwrap();
 
-        assert!(p.id.name.is_none() && p.id.provider.is_none());
+        assert!(p.id.is_empty());
 
         let kv = KvAssignment::try_from_cli(":", r#"{"id":{"provider":"google","name":"foo"}}"#)
             .unwrap();
         p.assign(kv).unwrap();
-        assert_eq!(p.id, PartialModelIdConfig {
-            provider: Some(ProviderId::Google),
-            name: Some("foo".parse().unwrap()),
-        });
+        assert_eq!(
+            p.id,
+            PartialModelIdConfig {
+                provider: Some(ProviderId::Google),
+                name: Some("foo".parse().unwrap()),
+            }
+            .into()
+        );
 
         let kv =
             KvAssignment::try_from_cli("id:", r#"{"provider":"google","name":"bar"}"#).unwrap();
         p.assign(kv).unwrap();
-        assert_eq!(p.id, PartialModelIdConfig {
-            provider: Some(ProviderId::Google),
-            name: Some("bar".parse().unwrap()),
-        });
+        assert_eq!(
+            p.id,
+            PartialModelIdConfig {
+                provider: Some(ProviderId::Google),
+                name: Some("bar".parse().unwrap()),
+            }
+            .into()
+        );
 
         let kv = KvAssignment::try_from_cli("id.provider", "openai").unwrap();
         p.assign(kv).unwrap();
-        assert_eq!(p.id, PartialModelIdConfig {
-            provider: Some(ProviderId::Openai),
-            name: Some("bar".parse().unwrap()),
-        });
+        assert_eq!(
+            p.id,
+            PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some("bar".parse().unwrap()),
+            }
+            .into()
+        );
 
         let kv = KvAssignment::try_from_cli("id.name", "baz").unwrap();
         p.assign(kv).unwrap();
-        assert_eq!(p.id, PartialModelIdConfig {
-            provider: Some(ProviderId::Openai),
-            name: Some("baz".parse().unwrap()),
-        });
+        assert_eq!(
+            p.id,
+            PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some("baz".parse().unwrap()),
+            }
+            .into()
+        );
 
         let kv = KvAssignment::try_from_cli("id", "google/gemini").unwrap();
         p.assign(kv).unwrap();
-        assert_eq!(p.id, PartialModelIdConfig {
-            provider: Some(ProviderId::Google),
-            name: Some("gemini".parse().unwrap()),
-        });
+        assert_eq!(
+            p.id,
+            PartialModelIdConfig {
+                provider: Some(ProviderId::Google),
+                name: Some("gemini".parse().unwrap()),
+            }
+            .into()
+        );
     }
 
     #[test]

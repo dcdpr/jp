@@ -47,6 +47,7 @@ expression: "AppConfig::fields()"
     "assistant.name",
     "assistant.system_prompt",
     "assistant.tool_choice",
+    "assistant.model.id",
     "assistant.model.parameters.max_tokens",
     "assistant.model.parameters.other",
     "assistant.model.parameters.reasoning",
@@ -54,6 +55,4 @@ expression: "AppConfig::fields()"
     "assistant.model.parameters.temperature",
     "assistant.model.parameters.top_k",
     "assistant.model.parameters.top_p",
-    "assistant.model.id.name",
-    "assistant.model.id.provider",
 ]
