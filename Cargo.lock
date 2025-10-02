@@ -3436,7 +3436,7 @@ dependencies = [
 [[package]]
 name = "schematic"
 version = "0.18.12"
-source = "git+https://github.com/JeanMertz/schematic?branch=merged#062bf589c80f7eba0ec3b370232294dbb307a5b0"
+source = "git+https://github.com/JeanMertz/schematic?branch=merged#b9aee000613d0ab80c32b9fb2743186954e930f4"
 dependencies = [
  "indexmap",
  "miette",
@@ -3455,7 +3455,7 @@ dependencies = [
 [[package]]
 name = "schematic_macros"
 version = "0.18.11"
-source = "git+https://github.com/JeanMertz/schematic?branch=merged#062bf589c80f7eba0ec3b370232294dbb307a5b0"
+source = "git+https://github.com/JeanMertz/schematic?branch=merged#b9aee000613d0ab80c32b9fb2743186954e930f4"
 dependencies = [
  "convert_case 0.8.0",
  "darling 0.21.3",
@@ -3467,7 +3467,7 @@ dependencies = [
 [[package]]
 name = "schematic_types"
 version = "0.10.6"
-source = "git+https://github.com/JeanMertz/schematic?branch=merged#062bf589c80f7eba0ec3b370232294dbb307a5b0"
+source = "git+https://github.com/JeanMertz/schematic?branch=merged#b9aee000613d0ab80c32b9fb2743186954e930f4"
 dependencies = [
  "indexmap",
  "relative-path",
