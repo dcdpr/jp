@@ -94,11 +94,11 @@ impl ModelDetails {
                         provider = %self.provider,
                         model = %self.slug,
                         ?config,
-                        "Model does not support reasoning, but the configuration explicitly enabled \
-                        it. This can lead to unexpected behavior."
+                        "Model does not support reasoning, but the configuration explicitly \
+                        enabled it. Reasoning will be disabled to avoid failed requests."
                     );
 
-                    Some(config)
+                    None
                 }
             },
 

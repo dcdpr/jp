@@ -21,12 +21,7 @@ Ok(
         ],
         model: "claude-3-5-haiku-latest",
         max_tokens: 8192,
-        thinking: Some(
-            ExtendedThinking {
-                kind: "enabled",
-                budget_tokens: 4096,
-            },
-        ),
+        thinking: None,
         metadata: {},
         stop_sequences: [],
         stream: false,
