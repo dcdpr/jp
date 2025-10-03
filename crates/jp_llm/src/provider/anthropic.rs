@@ -344,10 +344,11 @@ fn get_details_for_model<'a>(
 ) -> Option<&'a ModelDetails> {
     // see: <https://docs.anthropic.com/en/docs/about-claude/models/overview#model-aliases>
     let details_slug = match model_id.name.as_ref() {
+        "claude-opus-4-1" => "claude-opus-4-1-20250805",
         "claude-opus-4-0" => "claude-opus-4-20250514",
+        "claude-sonnet-4-5" => "claude-sonnet-4-5-20250929",
         "claude-sonnet-4-0" => "claude-sonnet-4-20250514",
         "claude-3-7-sonnet-latest" => "claude-3-7-sonnet-20250219",
-        "claude-3-5-sonnet-latest" => "claude-3-5-sonnet-20241022",
         "claude-3-5-haiku-latest" => "claude-3-5-haiku-20241022",
         slug => slug,
     };
@@ -358,6 +359,14 @@ fn get_details_for_model<'a>(
 #[expect(clippy::match_same_arms)]
 fn map_model(model: types::Model) -> ModelDetails {
     match model.id.as_str() {
+        "claude-sonnet-4-5" | "claude-sonnet-4-5-20250929" => ModelDetails {
+            provider: PROVIDER,
+            slug: model.id,
+            context_window: Some(200_000),
+            max_output_tokens: Some(64_000),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
+            knowledge_cutoff: Some(date!(2025 - 7 - 1)),
+        },
         "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelDetails {
             provider: PROVIDER,
             slug: model.id,
@@ -1077,14 +1086,6 @@ mod tests {
             },
             ModelDetails {
                 provider: PROVIDER,
-                slug: "claude-3-5-sonnet-20241022".to_owned(),
-                context_window: None,
-                max_output_tokens: None,
-                reasoning: None,
-                knowledge_cutoff: None,
-            },
-            ModelDetails {
-                provider: PROVIDER,
                 slug: "claude-3-5-haiku-20241022".to_owned(),
                 context_window: None,
                 max_output_tokens: None,
@@ -1100,10 +1101,8 @@ mod tests {
             ("anthropic/claude-sonnet-4-20250514", Some(&details[1])),
             ("anthropic/claude-3-7-sonnet-latest", Some(&details[2])),
             ("anthropic/claude-3-7-sonnet-20250219", Some(&details[2])),
-            ("anthropic/claude-3-5-sonnet-latest", Some(&details[3])),
-            ("anthropic/claude-3-5-sonnet-20241022", Some(&details[3])),
-            ("anthropic/claude-3-5-haiku-latest", Some(&details[4])),
-            ("anthropic/claude-3-5-haiku-20241022", Some(&details[4])),
+            ("anthropic/claude-3-5-haiku-latest", Some(&details[3])),
+            ("anthropic/claude-3-5-haiku-20241022", Some(&details[3])),
             ("anthropic/nonexistent", None),
         ];
 
