@@ -529,6 +529,12 @@ fn map_event(
                 .into_iter()
                 .collect()
         }
+        ContentBlockStop { .. } if state.is_accumulating() => {
+            handle_delta(Delta::tool_call_finished(), state)
+                .transpose()
+                .into_iter()
+                .collect()
+        }
         _ => vec![],
     }
 }
