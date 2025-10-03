@@ -1086,14 +1086,6 @@ mod tests {
             },
             ModelDetails {
                 provider: PROVIDER,
-                slug: "claude-3-5-sonnet-20241022".to_owned(),
-                context_window: None,
-                max_output_tokens: None,
-                reasoning: None,
-                knowledge_cutoff: None,
-            },
-            ModelDetails {
-                provider: PROVIDER,
                 slug: "claude-3-5-haiku-20241022".to_owned(),
                 context_window: None,
                 max_output_tokens: None,
@@ -1109,8 +1101,6 @@ mod tests {
             ("anthropic/claude-sonnet-4-20250514", Some(&details[1])),
             ("anthropic/claude-3-7-sonnet-latest", Some(&details[2])),
             ("anthropic/claude-3-7-sonnet-20250219", Some(&details[2])),
-            ("anthropic/claude-3-5-sonnet-latest", Some(&details[3])),
-            ("anthropic/claude-3-5-sonnet-20241022", Some(&details[3])),
             ("anthropic/claude-3-5-haiku-latest", Some(&details[4])),
             ("anthropic/claude-3-5-haiku-20241022", Some(&details[4])),
             ("anthropic/nonexistent", None),
