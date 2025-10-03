@@ -84,16 +84,82 @@ impl InstructionsConfig {
         self
     }
 
-    /// Serialize the instructions to XML.
+    /// Serialize the instructions to the proper XML representation.
     ///
     /// # Errors
     ///
     /// Returns an error if the XML serialization fails.
     pub fn try_to_xml(&self) -> Result<String, quick_xml::SeError> {
+        #[derive(Serialize)]
+        #[serde(rename = "instruction")]
+        pub struct XmlWrapper<'a> {
+            /// See [`InstructionsConfig::title`].
+            #[serde(skip_serializing_if = "Option::is_none", rename = "@title")]
+            pub title: Option<&'a str>,
+
+            /// See [`InstructionsConfig::description`].
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub description: Option<&'a str>,
+
+            /// See [`InstructionsConfig::items`].
+            #[serde(rename = "$value")]
+            pub items: Items<'a>,
+
+            /// See [`InstructionsConfig::examples`].
+            pub examples: Examples<'a>,
+        }
+
+        #[derive(Serialize)]
+        struct Items<'a> {
+            /// See [`InstructionsConfig::items`].
+            #[serde(default, rename = "item")]
+            items: &'a [String],
+        }
+
+        #[derive(Serialize)]
+        struct Examples<'a> {
+            /// See [`InstructionsConfig::examples`].
+            #[serde(default, rename = "$value")]
+            examples: Vec<Example<'a>>,
+        }
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "snake_case")]
+        enum Example<'a> {
+            /// See [`ExampleConfig::Generic`].
+            Simple(&'a str),
+            /// See [`ExampleConfig::Contrast`].
+            Detailed(&'a ContrastConfig),
+        }
+
+        let Self {
+            title,
+            description,
+            items,
+            examples,
+        } = self;
+
+        let wrapper = XmlWrapper {
+            title: title.as_deref(),
+            description: description.as_deref(),
+            items: Items { items },
+            examples: Examples {
+                examples: examples
+                    .iter()
+                    .map(|e| match e {
+                        ExampleConfig::Generic(text) => Example::Simple(text),
+                        ExampleConfig::Contrast(contrast) => Example::Detailed(contrast),
+                    })
+                    .collect::<Vec<_>>(),
+            },
+        };
+
         let mut buffer = String::new();
         let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
         serializer.indent(' ', 2);
-        self.serialize(serializer)?;
+        serializer.text_format(quick_xml::se::TextFormat::CData);
+
+        wrapper.serialize(serializer)?;
         Ok(buffer)
     }
 }
@@ -306,5 +372,34 @@ mod tests {
 
         let kv = KvAssignment::try_from_cli("nope", "nope").unwrap();
         assert_eq!(&p.assign(kv).unwrap_err().to_string(), "nope: unknown key");
+    }
+
+    #[test]
+    fn test_instructions_to_xml() {
+        let i = InstructionsConfig {
+            title: Some("foo".to_owned()),
+            description: Some("bar".to_owned()),
+            items: vec![
+                "foo".to_owned(),
+                "bar <test>bar</test>".to_owned(),
+                "baz]]> baz".to_owned(),
+            ],
+            examples: vec![
+                ExampleConfig::Generic("foo".to_owned()),
+                ExampleConfig::Contrast(ContrastConfig {
+                    good: "bar".to_owned(),
+                    bad: "baz".to_owned(),
+                    reason: Some("qux".to_owned()),
+                }),
+                ExampleConfig::Contrast(ContrastConfig {
+                    good: "quux".to_owned(),
+                    bad: "quuz".to_owned(),
+                    reason: None,
+                }),
+            ],
+        };
+
+        let xml = i.try_to_xml().unwrap();
+        insta::assert_snapshot!(xml);
     }
 }

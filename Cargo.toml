@@ -62,7 +62,7 @@ openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs", d
 path-clean = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
-quick-xml = { version = "0.38", default-features = false }
+quick-xml = { git = "https://github.com/Ninja3047/quick-xml", branch = "serialize-cdata", default-features = false } # <https://github.com/tafia/quick-xml/pull/904>
 relative-path = { version = "2", default-features = false }
 reqwest = { version = "0.12", default-features = false }
 reqwest-eventsource = { version = "0.6", default-features = false }
