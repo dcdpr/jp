@@ -34,7 +34,7 @@ system_prompt = """
 
 [assistant.model]
 id = { provider = "anthropic", name = "claude-sonnet-4-0" }
-parameters.reasoning.effort = "high"
+parameters.reasoning.effort = "medium"
 
 [[assistant.instructions]]
 title = "How to format your response"
@@ -52,8 +52,8 @@ items = [
     DO NOT add fenced code blocks around the commit message.
     """,
     """
-    YOU MUST be concise and to the point. Don't leave out important details,
-    but don't add unnecessary information either.
+    YOU MUST be concise and to the point. Don't leave out important details, but don't add \
+    unnecessary information either.
     """,
 ]
 
@@ -61,37 +61,34 @@ items = [
 title = "Project Structure"
 items = [
     """
-    Any changes in `.jp/` are part of the project infrastructure, so are either
-    `chore` or `build` commits.
+    Any changes in `.jp/` are part of the project infrastructure, so are either `chore` or `build` \
+    commits.
     """,
     """
-    The project is structured as a Cargo workspace, with all code in individual
-    crates in `crates/`.
+    The project is structured as a Cargo workspace, with all code in individual crates in \
+    `crates/`.
     """,
     """
-    Crates are organized into their logical domains, e.g. `jp_attachment`,
-    `jp_conversation`, etc.
+    Crates are organized into their logical domains, e.g. `jp_attachment`, `jp_conversation`, etc.
     """,
     """
-    Only changes visible/noticeable to the end user should marked as `feat`,
-    `fix`, or `perf`.
+    Only changes visible/noticeable to the end user should marked as `feat`, `fix`, or `perf`.
     """,
     """
-    The code in `.config/jp/tools` is used for project tooling not part of the
-    "jp" releases, and should be considered `chore(tools)` changes.
+    The code in `.config/jp/tools` is used for project tooling not part of the "jp" releases, and \
+    should be considered `chore(tools)` changes.
     """,
 ]
 
 [[assistant.instructions]]
 title = "Research Steps"
 description = """
-    Research steps to take before writing a commit message.
-    """
+Research steps to take before writing a commit message.
+"""
 items = [
     """
-    Use the `github_issues` tool to find any related issues that are
-    resolved/fixed/closed by the commit. You MUST reference the issue number in
-    the commit message footer, e.g.:
+    Use the `github_issues` tool to find any related issues that are resolved/fixed/closed by the \
+    commit. You MUST reference the issue number in the commit message footer, e.g.:
 
     ```
     Closes: #123
@@ -102,13 +99,12 @@ items = [
     You can use either of the three prefixes, picking the one that fits best.
     """,
     """
-    Research the impact of the change on the user experience. Commit messages
-    should always start by describing the impact on the user experience, and
-    then lower-level details of the change.
+    Research the impact of the change on the user experience. Commit messages should always start \
+    by describing the impact on the user experience, and then lower-level details of the change.
     """,
     """
-    If the impact of a change is not immediately obvious, use the tools
-    available to you to build more context around the change.
+    If the impact of a change is not immediately obvious, use the tools available to you to build \
+    more context around the change.
     """,
 ]
 
@@ -116,22 +112,19 @@ items = [
 title = "Why Commit Messages Matter"
 items = [
     """
-    Re-establishing the context of a piece of code is wasteful. We can’t avoid
-    it completely, so our efforts should go to reducing it [as much] as
-    possible. Commit messages can do exactly that and as a result, a commit
-    message shows whether a developer is a good collaborator.
+    Re-establishing the context of a piece of code is wasteful. We can’t avoid it completely, so \
+    our efforts should go to reducing it [as much] as possible. Commit messages can do exactly \
+    that and as a result, a commit message shows whether a developer is a good collaborator.
     """,
     """
-    A well-cared for log is a beautiful and useful thing. git blame, revert,
-    rebase, log, shortlog and other subcommands come to life. Reviewing others’
-    commits and pull requests becomes something worth doing, and suddenly can be
-    done independently. Understanding why something happened months or years ago
-    becomes not only possible but efficient.
+    A well-cared for log is a beautiful and useful thing. git blame, revert, rebase, log, shortlog \
+    and other subcommands come to life. Reviewing others’ commits and pull requests becomes \
+    something worth doing, and suddenly can be done independently. Understanding why something \
+    happened months or years ago becomes not only possible but efficient.
     """,
     """
-    A project’s long-term success rests (among other things) on its
-    maintainability, and a maintainer has few tools more powerful than his
-    project’s log.
+    A project’s long-term success rests (among other things) on its maintainability, and a \
+    maintainer has few tools more powerful than his project’s log.
     """,
 ]
 
@@ -164,9 +157,8 @@ items = [
 [[assistant.instructions]]
 title = "Commit Message Format"
 description = """
-    We have very precise rules over how our Git commit messages must be
-    formatted. This format leads to easier to read commit history and makes it
-    analyzable for changelog generation.
+We have very precise rules over how our Git commit messages must be formatted. This format leads \
+to easier to read commit history and makes it analyzable for changelog generation.
 """
 items = [
     """
@@ -180,13 +172,13 @@ items = [
     format.
     """,
     """
-    The body is mandatory for all commits except for those of type "docs". When
-    the body is present it must be at least 20 characters long and must conform
-    to the Commit Message Body format.
+    The body is mandatory for all commits except for those of type "docs". When the body is \
+    present it must be at least 20 characters long and must conform to the Commit Message Body \
+    format.
     """,
     """
-    The footer is optional. The Commit Message Footer format describes what the
-    footer is used for and the structure it must have.
+    The footer is optional. The Commit Message Footer format describes what the footer is used for \
+    and the structure it must have.
     """,
 ]
 
@@ -195,27 +187,24 @@ title = "Commit Message Header Format"
 description = "<type>(<scope>)[!]: <subject line>"
 items = [
     """
-    <type>: Commit Type: build|ci|docs|feat|fix|perf|refactor|test
+    <type>: Commit Type: build|ci|docs|feat|enhance|fix|perf|refactor|test
     """,
     """
-    <scope>: Commit Scope: One or more comma-space-separated scopes relevant to
-    the changes.
+    <scope>: Commit Scope: One or more comma-space-separated scopes relevant to the changes.
     """,
     """
     [!]: Optional breaking change indicator.
     """,
     """
-    <subject line>: Summary in present tense. Capitalized. No period at the end.
-    Limit to 50 characters. Use backticks (``) to format code or crate
-    references.
+    <subject line>: Summary in present tense. Capitalized. No period at the end. Limit to 50 \
+    characters. Use backticks (``) to format code or crate references.
     """,
     """
-    A properly formed <subject line> should always be able to complete the
-    following sentence: If applied, this commit will <subject line>
+    A properly formed <subject line> should always be able to complete the following sentence: If \
+    applied, this commit will <subject line>
     """,
     """
-    The <type> and <subject line> fields are mandatory, the (<scope>) field is
-    optional.
+    The <type> and <subject line> fields are mandatory, the (<scope>) field is optional.
     """,
 ]
 
@@ -223,27 +212,29 @@ items = [
 title = "Commit Message Header Types"
 items = [
     """
-    build: Changes that affect the build system or external dependencies
-    (example scopes: cargo, npm)
+    build: Changes that affect the build system or external dependencies (example scopes: cargo, \
+    npm)
     """,
     """
-    ci: Changes to our CI configuration files and scripts (example scopes:
-    github-actions, travis)
+    ci: Changes to our CI configuration files and scripts (example scopes: github-actions, travis)
     """,
     """
     docs: Documentation only changes
     """,
     """
-    feat: A new feature
+    feat: A new feature that impacts the user experience
     """,
     """
-    fix: A bug fix
+    enhance: Improvement of existing features that impacts the user experience
+    """,
+    """
+    fix: A bug fix that impacts the user experience
     """,
     """
     perf: A code change that improves performance
     """,
     """
-    refactor: A code change that neither fixes a bug nor adds a feature
+    refactor: A code change that has no impact on the user experience
     """,
     """
     test: Adding missing tests or correcting existing tests
@@ -254,23 +245,23 @@ items = [
 title = "Commit Message Scope Types"
 items = [
     """
-    The first scope is usually the relevant crate name without the `jp` prefix,
-    e.g. `cli`, `config`, `conversation`, etc.
+    The first scope is usually the relevant crate name without the `jp` prefix, e.g. `cli`, \
+    `config`, `conversation`, etc.
     """,
     """
-    If the crate scope is insufficient, append more scopes by comma-separating
-    them (adding a whitespace after each comma).
+    If the crate scope is insufficient, append more scopes by comma-separating them (adding a \
+    whitespace after each comma).
     """,
     """
     Try to keep the number of scopes to a minimum, without sacrificing clarity.
     """,
     """
-    A scope may be omitted if changes are cross-crate, or too broad to capture
-    in one or more scopes.
+    A scope may be omitted if changes are cross-crate, or too broad to capture in one or more \
+    scopes.
     """,
     """
-    For the `jp_llm` crate, add an additional provider-specific scope when
-    relevant (e.g. `ollama` or `anthropic`).
+    For the `jp_llm` crate, add an additional provider-specific scope when relevant (e.g. `ollama` \
+    or `anthropic`).
     """,
 ]
 
@@ -278,14 +269,13 @@ items = [
 title = "Commit Message Body Format"
 items = [
     """
-    Use of the imperative is important only in the subject line. You can relax
-    this restriction when you’re writing the body.
+    Use of the imperative is important only in the subject line. You can relax this restriction \
+    when you’re writing the body.
     """,
     """
-    Explain the motivation for the change in the commit message body. This
-    commit message should explain why you are making the change. You can include
-    a comparison of the previous behavior with the new behavior in order to
-    illustrate the impact of the change.
+    Explain the motivation for the change in the commit message body. This commit message should \
+    explain why you are making the change. You can include a comparison of the previous behavior \
+    with the new behavior in order to illustrate the impact of the change.
     """,
     """
     Use the body to explain what and why vs. how.
@@ -297,17 +287,17 @@ items = [
     Use backticks (``) to format code or crate references.
     """,
     """
-    Where applicable, use examples on how the change impacts the user experience
-    when running the CLI, e.g. after adding a `--new` flag to the `query`
-    command, show it in action: `jp query --new "Hello World"`.
+    Where applicable, use examples on how the change impacts the user experience when running the \
+    CLI, e.g. after adding a `--new` flag to the `query` command, show it in action: `jp query \
+    --new "Hello World"`.
     """,
     """
-    Use a narrative style to describe the change in one or more paragraphs,
-    avoid using lists, unless they are necessary to convey the change.
+    Use a narrative style to describe the change in one or more paragraphs, avoid using lists, \
+    unless they are necessary to convey the change.
     """,
     """
-    Changes to test code can be ignored, unless the commit is marked with the
-    `test` header type, indicating this commit purely focuses on test changes.
+    Changes to test code can be ignored, unless the commit is marked with the `test` header type, \
+    indicating this commit purely focuses on test changes.
     """,
 ]
 
@@ -315,30 +305,25 @@ items = [
 title = "Commit Message Footer Format"
 items = [
     """
-    The footer can contain information about breaking changes and deprecations
-    and is also the place to reference GitHub issues and other PRs that this
-    commit closes or is related to.
+    The footer can contain information about breaking changes and deprecations and is also the \
+    place to reference GitHub issues and other PRs that this commit closes or is related to.
     """,
     """
-    Breaking Change section should start with the phrase `BREAKING CHANGE: `
-    followed by a brief summary of the breaking change, a blank line, and a
-    detailed description of the breaking change that also includes migration
-    instructions.
+    Breaking Change section should start with the phrase `BREAKING CHANGE: ` followed by a brief \
+    summary of the breaking change, a blank line, and a detailed description of the breaking \
+    change that also includes migration instructions.
     """,
     """
-    Similarly, a Deprecation section should start with `DEPRECATED: ` followed
-    by a short description of what is deprecated, a blank line, and a detailed
-    description of the deprecation that also mentions the recommended update
-    path.
+    Similarly, a Deprecation section should start with `DEPRECATED: ` followed by a short \
+    description of what is deprecated, a blank line, and a detailed description of the deprecation \
+    that also mentions the recommended update path.
     """,
     """
-    Example: BREAKING CHANGE: <breaking change summary><BLANK LINE><breaking
-    change description + migration instructions><BLANK LINE><BLANK LINE>Fixes
-    #<issue number>
+    Example: BREAKING CHANGE: <breaking change summary><BLANK LINE><breaking change description + \
+    migration instructions><BLANK LINE><BLANK LINE>Fixes #<issue number>
     """,
     """
-    Example: DEPRECATED: <what is deprecated><BLANK LINE><deprecation
-    description + recommended update path><BLANK LINE><BLANK LINE>Closes #<pr
-    number>
+    Example: DEPRECATED: <what is deprecated><BLANK LINE><deprecation description + recommended \
+    update path><BLANK LINE><BLANK LINE>Closes #<pr number>
     """,
 ]
