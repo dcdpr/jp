@@ -1,6 +1,6 @@
 use std::env;
 
-use async_stream::stream;
+use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt as _};
 use jp_config::{
@@ -101,8 +101,8 @@ impl Provider for Openrouter {
             .chat_completion_stream(request)
             .map_err(Error::from);
 
-        let stream = Box::pin(stream! {
-            let mut current_state = AccumulationState::default();
+        Ok(Box::pin(try_stream!({
+            let mut accumulator = Accumulator::new(200);
             tokio::pin!(inner_stream);
 
             while let Some(result) = inner_stream.next().await {
@@ -110,8 +110,7 @@ impl Provider for Openrouter {
                     Ok(chunk) => chunk,
                     Err(e) => {
                         warn!(error = ?e, "Error receiving delta from OpenRouter stream.");
-                        yield Err(e);
-                        continue
+                        Err(e)?
                     }
                 };
 
