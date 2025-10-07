@@ -8,7 +8,7 @@ use jp_config::{
     assistant::tool_choice::ToolChoice,
     conversation::tool::ToolParameterConfig,
     model::{
-        id::{ModelIdConfig, ProviderId},
+        id::{ModelIdConfig, Name, ProviderId},
         parameters::{CustomReasoningConfig, ParametersConfig, ReasoningEffort},
     },
     providers::llm::openai::OpenaiConfig,
@@ -33,7 +33,7 @@ use super::{
 };
 use crate::{
     error::{Error, Result},
-    provider::AccumulationState,
+    provider::{AccumulationState, ModelDeprecation},
     query::ChatQuery,
     tool::ToolDefinition,
 };
@@ -47,60 +47,21 @@ pub struct Openai {
     base_url: String,
 }
 
-impl Openai {
-    async fn create_request(
-        &self,
-        model_id: &ModelIdConfig,
-        parameters: &ParametersConfig,
-        query: ChatQuery,
-    ) -> Result<Request> {
-        let ChatQuery {
-            thread,
-            tools,
-            tool_choice,
-            tool_call_strict_mode,
-        } = query;
+#[async_trait]
+impl Provider for Openai {
+    async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
+        let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        let model_details = self
+        Ok(self
             .models()
             .await?
             .into_iter()
-            .find(|m| *m.slug == *model_id.name);
-
-        let reasoning_support = model_details.as_ref().and_then(|m| m.reasoning);
-        let supports_reasoning =
-            reasoning_support.is_some_and(|v| matches!(v, ReasoningDetails::Supported { .. }));
-        let reasoning = model_details
-            .as_ref()
-            .and_then(|m| m.custom_reasoning_config(parameters.reasoning));
-
-        let request = Request {
-            model: types::Model::Other(model_id.name.to_string()),
-            input: convert_thread(thread, supports_reasoning)?,
-            include: supports_reasoning.then_some(vec![Include::ReasoningEncryptedContent]),
-            store: Some(false),
-            tool_choice: Some(convert_tool_choice(tool_choice)),
-            tools: Some(convert_tools(tools, tool_call_strict_mode)),
-            temperature: parameters.temperature,
-            reasoning: reasoning
-                .map(|r| convert_reasoning(r, model_details.and_then(|d| d.max_output_tokens))),
-            max_output_tokens: parameters.max_tokens.map(Into::into),
-            truncation: Some(types::Truncation::Auto),
-            top_p: parameters.top_p,
-            ..Default::default()
-        };
-
-        trace!(?request, "Sending request to OpenAI.");
-
-        Ok(request)
+            .find(|m| m.id == id)
+            .unwrap_or(ModelDetails::empty(id)))
     }
-}
 
-#[async_trait]
-impl Provider for Openai {
     async fn models(&self) -> Result<Vec<ModelDetails>> {
-        Ok(self
-            .reqwest_client
+        self.reqwest_client
             .get(format!("{}/v1/models", self.base_url))
             .send()
             .await?
@@ -110,17 +71,17 @@ impl Provider for Openai {
             .data
             .into_iter()
             .map(map_model)
-            .collect())
+            .collect::<Result<_>>()
     }
 
     async fn chat_completion(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
         let client = self.client.clone();
-        let request = self.create_request(model_id, parameters, query).await?;
+        let request = create_request(model, parameters, query)?;
         client
             .create(request)
             .await?
@@ -158,6 +119,43 @@ impl Provider for Openai {
     }
 }
 
+fn create_request(
+    model: &ModelDetails,
+    parameters: &ParametersConfig,
+    query: ChatQuery,
+) -> Result<Request> {
+    let ChatQuery {
+        thread,
+        tools,
+        tool_choice,
+        tool_call_strict_mode,
+    } = query;
+
+    let reasoning_support = model.reasoning;
+    let supports_reasoning =
+        reasoning_support.is_some_and(|v| matches!(v, ReasoningDetails::Supported { .. }));
+    let reasoning = model.custom_reasoning_config(parameters.reasoning);
+
+    let request = Request {
+        model: types::Model::Other(model.id.name.to_string()),
+        input: convert_thread(thread, supports_reasoning)?,
+        include: supports_reasoning.then_some(vec![Include::ReasoningEncryptedContent]),
+        store: Some(false),
+        tool_choice: Some(convert_tool_choice(tool_choice)),
+        tools: Some(convert_tools(tools, tool_call_strict_mode)),
+        temperature: parameters.temperature,
+        reasoning: reasoning.map(|r| convert_reasoning(r, model.max_output_tokens)),
+        max_output_tokens: parameters.max_tokens.map(Into::into),
+        truncation: Some(types::Truncation::Auto),
+        top_p: parameters.top_p,
+        ..Default::default()
+    };
+
+    trace!(?request, "Sending request to OpenAI.");
+
+    Ok(request)
+}
+
 #[derive(Debug, Deserialize)]
 #[expect(dead_code)]
 pub(crate) struct ModelListResponse {
@@ -176,189 +174,207 @@ pub(crate) struct ModelResponse {
 }
 
 #[expect(clippy::too_many_lines, clippy::match_same_arms)]
-fn map_model(model: ModelResponse) -> ModelDetails {
-    match model.id.as_str() {
+fn map_model(model: ModelResponse) -> Result<ModelDetails> {
+    let details = match model.id.as_str() {
         "o4-mini" | "o4-mini-2025-04-16" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "o3-mini" | "o3-mini-2025-01-31" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "o1-mini" | "o1-mini-2024-09-12" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(128_000),
             max_output_tokens: Some(65_536),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: o4-mini",
+                Some(date!(2025 - 10 - 27)),
+            )),
+            features: vec![],
         },
         "o3" | "o3-2025-04-16" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "o3-pro" | "o3-pro-2025-06-10" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "o1" | "o1-2024-12-17" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "o1-pro" | "o1-pro-2025-03-19" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-4.1" | "gpt-4.1-2025-04-14" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-4o" | "gpt-4o-2024-08-06" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "chatgpt-4o" | "chatgpt-4o-latest" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-5-nano" | "gpt-5-nano-2025-08-07" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-5-mini" | "gpt-5-mini-2025-08-07" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-5" | "gpt-5-2025-08-07" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-5-chat-latest" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-oss-120b" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(131_072),
             max_output_tokens: Some(131_072),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-oss-20b" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(131_072),
             max_output_tokens: Some(131_072),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "o3-deep-research" | "o3-deep-research-2025-06-26" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "o4-mini-deep-research" | "o4-mini-deep-research-2025-06-26" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         id => {
             warn!(model = id, ?model, "Missing model details.");
-
-            ModelDetails {
-                provider: PROVIDER,
-                slug: model.id,
-                context_window: None,
-                max_output_tokens: None,
-                reasoning: None,
-                knowledge_cutoff: None,
-            }
+            ModelDetails::empty((PROVIDER, id).try_into()?)
         }
-    }
+    };
+
+    Ok(details)
 }
 
 async fn handle_error(error: StreamError) -> std::result::Result<types::Event, Error> {
@@ -849,6 +865,7 @@ mod tests {
     async fn test_openai_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().openai;
         let model_id = "openai/o4-mini".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -874,7 +891,7 @@ mod tests {
 
                 Openai::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &ParametersConfig::default(), query)
+                    .chat_completion(&model, &ParametersConfig::default(), query)
                     .await
             },
         )

@@ -6,7 +6,7 @@ use futures::StreamExt as _;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
-        id::{ModelIdConfig, ProviderId},
+        id::{ModelIdConfig, Name, ProviderId},
         parameters::{ParametersConfig, ReasoningConfig},
     },
     providers::llm::ollama::OllamaConfig,
@@ -46,19 +46,30 @@ pub struct Ollama {
 
 #[async_trait]
 impl Provider for Ollama {
+    async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
+        let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
+
+        Ok(self
+            .models()
+            .await?
+            .into_iter()
+            .find(|m| m.id == id)
+            .unwrap_or(ModelDetails::empty(id)))
+    }
+
     async fn models(&self) -> Result<Vec<ModelDetails>> {
         let models = self.client.list_local_models().await?;
 
-        Ok(models.into_iter().map(map_model).collect())
+        models.into_iter().map(map_model).collect::<Result<_>>()
     }
 
     async fn chat_completion(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
-        let request = create_request(model_id, parameters, query)?;
+        let request = create_request(model, parameters, query)?;
         self.client
             .send_chat_messages(request)
             .await
@@ -72,12 +83,12 @@ impl Provider for Ollama {
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = create_request(model_id, parameters, query)?;
+        let request = create_request(model, parameters, query)?;
         let stream = Box::pin(stream! {
             let mut current_state = AccumulationState::default();
             let mut extractor = ReasoningExtractor::default();
@@ -110,15 +121,16 @@ impl Provider for Ollama {
     }
 }
 
-fn map_model(model: LocalModel) -> ModelDetails {
-    ModelDetails {
-        provider: PROVIDER,
-        slug: model.name,
+fn map_model(model: LocalModel) -> Result<ModelDetails> {
+    Ok(ModelDetails {
+        id: (PROVIDER, model.name).try_into()?,
         context_window: None,
         max_output_tokens: None,
         reasoning: None,
         knowledge_cutoff: None,
-    }
+        deprecated: None,
+        features: vec![],
+    })
 }
 
 fn map_response(response: ChatMessageResponse) -> Result<Vec<Event>> {
@@ -182,7 +194,7 @@ fn map_content(
 }
 
 fn create_request(
-    model_id: &ModelIdConfig,
+    model: &ModelDetails,
     parameters: &ParametersConfig,
     query: ChatQuery,
 ) -> Result<ChatMessageRequest> {
@@ -194,7 +206,7 @@ fn create_request(
     } = query;
 
     let mut request = ChatMessageRequest::new(
-        model_id.name.to_string(),
+        model.id.name.to_string(),
         convert_thread(thread, tool_choice)?,
     );
 
@@ -587,6 +599,7 @@ mod tests {
     async fn test_ollama_chat_completion() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().ollama;
         let model_id = "ollama/llama3:latest".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -608,7 +621,7 @@ mod tests {
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &ParametersConfig::default(), query)
+                    .chat_completion(&model, &ParametersConfig::default(), query)
                     .await
             },
         )
@@ -619,6 +632,7 @@ mod tests {
     async fn test_ollama_chat_completion_stream() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().ollama;
         let model_id = "ollama/llama3:latest".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -640,7 +654,7 @@ mod tests {
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .chat_completion_stream(&model_id, &ParametersConfig::default(), query)
+                    .chat_completion_stream(&model, &ParametersConfig::default(), query)
                     .await
                     .unwrap()
                     .filter_map(
@@ -657,6 +671,7 @@ mod tests {
     async fn test_ollama_structured_completion() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().ollama;
         let model_id = "ollama/llama3.1:8b".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
 
         let message = UserMessage::Query("Test message".to_string());
         let history = {
@@ -682,7 +697,7 @@ mod tests {
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .structured_completion(&model_id, &ParametersConfig::default(), query)
+                    .structured_completion(&model, &ParametersConfig::default(), query)
                     .await
             },
         )

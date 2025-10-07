@@ -9,13 +9,13 @@ use async_anthropic::{
     },
     Client,
 };
-use async_stream::stream;
+use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
-        id::{ModelIdConfig, ProviderId},
+        id::{ModelIdConfig, Name, ProviderId},
         parameters::ParametersConfig,
     },
     providers::llm::anthropic::AnthropicConfig,
@@ -25,15 +25,20 @@ use jp_conversation::{
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 use time::macros::date;
 use tracing::{debug, info, trace, warn};
 
-use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply, StreamEvent};
+use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply};
 use crate::{
     error::{Error, Result},
-    provider::{handle_delta, AccumulationState, Delta},
+    provider::ModelDeprecation,
     query::ChatQuery,
+    stream::{
+        accumulator::Accumulator,
+        delta::Delta,
+        event::{CompletionChunk, StreamEndReason, StreamEvent},
+    },
     tool::ToolDefinition,
 };
 
@@ -52,6 +57,11 @@ pub struct Anthropic {
 
 #[async_trait]
 impl Provider for Anthropic {
+    async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
+        let models = self.models().await?;
+        get_details_for_model(name, &models)
+    }
+
     async fn models(&self) -> Result<Vec<ModelDetails>> {
         let (mut after_id, mut models) = self
             .client
@@ -71,23 +81,24 @@ impl Provider for Anthropic {
             after_id = id;
         }
 
-        Ok(models.into_iter().map(map_model).collect())
+        models
+            .into_iter()
+            .map(|v| map_model(v, &self.beta))
+            .collect::<Result<_>>()
     }
 
     async fn chat_completion(
         &self,
-        model: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
-        let details = self.models().await?;
-        let model_details = get_details_for_model(model, &details);
-        let request = create_request(model, model_details, parameters, query, false)?;
+        let request = create_request(model, parameters, query, false, &self.beta)?;
 
-        debug!(
+        debug!(stream = false, "Anthropic chat completion request.");
+        trace!(
             request = serde_json::to_string(&request).unwrap_or_default(),
-            stream = false,
-            "Anthropic chat completion request."
+            "Request payload."
         );
 
         self.client
@@ -104,19 +115,17 @@ impl Provider for Anthropic {
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let details = self.models().await?;
-        let model_details = get_details_for_model(model_id, &details);
-        let request = create_request(model_id, model_details, parameters, query, true)?;
+        let request = create_request(model, parameters, query, true, &self.beta)?;
 
-        debug!(
+        debug!(stream = true, "Anthropic chat completion stream request.");
+        trace!(
             request = serde_json::to_string(&request).unwrap_or_default(),
-            stream = true,
-            "Anthropic chat completion stream request."
+            "Request payload."
         );
 
         Ok(Box::pin(stream! {
@@ -150,13 +159,35 @@ impl Provider for Anthropic {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct BetaFeatures(Vec<String>);
+
+impl BetaFeatures {
+    /// See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#interleaved-thinking>
+    fn interleaved_thinking(&self) -> bool {
+        self.0
+            .iter()
+            .any(|h| h == "interleaved-thinking-2025-05-14")
+    }
+
+    /// See: <https://docs.claude.com/en/docs/build-with-claude/context-editing>
+    fn context_editing(&self) -> bool {
+        self.0.iter().any(|h| h == "context-editing-2025-06-27")
+    }
+
+    /// See: <https://docs.claude.com/en/api/rate-limits#long-context-rate-limits>
+    fn context_1m(&self) -> bool {
+        self.0.iter().any(|h| h == "context-1m-2025-08-07")
+    }
+}
+
 #[expect(clippy::too_many_lines)]
 fn create_request(
-    model_id: &ModelIdConfig,
-    model_details: Option<&ModelDetails>,
+    model: &ModelDetails,
     parameters: &ParametersConfig,
     query: ChatQuery,
     stream: bool,
+    beta: &BetaFeatures,
 ) -> Result<types::CreateMessagesRequest> {
     let ChatQuery {
         thread,
@@ -180,7 +211,7 @@ fn create_request(
     let mut cache_control_count = MAX_CACHE_CONTROL_COUNT;
 
     builder
-        .model(model_id.name.clone())
+        .model(model.id.name.clone())
         .messages(AnthropicMessages::build(history, message, &mut cache_control_count).0);
 
     let tools = convert_tools(tools, tool_call_strict_mode, &mut cache_control_count);
@@ -255,10 +286,10 @@ fn create_request(
 
     let max_tokens = parameters
         .max_tokens
-        .or_else(|| model_details.as_ref().and_then(|d| d.max_output_tokens))
+        .or(model.max_output_tokens)
         .unwrap_or_else(|| {
             warn!(
-                %model_id,
+                %model.id,
                 %DEFAULT_MAX_TOKENS,
                 "Model `max_tokens` parameter not found, using default value."
             );
@@ -266,10 +297,7 @@ fn create_request(
             DEFAULT_MAX_TOKENS as u32
         });
 
-    let reasoning_support = model_details.as_ref().and_then(|m| m.reasoning);
-    let reasoning_config = model_details
-        .as_ref()
-        .and_then(|m| m.custom_reasoning_config(parameters.reasoning));
+    let reasoning_config = model.custom_reasoning_config(parameters.reasoning);
 
     // See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#extended-thinking-with-tool-use>
     if reasoning_config.is_some()
@@ -302,13 +330,26 @@ fn create_request(
     }
 
     if let Some(config) = reasoning_config {
-        let (min_budget, max_budget) = match reasoning_support {
+        let (min_budget, mut max_budget) = match model.reasoning {
             Some(ReasoningDetails::Supported {
                 min_tokens,
                 max_tokens,
             }) => (min_tokens, max_tokens.unwrap_or(u32::MAX)),
             _ => (0, u32::MAX),
         };
+
+        // With interleaved thinking, the `budget_tokens` can exceed the
+        // `max_tokens` parameter, as it represents the total budget across all
+        // thinking blocks within one assistant turn.
+        //
+        // See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#interleaved-thinking>
+        //
+        // This is only enabled if the model supports it, otherwise an error is
+        // returned if the `max_tokens` parameter is larger than the model's
+        // supported range.
+        if beta.interleaved_thinking() && model.features.contains(&"interleaved-thinking") {
+            max_budget = model.context_window.unwrap_or(max_budget);
+        }
 
         builder.thinking(types::ExtendedThinking {
             kind: "enabled".to_string(),
@@ -335,15 +376,27 @@ fn create_request(
         builder.top_k(top_k);
     }
 
+    // See: <https://docs.claude.com/en/docs/build-with-claude/context-editing>
+    if beta.context_editing() {
+        let strategy = match parameters.other.get("context_management").cloned() {
+            Some(Value::Object(strategy)) => strategy,
+            // If no strategy is provided, but the `context_editing` feature is
+            // enabled, use the default strategy.
+            _ => serde_json::Map::from_iter([(
+                "edits".into(),
+                json!([{"type": "clear_tool_uses_20250919"}]),
+            )]),
+        };
+
+        builder.context_management(strategy);
+    }
+
     builder.build().map_err(Into::into)
 }
 
-fn get_details_for_model<'a>(
-    model_id: &ModelIdConfig,
-    details: &'a [ModelDetails],
-) -> Option<&'a ModelDetails> {
+fn get_details_for_model(name: &Name, details: &[ModelDetails]) -> Result<ModelDetails> {
     // see: <https://docs.anthropic.com/en/docs/about-claude/models/overview#model-aliases>
-    let details_slug = match model_id.name.as_ref() {
+    let details_slug = match name.as_ref() {
         "claude-opus-4-1" => "claude-opus-4-1-20250805",
         "claude-opus-4-0" => "claude-opus-4-20250514",
         "claude-sonnet-4-5" => "claude-sonnet-4-5-20250929",
@@ -353,111 +406,146 @@ fn get_details_for_model<'a>(
         slug => slug,
     };
 
-    details.iter().find(|m| m.slug == details_slug)
+    let details = details
+        .iter()
+        .find(|m| &*m.id.name == details_slug)
+        .cloned()
+        .unwrap_or(ModelDetails::empty(ModelIdConfig {
+            provider: PROVIDER,
+            name: details_slug.parse()?,
+        }));
+
+    if let Some(ModelDeprecation::Deprecated { note, retire_at }) = &details.deprecated {
+        let notes = &[
+            note.to_owned(),
+            "See: <https://docs.claude.com/en/docs/about-claude/model-deprecations>".to_owned(),
+        ];
+
+        warn!(
+            id = %details.id,
+            retire_at = retire_at.map(|d| d.to_string()),
+            note = notes.join("\n\n"),
+            "Model is deprecated and will be retired in the future."
+        );
+    }
+
+    Ok(details)
 }
 
-#[expect(clippy::match_same_arms)]
-fn map_model(model: types::Model) -> ModelDetails {
-    match model.id.as_str() {
+#[expect(clippy::match_same_arms, clippy::too_many_lines)]
+fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
+    let details = match model.id.as_str() {
         "claude-sonnet-4-5" | "claude-sonnet-4-5-20250929" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
-            context_window: Some(200_000),
+            id: (PROVIDER, model.id).try_into()?,
+            context_window: if beta.context_1m() {
+                Some(1_000_000)
+            } else {
+                Some(200_000)
+            },
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::supported(0, None)),
+            reasoning: Some(ReasoningDetails::supported(1024, None)),
             knowledge_cutoff: Some(date!(2025 - 7 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec!["interleaved-thinking", "context-editing"],
         },
         "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
-            reasoning: Some(ReasoningDetails::supported(0, None)),
+            reasoning: Some(ReasoningDetails::supported(1024, None)),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec!["interleaved-thinking", "context-editing"],
         },
         "claude-opus-4-0" | "claude-opus-4-20250514" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
-            reasoning: Some(ReasoningDetails::supported(0, None)),
+            reasoning: Some(ReasoningDetails::supported(1024, None)),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec!["interleaved-thinking", "context-editing"],
         },
         "claude-sonnet-4-0" | "claude-sonnet-4-20250514" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
-            // TODO: The context window is 1_000_000 *IF* the
-            // `context-1m-2025-08-07` beta header is set.
-            //
-            // We should probably update this method signature to take in the
-            // final configuration, and change this value based on which header
-            // is configured.
-            context_window: Some(200_000),
+            id: (PROVIDER, model.id).try_into()?,
+            context_window: if beta.context_1m() {
+                Some(1_000_000)
+            } else {
+                Some(200_000)
+            },
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::supported(0, None)),
+            reasoning: Some(ReasoningDetails::supported(1024, None)),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec!["interleaved-thinking", "context-editing"],
         },
         "claude-3-7-sonnet-latest" | "claude-3-7-sonnet-20250219" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::supported(0, None)),
+            reasoning: Some(ReasoningDetails::supported(1024, None)),
             knowledge_cutoff: Some(date!(2024 - 11 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "claude-3-5-haiku-latest" | "claude-3-5-haiku-20241022" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 7 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "claude-3-5-sonnet-latest"
         | "claude-3-5-sonnet-20241022"
         | "claude-3-5-sonnet-20240620" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 4 - 1)),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: claude-sonnet-4-5-20250929",
+                Some(date!(2025 - 10 - 22)),
+            )),
+            features: vec![],
         },
         "claude-3-opus-latest" | "claude-3-opus-20240229" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2023 - 8 - 1)),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: claude-opus-4-1-20250805",
+                Some(date!(2026 - 1 - 5)),
+            )),
+            features: vec![],
         },
         "claude-3-haiku-20240307" => ModelDetails {
-            provider: PROVIDER,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 8 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         id => {
-            warn!(model = id, ?model, "Missing model details.");
-
-            ModelDetails {
-                provider: PROVIDER,
-                slug: model.id,
-                context_window: None,
-                max_output_tokens: None,
-                reasoning: None,
-                knowledge_cutoff: None,
-            }
+            debug!(model = id, ?model, "Missing model details.");
+            ModelDetails::empty((PROVIDER, id).try_into()?)
         }
-    }
+    };
+
+    Ok(details)
 }
 
 fn map_response(response: types::CreateMessagesResponse) -> Result<Vec<Event>> {
-    debug!(
+    debug!("Received response from Anthropic API.");
+    trace!(
         response = serde_json::to_string(&response).unwrap_or_default(),
-        "Received response from Anthropic API."
+        "Response payload."
     );
 
     response
@@ -566,6 +654,7 @@ impl TryFrom<&AnthropicConfig> for Anthropic {
         }
 
         Ok(Anthropic {
+            beta: BetaFeatures(config.beta_headers.clone()),
             client: builder
                 .build()
                 .map_err(|e| Error::Anthropic(AnthropicError::Unknown(e.to_string())))?,
@@ -871,6 +960,7 @@ mod tests {
     {
         let mut config = LlmProviderConfig::default().anthropic;
         let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -896,7 +986,7 @@ mod tests {
 
                 Anthropic::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &ParametersConfig::default(), query)
+                    .chat_completion(&model, &ParametersConfig::default(), query)
                     .await
             },
         )
@@ -907,6 +997,7 @@ mod tests {
     async fn test_anthropic_tool_call() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().anthropic;
         let model_id = "anthropic/claude-3-7-sonnet-latest".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -957,7 +1048,7 @@ mod tests {
 
                 Anthropic::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &ParametersConfig::default(), query)
+                    .chat_completion(&model, &ParametersConfig::default(), query)
                     .await
             },
         )
@@ -969,6 +1060,7 @@ mod tests {
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().anthropic;
         let model_id = "anthropic/claude-3-7-sonnet-latest".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 // See: <https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#thinking-redaction>
@@ -1006,7 +1098,7 @@ mod tests {
 
                 let events = Anthropic::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &parameters, query.clone())
+                    .chat_completion(&model, &parameters, query.clone())
                     .await
                     .unwrap()
                     .into_inner();
@@ -1024,6 +1116,7 @@ mod tests {
     #[test]
     fn test_create_request() {
         let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -1045,14 +1138,7 @@ mod tests {
             ..Default::default()
         };
 
-        let model_details = map_model(types::Model {
-            id: "claude-3-5-haiku-latest".to_owned(),
-            display_name: String::new(),
-            created_at: String::new(),
-            model_type: String::new(),
-        });
-
-        let request = create_request(&model_id, Some(&model_details), &parameters, query, false);
+        let request = create_request(&model, &parameters, query, false, &BetaFeatures::default());
 
         insta::assert_debug_snapshot!(request);
     }
@@ -1061,54 +1147,61 @@ mod tests {
     fn test_get_details_for_model() {
         let details = vec![
             ModelDetails {
-                provider: PROVIDER,
-                slug: "claude-opus-4-20250514".to_owned(),
+                id: (PROVIDER, "claude-opus-4-20250514").try_into().unwrap(),
                 context_window: None,
                 max_output_tokens: None,
                 reasoning: None,
                 knowledge_cutoff: None,
+                deprecated: None,
+                features: vec!["interleaved-thinking"],
             },
             ModelDetails {
-                provider: PROVIDER,
-                slug: "claude-sonnet-4-20250514".to_owned(),
+                id: (PROVIDER, "claude-sonnet-4-20250514").try_into().unwrap(),
                 context_window: None,
                 max_output_tokens: None,
                 reasoning: None,
                 knowledge_cutoff: None,
+                deprecated: None,
+                features: vec![],
             },
             ModelDetails {
-                provider: PROVIDER,
-                slug: "claude-3-7-sonnet-20250219".to_owned(),
+                id: (PROVIDER, "claude-3-7-sonnet-20250219").try_into().unwrap(),
                 context_window: None,
                 max_output_tokens: None,
                 reasoning: None,
                 knowledge_cutoff: None,
+                deprecated: None,
+                features: vec![],
             },
             ModelDetails {
-                provider: PROVIDER,
-                slug: "claude-3-5-haiku-20241022".to_owned(),
+                id: (PROVIDER, "claude-3-5-haiku-20241022").try_into().unwrap(),
                 context_window: None,
                 max_output_tokens: None,
                 reasoning: None,
                 knowledge_cutoff: None,
+                deprecated: None,
+                features: vec![],
             },
         ];
 
         let cases = vec![
-            ("anthropic/claude-opus-4-0", Some(&details[0])),
-            ("anthropic/claude-opus-4-20250514", Some(&details[0])),
-            ("anthropic/claude-sonnet-4-0", Some(&details[1])),
-            ("anthropic/claude-sonnet-4-20250514", Some(&details[1])),
-            ("anthropic/claude-3-7-sonnet-latest", Some(&details[2])),
-            ("anthropic/claude-3-7-sonnet-20250219", Some(&details[2])),
-            ("anthropic/claude-3-5-haiku-latest", Some(&details[3])),
-            ("anthropic/claude-3-5-haiku-20241022", Some(&details[3])),
-            ("anthropic/nonexistent", None),
+            ("claude-opus-4-0", details[0].clone()),
+            ("claude-opus-4-20250514", details[0].clone()),
+            ("claude-sonnet-4-0", details[1].clone()),
+            ("claude-sonnet-4-20250514", details[1].clone()),
+            ("claude-3-7-sonnet-latest", details[2].clone()),
+            ("claude-3-7-sonnet-20250219", details[2].clone()),
+            ("claude-3-5-haiku-latest", details[3].clone()),
+            ("claude-3-5-haiku-20241022", details[3].clone()),
+            (
+                "nonexistent",
+                ModelDetails::empty((PROVIDER, "nonexistent").try_into().unwrap()),
+            ),
         ];
 
         for (model_id, expected) in cases {
             let actual = get_details_for_model(&model_id.parse().unwrap(), &details);
-            assert_eq!(actual, expected);
+            assert_eq!(actual, Ok(expected));
         }
     }
 }

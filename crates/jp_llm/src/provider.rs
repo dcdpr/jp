@@ -15,7 +15,7 @@ use futures::{Stream, StreamExt as _};
 use google::Google;
 use jp_config::{
     model::{
-        id::{ModelIdConfig, ProviderId},
+        id::{ModelIdConfig, Name, ProviderId},
         parameters::{CustomReasoningConfig, ParametersConfig, ReasoningConfig, ReasoningEffort},
     },
     providers::llm::LlmProviderConfig,
@@ -41,11 +41,8 @@ pub type EventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>;
 /// Details about a model for a given provider, as specified by the provider.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelDetails {
-    /// The provider of the model.
-    pub provider: ProviderId,
-
-    /// The slug of the model.
-    pub slug: String,
+    /// The id of the model.
+    pub id: ModelIdConfig,
 
     /// The context window size in tokens, if known.
     pub context_window: Option<u32>,
@@ -59,9 +56,27 @@ pub struct ModelDetails {
 
     /// The knowledge cutoff date, if known.
     pub knowledge_cutoff: Option<Date>,
+
+    /// Deprecation status of the model, if known.
+    pub deprecated: Option<ModelDeprecation>,
+
+    /// Provider-specific features.
+    pub features: Vec<&'static str>,
 }
 
 impl ModelDetails {
+    fn empty(id: ModelIdConfig) -> Self {
+        Self {
+            id,
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+            deprecated: None,
+            features: vec![],
+        }
+    }
+
     #[must_use]
     pub fn custom_reasoning_config(
         &self,
@@ -91,8 +106,7 @@ impl ModelDetails {
                 // Custom configuration, invalid, so warn + disabled.
                 Some(ReasoningConfig::Custom(config)) => {
                     warn!(
-                        provider = %self.provider,
-                        model = %self.slug,
+                        id = %self.id,
                         ?config,
                         "Model does not support reasoning, but the configuration explicitly \
                         enabled it. Reasoning will be disabled to avoid failed requests."
@@ -116,6 +130,35 @@ impl ModelDetails {
                 // Custom configuration, so use it.
                 Some(ReasoningConfig::Custom(custom)) => Some(custom),
             },
+        }
+    }
+}
+
+/// The deprecation status of a model.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum ModelDeprecation {
+    /// The model is active and available for use.
+    #[default]
+    Active,
+
+    /// The model is deprecated and will be removed at some point in the future.
+    Deprecated {
+        /// Any details about the deprecation.
+        ///
+        /// This could include a link to the deprecation notice, a reason for
+        /// deprecation, or recommended replacements.
+        note: String,
+
+        /// The date on which the model will be retired, if known.
+        retire_at: Option<Date>,
+    },
+}
+
+impl ModelDeprecation {
+    pub fn deprecated(note: &impl ToString, retire_at: Option<Date>) -> Self {
+        Self::Deprecated {
+            note: note.to_string(),
+            retire_at,
         }
     }
 }
@@ -342,6 +385,9 @@ impl CompletionChunk {
 
 #[async_trait]
 pub trait Provider: std::fmt::Debug + Send + Sync {
+    /// Get details of a model.
+    async fn model_details(&self, name: &Name) -> Result<ModelDetails>;
+
     /// Get a list of available models.
     async fn models(&self) -> Result<Vec<ModelDetails>>;
 

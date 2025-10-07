@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
-        id::{ModelIdConfig, ProviderId},
+        id::{ModelIdConfig, Name, ProviderId},
         parameters::ParametersConfig,
     },
     providers::llm::llamacpp::LlamacppConfig,
@@ -50,11 +50,11 @@ impl Llamacpp {
     /// Build request for Llama.cpp API.
     fn build_request(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         _parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<ChatCompletionBuilder> {
-        let slug = model_id.name.to_string();
+        let slug = model.id.name.to_string();
         let ChatQuery {
             thread,
             tools,
@@ -82,9 +82,19 @@ impl Llamacpp {
 
 #[async_trait]
 impl Provider for Llamacpp {
-    async fn models(&self) -> Result<Vec<ModelDetails>> {
+    async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
+        let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
+
         Ok(self
-            .reqwest_client
+            .models()
+            .await?
+            .into_iter()
+            .find(|m| m.id == id)
+            .unwrap_or(ModelDetails::empty(id)))
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>> {
+        self.reqwest_client
             .get(format!("{}/v1/models", self.base_url))
             .send()
             .await?
@@ -94,21 +104,21 @@ impl Provider for Llamacpp {
             .data
             .iter()
             .map(map_model)
-            .collect())
+            .collect::<Result<_>>()
     }
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         debug!(
-            model = %model_id.name,
+            model = %model.id.name,
             "Starting Llamacpp chat completion stream."
         );
 
-        let request = self.build_request(model_id, parameters, query)?;
+        let request = self.build_request(model, parameters, query)?;
         let stream = Box::pin(stream! {
             let mut current_state = AccumulationState::default();
             let mut extractor = ReasoningExtractor::default();
@@ -200,19 +210,23 @@ fn map_content(
     events
 }
 
-fn map_model(model: &ModelResponse) -> ModelDetails {
-    ModelDetails {
-        provider: PROVIDER,
-        slug: model
-            .id
-            .rsplit_once('/')
-            .map_or(model.id.as_str(), |(_, v)| v)
-            .to_string(),
+fn map_model(model: &ModelResponse) -> Result<ModelDetails> {
+    Ok(ModelDetails {
+        id: (
+            PROVIDER,
+            model
+                .id
+                .rsplit_once('/')
+                .map_or(model.id.as_str(), |(_, v)| v),
+        )
+            .try_into()?,
         context_window: None,
         max_output_tokens: None,
         reasoning: None,
         knowledge_cutoff: None,
-    }
+        deprecated: None,
+        features: vec![],
+    })
 }
 
 impl TryFrom<&LlamacppConfig> for Llamacpp {
@@ -522,6 +536,7 @@ mod tests {
     {
         let mut config = LlmProviderConfig::default().llamacpp;
         let model_id = "llamacpp/llama3:latest".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -543,7 +558,7 @@ mod tests {
 
                 Llamacpp::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &ParametersConfig::default(), query)
+                    .chat_completion(&model, &ParametersConfig::default(), query)
                     .await
             },
         )

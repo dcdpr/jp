@@ -7,7 +7,7 @@ use gemini_client_rs::{types, GeminiClient};
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
-        id::{ModelIdConfig, ProviderId},
+        id::{ModelIdConfig, Name, ProviderId},
         parameters::ParametersConfig,
     },
     providers::llm::google::GoogleConfig,
@@ -33,87 +33,19 @@ pub struct Google {
     client: GeminiClient,
 }
 
-impl Google {
-    async fn create_request(
-        &self,
-        model_id: &ModelIdConfig,
-        parameters: &ParametersConfig,
-        query: ChatQuery,
-    ) -> Result<types::GenerateContentRequest> {
-        let ChatQuery {
-            thread,
-            tools,
-            tool_choice,
-            tool_call_strict_mode,
-        } = query;
+#[async_trait]
+impl Provider for Google {
+    async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
+        let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        let model_details = self
+        Ok(self
             .models()
             .await?
             .into_iter()
-            .find(|m| *m.slug == *model_id.name);
-
-        let system_prompt = thread.system_prompt.clone();
-        let tools = convert_tools(tools, tool_call_strict_mode);
-
-        #[expect(clippy::cast_possible_wrap)]
-        let max_output_tokens = parameters
-            .max_tokens
-            .or_else(|| model_details.as_ref().and_then(|d| d.max_output_tokens))
-            .map(|v| v as i32);
-
-        let tool_config = (!tools.is_empty()).then_some(convert_tool_choice(tool_choice));
-
-        let reasoning = model_details
-            .as_ref()
-            .and_then(|m| m.custom_reasoning_config(parameters.reasoning));
-
-        // Add thinking config if the model requires it, or if it supports it,
-        // and we have the parameters configured.
-        let thinking_config = model_details
-            .as_ref()
-            .and_then(|d| d.reasoning)
-            .filter(|details| (details.min_tokens() > 0) || reasoning.is_some())
-            .map(|details| types::ThinkingConfig {
-                include_thoughts: reasoning.is_some_and(|v| !v.exclude),
-                thinking_budget: reasoning.map(|v| {
-                    // TODO: Once the `gemini` crate supports `-1` for "auto"
-                    // thinking, use that here if `effort` is `Auto`.
-                    //
-                    // See: <https://ai.google.dev/gemini-api/docs/thinking#set-budget>
-                    #[expect(clippy::cast_sign_loss)]
-                    v.effort
-                        .to_tokens(max_output_tokens.unwrap_or(32_000) as u32)
-                        .min(details.max_tokens().unwrap_or(u32::MAX))
-                        .max(details.min_tokens())
-                }),
-            });
-
-        Ok(types::GenerateContentRequest {
-            system_instruction: system_prompt.map(|text| types::Content {
-                parts: vec![types::ContentData::Text(text).into()],
-                role: types::Role::System,
-            }),
-            contents: convert_thread(thread)?,
-            tools,
-            tool_config,
-            generation_config: Some(types::GenerationConfig {
-                max_output_tokens,
-                #[expect(clippy::cast_lossless)]
-                temperature: parameters.temperature.map(|v| v as f64),
-                #[expect(clippy::cast_lossless)]
-                top_p: parameters.top_p.map(|v| v as f64),
-                #[expect(clippy::cast_possible_wrap)]
-                top_k: parameters.top_k.map(|v| v as i32),
-                thinking_config,
-                ..Default::default()
-            }),
-        })
+            .find(|m| m.id == id)
+            .unwrap_or(ModelDetails::empty(id)))
     }
-}
 
-#[async_trait]
-impl Provider for Google {
     async fn models(&self) -> Result<Vec<ModelDetails>> {
         Ok(self
             .client
@@ -126,14 +58,14 @@ impl Provider for Google {
 
     async fn chat_completion(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
-        let request = self.create_request(model_id, parameters, query).await?;
+        let request = create_request(model, parameters, query)?;
 
         self.client
-            .generate_content(&model_id.name, &request)
+            .generate_content(&model.id.name, &request)
             .await
             .map_err(Into::into)
             .and_then(map_response)
@@ -145,13 +77,13 @@ impl Provider for Google {
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = self.create_request(model_id, parameters, query).await?;
-        let slug = model_id.name.clone();
+        let request = create_request(model, parameters, query)?;
+        let slug = model.id.name.clone();
         let stream = Box::pin(stream! {
             let stream = client
                 .stream_content(&slug, &request)
@@ -170,11 +102,76 @@ impl Provider for Google {
     }
 }
 
+fn create_request(
+    model: &ModelDetails,
+    parameters: &ParametersConfig,
+    query: ChatQuery,
+) -> Result<types::GenerateContentRequest> {
+    let ChatQuery {
+        thread,
+        tools,
+        tool_choice,
+        tool_call_strict_mode,
+    } = query;
+
+    let system_prompt = thread.system_prompt.clone();
+    let tools = convert_tools(tools, tool_call_strict_mode);
+
+    #[expect(clippy::cast_possible_wrap)]
+    let max_output_tokens = parameters
+        .max_tokens
+        .or(model.max_output_tokens)
+        .map(|v| v as i32);
+
+    let tool_config = (!tools.is_empty()).then_some(convert_tool_choice(tool_choice));
+    let reasoning = model.custom_reasoning_config(parameters.reasoning);
+
+    // Add thinking config if the model requires it, or if it supports it,
+    // and we have the parameters configured.
+    let thinking_config = model
+        .reasoning
+        .filter(|details| (details.min_tokens() > 0) || reasoning.is_some())
+        .map(|details| types::ThinkingConfig {
+            include_thoughts: reasoning.is_some_and(|v| !v.exclude),
+            thinking_budget: reasoning.map(|v| {
+                // TODO: Once the `gemini` crate supports `-1` for "auto"
+                // thinking, use that here if `effort` is `Auto`.
+                //
+                // See: <https://ai.google.dev/gemini-api/docs/thinking#set-budget>
+                #[expect(clippy::cast_sign_loss)]
+                v.effort
+                    .to_tokens(max_output_tokens.unwrap_or(32_000) as u32)
+                    .min(details.max_tokens().unwrap_or(u32::MAX))
+                    .max(details.min_tokens())
+            }),
+        });
+
+    Ok(types::GenerateContentRequest {
+        system_instruction: system_prompt.map(|text| types::Content {
+            parts: vec![types::ContentData::Text(text).into()],
+            role: types::Role::System,
+        }),
+        contents: convert_thread(thread)?,
+        tools,
+        tool_config,
+        generation_config: Some(types::GenerationConfig {
+            max_output_tokens,
+            #[expect(clippy::cast_lossless)]
+            temperature: parameters.temperature.map(|v| v as f64),
+            #[expect(clippy::cast_lossless)]
+            top_p: parameters.top_p.map(|v| v as f64),
+            #[expect(clippy::cast_possible_wrap)]
+            top_k: parameters.top_k.map(|v| v as i32),
+            thinking_config,
+            ..Default::default()
+        }),
+    })
+}
+
 #[expect(clippy::needless_pass_by_value)]
 fn map_model(model: types::Model) -> ModelDetails {
     ModelDetails {
-        provider: PROVIDER,
-        slug: model.base_model_id.clone(),
+        id: (PROVIDER, model.base_model_id.as_str()).try_into().unwrap(),
         context_window: Some(model.input_token_limit),
         max_output_tokens: Some(model.output_token_limit),
         reasoning: model
@@ -534,6 +531,7 @@ mod tests {
     async fn test_google_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().google;
         let model_id = "google/gemini-2.5-flash-preview-05-20".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -559,7 +557,7 @@ mod tests {
 
                 Google::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &ParametersConfig::default(), query)
+                    .chat_completion(&model, &ParametersConfig::default(), query)
                     .await
                     .map(|mut v| {
                         v.truncate(10);
@@ -575,6 +573,7 @@ mod tests {
     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().google;
         let model_id = "google/gemini-2.5-flash-preview-05-20".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -600,7 +599,7 @@ mod tests {
 
                 Google::try_from(&config)
                     .unwrap()
-                    .chat_completion_stream(&model_id, &ParametersConfig::default(), query)
+                    .chat_completion_stream(&model, &ParametersConfig::default(), query)
                     .await
                     .unwrap()
                     .filter_map(
