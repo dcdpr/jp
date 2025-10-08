@@ -394,7 +394,7 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     /// Perform a streaming chat completion.
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream>;
@@ -404,12 +404,12 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     /// Default implementation collects results from the streaming version.
     async fn chat_completion(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
         let mut stream = self
-            .chat_completion_stream(model_id, parameters, query)
+            .chat_completion_stream(model, parameters, query)
             .await?;
 
         let mut events = Vec::new();
@@ -446,7 +446,7 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
         }
 
         Ok(Reply {
-            provider: model_id.provider,
+            provider: model.id.provider,
             events,
         })
     }
@@ -460,7 +460,7 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
     /// override this method.
     async fn structured_completion(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: StructuredQuery,
     ) -> Result<Value> {
@@ -474,7 +474,7 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
         let max_retries = 3;
         for i in 1..=3 {
             let result = self
-                .chat_completion(model_id, parameters, chat_query.clone())
+                .chat_completion(model, parameters, chat_query.clone())
                 .await;
             let events = match result {
                 Ok(events) => events,
