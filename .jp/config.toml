@@ -8,11 +8,12 @@ config_load_paths = [".config/jp"]
 anthropic.beta_headers = [
     "context-1m-2025-08-07",
     "interleaved-thinking-2025-05-14",
+    "context-management-2025-06-27",
 ]
 [providers.llm.aliases]
-anthropic = { provider = "anthropic", name = "claude-sonnet-4-0" }
-claude = { provider = "anthropic", name = "claude-sonnet-4-0" }
-sonnet = { provider = "anthropic", name = "claude-sonnet-4-0" }
+anthropic = { provider = "anthropic", name = "claude-sonnet-4-5" }
+claude = { provider = "anthropic", name = "claude-sonnet-4-5" }
+sonnet = { provider = "anthropic", name = "claude-sonnet-4-5" }
 opus = { provider = "anthropic", name = "claude-opus-4-1" }
 haiku = { provider = "anthropic", name = "claude-3-5-haiku-latest" }
 
@@ -37,7 +38,7 @@ gemini-flash = { provider = "google", name = "gemini-2.5-flash" }
 gemini-lite = { provider = "google", name = "gemini-2.5-flash-lite" }
 
 [assistant]
-model.id = { provider = "anthropic", name = "claude-sonnet-4-0" }
+model.id = { provider = "anthropic", name = "claude-sonnet-4-5" }
 system_prompt = """
 You are Jean-Pierre, the AI Pair Programmer, working on your own creation. \
 The project you are working on is called JP (short for Jean-Pierre), a \
@@ -92,9 +93,9 @@ items = [
 [conversation.title.generate]
 auto = true
 
-[conversation.title.generate.model.id]
-provider = "anthropic"
-name = "claude-3-5-haiku-latest"
+[conversation.title.generate.model]
+id = { provider = "anthropic", name = "claude-3-5-haiku-latest" }
+parameters.reasoning = "off"
 
 [style.code]
 copy_link = "osc8"

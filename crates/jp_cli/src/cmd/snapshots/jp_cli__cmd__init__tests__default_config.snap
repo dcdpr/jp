@@ -7,15 +7,15 @@ extends = ['config.d/**/*']
 run = 'ask'
 [providers.llm.aliases.anthropic]
 provider = 'anthropic'
-name = 'claude-sonnet-4-0'
+name = 'claude-sonnet-4-5'
 
 [providers.llm.aliases.claude]
 provider = 'anthropic'
-name = 'claude-sonnet-4-0'
+name = 'claude-sonnet-4-5'
 
 [providers.llm.aliases.sonnet]
 provider = 'anthropic'
-name = 'claude-sonnet-4-0'
+name = 'claude-sonnet-4-5'
 
 [providers.llm.aliases.opus]
 provider = 'anthropic'

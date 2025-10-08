@@ -93,15 +93,15 @@ fn default_config() -> jp_config::PartialAppConfig {
         cfg.providers.llm.aliases.extend([
             ("anthropic".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Anthropic),
-                name: Some(Name("claude-sonnet-4-0".into())),
+                name: Some(Name("claude-sonnet-4-5".into())),
             }),
             ("claude".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Anthropic),
-                name: Some(Name("claude-sonnet-4-0".into())),
+                name: Some(Name("claude-sonnet-4-5".into())),
             }),
             ("sonnet".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Anthropic),
-                name: Some(Name("claude-sonnet-4-0".into())),
+                name: Some(Name("claude-sonnet-4-5".into())),
             }),
             ("opus".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Anthropic),
