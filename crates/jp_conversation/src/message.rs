@@ -223,6 +223,14 @@ impl UserMessage {
             _ => &[],
         }
     }
+
+    #[must_use]
+    pub fn as_query_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Query(query) => Some(query),
+            Self::ToolCallResults(_) => None,
+        }
+    }
 }
 
 impl From<String> for UserMessage {
