@@ -8,7 +8,7 @@ use jp_config::{
     assistant::tool_choice::ToolChoice,
     conversation::tool::ToolParameterConfig,
     model::{
-        id::{ModelIdConfig, Name, ProviderId},
+        id::{Name, ProviderId},
         parameters::{CustomReasoningConfig, ParametersConfig, ReasoningEffort},
     },
     providers::llm::openai::OpenaiConfig,
@@ -50,14 +50,15 @@ pub struct Openai {
 #[async_trait]
 impl Provider for Openai {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
-        let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
-
-        Ok(self
-            .models()
+        self.reqwest_client
+            .get(format!("{}/v1/models/{}", self.base_url, name))
+            .send()
             .await?
-            .into_iter()
-            .find(|m| m.id == id)
-            .unwrap_or(ModelDetails::empty(id)))
+            .error_for_status()?
+            .json::<ModelResponse>()
+            .await
+            .map_err(Into::into)
+            .and_then(map_model)
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
@@ -173,11 +174,12 @@ pub(crate) struct ModelResponse {
     owned_by: String,
 }
 
-#[expect(clippy::too_many_lines, clippy::match_same_arms)]
+#[expect(clippy::too_many_lines)]
 fn map_model(model: ModelResponse) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
         "o4-mini" | "o4-mini-2025-04-16" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o4-mini".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -187,6 +189,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "o3-mini" | "o3-mini-2025-01-31" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o3-mini".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -196,6 +199,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "o1-mini" | "o1-mini-2024-09-12" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o1-mini".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(65_536),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -208,6 +212,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "o3" | "o3-2025-04-16" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o3".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -217,6 +222,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "o3-pro" | "o3-pro-2025-06-10" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o3-pro".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -226,6 +232,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "o1" | "o1-2024-12-17" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o1".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -235,6 +242,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "o1-pro" | "o1-pro-2025-03-19" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o1-pro".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -244,6 +252,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "gpt-4.1" | "gpt-4.1-2025-04-14" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-4.1".to_owned()),
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
             reasoning: Some(ReasoningDetails::unsupported()),
@@ -253,6 +262,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "gpt-4o" | "gpt-4o-2024-08-06" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-4o".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::unsupported()),
@@ -262,6 +272,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "chatgpt-4o" | "chatgpt-4o-latest" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("ChatGPT-4o".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::unsupported()),
@@ -271,6 +282,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-4.1 nano".to_owned()),
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
             reasoning: Some(ReasoningDetails::unsupported()),
@@ -280,6 +292,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-4o mini".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::unsupported()),
@@ -289,6 +302,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-4.1 mini".to_owned()),
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
             reasoning: Some(ReasoningDetails::unsupported()),
@@ -298,6 +312,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "gpt-5-nano" | "gpt-5-nano-2025-08-07" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5 nano".to_owned()),
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -307,6 +322,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "gpt-5-mini" | "gpt-5-mini-2025-08-07" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5 mini".to_owned()),
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -316,6 +332,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "gpt-5" | "gpt-5-2025-08-07" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5".to_owned()),
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -325,6 +342,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "gpt-5-chat-latest" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5 Chat".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -334,6 +352,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "gpt-oss-120b" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("gpt-oss-120b".to_owned()),
             context_window: Some(131_072),
             max_output_tokens: Some(131_072),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -343,6 +362,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "gpt-oss-20b" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("gpt-oss-20b".to_owned()),
             context_window: Some(131_072),
             max_output_tokens: Some(131_072),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -352,6 +372,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "o3-deep-research" | "o3-deep-research-2025-06-26" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o3-deep-research".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -361,6 +382,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         },
         "o4-mini-deep-research" | "o4-mini-deep-research-2025-06-26" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o4-mini-deep-research".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::supported(0, None)),
@@ -828,6 +850,35 @@ mod tests {
     fn vcr() -> Vcr {
         let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
         Vcr::new("https://api.openai.com", fixtures)
+    }
+
+    #[test(tokio::test)]
+    async fn test_openai_model_details() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = LlmProviderConfig::default().openai;
+        let name: Name = "o4-mini".parse().unwrap();
+
+        let vcr = vcr();
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
+                });
+            },
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Openai::try_from(&config)
+                    .unwrap()
+                    .model_details(&name)
+                    .await
+            },
+        )
+        .await
     }
 
     #[test(tokio::test)]

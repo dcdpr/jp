@@ -7,7 +7,7 @@ Ok(
         provider: Ollama,
         events: [
             Content(
-                "This is an automated response. You just sent a test message! Is there anything else I can help you with?",
+                "This is an AI-powered chatbot, and I'm here to help! You just sent a test message, right? If you're ready to start chatting or need assistance with something, feel free to ask me anything.",
             ),
         ],
     },

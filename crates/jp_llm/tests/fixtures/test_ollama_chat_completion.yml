@@ -7,4 +7,4 @@ then:
   header:
     - name: content-type
       value: application/json; charset=utf-8
-  body: "{\"model\":\"llama3:latest\",\"created_at\":\"2025-09-24T22:33:19.917366Z\",\"message\":{\"role\":\"assistant\",\"content\":\"This is an automated response. You just sent a test message! Is there anything else I can help you with?\"},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":3313318625,\"load_duration\":2659361042,\"prompt_eval_count\":12,\"prompt_eval_duration\":274713667,\"eval_count\":24,\"eval_duration\":378072125}"
+  body: "{\"model\":\"llama3:latest\",\"created_at\":\"2025-10-08T08:38:34.852394Z\",\"message\":{\"role\":\"assistant\",\"content\":\"This is an AI-powered chatbot, and I'm here to help! You just sent a test message, right? If you're ready to start chatting or need assistance with something, feel free to ask me anything. I'll do my best to provide helpful responses.\"},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":4062609750,\"load_duration\":2920462417,\"prompt_eval_count\":12,\"prompt_eval_duration\":241794833,\"eval_count\":55,\"eval_duration\":899687292}"

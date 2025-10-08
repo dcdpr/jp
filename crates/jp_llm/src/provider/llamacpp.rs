@@ -218,6 +218,7 @@ fn map_model(model: &ModelResponse) -> Result<ModelDetails> {
                 .map_or(model.id.as_str(), |(_, v)| v),
         )
             .try_into()?,
+        display_name: Some(model.id.clone()),
         context_window: None,
         max_output_tokens: None,
         reasoning: None,

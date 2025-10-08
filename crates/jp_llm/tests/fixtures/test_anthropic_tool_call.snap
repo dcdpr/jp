@@ -6,19 +6,9 @@ Ok(
     Reply {
         provider: Anthropic,
         events: [
-            Reasoning(
-                "The user has sent a simple \"Test message\" without any specific instructions or details. Since I've been instructed to use the `run_me` function, I should proceed to call it.\n\nLooking at the function schema:\n- `run_me` has two parameters:\n  - `bar`: Required parameter, can be either a string or an array of strings, with allowed values of either \"foo\" or [\"foo\", \"bar\"]\n  - `foo`: Optional parameter with a default value of \"foo\", type string\n\nSince I must call the function and `bar` is required, I need to choose a valid value for it. The schema indicates that `bar` can be either \"foo\" or [\"foo\", \"bar\"]. Since I have no specific preference from the user, I'll use \"foo\" as it's simpler.\n\nI don't need to specify the `foo` parameter as it has a default value.",
-            ),
-            Metadata(
-                "signature",
-                String("ErUBCkYIBxgCIkBGJ91VDCnoR1A2YN/I0XpNtTvlbRow4qgN0qhh2P7N5Tv2dJ9SyBoPASJhreVZHHX3uDasUnYmlrc2Ja/ueyAEEgzCqmxJJug5g7eAhyMaDHvIy4vFjOrUnbDzNCIwBmZoiovKUpA2BlHpOODaclDDzZS4WPKkY71otebI9QsaaGLQT4ON38wlpvorb341Kh1k0zkXx26KU38cUuvPqqB5K8Q6Mqm94Pulelz2uxgC"),
-            ),
-            Content(
-                "I'll run the test function for you.",
-            ),
             ToolCall(
                 ToolCallRequest {
-                    id: "toolu_01Q7TdtVPkWtjY69rthnn1uY",
+                    id: "toolu_01K11NmNvySR6WkRHa9hbV84",
                     name: "run_me",
                     arguments: Object {
                         "bar": String("foo"),

@@ -7,10 +7,10 @@ Ok(
         provider: Openai,
         events: [
             Reasoning(
-                "**Acknowledging test message**\n\nThe user sent a \"Test message,\" which seems like they're just checking things. I should definitely respond to acknowledge this and let them know I'm here to help. I’ll ask if there’s anything specific they need or want to explore further. It’s important to be prompt and friendly! Alright, let's keep the conversation flowing and find out what they’re looking for.",
+                "",
             ),
             Content(
-                "Hello! I’m here and ready to help. What would you like to do today?",
+                "Received your test message. How can I assist you today?",
             ),
         ],
     },

@@ -15,7 +15,7 @@ use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
-        id::{ModelIdConfig, Name, ProviderId},
+        id::{Name, ProviderId},
         parameters::ParametersConfig,
     },
     providers::llm::anthropic::AnthropicConfig,
@@ -61,8 +61,8 @@ pub struct Anthropic {
 #[async_trait]
 impl Provider for Anthropic {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
-        let models = self.models().await?;
-        get_details_for_model(name, &models)
+        let model = self.client.models().get(name).await?;
+        map_model(model, &self.beta)
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
@@ -545,49 +545,12 @@ fn create_request(
     builder.build().map_err(Into::into)
 }
 
-fn get_details_for_model(name: &Name, details: &[ModelDetails]) -> Result<ModelDetails> {
-    // see: <https://docs.anthropic.com/en/docs/about-claude/models/overview#model-aliases>
-    let details_slug = match name.as_ref() {
-        "claude-opus-4-1" => "claude-opus-4-1-20250805",
-        "claude-opus-4-0" => "claude-opus-4-20250514",
-        "claude-sonnet-4-5" => "claude-sonnet-4-5-20250929",
-        "claude-sonnet-4-0" => "claude-sonnet-4-20250514",
-        "claude-3-7-sonnet-latest" => "claude-3-7-sonnet-20250219",
-        "claude-3-5-haiku-latest" => "claude-3-5-haiku-20241022",
-        slug => slug,
-    };
-
-    let details = details
-        .iter()
-        .find(|m| &*m.id.name == details_slug)
-        .cloned()
-        .unwrap_or(ModelDetails::empty(ModelIdConfig {
-            provider: PROVIDER,
-            name: details_slug.parse()?,
-        }));
-
-    if let Some(ModelDeprecation::Deprecated { note, retire_at }) = &details.deprecated {
-        let notes = &[
-            note.to_owned(),
-            "See: <https://docs.claude.com/en/docs/about-claude/model-deprecations>".to_owned(),
-        ];
-
-        warn!(
-            id = %details.id,
-            retire_at = retire_at.map(|d| d.to_string()),
-            note = notes.join("\n\n"),
-            "Model is deprecated and will be retired in the future."
-        );
-    }
-
-    Ok(details)
-}
-
 #[expect(clippy::match_same_arms, clippy::too_many_lines)]
 fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
         "claude-sonnet-4-5" | "claude-sonnet-4-5-20250929" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
             context_window: if beta.context_1m() {
                 Some(1_000_000)
             } else {
@@ -601,6 +564,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         },
         "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
             reasoning: Some(ReasoningDetails::supported(1024, None)),
@@ -610,6 +574,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         },
         "claude-opus-4-0" | "claude-opus-4-20250514" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
             reasoning: Some(ReasoningDetails::supported(1024, None)),
@@ -619,6 +584,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         },
         "claude-sonnet-4-0" | "claude-sonnet-4-20250514" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
             context_window: if beta.context_1m() {
                 Some(1_000_000)
             } else {
@@ -632,6 +598,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         },
         "claude-3-7-sonnet-latest" | "claude-3-7-sonnet-20250219" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
             reasoning: Some(ReasoningDetails::supported(1024, None)),
@@ -641,6 +608,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         },
         "claude-3-5-haiku-latest" | "claude-3-5-haiku-20241022" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
             reasoning: Some(ReasoningDetails::unsupported()),
@@ -652,6 +620,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         | "claude-3-5-sonnet-20241022"
         | "claude-3-5-sonnet-20240620" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
             reasoning: Some(ReasoningDetails::unsupported()),
@@ -664,6 +633,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         },
         "claude-3-opus-latest" | "claude-3-opus-20240229" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
             reasoning: Some(ReasoningDetails::unsupported()),
@@ -676,6 +646,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         },
         "claude-3-haiku-20240307" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
             reasoning: Some(ReasoningDetails::unsupported()),
@@ -685,7 +656,9 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         },
         id => {
             debug!(model = id, ?model, "Missing model details.");
-            ModelDetails::empty((PROVIDER, id).try_into()?)
+            let mut model = ModelDetails::empty((PROVIDER, id).try_into()?);
+            model.display_name = Some(id.to_string());
+            model
         }
     };
 
@@ -1079,6 +1052,35 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn test_anthropic_model_details() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = LlmProviderConfig::default().anthropic;
+        let name: Name = "claude-3-5-haiku-latest".parse().unwrap();
+
+        let vcr = vcr();
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
+                });
+            },
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Anthropic::try_from(&config)
+                    .unwrap()
+                    .model_details(&name)
+                    .await
+            },
+        )
+        .await
+    }
+
+    #[test(tokio::test)]
     async fn test_anthropic_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().anthropic;
 
@@ -1332,67 +1334,5 @@ mod tests {
         let request = create_request(&model, &parameters, query, false, &BetaFeatures::default());
 
         insta::assert_debug_snapshot!(request);
-    }
-
-    #[test]
-    fn test_get_details_for_model() {
-        let details = vec![
-            ModelDetails {
-                id: (PROVIDER, "claude-opus-4-20250514").try_into().unwrap(),
-                context_window: None,
-                max_output_tokens: None,
-                reasoning: None,
-                knowledge_cutoff: None,
-                deprecated: None,
-                features: vec!["interleaved-thinking"],
-            },
-            ModelDetails {
-                id: (PROVIDER, "claude-sonnet-4-20250514").try_into().unwrap(),
-                context_window: None,
-                max_output_tokens: None,
-                reasoning: None,
-                knowledge_cutoff: None,
-                deprecated: None,
-                features: vec![],
-            },
-            ModelDetails {
-                id: (PROVIDER, "claude-3-7-sonnet-20250219").try_into().unwrap(),
-                context_window: None,
-                max_output_tokens: None,
-                reasoning: None,
-                knowledge_cutoff: None,
-                deprecated: None,
-                features: vec![],
-            },
-            ModelDetails {
-                id: (PROVIDER, "claude-3-5-haiku-20241022").try_into().unwrap(),
-                context_window: None,
-                max_output_tokens: None,
-                reasoning: None,
-                knowledge_cutoff: None,
-                deprecated: None,
-                features: vec![],
-            },
-        ];
-
-        let cases = vec![
-            ("claude-opus-4-0", details[0].clone()),
-            ("claude-opus-4-20250514", details[0].clone()),
-            ("claude-sonnet-4-0", details[1].clone()),
-            ("claude-sonnet-4-20250514", details[1].clone()),
-            ("claude-3-7-sonnet-latest", details[2].clone()),
-            ("claude-3-7-sonnet-20250219", details[2].clone()),
-            ("claude-3-5-haiku-latest", details[3].clone()),
-            ("claude-3-5-haiku-20241022", details[3].clone()),
-            (
-                "nonexistent",
-                ModelDetails::empty((PROVIDER, "nonexistent").try_into().unwrap()),
-            ),
-        ];
-
-        for (model_id, expected) in cases {
-            let actual = get_details_for_model(&model_id.parse().unwrap(), &details);
-            assert_eq!(actual, Ok(expected));
-        }
     }
 }

@@ -5,13 +5,6 @@ expression: expr
 Ok(
     Reply {
         provider: Google,
-        events: [
-            Reasoning(
-                "**Thinking Through a Simple \"Test Message\"**\n\nOkay, here's what's going on in my head when I see someone just type \"Test message.\" First, I break it down. It's not a question, it's not a command, it's not trying to get information, and it's definitely not some complicated problem. So, what's the deal? They're probably just checking if I'm even \"on,\" if I'm responsive. Maybe it's a slip of the fingers, or perhaps a placeholder, or they're just starting a conversation but haven't settled on a topic yet.\n\nThe main thing is to show I got the message, make sure they know I'm working, and give them an easy way to move forward if they have a real request. I don't want to jump to conclusions, assume something they don't want, or act confused and be unhelpful.\n\nLet's see, what should I say? \"Okay\"? Too short. \"Got it\"? Better, but still a little bare. \"Yes, I'm here\"? Kind of blunt. \"Received\"? A bit robotic. \"How can I help you?\" Might be too pushy – they might not *need* help right away. How about \"Hello! What would you like to do?\" That's good – friendly and open. Or maybe \"Message received! I'm ready when you are.\" Also a good vibe.\n\nOkay, let's combine the acknowledgement with an invitation. Keep it concise, helpful, and friendly. I think I've got it: \"Test message received! I'm here and ready to assist you. How can I help you today?\" That should be just right. Shows I'm on it, reassures them, and gently prompts them to actually tell me what they need.\n",
-            ),
-            Content(
-                "Test message received! I'm here and ready to assist you. How can I help you today?",
-            ),
-        ],
+        events: [],
     },
 )

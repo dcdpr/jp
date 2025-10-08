@@ -120,7 +120,8 @@ impl Provider for Ollama {
 
 fn map_model(model: LocalModel) -> Result<ModelDetails> {
     Ok(ModelDetails {
-        id: (PROVIDER, model.name).try_into()?,
+        id: (PROVIDER, &model.name).try_into()?,
+        display_name: Some(model.name),
         context_window: None,
         max_output_tokens: None,
         reasoning: None,

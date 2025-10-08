@@ -185,10 +185,10 @@ fn create_request(
     })
 }
 
-#[expect(clippy::needless_pass_by_value)]
 fn map_model(model: types::Model) -> ModelDetails {
     ModelDetails {
         id: (PROVIDER, model.base_model_id.as_str()).try_into().unwrap(),
+        display_name: Some(model.name),
         context_window: Some(model.input_token_limit),
         max_output_tokens: Some(model.output_token_limit),
         reasoning: model

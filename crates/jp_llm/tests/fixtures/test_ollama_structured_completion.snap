@@ -2,10 +2,6 @@
 source: crates/jp_test/src/mock.rs
 expression: expr
 ---
-Ok(
-    Array [
-        String("Testing Conversation"),
-        String("Assistance Provided"),
-        String("Helpful Assistant"),
-    ],
+Err(
+    MissingStructuredData,
 )

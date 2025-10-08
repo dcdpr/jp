@@ -48,6 +48,9 @@ pub struct ModelDetails {
     /// The id of the model.
     pub id: ModelIdConfig,
 
+    /// The display name of the model, if known.
+    pub display_name: Option<String>,
+
     /// The context window size in tokens, if known.
     pub context_window: Option<u32>,
 
@@ -72,6 +75,7 @@ impl ModelDetails {
     fn empty(id: ModelIdConfig) -> Self {
         Self {
             id,
+            display_name: None,
             context_window: None,
             max_output_tokens: None,
             reasoning: None,

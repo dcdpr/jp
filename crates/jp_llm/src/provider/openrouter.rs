@@ -272,6 +272,7 @@ fn build_request(
 fn map_model(model: response::Model) -> Result<ModelDetails> {
     Ok(ModelDetails {
         id: (PROVIDER, model.id).try_into()?,
+        display_name: Some(model.name),
         context_window: Some(model.context_length),
         max_output_tokens: None,
         reasoning: None,
