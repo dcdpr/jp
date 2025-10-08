@@ -520,7 +520,7 @@ impl Query {
                         .models()
                         .await?
                         .into_iter()
-                        .map(|v| v.slug)
+                        .map(|v| v.id.name.to_string())
                         .collect();
 
                     return Err(Error::UnknownModel { model, available });
@@ -1037,8 +1037,9 @@ async fn handle_structured_output(
     let message = thread.message.clone();
     let query = StructuredQuery::new(schema, thread);
 
+    let model = provider.model_details(&model_id.name).await?;
     let value = provider
-        .structured_completion(model_id, parameters, query)
+        .structured_completion(&model, parameters, query)
         .await?;
     let content = if ctx.term.is_tty {
         serde_json::to_string_pretty(&value)?
