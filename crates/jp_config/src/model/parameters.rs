@@ -25,6 +25,14 @@ pub struct ParametersConfig {
     /// based on the local machine's resources, in such cases, it might be
     /// necessary to set a higher limit if your conversation is long or has more
     /// context attached.
+    ///
+    /// If unset, some providers may use "request chaining" to allow the model
+    /// to generate more tokens than the maximum token limit of the model, if
+    /// the model had not finished its complete response after the first
+    /// request. You can either set `chain_on_max_tokens` to `false` for a given
+    /// provider, or explicitly set this `max_tokens` parameter to a specific
+    /// value to avoid request chaining. While request chaining is generally
+    /// useful, sometimes you might want to have more tighter cost controls.
     pub max_tokens: Option<u32>,
 
     /// Reasoning configuration.

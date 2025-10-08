@@ -542,6 +542,7 @@ impl Query {
                     metadata.insert(key, data);
                     continue;
                 }
+                _ => continue,
             };
 
             let Some(data) = data else {
