@@ -48,6 +48,8 @@ use crate::{
     load_cli_cfg_args, parser, Ctx, PATH_STRING_PREFIX,
 };
 
+const EMPTY_RESPONSE_MESSAGE: &str = "The response appears to be empty. Please try again.";
+
 type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Debug, Default, clap::Args)]
@@ -564,6 +566,15 @@ impl Query {
             let max_tries = 3;
             if tries <= max_tries {
                 warn!(tries, max_tries, "Empty response received, retrying...");
+
+                if let Some(query) = thread.message.as_query_mut() {
+                    query.push_str(" -- ");
+                    if query.ends_with(EMPTY_RESPONSE_MESSAGE) {
+                        query.push_str(" Please try again.");
+                    } else {
+                        query.push_str(EMPTY_RESPONSE_MESSAGE);
+                    }
+                }
 
                 return Box::pin(self.handle_stream(
                     ctx,
