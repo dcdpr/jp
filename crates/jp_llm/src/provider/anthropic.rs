@@ -741,9 +741,7 @@ fn map_event(
         {
             Delta::tool_call_finished().into_stream_events(accumulator)
         }
-        ContentBlockStop { .. } if accumulator.is_accumulating_function_call() => {
-            Delta::tool_call_finished().into_stream_events(accumulator)
-        }
+        ContentBlockStop { .. } => accumulator.drain(),
         MessageDelta { delta, .. }
             if delta
                 .stop_reason

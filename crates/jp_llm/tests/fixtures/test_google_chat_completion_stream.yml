@@ -7,4 +7,4 @@ then:
   header:
     - name: content-type
       value: text/event-stream
-  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"Hello! I received your test message. How can I assist you?\"}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 3,\"candidatesTokenCount\": 14,\"totalTokenCount\": 618,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 3}],\"thoughtsTokenCount\": 601},\"modelVersion\": \"models/gemini-2.5-flash-preview-05-20\",\"responseId\": \"ByPmaMmFHaXTvdIPk4b26Q8\"}\r\n\r\n"
+  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"Received. How can I help you today?\"}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 3,\"candidatesTokenCount\": 9,\"totalTokenCount\": 43,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 3}],\"thoughtsTokenCount\": 31},\"modelVersion\": \"models/gemini-2.5-flash-preview-05-20\",\"responseId\": \"IF_maKfFM9S0vdIP8eXnuA4\"}\r\n\r\n"

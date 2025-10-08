@@ -11,6 +11,9 @@ Ok(
                     "google/gemini-2.5-flash-image",
                 ),
             },
+            display_name: Some(
+                "Google: Gemini 2.5 Flash Image (Nano Banana)",
+            ),
             context_window: Some(
                 32768,
             ),
@@ -29,6 +32,9 @@ Ok(
                     "openai/gpt-5-pro",
                 ),
             },
+            display_name: Some(
+                "OpenAI: GPT-5 Pro",
+            ),
             context_window: Some(
                 400000,
             ),

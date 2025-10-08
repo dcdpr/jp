@@ -267,7 +267,7 @@ impl From<Reply> for AssistantMessage {
                 Event::Metadata(key, metadata) => {
                     message.metadata.insert(key, metadata);
                 }
-                Event::MaxTokensReached | Event::Completed => {}
+                Event::Finished(_) => {}
             }
         }
 
@@ -301,14 +301,7 @@ impl From<(ProviderId, Vec<StreamEvent>)> for Reply {
                 StreamEvent::Metadata(key, metadata) => {
                     events.push(Event::Metadata(key, metadata));
                 }
-                StreamEvent::EndOfStream(reason) => {
-                    match reason {
-                        StreamEndReason::Completed => events.push(Event::Completed),
-                        StreamEndReason::MaxTokens => events.push(Event::MaxTokensReached),
-                    }
-
-                    break;
-                }
+                StreamEvent::EndOfStream(reason) => events.push(Event::Finished(reason)),
             }
         }
 
@@ -331,12 +324,8 @@ pub enum Event {
     /// Opaque provider-specific metadata.
     Metadata(String, Value),
 
-    /// The response ended prematurely due to reaching the maximum number of
-    /// tokens.
-    MaxTokensReached,
-
-    /// The response was completed.
-    Completed,
+    /// The reason the response was finished.
+    Finished(StreamEndReason),
 }
 
 impl Event {
@@ -371,8 +360,7 @@ impl From<Event> for StreamEvent {
             }
             Event::ToolCall(call) => StreamEvent::ToolCall(call),
             Event::Metadata(key, metadata) => StreamEvent::Metadata(key, metadata),
-            Event::MaxTokensReached => StreamEvent::EndOfStream(StreamEndReason::MaxTokens),
-            Event::Completed => StreamEvent::EndOfStream(StreamEndReason::Completed),
+            Event::Finished(reason) => StreamEvent::EndOfStream(reason),
         }
     }
 }
@@ -454,10 +442,7 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
                     events.push(Event::ToolCall(call));
                 }
                 StreamEvent::Metadata(key, metadata) => events.push(Event::Metadata(key, metadata)),
-                StreamEvent::EndOfStream(reason) => match reason {
-                    StreamEndReason::Completed => events.push(Event::Completed),
-                    StreamEndReason::MaxTokens => events.push(Event::MaxTokensReached),
-                },
+                StreamEvent::EndOfStream(reason) => events.push(Event::Finished(reason)),
             }
         }
 

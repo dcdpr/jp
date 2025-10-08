@@ -5,6 +5,13 @@ expression: expr
 Ok(
     Reply {
         provider: Google,
-        events: [],
+        events: [
+            Content(
+                "Received! How can I help you today?",
+            ),
+            Finished(
+                Completed,
+            ),
+        ],
     },
 )

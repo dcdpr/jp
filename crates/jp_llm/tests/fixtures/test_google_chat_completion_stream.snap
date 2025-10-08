@@ -2,4 +2,17 @@
 source: crates/jp_test/src/mock.rs
 expression: expr
 ---
-""
+[
+    Ok(
+        ChatChunk(
+            Content(
+                "Received. How can I help you today?",
+            ),
+        ),
+    ),
+    Ok(
+        EndOfStream(
+            Completed,
+        ),
+    ),
+]

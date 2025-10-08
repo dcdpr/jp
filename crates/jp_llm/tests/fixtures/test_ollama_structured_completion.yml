@@ -7,26 +7,4 @@ then:
   header:
     - name: content-type
       value: application/json; charset=utf-8
-  body: "{\"model\":\"llama3.1:8b\",\"created_at\":\"2025-10-08T08:38:39.591599Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"generate_structured_data\",\"arguments\":{\"description1\":\"Conversation Test\",\"description2\":\"User Request Answered\",\"description3\":\"Assistant Response Provided\"}}}]},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":4361081459,\"load_duration\":2951188334,\"prompt_eval_count\":205,\"prompt_eval_duration\":642099000,\"eval_count\":40,\"eval_duration\":766332250}"
----
-when:
-  path: /api/chat
-  method: POST
-  body: "{\"model\":\"llama3.1:8b\",\"messages\":[{\"role\":\"user\",\"content\":\"Test message\",\"tool_calls\":[],\"thinking\":null},{\"role\":\"user\",\"content\":\"Generate 3 concise, descriptive, factual titles for this conversation. Try to keep them short and to the point, no more than 50 characters.\\n\\nDO NOT generate titles about the request to generate titles!\",\"tool_calls\":[],\"thinking\":null}],\"tools\":[{\"type\":\"Function\",\"function\":{\"name\":\"generate_structured_data\",\"description\":\"Generate structured data using the following description:\\n\\nGenerate 3 concise, descriptive factual titles for this conversation.\",\"parameters\":{\"titles\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}}],\"options\":{},\"stream\":false,\"think\":null}"
-then:
-  status: 200
-  header:
-    - name: content-type
-      value: application/json; charset=utf-8
-  body: "{\"model\":\"llama3.1:8b\",\"created_at\":\"2025-10-08T08:38:40.033143Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"generate_structured_data\",\"arguments\":{\"description\":\"Test message\"}}}]},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":440223959,\"load_duration\":48690042,\"prompt_eval_count\":205,\"prompt_eval_duration\":19954459,\"eval_count\":20,\"eval_duration\":370883875}"
----
-when:
-  path: /api/chat
-  method: POST
-  body: "{\"model\":\"llama3.1:8b\",\"messages\":[{\"role\":\"user\",\"content\":\"Test message\",\"tool_calls\":[],\"thinking\":null},{\"role\":\"user\",\"content\":\"Generate 3 concise, descriptive, factual titles for this conversation. Try to keep them short and to the point, no more than 50 characters.\\n\\nDO NOT generate titles about the request to generate titles!\",\"tool_calls\":[],\"thinking\":null}],\"tools\":[{\"type\":\"Function\",\"function\":{\"name\":\"generate_structured_data\",\"description\":\"Generate structured data using the following description:\\n\\nGenerate 3 concise, descriptive factual titles for this conversation.\",\"parameters\":{\"titles\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}}],\"options\":{},\"stream\":false,\"think\":null}"
-then:
-  status: 200
-  header:
-    - name: content-type
-      value: application/json; charset=utf-8
-  body: "{\"model\":\"llama3.1:8b\",\"created_at\":\"2025-10-08T08:38:40.473837Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"generate_structured_data\",\"arguments\":{\"description\":\"Test message\"}}}]},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":439625333,\"load_duration\":46725375,\"prompt_eval_count\":205,\"prompt_eval_duration\":20020958,\"eval_count\":20,\"eval_duration\":372150083}"
+  body: "{\"model\":\"llama3.1:8b\",\"created_at\":\"2025-10-08T13:01:45.171569Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"generate_structured_data\",\"arguments\":{\"description\":[\"Test message\",\"3 concise, descriptive factual titles for this conversation.\",\"Try to keep them short and to the point, no more than 50 characters.\",\"DO NOT generate titles about the request to generate titles!\"]}}}]},\"done_reason\":\"stop\",\"done\":true,\"total_duration\":2775936750,\"load_duration\":880062042,\"prompt_eval_count\":205,\"prompt_eval_duration\":642487542,\"eval_count\":63,\"eval_duration\":1252334708}"

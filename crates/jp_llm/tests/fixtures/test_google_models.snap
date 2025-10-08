@@ -11,6 +11,9 @@ Ok(
                     "embedding-gecko-001",
                 ),
             },
+            display_name: Some(
+                "Embedding Gecko",
+            ),
             context_window: Some(
                 1024,
             ),
@@ -29,6 +32,9 @@ Ok(
                     "gemini-2.5-pro-preview-03-25",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Pro Preview 03-25",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -54,6 +60,9 @@ Ok(
                     "gemini-2.5-flash-preview-05-20",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash Preview 05-20",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -79,6 +88,9 @@ Ok(
                     "gemini-2.5-flash",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -104,6 +116,9 @@ Ok(
                     "gemini-2.5-flash-lite-preview-06-17",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash-Lite Preview 06-17",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -129,6 +144,9 @@ Ok(
                     "gemini-2.5-pro-preview-05-06",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Pro Preview 05-06",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -154,6 +172,9 @@ Ok(
                     "gemini-2.5-pro-preview-06-05",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Pro Preview",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -179,6 +200,9 @@ Ok(
                     "gemini-2.5-pro",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Pro",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -204,6 +228,9 @@ Ok(
                     "gemini-2.0-flash-exp",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.0 Flash Experimental",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -222,6 +249,9 @@ Ok(
                     "gemini-2.0-flash",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.0 Flash",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -240,6 +270,9 @@ Ok(
                     "gemini-2.0-flash-001",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.0 Flash 001",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -258,6 +291,9 @@ Ok(
                     "gemini-2.0-flash-lite-001",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.0 Flash-Lite 001",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -276,6 +312,9 @@ Ok(
                     "gemini-2.0-flash-lite",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.0 Flash-Lite",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -294,6 +333,9 @@ Ok(
                     "gemini-2.0-flash-lite-preview-02-05",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.0 Flash-Lite Preview 02-05",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -312,6 +354,9 @@ Ok(
                     "gemini-2.0-flash-lite-preview",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.0 Flash-Lite Preview",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -330,6 +375,9 @@ Ok(
                     "gemini-2.0-pro-exp",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.0 Pro Experimental",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -348,6 +396,9 @@ Ok(
                     "gemini-2.0-pro-exp-02-05",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.0 Pro Experimental 02-05",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -366,6 +417,9 @@ Ok(
                     "gemini-exp-1206",
                 ),
             },
+            display_name: Some(
+                "Gemini Experimental 1206",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -384,6 +438,9 @@ Ok(
                     "gemini-2.0-flash-thinking-exp-01-21",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash Preview 05-20",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -402,6 +459,9 @@ Ok(
                     "gemini-2.0-flash-thinking-exp",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash Preview 05-20",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -420,6 +480,9 @@ Ok(
                     "gemini-2.0-flash-thinking-exp-1219",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash Preview 05-20",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -438,6 +501,9 @@ Ok(
                     "gemini-2.5-flash-preview-tts",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash Preview TTS",
+            ),
             context_window: Some(
                 8192,
             ),
@@ -463,6 +529,9 @@ Ok(
                     "gemini-2.5-pro-preview-tts",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Pro Preview TTS",
+            ),
             context_window: Some(
                 8192,
             ),
@@ -488,6 +557,9 @@ Ok(
                     "learnlm-2.0-flash-experimental",
                 ),
             },
+            display_name: Some(
+                "LearnLM 2.0 Flash Experimental",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -506,6 +578,9 @@ Ok(
                     "gemma-3-1b-it",
                 ),
             },
+            display_name: Some(
+                "Gemma 3 1B",
+            ),
             context_window: Some(
                 32768,
             ),
@@ -524,6 +599,9 @@ Ok(
                     "gemma-3-4b-it",
                 ),
             },
+            display_name: Some(
+                "Gemma 3 4B",
+            ),
             context_window: Some(
                 32768,
             ),
@@ -542,6 +620,9 @@ Ok(
                     "gemma-3-12b-it",
                 ),
             },
+            display_name: Some(
+                "Gemma 3 12B",
+            ),
             context_window: Some(
                 32768,
             ),
@@ -560,6 +641,9 @@ Ok(
                     "gemma-3-27b-it",
                 ),
             },
+            display_name: Some(
+                "Gemma 3 27B",
+            ),
             context_window: Some(
                 131072,
             ),
@@ -578,6 +662,9 @@ Ok(
                     "gemma-3n-e4b-it",
                 ),
             },
+            display_name: Some(
+                "Gemma 3n E4B",
+            ),
             context_window: Some(
                 8192,
             ),
@@ -596,6 +683,9 @@ Ok(
                     "gemma-3n-e2b-it",
                 ),
             },
+            display_name: Some(
+                "Gemma 3n E2B",
+            ),
             context_window: Some(
                 8192,
             ),
@@ -614,6 +704,9 @@ Ok(
                     "gemini-flash-latest",
                 ),
             },
+            display_name: Some(
+                "Gemini Flash Latest",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -632,6 +725,9 @@ Ok(
                     "gemini-flash-lite-latest",
                 ),
             },
+            display_name: Some(
+                "Gemini Flash-Lite Latest",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -650,6 +746,9 @@ Ok(
                     "gemini-pro-latest",
                 ),
             },
+            display_name: Some(
+                "Gemini Pro Latest",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -668,6 +767,9 @@ Ok(
                     "gemini-2.5-flash-lite",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash-Lite",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -693,6 +795,9 @@ Ok(
                     "gemini-2.5-flash-image-preview",
                 ),
             },
+            display_name: Some(
+                "Nano Banana",
+            ),
             context_window: Some(
                 32768,
             ),
@@ -718,6 +823,9 @@ Ok(
                     "gemini-2.5-flash-image",
                 ),
             },
+            display_name: Some(
+                "Nano Banana",
+            ),
             context_window: Some(
                 32768,
             ),
@@ -743,6 +851,9 @@ Ok(
                     "gemini-2.5-flash-preview-09-2025",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash Preview Sep 2025",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -768,6 +879,9 @@ Ok(
                     "gemini-2.5-flash-lite-preview-09-2025",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash-Lite Preview Sep 2025",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -793,6 +907,9 @@ Ok(
                     "gemini-robotics-er-1.5-preview",
                 ),
             },
+            display_name: Some(
+                "Gemini Robotics-ER 1.5 Preview",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -811,6 +928,9 @@ Ok(
                     "gemini-2.5-computer-use-preview-10-2025",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Computer Use Preview 10-2025",
+            ),
             context_window: Some(
                 131072,
             ),
@@ -829,6 +949,9 @@ Ok(
                     "embedding-001",
                 ),
             },
+            display_name: Some(
+                "Embedding 001",
+            ),
             context_window: Some(
                 2048,
             ),
@@ -847,6 +970,9 @@ Ok(
                     "text-embedding-004",
                 ),
             },
+            display_name: Some(
+                "Text Embedding 004",
+            ),
             context_window: Some(
                 2048,
             ),
@@ -865,6 +991,9 @@ Ok(
                     "gemini-embedding-exp-03-07",
                 ),
             },
+            display_name: Some(
+                "Gemini Embedding Experimental 03-07",
+            ),
             context_window: Some(
                 8192,
             ),
@@ -883,6 +1012,9 @@ Ok(
                     "gemini-embedding-exp",
                 ),
             },
+            display_name: Some(
+                "Gemini Embedding Experimental",
+            ),
             context_window: Some(
                 8192,
             ),
@@ -901,6 +1033,9 @@ Ok(
                     "gemini-embedding-001",
                 ),
             },
+            display_name: Some(
+                "Gemini Embedding 001",
+            ),
             context_window: Some(
                 2048,
             ),
@@ -919,6 +1054,9 @@ Ok(
                     "aqa",
                 ),
             },
+            display_name: Some(
+                "Model that performs Attributed Question Answering.",
+            ),
             context_window: Some(
                 7168,
             ),
@@ -937,6 +1075,9 @@ Ok(
                     "imagen-3.0-generate-002",
                 ),
             },
+            display_name: Some(
+                "Imagen 3.0",
+            ),
             context_window: Some(
                 480,
             ),
@@ -955,6 +1096,9 @@ Ok(
                     "imagen-4.0-generate-preview-06-06",
                 ),
             },
+            display_name: Some(
+                "Imagen 4 (Preview)",
+            ),
             context_window: Some(
                 480,
             ),
@@ -973,6 +1117,9 @@ Ok(
                     "imagen-4.0-ultra-generate-preview-06-06",
                 ),
             },
+            display_name: Some(
+                "Imagen 4 Ultra (Preview)",
+            ),
             context_window: Some(
                 480,
             ),
@@ -991,6 +1138,9 @@ Ok(
                     "imagen-4.0-generate-001",
                 ),
             },
+            display_name: Some(
+                "Imagen 4",
+            ),
             context_window: Some(
                 480,
             ),
@@ -1009,6 +1159,9 @@ Ok(
                     "imagen-4.0-ultra-generate-001",
                 ),
             },
+            display_name: Some(
+                "Imagen 4 Ultra",
+            ),
             context_window: Some(
                 480,
             ),
@@ -1027,6 +1180,9 @@ Ok(
                     "imagen-4.0-fast-generate-001",
                 ),
             },
+            display_name: Some(
+                "Imagen 4 Fast",
+            ),
             context_window: Some(
                 480,
             ),
@@ -1045,6 +1201,9 @@ Ok(
                     "veo-2.0-generate-001",
                 ),
             },
+            display_name: Some(
+                "Veo 2",
+            ),
             context_window: Some(
                 480,
             ),
@@ -1063,6 +1222,9 @@ Ok(
                     "veo-3.0-generate-preview",
                 ),
             },
+            display_name: Some(
+                "Veo 3",
+            ),
             context_window: Some(
                 480,
             ),
@@ -1081,6 +1243,9 @@ Ok(
                     "veo-3.0-fast-generate-preview",
                 ),
             },
+            display_name: Some(
+                "Veo 3 fast",
+            ),
             context_window: Some(
                 480,
             ),
@@ -1099,6 +1264,9 @@ Ok(
                     "veo-3.0-generate-001",
                 ),
             },
+            display_name: Some(
+                "Veo 3",
+            ),
             context_window: Some(
                 480,
             ),
@@ -1117,6 +1285,9 @@ Ok(
                     "veo-3.0-fast-generate-001",
                 ),
             },
+            display_name: Some(
+                "Veo 3 fast",
+            ),
             context_window: Some(
                 480,
             ),
@@ -1135,6 +1306,9 @@ Ok(
                     "gemini-2.5-flash-preview-native-audio-dialog",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash Preview Native Audio Dialog",
+            ),
             context_window: Some(
                 131072,
             ),
@@ -1160,6 +1334,9 @@ Ok(
                     "gemini-2.5-flash-exp-native-audio-thinking-dialog",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash Exp Native Audio Thinking Dialog",
+            ),
             context_window: Some(
                 131072,
             ),
@@ -1185,6 +1362,9 @@ Ok(
                     "gemini-2.0-flash-live-001",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.0 Flash 001",
+            ),
             context_window: Some(
                 131072,
             ),
@@ -1203,6 +1383,9 @@ Ok(
                     "gemini-live-2.5-flash-preview",
                 ),
             },
+            display_name: Some(
+                "Gemini Live 2.5 Flash Preview",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -1221,6 +1404,9 @@ Ok(
                     "gemini-2.5-flash-live-preview",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash Live Preview",
+            ),
             context_window: Some(
                 1048576,
             ),
@@ -1246,6 +1432,9 @@ Ok(
                     "gemini-2.5-flash-native-audio-latest",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash Native Audio Latest",
+            ),
             context_window: Some(
                 131072,
             ),
@@ -1271,6 +1460,9 @@ Ok(
                     "gemini-2.5-flash-native-audio-preview-09-2025",
                 ),
             },
+            display_name: Some(
+                "Gemini 2.5 Flash Native Audio Preview 09-2025",
+            ),
             context_window: Some(
                 131072,
             ),

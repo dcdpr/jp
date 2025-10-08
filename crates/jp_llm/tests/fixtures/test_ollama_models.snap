@@ -11,6 +11,9 @@ Ok(
                     "qwen2.5vl:3b",
                 ),
             },
+            display_name: Some(
+                "qwen2.5vl:3b",
+            ),
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
@@ -25,6 +28,9 @@ Ok(
                     "llama3.1:8b",
                 ),
             },
+            display_name: Some(
+                "llama3.1:8b",
+            ),
             context_window: None,
             max_output_tokens: None,
             reasoning: None,

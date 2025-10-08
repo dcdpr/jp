@@ -11,6 +11,7 @@ Ok(
                     "bartowski_Qwen2.5-7B-Instruct-GGUF_Qwen2.5-7B-Instruct-Q4_K_M.gguf",
                 ),
             },
+            display_name: None,
             context_window: None,
             max_output_tokens: None,
             reasoning: None,

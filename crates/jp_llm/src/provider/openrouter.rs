@@ -93,16 +93,16 @@ impl Provider for Openrouter {
     ) -> Result<EventStream> {
         debug!(
             model = %model.id,
-
+            "Starting OpenRouter chat completion stream."
         );
 
         let request = build_request(query, model, parameters)?;
         let inner_stream = self
             .client
             .chat_completion_stream(request)
-            .map_err(Error::from)
-            .peekable();
+            .map_err(Error::from);
 
+        #[expect(clippy::semicolon_if_nothing_returned)]
         Ok(Box::pin(try_stream!({
             let mut accumulator = Accumulator::new(200);
             tokio::pin!(inner_stream);
@@ -129,21 +129,37 @@ impl Provider for Openrouter {
                     continue;
                 };
 
+                let finish_reason = streaming_choice.finish_reason;
+
                 let mut delta: Delta = streaming_choice.delta.into();
                 delta.tool_call_finished = streaming_choice
                     .finish_reason
                     .is_some_and(|r| matches!(r, FinishReason::ToolCalls | FinishReason::Stop));
 
-                if inner_stream.as_mut().peek().await.is_none() {
-                    accumulator.finalize();
-                }
-
                 for event in delta.into_stream_events(&mut accumulator)? {
                     yield event;
                 }
-            }
 
-            yield StreamEvent::EndOfStream(StreamEndReason::Completed);
+                if let Some(finish_reason) = finish_reason {
+                    for event in accumulator.drain()? {
+                        yield event;
+                    }
+
+                    match finish_reason {
+                        FinishReason::Length => {
+                            yield StreamEvent::EndOfStream(StreamEndReason::MaxTokens)
+                        }
+                        FinishReason::Stop => {
+                            yield StreamEvent::EndOfStream(StreamEndReason::Completed)
+                        }
+                        _ => {
+                            yield StreamEvent::EndOfStream(StreamEndReason::Other(
+                                finish_reason.as_str().to_owned(),
+                            ))
+                        }
+                    }
+                }
+            }
         })))
     }
 
@@ -192,6 +208,14 @@ impl Provider for Openrouter {
                 arguments: serde_json::from_str(&function.arguments.unwrap_or_default())
                     .unwrap_or(Value::Null),
             }));
+        }
+
+        match choice.finish_reason {
+            FinishReason::Length => events.push(Event::Finished(StreamEndReason::MaxTokens)),
+            FinishReason::Stop => events.push(Event::Finished(StreamEndReason::Completed)),
+            finish_reason => events.push(Event::Finished(StreamEndReason::Other(
+                finish_reason.as_str().to_owned(),
+            ))),
         }
 
         Ok(Reply {

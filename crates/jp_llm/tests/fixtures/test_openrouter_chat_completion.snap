@@ -7,7 +7,10 @@ Ok(
         provider: Openrouter,
         events: [
             Content(
-                "Hello! I received your test message. How can I assist you today?",
+                "Test message received. How can I assist you today?",
+            ),
+            Finished(
+                Completed,
             ),
         ],
     },

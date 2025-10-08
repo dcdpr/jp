@@ -142,19 +142,15 @@ impl Provider for Llamacpp {
 
                 reasoning_extractor.handle(delta.content.as_deref().unwrap_or_default());
 
-                if stream.is_empty() && stream.is_closed() {
+                if finish_reason.is_some() {
                     reasoning_extractor.finalize();
-                    accumulator.finalize();
                 }
-
-                let tool_call_finished =
-                    finish_reason.is_some_and(|reason| reason == "function_call");
 
                 for event in map_event(
                     delta,
                     &mut accumulator,
                     &mut reasoning_extractor,
-                    tool_call_finished,
+                    finish_reason.as_deref(),
                 )? {
                     yield event;
                 }
@@ -167,7 +163,7 @@ fn map_event(
     event: ChatCompletionMessageDelta,
     accumulator: &mut Accumulator,
     extractor: &mut ReasoningExtractor,
-    tool_call_finished: bool,
+    finish_reason: Option<&str>,
 ) -> Result<Vec<StreamEvent>> {
     let mut events = vec![];
 
@@ -179,20 +175,26 @@ fn map_event(
 
         let mut delta = Delta::tool_call(id.unwrap_or_default(), name, arguments);
 
-        if tool_call_finished {
+        if finish_reason == Some("function_call") {
             delta.tool_call_finished = true;
         }
 
         events.extend(delta.into_stream_events(accumulator)?);
     }
 
-    events.extend(map_content(accumulator, extractor)?);
+    events.extend(map_content(
+        accumulator,
+        extractor,
+        finish_reason.is_some(),
+    )?);
+
     Ok(events)
 }
 
 fn map_content(
     accumulator: &mut Accumulator,
     extractor: &mut ReasoningExtractor,
+    done: bool,
 ) -> Result<Vec<StreamEvent>> {
     let mut events = Vec::new();
     if !extractor.reasoning.is_empty() {
@@ -203,6 +205,10 @@ fn map_content(
     if !extractor.other.is_empty() {
         let content = mem::take(&mut extractor.other);
         events.extend(Delta::content(content).into_stream_events(accumulator)?);
+    }
+
+    if done {
+        events.extend(accumulator.drain()?);
     }
 
     Ok(events)
@@ -218,7 +224,7 @@ fn map_model(model: &ModelResponse) -> Result<ModelDetails> {
                 .map_or(model.id.as_str(), |(_, v)| v),
         )
             .try_into()?,
-        display_name: Some(model.id.clone()),
+        display_name: None,
         context_window: None,
         max_output_tokens: None,
         reasoning: None,

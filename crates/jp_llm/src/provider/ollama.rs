@@ -98,16 +98,13 @@ impl Provider for Ollama {
             let stream = client
                 .send_chat_messages_stream(request.clone())
                 .await
-                .map_err(Error::from)?
-                .peekable();
+                .map_err(Error::from)?;
 
             tokio::pin!(stream);
             while let Some(Ok(event)) = stream.next().await {
                 extractor.handle(&event.message.content);
-
-                if stream.as_mut().peek().await.is_none() {
+                if event.done {
                     extractor.finalize();
-                    accumulator.finalize();
                 }
 
                 for event in map_event(event, &mut accumulator, &mut extractor)? {
@@ -146,10 +143,7 @@ fn map_response(response: ChatMessageResponse) -> Result<Vec<Event>> {
                 },
                 StreamEvent::ToolCall(request) => Event::ToolCall(request),
                 StreamEvent::Metadata(key, metadata) => Event::Metadata(key, metadata),
-                StreamEvent::EndOfStream(reason) => match reason {
-                    StreamEndReason::Completed => Event::Completed,
-                    StreamEndReason::MaxTokens => Event::MaxTokensReached,
-                },
+                StreamEvent::EndOfStream(eos) => Event::Finished(eos),
             })
             .collect(),
     )
@@ -173,13 +167,14 @@ fn map_event(
         events.extend(delta.into_stream_events(accumulator)?);
     }
 
-    events.extend(map_content(accumulator, extractor)?);
+    events.extend(map_content(accumulator, extractor, event.done)?);
     Ok(events)
 }
 
 fn map_content(
     accumulator: &mut Accumulator,
     extractor: &mut ReasoningExtractor,
+    done: bool,
 ) -> Result<Vec<StreamEvent>> {
     let mut events = Vec::new();
     if !extractor.reasoning.is_empty() {
@@ -190,6 +185,11 @@ fn map_content(
     if !extractor.other.is_empty() {
         let content = mem::take(&mut extractor.other);
         events.extend(Delta::content(content).into_stream_events(accumulator)?);
+    }
+
+    if done {
+        events.extend(accumulator.drain()?);
+        events.push(StreamEvent::EndOfStream(StreamEndReason::Completed));
     }
 
     Ok(events)
@@ -659,10 +659,7 @@ mod tests {
                     .chat_completion_stream(&model, &ParametersConfig::default(), query)
                     .await
                     .unwrap()
-                    .filter_map(
-                        |r| async move { r.unwrap().into_chat_chunk().unwrap().into_content() },
-                    )
-                    .collect::<String>()
+                    .collect::<Vec<_>>()
                     .await
             },
         )

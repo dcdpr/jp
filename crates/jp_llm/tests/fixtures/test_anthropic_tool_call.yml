@@ -7,4 +7,4 @@ then:
   header:
     - name: content-type
       value: application/json
-  body: "{\"model\":\"claude-3-7-sonnet-20250219\",\"id\":\"msg_01HmGtfaLtH3xWVPoZdxftzU\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_01K11NmNvySR6WkRHa9hbV84\",\"name\":\"run_me\",\"input\":{\"bar\":\"foo\"}}],\"stop_reason\":\"tool_use\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":408,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":38,\"service_tier\":\"standard\"}}"
+  body: "{\"model\":\"claude-3-7-sonnet-20250219\",\"id\":\"msg_01T4PshTEQFhj3mNKVgdGx7o\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_01AwxriXHLygkS3YYygTo7HF\",\"name\":\"run_me\",\"input\":{\"bar\":\"foo\"}}],\"stop_reason\":\"tool_use\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":408,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":38,\"service_tier\":\"standard\"}}"

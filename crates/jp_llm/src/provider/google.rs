@@ -82,10 +82,7 @@ impl Provider for Google {
                         },
                         StreamEvent::ToolCall(call) => Event::ToolCall(call),
                         StreamEvent::Metadata(key, value) => Event::Metadata(key, value),
-                        StreamEvent::EndOfStream(eos) => match eos {
-                            StreamEndReason::Completed => Event::Completed,
-                            StreamEndReason::MaxTokens => Event::MaxTokensReached,
-                        },
+                        StreamEvent::EndOfStream(eos) => Event::Finished(eos),
                     })
                     .collect(),
             })
@@ -188,7 +185,7 @@ fn create_request(
 fn map_model(model: types::Model) -> ModelDetails {
     ModelDetails {
         id: (PROVIDER, model.base_model_id.as_str()).try_into().unwrap(),
-        display_name: Some(model.name),
+        display_name: Some(model.display_name),
         context_window: Some(model.input_token_limit),
         max_output_tokens: Some(model.output_token_limit),
         reasoning: model
@@ -214,12 +211,48 @@ fn map_response(
     response
         .candidates
         .into_iter()
-        .flat_map(|v| v.content.parts)
+        .flat_map(|v| map_candidate(v, accumulator))
+        .try_fold(vec![], |mut acc, events| {
+            acc.extend(events);
+            Ok(acc)
+        })
+}
+
+fn map_candidate(
+    candidate: types::Candidate,
+    accumulator: &mut Accumulator,
+) -> Result<Vec<StreamEvent>> {
+    let mut events: Vec<StreamEvent> = candidate
+        .content
+        .parts
+        .into_iter()
         .map(|v| Delta::from(v).into_stream_events(accumulator))
         .try_fold(vec![], |mut acc, events| {
             acc.extend(events?);
-            Ok(acc)
-        })
+            Ok::<_, Error>(acc)
+        })?;
+
+    // The model has finished generating tokens, drain the accumulator.
+    if candidate.finish_reason.is_some() {
+        events.extend(accumulator.drain()?);
+    }
+
+    match candidate.finish_reason {
+        Some(types::FinishReason::MaxTokens) => {
+            events.push(StreamEvent::EndOfStream(StreamEndReason::MaxTokens));
+        }
+        Some(types::FinishReason::Stop) => {
+            events.push(StreamEvent::EndOfStream(StreamEndReason::Completed));
+        }
+        Some(v) => {
+            events.push(StreamEvent::EndOfStream(StreamEndReason::Other(
+                serde_json::to_string(&v)?,
+            )));
+        }
+        _ => {}
+    }
+
+    Ok(events)
 }
 
 impl TryFrom<&GoogleConfig> for Google {
@@ -529,6 +562,34 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn test_google_model_details() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = LlmProviderConfig::default().google;
+        let name: Name = "gemini-2.5-flash-preview-05-20".parse().unwrap();
+        let vcr = vcr();
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
+                });
+            },
+            |recording, url| async move {
+                config.base_url = format!("{url}/v1beta");
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Google::try_from(&config)
+                    .unwrap()
+                    .model_details(&name)
+                    .await
+            },
+        )
+        .await
+    }
+
+    #[test(tokio::test)]
     async fn test_google_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().google;
         let vcr = vcr();
@@ -627,10 +688,7 @@ mod tests {
                     .chat_completion_stream(&model, &ParametersConfig::default(), query)
                     .await
                     .unwrap()
-                    .filter_map(
-                        |r| async move { r.unwrap().into_chat_chunk().unwrap().into_content() },
-                    )
-                    .collect::<String>()
+                    .collect::<Vec<_>>()
                     .await
             },
         )

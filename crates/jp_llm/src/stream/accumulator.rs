@@ -53,12 +53,23 @@ impl Accumulator {
         Ok(events)
     }
 
-    /// Mark the accumulator as finished, so that the next `delta_step` call
-    /// will drain all buffers and close any open accumulators.
-    pub fn finalize(&mut self) {
-        self.tool_call.finalize();
-        self.reasoning.finalize();
-        self.content.finalize();
+    /// Drain the buffers and return any remaining events.
+    pub fn drain(&mut self) -> Result<Vec<StreamEvent>, Error> {
+        let mut events = vec![];
+
+        if let Some(text) = self.reasoning.drain() {
+            events.push(StreamEvent::ChatChunk(CompletionChunk::Reasoning(text)));
+        }
+
+        if let Some(text) = self.content.drain() {
+            events.push(StreamEvent::ChatChunk(CompletionChunk::Content(text)));
+        }
+
+        if let Some(call) = self.tool_call.delta_step(None, None, None, true)? {
+            events.push(StreamEvent::ToolCall(call));
+        }
+
+        Ok(events)
     }
 }
 
@@ -71,7 +82,6 @@ pub enum ToolCallAccumulator {
         id: String,
         name: String,
         arguments_buffer: String,
-        finished: bool,
     },
 }
 
@@ -85,7 +95,7 @@ impl ToolCallAccumulator {
         id: Option<&str>,
         name: Option<&str>,
         arguments: Option<&str>,
-        force_finished: bool,
+        finished: bool,
     ) -> Result<Option<ToolCallRequest>, Error> {
         match self {
             Self::Idle => match name {
@@ -94,7 +104,6 @@ impl ToolCallAccumulator {
                         id: id.map(str::to_owned).unwrap_or_default(),
                         name: name.to_owned(),
                         arguments_buffer: arguments.map(str::to_owned).unwrap_or_default(),
-                        finished: false,
                     };
 
                     Ok(None)
@@ -108,13 +117,12 @@ impl ToolCallAccumulator {
                 id,
                 name,
                 arguments_buffer,
-                finished,
             } => {
                 if let Some(args_chunk) = arguments {
                     arguments_buffer.push_str(args_chunk);
                 }
 
-                if !*finished && !force_finished {
+                if !finished {
                     return Ok(None);
                 }
 
@@ -143,13 +151,6 @@ impl ToolCallAccumulator {
             }
         }
     }
-
-    fn finalize(&mut self) {
-        match self {
-            ToolCallAccumulator::Idle => {}
-            ToolCallAccumulator::Accumulating { finished, .. } => *finished = true,
-        }
-    }
 }
 
 // State for accumulating content.
@@ -161,10 +162,6 @@ pub struct TextAccumulator {
     /// longer than `line_length`, it tries to find the nearest sentence
     /// terminator and accumulates until that point.
     max_line_length: Option<usize>,
-
-    /// If set to `true`, the next `delta_step` call will drain the entire
-    /// buffer.
-    drain: bool,
 }
 
 impl TextAccumulator {
@@ -172,16 +169,11 @@ impl TextAccumulator {
         Self {
             buffer: String::new(),
             max_line_length: Some(max_line_length),
-            drain: false,
         }
     }
 
     pub fn delta_step(&mut self, text: &str) -> Option<String> {
         self.buffer.push_str(text);
-
-        if self.drain && !self.buffer.is_empty() {
-            return Some(self.buffer.drain(..).collect());
-        }
 
         let max = self.max_line_length.unwrap_or(usize::MAX);
         if self.buffer.len() < max {
@@ -199,10 +191,13 @@ impl TextAccumulator {
         Some(self.buffer.drain(..=pos).collect())
     }
 
-    /// Mark the accumulator as finished, so that the next `delta_step` call
-    /// will drain the entire buffer.
-    pub fn finalize(&mut self) {
-        self.drain = true;
+    /// Drain the buffer and return the content.
+    pub fn drain(&mut self) -> Option<String> {
+        if self.buffer.is_empty() {
+            return None;
+        }
+
+        Some(std::mem::take(&mut self.buffer))
     }
 }
 
@@ -226,8 +221,8 @@ mod tests {
         assert_eq!(accumulator.delta_step(" Uh Good!"), Some("Ah yes, me too\n".to_owned()));
         assert_eq!(accumulator.delta_step("\n\nGreat!"), Some("And you? Uh Good!\n\n".to_owned()));
         assert_eq!(accumulator.delta_step("!!"), None);
-        accumulator.finalize();
-        assert_eq!(accumulator.delta_step(""), Some("Great!!!".to_owned()));
+        assert_eq!(accumulator.drain(), Some("Great!!!".to_owned()));
+        assert_eq!(accumulator.drain(), None);
 
     }
 }

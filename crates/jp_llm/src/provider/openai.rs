@@ -34,7 +34,7 @@ use crate::{
     error::{Error, Result},
     provider::ModelDeprecation,
     query::ChatQuery,
-    stream::accumulator::Accumulator,
+    stream::{accumulator::Accumulator, event::StreamEndReason},
     tool::ToolDefinition,
 };
 
@@ -443,6 +443,24 @@ fn map_event(event: types::Event, accumulator: &mut Accumulator) -> Result<Vec<S
                 Ok(value) => Ok(vec![StreamEvent::Metadata("reasoning".to_owned(), value)]),
                 Err(error) => Err(error.into()),
             }
+        }
+        Event::OutputItemDone { .. } => return accumulator.drain(),
+        Event::ResponseIncomplete {
+            response:
+                types::Response {
+                    incomplete_details: Some(details),
+                    ..
+                },
+        } => match details.reason.as_str() {
+            "max_tokens" => return Ok(vec![StreamEvent::EndOfStream(StreamEndReason::MaxTokens)]),
+            reason => {
+                return Ok(vec![StreamEvent::EndOfStream(StreamEndReason::Other(
+                    reason.to_owned(),
+                ))])
+            }
+        },
+        Event::ResponseCompleted { .. } => {
+            return Ok(vec![StreamEvent::EndOfStream(StreamEndReason::Completed)])
         }
         _ => {
             trace!(?event, "Ignoring Openai event");

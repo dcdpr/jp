@@ -13,17 +13,21 @@ pub enum StreamEvent {
     /// Opaque provider-specific metadata.
     Metadata(String, Value),
 
-    /// The Cstream ended.
+    /// The stream ended.
     EndOfStream(StreamEndReason),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum StreamEndReason {
     /// The turn was completed by the assistant.
     Completed,
 
-    /// The maximum number of tokens was reached.
+    /// The maximum number of tokens was reached before the assistant could
+    /// complete the turn.
     MaxTokens,
+
+    /// The assistant has stopped generating tokens for some reason.
+    Other(String),
 }
 
 impl StreamEvent {
