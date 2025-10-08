@@ -287,7 +287,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[expect(clippy::too_many_lines)]
     fn test_stream_event_handler_handle_chat_chunk() {
         struct TestCase {
             handler: StreamEventHandler,
