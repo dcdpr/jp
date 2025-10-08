@@ -110,7 +110,7 @@ pub(crate) struct Query {
     no_edit: bool,
 
     /// The model to use.
-    #[arg(short = 'o', long = "model")]
+    #[arg(short = 'm', long = "model")]
     model: Option<String>,
 
     /// The model parameters to use.
@@ -459,7 +459,7 @@ impl Query {
 
         let parameters = &ctx.config().assistant.model.parameters;
         let provider = provider::get_provider(model_id.provider, &ctx.config().providers.llm)?;
-        let message = thread.message.clone();
+        let user_message = thread.message.clone();
         let query = ChatQuery {
             thread: thread.clone(),
 
@@ -534,7 +534,9 @@ impl Query {
             };
 
             let data = match event {
-                StreamEvent::ChatChunk(chunk) => event_handler.handle_chat_chunk(ctx, chunk),
+                StreamEvent::ChatChunk(chunk) => {
+                    event_handler.handle_chat_chunk(ctx.config().style.reasoning.show, chunk)
+                }
                 StreamEvent::ToolCall(call) => {
                     event_handler
                         .handle_tool_call(ctx, call, &mut printer)
@@ -551,13 +553,11 @@ impl Query {
                 continue;
             };
 
-            printer.handle(&data, ctx, false)?;
+            printer.handle(&data, &ctx.config().style, false)?;
         }
 
         // Ensure we handle the last line of the stream.
-        if !printer.buffer.is_empty() {
-            printer.handle("\n", ctx, false)?;
-        }
+        printer.drain(&ctx.config().style, false)?;
 
         let content_tokens = event_handler.content_tokens.trim().to_string();
         let content = if !content_tokens.is_empty() {
@@ -607,7 +607,7 @@ impl Query {
             println!();
         }
 
-        let message = MessagePair::new(message, AssistantMessage {
+        let message = MessagePair::new(user_message, AssistantMessage {
             provider: model_id.provider,
             metadata,
             content,

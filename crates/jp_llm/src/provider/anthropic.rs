@@ -1333,4 +1333,95 @@ mod tests {
 
         insta::assert_debug_snapshot!(request);
     }
+
+    #[test]
+    fn test_find_merge_point_edge_cases() {
+        struct TestCase {
+            left: &'static str,
+            right: &'static str,
+            expected: &'static str,
+            max_search: usize,
+        }
+
+        let cases = IndexMap::from([
+            ("no overlap", TestCase {
+                left: "Hello",
+                right: " world",
+                expected: "Hello world",
+                max_search: 500,
+            }),
+            ("single word overlap", TestCase {
+                left: "The quick brown",
+                right: "brown fox",
+                expected: "The quick brown fox",
+                max_search: 500,
+            }),
+            ("minimal overlap (5 chars)", TestCase {
+                expected: "abcdefghij",
+                left: "abcdefgh",
+                right: "defghij",
+                max_search: 500,
+            }),
+            (
+                "below minimum overlap (4 chars) - should not merge",
+                TestCase {
+                    left: "abcd",
+                    right: "abcd",
+                    expected: "abcdabcd",
+                    max_search: 500,
+                },
+            ),
+            ("complete overlap", TestCase {
+                left: "Hello world",
+                right: "world",
+                expected: "Hello world",
+                max_search: 500,
+            }),
+            ("overlap with punctuation", TestCase {
+                left: "Hello, how are",
+                right: "how are you?",
+                expected: "Hello, how are you?",
+                max_search: 500,
+            }),
+            ("overlap with whitespace", TestCase {
+                left: "Hello     ",
+                right: "     world",
+                expected: "Hello     world",
+                max_search: 500,
+            }),
+            ("unicode overlap", TestCase {
+                left: "Hello 世界",
+                right: "世界 friend",
+                expected: "Hello 世界 friend",
+                max_search: 500,
+            }),
+            ("long overlap", TestCase {
+                left: "The quick brown fox jumps",
+                right: "fox jumps over the lazy dog",
+                expected: "The quick brown fox jumpsfox jumps over the lazy dog",
+                max_search: 8,
+            }),
+            ("empty right", TestCase {
+                left: "Hello",
+                right: "",
+                expected: "Hello",
+                max_search: 500,
+            }),
+        ]);
+
+        for (
+            name,
+            TestCase {
+                left,
+                right,
+                expected,
+                max_search,
+            },
+        ) in cases
+        {
+            let pos = find_merge_point(left, right, max_search);
+            let result = format!("{left}{}", &right[pos..]);
+            assert_eq!(result, expected, "Failed test case: {name}");
+        }
+    }
 }

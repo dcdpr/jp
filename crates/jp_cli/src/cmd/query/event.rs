@@ -1,9 +1,12 @@
 use std::{env, fs, time};
 
 use crossterm::style::Stylize as _;
-use jp_config::conversation::tool::{
-    style::{InlineResults, LinkStyle, Truncate},
-    ToolConfigWithDefaults,
+use jp_config::{
+    conversation::tool::{
+        style::{InlineResults, LinkStyle, Truncate},
+        ToolConfigWithDefaults,
+    },
+    style::StyleConfig,
 };
 use jp_conversation::message::{ToolCallRequest, ToolCallResult};
 use jp_llm::CompletionChunk;
@@ -23,30 +26,29 @@ pub(super) struct StreamEventHandler {
 impl StreamEventHandler {
     pub(super) fn handle_chat_chunk(
         &mut self,
-        ctx: &mut Ctx,
+        show_reasoning: bool,
         chunk: CompletionChunk,
     ) -> Option<String> {
         match chunk {
             CompletionChunk::Reasoning(data) if !data.is_empty() => {
                 self.reasoning_tokens.push_str(&data);
 
-                if !ctx.config().style.reasoning.show {
+                if !show_reasoning {
                     return None;
                 }
 
                 Some(data)
             }
             CompletionChunk::Content(mut data) if !data.is_empty() => {
-                let reasoning_ended = !self.reasoning_tokens.is_empty()
-                    && ctx.config().style.reasoning.show
-                    && self.content_tokens.is_empty();
+                let reasoning_ended =
+                    !self.reasoning_tokens.is_empty() && self.content_tokens.is_empty();
 
                 self.content_tokens.push_str(&data);
 
                 // If the response includes reasoning, we add two newlines
                 // after the reasoning, but before the content.
-                if reasoning_ended {
-                    data = format!("\n\n{data}");
+                if show_reasoning && reasoning_ended {
+                    data = format!("\n---\n\n{data}");
                 }
 
                 Some(data)
@@ -88,7 +90,7 @@ impl StreamEventHandler {
             }
 
             let data = format!("\n{title}\n");
-            handler.handle(&data, ctx, false)?;
+            handler.handle(&data, &ctx.config().style, false)?;
         }
 
         let result = tool
@@ -104,12 +106,12 @@ impl StreamEventHandler {
 
         self.tool_call_results.push(result.clone());
 
-        build_tool_call_result(ctx, &result, &tool_config, handler)
+        build_tool_call_result(&ctx.config().style, &result, &tool_config, handler)
     }
 }
 
 fn build_tool_call_result(
-    ctx: &Ctx,
+    style: &StyleConfig,
     result: &ToolCallResult,
     tool_config: &ToolConfigWithDefaults,
     handler: &mut ResponseHandler,
@@ -183,7 +185,7 @@ fn build_tool_call_result(
         }
         intro.push_str(":\n");
 
-        handler.handle(&intro, ctx, false)?;
+        handler.handle(&intro, style, false)?;
     }
 
     let mut data = "\n".to_owned();
@@ -212,7 +214,7 @@ fn build_tool_call_result(
             data.push('\n');
         }
 
-        handler.handle(&data, ctx, false)?;
+        handler.handle(&data, style, false)?;
     }
 
     let link = match tool_config.style().results_file_link {
@@ -234,7 +236,7 @@ fn build_tool_call_result(
     if handler.render_tool_calls
         && let Some(link) = link
     {
-        handler.handle(&link, ctx, true)?;
+        handler.handle(&link, style, true)?;
     }
 
     Ok(None)
@@ -275,4 +277,117 @@ pub(super) async fn handle_tool_calls(
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use indexmap::IndexMap;
+
+    use super::*;
+
+    #[test]
+    #[expect(clippy::too_many_lines)]
+    fn test_stream_event_handler_handle_chat_chunk() {
+        struct TestCase {
+            handler: StreamEventHandler,
+            chunk: CompletionChunk,
+            show_reasoning: bool,
+            output: Option<String>,
+            mutated_handler: StreamEventHandler,
+        }
+
+        let cases = IndexMap::from([
+            ("empty content chunk", TestCase {
+                handler: StreamEventHandler::default(),
+                chunk: CompletionChunk::Content(String::new()),
+                show_reasoning: true,
+                output: None,
+                mutated_handler: StreamEventHandler::default(),
+            }),
+            ("empty reasoning chunk", TestCase {
+                handler: StreamEventHandler::default(),
+                chunk: CompletionChunk::Reasoning(String::new()),
+                show_reasoning: true,
+                output: None,
+                mutated_handler: StreamEventHandler::default(),
+            }),
+            ("reasoning chunk with show_reasoning=true", TestCase {
+                handler: StreamEventHandler::default(),
+                chunk: CompletionChunk::Reasoning("Let me think...".into()),
+                show_reasoning: true,
+                output: Some("Let me think...".into()),
+                mutated_handler: StreamEventHandler {
+                    reasoning_tokens: "Let me think...".into(),
+                    ..Default::default()
+                },
+            }),
+            ("reasoning chunk with show_reasoning=false", TestCase {
+                handler: StreamEventHandler::default(),
+                chunk: CompletionChunk::Reasoning("Let me think...".into()),
+                show_reasoning: false,
+                output: None,
+                mutated_handler: StreamEventHandler {
+                    reasoning_tokens: "Let me think...".into(),
+                    ..Default::default()
+                },
+            }),
+            ("content after reasoning adds separator", TestCase {
+                handler: StreamEventHandler {
+                    reasoning_tokens: "I reasoned".into(),
+                    ..Default::default()
+                },
+                chunk: CompletionChunk::Content("Answer".into()),
+                show_reasoning: true,
+                output: Some("\n---\n\nAnswer".into()),
+                mutated_handler: StreamEventHandler {
+                    reasoning_tokens: "I reasoned".into(),
+                    content_tokens: "Answer".into(),
+                    ..Default::default()
+                },
+            }),
+            ("content after reasoning without show_reasoning", TestCase {
+                handler: StreamEventHandler {
+                    reasoning_tokens: "I reasoned".into(),
+                    ..Default::default()
+                },
+                chunk: CompletionChunk::Content("Answer".into()),
+                show_reasoning: false,
+                output: Some("Answer".into()),
+                mutated_handler: StreamEventHandler {
+                    reasoning_tokens: "I reasoned".into(),
+                    content_tokens: "Answer".into(),
+                    ..Default::default()
+                },
+            }),
+            ("subsequent content chunks accumulate", TestCase {
+                handler: StreamEventHandler {
+                    content_tokens: "Hello".into(),
+                    ..Default::default()
+                },
+                chunk: CompletionChunk::Content(" world".into()),
+                show_reasoning: false,
+                output: Some(" world".into()),
+                mutated_handler: StreamEventHandler {
+                    content_tokens: "Hello world".into(),
+                    ..Default::default()
+                },
+            }),
+        ]);
+
+        for (
+            name,
+            TestCase {
+                mut handler,
+                chunk,
+                show_reasoning,
+                output,
+                mutated_handler,
+            },
+        ) in cases
+        {
+            let result = handler.handle_chat_chunk(show_reasoning, chunk);
+            assert_eq!(result, output, "Failed test case: {name}");
+            assert_eq!(handler, mutated_handler, "Failed test case: {name}");
+        }
+    }
 }
