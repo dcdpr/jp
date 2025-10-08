@@ -9,7 +9,7 @@ use async_anthropic::{
     },
     Client,
 };
-use async_stream::try_stream;
+use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use jp_config::{
@@ -32,13 +32,8 @@ use tracing::{debug, info, trace, warn};
 use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply};
 use crate::{
     error::{Error, Result},
-    provider::ModelDeprecation,
+    provider::{handle_delta, AccumulationState, Delta, ModelDeprecation, StreamEvent},
     query::ChatQuery,
-    stream::{
-        accumulator::Accumulator,
-        delta::Delta,
-        event::{CompletionChunk, StreamEndReason, StreamEvent},
-    },
     tool::ToolDefinition,
 };
 
