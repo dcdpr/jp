@@ -26,10 +26,10 @@ use jp_conversation::{
     AssistantMessage, Conversation, ConversationId, MessagePair, UserMessage,
 };
 use jp_llm::{
-    provider::{self, StreamEvent},
+    provider,
     query::{ChatQuery, StructuredQuery},
     tool::{tool_definitions, ToolDefinition},
-    ToolError,
+    StreamEvent, ToolError,
 };
 use jp_task::task::TitleGeneratorTask;
 use jp_term::stdout;
@@ -474,8 +474,9 @@ impl Query {
             tool_choice: tool_choice.clone(),
             ..Default::default()
         };
+        let model = provider.model_details(&model_id.name).await?;
         let mut stream = provider
-            .chat_completion_stream(model_id, parameters, query)
+            .chat_completion_stream(&model, parameters, query)
             .await?;
 
         let mut event_handler = StreamEventHandler {
