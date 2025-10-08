@@ -25,8 +25,9 @@ pub async fn completion<T: DeserializeOwned>(
     parameters: &ParametersConfig,
     query: StructuredQuery,
 ) -> Result<T> {
+    let model = provider.model_details(&model_id.name).await?;
     let value = provider
-        .structured_completion(model_id, parameters, query)
+        .structured_completion(&model, parameters, query)
         .await?;
 
     serde_json::from_value(value).map_err(Into::into)

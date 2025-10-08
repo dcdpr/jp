@@ -1,6 +1,6 @@
 use std::mem;
 
-use async_stream::stream;
+use async_stream::try_stream;
 use async_trait::async_trait;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -32,8 +32,9 @@ use super::{
 };
 use crate::{
     error::{Error, Result},
-    provider::{handle_delta, AccumulationState, Provider, ReasoningExtractor},
+    provider::{Provider, ReasoningExtractor},
     query::ChatQuery,
+    stream::accumulator::Accumulator,
     tool::ToolDefinition,
 };
 
@@ -119,95 +120,92 @@ impl Provider for Llamacpp {
         );
 
         let request = self.build_request(model, parameters, query)?;
-        let stream = Box::pin(stream! {
-            let mut current_state = AccumulationState::default();
-            let mut extractor = ReasoningExtractor::default();
+        Ok(Box::pin(try_stream!({
+            let mut accumulator = Accumulator::new(200);
+            let mut reasoning_extractor = ReasoningExtractor::default();
 
             let stream = request
                 .create_stream()
-                .await.expect("Should not fail to clone");
+                .await
+                .expect("Should not fail to clone");
             tokio::pin!(stream);
 
             while let Some(delta) = stream.recv().await {
-                let delta = delta.choices.into_iter().next().map(|c| (c.delta, c.finish_reason));
-                let Some((delta, finish_reason)) = delta else {
-                    continue
+                let Some((delta, finish_reason)) = delta
+                    .choices
+                    .into_iter()
+                    .next()
+                    .map(|c| (c.delta, c.finish_reason))
+                else {
+                    continue;
                 };
 
-                extractor.handle(delta.content.as_deref().unwrap_or_default());
+                reasoning_extractor.handle(delta.content.as_deref().unwrap_or_default());
 
-                let tool_call_finished = finish_reason.is_some_and(|reason| reason == "function_call");
-                for event in map_event(delta, &mut current_state, &mut extractor, tool_call_finished) {
+                if stream.is_empty() && stream.is_closed() {
+                    reasoning_extractor.finalize();
+                    accumulator.finalize();
+                }
+
+                let tool_call_finished =
+                    finish_reason.is_some_and(|reason| reason == "function_call");
+
+                for event in map_event(
+                    delta,
+                    &mut accumulator,
+                    &mut reasoning_extractor,
+                    tool_call_finished,
+                )? {
                     yield event;
                 }
             }
-
-            extractor.finalize();
-
-            if current_state.is_accumulating() && let Some(event) =
-                handle_delta(Delta::tool_call_finished(), &mut current_state).transpose() {
-                    yield event;
-            }
-
-            for event in map_content(&mut current_state, &mut extractor) {
-                yield event;
-            }
-        });
-
-        Ok(stream)
+        })))
     }
 }
 
 fn map_event(
     event: ChatCompletionMessageDelta,
-    state: &mut AccumulationState,
+    accumulator: &mut Accumulator,
     extractor: &mut ReasoningExtractor,
     tool_call_finished: bool,
-) -> Vec<Result<StreamEvent>> {
+) -> Result<Vec<StreamEvent>> {
     let mut events = vec![];
 
-    for tool_call in event.tool_calls.into_iter().flatten() {
-        let mut delta = Delta::tool_call(
-            tool_call.id.clone().unwrap_or_default(),
-            tool_call
-                .function
-                .as_ref()
-                .map(|f| f.name.clone())
-                .unwrap_or_default(),
-            tool_call
-                .function
-                .as_ref()
-                .map(|f| f.arguments.clone())
-                .unwrap_or_default(),
-        );
+    for chat::ToolCallDelta { id, function, .. } in event.tool_calls.into_iter().flatten() {
+        let (name, arguments) = match function {
+            Some(chat::ToolCallFunction { name, arguments }) => (name, arguments),
+            None => (String::new(), String::new()),
+        };
+
+        let mut delta = Delta::tool_call(id.unwrap_or_default(), name, arguments);
 
         if tool_call_finished {
             delta.tool_call_finished = true;
         }
 
-        events.extend(handle_delta(delta, state).transpose());
+        events.extend(delta.into_stream_events(accumulator)?);
     }
 
-    events.extend(map_content(state, extractor));
-    events
+    events.extend(map_content(accumulator, extractor)?);
+    Ok(events)
 }
 
 fn map_content(
-    state: &mut AccumulationState,
+    accumulator: &mut Accumulator,
     extractor: &mut ReasoningExtractor,
-) -> Vec<Result<StreamEvent>> {
+) -> Result<Vec<StreamEvent>> {
     let mut events = Vec::new();
     if !extractor.reasoning.is_empty() {
         let reasoning = mem::take(&mut extractor.reasoning);
-        events.extend(handle_delta(Delta::reasoning(reasoning), state).transpose());
+        events.extend(Delta::reasoning(reasoning).into_stream_events(accumulator)?);
     }
 
     if !extractor.other.is_empty() {
         let content = mem::take(&mut extractor.other);
-        events.extend(handle_delta(Delta::content(content), state).transpose());
+        events.extend(Delta::content(content).into_stream_events(accumulator)?);
     }
 
-    events
+    Ok(events)
 }
 
 fn map_model(model: &ModelResponse) -> Result<ModelDetails> {

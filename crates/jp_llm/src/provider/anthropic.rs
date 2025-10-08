@@ -48,6 +48,12 @@ const MAX_CACHE_CONTROL_COUNT: usize = 4;
 #[derive(Debug, Clone)]
 pub struct Anthropic {
     client: Client,
+
+    /// See [`AnthropicConfig::chain_on_max_tokens`].
+    chain_on_max_tokens: bool,
+
+    /// Which beta features are enabled.
+    beta: BetaFeatures,
 }
 
 #[async_trait]
@@ -115,6 +121,7 @@ impl Provider for Anthropic {
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
+        let chain_on_max_tokens = parameters.max_tokens.is_none() && self.chain_on_max_tokens;
         let request = create_request(model, parameters, query, true, &self.beta)?;
 
         debug!(stream = true, "Anthropic chat completion stream request.");
@@ -123,35 +130,182 @@ impl Provider for Anthropic {
             "Request payload."
         );
 
-        Ok(Box::pin(stream! {
-            let mut current_state = AccumulationState::default();
-            let stream = client
-                .messages()
-                .create_stream(request).await
-                .map_err(|e| match e {
-                    AnthropicError::RateLimit { retry_after } =>
-                        Error::RateLimit { retry_after: retry_after.map(Duration::from_secs) },
+        Ok(call(client, request, chain_on_max_tokens))
+    }
+}
 
-                    // Anthropic's API is notoriously unreliable, so we
-                    // special-case the "overloaded" error, which is returned
-                    // when their API is experiencing a high load.
-                    //
-                    // See: <https://docs.claude.com/en/docs/build-with-claude/streaming#error-events>
-                    // See: <https://docs.claude.com/en/api/errors#http-errors>
-                    AnthropicError::StreamError(e) if &e.error_type == "overloaded_error" =>
-                        Error::RateLimit { retry_after: Some(Duration::from_secs(3)) },
+/// Create a request to the assistant to generate a response, and return a
+/// stream of [`StreamEvent`]s.
+///
+/// If `chain_on_max_tokens` is `true`, a new request is created when the last
+/// one ends with a [`StreamEndReason::MaxTokens`] event, allowing the assistant
+/// to continue from where it left off and the caller to receive the full
+/// response as a single stream of events.
+fn call(
+    client: Client,
+    request: types::CreateMessagesRequest,
+    chain_on_max_tokens: bool,
+) -> EventStream {
+    Box::pin(try_stream!({
+        let mut accumulator = Accumulator::new(200);
+        let mut events = vec![];
 
-                    _ => Error::from(e),
-                });
+        // If a tool call is requested, we cannot chain on max tokens, as the
+        // Anthropic API expects the response to a tool call to contain the tool
+        // result.
+        let mut tool_calls_requested = false;
 
-            tokio::pin!(stream);
-            while let Some(event) = stream.next().await {
-                for event in map_event(event?, &mut current_state) {
-                    yield event;
+        let stream = client
+            .messages()
+            .create_stream(request.clone())
+            .await
+            .map_err(|e| match e {
+                AnthropicError::RateLimit { retry_after } => Error::RateLimit {
+                    retry_after: retry_after.map(Duration::from_secs),
+                },
+
+                // Anthropic's API is notoriously unreliable, so we
+                // special-case a few common errors that most of the times
+                // resolve themselves when retried.
+                //
+                // See: <https://docs.claude.com/en/docs/build-with-claude/streaming#error-events>
+                // See: <https://docs.claude.com/en/api/errors#http-errors>
+                AnthropicError::StreamError(e)
+                    if ["rate_limit_error", "overloaded_error", "api_error"]
+                        .contains(&e.error_type.as_str()) =>
+                {
+                    Error::RateLimit {
+                        retry_after: Some(Duration::from_secs(3)),
+                    }
+                }
+
+                _ => Error::from(e),
+            });
+
+        tokio::pin!(stream);
+        while let Some(event) = stream.next().await {
+            for event in map_event(event?, &mut accumulator)? {
+                if event.is_tool_call() {
+                    tool_calls_requested = true;
+                }
+
+                if !tool_calls_requested && chain_on_max_tokens {
+                    events.push(event.clone());
+                }
+
+                match event {
+                    // If the assistant has reached the maximum number of
+                    // tokens, and we are in a state in which we can request
+                    // more tokens, we do so by sending a new request and
+                    // chaining those events onto the previous ones, keeping the
+                    // existing stream of events alive.
+                    StreamEvent::EndOfStream(StreamEndReason::MaxTokens)
+                        if !tool_calls_requested && chain_on_max_tokens =>
+                    {
+                        debug!("Max tokens reached, auto-requesting more tokens.");
+
+                        for await event in chain(client.clone(), request.clone(), events) {
+                            yield event?;
+                        }
+                        return;
+                    }
+                    eos @ StreamEvent::EndOfStream(_) => {
+                        yield eos;
+                        return;
+                    }
+                    event => yield event,
                 }
             }
-        }))
+        }
+
+        yield StreamEvent::EndOfStream(StreamEndReason::Completed);
+    }))
+}
+
+/// Create a new `EventStream` by asking the assistant to continue from where it
+/// left off.
+fn chain(
+    client: Client,
+    mut request: types::CreateMessagesRequest,
+    events: Vec<StreamEvent>,
+) -> EventStream {
+    let reply = AssistantMessage::from(Reply::from((PROVIDER, events)));
+    debug_assert!(reply.tool_calls.is_empty());
+
+    let mut should_merge = true;
+    let previous_content = reply.content.clone().unwrap_or_default();
+    let message = assistant_message_to_message(reply);
+
+    request.messages.push(message);
+    request.messages.push(types::Message {
+        role: types::MessageRole::User,
+        content: types::MessageContentList(vec![types::MessageContent::Text(
+            "Please continue from where you left off.".into(),
+        )]),
+    });
+
+    Box::pin(try_stream!({
+        for await event in call(client, request, true) {
+            match event? {
+                StreamEvent::ChatChunk(chunk) => match chunk {
+                    // When chaining new events, the reasoning content is
+                    // irrelevant, as it will contain text such as "the user
+                    // asked me to continue [...]".
+                    CompletionChunk::Reasoning(_) => continue,
+                    CompletionChunk::Content(mut text) => {
+                        // Merge the new content with the previous content, if
+                        // there is any overlap. Sometimes the assistant will
+                        // start a chaining response with a small amount of
+                        // content that was already seen in the previous
+                        // response, and we want to avoid duplicating that.
+                        if should_merge {
+                            let merge_point = find_merge_point(&previous_content, &text, 500);
+                            text.replace_range(..merge_point, "");
+                        }
+
+                        // After receiving the first content event, we can
+                        // stop merging.
+                        should_merge = false;
+
+                        yield StreamEvent::ChatChunk(CompletionChunk::Content(text));
+                    }
+                },
+                event => yield event,
+            }
+        }
+
+        return;
+    }))
+}
+
+/// Finds the merge point between two text chunks by detecting overlapping
+/// content.
+///
+/// Returns the number of bytes to skip from the start of `right` to merge it
+/// seamlessly with `left`.
+fn find_merge_point(left: &str, right: &str, max_search: usize) -> usize {
+    const MIN_OVERLAP: usize = 5;
+
+    let max_overlap = left.len().min(right.len()).min(max_search);
+
+    // Try progressively smaller overlaps, but stop at minimum threshold
+    for overlap in (MIN_OVERLAP..=max_overlap).rev() {
+        let left_start = left.len() - overlap;
+
+        // Only attempt comparison if both positions are valid UTF-8 char
+        // boundaries
+        if left.is_char_boundary(left_start) && right.is_char_boundary(overlap) {
+            let left_suffix = &left[left_start..];
+            let right_prefix = &right[..overlap];
+
+            if left_suffix == right_prefix {
+                return overlap;
+            }
+        }
     }
+
+    // No overlap found (or overlap was below minimum threshold)
+    0
 }
 
 #[derive(Debug, Clone, Default)]
@@ -570,8 +724,8 @@ fn map_response(response: types::CreateMessagesResponse) -> Result<Vec<Event>> {
 
 fn map_event(
     event: types::MessagesStreamEvent,
-    state: &mut AccumulationState,
-) -> Vec<Result<StreamEvent>> {
+    accumulator: &mut Accumulator,
+) -> Result<Vec<StreamEvent>> {
     use types::{ContentBlockDelta::*, MessagesStreamEvent::*};
 
     trace!(
@@ -583,27 +737,21 @@ fn map_event(
         MessageStart { message, .. } => message
             .content
             .into_iter()
-            .map(Delta::from)
-            .filter_map(|v| handle_delta(v, state).transpose())
-            .collect(),
-        ContentBlockStart { content_block, .. } => handle_delta(content_block.into(), state)
-            .transpose()
-            .into_iter()
-            .collect(),
+            .map(|c| Delta::from(c).into_stream_events(accumulator))
+            .try_fold(vec![], |mut acc, events| {
+                acc.extend(events?);
+                Ok(acc)
+            }),
+        ContentBlockStart { content_block, .. } => {
+            Delta::from(content_block).into_stream_events(accumulator)
+        }
         ContentBlockDelta { delta, .. } => match delta {
-            TextDelta { text } => handle_delta(Delta::content(text), state)
-                .transpose()
-                .into_iter()
-                .collect(),
-            ThinkingDelta { thinking } => handle_delta(Delta::reasoning(thinking), state)
-                .transpose()
-                .into_iter()
-                .collect(),
+            TextDelta { text } => Delta::content(text).into_stream_events(accumulator),
+            ThinkingDelta { thinking } => {
+                Delta::reasoning(thinking).into_stream_events(accumulator)
+            }
             InputJsonDelta { partial_json } => {
-                handle_delta(Delta::tool_call("", "", partial_json), state)
-                    .transpose()
-                    .into_iter()
-                    .collect()
+                Delta::tool_call("", "", partial_json).into_stream_events(accumulator)
             }
 
             // This is only used for thinking blocks, and we need to store this
@@ -611,23 +759,25 @@ fn map_event(
             // history.
             //
             // See: <https://docs.anthropic.com/en/docs/build-with-claude/streaming#thinking-delta>
-            SignatureDelta { signature } => vec![Ok(StreamEvent::metadata("signature", signature))],
+            SignatureDelta { signature } => Ok(vec![StreamEvent::metadata("signature", signature)]),
         },
         MessageDelta { delta, .. }
             if delta.stop_reason.as_ref().is_some_and(|v| v == "tool_use") =>
         {
-            handle_delta(Delta::tool_call_finished(), state)
-                .transpose()
-                .into_iter()
-                .collect()
+            Delta::tool_call_finished().into_stream_events(accumulator)
         }
-        ContentBlockStop { .. } if state.is_accumulating() => {
-            handle_delta(Delta::tool_call_finished(), state)
-                .transpose()
-                .into_iter()
-                .collect()
+        ContentBlockStop { .. } if accumulator.is_accumulating_function_call() => {
+            Delta::tool_call_finished().into_stream_events(accumulator)
         }
-        _ => vec![],
+        MessageDelta { delta, .. }
+            if delta
+                .stop_reason
+                .as_ref()
+                .is_some_and(|v| v == "max_tokens") =>
+        {
+            Ok(vec![StreamEvent::EndOfStream(StreamEndReason::MaxTokens)])
+        }
+        _ => Ok(vec![]),
     }
 }
 
@@ -650,6 +800,7 @@ impl TryFrom<&AnthropicConfig> for Anthropic {
 
         Ok(Anthropic {
             beta: BetaFeatures(config.beta_headers.clone()),
+            chain_on_max_tokens: config.chain_on_max_tokens,
             client: builder
                 .build()
                 .map_err(|e| Error::Anthropic(AnthropicError::Unknown(e.to_string())))?,
@@ -1103,6 +1254,49 @@ mod tests {
                 ));
 
                 events
+            },
+        )
+        .await
+    }
+
+    #[test(tokio::test)]
+    async fn test_anthropic_request_chaining() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let mut config = LlmProviderConfig::default().anthropic;
+        let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
+        let mut model = ModelDetails::empty(model_id);
+        model.max_output_tokens = Some(1024);
+
+        let query = ChatQuery {
+            thread: Thread {
+                message: "Give me a 2000 word explainer about Kirigami-inspired parachutes".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let vcr = vcr();
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
+                });
+            },
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Anthropic::try_from(&config)
+                    .unwrap()
+                    .chat_completion_stream(&model, &ParametersConfig::default(), query)
+                    .await
+                    .unwrap()
+                    .collect::<Vec<_>>()
+                    .await
             },
         )
         .await

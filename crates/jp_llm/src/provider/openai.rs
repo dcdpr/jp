@@ -1,6 +1,6 @@
 use std::env;
 
-use async_stream::stream;
+use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use indexmap::IndexMap;
@@ -28,13 +28,13 @@ use time::{macros::date, OffsetDateTime};
 use tracing::{debug, trace, warn};
 
 use super::{
-    handle_delta, Delta, Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply,
-    StreamEvent,
+    Delta, Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply, StreamEvent,
 };
 use crate::{
     error::{Error, Result},
-    provider::{AccumulationState, ModelDeprecation},
+    provider::ModelDeprecation,
     query::ChatQuery,
+    stream::accumulator::Accumulator,
     tool::ToolDefinition,
 };
 
@@ -95,21 +95,21 @@ impl Provider for Openai {
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = self.create_request(model_id, parameters, query).await?;
-        let stream = Box::pin(stream! {
-            let mut current_state = AccumulationState::default();
+        let request = create_request(model, parameters, query)?;
+        let stream = Box::pin(try_stream! {
+            let mut accumulator = Accumulator::new(200);
             let stream = client
                 .stream(request)
                 .or_else(handle_error);
 
             tokio::pin!(stream);
             while let Some(event) = stream.next().await {
-                if let Some(event) = map_event(event?, &mut current_state) {
+                for event in map_event(event?, &mut accumulator)? {
                     yield event;
                 }
             }
@@ -400,7 +400,7 @@ fn map_response(response: types::Response) -> Result<Vec<Event>> {
         .collect::<Result<Vec<_>>>()
 }
 
-fn map_event(event: types::Event, state: &mut AccumulationState) -> Option<Result<StreamEvent>> {
+fn map_event(event: types::Event, accumulator: &mut Accumulator) -> Result<Vec<StreamEvent>> {
     use types::Event;
 
     let delta: Delta = match event {
@@ -418,17 +418,17 @@ fn map_event(event: types::Event, state: &mut AccumulationState) -> Option<Resul
             ..
         } => {
             return match serde_json::to_value(reasoning) {
-                Ok(value) => Some(Ok(StreamEvent::Metadata("reasoning".to_owned(), value))),
-                Err(error) => Some(Err(error.into())),
+                Ok(value) => Ok(vec![StreamEvent::Metadata("reasoning".to_owned(), value)]),
+                Err(error) => Err(error.into()),
             }
         }
         _ => {
             trace!(?event, "Ignoring Openai event");
-            return None;
+            return Ok(vec![]);
         }
     };
 
-    handle_delta(delta, state).transpose()
+    delta.into_stream_events(accumulator)
 }
 
 impl TryFrom<&OpenaiConfig> for Openai {

@@ -35,8 +35,9 @@ use tracing::{debug, trace, warn};
 use super::{CompletionChunk, Delta, Event, EventStream, ModelDetails, Reply, StreamEvent};
 use crate::{
     error::Result,
-    provider::{handle_delta, openai::parameters_with_strict_mode, AccumulationState, Provider},
+    provider::{openai::parameters_with_strict_mode, Provider},
     query::ChatQuery,
+    stream::{accumulator::Accumulator, event::StreamEndReason},
     Error,
 };
 
@@ -99,7 +100,8 @@ impl Provider for Openrouter {
         let inner_stream = self
             .client
             .chat_completion_stream(request)
-            .map_err(Error::from);
+            .map_err(Error::from)
+            .peekable();
 
         Ok(Box::pin(try_stream!({
             let mut accumulator = Accumulator::new(200);

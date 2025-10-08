@@ -164,20 +164,22 @@ pub fn load_partial_at_path_recursive<P: Into<PathBuf>>(
 /// # Errors
 ///
 /// Can error if partial validation fails.
-pub fn build(mut config: PartialAppConfig) -> Result<AppConfig, Error> {
+pub fn build(mut partial: PartialAppConfig) -> Result<AppConfig, Error> {
     if let Some(mut defaults) = PartialAppConfig::default_values(&())? {
         // The `config` partial is merged into `defaults`. This ensures that,
         // even if a value is `Some` by default, it can be overridden by the
         // explicitly set config value.
-        defaults.merge(&(), config)?;
-        config = defaults;
+        defaults.merge(&(), partial)?;
+        partial = defaults;
     }
 
-    let partial_json = serde_json::to_string(&config).unwrap_or_default();
-    let config = Config::from_partial(config)?;
-    debug!(config = partial_json, "Loaded configuration.");
+    debug!("Loading configuration.");
+    trace!(
+        config = serde_json::to_string(&partial).unwrap_or_default(),
+        "Configuration details."
+    );
 
-    Ok(config)
+    Config::from_partial(partial).map_err(Into::into)
 }
 
 /// Open a configuration file at `path`, if it exists.

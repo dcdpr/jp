@@ -21,6 +21,23 @@ pub struct AnthropicConfig {
     #[setting(default = "https://api.anthropic.com")]
     pub base_url: String,
 
+    /// Whether to chain multiple requests when a request is stopped early due
+    /// to exceeding the maximum number of tokens allowed by the model.
+    ///
+    /// This is enabled by default, but even when enabled, if you explicitly set
+    /// the model's `max_tokens` parameter, the request will not be chained when
+    /// that limit is reached. This allows for better cost control.
+    ///
+    /// Further note that if/when an API response contains a tool call request,
+    /// no chaining will be performed, as the API expects the next request to
+    /// contain the tool call results.
+    ///
+    /// Finally, be aware that there is a performance penalty for enabling this
+    /// feature, as the client has to copy the received messages in order to
+    /// append them to the next request.
+    #[setting(default = true)]
+    pub chain_on_max_tokens: bool,
+
     /// Any optional headers to enable beta features.
     ///
     /// See: <https://docs.anthropic.com/en/api/beta-headers>
@@ -37,6 +54,7 @@ impl AssignKeyValue for PartialAnthropicConfig {
             "" => *self = kv.try_object()?,
             "api_key_env" => self.api_key_env = kv.try_some_string()?,
             "base_url" => self.base_url = kv.try_some_string()?,
+            "chain_on_max_tokens" => self.chain_on_max_tokens = kv.try_some_bool()?,
             "beta_headers" => kv.try_some_vec_of_strings(&mut self.beta_headers)?,
             _ => return missing_key(&kv),
         }
@@ -50,6 +68,10 @@ impl PartialConfigDelta for PartialAnthropicConfig {
         Self {
             api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
+            chain_on_max_tokens: delta_opt(
+                self.chain_on_max_tokens.as_ref(),
+                next.chain_on_max_tokens,
+            ),
             beta_headers: delta_opt_vec(self.beta_headers.as_ref(), next.beta_headers),
         }
     }
@@ -62,6 +84,10 @@ impl ToPartial for AnthropicConfig {
         Self::Partial {
             api_key_env: partial_opt(&self.api_key_env, defaults.api_key_env),
             base_url: partial_opt(&self.base_url, defaults.base_url),
+            chain_on_max_tokens: partial_opt(
+                &self.chain_on_max_tokens,
+                defaults.chain_on_max_tokens,
+            ),
             beta_headers: partial_opt(&self.beta_headers, defaults.beta_headers),
         }
     }

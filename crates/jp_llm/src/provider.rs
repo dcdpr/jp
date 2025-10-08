@@ -32,6 +32,10 @@ use tracing::warn;
 use crate::{
     error::Result,
     query::{ChatQuery, StructuredQuery},
+    stream::{
+        delta::Delta,
+        event::{CompletionChunk, StreamEndReason, StreamEvent},
+    },
     structured::SCHEMA_TOOL_NAME,
     Error,
 };
@@ -208,34 +212,6 @@ impl ReasoningDetails {
     }
 }
 
-/// Represents an event yielded by the chat completion stream.
-#[derive(Debug, Clone)]
-pub enum StreamEvent {
-    /// A chunk of chat content or reasoning.
-    ChatChunk(CompletionChunk),
-
-    /// A request to call a tool.
-    ToolCall(ToolCallRequest),
-
-    /// Opaque provider-specific metadata.
-    Metadata(String, Value),
-}
-
-impl StreamEvent {
-    #[must_use]
-    pub fn metadata(key: impl Into<String>, value: impl Into<Value>) -> Self {
-        Self::Metadata(key.into(), value.into())
-    }
-
-    #[must_use]
-    pub fn into_chat_chunk(self) -> Option<CompletionChunk> {
-        match self {
-            Self::ChatChunk(chunk) => Some(chunk),
-            _ => None,
-        }
-    }
-}
-
 /// A collection of events in a single reply.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Reply {
@@ -287,10 +263,52 @@ impl From<Reply> for AssistantMessage {
                 Event::Metadata(key, metadata) => {
                     message.metadata.insert(key, metadata);
                 }
+                Event::MaxTokensReached | Event::Completed => {}
             }
         }
 
         message
+    }
+}
+
+impl From<(ProviderId, Vec<StreamEvent>)> for Reply {
+    fn from((provider, stream_events): (ProviderId, Vec<StreamEvent>)) -> Self {
+        let mut events: Vec<Event> = vec![];
+
+        for event in stream_events {
+            match event {
+                StreamEvent::ChatChunk(chunk) => match chunk {
+                    CompletionChunk::Content(text) => {
+                        match events.last_mut().and_then(|e| e.as_content_mut()) {
+                            Some(content) => content.push_str(&text),
+                            None => events.push(Event::Content(text)),
+                        }
+                    }
+                    CompletionChunk::Reasoning(text) => {
+                        match events.last_mut().and_then(|e| e.as_reasoning_mut()) {
+                            Some(reasoning) => reasoning.push_str(&text),
+                            None => events.push(Event::Reasoning(text)),
+                        }
+                    }
+                },
+                StreamEvent::ToolCall(call) => {
+                    events.push(Event::ToolCall(call));
+                }
+                StreamEvent::Metadata(key, metadata) => {
+                    events.push(Event::Metadata(key, metadata));
+                }
+                StreamEvent::EndOfStream(reason) => {
+                    match reason {
+                        StreamEndReason::Completed => events.push(Event::Completed),
+                        StreamEndReason::MaxTokens => events.push(Event::MaxTokensReached),
+                    }
+
+                    break;
+                }
+            }
+        }
+
+        Self { provider, events }
     }
 }
 
@@ -308,12 +326,35 @@ pub enum Event {
 
     /// Opaque provider-specific metadata.
     Metadata(String, Value),
+
+    /// The response ended prematurely due to reaching the maximum number of
+    /// tokens.
+    MaxTokensReached,
+
+    /// The response was completed.
+    Completed,
 }
 
 impl Event {
     #[must_use]
     pub fn metadata(key: impl Into<String>, value: impl Into<Value>) -> Self {
         Self::Metadata(key.into(), value.into())
+    }
+
+    #[must_use]
+    pub fn as_content_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Content(content) => Some(content),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn as_reasoning_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Reasoning(reasoning) => Some(reasoning),
+            _ => None,
+        }
     }
 }
 
@@ -326,6 +367,8 @@ impl From<Event> for StreamEvent {
             }
             Event::ToolCall(call) => StreamEvent::ToolCall(call),
             Event::Metadata(key, metadata) => StreamEvent::Metadata(key, metadata),
+            Event::MaxTokensReached => StreamEvent::EndOfStream(StreamEndReason::MaxTokens),
+            Event::Completed => StreamEvent::EndOfStream(StreamEndReason::Completed),
         }
     }
 }
@@ -352,34 +395,6 @@ impl From<Delta> for Option<Result<Event>> {
         }
 
         None
-    }
-}
-
-/// A chunk of chat content or reasoning.
-#[derive(Debug, Clone)]
-pub enum CompletionChunk {
-    /// Regular chat content.
-    Content(String),
-
-    /// Reasoning content.
-    Reasoning(String),
-}
-
-impl CompletionChunk {
-    #[must_use]
-    pub fn into_content(self) -> Option<String> {
-        match self {
-            Self::Content(content) => Some(content),
-            Self::Reasoning(_) => None,
-        }
-    }
-
-    #[must_use]
-    pub fn into_reasoning(self) -> Option<String> {
-        match self {
-            Self::Reasoning(reasoning) => Some(reasoning),
-            Self::Content(_) => None,
-        }
     }
 }
 
@@ -435,6 +450,10 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
                     events.push(Event::ToolCall(call));
                 }
                 StreamEvent::Metadata(key, metadata) => events.push(Event::Metadata(key, metadata)),
+                StreamEvent::EndOfStream(reason) => match reason {
+                    StreamEndReason::Completed => events.push(Event::Completed),
+                    StreamEndReason::MaxTokens => events.push(Event::MaxTokensReached),
+                },
             }
         }
 
@@ -522,201 +541,9 @@ pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dy
     Ok(provider)
 }
 
-#[derive(Debug, Default)]
-struct Delta {
-    content: Option<String>,
-    reasoning: Option<String>,
-    tool_call_id: Option<String>,
-    tool_call_name: Option<String>,
-    tool_call_arguments: Option<String>,
-    tool_call_finished: bool,
-}
-
-impl Delta {
-    fn content(content: impl Into<String>) -> Self {
-        Self {
-            content: Some(content.into()),
-            ..Default::default()
-        }
-    }
-
-    fn reasoning(reasoning: impl Into<String>) -> Self {
-        Self {
-            reasoning: Some(reasoning.into()),
-            ..Default::default()
-        }
-    }
-
-    fn tool_call(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        arguments: impl Into<String>,
-    ) -> Self {
-        let id = id.into();
-        let name = name.into();
-        let arguments = arguments.into();
-
-        Self {
-            tool_call_id: (!id.is_empty()).then_some(id),
-            tool_call_name: (!name.is_empty()).then_some(name),
-            tool_call_arguments: (!arguments.is_empty()).then_some(arguments),
-            ..Default::default()
-        }
-    }
-
-    #[must_use]
-    fn finished(mut self) -> Self {
-        self.tool_call_finished = true;
-        self
-    }
-
-    fn tool_call_finished() -> Self {
-        Self {
-            tool_call_finished: true,
-            ..Default::default()
-        }
-    }
-}
-
-// State for accumulating function calls.
 #[derive(Default, Debug)]
-enum AccumulationState {
-    #[default]
-    Idle,
-    AccumulatingFunctionCall {
-        id: String,
-        name: String,
-        arguments_buffer: String,
-    },
-}
-
-impl AccumulationState {
-    fn is_accumulating(&self) -> bool {
-        matches!(self, Self::AccumulatingFunctionCall { .. })
-    }
-}
-
-fn handle_delta(delta: Delta, state: &mut AccumulationState) -> Result<Option<StreamEvent>> {
-    let Delta {
-        content,
-        reasoning,
-        tool_call_id,
-        tool_call_name,
-        tool_call_arguments,
-        tool_call_finished,
-    } = delta;
-
-    let reasoning = reasoning.and_then(|v| {
-        if v.trim_matches(' ').is_empty() {
-            None
-        } else {
-            Some(v)
-        }
-    });
-    let content = content.and_then(|v| {
-        if v.trim_matches(' ').is_empty() {
-            None
-        } else {
-            Some(v)
-        }
-    });
-
-    // Check for function call start or continuation.
-    match state {
-        AccumulationState::Idle => match tool_call_name {
-            Some(name) => {
-                *state = AccumulationState::AccumulatingFunctionCall {
-                    id: tool_call_id.unwrap_or_default(),
-                    name,
-                    arguments_buffer: tool_call_arguments.unwrap_or_default(),
-                };
-            }
-            None if tool_call_arguments.is_some() => {
-                return Err(Error::InvalidResponse(
-                    "Received function call arguments without a function name.".into(),
-                ));
-            }
-            _ => {}
-        },
-        AccumulationState::AccumulatingFunctionCall {
-            arguments_buffer, ..
-        } => {
-            if let Some(args_chunk) = tool_call_arguments {
-                arguments_buffer.push_str(&args_chunk);
-            }
-        }
-    }
-
-    // Check for function call completion.
-    if tool_call_finished {
-        // If we're not accumulating, ignore any finish reason, since some
-        // providers don't send the `tool_calls` finish reason at the end of
-        // a response, but instead send the `stop` reason.
-        if let AccumulationState::AccumulatingFunctionCall {
-            id,
-            name,
-            arguments_buffer,
-        } = state
-        {
-            let id = id.clone();
-            let name = name.clone();
-            let arguments = if arguments_buffer.trim().is_empty() {
-                serde_json::json!({})
-            } else {
-                match serde_json::from_str(arguments_buffer) {
-                    Ok(arguments) => arguments,
-                    Err(e) => {
-                        return Err(Error::InvalidResponse(format!(
-                            "Failed to parse function call arguments: {e}. Buffer was: \
-                             '{arguments_buffer}'"
-                        )));
-                    }
-                }
-            };
-
-            *state = AccumulationState::default();
-            return Ok(Some(StreamEvent::ToolCall(ToolCallRequest {
-                id,
-                name,
-                arguments,
-            })));
-        }
-    }
-
-    // Handle reasoning.
-    if let Some(reasoning) = reasoning {
-        if !state.is_accumulating() {
-            return Ok(Some(StreamEvent::ChatChunk(CompletionChunk::Reasoning(
-                reasoning,
-            ))));
-        }
-
-        warn!(
-            reasoning,
-            "Ignoring reasoning chunk while accumulating function call."
-        );
-    }
-
-    // Handle regular content.
-    if let Some(content) = content {
-        if !state.is_accumulating() {
-            return Ok(Some(StreamEvent::ChatChunk(CompletionChunk::Content(
-                content,
-            ))));
-        }
-
-        warn!(
-            content_len = content.len(),
-            "Ignoring content chunk while accumulating function call."
-        );
-    }
-
-    Ok(None)
-}
-
-#[derive(Default, Debug)]
-/// A parser that segments a stream of text into 'reasoning' and 'other' buckets.
-/// It handles streams with or without a `<think>` block.
+/// A parser that segments a stream of text into 'reasoning' and 'other'
+/// buckets. It handles streams with or without a `<think>` block.
 pub struct ReasoningExtractor {
     pub other: String,
     pub reasoning: String,
@@ -727,9 +554,11 @@ pub struct ReasoningExtractor {
 #[derive(Default, PartialEq, Debug)]
 enum ReasoningState {
     #[default]
-    /// The default state. Processing 'other' text while looking for `<think>\n`.
+    /// The default state. Processing 'other' text while looking for
+    /// `<think>\n`.
     Idle,
-    /// Found `<think>\n`. Processing 'reasoning' text while looking for `</think>\n`.
+    /// Found `<think>\n`. Processing 'reasoning' text while looking for
+    /// `</think>\n`.
     Accumulating,
     /// Found `</think>\n`. All subsequent text is 'other'.
     Finished,
@@ -755,11 +584,13 @@ impl ReasoningExtractor {
                         let tag_end_offset = tag_start_index + "<think>\n".len();
                         self.buffer.drain(..tag_end_offset);
 
-                        // Transition state and re-process the rest of the buffer.
+                        // Transition state and re-process the rest of the
+                        // buffer.
                         self.state = ReasoningState::Accumulating;
                     } else {
-                        // No tag found. We can safely move most of the buffer to `other`,
-                        // but must keep a small tail in case a tag is split across chunks.
+                        // No tag found. We can safely move most of the buffer
+                        // to `other`, but must keep a small tail in case a tag
+                        // is split across chunks.
                         let tail_len = self.buffer.len().min("<think>\n".len() - 1);
                         let mut drain_to = self.buffer.len() - tail_len;
 
@@ -788,7 +619,8 @@ impl ReasoningExtractor {
                         // Transition state and re-process.
                         self.state = ReasoningState::Finished;
                     } else {
-                        // No closing tag found yet. Move "safe" part of the buffer to `reasoning`.
+                        // No closing tag found yet. Move "safe" part of the
+                        // buffer to `reasoning`.
                         let tail_len = self.buffer.len().min("</think>\n".len() - 1);
                         let drain_to = self.buffer.len() - tail_len;
 
@@ -802,7 +634,8 @@ impl ReasoningExtractor {
                     }
                 }
                 ReasoningState::Finished => {
-                    // Everything from now on is 'other'. No need for complex buffering.
+                    // Everything from now on is 'other'. No need for complex
+                    // buffering.
                     self.other.push_str(&self.buffer);
                     self.buffer.clear();
                     return;
@@ -811,7 +644,8 @@ impl ReasoningExtractor {
         }
     }
 
-    /// Call this after the stream has finished to process any remaining data.
+    /// Call this after the stream has finished to process any remaining data
+    /// and fix potential unclosed thinking blocks.
     pub fn finalize(&mut self) {
         match self.state {
             ReasoningState::Accumulating => {

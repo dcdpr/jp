@@ -1,6 +1,6 @@
 use std::{mem, str::FromStr as _};
 
-use async_stream::stream;
+use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::StreamExt as _;
 use jp_config::{
@@ -28,11 +28,12 @@ use serde_json::Value;
 use tracing::trace;
 use url::Url;
 
-use super::{handle_delta, Event, EventStream, ModelDetails, Provider, Reply, StreamEvent};
+use super::{Event, EventStream, ModelDetails, Provider, Reply, StreamEvent};
 use crate::{
     error::{Error, Result},
-    provider::{AccumulationState, Delta, ReasoningExtractor},
+    provider::{Delta, ReasoningExtractor, StreamEndReason},
     query::ChatQuery,
+    stream::accumulator::Accumulator,
     tool::ToolDefinition,
     CompletionChunk,
 };
@@ -89,35 +90,31 @@ impl Provider for Ollama {
     ) -> Result<EventStream> {
         let client = self.client.clone();
         let request = create_request(model, parameters, query)?;
-        let stream = Box::pin(stream! {
-            let mut current_state = AccumulationState::default();
+
+        Ok(Box::pin(try_stream!({
+            let mut accumulator = Accumulator::new(200);
             let mut extractor = ReasoningExtractor::default();
 
             let stream = client
-                .send_chat_messages_stream(request.clone()).await
-                .map_err(Error::from)?;
+                .send_chat_messages_stream(request.clone())
+                .await
+                .map_err(Error::from)?
+                .peekable();
 
             tokio::pin!(stream);
-            while let Some(event) = stream.next().await {
-                let events = event
-                    .map(|event| {
-                        extractor.handle(&event.message.content);
-                        map_event(event, &mut current_state, &mut extractor)
-                    })
-                    .unwrap_or_default();
+            while let Some(Ok(event)) = stream.next().await {
+                extractor.handle(&event.message.content);
 
-                for event in events {
+                if stream.as_mut().peek().await.is_none() {
+                    extractor.finalize();
+                    accumulator.finalize();
+                }
+
+                for event in map_event(event, &mut accumulator, &mut extractor)? {
                     yield event;
                 }
             }
-
-            extractor.finalize();
-            for event in map_content(&mut current_state, &mut extractor) {
-                yield event;
-            }
-        });
-
-        Ok(stream)
+        })))
     }
 }
 
@@ -138,26 +135,30 @@ fn map_response(response: ChatMessageResponse) -> Result<Vec<Event>> {
     extractor.handle(&response.message.content);
     extractor.finalize();
 
-    map_event(response, &mut AccumulationState::default(), &mut extractor)
-        .into_iter()
-        .map(|v| {
-            v.map(|e| match e {
+    Ok(
+        map_event(response, &mut Accumulator::new(200), &mut extractor)?
+            .into_iter()
+            .map(|e| match e {
                 StreamEvent::ChatChunk(content) => match content {
                     CompletionChunk::Content(s) => Event::Content(s),
                     CompletionChunk::Reasoning(content) => Event::Reasoning(content),
                 },
                 StreamEvent::ToolCall(request) => Event::ToolCall(request),
                 StreamEvent::Metadata(key, metadata) => Event::Metadata(key, metadata),
+                StreamEvent::EndOfStream(reason) => match reason {
+                    StreamEndReason::Completed => Event::Completed,
+                    StreamEndReason::MaxTokens => Event::MaxTokensReached,
+                },
             })
-        })
-        .collect::<Result<Vec<_>>>()
+            .collect(),
+    )
 }
 
 fn map_event(
     event: ChatMessageResponse,
-    state: &mut AccumulationState,
+    accumulator: &mut Accumulator,
     extractor: &mut ReasoningExtractor,
-) -> Vec<Result<StreamEvent>> {
+) -> Result<Vec<StreamEvent>> {
     let mut events = vec![];
 
     for tool_call in event.message.tool_calls {
@@ -168,29 +169,29 @@ fn map_event(
         )
         .finished();
 
-        events.extend(handle_delta(delta, state).transpose());
+        events.extend(delta.into_stream_events(accumulator)?);
     }
 
-    events.extend(map_content(state, extractor));
-    events
+    events.extend(map_content(accumulator, extractor)?);
+    Ok(events)
 }
 
 fn map_content(
-    state: &mut AccumulationState,
+    accumulator: &mut Accumulator,
     extractor: &mut ReasoningExtractor,
-) -> Vec<Result<StreamEvent>> {
+) -> Result<Vec<StreamEvent>> {
     let mut events = Vec::new();
     if !extractor.reasoning.is_empty() {
         let reasoning = mem::take(&mut extractor.reasoning);
-        events.extend(handle_delta(Delta::reasoning(reasoning), state).transpose());
+        events.extend(Delta::reasoning(reasoning).into_stream_events(accumulator)?);
     }
 
     if !extractor.other.is_empty() {
         let content = mem::take(&mut extractor.other);
-        events.extend(handle_delta(Delta::content(content), state).transpose());
+        events.extend(Delta::content(content).into_stream_events(accumulator)?);
     }
 
-    events
+    Ok(events)
 }
 
 fn create_request(

@@ -81,6 +81,7 @@ PartialAppConfig {
             anthropic: PartialAnthropicConfig {
                 api_key_env: None,
                 base_url: None,
+                chain_on_max_tokens: None,
                 beta_headers: None,
             },
             deepseek: PartialDeepseekConfig {

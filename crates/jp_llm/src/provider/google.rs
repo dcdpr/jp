@@ -23,7 +23,9 @@ use crate::{
     error::{Error, Result},
     provider::Delta,
     query::ChatQuery,
+    stream::{accumulator::Accumulator, event::StreamEndReason},
     tool::ToolDefinition,
+    CompletionChunk, StreamEvent,
 };
 
 static PROVIDER: ProviderId = ProviderId::Google;
@@ -68,10 +70,24 @@ impl Provider for Google {
             .generate_content(&model.id.name, &request)
             .await
             .map_err(Into::into)
-            .and_then(map_response)
+            .and_then(|v| map_response(v, &mut Accumulator::default()))
             .map(|events| Reply {
                 provider: PROVIDER,
-                events,
+                events: events
+                    .into_iter()
+                    .map(|e| match e {
+                        StreamEvent::ChatChunk(chunk) => match chunk {
+                            CompletionChunk::Content(content) => Event::Content(content),
+                            CompletionChunk::Reasoning(reasoning) => Event::Reasoning(reasoning),
+                        },
+                        StreamEvent::ToolCall(call) => Event::ToolCall(call),
+                        StreamEvent::Metadata(key, value) => Event::Metadata(key, value),
+                        StreamEvent::EndOfStream(eos) => match eos {
+                            StreamEndReason::Completed => Event::Completed,
+                            StreamEndReason::MaxTokens => Event::MaxTokensReached,
+                        },
+                    })
+                    .collect(),
             })
     }
 
@@ -85,6 +101,7 @@ impl Provider for Google {
         let request = create_request(model, parameters, query)?;
         let slug = model.id.name.clone();
         let stream = Box::pin(stream! {
+            let mut accumulator = Accumulator::new(200);
             let stream = client
                 .stream_content(&slug, &request)
                 .await?
@@ -92,8 +109,8 @@ impl Provider for Google {
 
             tokio::pin!(stream);
             while let Some(event) = stream.next().await {
-                for event in map_response(event?)? {
-                    yield Ok(event.into());
+                for event in map_response(event?, &mut accumulator)? {
+                    yield Ok(event);
                 }
             }
         });
@@ -185,16 +202,24 @@ fn map_model(model: types::Model) -> ModelDetails {
                     .then_some(ReasoningDetails::supported(0, Some(24576)))
             }),
         knowledge_cutoff: None,
+        deprecated: None,
+        features: vec![],
     }
 }
 
-fn map_response(response: types::GenerateContentResponse) -> Result<Vec<Event>> {
+fn map_response(
+    response: types::GenerateContentResponse,
+    accumulator: &mut Accumulator,
+) -> Result<Vec<StreamEvent>> {
     response
         .candidates
         .into_iter()
         .flat_map(|v| v.content.parts)
-        .filter_map(|v| Option::<Result<Event>>::from(Delta::from(v)))
-        .collect::<Result<_>>()
+        .map(|v| Delta::from(v).into_stream_events(accumulator))
+        .try_fold(vec![], |mut acc, events| {
+            acc.extend(events?);
+            Ok(acc)
+        })
 }
 
 impl TryFrom<&GoogleConfig> for Google {
