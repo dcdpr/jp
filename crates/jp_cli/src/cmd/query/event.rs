@@ -16,6 +16,7 @@ use serde_json::Value;
 use super::ResponseHandler;
 use crate::{Ctx, Error};
 
+#[derive(Debug, Default, PartialEq)]
 pub(super) struct StreamEventHandler {
     pub reasoning_tokens: String,
     pub content_tokens: String,
