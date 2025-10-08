@@ -33,6 +33,7 @@ expression: "AppConfig::fields()"
     "providers.llm.anthropic.api_key_env",
     "providers.llm.anthropic.base_url",
     "providers.llm.anthropic.beta_headers",
+    "providers.llm.anthropic.chain_on_max_tokens",
     "editor.cmd",
     "editor.envs",
     "conversation.attachments",

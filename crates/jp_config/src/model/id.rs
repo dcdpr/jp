@@ -126,7 +126,7 @@ impl ModelIdOrAliasConfig {
 }
 
 /// Assistant-specific configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ModelIdConfig {
     /// The provider to supply the model.
@@ -180,6 +180,33 @@ impl fmt::Display for ModelIdConfig {
 impl From<PartialModelIdConfig> for PartialModelIdOrAliasConfig {
     fn from(v: PartialModelIdConfig) -> Self {
         Self::Id(v)
+    }
+}
+
+impl TryFrom<(ProviderId, String)> for ModelIdConfig {
+    type Error = ModelIdConfigError;
+
+    fn try_from((provider, name): (ProviderId, String)) -> Result<Self, Self::Error> {
+        (provider, &name).try_into()
+    }
+}
+
+impl TryFrom<(ProviderId, &String)> for ModelIdConfig {
+    type Error = ModelIdConfigError;
+
+    fn try_from((provider, name): (ProviderId, &String)) -> Result<Self, Self::Error> {
+        (provider, name.as_str()).try_into()
+    }
+}
+
+impl TryFrom<(ProviderId, &str)> for ModelIdConfig {
+    type Error = ModelIdConfigError;
+
+    fn try_from((provider, name): (ProviderId, &str)) -> Result<Self, Self::Error> {
+        Ok(Self {
+            provider,
+            name: name.parse()?,
+        })
     }
 }
 
@@ -281,6 +308,12 @@ impl std::ops::Deref for Name {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<str> for Name {
+    fn as_ref(&self) -> &str {
         &self.0
     }
 }

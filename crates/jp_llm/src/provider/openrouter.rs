@@ -1,12 +1,12 @@
 use std::env;
 
-use async_stream::stream;
+use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt as _};
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
-        id::{ModelIdConfig, ProviderId},
+        id::{ModelIdConfig, Name, ProviderId},
         parameters::{ParametersConfig, ReasoningEffort},
     },
     providers::llm::openrouter::OpenrouterConfig,
@@ -35,8 +35,9 @@ use tracing::{debug, trace, warn};
 use super::{CompletionChunk, Delta, Event, EventStream, ModelDetails, Reply, StreamEvent};
 use crate::{
     error::Result,
-    provider::{handle_delta, openai::parameters_with_strict_mode, AccumulationState, Provider},
+    provider::{openai::parameters_with_strict_mode, Provider},
     query::ChatQuery,
+    stream::{accumulator::Accumulator, event::StreamEndReason},
     Error,
 };
 
@@ -59,121 +60,51 @@ impl Openrouter {
         self.client = self.client.with_base_url(base_url);
         self
     }
-
-    /// Build request for Openrouter API.
-    async fn build_request(
-        &self,
-        query: ChatQuery,
-        model_id: &ModelIdConfig,
-        parameters: &ParametersConfig,
-    ) -> Result<request::ChatCompletion> {
-        let ChatQuery {
-            thread,
-            tools,
-            tool_choice,
-            tool_call_strict_mode,
-        } = query;
-
-        let model_details = self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| *m.slug == *model_id.name);
-
-        let slug = model_id.name.to_string();
-        let reasoning = model_details
-            .as_ref()
-            .and_then(|m| m.custom_reasoning_config(parameters.reasoning));
-
-        let messages: RequestMessages = (model_id, thread).try_into()?;
-        let tools = tools
-            .into_iter()
-            .map(|tool| Tool::Function {
-                function: ToolFunction {
-                    parameters: parameters_with_strict_mode(tool.parameters, tool_call_strict_mode),
-                    name: tool.name,
-                    description: tool.description,
-                    strict: tool_call_strict_mode,
-                },
-            })
-            .collect::<Vec<_>>();
-        let tool_choice: tool::ToolChoice = if tools.is_empty() {
-            tool::ToolChoice::None
-        } else {
-            match tool_choice {
-                ToolChoice::Auto => tool::ToolChoice::Auto,
-                ToolChoice::None => tool::ToolChoice::None,
-                ToolChoice::Required => tool::ToolChoice::Required,
-                ToolChoice::Function(name) => tool::ToolChoice::function(name),
-            }
-        };
-
-        trace!(
-            slug,
-            messages_size = messages.0.len(),
-            tools_size = tools.len(),
-            "Built Openrouter request."
-        );
-
-        Ok(request::ChatCompletion {
-            model: slug,
-            messages: messages.0,
-            reasoning: reasoning.map(|r| request::Reasoning {
-                exclude: r.exclude,
-                effort: match r
-                    .effort
-                    .abs_to_rel(model_details.and_then(|d| d.max_output_tokens))
-                {
-                    ReasoningEffort::High => request::ReasoningEffort::High,
-                    ReasoningEffort::Auto | ReasoningEffort::Medium => {
-                        request::ReasoningEffort::Medium
-                    }
-                    ReasoningEffort::Low => request::ReasoningEffort::Low,
-                    ReasoningEffort::Absolute(_) => {
-                        debug_assert!(false, "Reasoning effort must be relative.");
-                        request::ReasoningEffort::Medium
-                    }
-                },
-            }),
-            tools,
-            tool_choice,
-            ..Default::default()
-        })
-    }
 }
 
 #[async_trait]
 impl Provider for Openrouter {
-    async fn models(&self) -> Result<Vec<ModelDetails>> {
+    async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
+        let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
+
         Ok(self
-            .client
+            .models()
+            .await?
+            .into_iter()
+            .find(|m| m.id == id)
+            .unwrap_or(ModelDetails::empty(id)))
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>> {
+        self.client
             .models()
             .await?
             .data
             .into_iter()
             .map(map_model)
-            .collect())
+            .collect::<Result<_>>()
     }
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         debug!(
-            model = %model_id.name,
+            model = %model.id,
             "Starting OpenRouter chat completion stream."
         );
 
-        let request = self.build_request(query, model_id, parameters).await?;
+        let request = build_request(query, model, parameters)?;
         let inner_stream = self
             .client
             .chat_completion_stream(request)
             .map_err(Error::from);
 
-        let stream = Box::pin(stream! {
-            let mut current_state = AccumulationState::default();
+        #[expect(clippy::semicolon_if_nothing_returned)]
+        Ok(Box::pin(try_stream!({
+            let mut accumulator = Accumulator::new(200);
             tokio::pin!(inner_stream);
 
             while let Some(result) = inner_stream.next().await {
@@ -181,8 +112,7 @@ impl Provider for Openrouter {
                     Ok(chunk) => chunk,
                     Err(e) => {
                         warn!(error = ?e, "Error receiving delta from OpenRouter stream.");
-                        yield Err(e);
-                        continue
+                        Err(e)?
                     }
                 };
 
@@ -191,39 +121,55 @@ impl Provider for Openrouter {
                 let choice_data = chunk.choices.into_iter().next();
                 let Some(choice) = choice_data else {
                     trace!("OpenRouter delta had no choices, skipping.");
-                    continue
+                    continue;
                 };
 
                 let Choice::Streaming(streaming_choice) = choice else {
                     warn!("Received non-streaming choice in streaming context, ignoring.");
-                    continue
+                    continue;
                 };
 
+                let finish_reason = streaming_choice.finish_reason;
+
                 let mut delta: Delta = streaming_choice.delta.into();
-                delta.tool_call_finished = streaming_choice.finish_reason
+                delta.tool_call_finished = streaming_choice
+                    .finish_reason
                     .is_some_and(|r| matches!(r, FinishReason::ToolCalls | FinishReason::Stop));
 
-                match handle_delta(delta, &mut current_state) {
-                    Ok(Some(event)) => yield Ok(event),
-                    Ok(None) => {}
-                    Err(error) => {
-                        warn!(?error, "Error handling OpenRouter delta.");
-                        yield Err(error);
+                for event in delta.into_stream_events(&mut accumulator)? {
+                    yield event;
+                }
+
+                if let Some(finish_reason) = finish_reason {
+                    for event in accumulator.drain()? {
+                        yield event;
+                    }
+
+                    match finish_reason {
+                        FinishReason::Length => {
+                            yield StreamEvent::EndOfStream(StreamEndReason::MaxTokens)
+                        }
+                        FinishReason::Stop => {
+                            yield StreamEvent::EndOfStream(StreamEndReason::Completed)
+                        }
+                        _ => {
+                            yield StreamEvent::EndOfStream(StreamEndReason::Other(
+                                finish_reason.as_str().to_owned(),
+                            ))
+                        }
                     }
                 }
             }
-        });
-
-        Ok(stream)
+        })))
     }
 
     async fn chat_completion(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
-        let request = self.build_request(query, model_id, parameters).await?;
+        let request = build_request(query, model, parameters)?;
         let completion =
             self.client.chat_completion(request).await.inspect_err(
                 |error| warn!(%error, "Error receiving completion from OpenRouter."),
@@ -264,6 +210,14 @@ impl Provider for Openrouter {
             }));
         }
 
+        match choice.finish_reason {
+            FinishReason::Length => events.push(Event::Finished(StreamEndReason::MaxTokens)),
+            FinishReason::Stop => events.push(Event::Finished(StreamEndReason::Completed)),
+            finish_reason => events.push(Event::Finished(StreamEndReason::Other(
+                finish_reason.as_str().to_owned(),
+            ))),
+        }
+
         Ok(Reply {
             provider: PROVIDER,
             events,
@@ -271,16 +225,85 @@ impl Provider for Openrouter {
     }
 }
 
+/// Build request for Openrouter API.
+fn build_request(
+    query: ChatQuery,
+    model: &ModelDetails,
+    parameters: &ParametersConfig,
+) -> Result<request::ChatCompletion> {
+    let ChatQuery {
+        thread,
+        tools,
+        tool_choice,
+        tool_call_strict_mode,
+    } = query;
+
+    let slug = model.id.name.to_string();
+    let reasoning = model.custom_reasoning_config(parameters.reasoning);
+
+    let messages: RequestMessages = (&model.id, thread).try_into()?;
+    let tools = tools
+        .into_iter()
+        .map(|tool| Tool::Function {
+            function: ToolFunction {
+                parameters: parameters_with_strict_mode(tool.parameters, tool_call_strict_mode),
+                name: tool.name,
+                description: tool.description,
+                strict: tool_call_strict_mode,
+            },
+        })
+        .collect::<Vec<_>>();
+    let tool_choice: tool::ToolChoice = if tools.is_empty() {
+        tool::ToolChoice::None
+    } else {
+        match tool_choice {
+            ToolChoice::Auto => tool::ToolChoice::Auto,
+            ToolChoice::None => tool::ToolChoice::None,
+            ToolChoice::Required => tool::ToolChoice::Required,
+            ToolChoice::Function(name) => tool::ToolChoice::function(name),
+        }
+    };
+
+    trace!(
+        slug,
+        messages_size = messages.0.len(),
+        tools_size = tools.len(),
+        "Built Openrouter request."
+    );
+
+    Ok(request::ChatCompletion {
+        model: slug,
+        messages: messages.0,
+        reasoning: reasoning.map(|r| request::Reasoning {
+            exclude: r.exclude,
+            effort: match r.effort.abs_to_rel(model.max_output_tokens) {
+                ReasoningEffort::High => request::ReasoningEffort::High,
+                ReasoningEffort::Auto | ReasoningEffort::Medium => request::ReasoningEffort::Medium,
+                ReasoningEffort::Low => request::ReasoningEffort::Low,
+                ReasoningEffort::Absolute(_) => {
+                    debug_assert!(false, "Reasoning effort must be relative.");
+                    request::ReasoningEffort::Medium
+                }
+            },
+        }),
+        tools,
+        tool_choice,
+        ..Default::default()
+    })
+}
+
 // TODO: Manually add a bunch of often-used models.
-fn map_model(model: response::Model) -> ModelDetails {
-    ModelDetails {
-        provider: PROVIDER,
-        slug: model.id,
+fn map_model(model: response::Model) -> Result<ModelDetails> {
+    Ok(ModelDetails {
+        id: (PROVIDER, model.id).try_into()?,
+        display_name: Some(model.name),
         context_window: Some(model.context_length),
         max_output_tokens: None,
         reasoning: None,
         knowledge_cutoff: Some(model.created.date()),
-    }
+        deprecated: None,
+        features: vec![],
+    })
 }
 
 impl From<StreamingDelta> for Delta {
@@ -634,6 +657,7 @@ mod tests {
     {
         let mut config = LlmProviderConfig::default().openrouter;
         let model_id = "openrouter/openai/o4-mini".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -659,7 +683,7 @@ mod tests {
 
                 Openrouter::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &ParametersConfig::default(), query)
+                    .chat_completion(&model, &ParametersConfig::default(), query)
                     .await
             },
         )

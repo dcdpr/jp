@@ -18,12 +18,14 @@ use crate::error::{Error, Result};
 pub struct Messages(Vec<MessagePairWithConfig>);
 
 impl Messages {
-    pub fn iter(&self) -> impl Iterator<Item = &MessagePair> {
+    #[must_use]
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &MessagePair> {
         self.0.iter().map(|m| &m.pair)
     }
 
     #[expect(clippy::should_implement_trait)]
-    pub fn into_iter(self) -> impl Iterator<Item = MessagePair> {
+    #[must_use]
+    pub fn into_iter(self) -> impl DoubleEndedIterator<Item = MessagePair> {
         self.0.into_iter().map(|m| m.pair)
     }
 

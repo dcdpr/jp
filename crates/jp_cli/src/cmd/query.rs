@@ -26,10 +26,10 @@ use jp_conversation::{
     AssistantMessage, Conversation, ConversationId, MessagePair, UserMessage,
 };
 use jp_llm::{
-    provider::{self, StreamEvent},
+    provider,
     query::{ChatQuery, StructuredQuery},
     tool::{tool_definitions, ToolDefinition},
-    ToolError,
+    StreamEvent, ToolError,
 };
 use jp_task::task::TitleGeneratorTask;
 use jp_term::stdout;
@@ -474,8 +474,9 @@ impl Query {
             tool_choice: tool_choice.clone(),
             ..Default::default()
         };
+        let model = provider.model_details(&model_id.name).await?;
         let mut stream = provider
-            .chat_completion_stream(model_id, parameters, query)
+            .chat_completion_stream(&model, parameters, query)
             .await?;
 
         let mut event_handler = StreamEventHandler {
@@ -519,7 +520,7 @@ impl Query {
                         .models()
                         .await?
                         .into_iter()
-                        .map(|v| v.slug)
+                        .map(|v| v.id.name.to_string())
                         .collect();
 
                     return Err(Error::UnknownModel { model, available });
@@ -541,6 +542,7 @@ impl Query {
                     metadata.insert(key, data);
                     continue;
                 }
+                StreamEvent::EndOfStream(_) => continue,
             };
 
             let Some(data) = data else {
@@ -1036,8 +1038,9 @@ async fn handle_structured_output(
     let message = thread.message.clone();
     let query = StructuredQuery::new(schema, thread);
 
+    let model = provider.model_details(&model_id.name).await?;
     let value = provider
-        .structured_completion(model_id, parameters, query)
+        .structured_completion(&model, parameters, query)
         .await?;
     let content = if ctx.term.is_tty {
         serde_json::to_string_pretty(&value)?

@@ -66,6 +66,12 @@ pub enum Error {
 
     #[error("Failed to serialize XML")]
     XmlSerialization(#[from] quick_xml::SeError),
+
+    #[error(transparent)]
+    ModelIdConfig(#[from] jp_config::model::id::ModelIdConfigError),
+
+    #[error(transparent)]
+    ModelId(#[from] jp_config::model::id::ModelIdError),
 }
 
 impl From<gemini_client_rs::GeminiError> for Error {

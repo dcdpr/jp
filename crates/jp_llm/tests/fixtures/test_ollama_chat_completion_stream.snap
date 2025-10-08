@@ -2,4 +2,17 @@
 source: crates/jp_test/src/mock.rs
 expression: expr
 ---
-"This is a test message. I'm here and ready to assist you with any questions or topics you'd like to discuss!"
+[
+    Ok(
+        ChatChunk(
+            Content(
+                "It looks like you sent a test message! That's perfectly fine. If you need help with anything or just want to chat, I'm here for you. Otherwise, feel free to send another test message (or not!)",
+            ),
+        ),
+    ),
+    Ok(
+        EndOfStream(
+            Completed,
+        ),
+    ),
+]

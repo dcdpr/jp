@@ -6,11 +6,11 @@ Ok(
     Reply {
         provider: Openrouter,
         events: [
-            Reasoning(
-                "**Acknowledging the test message**\n\nThe user sent a message saying \"Test message,\" which seems to be a way to check things. I should acknowledge this and confirm that I've received it. I can also invite the user to share how I can assist or if there's anything specific they want to test. It’s important to respond warmly to keep communication flowing smoothly. Let's see what they need next!",
-            ),
             Content(
-                "Hello! I’m here and ready to help. How can I assist you today?",
+                "Test message received. How can I assist you today?",
+            ),
+            Finished(
+                Completed,
             ),
         ],
     },

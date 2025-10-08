@@ -1,20 +1,10 @@
 when:
-  path: /v1/models
-  method: GET
-then:
-  status: 200
-  header:
-    - name: content-type
-      value: application/json
-  body: "{\"data\":[{\"type\":\"model\",\"id\":\"claude-opus-4-1-20250805\",\"display_name\":\"Claude Opus 4.1\",\"created_at\":\"2025-08-05T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-opus-4-20250514\",\"display_name\":\"Claude Opus 4\",\"created_at\":\"2025-05-22T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-sonnet-4-20250514\",\"display_name\":\"Claude Sonnet 4\",\"created_at\":\"2025-05-22T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-7-sonnet-20250219\",\"display_name\":\"Claude Sonnet 3.7\",\"created_at\":\"2025-02-24T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-5-sonnet-20241022\",\"display_name\":\"Claude Sonnet 3.5 (New)\",\"created_at\":\"2024-10-22T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-5-haiku-20241022\",\"display_name\":\"Claude Haiku 3.5\",\"created_at\":\"2024-10-22T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-5-sonnet-20240620\",\"display_name\":\"Claude Sonnet 3.5 (Old)\",\"created_at\":\"2024-06-20T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-haiku-20240307\",\"display_name\":\"Claude Haiku 3\",\"created_at\":\"2024-03-07T00:00:00Z\"},{\"type\":\"model\",\"id\":\"claude-3-opus-20240229\",\"display_name\":\"Claude Opus 3\",\"created_at\":\"2024-02-29T00:00:00Z\"}],\"has_more\":false,\"first_id\":\"claude-opus-4-1-20250805\",\"last_id\":\"claude-3-opus-20240229\"}"
----
-when:
   path: /v1/messages
   method: POST
-  body: "{\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Test message\"}]}],\"model\":\"claude-3-5-haiku-latest\",\"max_tokens\":8192,\"stream\":false}"
+  body: "{\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Test message\"}]}],\"model\":\"claude-3-5-haiku-latest\",\"max_tokens\":2048,\"stream\":false}"
 then:
   status: 200
   header:
     - name: content-type
       value: application/json
-  body: "{\"id\":\"msg_01QHYJn5PAkVskLRsQpwKaF5\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-5-haiku-20241022\",\"content\":[{\"type\":\"text\",\"text\":\"Hello! I'm ready to help you. What can I do for you today?\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":9,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":20,\"service_tier\":\"standard\"}}"
+  body: "{\"model\":\"claude-3-5-haiku-20241022\",\"id\":\"msg_01T7hfXsDPUpK46eR4Y9w1i9\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Hello! I'm ready to help you with any questions or tasks you may have. What would you like to discuss?\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"usage\":{\"input_tokens\":9,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":27,\"service_tier\":\"standard\"}}"

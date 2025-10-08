@@ -1,0 +1,33 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Anthropic,
+            name: Name(
+                "claude-3-5-haiku-20241022",
+            ),
+        },
+        display_name: Some(
+            "Claude Haiku 3.5",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            8192,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-07-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+)

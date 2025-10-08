@@ -1,12 +1,12 @@
 use std::{mem, str::FromStr as _};
 
-use async_stream::stream;
+use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::StreamExt as _;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
-        id::{ModelIdConfig, ProviderId},
+        id::{ModelIdConfig, Name, ProviderId},
         parameters::{ParametersConfig, ReasoningConfig},
     },
     providers::llm::ollama::OllamaConfig,
@@ -28,11 +28,12 @@ use serde_json::Value;
 use tracing::trace;
 use url::Url;
 
-use super::{handle_delta, Event, EventStream, ModelDetails, Provider, Reply, StreamEvent};
+use super::{Event, EventStream, ModelDetails, Provider, Reply, StreamEvent};
 use crate::{
     error::{Error, Result},
-    provider::{AccumulationState, Delta, ReasoningExtractor},
+    provider::{Delta, ReasoningExtractor, StreamEndReason},
     query::ChatQuery,
+    stream::accumulator::Accumulator,
     tool::ToolDefinition,
     CompletionChunk,
 };
@@ -46,19 +47,30 @@ pub struct Ollama {
 
 #[async_trait]
 impl Provider for Ollama {
+    async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
+        let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
+
+        Ok(self
+            .models()
+            .await?
+            .into_iter()
+            .find(|m| m.id == id)
+            .unwrap_or(ModelDetails::empty(id)))
+    }
+
     async fn models(&self) -> Result<Vec<ModelDetails>> {
         let models = self.client.list_local_models().await?;
 
-        Ok(models.into_iter().map(map_model).collect())
+        models.into_iter().map(map_model).collect::<Result<_>>()
     }
 
     async fn chat_completion(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
-        let request = create_request(model_id, parameters, query)?;
+        let request = create_request(model, parameters, query)?;
         self.client
             .send_chat_messages(request)
             .await
@@ -72,53 +84,48 @@ impl Provider for Ollama {
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelIdConfig,
+        model: &ModelDetails,
         parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = create_request(model_id, parameters, query)?;
-        let stream = Box::pin(stream! {
-            let mut current_state = AccumulationState::default();
+        let request = create_request(model, parameters, query)?;
+
+        Ok(Box::pin(try_stream!({
+            let mut accumulator = Accumulator::new(200);
             let mut extractor = ReasoningExtractor::default();
 
             let stream = client
-                .send_chat_messages_stream(request.clone()).await
+                .send_chat_messages_stream(request.clone())
+                .await
                 .map_err(Error::from)?;
 
             tokio::pin!(stream);
-            while let Some(event) = stream.next().await {
-                let events = event
-                    .map(|event| {
-                        extractor.handle(&event.message.content);
-                        map_event(event, &mut current_state, &mut extractor)
-                    })
-                    .unwrap_or_default();
+            while let Some(Ok(event)) = stream.next().await {
+                extractor.handle(&event.message.content);
+                if event.done {
+                    extractor.finalize();
+                }
 
-                for event in events {
+                for event in map_event(event, &mut accumulator, &mut extractor)? {
                     yield event;
                 }
             }
-
-            extractor.finalize();
-            for event in map_content(&mut current_state, &mut extractor) {
-                yield event;
-            }
-        });
-
-        Ok(stream)
+        })))
     }
 }
 
-fn map_model(model: LocalModel) -> ModelDetails {
-    ModelDetails {
-        provider: PROVIDER,
-        slug: model.name,
+fn map_model(model: LocalModel) -> Result<ModelDetails> {
+    Ok(ModelDetails {
+        id: (PROVIDER, &model.name).try_into()?,
+        display_name: Some(model.name),
         context_window: None,
         max_output_tokens: None,
         reasoning: None,
         knowledge_cutoff: None,
-    }
+        deprecated: None,
+        features: vec![],
+    })
 }
 
 fn map_response(response: ChatMessageResponse) -> Result<Vec<Event>> {
@@ -126,26 +133,27 @@ fn map_response(response: ChatMessageResponse) -> Result<Vec<Event>> {
     extractor.handle(&response.message.content);
     extractor.finalize();
 
-    map_event(response, &mut AccumulationState::default(), &mut extractor)
-        .into_iter()
-        .map(|v| {
-            v.map(|e| match e {
+    Ok(
+        map_event(response, &mut Accumulator::new(200), &mut extractor)?
+            .into_iter()
+            .map(|e| match e {
                 StreamEvent::ChatChunk(content) => match content {
                     CompletionChunk::Content(s) => Event::Content(s),
                     CompletionChunk::Reasoning(content) => Event::Reasoning(content),
                 },
                 StreamEvent::ToolCall(request) => Event::ToolCall(request),
                 StreamEvent::Metadata(key, metadata) => Event::Metadata(key, metadata),
+                StreamEvent::EndOfStream(eos) => Event::Finished(eos),
             })
-        })
-        .collect::<Result<Vec<_>>>()
+            .collect(),
+    )
 }
 
 fn map_event(
     event: ChatMessageResponse,
-    state: &mut AccumulationState,
+    accumulator: &mut Accumulator,
     extractor: &mut ReasoningExtractor,
-) -> Vec<Result<StreamEvent>> {
+) -> Result<Vec<StreamEvent>> {
     let mut events = vec![];
 
     for tool_call in event.message.tool_calls {
@@ -156,33 +164,39 @@ fn map_event(
         )
         .finished();
 
-        events.extend(handle_delta(delta, state).transpose());
+        events.extend(delta.into_stream_events(accumulator)?);
     }
 
-    events.extend(map_content(state, extractor));
-    events
+    events.extend(map_content(accumulator, extractor, event.done)?);
+    Ok(events)
 }
 
 fn map_content(
-    state: &mut AccumulationState,
+    accumulator: &mut Accumulator,
     extractor: &mut ReasoningExtractor,
-) -> Vec<Result<StreamEvent>> {
+    done: bool,
+) -> Result<Vec<StreamEvent>> {
     let mut events = Vec::new();
     if !extractor.reasoning.is_empty() {
         let reasoning = mem::take(&mut extractor.reasoning);
-        events.extend(handle_delta(Delta::reasoning(reasoning), state).transpose());
+        events.extend(Delta::reasoning(reasoning).into_stream_events(accumulator)?);
     }
 
     if !extractor.other.is_empty() {
         let content = mem::take(&mut extractor.other);
-        events.extend(handle_delta(Delta::content(content), state).transpose());
+        events.extend(Delta::content(content).into_stream_events(accumulator)?);
     }
 
-    events
+    if done {
+        events.extend(accumulator.drain()?);
+        events.push(StreamEvent::EndOfStream(StreamEndReason::Completed));
+    }
+
+    Ok(events)
 }
 
 fn create_request(
-    model_id: &ModelIdConfig,
+    model: &ModelDetails,
     parameters: &ParametersConfig,
     query: ChatQuery,
 ) -> Result<ChatMessageRequest> {
@@ -194,7 +208,7 @@ fn create_request(
     } = query;
 
     let mut request = ChatMessageRequest::new(
-        model_id.name.to_string(),
+        model.id.name.to_string(),
         convert_thread(thread, tool_choice)?,
     );
 
@@ -587,6 +601,7 @@ mod tests {
     async fn test_ollama_chat_completion() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().ollama;
         let model_id = "ollama/llama3:latest".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -608,7 +623,7 @@ mod tests {
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &ParametersConfig::default(), query)
+                    .chat_completion(&model, &ParametersConfig::default(), query)
                     .await
             },
         )
@@ -619,6 +634,7 @@ mod tests {
     async fn test_ollama_chat_completion_stream() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().ollama;
         let model_id = "ollama/llama3:latest".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -640,13 +656,10 @@ mod tests {
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .chat_completion_stream(&model_id, &ParametersConfig::default(), query)
+                    .chat_completion_stream(&model, &ParametersConfig::default(), query)
                     .await
                     .unwrap()
-                    .filter_map(
-                        |r| async move { r.unwrap().into_chat_chunk().unwrap().into_content() },
-                    )
-                    .collect::<String>()
+                    .collect::<Vec<_>>()
                     .await
             },
         )
@@ -657,6 +670,7 @@ mod tests {
     async fn test_ollama_structured_completion() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().ollama;
         let model_id = "ollama/llama3.1:8b".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
 
         let message = UserMessage::Query("Test message".to_string());
         let history = {
@@ -682,7 +696,7 @@ mod tests {
 
                 Ollama::try_from(&config)
                     .unwrap()
-                    .structured_completion(&model_id, &ParametersConfig::default(), query)
+                    .structured_completion(&model, &ParametersConfig::default(), query)
                     .await
             },
         )

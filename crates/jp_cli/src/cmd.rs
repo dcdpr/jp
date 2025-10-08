@@ -379,6 +379,7 @@ impl_from_error!(toml::ser::Error, "Error while serializing TOML");
 impl_from_error!(url::ParseError, "Error while parsing URL");
 impl_from_error!(which::Error, "Which error");
 impl_from_error!(jp_config::model::id::ModelIdConfigError, "Model ID error");
+impl_from_error!(jp_config::model::id::ModelIdError, "Model ID error");
 
 impl From<jp_llm::Error> for Error {
     fn from(error: jp_llm::Error) -> Self {
@@ -392,6 +393,8 @@ impl From<jp_llm::Error> for Error {
             Json(error) => return error.into(),
             Request(error) => return error.into(),
             Url(error) => return error.into(),
+            ModelIdConfig(error) => return error.into(),
+            ModelId(error) => return error.into(),
             MissingEnv(variable) => [
                 ("message", "Missing environment variable".into()),
                 ("variable", variable),

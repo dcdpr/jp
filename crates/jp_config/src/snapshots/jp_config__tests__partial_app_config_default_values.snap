@@ -136,6 +136,9 @@ Ok(
                         base_url: Some(
                             "https://api.anthropic.com",
                         ),
+                        chain_on_max_tokens: Some(
+                            true,
+                        ),
                         beta_headers: Some(
                             [],
                         ),
