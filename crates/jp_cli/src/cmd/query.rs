@@ -542,7 +542,7 @@ impl Query {
                     metadata.insert(key, data);
                     continue;
                 }
-                _ => continue,
+                StreamEvent::EndOfStream(_) => continue,
             };
 
             let Some(data) = data else {
