@@ -79,7 +79,7 @@ pub struct RootOpts {
 struct Globals {
     /// Override a configuration value for the duration of the command.
     #[arg(
-        short,
+        short = 'c',
         long = "cfg",
         global = true,
         action = ArgAction::Append,
@@ -105,11 +105,11 @@ struct Globals {
     /// Defaults to printing "error" messages. For each increase in verbosity,
     /// the log level is set to "warn", "info", "debug", and "trace"
     /// respectively.
-    #[arg(short, long, global = true, action = ArgAction::Count)]
+    #[arg(short = 'v', long, global = true, action = ArgAction::Count)]
     verbose: u8,
 
     /// Suppress all output, including errors.
-    #[arg(short, long, global = true)]
+    #[arg(short = 'q', long, global = true)]
     quiet: bool,
 
     /// Use OCI-compliant terminal links.
@@ -154,7 +154,7 @@ struct Globals {
     /// The workspace to use for the command.
     ///
     /// This can be either a path to a workspace directory, or a workspace ID.
-    #[arg(short, long, global = true, value_parser = WorkspaceIdOrPath::from_str)]
+    #[arg(short = 'w', long, global = true, value_parser = WorkspaceIdOrPath::from_str)]
     workspace: Option<WorkspaceIdOrPath>,
     // TODO
     // /// The format of the output.
