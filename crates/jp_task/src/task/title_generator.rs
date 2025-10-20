@@ -118,18 +118,22 @@ impl Task for TitleGeneratorTask {
         token: CancellationToken,
     ) -> Result<Box<dyn Task>, Box<dyn Error + Send + Sync>> {
         let id = self.conversation_id;
-        tokio::select! {
-            () = token.cancelled() => {
+        jp_macro::select!(
+            token.cancelled(),
+            |_cancel| {
                 trace!(conversation_id = %id, "Title generator task cancelled.");
-            }
-            result = self.update_title() => match result {
-                Ok(()) => trace!(conversation_id = %id, "Title generator task completed."),
-                Err(error) => {
-                    warn!(?error, conversation_id = %id, "Title generator task failed.");
-                    return Err(error)
+            },
+            self.update_title(),
+            |result| {
+                match result {
+                    Ok(()) => trace!(conversation_id = %id, "Title generator task completed."),
+                    Err(error) => {
+                        warn!(?error, conversation_id = %id, "Title generator task failed.");
+                        return Err(error);
+                    }
                 }
             }
-        };
+        );
 
         Ok(self)
     }

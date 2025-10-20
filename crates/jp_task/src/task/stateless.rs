@@ -26,10 +26,7 @@ impl Task for StatelessTask {
         mut self: Box<Self>,
         token: CancellationToken,
     ) -> Result<Box<dyn Task>, Box<dyn Error + Send + Sync>> {
-        tokio::select! {
-            () = token.cancelled() => {}
-            v = &mut self.0 => v?
-        };
+        jp_macro::select!(token.cancelled(), |_cancel| {}, &mut self.0, |v| { v? });
 
         Ok(self)
     }
