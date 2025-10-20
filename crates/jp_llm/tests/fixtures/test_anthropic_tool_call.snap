@@ -10,7 +10,7 @@ Ok(
                 ToolCallRequest {
                     id: "toolu_01AwxriXHLygkS3YYygTo7HF",
                     name: "run_me",
-                    arguments: Object {
+                    arguments: {
                         "bar": String("foo"),
                     },
                 },

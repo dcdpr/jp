@@ -89,3 +89,42 @@ pub mod base64_json_map {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde::{Deserialize, Serialize};
+    use serde_json::{json, Map, Value};
+
+    use super::*;
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct TestString(#[serde(with = "base64_string")] String);
+
+    #[test]
+    fn test_base64_string() {
+        let serialized = serde_json::to_string(&TestString("hello world".to_string())).unwrap();
+        assert_eq!(serialized, r#""aGVsbG8gd29ybGQ=""#);
+
+        let deserialized: TestString = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.0, "hello world");
+    }
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    struct TestJsonMap(#[serde(with = "base64_json_map")] Map<String, Value>);
+
+    #[test]
+    fn test_base64_json_map() {
+        let serialized = serde_json::to_value(TestJsonMap(
+            json!({"key": "value"}).as_object().unwrap().clone(),
+        ))
+        .unwrap();
+
+        assert_eq!(serialized, json!({"key": "dmFsdWU="}));
+
+        let deserialized: TestJsonMap = serde_json::from_value(serialized).unwrap();
+        assert_eq!(
+            deserialized.0,
+            json!({"key": "value"}).as_object().unwrap().clone()
+        );
+    }
+}
