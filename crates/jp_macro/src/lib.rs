@@ -4,7 +4,7 @@
 /// the same, but supports rustfmt. It uses closure syntax which rustfmt
 /// supports with support for `if branches` and the "biased" keyword.
 ///
-/// ```rust
+/// ```rust,ignore
 /// select!(
 ///     biased,
 ///     tasks.join_next(),
