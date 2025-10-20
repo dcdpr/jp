@@ -3,14 +3,16 @@ mod ctx;
 mod editor;
 mod error;
 mod parser;
+mod signals;
 
 use std::{
     error::Error as _,
     fmt,
     io::{stdout, IsTerminal as _},
-    num::NonZeroI32,
+    num::{NonZeroI32, NonZeroUsize},
     path::PathBuf,
     str::FromStr,
+    sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
 };
 
@@ -34,7 +36,10 @@ use jp_config::{
 };
 use jp_workspace::{user_data_dir, Workspace};
 use serde_json::Value;
-use tracing::{debug, info, trace};
+use tokio::runtime::{self, Runtime};
+use tracing::{debug, info, trace, warn};
+
+static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
 
 const DEFAULT_STORAGE_DIR: &str = ".jp";
 
@@ -51,8 +56,23 @@ struct Cli {
     #[command(flatten, next_help_heading = "Global Options")]
     globals: Globals,
 
+    #[command(flatten)]
+    root: RootOpts,
+
     #[command(subcommand, next_help_heading = "Options")]
     command: Commands,
+}
+
+/// The root options for the CLI.
+///
+/// These options are only available at the root level, e.g. `jp --foo` but not
+/// `jp query --foo`.
+#[derive(Parser)]
+pub struct RootOpts {
+    /// Number of threads to use for processing (default is number of available
+    /// cores)
+    #[arg(short = 't', long = "threads")]
+    pub threads: Option<NonZeroUsize>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -212,14 +232,14 @@ impl fmt::Display for Cli {
     }
 }
 
-pub async fn run() {
+pub fn run() {
     let cli = Cli::parse();
     let is_tty = stdout().is_terminal();
 
     configure_logging(cli.globals.verbose, cli.globals.quiet);
     trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
 
-    let (code, output) = match run_inner(cli).await {
+    let (code, output) = match run_inner(cli) {
         Ok(output) if is_tty => (0, output_to_string(output)),
         Ok(output) => (0, parse_json_output(output)),
         Err(error) => parse_error(error, is_tty),
@@ -234,7 +254,7 @@ pub async fn run() {
     std::process::exit(code);
 }
 
-async fn run_inner(cli: Cli) -> Result<Success> {
+fn run_inner(cli: Cli) -> Result<Success> {
     match cli.command {
         Commands::Init(ref args) => args.run().map_err(Into::into),
         cmd => {
@@ -243,12 +263,16 @@ async fn run_inner(cli: Cli) -> Result<Success> {
                 workspace.disable_persistence();
             }
 
-            workspace.load()?;
+            let runtime = build_runtime(cli.root.threads, "jp-worker")?;
+            runtime.block_on(workspace.load())?;
 
             let partial = load_partial_config(&cmd, Some(&workspace), &cli.globals.config)?;
             let config = build(partial.clone())?;
-            let mut ctx = Ctx::new(workspace, cli.globals, config);
-            let output = cmd.run(&mut ctx).await;
+
+            let mut ctx = Ctx::new(workspace, runtime, cli.globals, config);
+            let handle = ctx.handle().clone();
+
+            let output = handle.block_on(cmd.run(&mut ctx));
             if output.is_err() {
                 tracing::info!("Error running command. Disabling workspace persistence.");
                 ctx.workspace.disable_persistence();
@@ -256,9 +280,11 @@ async fn run_inner(cli: Cli) -> Result<Success> {
 
             // Wait for background tasks to complete and sync their results to
             // the workspace.
-            ctx.task_handler
-                .sync(&mut ctx.workspace, Duration::from_secs(10))
-                .await
+            handle
+                .block_on(
+                    ctx.task_handler
+                        .sync(&mut ctx.workspace, Duration::from_secs(10)),
+                )
                 .map_err(Error::Task)?;
 
             output.map_err(Into::into)
@@ -624,6 +650,43 @@ fn configure_logging(verbose: u8, quiet: bool) {
             .with_writer(std::io::stderr)
             .with_env_filter(filter.join(","))
             .init();
+    }
+}
+
+/// Get the number of worker threads to use.
+pub fn worker_threads() -> Option<NonZeroUsize> {
+    NonZeroUsize::new(WORKER_THREADS.load(Ordering::Relaxed))
+}
+
+/// Build an async runtime.
+///
+/// # Panics
+///
+/// Panics if called twice.
+pub(crate) fn build_runtime(threads: Option<NonZeroUsize>, thread_name: &str) -> Result<Runtime> {
+    let mut rt_builder = runtime::Builder::new_multi_thread();
+    rt_builder.max_blocking_threads(1024);
+    rt_builder.enable_all().thread_name(thread_name);
+
+    let worker_threads = threads.unwrap_or_else(num_threads).get();
+    WORKER_THREADS
+        .compare_exchange(0, worker_threads, Ordering::Acquire, Ordering::Relaxed)
+        .expect("double thread initialization");
+    rt_builder.worker_threads(worker_threads);
+
+    debug!(worker_threads, "Building runtime.");
+    rt_builder.build().map_err(Into::into)
+}
+
+/// Returns an estimate of the number of recommended threads that JP should
+/// spawn.
+pub fn num_threads() -> NonZeroUsize {
+    match std::thread::available_parallelism() {
+        Ok(count) => count,
+        Err(error) => {
+            warn!(%error, "Failed to determine available parallelism for thread count, defaulting to 1.");
+            std::num::NonZeroUsize::MIN
+        }
     }
 }
 

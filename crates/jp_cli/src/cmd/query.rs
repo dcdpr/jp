@@ -36,6 +36,7 @@ use jp_term::stdout;
 use jp_workspace::Workspace;
 use minijinja::{Environment, UndefinedBehavior};
 use response_handler::ResponseHandler;
+use serde_json::Value;
 use tracing::{debug, error, info, trace, warn};
 use url::Url;
 
@@ -45,7 +46,9 @@ use crate::{
     ctx::IntoPartialAppConfig,
     editor::{self, Editor},
     error::{Error, Result},
-    load_cli_cfg_args, parser, Ctx, PATH_STRING_PREFIX,
+    load_cli_cfg_args, parser,
+    signals::SignalTo,
+    Ctx, PATH_STRING_PREFIX,
 };
 
 const EMPTY_RESPONSE_MESSAGE: &str = "The response appears to be empty. Please try again.";
@@ -492,68 +495,45 @@ impl Query {
             ResponseHandler::new(self.render_mode(), ctx.config().style.tool_call.show);
         let mut metadata = BTreeMap::new();
 
-        while let Some(event) = stream.next().await {
-            let event = match event {
-                Err(jp_llm::Error::RateLimit { retry_after }) => {
-                    let max_tries = 5;
-                    if tries > max_tries {
-                        error!(tries, "Failed to get a non-rate-limited response.");
-                        return Err(Error::Llm(jp_llm::Error::RateLimit { retry_after: None }));
+        loop {
+            jp_macro::select!(
+                biased,
+                ctx.signals.receiver.recv(),
+                |signal| {
+                    debug!(?signal, "Received signal.");
+                    match signal {
+                        // Stop processing events, but gracefully store the
+                        // conversation state.
+                        Ok(SignalTo::Shutdown) => break,
+                        // Immediately stop processing events, and exit, without
+                        // storing the new conversation state.
+                        Ok(SignalTo::Quit) => return Ok(()),
+                        Ok(SignalTo::ReloadFromDisk) => {}
+                        Err(error) => error!(?error, "Failed to receive signal."),
                     }
+                },
+                stream.next(),
+                |event| {
+                    let Some(event) = event else {
+                        break;
+                    };
 
-                    let retry_after = retry_after.unwrap_or(Duration::from_secs(2));
-                    warn!(
-                        retry_after_secs = retry_after.as_secs(),
-                        tries, max_tries, "Rate limited, retrying..."
-                    );
-                    tokio::time::sleep(retry_after).await;
-                    return Box::pin(self.handle_stream(
-                        ctx,
-                        thread,
-                        tool_choice,
-                        tools,
-                        messages,
+                    self.handle_event(
+                        event,
                         tries,
-                    ))
-                    .await;
-                }
-                Err(jp_llm::Error::UnknownModel(model)) => {
-                    let available = provider
-                        .models()
-                        .await?
-                        .into_iter()
-                        .map(|v| v.id.name.to_string())
-                        .collect();
-
-                    return Err(Error::UnknownModel { model, available });
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-                Ok(event) => event,
-            };
-
-            let data = match event {
-                StreamEvent::ChatChunk(chunk) => {
-                    event_handler.handle_chat_chunk(ctx.config().style.reasoning.show, chunk)
-                }
-                StreamEvent::ToolCall(call) => {
-                    event_handler
-                        .handle_tool_call(ctx, call, &mut printer)
-                        .await?
-                }
-                StreamEvent::Metadata(key, data) => {
-                    metadata.insert(key, data);
-                    continue;
-                }
-                StreamEvent::EndOfStream(_) => continue,
-            };
-
-            let Some(data) = data else {
-                continue;
-            };
-
-            printer.handle(&data, &ctx.config().style, false)?;
+                        ctx,
+                        provider.as_ref(),
+                        &thread,
+                        &tool_choice,
+                        &tools,
+                        messages,
+                        &mut printer,
+                        &mut event_handler,
+                        &mut metadata,
+                    )
+                    .await?
+                },
+            );
         }
 
         // Ensure we handle the last line of the stream.
@@ -635,6 +615,84 @@ impl Query {
             ))
             .await?;
         }
+
+        Ok(())
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    async fn handle_event(
+        &self,
+        event: std::result::Result<StreamEvent, jp_llm::Error>,
+        tries: usize,
+        ctx: &mut Ctx,
+        provider: &dyn provider::Provider,
+        thread: &Thread,
+        tool_choice: &ToolChoice,
+        tools: &[ToolDefinition],
+        messages: &mut Vec<MessagePair>,
+        printer: &mut ResponseHandler,
+        event_handler: &mut StreamEventHandler,
+        metadata: &mut BTreeMap<String, Value>,
+    ) -> Result<()> {
+        let event = match event {
+            Err(jp_llm::Error::RateLimit { retry_after }) => {
+                let max_tries = 5;
+                if tries > max_tries {
+                    error!(tries, "Failed to get a non-rate-limited response.");
+                    return Err(Error::Llm(jp_llm::Error::RateLimit { retry_after: None }));
+                }
+
+                let retry_after = retry_after.unwrap_or(Duration::from_secs(2));
+                warn!(
+                    retry_after_secs = retry_after.as_secs(),
+                    tries, max_tries, "Rate limited, retrying..."
+                );
+                tokio::time::sleep(retry_after).await;
+                return Box::pin(self.handle_stream(
+                    ctx,
+                    thread.clone(),
+                    tool_choice.clone(),
+                    tools.to_vec(),
+                    messages,
+                    tries,
+                ))
+                .await;
+            }
+            Err(jp_llm::Error::UnknownModel(model)) => {
+                let available = provider
+                    .models()
+                    .await?
+                    .into_iter()
+                    .map(|v| v.id.name.to_string())
+                    .collect();
+
+                return Err(Error::UnknownModel { model, available });
+            }
+            Err(e) => {
+                return Err(e.into());
+            }
+            Ok(event) => event,
+        };
+
+        let data = match event {
+            StreamEvent::ChatChunk(chunk) => {
+                event_handler.handle_chat_chunk(ctx.config().style.reasoning.show, chunk)
+            }
+            StreamEvent::ToolCall(call) => {
+                event_handler.handle_tool_call(ctx, call, printer).await?
+            }
+            StreamEvent::Metadata(key, data) => {
+                metadata.insert(key, data);
+                return Ok(());
+            }
+            StreamEvent::EndOfStream(_) => return Ok(()),
+        };
+
+        let Some(data) = data else {
+            return Ok(());
+        };
+
+        printer.handle(&data, &ctx.config().style, false)?;
 
         Ok(())
     }

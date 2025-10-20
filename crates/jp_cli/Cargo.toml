@@ -24,6 +24,7 @@ jp_conversation = { workspace = true }
 jp_format = { workspace = true }
 jp_id = { workspace = true }
 jp_llm = { workspace = true }
+jp_macro = { workspace = true }
 jp_mcp = { workspace = true }
 jp_openrouter = { workspace = true }
 jp_storage = { workspace = true }
@@ -31,6 +32,7 @@ jp_task = { workspace = true }
 jp_term = { workspace = true }
 jp_workspace = { workspace = true }
 
+async-stream = { workspace = true }
 bat = { workspace = true, features = ["regex-onig"] }
 clap = { workspace = true, features = [
     "color",

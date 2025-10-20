@@ -4,8 +4,9 @@ use jp_config::{conversation::tool::ToolSource, AppConfig, PartialAppConfig};
 use jp_mcp::id::{McpServerId, McpToolId};
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
+use tokio::runtime::{Handle, Runtime};
 
-use crate::{Globals, Result};
+use crate::{signals::SignalPair, Globals, Result};
 
 /// Context for the CLI application
 pub(crate) struct Ctx {
@@ -22,6 +23,10 @@ pub(crate) struct Ctx {
     pub(crate) mcp_client: jp_mcp::Client,
 
     pub(crate) task_handler: jp_task::TaskHandler,
+
+    pub(crate) signals: SignalPair,
+
+    runtime: Runtime,
 }
 
 pub(crate) struct Term {
@@ -38,7 +43,12 @@ pub(crate) struct Term {
 
 impl Ctx {
     /// Create a new context with the given workspace
-    pub(crate) fn new(workspace: Workspace, args: Globals, config: AppConfig) -> Self {
+    pub(crate) fn new(
+        workspace: Workspace,
+        runtime: Runtime,
+        args: Globals,
+        config: AppConfig,
+    ) -> Self {
         let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
         Self {
@@ -50,6 +60,8 @@ impl Ctx {
             },
             mcp_client,
             task_handler: TaskHandler::default(),
+            signals: SignalPair::new(&runtime),
+            runtime,
         }
     }
 
@@ -65,6 +77,11 @@ impl Ctx {
     /// [`AppConfig`] object.
     pub(crate) fn config(&self) -> &AppConfig {
         &self.config
+    }
+
+    /// Get a runtime handle.
+    pub(crate) fn handle(&self) -> &Handle {
+        self.runtime.handle()
     }
 
     /// Activate and deactivate MCP servers based on the active conversation
