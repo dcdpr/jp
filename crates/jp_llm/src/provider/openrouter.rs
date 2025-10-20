@@ -29,7 +29,6 @@ use jp_openrouter::{
     Client,
 };
 use serde::Serialize;
-use serde_json::Value;
 use tracing::{debug, trace, warn};
 
 use super::{CompletionChunk, Delta, Event, EventStream, ModelDetails, Reply, StreamEvent};
@@ -206,7 +205,7 @@ impl Provider for Openrouter {
                 id: id.unwrap_or_default(),
                 name: function.name.unwrap_or_default(),
                 arguments: serde_json::from_str(&function.arguments.unwrap_or_default())
-                    .unwrap_or(Value::Null),
+                    .unwrap_or(serde_json::Map::new()),
             }));
         }
 
@@ -591,9 +590,10 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> RequestMessage {
             index: 0,
             function: FunctionCall {
                 name: Some(call.name),
-                arguments: match call.arguments {
-                    Value::Null => None,
-                    v => serde_json::to_string(&v).ok(),
+                arguments: if call.arguments.is_empty() {
+                    None
+                } else {
+                    serde_json::to_string(&call.arguments).ok()
                 },
             },
         })

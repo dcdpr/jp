@@ -531,7 +531,7 @@ fn assistant_message_to_messages(assistant: AssistantMessage) -> Vec<ChatMessage
                 .map(|call| ToolCall {
                     function: ToolCallFunction {
                         name: call.name,
-                        arguments: call.arguments,
+                        arguments: Value::Object(call.arguments),
                     },
                 })
                 .collect(),

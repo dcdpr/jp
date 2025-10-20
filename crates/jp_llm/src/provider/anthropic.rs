@@ -997,7 +997,7 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> types::Message {
     for tool_call in tool_calls {
         list.push(types::MessageContent::ToolUse(types::ToolUse {
             id: tool_call.id,
-            input: tool_call.arguments,
+            input: Value::Object(tool_call.arguments),
             name: tool_call.name,
             cache_control: None,
         }));

@@ -2009,6 +2009,7 @@ dependencies = [
  "jp_attachment",
  "jp_config",
  "jp_id",
+ "jp_serde",
  "quick-xml 0.38.3 (git+https://github.com/Ninja3047/quick-xml?branch=serialize-cdata)",
  "serde",
  "serde_json",
@@ -2116,6 +2117,15 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "jp_serde"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

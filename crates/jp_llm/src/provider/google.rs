@@ -16,6 +16,7 @@ use jp_conversation::{
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
 };
+use serde_json::Value;
 use tracing::trace;
 
 use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply};
@@ -478,7 +479,7 @@ fn user_message_to_message(user: UserMessage) -> types::Content {
                 types::ContentData::FunctionResponse(types::FunctionResponse {
                     name: result.id,
                     response: types::FunctionResponsePayload {
-                        content: serde_json::Value::String(result.content),
+                        content: Value::String(result.content),
                     },
                 })
                 .into()
@@ -517,7 +518,7 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> types::Content {
         parts.push(
             types::ContentData::FunctionCall(types::FunctionCall {
                 name: tool_call.id,
-                arguments: tool_call.arguments,
+                arguments: Value::Object(tool_call.arguments),
             })
             .into(),
         );
