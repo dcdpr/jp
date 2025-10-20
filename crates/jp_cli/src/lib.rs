@@ -264,7 +264,7 @@ fn run_inner(cli: Cli) -> Result<Success> {
             }
 
             let runtime = build_runtime(cli.root.threads, "jp-worker")?;
-            runtime.block_on(workspace.load())?;
+            workspace.load()?;
 
             let partial = load_partial_config(&cmd, Some(&workspace), &cli.globals.config)?;
             let config = build(partial.clone())?;
