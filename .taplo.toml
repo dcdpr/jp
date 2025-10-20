@@ -1,6 +1,9 @@
 include = ["Cargo.toml", "**/*.toml"]
 
 [formatting]
+# UNRELEASED, TESTING
+wrap_long_multi_line_strings = true
+
 # Align consecutive entries vertically.
 align_entries = false
 # Align consecutive comments vertically.
@@ -17,7 +20,7 @@ compact_arrays = true
 compact_inline_tables = false
 # Maximum column width in characters, affects array expansion and collapse, this doesn't take whitespace into account.
 # Note that this is not set in stone, and works on a best-effort basis.
-column_width = 120
+column_width = 100
 # Indent based on tables and arrays of tables and their subtables, subtables out of order are not indented.
 indent_tables = false
 # The substring that is used for indentation, should be tabs or spaces (but technically can be anything).
