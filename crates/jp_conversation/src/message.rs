@@ -335,12 +335,14 @@ impl<T: Into<String>> From<(ProviderId, T)> for AssistantMessage {
 pub struct ToolCallRequest {
     pub id: String,
     pub name: String,
-    pub arguments: serde_json::Value,
+    #[serde(with = "jp_serde::repr::base64_json_map")]
+    pub arguments: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCallResult {
     pub id: String,
+    #[serde(with = "jp_serde::repr::base64_string")]
     pub content: String,
     pub error: bool,
 }

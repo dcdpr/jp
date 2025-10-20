@@ -16,6 +16,7 @@ jp_llm = { path = "crates/jp_llm" }
 jp_macro = { path = "crates/jp_macro" }
 jp_mcp = { path = "crates/jp_mcp" }
 jp_openrouter = { path = "crates/jp_openrouter" }
+jp_serde = { path = "crates/jp_serde" }
 jp_storage = { path = "crates/jp_storage" }
 jp_task = { path = "crates/jp_task" }
 jp_term = { path = "crates/jp_term" }

@@ -814,7 +814,7 @@ fn assistant_message_to_messages(
         items.push(types::InputItem::FunctionCall(types::FunctionCall {
             call_id: tool_call.id,
             name: tool_call.name,
-            arguments: tool_call.arguments.to_string(),
+            arguments: Value::Object(tool_call.arguments).to_string(),
             status: None,
             id: None,
         }));

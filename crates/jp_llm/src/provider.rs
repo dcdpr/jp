@@ -503,7 +503,7 @@ pub trait Provider: std::fmt::Debug + Send + Sync {
                 });
 
             match data {
-                Some(data) => return Ok(query.map(data)),
+                Some(data) => return Ok(query.map(Value::Object(data))),
                 None if i >= max_retries => return Err(Error::MissingStructuredData),
                 None => {
                     warn!("Failed to fetch structured data. Retrying.");

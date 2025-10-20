@@ -24,6 +24,7 @@ use openai::{
     Credentials,
 };
 use serde::Serialize;
+use serde_json::Value;
 use tracing::{debug, trace};
 
 use super::{
@@ -485,7 +486,7 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> ChatCompletionMe
                     r#type: chat::FunctionType::Function,
                     function: ToolCallFunction {
                         name: call.name,
-                        arguments: call.arguments.to_string(),
+                        arguments: Value::Object(call.arguments).to_string(),
                     },
                 })
                 .collect(),

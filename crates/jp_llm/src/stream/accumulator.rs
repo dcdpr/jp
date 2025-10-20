@@ -129,7 +129,7 @@ impl ToolCallAccumulator {
                 let id = id.clone();
                 let name = name.clone();
                 let arguments = if arguments_buffer.trim().is_empty() {
-                    serde_json::json!({})
+                    serde_json::Map::new()
                 } else {
                     match serde_json::from_str(arguments_buffer) {
                         Ok(arguments) => arguments,

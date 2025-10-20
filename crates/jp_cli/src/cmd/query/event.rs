@@ -83,9 +83,7 @@ impl StreamEventHandler {
         if handler.render_tool_calls {
             let mut title = format!("Calling tool **{}**", tool.name);
 
-            if let Value::Object(map) = &call.arguments
-                && !map.is_empty()
-            {
+            if !call.arguments.is_empty() {
                 let arguments = serde_json::to_string_pretty(&call.arguments)?;
                 title.push_str(&format!(" with arguments:\n\n```json\n{arguments}\n```\n"));
             }
@@ -97,7 +95,7 @@ impl StreamEventHandler {
         let result = tool
             .call(
                 call.id,
-                call.arguments,
+                Value::Object(call.arguments),
                 &ctx.mcp_client,
                 tool_config.clone(),
                 ctx.workspace.root.clone(),
@@ -145,12 +143,9 @@ fn build_tool_call_result(
     // quoted string should not be treated as JSON unless explicitly defined as
     // such).
     if ext.is_none() {
-        if content.trim().starts_with('<')
-            && quick_xml::de::from_str::<serde_json::Value>(&content).is_ok()
-        {
+        if content.trim().starts_with('<') && quick_xml::de::from_str::<Value>(&content).is_ok() {
             ext = Some("xml".to_owned());
-        } else if content.trim().starts_with('{')
-            && serde_json::from_str::<serde_json::Value>(&content).is_ok()
+        } else if content.trim().starts_with('{') && serde_json::from_str::<Value>(&content).is_ok()
         {
             ext = Some("json".to_owned());
         }
@@ -267,7 +262,7 @@ pub(super) async fn handle_tool_calls(
         results.push(
             tool.call(
                 call.id,
-                call.arguments,
+                Value::Object(call.arguments),
                 &ctx.mcp_client,
                 tool_config,
                 ctx.workspace.root.clone(),
