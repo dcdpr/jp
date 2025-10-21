@@ -53,6 +53,7 @@ indexmap = { version = "2", default-features = false }
 indoc = { version = "2", default-features = false }
 inquire = { version = "0.9", default-features = false }
 insta = { version = "1", default-features = false }
+itertools = { version = "0.14", default-features = false }
 json5 = { version = "0.4", default-features = false }
 linkme = { version = "0.3", default-features = false }
 minijinja = { version = "2", default-features = false }
