@@ -9,7 +9,7 @@ use crate::Error;
 pub(crate) async fn fs_create_file(
     root: PathBuf,
     path: String,
-    contents: Option<String>,
+    content: Option<String>,
 ) -> std::result::Result<String, Error> {
     let p = PathBuf::from(&path);
 
@@ -44,9 +44,13 @@ pub(crate) async fn fs_create_file(
         .create_new(true)
         .open(&absolute_path)?;
 
-    if let Some(contents) = contents {
-        file.write_all(contents.as_bytes())?;
+    if let Some(content) = content {
+        file.write_all(content.as_bytes())?;
     }
 
-    Ok("File created.".into())
+    Ok(format!(
+        "File '{}' created. File size: {}",
+        path,
+        file.metadata()?.len()
+    ))
 }
