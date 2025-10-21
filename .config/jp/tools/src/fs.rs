@@ -43,7 +43,7 @@ pub async fn run(ws: Workspace, t: Tool) -> std::result::Result<String, Error> {
             .await
         }
 
-        "create_file" => fs_create_file(ws.path, t.req("path")?, t.opt("contents")?).await,
+        "create_file" => fs_create_file(ws.path, t.req("path")?, t.opt("content")?).await,
 
         "delete_file" => fs_delete_file(ws.path, t.req("path")?).await,
 
