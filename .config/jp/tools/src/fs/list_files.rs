@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use ignore::{WalkBuilder, WalkState};
 
-use crate::Error;
+use crate::{util::OneOrMany, Error};
 
 #[derive(Debug)]
 pub(crate) enum Files {
@@ -33,10 +33,10 @@ impl serde::Serialize for Files {
 
 pub(crate) async fn fs_list_files(
     root: PathBuf,
-    prefixes: Option<Vec<String>>,
-    extensions: Option<Vec<String>>,
+    prefixes: Option<OneOrMany<String>>,
+    extensions: Option<OneOrMany<String>>,
 ) -> std::result::Result<Files, Error> {
-    let prefixes = prefixes.unwrap_or(vec![String::new()]);
+    let prefixes = prefixes.unwrap_or_default().into_vec();
 
     let mut entries = vec![];
     for prefix in &prefixes {
@@ -195,9 +195,13 @@ mod tests {
     async fn test_empty_list() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        let files = fs_list_files(PathBuf::from(root), Some(vec!["foo".to_owned()]), None)
-            .await
-            .unwrap();
+        let files = fs_list_files(
+            PathBuf::from(root),
+            Some(vec!["foo".to_owned()].into()),
+            None,
+        )
+        .await
+        .unwrap();
 
         assert_matches!(files, Files::Empty);
     }

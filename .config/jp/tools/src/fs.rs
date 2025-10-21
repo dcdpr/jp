@@ -38,7 +38,7 @@ pub async fn run(ws: Workspace, t: Tool) -> std::result::Result<String, Error> {
                 ws.path,
                 t.req("pattern")?,
                 t.opt("context")?,
-                Some(vec!["docs".to_owned()]),
+                Some(vec!["docs".to_owned()].into()),
             )
             .await
         }
