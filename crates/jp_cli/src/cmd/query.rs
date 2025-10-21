@@ -451,6 +451,7 @@ impl Query {
         messages: &mut Vec<MessagePair>,
         mut tries: usize,
     ) -> Result<()> {
+        let mut cancelled = false;
         tries += 1;
 
         let model_id = &ctx
@@ -504,7 +505,10 @@ impl Query {
                     match signal {
                         // Stop processing events, but gracefully store the
                         // conversation state.
-                        Ok(SignalTo::Shutdown) => break,
+                        Ok(SignalTo::Shutdown) => {
+                            cancelled = true;
+                            break;
+                        }
                         // Immediately stop processing events, and exit, without
                         // storing the new conversation state.
                         Ok(SignalTo::Quit) => return Ok(()),
@@ -542,7 +546,7 @@ impl Query {
         let content_tokens = event_handler.content_tokens.trim().to_string();
         let content = if !content_tokens.is_empty() {
             Some(content_tokens)
-        } else if content_tokens.is_empty() && event_handler.tool_calls.is_empty() {
+        } else if !cancelled && content_tokens.is_empty() && event_handler.tool_calls.is_empty() {
             let max_tries = 3;
             if tries <= max_tries {
                 warn!(tries, max_tries, "Empty response received, retrying...");
@@ -599,7 +603,7 @@ impl Query {
         // If the assistant asked for a tool call, we handle it within the same
         // "conversation turn", essentially going into a "loop" until no more
         // tool calls are requested.
-        if !event_handler.tool_call_results.is_empty() {
+        if !cancelled && !event_handler.tool_call_results.is_empty() {
             thread.history.push(message, None);
             thread.message = UserMessage::ToolCallResults(event_handler.tool_call_results);
 
