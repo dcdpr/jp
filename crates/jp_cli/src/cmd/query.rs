@@ -12,6 +12,7 @@ use std::{
 use clap::{builder::TypedValueParser as _, ArgAction};
 use event::{handle_tool_calls, StreamEventHandler};
 use futures::StreamExt as _;
+use itertools::Itertools as _;
 use jp_attachment::Attachment;
 use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
@@ -480,6 +481,23 @@ impl Query {
             ..Default::default()
         };
         let model = provider.model_details(&model_id.name).await?;
+
+        info!(
+            model = model
+                .display_name
+                .as_deref()
+                .unwrap_or(&model.id.to_string()),
+            tools = query.tools.iter().map(|v| &v.name).sorted().join(", "),
+            attachments = query
+                .thread
+                .attachments
+                .iter()
+                .map(|v| &v.source)
+                .sorted()
+                .join(", "),
+            "Chat query created."
+        );
+
         let mut stream = provider
             .chat_completion_stream(&model, parameters, query)
             .await?;

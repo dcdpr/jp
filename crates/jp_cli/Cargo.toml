@@ -51,6 +51,7 @@ duct = { workspace = true }
 futures = { workspace = true }
 indexmap = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
+itertools = { workspace = true, features = ["use_std"] }
 minijinja = { workspace = true }
 path-clean = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
