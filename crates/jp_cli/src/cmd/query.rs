@@ -803,15 +803,15 @@ impl IntoPartialAppConfig for Query {
             hide_tool_calls,
             stream: _,
             no_stream: _,
-            tools: raw_tools,
-            no_tools: raw_no_tools,
+            tools,
+            no_tools,
             reasoning,
             no_reasoning,
         } = &self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);
         apply_editor(&mut partial, edit.as_ref().map(|v| v.as_ref()), *no_edit);
-        apply_enable_tools(&mut partial, raw_tools, raw_no_tools, merged_config)?;
+        apply_enable_tools(&mut partial, tools, no_tools, merged_config)?;
         apply_tool_use(
             &mut partial,
             tool_use.as_ref().map(|v| v.as_deref()),
@@ -916,24 +916,24 @@ fn apply_editor(partial: &mut PartialAppConfig, editor: Option<Option<&Editor>>,
 
 fn apply_enable_tools(
     partial: &mut PartialAppConfig,
-    raw_tools: &[Option<String>],
-    raw_no_tools: &[Option<String>],
+    tools: &[Option<String>],
+    no_tools: &[Option<String>],
     merged_config: Option<&PartialAppConfig>,
 ) -> BoxedResult<()> {
-    let tools = if raw_tools.is_empty() {
+    let tools = if tools.is_empty() {
         None
-    } else if raw_tools.iter().any(Option::is_none) {
+    } else if tools.iter().any(Option::is_none) {
         Some(vec![])
     } else {
-        Some(raw_tools.iter().filter_map(|v| v.as_deref()).collect())
+        Some(tools.iter().filter_map(|v| v.as_deref()).collect())
     };
 
-    let no_tools = if raw_no_tools.is_empty() {
+    let no_tools = if no_tools.is_empty() {
         None
-    } else if raw_no_tools.iter().any(Option::is_none) {
+    } else if no_tools.iter().any(Option::is_none) {
         Some(vec![])
     } else {
-        Some(raw_no_tools.iter().filter_map(|v| v.as_deref()).collect())
+        Some(no_tools.iter().filter_map(|v| v.as_deref()).collect())
     };
 
     let enable_all = tools.as_ref().is_some_and(Vec::is_empty);
@@ -966,26 +966,44 @@ fn apply_enable_tools(
         .into());
     }
 
-    // Disable tools.
-    if let Some(no_tools) = no_tools {
+    // Disable all first, if all tools are to be disabled.
+    if disable_all {
         partial
             .conversation
             .tools
             .tools
             .iter_mut()
-            .filter(|(name, _)| disable_all || no_tools.iter().any(|v| v == name))
             .for_each(|(_, v)| v.enable = Some(false));
+    // Enable all tools first if all tools are to be enabled.
+    } else if enable_all {
+        partial
+            .conversation
+            .tools
+            .tools
+            .iter_mut()
+            .for_each(|(_, v)| v.enable = Some(true));
     }
 
-    // Enable tools.
+    // Then enable individual tools.
     if let Some(tools) = tools {
         partial
             .conversation
             .tools
             .tools
             .iter_mut()
-            .filter(|(name, _)| enable_all || tools.iter().any(|v| v == *name))
+            .filter(|(name, _)| tools.iter().any(|v| v == *name))
             .for_each(|(_, v)| v.enable = Some(true));
+    }
+
+    // And finally disable individual tools.
+    if let Some(no_tools) = no_tools {
+        partial
+            .conversation
+            .tools
+            .tools
+            .iter_mut()
+            .filter(|(name, _)| no_tools.iter().any(|v| v == name))
+            .for_each(|(_, v)| v.enable = Some(false));
     }
 
     Ok(())
