@@ -180,4 +180,25 @@ pub enum ToolError {
 
     #[error("Serialization error")]
     Serde(#[from] serde_json::Error),
+
+    #[error("Invalid arguments (missing: {missing:?}, unknown: {unknown:?})")]
+    Arguments {
+        /// Required arguments that were missing.
+        missing: Vec<String>,
+
+        /// Unknown arguments that were provided.
+        unknown: Vec<String>,
+    },
+}
+
+#[cfg(test)]
+impl PartialEq for ToolError {
+    fn eq(&self, other: &Self) -> bool {
+        if std::mem::discriminant(self) != std::mem::discriminant(other) {
+            return false;
+        }
+
+        // Good enough for testing purposes
+        format!("{self:?}") == format!("{other:?}")
+    }
 }
