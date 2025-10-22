@@ -52,7 +52,7 @@ pub async fn run(ws: Workspace, t: Tool) -> std::result::Result<String, Error> {
                 ws.path,
                 t.req("path")?,
                 t.req("string_to_replace")?,
-                t.opt("new_string")?,
+                t.req("new_string")?,
             )
             .await
         }
