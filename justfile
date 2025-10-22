@@ -1,12 +1,12 @@
-bacon_version    := "3.18.0"
-binstall_version := "1.15.3"
-deny_version     := "0.18.4"
-expand_version   := "1.0.115"
-insta_version    := "1.43.1"
+bacon_version    := "3.19.0"
+binstall_version := "1.15.7"
+deny_version     := "0.18.5"
+expand_version   := "1.0.118"
+insta_version    := "1.43.2"
 jilu_version     := "0.13.2"
-llvm_cov_version := "0.6.18"
-nextest_version  := "0.9.103"
-shear_version    := "1.5.1"
+llvm_cov_version := "0.6.21"
+nextest_version  := "0.9.108"
+shear_version    := "1.6.0"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
