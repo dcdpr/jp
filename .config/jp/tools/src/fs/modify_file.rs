@@ -76,7 +76,7 @@ pub(crate) async fn fs_modify_file(
     root: PathBuf,
     path: String,
     string_to_replace: String,
-    new_string: Option<String>,
+    new_string: String,
 ) -> std::result::Result<String, Error> {
     let p = PathBuf::from(&path);
 
@@ -122,9 +122,7 @@ pub(crate) async fn fs_modify_file(
     lines.drain(change_lines.start..change_lines.end.min(lines.len()));
 
     // Insert new content if any
-    if let Some(new_string) = &new_string
-        && !new_string.trim().is_empty()
-    {
+    if !new_string.trim().is_empty() {
         let new_lines: Vec<String> = new_string.lines().map(str::to_owned).collect();
         for (i, line) in new_lines.into_iter().enumerate() {
             if lines.len() <= change_lines.start + i {
@@ -164,7 +162,7 @@ mod tests {
         struct TestCase {
             start_content: &'static str,
             string_to_replace: &'static str,
-            new_string: Option<&'static str>,
+            new_string: &'static str,
             final_content: &'static str,
             output: Result<&'static str, &'static str>,
         }
@@ -173,21 +171,21 @@ mod tests {
             ("replace first line", TestCase {
                 start_content: "hello world\n",
                 string_to_replace: "hello world",
-                new_string: Some("hello universe"),
+                new_string: "hello universe",
                 final_content: "hello universe\n",
                 output: Ok("File modified successfully."),
             }),
             ("delete first line", TestCase {
                 start_content: "hello world\n",
                 string_to_replace: "hello world",
-                new_string: None,
+                new_string: "",
                 final_content: "\n",
                 output: Ok("File modified successfully."),
             }),
             ("replace first line with multiple lines", TestCase {
                 start_content: "hello world\n",
                 string_to_replace: "hello world",
-                new_string: Some("hello\nworld\n"),
+                new_string: "hello\nworld\n",
                 final_content: "hello\nworld\n",
                 output: Ok("File modified successfully."),
             }),
@@ -207,7 +205,7 @@ mod tests {
                 root,
                 file_path.to_owned(),
                 test_case.string_to_replace.to_owned(),
-                test_case.new_string.map(str::to_owned),
+                test_case.new_string.to_owned(),
             )
             .await
             .map_err(|e| e.to_string());
