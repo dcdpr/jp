@@ -23,8 +23,9 @@ The string to replace in the file. The string may span multiple lines.
 """
 
 [conversation.tools.fs_modify_file.parameters.new_string]
+required = true
 type = "string"
 description = """
-Optional new string to replace the `string_to_replace` with. The string may span
-multiple lines. If not specified, the `string_tp_replace` will be deleted.
+new string to replace the `string_to_replace` with. The string may span multiple lines. If empty, \
+the `string_to_replace` will be deleted.
 """
