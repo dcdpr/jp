@@ -13,9 +13,9 @@ description = """
 The path to the file to create. The path must be relative to the project's root.
 """
 
-[conversation.tools.fs_create_file.parameters.contents]
+[conversation.tools.fs_create_file.parameters.content]
 type = "string"
 required = false
 description = """
-The contents of the file to create. If not specified, the file will be empty.
+The content of the file to create. If not specified, the file will be empty.
 """
