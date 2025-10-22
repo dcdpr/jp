@@ -596,12 +596,13 @@ fn configure_logging(verbose: u8, quiet: bool) {
         0 => vec!["off".to_owned()],
         1 => vec![[
             "trace",
-            "mio=off",
-            "tokio=off",
             "h2=off",
-            "rustls=off",
             "hyper_util=off",
+            "ignore=off",
+            "mio=off",
             "reqwest=off",
+            "rustls=off",
+            "tokio=off",
         ]
         .to_vec()
         .join(",")],
