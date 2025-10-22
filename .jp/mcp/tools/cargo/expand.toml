@@ -7,11 +7,11 @@ source = "local"
 command = "just serve-tools {{workspace}} {{tool}}"
 description = "Expand the auto-generated Rust code for the given item."
 
-[conversation.tools.cargo_expand.arguments.package]
+[conversation.tools.cargo_expand.parameters.package]
 description = "Package to find the item in, required if working with a workspace."
 type = "string"
 
-[conversation.tools.cargo_expand.arguments.item]
+[conversation.tools.cargo_expand.parameters.item]
 description = "Local path to module or other named item to expand, e.g. os::unix::ffi"
 required = true
 type = "string"

@@ -8,21 +8,21 @@ Modify a file in the project's local filesystem.
 The file must exist, be a regular file, and have no uncommitted changes.
 """
 
-[conversation.tools.fs_modify_file.arguments.path]
+[conversation.tools.fs_modify_file.parameters.path]
 required = true
 type = "string"
 description = """
 The path to the file to delete. The path must be relative to the project's root.
 """
 
-[conversation.tools.fs_modify_file.arguments.string_to_replace]
+[conversation.tools.fs_modify_file.parameters.string_to_replace]
 required = true
 type = "string"
 description = """
 The string to replace in the file. The string may span multiple lines.
 """
 
-[conversation.tools.fs_modify_file.arguments.new_string]
+[conversation.tools.fs_modify_file.parameters.new_string]
 type = "string"
 description = """
 Optional new string to replace the `string_to_replace` with. The string may span
