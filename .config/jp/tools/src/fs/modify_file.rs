@@ -6,7 +6,7 @@
 use std::{
     fs::{self, File},
     io::Read as _,
-    ops::{Deref, DerefMut, Range},
+    ops::{Deref, DerefMut},
     path::PathBuf,
 };
 
@@ -33,45 +33,41 @@ impl DerefMut for Content {
 }
 
 impl Content {
-    fn find_lines_to_replace(&self, pattern: &str) -> Option<Range<usize>> {
-        let start_idx = self
-            .find_exact_start_line(pattern)
-            .or_else(|| self.find_trimmed_start_line(pattern))
-            .or_else(|| self.find_fuzzy_start_line(pattern))?;
+    fn find_pattern_range(&self, pattern: &str) -> Option<(usize, usize)> {
+        let start_byte = self
+            .find_exact_substring(pattern)
+            .or_else(|| self.find_trimmed_substring(pattern))
+            .or_else(|| self.find_fuzzy_substring(pattern))?;
 
-        Some(start_idx..start_idx + pattern.lines().count())
+        Some((start_byte, start_byte + pattern.len()))
     }
 
-    fn find_exact_start_line(&self, pattern: &str) -> Option<usize> {
+    fn find_exact_substring(&self, pattern: &str) -> Option<usize> {
         self.0.find(pattern)
     }
 
-    fn find_trimmed_start_line(&self, pattern: &str) -> Option<usize> {
+    fn find_trimmed_substring(&self, pattern: &str) -> Option<usize> {
         self.0.find(pattern.trim())
     }
 
-    fn find_fuzzy_start_line(&self, pattern: &str) -> Option<usize> {
-        let first_line_to_replace = pattern
+    fn find_fuzzy_substring(&self, pattern: &str) -> Option<usize> {
+        let first_line_to_find = pattern
             .lines()
             .next()?
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
 
-        let first_line_matches =
-            self.0
-                .lines()
-                .enumerate()
-                .fold::<Option<Vec<_>>, _>(None, |mut acc, (i, line)| {
-                    let fuzzy_line = line.split_whitespace().collect::<Vec<_>>().join(" ");
-                    if fuzzy_line.contains(&first_line_to_replace) {
-                        acc.get_or_insert_default().push(i);
-                    }
-                    acc
-                })?;
-
-        // TODO: Handle multiple matches
-        first_line_matches.first().copied()
+        // Find lines that fuzzy match
+        let mut byte_offset = 0;
+        for line in self.0.lines() {
+            let fuzzy_line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+            if fuzzy_line.contains(&first_line_to_find) {
+                return Some(byte_offset);
+            }
+            byte_offset += line.len() + 1; // +1 for newline
+        }
+        None
     }
 }
 
@@ -131,39 +127,34 @@ pub(crate) async fn fs_modify_file(
     file.read_to_string(&mut content)?;
 
     let contents = Content(content);
-    let mut lines: Vec<String> = contents.lines().map(str::to_owned).collect();
 
-    let change_lines = contents
-        .find_lines_to_replace(&string_to_replace)
-        .ok_or("Cannot find lines to replace")?;
+    let (start_byte, mut end_byte) = contents
+        .find_pattern_range(&string_to_replace)
+        .ok_or("Cannot find pattern to replace")?;
 
-    // Remove the lines to be replaced
-    lines.drain(change_lines.start..change_lines.end.min(lines.len()));
+    // Check if pattern is followed by a newline
+    let followed_by_newline = end_byte < contents.len() && contents.as_bytes()[end_byte] == b'\n';
 
-    // Insert new content if any
-    if !new_string.trim().is_empty() {
-        let new_lines: Vec<String> = new_string.lines().map(str::to_owned).collect();
-        for (i, line) in new_lines.into_iter().enumerate() {
-            if lines.len() <= change_lines.start + i {
-                lines.push(line);
-            } else {
-                lines[change_lines.start + i] = line;
-            }
-        }
+    // If followed by newline, consume it
+    if followed_by_newline {
+        end_byte += 1;
     }
+
+    // Replace the pattern with new string
+    let mut new_content = String::new();
+    new_content.push_str(&contents[..start_byte]);
+    new_content.push_str(&new_string);
+
+    // If we consumed a newline but replacement doesn't end with one, add it
+    // back
+    if followed_by_newline && !new_string.ends_with('\n') {
+        new_content.push('\n');
+    }
+
+    new_content.push_str(&contents[end_byte..]);
 
     // Write modified content back to file
-    let new_contents = lines.join("\n");
-    if !new_contents.is_empty() || !contents.is_empty() {
-        // Preserve trailing newline if original had one
-        let final_contents = if contents.ends_with('\n') && !new_contents.ends_with('\n') {
-            format!("{new_contents}\n")
-        } else {
-            new_contents
-        };
-
-        fs::write(&absolute_path, final_contents)?;
-    }
+    fs::write(&absolute_path, new_content)?;
 
     Ok("File modified successfully.".into())
 }
@@ -207,6 +198,34 @@ mod tests {
                 new_string: "hello\nworld\n",
                 final_content: "hello\nworld\n",
                 output: Ok("File modified successfully."),
+            }),
+            ("replace whole line without newline", TestCase {
+                start_content: "hello world\nhello universe",
+                string_to_replace: "hello world",
+                new_string: "hello there",
+                final_content: "hello there\nhello universe",
+                output: Ok("File modified successfully."),
+            }),
+            ("replace subset of line", TestCase {
+                start_content: "hello world how are you doing?",
+                string_to_replace: "world",
+                new_string: "universe",
+                final_content: "hello universe how are you doing?",
+                output: Ok("File modified successfully."),
+            }),
+            ("replace subset across multiple lines", TestCase {
+                start_content: "hello world\nhow are you doing?",
+                string_to_replace: "world\nhow",
+                new_string: "universe\nwhat",
+                final_content: "hello universe\nwhat are you doing?",
+                output: Ok("File modified successfully."),
+            }),
+            ("ignore replacement if no match", TestCase {
+                start_content: "hello world how are you doing?",
+                string_to_replace: "universe",
+                new_string: "galaxy",
+                final_content: "hello world how are you doing?",
+                output: Err("Cannot find pattern to replace"),
             }),
         ];
 
