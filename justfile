@@ -71,8 +71,8 @@ install-tools:
     cargo install --locked --path .config/jp/tools --debug
 
 [group('tools')]
-serve-tools WORKSPACE TOOL:
-    @jp-tools {{quote(WORKSPACE)}} {{quote(TOOL)}}
+serve-tools CONTEXT TOOL:
+    @jp-tools {{quote(CONTEXT)}} {{quote(TOOL)}}
 
 # Run all ci tasks.
 [group('ci')]

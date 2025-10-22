@@ -1,15 +1,16 @@
 use duct::cmd;
+use jp_tool::Context;
 
-use crate::{Result, Workspace};
+use crate::Result;
 
-pub(crate) async fn cargo_check(workspace: &Workspace, package: Option<String>) -> Result<String> {
+pub(crate) async fn cargo_check(ctx: &Context, package: Option<String>) -> Result<String> {
     let package = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
     let result = cmd!("cargo", "check", "--color=never", &package, "--quiet")
         // Prevent warnings from being treated as errors, e.g. on CI.
         .env("RUSTFLAGS", "-W warnings")
         .stdout_capture()
         .stderr_capture()
-        .dir(&workspace.path)
+        .dir(&ctx.root)
         .unchecked()
         .run()?;
 
@@ -45,8 +46,8 @@ mod tests {
     #[tokio::test]
     async fn test_cargo_check() {
         let dir = tempfile::tempdir().unwrap();
-        let workspace = Workspace {
-            path: dir.path().to_owned(),
+        let ctx = Context {
+            root: dir.path().to_owned(),
         };
 
         std::fs::write(dir.path().join("Cargo.toml"), indoc::indoc! {r#"
@@ -63,7 +64,7 @@ mod tests {
         "#})
         .unwrap();
 
-        let result = cargo_check(&workspace, None).await.unwrap();
+        let result = cargo_check(&ctx, None).await.unwrap();
 
         assert_eq!(result, indoc::indoc! {r#"
             ```

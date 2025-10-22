@@ -5,7 +5,7 @@ use tools::{run, Tool};
 
 #[tokio::main]
 async fn main() {
-    let workspace = match input(1, "workspace") {
+    let context = match input(1, "context") {
         Ok(workspace) => workspace,
         Err(error) => return println!("{error}"),
     };
@@ -16,9 +16,11 @@ async fn main() {
     };
 
     let name = tool.name.clone();
-    match run(workspace, tool).await {
-        Ok(output) if output.starts_with("```") => println!("{output}"),
-        Ok(output) => println!("```\n{output}\n```"),
+    match run(context, tool).await {
+        Ok(outcome) => match serde_json::to_string(&outcome) {
+            Ok(content) => println!("{content}"),
+            Err(error) => handle_error(&error, &name),
+        },
         Err(error) => handle_error(error.as_ref(), &name),
     }
 }

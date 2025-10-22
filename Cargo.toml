@@ -22,6 +22,7 @@ jp_task = { path = "crates/jp_task" }
 jp_term = { path = "crates/jp_term" }
 jp_test = { path = "crates/jp_test" }
 jp_tombmap = { path = "crates/jp_tombmap" }
+jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
 
 async-anthropic = { git = "https://github.com/JeanMertz/async-anthropic", default-features = false }

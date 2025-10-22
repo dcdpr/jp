@@ -1959,6 +1959,7 @@ dependencies = [
  "jp_storage",
  "jp_task",
  "jp_term",
+ "jp_tool",
  "jp_workspace",
  "minijinja",
  "path-clean",
@@ -2069,6 +2070,7 @@ dependencies = [
  "jp_mcp",
  "jp_openrouter",
  "jp_test",
+ "jp_tool",
  "minijinja",
  "ollama-rs",
  "open-editor",
@@ -2195,6 +2197,14 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "test-log",
+]
+
+[[package]]
+name = "jp_tool"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4398,6 +4408,7 @@ dependencies = [
  "grep-searcher",
  "ignore",
  "indoc",
+ "jp_tool",
  "octocrab",
  "pretty_assertions",
  "quick-xml 0.38.3 (git+https://github.com/Ninja3047/quick-xml?branch=serialize-cdata)",

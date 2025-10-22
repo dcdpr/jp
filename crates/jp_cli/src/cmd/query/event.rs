@@ -1,6 +1,7 @@
 use std::{env, fs, time};
 
 use crossterm::style::Stylize as _;
+use indexmap::IndexMap;
 use jp_config::{
     conversation::tool::{
         style::{InlineResults, LinkStyle, Truncate},
@@ -9,8 +10,9 @@ use jp_config::{
     style::StyleConfig,
 };
 use jp_conversation::message::{ToolCallRequest, ToolCallResult};
-use jp_llm::CompletionChunk;
+use jp_llm::{CompletionChunk, ToolError};
 use jp_term::osc::hyperlink;
+use jp_tool::{AnswerType, Question};
 use serde_json::Value;
 
 use super::ResponseHandler;
@@ -92,20 +94,67 @@ impl StreamEventHandler {
             handler.handle(&data, &ctx.config().style, false)?;
         }
 
-        let result = tool
-            .call(
-                call.id,
-                Value::Object(call.arguments),
-                &ctx.mcp_client,
-                tool_config.clone(),
-                ctx.workspace.root.clone(),
-                editor,
-            )
-            .await?;
+        let mut answers = IndexMap::new();
+        loop {
+            match tool
+                .call(
+                    call.id.clone(),
+                    Value::Object(call.arguments.clone()),
+                    &answers,
+                    &ctx.mcp_client,
+                    tool_config.clone(),
+                    &ctx.workspace.root,
+                    &editor,
+                )
+                .await
+            {
+                Ok(result) => {
+                    self.tool_call_results.push(result.clone());
+                    return build_tool_call_result(
+                        &ctx.config().style,
+                        &result,
+                        &tool_config,
+                        handler,
+                    );
+                }
+                Err(ToolError::NeedsInput { question }) => {
+                    let answer = if ctx.term.is_tty {
+                        prompt_user(&question)?
+                    } else {
+                        question.default.unwrap_or_default()
+                    };
 
-        self.tool_call_results.push(result.clone());
+                    answers.insert(question.id.clone(), answer);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+}
+fn prompt_user(question: &Question) -> Result<Value, Error> {
+    match &question.answer_type {
+        AnswerType::Boolean => {
+            let mut inquiry = inquire::Confirm::new(&question.text);
 
-        build_tool_call_result(&ctx.config().style, &result, &tool_config, handler)
+            if let Some(default) = question.default.as_ref().and_then(Value::as_bool) {
+                inquiry = inquiry.with_default(default);
+            }
+
+            inquiry.prompt().map(Into::into).map_err(Into::into)
+        }
+        AnswerType::Select { options } => inquire::Select::new(&question.text, options.clone())
+            .prompt()
+            .map(Into::into)
+            .map_err(Into::into),
+        AnswerType::Text => {
+            let mut inquiry = inquire::Text::new(&question.text);
+
+            if let Some(default) = question.default.as_ref().and_then(Value::as_str) {
+                inquiry = inquiry.with_default(default);
+            }
+
+            inquiry.prompt().map(Into::into).map_err(Into::into)
+        }
     }
 }
 
@@ -263,10 +312,11 @@ pub(super) async fn handle_tool_calls(
             tool.call(
                 call.id,
                 Value::Object(call.arguments),
+                &IndexMap::new(),
                 &ctx.mcp_client,
                 tool_config,
-                ctx.workspace.root.clone(),
-                editor,
+                &ctx.workspace.root,
+                &editor,
             )
             .await?,
         );

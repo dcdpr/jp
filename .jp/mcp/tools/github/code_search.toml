@@ -1,7 +1,7 @@
 [conversation.tools.github_code_search]
 enable = false
 source = "local"
-command = "just serve-tools {{workspace}} {{tool}}"
+command = "just serve-tools {{context}} {{tool}}"
 description = """
 Find code matching a query in any GitHub repository.
 

@@ -17,6 +17,7 @@ jp_config = { workspace = true }
 jp_conversation = { workspace = true }
 jp_mcp = { workspace = true }
 jp_openrouter = { workspace = true }
+jp_tool = { workspace = true }
 
 async-anthropic = { workspace = true }
 async-stream = { workspace = true }

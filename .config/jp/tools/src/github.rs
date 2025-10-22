@@ -1,4 +1,4 @@
-use crate::{Error, Tool, Workspace};
+use crate::{Context, Error, Tool};
 
 mod create_issue_bug;
 mod create_issue_enhancement;
@@ -15,7 +15,7 @@ use repo::{github_code_search, github_read_file};
 const ORG: &str = "dcdpr";
 const REPO: &str = "jp";
 
-pub async fn run(_: Workspace, t: Tool) -> std::result::Result<String, Error> {
+pub async fn run(_: Context, t: Tool) -> std::result::Result<String, Error> {
     match t.name.trim_start_matches("github_") {
         "issues" => github_issues(t.opt_or_empty("number")?).await,
         "create_issue_bug" => {

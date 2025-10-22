@@ -4,7 +4,7 @@ run = "always"
 style.inline_results = "off"
 
 source = "local"
-command = "just serve-tools {{workspace}} {{tool}}"
+command = "just serve-tools {{context}} {{tool}}"
 description = "Find one or more pull requests in the project's GitHub repository."
 
 [conversation.tools.github_pulls.parameters.number]

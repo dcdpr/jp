@@ -4,7 +4,7 @@ run = "always"
 style.inline_results = "full"
 
 source = "local"
-command = "just serve-tools {{workspace}} {{tool}}"
+command = "just serve-tools {{context}} {{tool}}"
 description = """
 Commit the staged changes to the local git repository using the provided
 message.
