@@ -174,4 +174,10 @@ pub enum ToolError {
         value: serde_json::Value,
         need: Vec<&'static str>,
     },
+
+    #[error("Needs input: {question:?}")]
+    NeedsInput { question: jp_tool::Question },
+
+    #[error("Serialization error")]
+    Serde(#[from] serde_json::Error),
 }

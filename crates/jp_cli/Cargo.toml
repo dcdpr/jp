@@ -30,6 +30,7 @@ jp_openrouter = { workspace = true }
 jp_storage = { workspace = true }
 jp_task = { workspace = true }
 jp_term = { workspace = true }
+jp_tool = { workspace = true }
 jp_workspace = { workspace = true }
 
 async-stream = { workspace = true }

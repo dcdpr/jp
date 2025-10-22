@@ -10,8 +10,11 @@ use std::{
     path::PathBuf,
 };
 
+use jp_tool::{AnswerType, Outcome, Question};
+use serde_json::{Map, Value};
+
 use super::utils::is_file_dirty;
-use crate::Error;
+use crate::{Context, Error};
 
 pub struct Content(String);
 
@@ -73,11 +76,12 @@ impl Content {
 }
 
 pub(crate) async fn fs_modify_file(
-    root: PathBuf,
+    ctx: Context,
+    answers: &Map<String, Value>,
     path: String,
     string_to_replace: String,
     new_string: String,
-) -> std::result::Result<String, Error> {
+) -> std::result::Result<Outcome, Error> {
     let p = PathBuf::from(&path);
 
     if p.is_absolute() {
@@ -92,7 +96,7 @@ pub(crate) async fn fs_modify_file(
         return Err("Path must be less than 20 components long.".into());
     }
 
-    let absolute_path = root.join(path.trim_start_matches('/'));
+    let absolute_path = ctx.root.join(path.trim_start_matches('/'));
 
     if !absolute_path.exists() {
         return Err("File does not exist.".into());
@@ -102,8 +106,23 @@ pub(crate) async fn fs_modify_file(
         return Err("Path is not a regular file.".into());
     }
 
-    if is_file_dirty(&root, &p)? {
-        return Err("File has uncommitted changes. Please commit or discard first.".into());
+    if is_file_dirty(&ctx.root, &p)? {
+        match answers.get("modify_dirty_file").and_then(Value::as_bool) {
+            Some(true) => {}
+            Some(false) => {
+                return Err("File has uncommitted changes. Please commit or discard first.".into());
+            }
+            None => {
+                return Ok(Outcome::NeedsInput {
+                    question: Question {
+                        id: "modify_dirty_file".to_string(),
+                        text: format!("File '{path}' has uncommitted changes. Modify anyway?"),
+                        answer_type: AnswerType::Boolean,
+                        default: Some(Value::Bool(false)),
+                    },
+                });
+            }
+        }
     }
 
     // Read existing file content
@@ -201,8 +220,11 @@ mod tests {
             let absolute_file_path = root.join(file_path);
             fs::write(&absolute_file_path, test_case.start_content).unwrap();
 
+            let ctx = Context { root };
+
             let actual = fs_modify_file(
-                root,
+                ctx,
+                &Map::new(),
                 file_path.to_owned(),
                 test_case.string_to_replace.to_owned(),
                 test_case.new_string.to_owned(),
@@ -212,7 +234,7 @@ mod tests {
 
             assert_eq!(
                 actual,
-                test_case.output.map(str::to_owned).map_err(str::to_owned),
+                test_case.output.map(Into::into).map_err(str::to_owned),
                 "test case: {name}"
             );
 

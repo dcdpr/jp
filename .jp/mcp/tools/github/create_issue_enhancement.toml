@@ -1,7 +1,7 @@
 [conversation.tools.github_create_issue_enhancement]
 enable = false
 source = "local"
-command = "just serve-tools {{workspace}} {{tool}}"
+command = "just serve-tools {{context}} {{tool}}"
 description = """
 File a new enhancement request in the project's GitHub repository.
 

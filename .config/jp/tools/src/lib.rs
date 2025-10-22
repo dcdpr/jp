@@ -8,33 +8,29 @@ mod git;
 mod github;
 mod web;
 
-use std::path::PathBuf;
-
+use jp_tool::{Context, Outcome};
 use serde_json::{Map, Value};
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 type Result<T> = std::result::Result<T, Error>;
 
-pub async fn run(ws: Workspace, t: Tool) -> Result<String> {
+pub async fn run(ctx: Context, t: Tool) -> Result<Outcome> {
     match t.name.as_str() {
-        s if s.starts_with("cargo_") => cargo::run(ws, t).await,
-        s if s.starts_with("github_") => github::run(ws, t).await,
-        s if s.starts_with("fs_") => fs::run(ws, t).await,
-        s if s.starts_with("web_") => web::run(ws, t).await,
-        s if s.starts_with("git_") => git::run(ws, t).await,
+        s if s.starts_with("cargo_") => cargo::run(ctx, t).await.map(Into::into),
+        s if s.starts_with("github_") => github::run(ctx, t).await.map(Into::into),
+        s if s.starts_with("fs_") => fs::run(ctx, t).await,
+        s if s.starts_with("web_") => web::run(ctx, t).await.map(Into::into),
+        s if s.starts_with("git_") => git::run(ctx, t).await.map(Into::into),
         _ => Err(format!("Unknown tool '{}'", t.name).into()),
     }
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct Workspace {
-    pub path: PathBuf,
 }
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Tool {
     pub name: String,
     pub arguments: Map<String, Value>,
+    #[serde(default)]
+    pub answers: Map<String, Value>,
 }
 
 impl Tool {

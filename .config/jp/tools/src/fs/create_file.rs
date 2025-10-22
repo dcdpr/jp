@@ -4,13 +4,17 @@ use std::{
     path::PathBuf,
 };
 
+use jp_tool::{AnswerType, Outcome, Question};
+use serde_json::{Map, Value};
+
 use crate::Error;
 
 pub(crate) async fn fs_create_file(
     root: PathBuf,
+    answers: &Map<String, Value>,
     path: String,
     content: Option<String>,
-) -> std::result::Result<String, Error> {
+) -> std::result::Result<Outcome, Error> {
     let p = PathBuf::from(&path);
 
     if p.is_absolute() {
@@ -31,7 +35,22 @@ pub(crate) async fn fs_create_file(
     }
 
     if absolute_path.exists() {
-        return Err("Path points to existing file".into());
+        match answers.get("overwrite_file").and_then(Value::as_bool) {
+            Some(true) => {}
+            Some(false) => {
+                return Err("Path points to existing file".into());
+            }
+            None => {
+                return Ok(Outcome::NeedsInput {
+                    question: Question {
+                        id: "overwrite_file".to_string(),
+                        text: format!("File '{path}' exists. Overwrite?"),
+                        answer_type: AnswerType::Boolean,
+                        default: Some(Value::Bool(false)),
+                    },
+                });
+            }
+        }
     }
 
     let Some(parent) = absolute_path.parent() else {
@@ -41,7 +60,7 @@ pub(crate) async fn fs_create_file(
     fs::create_dir_all(parent)?;
     let mut file = File::options()
         .write(true)
-        .create_new(true)
+        .truncate(true)
         .open(&absolute_path)?;
 
     if let Some(content) = content {
@@ -52,5 +71,6 @@ pub(crate) async fn fs_create_file(
         "File '{}' created. File size: {}",
         path,
         file.metadata()?.len()
-    ))
+    )
+    .into())
 }

@@ -1,13 +1,13 @@
-use crate::{Error, Tool, Workspace};
+use crate::{Context, Error, Tool};
 
 mod commit;
 // mod utils;
 
 use commit::git_commit;
 
-pub async fn run(ws: Workspace, t: Tool) -> std::result::Result<String, Error> {
+pub async fn run(ctx: Context, t: Tool) -> std::result::Result<String, Error> {
     match t.name.trim_start_matches("git_") {
-        "commit" => git_commit(ws.path, t.req("message")?).await,
+        "commit" => git_commit(ctx.root, t.req("message")?).await,
 
         _ => Err(format!("Unknown tool '{}'", t.name).into()),
     }
