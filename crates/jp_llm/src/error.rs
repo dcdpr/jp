@@ -180,4 +180,13 @@ pub enum ToolError {
 
     #[error("Serialization error")]
     Serde(#[from] serde_json::Error),
+
+    #[error("Invalid arguments (missing: {missing:?}, unknown: {unknown:?})")]
+    Arguments {
+        /// Required arguments that were missing.
+        missing: Vec<String>,
+
+        /// Unknown arguments that were provided.
+        unknown: Vec<String>,
+    },
 }

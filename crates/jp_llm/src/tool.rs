@@ -271,6 +271,8 @@ impl ToolDefinition {
     ) -> Result<ToolCallResult, ToolError> {
         let name = tool.unwrap_or(&self.name);
 
+        validate_tool_arguments(arguments, config)?;
+
         let command = {
             let ctx = json!({
                 "tool": {
@@ -403,6 +405,36 @@ impl ToolDefinition {
             content,
         })
     }
+}
+
+fn validate_tool_arguments(
+    arguments: &Value,
+    config: &ToolConfigWithDefaults,
+) -> Result<(), ToolError> {
+    // TODO: Should we enforce at a type-level this for all tool calls, even
+    // MCP?
+    let Some(arguments) = arguments.as_object() else {
+        return Ok(());
+    };
+
+    let unknown = arguments
+        .keys()
+        .filter(|k| !config.parameters().contains_key(*k))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let mut missing = vec![];
+    for (name, param) in config.parameters() {
+        if param.required && !arguments.contains_key(name) {
+            missing.push(name.to_owned());
+        }
+    }
+
+    if !missing.is_empty() || !unknown.is_empty() {
+        return Err(ToolError::Arguments { missing, unknown });
+    }
+
+    Ok(())
 }
 
 pub async fn tool_definitions(
