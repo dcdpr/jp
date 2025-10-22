@@ -171,7 +171,7 @@ impl ToPartial for ToolsDefaultsConfig {
 
 /// Tool configuration.
 #[derive(Debug, Clone, Config)]
-#[config(rename_all = "snake_case", allow_unknown_fields)]
+#[config(rename_all = "snake_case")]
 pub struct ToolConfig {
     /// The source of the tool.
     #[setting(required)]
@@ -578,7 +578,7 @@ impl ToolParameterConfig {
 
 /// Tool parameter configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Config)]
-#[config(rename_all = "snake_case", allow_unknown_fields)]
+#[config(rename_all = "snake_case")]
 pub struct ToolParameterItemsConfig {
     /// The type of the parameter array items.
     #[serde(rename = "type")]
