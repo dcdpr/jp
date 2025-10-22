@@ -4,13 +4,13 @@ use grep_printer::StandardBuilder;
 use grep_regex::RegexMatcher;
 use grep_searcher::SearcherBuilder;
 
-use crate::Error;
+use crate::{util::OneOrMany, Error};
 
 pub(crate) async fn fs_grep_files(
     root: PathBuf,
     pattern: String,
     context: Option<usize>,
-    paths: Option<Vec<String>>,
+    paths: Option<OneOrMany<String>>,
 ) -> std::result::Result<String, Error> {
     let absolute_paths: Vec<_> = paths
         .as_deref()
