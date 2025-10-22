@@ -190,3 +190,15 @@ pub enum ToolError {
         unknown: Vec<String>,
     },
 }
+
+#[cfg(test)]
+impl PartialEq for ToolError {
+    fn eq(&self, other: &Self) -> bool {
+        if std::mem::discriminant(self) != std::mem::discriminant(other) {
+            return false;
+        }
+
+        // Good enough for testing purposes
+        format!("{self:?}") == format!("{other:?}")
+    }
+}

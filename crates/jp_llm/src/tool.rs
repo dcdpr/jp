@@ -271,7 +271,18 @@ impl ToolDefinition {
     ) -> Result<ToolCallResult, ToolError> {
         let name = tool.unwrap_or(&self.name);
 
-        validate_tool_arguments(arguments, config)?;
+        // TODO: Should we enforce at a type-level this for all tool calls, even
+        // MCP?
+        if let Some(args) = arguments.as_object() {
+            validate_tool_arguments(
+                args,
+                &config
+                    .parameters()
+                    .iter()
+                    .map(|(k, v)| (k.to_owned(), v.required))
+                    .collect(),
+            )?;
+        }
 
         let command = {
             let ctx = json!({
@@ -408,24 +419,18 @@ impl ToolDefinition {
 }
 
 fn validate_tool_arguments(
-    arguments: &Value,
-    config: &ToolConfigWithDefaults,
+    arguments: &Map<String, Value>,
+    parameters: &IndexMap<String, bool>,
 ) -> Result<(), ToolError> {
-    // TODO: Should we enforce at a type-level this for all tool calls, even
-    // MCP?
-    let Some(arguments) = arguments.as_object() else {
-        return Ok(());
-    };
-
     let unknown = arguments
         .keys()
-        .filter(|k| !config.parameters().contains_key(*k))
+        .filter(|k| !parameters.contains_key(*k))
         .cloned()
         .collect::<Vec<_>>();
 
     let mut missing = vec![];
-    for (name, param) in config.parameters() {
-        if param.required && !arguments.contains_key(name) {
+    for (name, required) in parameters {
+        if *required && !arguments.contains_key(name) {
             missing.push(name.to_owned());
         }
     }
@@ -624,4 +629,63 @@ async fn mcp_tool_definition(
         description,
         parameters: params,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_tool_arguments() {
+        struct TestCase {
+            arguments: Map<String, Value>,
+            parameters: IndexMap<String, bool>,
+            want: Result<(), ToolError>,
+        }
+
+        let cases = vec![
+            ("empty", TestCase {
+                arguments: Map::new(),
+                parameters: IndexMap::new(),
+                want: Ok(()),
+            }),
+            ("correct", TestCase {
+                arguments: Map::from_iter([("foo".to_owned(), json!("bar"))]),
+                parameters: IndexMap::from_iter([
+                    ("foo".to_owned(), true),
+                    ("bar".to_owned(), false),
+                ]),
+                want: Ok(()),
+            }),
+            ("missing", TestCase {
+                arguments: Map::new(),
+                parameters: IndexMap::from_iter([("foo".to_owned(), true)]),
+                want: Err(ToolError::Arguments {
+                    missing: vec!["foo".to_owned()],
+                    unknown: vec![],
+                }),
+            }),
+            ("unknown", TestCase {
+                arguments: Map::from_iter([("foo".to_owned(), json!("bar"))]),
+                parameters: IndexMap::from_iter([("bar".to_owned(), false)]),
+                want: Err(ToolError::Arguments {
+                    missing: vec![],
+                    unknown: vec!["foo".to_owned()],
+                }),
+            }),
+            ("both", TestCase {
+                arguments: Map::from_iter([("foo".to_owned(), json!("bar"))]),
+                parameters: IndexMap::from_iter([("bar".to_owned(), true)]),
+                want: Err(ToolError::Arguments {
+                    missing: vec!["bar".to_owned()],
+                    unknown: vec!["foo".to_owned()],
+                }),
+            }),
+        ];
+
+        for (name, test_case) in cases {
+            let result = validate_tool_arguments(&test_case.arguments, &test_case.parameters);
+            assert_eq!(result, test_case.want, "failed case: {name}");
+        }
+    }
 }
