@@ -4,24 +4,17 @@ use schematic::PartialConfig;
 
 /// Calculate the delta between two partial configurations.
 ///
-/// It takes `self`, and checks for any value in `next` that differs from
-/// `self`. If a value differs, it is returned in the final [`PartialConfig`].
+/// It takes `self`, and should check for any value in `next` that differs from
+/// `self`. If a value differs, it must be returned in the final
+/// [`PartialConfig`].
 ///
-/// If no difference is found, the field is set to `None`.
+/// If no difference is found, the field should be set to `None` for optional
+/// values, or `next` for non-optional values.
 ///
-/// If all values are equal, then the returned `PartialConfig` is the same as
-/// [`PartialConfig::empty`].
+/// If all values are equal, then the returned `PartialConfig` should be the
+/// same as [`PartialConfig::empty`].
 pub trait PartialConfigDelta: PartialConfig {
-    /// Calculate the delta between two partial configurations.
-    ///
-    /// It takes `self`, and checks for any value in `next` that differs from
-    /// `self`. If a value differs, it is returned in the final
-    /// [`PartialConfig`].
-    ///
-    /// If no difference is found, the field is set to `None`.
-    ///
-    /// If all values are equal, then the returned `PartialConfig` is the
-    /// same as [`PartialConfig::empty`].
+    /// See [`PartialConfigDelta`].
     fn delta(&self, next: Self) -> Self;
 }
 

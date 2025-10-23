@@ -19,7 +19,9 @@ Ok(
             assistant: PartialAssistantConfig {
                 name: None,
                 system_prompt: Some(
-                    "You are a helpful assistant.",
+                    String(
+                        "You are a helpful assistant.",
+                    ),
                 ),
                 instructions: [
                     PartialInstructionsConfig {

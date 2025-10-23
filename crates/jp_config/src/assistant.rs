@@ -14,10 +14,13 @@ use schematic::{Config, TransformResult};
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
     assistant::tool_choice::ToolChoice,
-    delta::{delta_opt, PartialConfigDelta},
+    delta::{delta_opt, delta_opt_partial, PartialConfigDelta},
+    internal::merge::string_with_strategy,
     model::{ModelConfig, PartialModelConfig},
-    partial::{partial_opt, partial_opts, ToPartial},
+    partial::{partial_opt, partial_opt_config, partial_opts, ToPartial},
+    types::string::{PartialStringWithMerge, StringWithMerge},
 };
+
 /// Assistant-specific configuration.
 #[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case")]
@@ -26,8 +29,8 @@ pub struct AssistantConfig {
     pub name: Option<String>,
 
     /// The system prompt to use for the assistant.
-    #[setting(default = "You are a helpful assistant.")]
-    pub system_prompt: String,
+    #[setting(nested, default = "You are a helpful assistant.", merge = string_with_strategy)]
+    pub system_prompt: Option<StringWithMerge>,
 
     /// A list of instructions for the assistant.
     #[setting(nested, default = default_instructions, merge = schematic::merge::append_vec)]
@@ -47,7 +50,7 @@ impl AssignKeyValue for PartialAssistantConfig {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
             "name" => self.name = kv.try_some_string()?,
-            "system_prompt" => self.system_prompt = kv.try_some_string()?,
+            "system_prompt" => self.system_prompt = kv.try_some_object_or_from_str()?,
             _ if kv.p("instructions") => kv.try_vec_of_nested(&mut self.instructions)?,
             "tool_choice" => self.tool_choice = kv.try_some_from_str()?,
             _ if kv.p("model") => self.model.assign(kv)?,
@@ -62,7 +65,7 @@ impl PartialConfigDelta for PartialAssistantConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             name: delta_opt(self.name.as_ref(), next.name),
-            system_prompt: delta_opt(self.system_prompt.as_ref(), next.system_prompt),
+            system_prompt: delta_opt_partial(self.system_prompt.as_ref(), next.system_prompt),
             instructions: {
                 next.instructions
                     .into_iter()
@@ -81,7 +84,7 @@ impl ToPartial for AssistantConfig {
 
         Self::Partial {
             name: partial_opts(self.name.as_ref(), defaults.name),
-            system_prompt: partial_opt(&self.system_prompt, defaults.system_prompt),
+            system_prompt: partial_opt_config(self.system_prompt.as_ref(), defaults.system_prompt),
             instructions: self
                 .instructions
                 .iter()
@@ -117,9 +120,13 @@ mod tests {
     use schematic::PartialConfig as _;
 
     use super::*;
-    use crate::model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId};
+    use crate::{
+        model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+        types::string::{PartialStringWithStrategy, StringMergeStrategy},
+    };
 
     #[test]
+    #[expect(clippy::too_many_lines)]
     fn test_assistant_config_instructions() {
         let mut p = PartialAssistantConfig::default_values(&())
             .unwrap()
@@ -207,6 +214,49 @@ mod tests {
         assert_eq!(
             &kv.to_string(),
             "instructions: key must be a string at line 1 column 3"
+        );
+
+        let kv = KvAssignment::try_from_cli("system_prompt", "foo").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.system_prompt,
+            Some(PartialStringWithMerge::String("foo".into()))
+        );
+
+        let kv = KvAssignment::try_from_cli("system_prompt:", r#"{"value":"foo"}"#).unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.system_prompt,
+            Some(PartialStringWithMerge::Merged(PartialStringWithStrategy {
+                value: Some("foo".into()),
+                strategy: None,
+            }))
+        );
+
+        let kv =
+            KvAssignment::try_from_cli("system_prompt:", r#"{"value":"foo", "strategy":"append"}"#)
+                .unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.system_prompt,
+            Some(PartialStringWithMerge::Merged(PartialStringWithStrategy {
+                value: Some("foo".into()),
+                strategy: Some(StringMergeStrategy::Append),
+            }))
+        );
+
+        let kv = KvAssignment::try_from_cli(
+            "system_prompt:",
+            r#"{"value":"foo", "strategy":"append_space"}"#,
+        )
+        .unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.system_prompt,
+            Some(PartialStringWithMerge::Merged(PartialStringWithStrategy {
+                value: Some("foo".into()),
+                strategy: Some(StringMergeStrategy::AppendSpace),
+            }))
         );
     }
 
