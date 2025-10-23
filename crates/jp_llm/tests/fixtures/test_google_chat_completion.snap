@@ -7,7 +7,7 @@ Ok(
         provider: Google,
         events: [
             Content(
-                "Received! How can I help you today?",
+                "Received.\n\nHow can I help you?",
             ),
             Finished(
                 Completed,

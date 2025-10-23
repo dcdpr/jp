@@ -13,6 +13,7 @@ use jp_config::{
     providers::llm::google::GoogleConfig,
 };
 use jp_conversation::{
+    message::Messages,
     thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
 };
@@ -129,7 +130,14 @@ fn create_request(
         tool_call_strict_mode,
     } = query;
 
-    let system_prompt = thread.system_prompt.clone();
+    let Thread {
+        system_prompt,
+        instructions,
+        attachments,
+        history,
+        message,
+    } = thread;
+
     let tools = convert_tools(tools, tool_call_strict_mode);
 
     #[expect(clippy::cast_possible_wrap)]
@@ -161,12 +169,51 @@ fn create_request(
             }),
         });
 
+    let parts = {
+        let mut parts = vec![];
+        if let Some(text) = system_prompt {
+            parts.push(types::ContentData::Text(text));
+        }
+
+        if !instructions.is_empty() {
+            let text = instructions
+                .into_iter()
+                .map(|instruction| instruction.try_to_xml().map_err(Into::into))
+                .collect::<Result<Vec<_>>>()?
+                .join("\n\n");
+
+            parts.push(types::ContentData::Text(text));
+        }
+
+        if !attachments.is_empty() {
+            let documents: Documents = attachments
+                .into_iter()
+                .enumerate()
+                .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
+                .map(Document::from)
+                .collect::<Vec<_>>()
+                .into();
+
+            parts.push(types::ContentData::Text(documents.try_to_xml()?));
+        }
+
+        parts
+            .into_iter()
+            .map(|data| types::ContentPart {
+                data,
+                thought: false,
+                metadata: None,
+            })
+            .collect::<Vec<_>>()
+    };
+
     Ok(types::GenerateContentRequest {
-        system_instruction: system_prompt.map(|text| types::Content {
-            parts: vec![types::ContentData::Text(text).into()],
-            role: types::Role::System,
-        }),
-        contents: convert_thread(thread)?,
+        system_instruction: if parts.is_empty() {
+            None
+        } else {
+            Some(types::Content { parts, role: None })
+        },
+        contents: GoogleMessages::build(history, message).0,
         tools,
         tool_config,
         generation_config: Some(types::GenerationConfig {
@@ -286,44 +333,13 @@ fn convert_tool_choice(choice: ToolChoice) -> types::ToolConfig {
 }
 
 fn convert_tools(tools: Vec<ToolDefinition>, _strict: bool) -> Vec<types::Tool> {
-    let supported_properties = [
-        "type",
-        "properties",
-        "required",
-        "format",
-        "title",
-        "description",
-        "nullable",
-        "enum",
-        "maxItems",
-        "minItems",
-        "properties",
-        "required",
-        "minProperties",
-        "maxProperties",
-        "minLength",
-        "maxLength",
-        "pattern",
-        "example",
-        "anyOf",
-        "propertyOrdering",
-        "default",
-        "items",
-        "minimum",
-        "maximum",
-    ];
-
     tools
         .into_iter()
         .map(|tool| {
             types::Tool::FunctionDeclaration(types::ToolConfigFunctionDeclaration {
                 function_declarations: vec![types::FunctionDeclaration {
-                    parameters: Some(
-                        tool.to_parameters_map()
-                            .into_iter()
-                            .filter(|(k, _)| supported_properties.contains(&k.as_str()))
-                            .collect(),
-                    ),
+                    parameters: None,
+                    parameters_json_schema: Some(tool.to_parameters_schema()),
                     name: tool.name,
                     description: tool.description.unwrap_or_default(),
                     response: None,
@@ -333,118 +349,27 @@ fn convert_tools(tools: Vec<ToolDefinition>, _strict: bool) -> Vec<types::Tool> 
         .collect()
 }
 
-fn convert_thread(thread: Thread) -> Result<Vec<types::Content>> {
-    Messages::try_from(thread).map(|v| v.0)
-}
+struct GoogleMessages(Vec<types::Content>);
 
-struct Messages(Vec<types::Content>);
-
-impl TryFrom<Thread> for Messages {
-    type Error = Error;
-
-    fn try_from(thread: Thread) -> Result<Self> {
-        let Thread {
-            instructions,
-            attachments,
-            mut history,
-            message,
-            ..
-        } = thread;
-
-        // If the last history message is a tool call response, we need to go
-        // one more back in history, to avoid disjointing tool call requests and
-        // their responses.
-        let mut history_after_instructions = vec![];
-        while let Some(message) = history.pop() {
-            let tool_call_results = matches!(message.message, UserMessage::ToolCallResults(_));
-            history_after_instructions.insert(0, message);
-
-            if !tool_call_results {
-                break;
-            }
-        }
-
-        let mut items = vec![];
-        let history = history
+impl GoogleMessages {
+    fn build(history: Messages, message: UserMessage) -> Self {
+        // Message history
+        let mut items = history
             .into_iter()
             .flat_map(message_pair_to_messages)
             .collect::<Vec<_>>();
-
-        // Historical messages second, these are static.
-        items.extend(history);
-
-        // Group multiple contents blocks into a single message.
-        let mut content = vec![];
-
-        if !instructions.is_empty() {
-            content.push(
-                "Before we continue, here are some contextual details that will help you generate \
-                 a better response."
-                    .to_string(),
-            );
-        }
-
-        // Then instructions in XML tags.
-        for instruction in &instructions {
-            content.push(instruction.try_to_xml()?);
-        }
-
-        // Then large list of attachments, formatted as XML.
-        if !attachments.is_empty() {
-            let documents: Documents = attachments
-                .into_iter()
-                .enumerate()
-                .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
-                .map(Document::from)
-                .collect::<Vec<_>>()
-                .into();
-
-            content.push(documents.try_to_xml()?);
-        }
-
-        // Attach all data, and add a "fake" acknowledgement by the assistant.
-        //
-        // See `provider::openrouter` for more information.
-        if !content.is_empty() {
-            items.push(types::Content {
-                role: types::Role::User,
-                parts: content
-                    .into_iter()
-                    .map(|s| types::ContentData::Text(s).into())
-                    .collect(),
-            });
-        }
-
-        if items
-            .last()
-            .is_some_and(|m| matches!(m.role, types::Role::User))
-        {
-            items.push(types::Content {
-                role: types::Role::Model,
-                parts: vec![types::ContentData::Text(
-                    "Thank you for those details, I'll use them to inform my next response.".into(),
-                )
-                .into()],
-            });
-        }
-
-        items.extend(
-            history_after_instructions
-                .into_iter()
-                .flat_map(message_pair_to_messages),
-        );
 
         // User query
         match message {
             UserMessage::Query(text) => {
                 items.push(types::Content {
-                    role: types::Role::User,
+                    role: Some(types::Role::User),
                     parts: vec![types::ContentData::Text(text).into()],
                 });
             }
             UserMessage::ToolCallResults(results) => {
                 items.extend(results.into_iter().map(|result| types::Content {
-                    role: types::Role::User,
+                    role: Some(types::Role::User),
                     parts: vec![types::ContentData::FunctionResponse(
                         types::FunctionResponse {
                             name: result.id,
@@ -457,7 +382,7 @@ impl TryFrom<Thread> for Messages {
             }
         }
 
-        Ok(Self(items))
+        Self(items)
     }
 }
 
@@ -488,7 +413,7 @@ fn user_message_to_message(user: UserMessage) -> types::Content {
     };
 
     types::Content {
-        role: types::Role::User,
+        role: Some(types::Role::User),
         parts,
     }
 }
@@ -525,7 +450,7 @@ fn assistant_message_to_message(assistant: AssistantMessage) -> types::Content {
     }
 
     types::Content {
-        role: types::Role::Model,
+        role: Some(types::Role::Model),
         parts,
     }
 }
