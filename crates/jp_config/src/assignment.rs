@@ -379,6 +379,16 @@ impl KvAssignment {
         }
     }
 
+    /// Convenience method for [`Self::try_object_or_from_str`] that wraps the `Ok` value
+    /// into `Some`.
+    pub(crate) fn try_some_object_or_from_str<T, E>(self) -> Result<Option<T>, KvAssignmentError>
+    where
+        T: DeserializeOwned + FromStr<Err = E>,
+        E: Into<BoxedError>,
+    {
+        self.try_object_or_from_str().map(Some)
+    }
+
     /// Try to parse the value using [`FromStr`].
     pub(crate) fn try_from_str<T, E>(self) -> Result<T, KvAssignmentError>
     where
