@@ -169,47 +169,50 @@ fn create_request(
             }),
         });
 
+    let parts = {
+        let mut parts = vec![];
+        if let Some(text) = system_prompt {
+            parts.push(types::ContentData::Text(text));
+        }
+
+        if !instructions.is_empty() {
+            let text = instructions
+                .into_iter()
+                .map(|instruction| instruction.try_to_xml().map_err(Into::into))
+                .collect::<Result<Vec<_>>>()?
+                .join("\n\n");
+
+            parts.push(types::ContentData::Text(text));
+        }
+
+        if !attachments.is_empty() {
+            let documents: Documents = attachments
+                .into_iter()
+                .enumerate()
+                .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
+                .map(Document::from)
+                .collect::<Vec<_>>()
+                .into();
+
+            parts.push(types::ContentData::Text(documents.try_to_xml()?));
+        }
+
+        parts
+            .into_iter()
+            .map(|data| types::ContentPart {
+                data,
+                thought: false,
+                metadata: None,
+            })
+            .collect::<Vec<_>>()
+    };
+
     Ok(types::GenerateContentRequest {
-        system_instruction: Some(types::Content {
-            parts: {
-                let mut parts = vec![];
-                if let Some(text) = system_prompt {
-                    parts.push(types::ContentData::Text(text));
-                }
-
-                if !instructions.is_empty() {
-                    let text = instructions
-                        .into_iter()
-                        .map(|instruction| instruction.try_to_xml().map_err(Into::into))
-                        .collect::<Result<Vec<_>>>()?
-                        .join("\n\n");
-
-                    parts.push(types::ContentData::Text(text));
-                }
-
-                if !attachments.is_empty() {
-                    let documents: Documents = attachments
-                        .into_iter()
-                        .enumerate()
-                        .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
-                        .map(Document::from)
-                        .collect::<Vec<_>>()
-                        .into();
-
-                    parts.push(types::ContentData::Text(documents.try_to_xml()?));
-                }
-
-                parts
-                    .into_iter()
-                    .map(|data| types::ContentPart {
-                        data,
-                        thought: false,
-                        metadata: None,
-                    })
-                    .collect()
-            },
-            role: None,
-        }),
+        system_instruction: if parts.is_empty() {
+            None
+        } else {
+            Some(types::Content { parts, role: None })
+        },
         contents: GoogleMessages::build(history, message).0,
         tools,
         tool_config,
