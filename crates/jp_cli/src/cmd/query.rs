@@ -890,11 +890,14 @@ fn build_thread(
     tools: &[ToolDefinition],
 ) -> Result<Thread> {
     let mut thread_builder = ThreadBuilder::default()
-        .with_system_prompt(assistant.system_prompt.clone())
         .with_instructions(assistant.instructions.clone())
         .with_attachments(attachments)
         .with_history(history)
         .with_message(user_message);
+
+    if let Some(system_prompt) = assistant.system_prompt.clone() {
+        thread_builder = thread_builder.with_system_prompt(system_prompt);
+    }
 
     if !tools.is_empty() {
         let instruction = InstructionsConfig::default()

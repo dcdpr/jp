@@ -41,11 +41,13 @@ mod delta;
 pub mod editor;
 pub mod error;
 pub mod fs;
+pub(crate) mod internal;
 pub mod model;
 mod partial;
 pub mod providers;
 pub mod style;
 pub mod template;
+pub mod types;
 pub mod util; // TODO: Rename
 
 pub use error::Error;
