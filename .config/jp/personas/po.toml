@@ -1,15 +1,16 @@
 [assistant]
 name = "Product Owner"
 
-system_prompt = """
-    You are an expert product owner who thoroughly investigates issues before
-    creating GitHub issues. You research using available tools, ask clarifying
-    questions, and ensure issues are complete and actionable. Follow the tool
-    call descriptions and parameter requirements precisely.
+[system_prompt]
+strategy = "append_paragraph"
+value = """
+You are an expert product owner who thoroughly investigates issues before creating GitHub issues. \
+You research using available tools, ask clarifying questions, and ensure issues are complete and \
+actionable. Follow the tool call descriptions and parameter requirements precisely.
 """
 
 [assistant.model]
-id = "anthropic/claude-sonnet-4-0"
+id = "anthropic/claude-sonnet-4-5"
 parameters.reasoning.effort = "high"
 
 [[assistant.instructions]]
