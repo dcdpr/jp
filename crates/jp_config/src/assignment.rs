@@ -379,6 +379,16 @@ impl KvAssignment {
         }
     }
 
+    /// Convenience method for [`Self::try_object_or_from_str`] that wraps the `Ok` value
+    /// into `Some`.
+    pub(crate) fn try_some_object_or_from_str<T, E>(self) -> Result<Option<T>, KvAssignmentError>
+    where
+        T: DeserializeOwned + FromStr<Err = E>,
+        E: Into<BoxedError>,
+    {
+        self.try_object_or_from_str().map(Some)
+    }
+
     /// Try to parse the value using [`FromStr`].
     pub(crate) fn try_from_str<T, E>(self) -> Result<T, KvAssignmentError>
     where
@@ -582,7 +592,7 @@ impl KvAssignment {
     /// merge the elements.
     pub(crate) fn try_vec_of_nested<T>(mut self, vec: &mut Vec<T>) -> Result<(), KvAssignmentError>
     where
-        T: PartialConfig<Context = ()> + AssignKeyValue + FromStr<Err = BoxedError>,
+        T: PartialConfig + AssignKeyValue + FromStr<Err = BoxedError>,
     {
         // If the key is an index into the array, assign the value to the
         // element, if it exists.
@@ -661,7 +671,7 @@ impl KvAssignment {
         vec: &mut Option<Vec<T>>,
     ) -> Result<(), KvAssignmentError>
     where
-        T: PartialConfig<Context = ()> + AssignKeyValue + FromStr<Err = BoxedError>,
+        T: PartialConfig + AssignKeyValue + FromStr<Err = BoxedError>,
     {
         self.try_vec_of_nested(vec.get_or_insert_default())
     }

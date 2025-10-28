@@ -65,7 +65,7 @@ mod tests {
     use std::assert_matches::assert_matches;
 
     use schematic::PartialConfig as _;
-    use serde_json::Value;
+    use serde_json::{json, Value};
 
     use super::*;
     use crate::model::{
@@ -213,5 +213,64 @@ mod tests {
             p.parameters.other.and_then(|v| v.get("foo").cloned()),
             Some(Value::String("bar".into()))
         );
+    }
+
+    #[test]
+    fn test_model_config_deserialize() {
+        struct TestCase {
+            data: Value,
+            expected: Result<PartialModelConfig, String>,
+        }
+
+        let cases = vec![
+            TestCase {
+                data: json!({
+                    "id": { "provider": "ollama", "name": "bar" },
+                }),
+                expected: Ok(PartialModelConfig {
+                    id: PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+                        provider: Some(ProviderId::Ollama),
+                        name: "bar".parse().ok(),
+                    }),
+                    ..Default::default()
+                }),
+            },
+            TestCase {
+                data: json!({
+                    "id": "llamacpp/bar",
+                }),
+                expected: Ok(PartialModelConfig {
+                    id: PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+                        provider: Some(ProviderId::Llamacpp),
+                        name: "bar".parse().ok(),
+                    }),
+                    ..Default::default()
+                }),
+            },
+            TestCase {
+                data: json!({
+                    "id": "llamabar",
+                }),
+                expected: Ok(PartialModelConfig {
+                    id: PartialModelIdOrAliasConfig::Alias("llamabar".into()),
+                    ..Default::default()
+                }),
+            },
+            TestCase {
+                data: json!({
+                    "id": "foo/bar",
+                }),
+                // TODO: See if we can get a better error message.
+                // expected: Err("Alias must not be empty and must not contain '/'.".into()),
+                expected: Err("data did not match any variant of untagged enum \
+                               PartialModelIdOrAliasConfig"
+                    .into()),
+            },
+        ];
+
+        for TestCase { data, expected } in cases {
+            let result = serde_json::from_value::<PartialModelConfig>(data);
+            assert_eq!(result.map_err(|e| e.to_string()), expected);
+        }
     }
 }

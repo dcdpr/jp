@@ -1,8 +1,12 @@
 extends = [
+    "../.config/jp/personas/default.toml",
     "mcp/tools/**/*.toml",
 ]
 
-config_load_paths = [".config/jp"]
+config_load_paths = [
+    ".config/jp",
+    ".config/jp/personas",
+]
 
 [providers.llm]
 anthropic.beta_headers = [
@@ -10,91 +14,37 @@ anthropic.beta_headers = [
     "interleaved-thinking-2025-05-14",
     "context-management-2025-06-27",
 ]
+
 [providers.llm.aliases]
-anthropic = { provider = "anthropic", name = "claude-sonnet-4-5" }
-claude = { provider = "anthropic", name = "claude-sonnet-4-5" }
-sonnet = { provider = "anthropic", name = "claude-sonnet-4-5" }
-opus = { provider = "anthropic", name = "claude-opus-4-1" }
-haiku = { provider = "anthropic", name = "claude-3-5-haiku-latest" }
-
-openai = { provider = "openai", name = "gpt-5" }
-chatgpt = { provider = "openai", name = "gpt-5" }
-gpt = { provider = "openai", name = "gpt-5" }
-gpt5 = { provider = "openai", name = "gpt-5" }
-gpt5-mini = { provider = "openai", name = "gpt-5-mini" }
-gpt-mini = { provider = "openai", name = "gpt-5-mini" }
-gpt5-nano = { provider = "openai", name = "gpt-5-nano" }
-gpt-nano = { provider = "openai", name = "gpt-5-nano" }
-o3-research = { provider = "openai", name = "o3-deep-research" }
-o4-mini-research = { provider = "openai", name = "o4-mini-deep-research" }
-codex = { provider = "openai", name = "gpt-5-codex" }
-gpt-5-codex = { provider = "openai", name = "gpt-5-codex" }
-codex-mini = { provider = "openai", name = "codex-mini-latest" }
-
-google = { provider = "google", name = "gemini-2.5-pro" }
-gemini = { provider = "google", name = "gemini-2.5-pro" }
-gemini-pro = { provider = "google", name = "gemini-2.5-pro" }
-gemini-flash = { provider = "google", name = "gemini-2.5-flash" }
-gemini-lite = { provider = "google", name = "gemini-2.5-flash-lite" }
-
-[assistant]
-model.id = { provider = "anthropic", name = "claude-sonnet-4-5" }
-system_prompt = """
-You are Jean-Pierre, the AI Pair Programmer, working on your own creation. \
-The project you are working on is called JP (short for Jean-Pierre), a \
-command-line toolkit to support humans in their daily work as a software \
-programmer. Built to integrate into their existing workflow, providing a \
-flexible and powerful pair-programming experience with LLMs. \
-"""
-
-[[assistant.instructions]]
-title = "Core Tasks"
-description = "These are the core tasks you must perform."
-items = [
-    "Answering general programming questions.",
-    "Explaining how the code in a question works.",
-    "Reviewing the code in a question.",
-    "Generating unit tests for the provided code.",
-    "Proposing fixes for problems in the provided code.",
-    "Scaffolding code for a new project.",
-    "Finding relevant code to the user's query.",
-    "Proposing fixes for test failures.",
-    "Running tools.",
-]
-
-[[assistant.instructions]]
-title = "Guidelines"
-description = "You must follow these guidelines."
-items = [
-    "Follow the user's requirements carefully and to the letter.",
-    "Keep your answers short and impersonal, especially if the user responds with context outside of your tasks.",
-    "Minimize other prose.",
-    "Use Markdown formatting in your answers.",
-    "Limit non-code text width to 120 characters.",
-    "Include the programming language name at the start of the Markdown code blocks.",
-    "Avoid including line numbers in code blocks.",
-    "Avoid wrapping the whole response in triple backticks.",
-    "Only return code that's relevant to the task at hand. You may not need to return all of the code that the user has shared.",
-    "Use actual line breaks instead of '\\\n' in your response to begin new lines.",
-    "Use '\\\n' only when you want a literal backslash followed by a character 'n'.",
-    "All non-code responses must be in the language of the user's query.",
-]
-
-[[assistant.instructions]]
-title = "Workflow"
-description = "Follow these steps to complete your tasks."
-items = [
-    "1. Think step-by-step and describe your plan for what to build in pseudocode, written out in great detail, unless asked not to do so.",
-    "2. Output the code in a single code block, being careful to only return relevant code.",
-    "3. You should always generate short suggestions for the next user turns that are relevant to the conversation.",
-    "4. You can only give one reply for each conversation turn.",
-]
-
-[conversation.title.generate]
-auto = true
+# Anthropic aliases
+anthropic = "anthropic/claude-sonnet-4-5"
+claude = "anthropic/claude-sonnet-4-5"
+sonnet = "anthropic/claude-sonnet-4-5"
+opus = "anthropic/claude-opus-4-1"
+haiku = "anthropic/claude-3-5-haiku-latest"
+# OpenAI aliases
+openai = "openai/gpt-5"
+chatgpt = "openai/gpt-5"
+gpt = "openai/gpt-5"
+gpt5 = "openai/gpt-5"
+gpt5-mini = "openai/gpt-5-mini"
+gpt-mini = "openai/gpt-5-mini"
+gpt5-nano = "openai/gpt-5-nano"
+gpt-nano = "openai/gpt-5-nano"
+o3-research = "openai/o3-deep-research"
+o4-mini-research = "openai/o4-mini-deep-research"
+codex = "openai/gpt-5-codex"
+gpt-5-codex = "openai/gpt-5-codex"
+codex-mini = "openai/codex-mini-latest"
+# Google aliases
+google = "google/gemini-2.5-pro"
+gemini = "google/gemini-2.5-pro"
+gemini-pro = "google/gemini-2.5-pro"
+gemini-flash = "google/gemini-2.5-flash"
+gemini-lite = "google/gemini-2.5-flash-lite"
 
 [conversation.title.generate.model]
-id = { provider = "anthropic", name = "claude-3-5-haiku-latest" }
+id = "anthropic/claude-3-5-haiku-latest"
 parameters.reasoning = "off"
 
 [style.code]

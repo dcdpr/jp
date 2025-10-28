@@ -88,4 +88,8 @@ pub(crate) enum Error {
 
     #[error("Model ID error")]
     ModelId(#[from] jp_config::model::id::ModelIdConfigError),
+
+    // TODO: we should not have this error variant.
+    #[error("Failed to inquire")]
+    Inquire(#[from] inquire::error::InquireError),
 }

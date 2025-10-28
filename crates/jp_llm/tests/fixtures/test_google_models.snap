@@ -1303,26 +1303,19 @@ Ok(
             id: ModelIdConfig {
                 provider: Google,
                 name: Name(
-                    "gemini-2.5-flash-preview-native-audio-dialog",
+                    "veo-3.1-generate-preview",
                 ),
             },
             display_name: Some(
-                "Gemini 2.5 Flash Preview Native Audio Dialog",
+                "Veo 3.1",
             ),
             context_window: Some(
-                131072,
+                480,
             ),
             max_output_tokens: Some(
                 8192,
             ),
-            reasoning: Some(
-                Supported {
-                    min_tokens: 0,
-                    max_tokens: Some(
-                        24576,
-                    ),
-                },
-            ),
+            reasoning: None,
             knowledge_cutoff: None,
             deprecated: None,
             features: [],
@@ -1331,26 +1324,19 @@ Ok(
             id: ModelIdConfig {
                 provider: Google,
                 name: Name(
-                    "gemini-2.5-flash-exp-native-audio-thinking-dialog",
+                    "veo-3.1-fast-generate-preview",
                 ),
             },
             display_name: Some(
-                "Gemini 2.5 Flash Exp Native Audio Thinking Dialog",
+                "Veo 3.1 fast",
             ),
             context_window: Some(
-                131072,
+                480,
             ),
             max_output_tokens: Some(
                 8192,
             ),
-            reasoning: Some(
-                Supported {
-                    min_tokens: 0,
-                    max_tokens: Some(
-                        24576,
-                    ),
-                },
-            ),
+            reasoning: None,
             knowledge_cutoff: None,
             deprecated: None,
             features: [],

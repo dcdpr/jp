@@ -1,5 +1,7 @@
 //! LLM model ID configuration.
 
+mod alias;
+
 use std::{fmt, str::FromStr};
 
 use indexmap::IndexMap;
@@ -8,7 +10,10 @@ use jp_id::{
     Id,
 };
 use schematic::{Config, ConfigEnum, Schematic};
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{self, MapAccess, Visitor},
+    Deserialize, Deserializer, Serialize,
+};
 
 use crate::{
     assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
@@ -30,6 +35,7 @@ pub enum ModelIdOrAliasConfig {
     /// [`LlmProviderConfig::aliases`].
     ///
     /// [`LlmProviderConfig::aliases`]: crate::providers::llm::LlmProviderConfig::aliases
+    #[setting(with = "alias")]
     Alias(String),
 }
 
@@ -127,7 +133,7 @@ impl ModelIdOrAliasConfig {
 
 /// Assistant-specific configuration.
 #[derive(Debug, Clone, PartialEq, Config)]
-#[config(rename_all = "snake_case")]
+#[config(rename_all = "snake_case", no_deserialize_derive)]
 pub struct ModelIdConfig {
     /// The provider to supply the model.
     #[setting(required)]
@@ -174,6 +180,62 @@ impl ToPartial for ModelIdConfig {
 impl fmt::Display for ModelIdConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.provider, self.name)
+    }
+}
+
+impl<'de> Deserialize<'de> for PartialModelIdConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ModelIdConfigVisitor;
+
+        impl<'de> Visitor<'de> for ModelIdConfigVisitor {
+            type Value = PartialModelIdConfig;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("string or map")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                v.parse::<PartialModelIdConfig>().map_err(E::custom)
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut provider: Option<ProviderId> = None;
+                let mut name: Option<Name> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "provider" => {
+                            if provider.is_some() {
+                                return Err(de::Error::duplicate_field("provider"));
+                            }
+                            provider = Some(map.next_value()?);
+                        }
+                        "name" => {
+                            if name.is_some() {
+                                return Err(de::Error::duplicate_field("name"));
+                            }
+                            name = Some(map.next_value()?);
+                        }
+                        _ => {
+                            map.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                Ok(PartialModelIdConfig { provider, name })
+            }
+        }
+
+        deserializer.deserialize_any(ModelIdConfigVisitor)
     }
 }
 
@@ -372,3 +434,43 @@ impl From<Name> for String {
 #[derive(Debug, thiserror::Error)]
 #[error("Model ID must be [a-zA-Z0-9_-.:/]+")]
 pub struct ModelIdError;
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{json, Value};
+
+    use super::*;
+
+    #[test]
+    fn test_model_id_config_deserialize() {
+        struct TestCase {
+            data: Value,
+            expected: PartialModelIdConfig,
+        }
+
+        let cases = vec![
+            TestCase {
+                data: json!({
+                    "provider": "ollama",
+                    "name": "bar",
+                }),
+                expected: PartialModelIdConfig {
+                    provider: Some(ProviderId::Ollama),
+                    name: "bar".parse().ok(),
+                },
+            },
+            TestCase {
+                data: json!("llamacpp/bar"),
+                expected: PartialModelIdConfig {
+                    provider: Some(ProviderId::Llamacpp),
+                    name: "bar".parse().ok(),
+                },
+            },
+        ];
+
+        for TestCase { data, expected } in cases {
+            let result = serde_json::from_value::<PartialModelIdConfig>(data);
+            assert_eq!(result.unwrap(), expected);
+        }
+    }
+}

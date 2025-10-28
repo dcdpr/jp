@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 
 use crossterm::style::Stylize as _;
 use indexmap::IndexMap;
@@ -15,6 +12,7 @@ use jp_mcp::{
     id::{McpServerId, McpToolId},
     RawContent, ResourceContents,
 };
+use jp_tool::Outcome;
 use minijinja::Environment;
 use serde_json::{json, Map, Value};
 use tracing::{info, trace};
@@ -99,10 +97,11 @@ impl ToolDefinition {
         &self,
         id: String,
         mut arguments: Value,
+        answers: &IndexMap<String, Value>,
         mcp_client: &jp_mcp::Client,
         mut config: ToolConfigWithDefaults,
-        root: PathBuf,
-        editor: PathBuf,
+        root: &Path,
+        editor: &Path,
     ) -> Result<ToolCallResult, ToolError> {
         info!(tool = %self.name, arguments = ?arguments, "Calling tool.");
 
@@ -116,7 +115,7 @@ impl ToolDefinition {
 
             arguments = loop {
                 open_editor::EditorCallBuilder::new()
-                    .with_editor(open_editor::Editor::from_bin_path(editor.clone()))
+                    .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
                     .edit_string_mut(&mut args)
                     .map_err(|error| ToolError::OpenEditorError {
                         arguments: arguments.clone(),
@@ -153,8 +152,12 @@ impl ToolDefinition {
             };
         }
 
+        // If the too call has answers to provide to the tool, it means the tool
+        // already ran once, and we should not ask for confirmation again.
+        let force_run = !answers.is_empty();
+
         let should_run = match config.run() {
-            RunMode::Ask => {
+            RunMode::Ask if !force_run => {
                 let mut question = format!(
                     "Run {} {} tool",
                     match config.source() {
@@ -192,7 +195,7 @@ impl ToolDefinition {
         let mut result = if should_run {
             match config.source() {
                 ToolSource::Local { tool } => {
-                    self.call_local(id, &arguments, &config, tool.as_deref(), &root)?
+                    self.call_local(id, &arguments, answers, &config, tool.as_deref(), root)?
                 }
                 ToolSource::Mcp { server, tool } => {
                     self.call_mcp(
@@ -218,7 +221,7 @@ impl ToolDefinition {
 
         if matches!(config.result(), ResultMode::Edit) {
             let content = open_editor::EditorCallBuilder::new()
-                .with_editor(open_editor::Editor::from_bin_path(editor.clone()))
+                .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
                 .edit_string(&result.content)
                 .map_err(|error| ToolError::OpenEditorError {
                     arguments: arguments.clone(),
@@ -261,20 +264,35 @@ impl ToolDefinition {
         &self,
         id: String,
         arguments: &Value,
+        answers: &IndexMap<String, Value>,
         config: &ToolConfigWithDefaults,
         tool: Option<&str>,
         root: &Path,
     ) -> Result<ToolCallResult, ToolError> {
         let name = tool.unwrap_or(&self.name);
 
+        // TODO: Should we enforce at a type-level this for all tool calls, even
+        // MCP?
+        if let Some(args) = arguments.as_object() {
+            validate_tool_arguments(
+                args,
+                &config
+                    .parameters()
+                    .iter()
+                    .map(|(k, v)| (k.to_owned(), v.required))
+                    .collect(),
+            )?;
+        }
+
         let command = {
             let ctx = json!({
                 "tool": {
                     "name": name,
                     "arguments": arguments,
+                    "answers": answers,
                 },
-                "workspace": {
-                    "path": root.to_string_lossy().into_owned(),
+                "context": {
+                    "root": root.to_string_lossy().into_owned(),
                 },
             });
 
@@ -322,11 +340,19 @@ impl ToolDefinition {
         match command.run() {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
+                let content = match serde_json::from_str::<Outcome>(&stdout) {
+                    Err(_) => stdout.to_string(),
+                    Ok(Outcome::Success { content }) => content,
+                    Ok(Outcome::NeedsInput { question }) => {
+                        return Err(ToolError::NeedsInput { question })
+                    }
+                };
+
                 if output.status.success() {
                     Ok(ToolCallResult {
                         id,
                         error: false,
-                        content: stdout.to_string(),
+                        content,
                     })
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -336,7 +362,7 @@ impl ToolDefinition {
                         content: json!({
                             "message": format!("Tool '{name}' execution failed."),
                             "stderr": stderr,
-                            "stdout": stdout,
+                            "stdout": content,
                         })
                         .to_string(),
                     })
@@ -390,6 +416,30 @@ impl ToolDefinition {
             content,
         })
     }
+}
+
+fn validate_tool_arguments(
+    arguments: &Map<String, Value>,
+    parameters: &IndexMap<String, bool>,
+) -> Result<(), ToolError> {
+    let unknown = arguments
+        .keys()
+        .filter(|k| !parameters.contains_key(*k))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let mut missing = vec![];
+    for (name, required) in parameters {
+        if *required && !arguments.contains_key(name) {
+            missing.push(name.to_owned());
+        }
+    }
+
+    if !missing.is_empty() || !unknown.is_empty() {
+        return Err(ToolError::Arguments { missing, unknown });
+    }
+
+    Ok(())
 }
 
 pub async fn tool_definitions(
@@ -579,4 +629,63 @@ async fn mcp_tool_definition(
         description,
         parameters: params,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_tool_arguments() {
+        struct TestCase {
+            arguments: Map<String, Value>,
+            parameters: IndexMap<String, bool>,
+            want: Result<(), ToolError>,
+        }
+
+        let cases = vec![
+            ("empty", TestCase {
+                arguments: Map::new(),
+                parameters: IndexMap::new(),
+                want: Ok(()),
+            }),
+            ("correct", TestCase {
+                arguments: Map::from_iter([("foo".to_owned(), json!("bar"))]),
+                parameters: IndexMap::from_iter([
+                    ("foo".to_owned(), true),
+                    ("bar".to_owned(), false),
+                ]),
+                want: Ok(()),
+            }),
+            ("missing", TestCase {
+                arguments: Map::new(),
+                parameters: IndexMap::from_iter([("foo".to_owned(), true)]),
+                want: Err(ToolError::Arguments {
+                    missing: vec!["foo".to_owned()],
+                    unknown: vec![],
+                }),
+            }),
+            ("unknown", TestCase {
+                arguments: Map::from_iter([("foo".to_owned(), json!("bar"))]),
+                parameters: IndexMap::from_iter([("bar".to_owned(), false)]),
+                want: Err(ToolError::Arguments {
+                    missing: vec![],
+                    unknown: vec!["foo".to_owned()],
+                }),
+            }),
+            ("both", TestCase {
+                arguments: Map::from_iter([("foo".to_owned(), json!("bar"))]),
+                parameters: IndexMap::from_iter([("bar".to_owned(), true)]),
+                want: Err(ToolError::Arguments {
+                    missing: vec!["bar".to_owned()],
+                    unknown: vec!["foo".to_owned()],
+                }),
+            }),
+        ];
+
+        for (name, test_case) in cases {
+            let result = validate_tool_arguments(&test_case.arguments, &test_case.parameters);
+            assert_eq!(result, test_case.want, "failed case: {name}");
+        }
+    }
 }
