@@ -592,7 +592,7 @@ impl KvAssignment {
     /// merge the elements.
     pub(crate) fn try_vec_of_nested<T>(mut self, vec: &mut Vec<T>) -> Result<(), KvAssignmentError>
     where
-        T: PartialConfig<Context = ()> + AssignKeyValue + FromStr<Err = BoxedError>,
+        T: PartialConfig + AssignKeyValue + FromStr<Err = BoxedError>,
     {
         // If the key is an index into the array, assign the value to the
         // element, if it exists.
@@ -671,7 +671,7 @@ impl KvAssignment {
         vec: &mut Option<Vec<T>>,
     ) -> Result<(), KvAssignmentError>
     where
-        T: PartialConfig<Context = ()> + AssignKeyValue + FromStr<Err = BoxedError>,
+        T: PartialConfig + AssignKeyValue + FromStr<Err = BoxedError>,
     {
         self.try_vec_of_nested(vec.get_or_insert_default())
     }
