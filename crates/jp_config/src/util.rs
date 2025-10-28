@@ -546,11 +546,10 @@ mod tests {
                 items: Some(vec![]),
                 examples: vec![],
             },
-        ];
+        ]
+        .into();
 
         let config = build(partial).unwrap();
-
-        dbg!(&config.assistant.instructions);
 
         assert_eq!(config.assistant.instructions[0].position, -1);
         assert_eq!(config.assistant.instructions[1].position, 0);

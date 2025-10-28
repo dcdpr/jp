@@ -20,7 +20,7 @@ use crate::{
     partial::{partial_opt, partial_opt_config, partial_opts, ToPartial},
     types::{
         string::{MergeableString, PartialMergeableString},
-        vec::MergeableVec,
+        vec::{MergeableVec, MergedVec, MergedVecStrategy},
     },
 };
 
@@ -99,21 +99,25 @@ impl ToPartial for AssistantConfig {
 /// The default instructions for the assistant.
 #[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
 fn default_instructions(_: &()) -> TransformResult<MergeableVec<PartialInstructionsConfig>> {
-    Ok(vec![PartialInstructionsConfig {
-        title: Some("How to respond to the user".into()),
-        items: Some(vec![
-            "Be concise".into(),
-            "Use simple sentences. But feel free to use technical jargon.".into(),
-            "Do NOT overexplain basic concepts. Assume the user is technically proficient.".into(),
-            "AVOID flattering, corporate-ish or marketing language. Maintain a neutral viewpoint."
-                .into(),
-            "AVOID vague and / or generic claims which may seem correct but are not substantiated \
-             by the context."
-                .into(),
-        ]),
-        ..Default::default()
-    }]
-    .into())
+    Ok(MergeableVec::Merged(MergedVec {
+        strategy: MergedVecStrategy::Replace,
+        value: vec![PartialInstructionsConfig {
+            title: Some("How to respond to the user".into()),
+            items: Some(vec![
+                "Be concise".into(),
+                "Use simple sentences. But feel free to use technical jargon.".into(),
+                "Do NOT overexplain basic concepts. Assume the user is technically proficient."
+                    .into(),
+                "AVOID flattering, corporate-ish or marketing language. Maintain a neutral \
+                 viewpoint."
+                    .into(),
+                "AVOID vague and / or generic claims which may seem correct but are not \
+                 substantiated by the context."
+                    .into(),
+            ]),
+            ..Default::default()
+        }],
+    }))
 }
 
 #[cfg(test)]
@@ -315,6 +319,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::too_many_lines)]
     fn test_assistant_config_instructions_merge() {
         struct TestCase {
             prev: PartialAssistantConfig,
@@ -328,6 +333,7 @@ mod tests {
                     instructions: vec![PartialInstructionsConfig {
                         title: Some("foo".into()),
                         description: None,
+                        position: None,
                         items: None,
                         examples: vec![],
                     }]
@@ -338,6 +344,7 @@ mod tests {
                     instructions: vec![PartialInstructionsConfig {
                         title: Some("bar".into()),
                         description: None,
+                        position: None,
                         items: None,
                         examples: vec![],
                     }]
@@ -348,6 +355,7 @@ mod tests {
                     instructions: vec![PartialInstructionsConfig {
                         title: Some("bar".into()),
                         description: None,
+                        position: None,
                         items: None,
                         examples: vec![],
                     }]
@@ -360,6 +368,7 @@ mod tests {
                     instructions: vec![PartialInstructionsConfig {
                         title: Some("foo".into()),
                         description: None,
+                        position: None,
                         items: None,
                         examples: vec![],
                     }]
@@ -371,6 +380,7 @@ mod tests {
                         value: vec![PartialInstructionsConfig {
                             title: Some("bar".into()),
                             description: None,
+                            position: None,
                             items: None,
                             examples: vec![],
                         }],
@@ -385,12 +395,14 @@ mod tests {
                             PartialInstructionsConfig {
                                 title: Some("foo".into()),
                                 description: None,
+                                position: None,
                                 items: None,
                                 examples: vec![],
                             },
                             PartialInstructionsConfig {
                                 title: Some("bar".into()),
                                 description: None,
+                                position: None,
                                 items: None,
                                 examples: vec![],
                             },
@@ -442,12 +454,14 @@ mod tests {
                         PartialInstructionsConfig {
                             title: Some("foo".into()),
                             description: Some("bar".into()),
+                            position: None,
                             items: None,
                             examples: vec![],
                         },
                         PartialInstructionsConfig {
                             title: Some("bar".into()),
                             description: Some("baz".into()),
+                            position: None,
                             items: None,
                             examples: vec![],
                         },
@@ -486,12 +500,14 @@ mod tests {
                             PartialInstructionsConfig {
                                 title: Some("foo".into()),
                                 description: Some("bar".into()),
+                                position: None,
                                 items: None,
                                 examples: vec![],
                             },
                             PartialInstructionsConfig {
                                 title: Some("bar".into()),
                                 description: Some("baz".into()),
+                                position: None,
                                 items: None,
                                 examples: vec![],
                             },
