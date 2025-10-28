@@ -26,6 +26,16 @@ pub struct InstructionsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
+    /// The position of these instructions.
+    ///
+    /// A lower position will be shown first. This is useful when merging
+    /// multiple instructions, and you want to make sure the most important
+    /// instructions are shown first.
+    ///
+    /// Defaults to `0`.
+    #[setting(default = 0)]
+    pub position: isize,
+
     /// The list of instructions.
     pub items: Vec<String>,
 
@@ -56,6 +66,7 @@ impl ToPartial for InstructionsConfig {
         Self::Partial {
             title: partial_opts(self.title.as_ref(), defaults.title),
             description: partial_opts(self.description.as_ref(), defaults.description),
+            position: partial_opt(&self.position, defaults.position),
             items: partial_opt(&self.items, defaults.items),
             examples: self.examples.iter().map(ToPartial::to_partial).collect(),
         }
@@ -137,6 +148,7 @@ impl InstructionsConfig {
             description,
             items,
             examples,
+            ..
         } = self;
 
         let wrapper = XmlWrapper {
@@ -379,6 +391,7 @@ mod tests {
         let i = InstructionsConfig {
             title: Some("foo".to_owned()),
             description: Some("bar".to_owned()),
+            position: 0,
             items: vec![
                 "foo".to_owned(),
                 "bar <test>bar</test>".to_owned(),
