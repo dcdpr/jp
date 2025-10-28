@@ -15,23 +15,23 @@ use crate::{
 /// defining a specific merge strategy.
 #[derive(Debug, Clone, Config)]
 #[config(serde(untagged))]
-pub enum StringWithMerge {
+pub enum MergeableString {
     /// A string that is merged using the [`schematic::merge::replace`]
     #[setting(default)]
     String(String),
 
     /// A string that is merged using the specified merge strategy.
     #[setting(nested)]
-    Merged(StringWithStrategy),
+    Merged(MergedString),
 }
 
-impl From<&str> for PartialStringWithMerge {
+impl From<&str> for PartialMergeableString {
     fn from(value: &str) -> Self {
         Self::String(value.to_string())
     }
 }
 
-impl FromStr for PartialStringWithMerge {
+impl FromStr for PartialMergeableString {
     type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -39,16 +39,16 @@ impl FromStr for PartialStringWithMerge {
     }
 }
 
-impl From<StringWithMerge> for String {
-    fn from(value: StringWithMerge) -> Self {
+impl From<MergeableString> for String {
+    fn from(value: MergeableString) -> Self {
         match value {
-            StringWithMerge::String(v) => v,
-            StringWithMerge::Merged(v) => v.value,
+            MergeableString::String(v) => v,
+            MergeableString::Merged(v) => v.value,
         }
     }
 }
 
-impl AsRef<str> for PartialStringWithMerge {
+impl AsRef<str> for PartialMergeableString {
     fn as_ref(&self) -> &str {
         match self {
             Self::String(v) => v,
@@ -57,7 +57,7 @@ impl AsRef<str> for PartialStringWithMerge {
     }
 }
 
-impl Deref for PartialStringWithMerge {
+impl Deref for PartialMergeableString {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
@@ -65,7 +65,7 @@ impl Deref for PartialStringWithMerge {
     }
 }
 
-impl AssignKeyValue for PartialStringWithMerge {
+impl AssignKeyValue for PartialMergeableString {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object_or_from_str()?,
@@ -79,7 +79,7 @@ impl AssignKeyValue for PartialStringWithMerge {
     }
 }
 
-impl PartialConfigDelta for PartialStringWithMerge {
+impl PartialConfigDelta for PartialMergeableString {
     fn delta(&self, next: Self) -> Self {
         if self == &next {
             return Self::empty();
@@ -89,7 +89,7 @@ impl PartialConfigDelta for PartialStringWithMerge {
     }
 }
 
-impl ToPartial for StringWithMerge {
+impl ToPartial for MergeableString {
     fn to_partial(&self) -> Self::Partial {
         match self {
             Self::String(v) => Self::Partial::String(v.clone()),
@@ -100,17 +100,17 @@ impl ToPartial for StringWithMerge {
 
 /// Strings that are merged using the specified merge strategy.
 #[derive(Debug, Clone, PartialEq, Config)]
-pub struct StringWithStrategy {
+pub struct MergedString {
     /// The string value.
     #[setting(default)]
     pub value: String,
 
     /// The merge strategy.
     #[setting(default)]
-    pub strategy: StringMergeStrategy,
+    pub strategy: MergedStringStrategy,
 }
 
-impl AssignKeyValue for PartialStringWithStrategy {
+impl AssignKeyValue for PartialMergedString {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
@@ -123,7 +123,7 @@ impl AssignKeyValue for PartialStringWithStrategy {
     }
 }
 
-impl ToPartial for StringWithStrategy {
+impl ToPartial for MergedString {
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
             value: Some(self.value.clone()),
@@ -135,7 +135,7 @@ impl ToPartial for StringWithStrategy {
 /// Merge strategy for `VecWithStrategy`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
-pub enum StringMergeStrategy {
+pub enum MergedStringStrategy {
     /// Append the string to the previous value, without any separator.
     #[default]
     Append,

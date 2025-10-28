@@ -890,7 +890,7 @@ fn build_thread(
     tools: &[ToolDefinition],
 ) -> Result<Thread> {
     let mut thread_builder = ThreadBuilder::default()
-        .with_instructions(assistant.instructions.clone())
+        .with_instructions(assistant.instructions.to_vec())
         .with_attachments(attachments)
         .with_history(history)
         .with_message(user_message);
