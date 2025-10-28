@@ -38,6 +38,7 @@ expression: "AppConfig::fields()"
     "editor.envs",
     "conversation.attachments",
     "conversation.tools.tools",
+    "conversation.tools.*.enable",
     "conversation.tools.*.result",
     "conversation.tools.*.run",
     "conversation.tools.*.style.inline_results",
