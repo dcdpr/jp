@@ -1,4 +1,5 @@
 [conversation.tools]
+'*'.enable = false
 '*'.run = "always"
 fs_read_file.enable = true
 fs_list_files.enable = true
@@ -26,15 +27,15 @@ tool_call.show = false
 
 [assistant]
 name = "Commit Writer"
+# Medium reasoning gives a good balance between correctness and speed.
+model.parameters.reasoning.effort = "medium"
 
-system_prompt = """
-    You are an expert at following the Conventional Commit specification.
-    Given the git diff shared with you, please generate a commit message.
+[assistant.system_prompt]
+strategy = "append_paragraph"
+value = """
+You are an expert at following the Conventional Commit specification. Given the git diff shared \
+with you, please generate a commit message.
 """
-
-[assistant.model]
-id = { provider = "anthropic", name = "claude-sonnet-4-0" }
-parameters.reasoning.effort = "medium"
 
 [[assistant.instructions]]
 title = "How to format your response"
