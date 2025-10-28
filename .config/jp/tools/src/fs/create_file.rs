@@ -61,6 +61,7 @@ pub(crate) async fn fs_create_file(
     let mut file = File::options()
         .write(true)
         .truncate(true)
+        .create(true)
         .open(&absolute_path)?;
 
     if let Some(content) = content {
