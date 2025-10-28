@@ -147,11 +147,13 @@ mod tests {
         p.assign(kv).unwrap();
         assert_eq!(
             p.instructions,
-            vec![PartialInstructionsConfig {
-                title: Some("foo".into()),
-                ..Default::default()
-            }]
-            .into()
+            MergeableVec::Merged(MergedVec {
+                strategy: MergedVecStrategy::Replace,
+                value: vec![PartialInstructionsConfig {
+                    title: Some("foo".into()),
+                    ..Default::default()
+                }],
+            })
         );
 
         let kv = KvAssignment::try_from_cli(
@@ -162,62 +164,70 @@ mod tests {
         p.assign(kv).unwrap();
         assert_eq!(
             p.instructions,
-            vec![
-                PartialInstructionsConfig {
-                    title: Some("foo".into()),
-                    ..Default::default()
-                },
-                PartialInstructionsConfig {
-                    title: Some("bar".into()),
-                    description: Some("hello".into()),
-                    ..Default::default()
-                }
-            ]
-            .into()
+            MergeableVec::Merged(MergedVec {
+                strategy: MergedVecStrategy::Replace,
+                value: vec![
+                    PartialInstructionsConfig {
+                        title: Some("foo".into()),
+                        ..Default::default()
+                    },
+                    PartialInstructionsConfig {
+                        title: Some("bar".into()),
+                        description: Some("hello".into()),
+                        ..Default::default()
+                    }
+                ],
+            })
         );
 
         let kv = KvAssignment::try_from_cli("instructions+", "baz").unwrap();
         p.assign(kv).unwrap();
         assert_eq!(
             p.instructions,
-            vec![
-                PartialInstructionsConfig {
-                    title: Some("foo".into()),
-                    ..Default::default()
-                },
-                PartialInstructionsConfig {
-                    title: Some("bar".into()),
-                    description: Some("hello".into()),
-                    ..Default::default()
-                },
-                PartialInstructionsConfig {
-                    title: Some("baz".into()),
-                    ..Default::default()
-                }
-            ]
-            .into()
+            MergeableVec::Merged(MergedVec {
+                strategy: MergedVecStrategy::Replace,
+                value: vec![
+                    PartialInstructionsConfig {
+                        title: Some("foo".into()),
+                        ..Default::default()
+                    },
+                    PartialInstructionsConfig {
+                        title: Some("bar".into()),
+                        description: Some("hello".into()),
+                        ..Default::default()
+                    },
+                    PartialInstructionsConfig {
+                        title: Some("baz".into()),
+                        ..Default::default()
+                    }
+                ],
+            })
         );
 
         let kv = KvAssignment::try_from_cli("instructions", "qux").unwrap();
         p.assign(kv).unwrap();
         assert_eq!(
             p.instructions,
-            vec![PartialInstructionsConfig {
-                title: Some("qux".into()),
-                ..Default::default()
-            }]
-            .into()
+            MergeableVec::Merged(MergedVec {
+                strategy: MergedVecStrategy::Replace,
+                value: vec![PartialInstructionsConfig {
+                    title: Some("qux".into()),
+                    ..Default::default()
+                }],
+            })
         );
 
         let kv = KvAssignment::try_from_cli("instructions.0.title", "boop").unwrap();
         p.assign(kv).unwrap();
         assert_eq!(
             p.instructions,
-            vec![PartialInstructionsConfig {
-                title: Some("boop".into()),
-                ..Default::default()
-            }]
-            .into()
+            MergeableVec::Merged(MergedVec {
+                strategy: MergedVecStrategy::Replace,
+                value: vec![PartialInstructionsConfig {
+                    title: Some("boop".into()),
+                    ..Default::default()
+                }],
+            })
         );
 
         let kv =
@@ -227,24 +237,28 @@ mod tests {
         p.assign(kv).unwrap();
         assert_eq!(
             p.instructions,
-            vec![PartialInstructionsConfig {
-                title: Some("quux".into()),
-                items: Some(vec!["one".into()]),
-                ..Default::default()
-            }]
-            .into()
+            MergeableVec::Merged(MergedVec {
+                strategy: MergedVecStrategy::Replace,
+                value: vec![PartialInstructionsConfig {
+                    title: Some("quux".into()),
+                    items: Some(vec!["one".into()]),
+                    ..Default::default()
+                }],
+            })
         );
 
         let kv = KvAssignment::try_from_cli("instructions.0.items.0", "two").unwrap();
         p.assign(kv).unwrap();
         assert_eq!(
             p.instructions,
-            vec![PartialInstructionsConfig {
-                title: Some("quux".into()),
-                items: Some(vec!["two".into()]),
-                ..Default::default()
-            }]
-            .into()
+            MergeableVec::Merged(MergedVec {
+                strategy: MergedVecStrategy::Replace,
+                value: vec![PartialInstructionsConfig {
+                    title: Some("quux".into()),
+                    items: Some(vec!["two".into()]),
+                    ..Default::default()
+                }],
+            })
         );
 
         let kv = KvAssignment::try_from_cli("instructions:", r#"[{title:"foo"}]"#).unwrap_err();
