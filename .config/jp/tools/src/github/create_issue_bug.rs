@@ -70,7 +70,6 @@ pub(crate) async fn github_create_issue_bug(
         && !resource_links.is_empty()
     {
         let resource_links = resource_links
-            .into_vec()
             .into_iter()
             .map(|link| {
                 if link.starts_with("http") {
