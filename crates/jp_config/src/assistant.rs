@@ -315,7 +315,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::too_many_lines)]
     fn test_assistant_config_instructions_merge() {
         struct TestCase {
             prev: PartialAssistantConfig,
@@ -329,7 +328,6 @@ mod tests {
                     instructions: vec![PartialInstructionsConfig {
                         title: Some("foo".into()),
                         description: None,
-                        position: None,
                         items: None,
                         examples: vec![],
                     }]
@@ -340,7 +338,6 @@ mod tests {
                     instructions: vec![PartialInstructionsConfig {
                         title: Some("bar".into()),
                         description: None,
-                        position: None,
                         items: None,
                         examples: vec![],
                     }]
@@ -351,7 +348,6 @@ mod tests {
                     instructions: vec![PartialInstructionsConfig {
                         title: Some("bar".into()),
                         description: None,
-                        position: None,
                         items: None,
                         examples: vec![],
                     }]
@@ -364,7 +360,6 @@ mod tests {
                     instructions: vec![PartialInstructionsConfig {
                         title: Some("foo".into()),
                         description: None,
-                        position: None,
                         items: None,
                         examples: vec![],
                     }]
@@ -376,7 +371,6 @@ mod tests {
                         value: vec![PartialInstructionsConfig {
                             title: Some("bar".into()),
                             description: None,
-                            position: None,
                             items: None,
                             examples: vec![],
                         }],
@@ -391,14 +385,12 @@ mod tests {
                             PartialInstructionsConfig {
                                 title: Some("foo".into()),
                                 description: None,
-                                position: None,
                                 items: None,
                                 examples: vec![],
                             },
                             PartialInstructionsConfig {
                                 title: Some("bar".into()),
                                 description: None,
-                                position: None,
                                 items: None,
                                 examples: vec![],
                             },
@@ -450,14 +442,12 @@ mod tests {
                         PartialInstructionsConfig {
                             title: Some("foo".into()),
                             description: Some("bar".into()),
-                            position: None,
                             items: None,
                             examples: vec![],
                         },
                         PartialInstructionsConfig {
                             title: Some("bar".into()),
                             description: Some("baz".into()),
-                            position: None,
                             items: None,
                             examples: vec![],
                         },
@@ -496,14 +486,12 @@ mod tests {
                             PartialInstructionsConfig {
                                 title: Some("foo".into()),
                                 description: Some("bar".into()),
-                                position: None,
                                 items: None,
                                 examples: vec![],
                             },
                             PartialInstructionsConfig {
                                 title: Some("bar".into()),
                                 description: Some("baz".into()),
-                                position: None,
                                 items: None,
                                 examples: vec![],
                             },

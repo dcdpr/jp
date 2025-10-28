@@ -30,7 +30,6 @@ Ok(
                                 "How to respond to the user",
                             ),
                             description: None,
-                            position: None,
                             items: Some(
                                 [
                                     "Be concise",
