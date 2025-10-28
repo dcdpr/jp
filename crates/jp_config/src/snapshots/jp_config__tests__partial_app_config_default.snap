@@ -40,6 +40,7 @@ PartialAppConfig {
         },
         tools: PartialToolsConfig {
             defaults: PartialToolsDefaultsConfig {
+                enable: None,
                 run: None,
                 result: None,
                 style: PartialDisplayStyleConfig {

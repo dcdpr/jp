@@ -121,6 +121,9 @@ impl ToolsConfig {
 #[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolsDefaultsConfig {
+    /// Whether the tool is enabled.
+    pub enable: Option<bool>,
+
     /// How to run the tool.
     #[setting(required)]
     pub run: RunMode,
@@ -137,6 +140,7 @@ pub struct ToolsDefaultsConfig {
 impl AssignKeyValue for PartialToolsDefaultsConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
+            "enable" => self.enable = kv.try_some_bool()?,
             "run" => self.run = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
             _ if kv.p("style") => self.style.assign(kv)?,
@@ -150,6 +154,7 @@ impl AssignKeyValue for PartialToolsDefaultsConfig {
 impl PartialConfigDelta for PartialToolsDefaultsConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
+            enable: delta_opt(self.enable.as_ref(), next.enable),
             run: delta_opt(self.run.as_ref(), next.run),
             result: delta_opt(self.result.as_ref(), next.result),
             style: self.style.delta(next.style),
@@ -162,6 +167,7 @@ impl ToPartial for ToolsDefaultsConfig {
         let defaults = Self::Partial::default();
 
         Self::Partial {
+            enable: partial_opts(self.enable.as_ref(), defaults.enable),
             run: partial_opt(&self.run, defaults.run),
             result: partial_opt(&self.result, defaults.result),
             style: self.style.to_partial(),
@@ -791,7 +797,7 @@ impl ToolConfigWithDefaults {
         // with the actual configuration, the `enable` field will still default
         // to `false`, because there is no default value set for any specific
         // entry in the map.
-        self.tool.enable.unwrap_or(true)
+        self.tool.enable.or(self.defaults.enable).unwrap_or(true)
     }
 
     /// Return the command to run the tool.
