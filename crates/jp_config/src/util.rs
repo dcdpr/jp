@@ -179,7 +179,15 @@ pub fn build(mut partial: PartialAppConfig) -> Result<AppConfig, Error> {
         "Configuration details."
     );
 
-    Config::from_partial(partial).map_err(Into::into)
+    let mut config: AppConfig = Config::from_partial(partial)?;
+
+    // Sort instructions by position.
+    config
+        .assistant
+        .instructions
+        .sort_by(|a, b| a.position.cmp(&b.position));
+
+    Ok(config)
 }
 
 /// Open a configuration file at `path`, if it exists.
@@ -376,6 +384,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        assistant::instructions::PartialInstructionsConfig,
         conversation::tool::RunMode,
         model::id::{PartialModelIdConfig, ProviderId},
     };
@@ -504,6 +513,47 @@ mod tests {
         partial.conversation.tools.defaults.run = Some(RunMode::Always);
 
         build(partial).unwrap();
+    }
+
+    #[test]
+    fn test_build_sorted_instructions() {
+        let mut partial = PartialAppConfig::empty();
+        partial.conversation.tools.defaults.run = Some(RunMode::Always);
+        partial.assistant.model.id = PartialModelIdConfig {
+            provider: Some(ProviderId::Openrouter),
+            name: Some("foo".parse().unwrap()),
+        }
+        .into();
+        partial.assistant.instructions = vec![
+            PartialInstructionsConfig {
+                title: None,
+                description: None,
+                position: Some(100),
+                items: Some(vec![]),
+                examples: vec![],
+            },
+            PartialInstructionsConfig {
+                title: None,
+                description: None,
+                position: Some(-1),
+                items: Some(vec![]),
+                examples: vec![],
+            },
+            PartialInstructionsConfig {
+                title: None,
+                description: None,
+                position: Some(0),
+                items: Some(vec![]),
+                examples: vec![],
+            },
+        ]
+        .into();
+
+        let config = build(partial).unwrap();
+
+        assert_eq!(config.assistant.instructions[0].position, -1);
+        assert_eq!(config.assistant.instructions[1].position, 0);
+        assert_eq!(config.assistant.instructions[2].position, 100);
     }
 
     #[test]
