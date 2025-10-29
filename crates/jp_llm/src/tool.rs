@@ -9,12 +9,12 @@ use jp_config::conversation::tool::{
 };
 use jp_conversation::message::ToolCallResult;
 use jp_mcp::{
-    id::{McpServerId, McpToolId},
     RawContent, ResourceContents,
+    id::{McpServerId, McpToolId},
 };
 use jp_tool::Outcome;
 use minijinja::Environment;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use tracing::{info, trace};
 
 use crate::error::ToolError;
@@ -344,7 +344,7 @@ impl ToolDefinition {
                     Err(_) => stdout.to_string(),
                     Ok(Outcome::Success { content }) => content,
                     Ok(Outcome::NeedsInput { question }) => {
-                        return Err(ToolError::NeedsInput { question })
+                        return Err(ToolError::NeedsInput { question });
                     }
                 };
 

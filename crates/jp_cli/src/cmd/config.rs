@@ -1,6 +1,6 @@
 use std::ffi::OsStr;
 
-use jp_config::fs::{user_global_config_path, ConfigFile, ConfigLoader, ConfigLoaderError};
+use jp_config::fs::{ConfigFile, ConfigLoader, ConfigLoaderError, user_global_config_path};
 
 use super::Output;
 use crate::ctx::Ctx;

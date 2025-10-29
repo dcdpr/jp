@@ -8,10 +8,10 @@ use serde_json::Value;
 use url::Url;
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
-    delta::{delta_opt, PartialConfigDelta},
-    partial::{partial_opt, ToPartial},
     BoxedError, Error,
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    delta::{PartialConfigDelta, delta_opt},
+    partial::{ToPartial, partial_opt},
 };
 
 /// Reasoning configuration.
@@ -192,7 +192,7 @@ impl AttachmentObjectConfig {
                              strings.",
                         )
                         .into(),
-                    ))
+                    ));
                 }
             }
         }

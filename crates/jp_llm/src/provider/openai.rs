@@ -14,17 +14,17 @@ use jp_config::{
     providers::llm::openai::OpenaiConfig,
 };
 use jp_conversation::{
-    thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
+    thread::{Document, Documents, Thread},
 };
 use openai_responses::{
-    types::{self, Include, Request, SummaryConfig},
     Client, CreateError, StreamError,
+    types::{self, Include, Request, SummaryConfig},
 };
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use time::{macros::date, OffsetDateTime};
+use time::{OffsetDateTime, macros::date};
 use tracing::{debug, trace, warn};
 
 use super::{
@@ -442,7 +442,7 @@ fn map_event(event: types::Event, accumulator: &mut Accumulator) -> Result<Vec<S
             return match serde_json::to_value(reasoning) {
                 Ok(value) => Ok(vec![StreamEvent::Metadata("reasoning".to_owned(), value)]),
                 Err(error) => Err(error.into()),
-            }
+            };
         }
         Event::OutputItemDone { .. } => return accumulator.drain(),
         Event::ResponseIncomplete {
@@ -456,11 +456,11 @@ fn map_event(event: types::Event, accumulator: &mut Accumulator) -> Result<Vec<S
             reason => {
                 return Ok(vec![StreamEvent::EndOfStream(StreamEndReason::Other(
                     reason.to_owned(),
-                ))])
+                ))]);
             }
         },
         Event::ResponseCompleted { .. } => {
-            return Ok(vec![StreamEvent::EndOfStream(StreamEndReason::Completed)])
+            return Ok(vec![StreamEvent::EndOfStream(StreamEndReason::Completed)]);
         }
         _ => {
             trace!(?event, "Ignoring Openai event");

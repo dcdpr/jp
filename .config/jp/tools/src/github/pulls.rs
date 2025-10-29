@@ -4,10 +4,10 @@ use url::Url;
 
 use super::auth;
 use crate::{
-    github::{handle_404, ORG, REPO},
+    Result,
+    github::{ORG, REPO, handle_404},
     to_xml, to_xml_with_root,
     util::OneOrMany,
-    Result,
 };
 
 /// The status of a issue or pull request.

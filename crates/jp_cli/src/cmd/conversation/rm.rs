@@ -4,7 +4,7 @@ use jp_conversation::{Conversation, ConversationId};
 use jp_format::conversation::DetailsFmt;
 use jp_workspace::query::ConversationQuery;
 
-use crate::{cmd::Success, ctx::Ctx, Output};
+use crate::{Output, cmd::Success, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Rm {

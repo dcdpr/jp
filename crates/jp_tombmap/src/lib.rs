@@ -1,6 +1,6 @@
 use std::{
     borrow::Borrow,
-    collections::{hash_map, HashMap, HashSet, TryReserveError},
+    collections::{HashMap, HashSet, TryReserveError, hash_map},
     fmt::{self, Debug},
     hash::{BuildHasher, Hash, RandomState},
     ops::Index,
@@ -1487,7 +1487,7 @@ impl<'a, K, V> OccupiedEntry<'a, K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::{hash_map::Entry, HashMap};
+    /// use std::collections::{HashMap, hash_map::Entry};
     ///
     /// let mut map: HashMap<&str, u32> = HashMap::new();
     /// map.entry("poneyland").or_insert(12);
@@ -1512,7 +1512,7 @@ impl<'a, K, V> OccupiedEntry<'a, K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::{hash_map::Entry, HashMap};
+    /// use std::collections::{HashMap, hash_map::Entry};
     ///
     /// let mut map: HashMap<&str, u32> = HashMap::new();
     /// map.entry("poneyland").or_insert(12);
@@ -1550,7 +1550,7 @@ impl<'a, K, V> OccupiedEntry<'a, K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::{hash_map::Entry, HashMap};
+    /// use std::collections::{HashMap, hash_map::Entry};
     ///
     /// let mut map: HashMap<&str, u32> = HashMap::new();
     /// map.entry("poneyland").or_insert(12);
@@ -1580,7 +1580,7 @@ impl<'a, K, V> OccupiedEntry<'a, K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::{hash_map::Entry, HashMap};
+    /// use std::collections::{HashMap, hash_map::Entry};
     ///
     /// let mut map: HashMap<&str, u32> = HashMap::new();
     /// map.entry("poneyland").or_insert(12);
@@ -1613,7 +1613,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use std::collections::{hash_map::Entry, HashMap};
+    /// use std::collections::{HashMap, hash_map::Entry};
     ///
     /// let mut map: HashMap<&str, u32> = HashMap::new();
     /// map.entry("poneyland").or_insert(12);
@@ -1643,7 +1643,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use std::collections::{hash_map::Entry, HashMap};
+    /// use std::collections::{HashMap, hash_map::Entry};
     ///
     /// let mut map: HashMap<&str, u32> = HashMap::new();
     /// map.entry("poneyland").or_insert(12);
@@ -1683,7 +1683,7 @@ impl<'a, K: 'a, V: 'a> VacantEntry<'a, K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::{hash_map::Entry, HashMap};
+    /// use std::collections::{HashMap, hash_map::Entry};
     ///
     /// let mut map: HashMap<&str, u32> = HashMap::new();
     ///
@@ -1702,7 +1702,7 @@ impl<'a, K: 'a, V: 'a> VacantEntry<'a, K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::{hash_map::Entry, HashMap};
+    /// use std::collections::{HashMap, hash_map::Entry};
     ///
     /// let mut map: HashMap<&str, u32> = HashMap::new();
     ///
@@ -1728,7 +1728,7 @@ impl<'a, K: 'a, V: 'a> VacantEntry<'a, K, V> {
     /// # Examples
     ///
     /// ```
-    /// use std::collections::{hash_map::Entry, HashMap};
+    /// use std::collections::{HashMap, hash_map::Entry};
     ///
     /// let mut map: HashMap<&str, u32> = HashMap::new();
     ///

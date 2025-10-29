@@ -8,7 +8,7 @@ use schematic::{ConfigLoader, MergeError, MergeResult, PartialConfig, TransformR
 use tracing::{debug, error, info, trace};
 
 use super::Config;
-use crate::{error::Error, AppConfig, BoxedError, PartialAppConfig};
+use crate::{AppConfig, BoxedError, PartialAppConfig, error::Error};
 
 /// Valid file extensions for configuration files.
 const VALID_CONFIG_FILE_EXTS: &[&str] = &["toml", "json", "json5", "yaml", "yml"];

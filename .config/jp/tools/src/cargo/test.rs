@@ -1,8 +1,8 @@
 use duct::cmd;
 use jp_tool::Context;
-use serde_json::{from_str, Value};
+use serde_json::{Value, from_str};
 
-use crate::{to_xml, Result};
+use crate::{Result, to_xml};
 
 #[derive(serde::Serialize)]
 struct TestResult {

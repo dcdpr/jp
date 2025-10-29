@@ -9,7 +9,7 @@ use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::PartialConfigDelta,
     partial::ToPartial,
     style::{

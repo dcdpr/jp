@@ -1,8 +1,8 @@
-use jp_config::{conversation::attachment::AttachmentConfig, Config as _, PartialAppConfig};
+use jp_config::{Config as _, PartialAppConfig, conversation::attachment::AttachmentConfig};
 use jp_workspace::Workspace;
 use url::Url;
 
-use crate::{ctx::Ctx, parser, IntoPartialAppConfig, Output};
+use crate::{IntoPartialAppConfig, Output, ctx::Ctx, parser};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Rm {

@@ -3,10 +3,10 @@
 use std::{fmt, str::FromStr};
 
 use jp_id::{
-    parts::{GlobalId, TargetId, Variant},
     Id, NANOSECONDS_PER_DECISECOND,
+    parts::{GlobalId, TargetId, Variant},
 };
-use serde::{ser::SerializeStruct as _, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, ser::SerializeStruct as _};
 use time::UtcDateTime;
 
 use crate::error::{Error, Result};

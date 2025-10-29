@@ -7,7 +7,7 @@ pub mod tool;
 use schematic::Config;
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     conversation::{
         attachment::AttachmentConfig,
         title::{PartialTitleConfig, TitleConfig},

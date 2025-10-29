@@ -1,6 +1,6 @@
 use jp_conversation::message::ToolCallRequest;
 
-use crate::{stream::delta::Delta, CompletionChunk, Error, StreamEvent};
+use crate::{CompletionChunk, Error, StreamEvent, stream::delta::Delta};
 
 #[derive(Debug, Default)]
 pub struct Accumulator {

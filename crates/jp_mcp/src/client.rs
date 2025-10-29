@@ -17,9 +17,9 @@ use tokio::{process::Command, sync::Mutex};
 use tracing::trace;
 
 use crate::{
+    Error,
     error::Result,
     id::{McpServerId, McpToolId},
-    Error,
 };
 
 /// Manages multiple MCP clients and delegates operations to them

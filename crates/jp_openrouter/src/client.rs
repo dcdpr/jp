@@ -4,8 +4,8 @@ use async_stream::stream;
 use backon::{ExponentialBuilder, Retryable as _};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use reqwest::{
-    header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, REFERER},
     RequestBuilder,
+    header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, REFERER},
 };
 use serde_json::Value;
 use tokio_util::{

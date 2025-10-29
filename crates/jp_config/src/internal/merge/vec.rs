@@ -3,7 +3,7 @@
 #![expect(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
 
 use schematic::{MergeResult, Schematic};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::types::vec::{MergeableVec, MergedVec, MergedVecStrategy};
 

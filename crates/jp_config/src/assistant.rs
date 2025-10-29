@@ -12,12 +12,12 @@ use instructions::{InstructionsConfig, PartialInstructionsConfig};
 use schematic::{Config, TransformResult};
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     assistant::tool_choice::ToolChoice,
-    delta::{delta_opt, delta_opt_partial, PartialConfigDelta},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
     internal::merge::{string_with_strategy, vec_with_strategy},
     model::{ModelConfig, PartialModelConfig},
-    partial::{partial_opt, partial_opt_config, partial_opts, ToPartial},
+    partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::{
         string::{MergeableString, PartialMergeableString},
         vec::{MergeableVec, MergedVec, MergedVecStrategy},
@@ -123,7 +123,7 @@ fn default_instructions(_: &()) -> TransformResult<MergeableVec<PartialInstructi
 #[cfg(test)]
 mod tests {
     use schematic::PartialConfig as _;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use super::*;
     use crate::{

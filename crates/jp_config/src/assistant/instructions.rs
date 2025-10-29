@@ -9,9 +9,9 @@ use schematic::Config;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, KvAssignment},
-    partial::{partial_opt, partial_opts, ToPartial},
     BoxedError,
+    assignment::{AssignKeyValue, KvAssignment, missing_key},
+    partial::{ToPartial, partial_opt, partial_opts},
 };
 
 /// A list of instructions for a persona.

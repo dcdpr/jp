@@ -7,7 +7,7 @@ use std::{
 };
 
 pub use error::Error;
-use jp_conversation::{message::Messages, Conversation, ConversationId, ConversationsMetadata};
+use jp_conversation::{Conversation, ConversationId, ConversationsMetadata, message::Messages};
 use jp_id::Id as _;
 use jp_tombmap::TombMap;
 use tracing::{trace, warn};

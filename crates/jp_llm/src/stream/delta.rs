@@ -1,6 +1,6 @@
 use crate::{
-    stream::{accumulator::Accumulator, event::StreamEvent},
     Error,
+    stream::{accumulator::Accumulator, event::StreamEvent},
 };
 
 #[derive(Debug, Default)]

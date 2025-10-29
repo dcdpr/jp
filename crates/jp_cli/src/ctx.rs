@@ -1,12 +1,12 @@
 use std::io::{self, IsTerminal as _};
 
-use jp_config::{conversation::tool::ToolSource, AppConfig, PartialAppConfig};
+use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
 use jp_mcp::id::{McpServerId, McpToolId};
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
 use tokio::runtime::{Handle, Runtime};
 
-use crate::{signals::SignalPair, Globals, Result};
+use crate::{Globals, Result, signals::SignalPair};
 
 /// Context for the CLI application
 pub(crate) struct Ctx {

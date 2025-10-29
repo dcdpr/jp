@@ -9,28 +9,27 @@ use std::{
     time::Duration,
 };
 
-use clap::{builder::TypedValueParser as _, ArgAction};
-use event::{handle_tool_calls, StreamEventHandler};
+use clap::{ArgAction, builder::TypedValueParser as _};
+use event::{StreamEventHandler, handle_tool_calls};
 use futures::StreamExt as _;
 use itertools::Itertools as _;
 use jp_attachment::Attachment;
 use jp_config::{
+    PartialAppConfig,
     assignment::{AssignKeyValue as _, KvAssignment},
-    assistant::{instructions::InstructionsConfig, tool_choice::ToolChoice, AssistantConfig},
+    assistant::{AssistantConfig, instructions::InstructionsConfig, tool_choice::ToolChoice},
     fs::{expand_tilde, load_partial},
     model::parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig},
-    PartialAppConfig,
 };
 use jp_conversation::{
+    AssistantMessage, Conversation, ConversationId, MessagePair, UserMessage,
     message::Messages,
     thread::{Thread, ThreadBuilder},
-    AssistantMessage, Conversation, ConversationId, MessagePair, UserMessage,
 };
 use jp_llm::{
-    provider,
+    StreamEvent, ToolError, provider,
     query::{ChatQuery, StructuredQuery},
-    tool::{tool_definitions, ToolDefinition},
-    StreamEvent, ToolError,
+    tool::{ToolDefinition, tool_definitions},
 };
 use jp_task::task::TitleGeneratorTask;
 use jp_term::stdout;
@@ -41,15 +40,15 @@ use serde_json::Value;
 use tracing::{debug, error, info, trace, warn};
 use url::Url;
 
-use super::{attachment::register_attachment, Output};
+use super::{Output, attachment::register_attachment};
 use crate::{
+    Ctx, PATH_STRING_PREFIX,
     cmd::Success,
     ctx::IntoPartialAppConfig,
     editor::{self, Editor},
     error::{Error, Result},
     load_cli_cfg_args, parser,
     signals::SignalTo,
-    Ctx, PATH_STRING_PREFIX,
 };
 
 const EMPTY_RESPONSE_MESSAGE: &str = "The response appears to be empty. Please try again.";

@@ -1,9 +1,9 @@
 use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
-use jp_conversation::{message::Messages, ConversationId};
+use jp_conversation::{ConversationId, message::Messages};
 use jp_llm::{provider, structured};
 
-use crate::{cmd::Success, ctx::Ctx, Output};
+use crate::{Output, cmd::Success, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 #[group(required = true, id = "edit")]

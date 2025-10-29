@@ -1,7 +1,7 @@
 use std::env;
 
 use serde_json::{from_str, json};
-use tools::{run, Tool};
+use tools::{Tool, run};
 
 #[tokio::main]
 async fn main() {

@@ -1,7 +1,7 @@
 pub mod base64_string {
     use std::fmt::Display;
 
-    use base64::{engine::general_purpose::URL_SAFE, Engine};
+    use base64::{Engine, engine::general_purpose::URL_SAFE};
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer, T: AsRef<str>>(
@@ -27,7 +27,7 @@ pub mod base64_string {
 }
 
 pub mod base64_json_map {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_json::{Map, Value};
 
@@ -93,7 +93,7 @@ pub mod base64_json_map {
 #[cfg(test)]
 mod tests {
     use serde::{Deserialize, Serialize};
-    use serde_json::{json, Map, Value};
+    use serde_json::{Map, Value, json};
 
     use super::*;
 

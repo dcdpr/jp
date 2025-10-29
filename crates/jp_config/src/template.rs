@@ -4,10 +4,10 @@ use schematic::Config;
 use serde_json::{Map, Value};
 
 use crate::{
-    assignment::{missing_key, type_error, AssignKeyValue, KvAssignment, KvValue},
-    delta::{delta_opt, PartialConfigDelta},
-    partial::{partial_opt, ToPartial},
     BoxedError,
+    assignment::{AssignKeyValue, KvAssignment, KvValue, missing_key, type_error},
+    delta::{PartialConfigDelta, delta_opt},
+    partial::{ToPartial, partial_opt},
 };
 
 /// Template configuration.

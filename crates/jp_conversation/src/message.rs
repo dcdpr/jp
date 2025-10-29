@@ -2,10 +2,10 @@
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
-use jp_config::{model::id::ProviderId, PartialAppConfig, PartialConfig as _};
+use jp_config::{PartialAppConfig, PartialConfig as _, model::id::ProviderId};
 use jp_id::{
-    parts::{GlobalId, TargetId, Variant},
     Id, NANOSECONDS_PER_DECISECOND,
+    parts::{GlobalId, TargetId, Variant},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

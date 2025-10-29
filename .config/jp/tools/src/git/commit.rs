@@ -2,7 +2,7 @@ use std::{path::PathBuf, process::Command};
 
 use serde::Serialize;
 
-use crate::{to_xml, Error};
+use crate::{Error, to_xml};
 
 #[derive(Serialize)]
 struct CommandResult {

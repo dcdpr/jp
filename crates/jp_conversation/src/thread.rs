@@ -3,9 +3,9 @@ use jp_config::assistant::instructions::InstructionsConfig;
 use serde::Serialize;
 
 use crate::{
+    UserMessage,
     error::{Error, Result},
     message::Messages,
-    UserMessage,
 };
 
 /// A wrapper for multiple messages, with convenience methods for adding

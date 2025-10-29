@@ -3,7 +3,7 @@ use std::fs;
 use jp_config::PartialAppConfig;
 
 use super::Target;
-use crate::{cmd, ctx::Ctx, Error, Output, Success};
+use crate::{Error, Output, Success, cmd, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Fmt {

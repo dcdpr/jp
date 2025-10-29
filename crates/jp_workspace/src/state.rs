@@ -1,6 +1,6 @@
 //! Represents the in-memory state of the workspace.
 
-use jp_conversation::{message::Messages, Conversation, ConversationId, ConversationsMetadata};
+use jp_conversation::{Conversation, ConversationId, ConversationsMetadata, message::Messages};
 use jp_tombmap::TombMap;
 use serde::{Deserialize, Serialize};
 

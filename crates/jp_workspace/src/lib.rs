@@ -19,10 +19,10 @@ use error::Result;
 pub use id::Id;
 use jp_config::PartialAppConfig;
 use jp_conversation::{
-    message::{Messages, MessagesRef},
     Conversation, ConversationId, MessagePair,
+    message::{Messages, MessagesRef},
 };
-use jp_storage::{Storage, DEFAULT_STORAGE_DIR};
+use jp_storage::{DEFAULT_STORAGE_DIR, Storage};
 use state::{LocalState, State, UserState};
 use tracing::{debug, info, trace};
 
@@ -421,7 +421,7 @@ pub fn user_data_dir() -> Result<PathBuf> {
 mod tests {
     use std::{collections::HashMap, fs, time::Duration};
 
-    use jp_storage::{value::read_json, CONVERSATIONS_DIR, METADATA_FILE};
+    use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
     use tempfile::tempdir;
     use test_log::test;
     use time::UtcDateTime;

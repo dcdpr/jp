@@ -2,7 +2,7 @@ use std::fmt;
 
 use comfy_table::{Cell, CellAlignment, Row, Table};
 use crossterm::style::Stylize as _;
-use jp_conversation::{message::MessagesRef, Conversation, ConversationId};
+use jp_conversation::{Conversation, ConversationId, message::MessagesRef};
 use time::UtcDateTime;
 
 use crate::datetime::DateTimeFmt;

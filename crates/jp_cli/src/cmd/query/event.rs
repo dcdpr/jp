@@ -4,8 +4,8 @@ use crossterm::style::Stylize as _;
 use indexmap::IndexMap;
 use jp_config::{
     conversation::tool::{
-        style::{InlineResults, LinkStyle, Truncate},
         ToolConfigWithDefaults,
+        style::{InlineResults, LinkStyle, Truncate},
     },
     style::StyleConfig,
 };

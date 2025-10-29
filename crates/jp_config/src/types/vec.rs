@@ -3,7 +3,7 @@
 use std::ops::{Deref, DerefMut};
 
 use schematic::{Config, ConfigEnum, PartialConfig as _, Schematic};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{delta::PartialConfigDelta, partial::ToPartial};
 
