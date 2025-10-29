@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
-    delta::{delta_opt, delta_opt_partial, delta_opt_vec, PartialConfigDelta},
-    partial::{partial_opt, partial_opt_config, partial_opts, ToPartial},
     BoxedError,
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec},
+    partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
 };
 
 /// Assistant-specific configuration.

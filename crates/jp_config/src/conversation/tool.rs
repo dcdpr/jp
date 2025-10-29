@@ -9,12 +9,12 @@ use serde_json::{Map, Value};
 use tracing::warn;
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
-    conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
-    delta::{delta_opt, delta_opt_partial, delta_opt_vec, delta_vec, PartialConfigDelta},
-    partial::{partial_opt, partial_opt_config, partial_opts, ToPartial},
-    util::merge_nested_indexmap,
     BoxedError,
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_vec},
+    partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
+    util::merge_nested_indexmap,
 };
 
 pub mod style;

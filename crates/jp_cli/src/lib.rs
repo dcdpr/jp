@@ -8,7 +8,7 @@ mod signals;
 use std::{
     error::Error as _,
     fmt,
-    io::{stdout, IsTerminal as _},
+    io::{IsTerminal as _, stdout},
     num::{NonZeroI32, NonZeroUsize},
     path::PathBuf,
     str::FromStr,
@@ -17,8 +17,8 @@ use std::{
 };
 
 use clap::{
-    builder::{BoolValueParser, TypedValueParser as _},
     ArgAction, Parser,
+    builder::{BoolValueParser, TypedValueParser as _},
 };
 use cmd::{Commands, Output, Success};
 use comfy_table::{Cell, CellAlignment, Row};
@@ -26,15 +26,15 @@ use crossterm::style::Stylize as _;
 use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
 use jp_config::{
+    PartialAppConfig,
     assignment::{AssignKeyValue as _, KvAssignment},
     fs::{load_partial, user_global_config_path},
     util::{
         build, find_file_in_load_path, load_envs, load_partial_at_path,
         load_partial_at_path_recursive, load_partials_with_inheritance,
     },
-    PartialAppConfig,
 };
-use jp_workspace::{user_data_dir, Workspace};
+use jp_workspace::{Workspace, user_data_dir};
 use serde_json::Value;
 use tokio::runtime::{self, Runtime};
 use tracing::{debug, info, trace, warn};
@@ -594,18 +594,20 @@ fn configure_logging(verbose: u8, quiet: bool) {
 
     let mut filter: Vec<_> = match more {
         0 => vec!["off".to_owned()],
-        1 => vec![[
-            "trace",
-            "h2=off",
-            "hyper_util=off",
-            "ignore=off",
-            "mio=off",
-            "reqwest=off",
-            "rustls=off",
-            "tokio=off",
-        ]
-        .to_vec()
-        .join(",")],
+        1 => vec![
+            [
+                "trace",
+                "h2=off",
+                "hyper_util=off",
+                "ignore=off",
+                "mio=off",
+                "reqwest=off",
+                "rustls=off",
+                "tokio=off",
+            ]
+            .to_vec()
+            .join(","),
+        ],
         _ => vec!["trace".to_owned()],
     };
 

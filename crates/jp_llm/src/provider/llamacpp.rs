@@ -11,25 +11,24 @@ use jp_config::{
     providers::llm::llamacpp::LlamacppConfig,
 };
 use jp_conversation::{
-    thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
+    thread::{Document, Documents, Thread},
 };
 use openai::{
-    chat::{
-        self, structured_output::ToolCallFunctionDefinition, ChatCompletionBuilder,
-        ChatCompletionChoiceDelta, ChatCompletionDelta, ChatCompletionGeneric,
-        ChatCompletionMessage, ChatCompletionMessageDelta, ChatCompletionMessageRole,
-        ToolCallFunction,
-    },
     Credentials,
+    chat::{
+        self, ChatCompletionBuilder, ChatCompletionChoiceDelta, ChatCompletionDelta,
+        ChatCompletionGeneric, ChatCompletionMessage, ChatCompletionMessageDelta,
+        ChatCompletionMessageRole, ToolCallFunction, structured_output::ToolCallFunctionDefinition,
+    },
 };
 use serde::Serialize;
 use serde_json::Value;
 use tracing::{debug, trace};
 
 use super::{
-    openai::{ModelListResponse, ModelResponse},
     CompletionChunk, Delta, EventStream, ModelDetails, StreamEvent,
+    openai::{ModelListResponse, ModelResponse},
 };
 use crate::{
     error::{Error, Result},

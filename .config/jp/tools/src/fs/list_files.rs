@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use ignore::{WalkBuilder, WalkState};
 
-use crate::{util::OneOrMany, Error};
+use crate::{Error, util::OneOrMany};
 
 #[derive(Debug)]
 pub(crate) enum Files {

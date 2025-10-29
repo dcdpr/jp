@@ -1,12 +1,12 @@
 use std::fs;
 
 use jp_config::{
-    assignment::{AssignKeyValue as _, KvAssignment},
     PartialAppConfig,
+    assignment::{AssignKeyValue as _, KvAssignment},
 };
 
 use super::TargetWithConversation;
-use crate::{ctx::Ctx, Output};
+use crate::{Output, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Set {

@@ -3,10 +3,10 @@
 use schematic::Config;
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
-    delta::{delta_opt, delta_opt_partial, PartialConfigDelta},
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
     model::{ModelConfig, PartialModelConfig},
-    partial::{partial_opt, partial_opt_config, ToPartial},
+    partial::{ToPartial, partial_opt, partial_opt_config},
 };
 
 /// Title generation configuration.

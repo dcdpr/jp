@@ -3,7 +3,7 @@ use jp_workspace::Workspace;
 use url::Url;
 
 use super::validate_attachment;
-use crate::{ctx::Ctx, parser, IntoPartialAppConfig, Output};
+use crate::{IntoPartialAppConfig, Output, ctx::Ctx, parser};
 
 #[derive(Debug, clap::Args)]
 #[command(arg_required_else_help(true))]

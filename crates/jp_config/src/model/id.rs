@@ -6,19 +6,19 @@ use std::{fmt, str::FromStr};
 
 use indexmap::IndexMap;
 use jp_id::{
-    parts::{GlobalId, TargetId, Variant},
     Id,
+    parts::{GlobalId, TargetId, Variant},
 };
 use schematic::{Config, ConfigEnum, Schematic};
 use serde::{
-    de::{self, MapAccess, Visitor},
     Deserialize, Deserializer, Serialize,
+    de::{self, MapAccess, Visitor},
 };
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
-    delta::{delta_opt, PartialConfigDelta},
-    partial::{partial_opt, ToPartial},
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    delta::{PartialConfigDelta, delta_opt},
+    partial::{ToPartial, partial_opt},
 };
 
 /// Either a [`ModelIdConfig`] or a named alias for one.
@@ -437,7 +437,7 @@ pub struct ModelIdError;
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use super::*;
 

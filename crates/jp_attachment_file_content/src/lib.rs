@@ -2,9 +2,9 @@ use std::{collections::BTreeSet, error::Error, fs, path::Path};
 
 use async_trait::async_trait;
 use glob::Pattern;
-use ignore::{overrides::OverrideBuilder, WalkBuilder, WalkState};
+use ignore::{WalkBuilder, WalkState, overrides::OverrideBuilder};
 use jp_attachment::{
-    distributed_slice, linkme, typetag, Attachment, BoxedHandler, Handler, HANDLERS,
+    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
 };
 use jp_mcp::Client;
 use serde::{Deserialize, Serialize};
@@ -308,21 +308,29 @@ mod tests {
 
         // Add as include
         handler.add(&uri_include).await?;
-        assert!(handler
-            .includes
-            .contains(&Pattern::new("/path/to/file.txt")?));
-        assert!(!handler
-            .excludes
-            .contains(&Pattern::new("/path/to/file.txt")?));
+        assert!(
+            handler
+                .includes
+                .contains(&Pattern::new("/path/to/file.txt")?)
+        );
+        assert!(
+            !handler
+                .excludes
+                .contains(&Pattern::new("/path/to/file.txt")?)
+        );
 
         // Add same path as exclude
         handler.add(&uri_exclude).await?;
-        assert!(!handler
-            .includes
-            .contains(&Pattern::new("/path/to/file.txt")?));
-        assert!(handler
-            .excludes
-            .contains(&Pattern::new("/path/to/file.txt")?));
+        assert!(
+            !handler
+                .includes
+                .contains(&Pattern::new("/path/to/file.txt")?)
+        );
+        assert!(
+            handler
+                .excludes
+                .contains(&Pattern::new("/path/to/file.txt")?)
+        );
 
         Ok(())
     }

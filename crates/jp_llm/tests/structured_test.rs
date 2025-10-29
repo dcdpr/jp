@@ -4,7 +4,7 @@ use jp_config::{
     model::{id::ProviderId, parameters::ParametersConfig},
     providers::llm::LlmProviderConfig,
 };
-use jp_conversation::{message::Messages, AssistantMessage, MessagePair, UserMessage};
+use jp_conversation::{AssistantMessage, MessagePair, UserMessage, message::Messages};
 use jp_llm::{provider::openrouter::Openrouter, structured};
 use jp_test::{function_name, mock::Vcr};
 

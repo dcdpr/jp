@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf, str::FromStr};
 
 use duct::Expression;
 use jp_conversation::{ConversationId, UserMessage};
-use time::{macros::format_description, UtcOffset};
+use time::{UtcOffset, macros::format_description};
 
 use crate::{
     ctx::Ctx,

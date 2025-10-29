@@ -7,8 +7,8 @@
 use std::{fmt, str::FromStr};
 
 use schematic::PartialConfig;
-use serde::{de::DeserializeOwned, Serialize};
-use serde_json::{from_str, Value};
+use serde::{Serialize, de::DeserializeOwned};
+use serde_json::{Value, from_str};
 
 use crate::{AppConfig, BoxedError};
 
@@ -632,7 +632,7 @@ impl KvAssignment {
                 Some(v) => {
                     return v
                         .assign(self.clone())
-                        .or_else(|err| assignment_error(&self.key, self.value.into_value(), err))
+                        .or_else(|err| assignment_error(&self.key, self.value.into_value(), err));
                 }
                 None => return vec_missing_index_error(&self.key, i, vec.len()),
             }

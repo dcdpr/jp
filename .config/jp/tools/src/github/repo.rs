@@ -1,9 +1,10 @@
-use base64::{prelude::BASE64_STANDARD, Engine as _};
+use base64::{Engine as _, prelude::BASE64_STANDARD};
 
 use super::auth;
 use crate::{
+    Result,
     github::{ORG, REPO},
-    to_xml, Result,
+    to_xml,
 };
 
 pub(crate) async fn github_code_search(

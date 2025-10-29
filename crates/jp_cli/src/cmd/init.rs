@@ -3,14 +3,14 @@ use std::{env, fs, path::PathBuf, str::FromStr as _};
 use crossterm::style::Stylize as _;
 use duct::cmd;
 use jp_config::{
+    PartialAppConfig,
     conversation::tool::RunMode,
     model::id::{ModelIdConfig, Name, PartialModelIdConfig, ProviderId},
-    PartialAppConfig,
 };
 use jp_workspace::Workspace;
 use path_clean::PathClean as _;
 
-use crate::{ctx::IntoPartialAppConfig, Output, DEFAULT_STORAGE_DIR};
+use crate::{DEFAULT_STORAGE_DIR, Output, ctx::IntoPartialAppConfig};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Init {

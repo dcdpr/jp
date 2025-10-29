@@ -5,7 +5,7 @@ pub mod generate;
 use schematic::Config;
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     conversation::title::generate::{GenerateConfig, PartialGenerateConfig},
     delta::PartialConfigDelta,
     partial::ToPartial,

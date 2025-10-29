@@ -2,7 +2,7 @@ use core::fmt;
 
 use crossterm::style::Stylize as _;
 use time::{
-    format_description::BorrowedFormatItem, macros::format_description, UtcDateTime, UtcOffset,
+    UtcDateTime, UtcOffset, format_description::BorrowedFormatItem, macros::format_description,
 };
 
 const DEFAULT_TIME_FMT: &[BorrowedFormatItem<'_>] =

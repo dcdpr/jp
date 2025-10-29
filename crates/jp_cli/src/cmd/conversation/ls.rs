@@ -2,9 +2,9 @@ use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_conversation::ConversationId;
 use jp_term::osc::hyperlink;
-use time::{macros::format_description, UtcDateTime, UtcOffset};
+use time::{UtcDateTime, UtcOffset, macros::format_description};
 
-use crate::{cmd::Success, ctx::Ctx, Output};
+use crate::{Output, cmd::Success, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Ls {

@@ -1,6 +1,6 @@
 use comfy_table::{Cell, Row};
 
-use crate::{cmd::Success, ctx::Ctx, Output};
+use crate::{Output, cmd::Success, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Ls {}

@@ -6,9 +6,9 @@ use duct::Expression;
 use schematic::Config;
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
-    delta::{delta_opt, delta_opt_vec, PartialConfigDelta},
-    partial::{partial_opt, partial_opts, ToPartial},
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_vec},
+    partial::{ToPartial, partial_opt, partial_opts},
 };
 
 /// Editor configuration.

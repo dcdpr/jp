@@ -3,7 +3,7 @@ use std::env;
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
-use gemini_client_rs::{types, GeminiClient};
+use gemini_client_rs::{GeminiClient, types};
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
@@ -13,21 +13,21 @@ use jp_config::{
     providers::llm::google::GoogleConfig,
 };
 use jp_conversation::{
+    AssistantMessage, MessagePair, UserMessage,
     message::Messages,
     thread::{Document, Documents, Thread},
-    AssistantMessage, MessagePair, UserMessage,
 };
 use serde_json::Value;
 use tracing::trace;
 
 use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply};
 use crate::{
+    CompletionChunk, StreamEvent,
     error::{Error, Result},
     provider::Delta,
     query::ChatQuery,
     stream::{accumulator::Accumulator, event::StreamEndReason},
     tool::ToolDefinition,
-    CompletionChunk, StreamEvent,
 };
 
 static PROVIDER: ProviderId = ProviderId::Google;
@@ -581,8 +581,8 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_google_chat_completion_stream(
-    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    async fn test_google_chat_completion_stream()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().google;
         let model_id = "google/gemini-2.5-flash-preview-05-20".parse().unwrap();
         let model = ModelDetails::empty(model_id);

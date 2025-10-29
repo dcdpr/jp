@@ -2,15 +2,15 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use jp_config::{
+    AppConfig,
     model::{
+        ModelConfig,
         id::{ModelIdConfig, ProviderId},
         parameters::{CustomReasoningConfig, ParametersConfig, ReasoningEffort},
-        ModelConfig,
     },
     providers::llm::LlmProviderConfig,
-    AppConfig,
 };
-use jp_conversation::{message::Messages, AssistantMessage, ConversationId, MessagePair};
+use jp_conversation::{AssistantMessage, ConversationId, MessagePair, message::Messages};
 use jp_llm::{provider, structured};
 use jp_workspace::Workspace;
 use tokio_util::sync::CancellationToken;

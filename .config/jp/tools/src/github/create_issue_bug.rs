@@ -3,10 +3,10 @@ use url::Url;
 
 use super::auth;
 use crate::{
+    Result,
     github::{ORG, REPO},
     to_xml,
     util::OneOrMany,
-    Result,
 };
 
 pub(crate) async fn github_create_issue_bug(

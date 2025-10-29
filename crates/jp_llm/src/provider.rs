@@ -20,7 +20,7 @@ use jp_config::{
     },
     providers::llm::LlmProviderConfig,
 };
-use jp_conversation::{message::ToolCallRequest, AssistantMessage};
+use jp_conversation::{AssistantMessage, message::ToolCallRequest};
 use llamacpp::Llamacpp;
 use ollama::Ollama;
 use openai::Openai;
@@ -30,6 +30,7 @@ use time::Date;
 use tracing::warn;
 
 use crate::{
+    Error,
     error::Result,
     query::{ChatQuery, StructuredQuery},
     stream::{
@@ -37,7 +38,6 @@ use crate::{
         event::{CompletionChunk, StreamEndReason, StreamEvent},
     },
     structured::SCHEMA_TOOL_NAME,
-    Error,
 };
 
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>;

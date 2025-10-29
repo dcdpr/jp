@@ -1,13 +1,13 @@
 use std::{env, time::Duration};
 
 use async_anthropic::{
+    Client,
     errors::AnthropicError,
     messages::DEFAULT_MAX_TOKENS,
     types::{
         self, ListModelsResponse, System, Thinking, ToolBash, ToolCodeExecution, ToolComputerUse,
         ToolTextEditor, ToolWebSearch,
     },
-    Client,
 };
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -21,22 +21,22 @@ use jp_config::{
     providers::llm::anthropic::AnthropicConfig,
 };
 use jp_conversation::{
+    AssistantMessage, MessagePair, UserMessage,
     message::Messages,
     thread::{Document, Documents, Thread},
-    AssistantMessage, MessagePair, UserMessage,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use time::macros::date;
 use tracing::{debug, info, trace, warn};
 
 use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply};
 use crate::{
+    CompletionChunk, StreamEvent,
     error::{Error, Result},
     provider::ModelDeprecation,
     query::ChatQuery,
     stream::{accumulator::Accumulator, delta::Delta, event::StreamEndReason},
     tool::ToolDefinition,
-    CompletionChunk, StreamEvent,
 };
 
 static PROVIDER: ProviderId = ProviderId::Anthropic;
@@ -1204,8 +1204,8 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_anthropic_redacted_thinking(
-    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    async fn test_anthropic_redacted_thinking()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().anthropic;
         let model_id = "anthropic/claude-3-7-sonnet-latest".parse().unwrap();
         let model = ModelDetails::empty(model_id);

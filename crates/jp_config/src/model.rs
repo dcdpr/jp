@@ -6,7 +6,7 @@ pub mod parameters;
 use schematic::Config;
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::PartialConfigDelta,
     model::{
         id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig},
@@ -64,7 +64,7 @@ mod tests {
 
     use assert_matches::assert_matches;
     use schematic::PartialConfig as _;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use super::*;
     use crate::model::{

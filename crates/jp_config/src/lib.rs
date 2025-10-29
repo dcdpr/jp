@@ -54,12 +54,12 @@ pub use schematic::{Config, PartialConfig};
 use serde_json::Value;
 
 use crate::{
-    assignment::{missing_key, type_error, AssignKeyValue, AssignResult, KvAssignment},
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key, type_error},
     assistant::{AssistantConfig, PartialAssistantConfig},
     conversation::{ConversationConfig, PartialConversationConfig},
-    delta::{delta_opt_vec, PartialConfigDelta},
+    delta::{PartialConfigDelta, delta_opt_vec},
     editor::{EditorConfig, PartialEditorConfig},
-    partial::{partial_opt, ToPartial},
+    partial::{ToPartial, partial_opt},
     providers::{PartialProviderConfig, ProviderConfig},
     style::{PartialStyleConfig, StyleConfig},
     template::{PartialTemplateConfig, TemplateConfig},

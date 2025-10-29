@@ -2,8 +2,8 @@ use std::{collections::BTreeSet, error::Error, path::Path};
 
 use async_trait::async_trait;
 use jp_attachment::{
-    distributed_slice, linkme, percent_decode_str, percent_encode_str, typetag, Attachment,
-    BoxedHandler, Handler, HANDLERS,
+    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, percent_decode_str,
+    percent_encode_str, typetag,
 };
 use jp_mcp::Client;
 use serde::{Deserialize, Serialize};

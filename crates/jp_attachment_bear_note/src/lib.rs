@@ -8,11 +8,11 @@ use std::{
 use async_trait::async_trait;
 use directories::BaseDirs;
 use jp_attachment::{
-    distributed_slice, linkme, percent_decode_str, percent_encode_str, typetag, Attachment,
-    BoxedHandler, Handler, HANDLERS,
+    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, percent_decode_str,
+    percent_encode_str, typetag,
 };
 use jp_mcp::Client;
-use rusqlite::{params, types::Value, Connection, OptionalExtension as _};
+use rusqlite::{Connection, OptionalExtension as _, params, types::Value};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
 use url::Url;

@@ -4,7 +4,7 @@ use grep_printer::StandardBuilder;
 use grep_regex::RegexMatcher;
 use grep_searcher::SearcherBuilder;
 
-use crate::{util::OneOrMany, Error};
+use crate::{Error, util::OneOrMany};
 
 pub(crate) async fn fs_grep_files(
     root: PathBuf,

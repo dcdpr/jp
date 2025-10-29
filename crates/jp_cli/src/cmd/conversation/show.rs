@@ -1,7 +1,7 @@
 use jp_conversation::ConversationId;
 use jp_format::conversation::DetailsFmt;
 
-use crate::{cmd::Success, ctx::Ctx, error::Error, Output};
+use crate::{Output, cmd::Success, ctx::Ctx, error::Error};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Show {

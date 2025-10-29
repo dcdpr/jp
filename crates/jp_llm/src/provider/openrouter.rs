@@ -12,11 +12,12 @@ use jp_config::{
     providers::llm::openrouter::OpenrouterConfig,
 };
 use jp_conversation::{
+    AssistantMessage, MessagePair, UserMessage,
     message::ToolCallRequest,
     thread::{Document, Documents, Thread},
-    AssistantMessage, MessagePair, UserMessage,
 };
 use jp_openrouter::{
+    Client,
     types::{
         chat::{CacheControl, Content, Message},
         request::{self, RequestMessage},
@@ -26,18 +27,17 @@ use jp_openrouter::{
         },
         tool::{self, FunctionCall, Tool, ToolCall, ToolFunction},
     },
-    Client,
 };
 use serde::Serialize;
 use tracing::{debug, trace, warn};
 
 use super::{CompletionChunk, Delta, Event, EventStream, ModelDetails, Reply, StreamEvent};
 use crate::{
+    Error,
     error::Result,
-    provider::{openai::parameters_with_strict_mode, Provider},
+    provider::{Provider, openai::parameters_with_strict_mode},
     query::ChatQuery,
     stream::{accumulator::Accumulator, event::StreamEndReason},
-    Error,
 };
 
 static PROVIDER: ProviderId = ProviderId::Openrouter;

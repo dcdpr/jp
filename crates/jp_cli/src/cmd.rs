@@ -11,7 +11,7 @@ use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 use serde_json::Value;
 
-use crate::{ctx::IntoPartialAppConfig, Ctx};
+use crate::{Ctx, ctx::IntoPartialAppConfig};
 
 #[derive(Debug, clap::Subcommand)]
 pub(crate) enum Commands {

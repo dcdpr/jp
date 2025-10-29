@@ -12,17 +12,17 @@ use jp_config::{
     providers::llm::ollama::OllamaConfig,
 };
 use jp_conversation::{
-    thread::{Document, Documents, Thread},
     AssistantMessage, MessagePair, UserMessage,
+    thread::{Document, Documents, Thread},
 };
 use ollama_rs::{
+    Ollama as Client,
     generation::{
-        chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse, MessageRole},
+        chat::{ChatMessage, ChatMessageResponse, MessageRole, request::ChatMessageRequest},
         parameters::{KeepAlive, TimeUnit},
         tools::{ToolCall, ToolCallFunction, ToolFunctionInfo, ToolInfo, ToolType},
     },
     models::{LocalModel, ModelOptions},
-    Ollama as Client,
 };
 use serde_json::Value;
 use tracing::trace;
@@ -30,12 +30,12 @@ use url::Url;
 
 use super::{Event, EventStream, ModelDetails, Provider, Reply, StreamEvent};
 use crate::{
+    CompletionChunk,
     error::{Error, Result},
     provider::{Delta, ReasoningExtractor, StreamEndReason},
     query::ChatQuery,
     stream::accumulator::Accumulator,
     tool::ToolDefinition,
-    CompletionChunk,
 };
 
 static PROVIDER: ProviderId = ProviderId::Ollama;

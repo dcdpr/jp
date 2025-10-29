@@ -9,9 +9,9 @@ use url::Url;
 
 use super::Output;
 use crate::{
+    IntoPartialAppConfig,
     ctx::Ctx,
     error::{Error, Result},
-    IntoPartialAppConfig,
 };
 
 pub(super) mod add;

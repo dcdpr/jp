@@ -12,7 +12,7 @@ use indexmap::IndexMap;
 use schematic::Config;
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::PartialConfigDelta,
     model::id::ModelIdConfig,
     partial::ToPartial,

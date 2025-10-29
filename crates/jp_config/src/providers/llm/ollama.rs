@@ -3,9 +3,9 @@
 use schematic::Config;
 
 use crate::{
-    assignment::{missing_key, AssignKeyValue, AssignResult, KvAssignment},
-    delta::{delta_opt, PartialConfigDelta},
-    partial::{partial_opt, ToPartial},
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    delta::{PartialConfigDelta, delta_opt},
+    partial::{ToPartial, partial_opt},
 };
 
 /// Ollama API configuration.

@@ -3,8 +3,9 @@ use url::Url;
 
 use super::auth;
 use crate::{
-    github::{handle_404, ORG, REPO},
-    to_xml, Result,
+    Result,
+    github::{ORG, REPO, handle_404},
+    to_xml,
 };
 
 pub(crate) async fn github_issues(number: Option<u64>) -> Result<String> {
