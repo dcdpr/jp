@@ -962,7 +962,7 @@ pub(crate) fn missing_key<T>(kv: &KvAssignment) -> Result<T, BoxedError> {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
+    use assert_matches::assert_matches;
 
     use super::*;
 

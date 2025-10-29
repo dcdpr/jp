@@ -31,8 +31,6 @@
     rustdoc::private_intra_doc_links,
     reason = "we don't host the docs, and use them mainly for LSP integration"
 )]
-// Should stabilize soon, see: <https://github.com/rust-lang/rust/pull/137487>
-#![cfg_attr(test, feature(assert_matches))]
 
 pub mod assignment;
 pub mod assistant;
@@ -331,8 +329,7 @@ impl PartialAppConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
-
+    use assert_matches::assert_matches;
     use schematic::PartialConfig as _;
 
     use super::*;

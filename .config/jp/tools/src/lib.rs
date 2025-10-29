@@ -1,6 +1,4 @@
 #![allow(clippy::too_many_arguments)]
-// Should stabilize soon, see: <https://github.com/rust-lang/rust/pull/137487>
-#![cfg_attr(test, feature(assert_matches))]
 
 mod cargo;
 mod fs;

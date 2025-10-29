@@ -1,3 +1,8 @@
 [toolchain]
-channel = "nightly-2025-09-05"
+# We're using unstable options in e.g. `.rustfmt.toml` that require a nightly compiler. However, the
+# project has the `unstable-features` lint set to `warn` (and `deny` on CI), so we can't
+# accidentally use unstable features that would not work on the stable release.
+#
+# When releasing a new version of the binary, we build it with the stable compiler.
+channel = "nightly-2025-10-29"
 components = ["cargo", "rustfmt", "clippy", "rust-analyzer", "llvm-tools-preview"]

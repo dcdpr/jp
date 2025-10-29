@@ -856,12 +856,20 @@ impl ToolConfigWithDefaults {
     pub fn style(&self) -> &DisplayStyleConfig {
         self.tool.style.as_ref().unwrap_or(&self.defaults.style)
     }
+
+    /// Get an automated answer for a question.
+    ///
+    /// Returns the configured answer if one exists for the given question ID,
+    /// otherwise returns `None`.
+    #[must_use]
+    pub fn get_answer(&self, question_id: &str) -> Option<&Value> {
+        self.tool.answers.get(question_id)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
-
+    use assert_matches::assert_matches;
     use schematic::PartialConfig as _;
 
     use super::*;

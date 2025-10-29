@@ -375,8 +375,9 @@ impl Drop for EnvVarGuard {
 
 #[cfg(test)]
 mod tests {
-    use std::{assert_matches::assert_matches, fs};
+    use std::fs;
 
+    use assert_matches::assert_matches;
     use serde_json::Value;
     use serial_test::serial;
     use tempfile::tempdir;

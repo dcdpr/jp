@@ -75,6 +75,7 @@ rusqlite = { version = "0.37", default-features = false }
 saphyr = { version = "0.0.6", default-features = false }
 schemars = { version = "1.0.0-alpha.17", default-features = false }
 schemars_08 = { package = "schemars", version = "0.8.22", default-features = false }
+assert_matches = { version = "1", default-features = false }
 schematic = { git = "https://github.com/JeanMertz/schematic", branch = "merged", default-features = false }
 serde = { version = "1", default-features = false }
 serde_json = { version = "1", default-features = false }
@@ -120,6 +121,7 @@ rust-2018-idioms = "warn"
 rust-2021-compatibility = "warn"
 rust-2024-compatibility = { level = "warn", priority = -1 } # See: <https://github.com/rust-lang/rust-clippy/pull/12827>
 tail_expr_drop_order = "allow"
+unstable-features = "warn"
 unused = { level = "warn", priority = -1 }
 
 [workspace.lints.clippy]
