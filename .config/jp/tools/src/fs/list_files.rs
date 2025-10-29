@@ -102,8 +102,9 @@ pub(crate) async fn fs_list_files(
 
 #[cfg(test)]
 mod tests {
-    use std::{assert_matches::assert_matches, collections::HashMap};
+    use std::collections::HashMap;
 
+    use assert_matches::assert_matches;
     use test_log::test;
 
     use super::*;

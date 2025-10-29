@@ -860,8 +860,7 @@ impl ToolConfigWithDefaults {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
-
+    use assert_matches::assert_matches;
     use schematic::PartialConfig as _;
 
     use super::*;

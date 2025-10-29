@@ -45,6 +45,7 @@ url = { workspace = true, features = ["serde"] }
 which = { workspace = true, features = ["real-sys"] }
 
 [dev-dependencies]
+assert_matches = { workspace = true }
 insta = { workspace = true }
 serial_test = { workspace = true }
 tempfile = { workspace = true }

@@ -148,6 +148,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "assert_matches"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
+
+[[package]]
 name = "async-anthropic"
 version = "0.6.0"
 source = "git+https://github.com/JeanMertz/async-anthropic#f43f9c91b17ce48cfc548709e6e7b95b9fb75f52"
@@ -1988,6 +1994,7 @@ dependencies = [
 name = "jp_config"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "directories",
  "duct",
  "duct_sh",
@@ -4401,6 +4408,7 @@ checksum = "d163a63c116ce562a22cda521fcc4d79152e7aba014456fb5eb442f6d6a10109"
 name = "tools"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "base64 0.22.1",
  "crossbeam-channel",
  "duct",
