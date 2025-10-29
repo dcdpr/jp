@@ -36,7 +36,7 @@ pub(crate) async fn fs_list_files(
     prefixes: Option<OneOrMany<String>>,
     extensions: Option<OneOrMany<String>>,
 ) -> std::result::Result<Files, Error> {
-    let prefixes = prefixes.unwrap_or_default().into_vec();
+    let prefixes = prefixes.unwrap_or(OneOrMany::One(String::new())).into_vec();
 
     let mut entries = vec![];
     for prefix in &prefixes {
