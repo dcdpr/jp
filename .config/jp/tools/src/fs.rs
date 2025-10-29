@@ -37,7 +37,7 @@ pub async fn run(ctx: Context, t: Tool) -> std::result::Result<Outcome, Error> {
             ctx.root,
             t.req("pattern")?,
             t.opt("context")?,
-            Some(vec!["docs".to_owned()]),
+            Some(vec!["docs".to_owned()].into()),
         )
         .await
         .map(Into::into),

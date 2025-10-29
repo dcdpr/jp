@@ -4,7 +4,9 @@ use url::Url;
 use super::auth;
 use crate::{
     github::{ORG, REPO},
-    to_xml, Result,
+    to_xml,
+    util::OneOrMany,
+    Result,
 };
 
 pub(crate) async fn github_create_issue_enhancement(
@@ -14,10 +16,10 @@ pub(crate) async fn github_create_issue_enhancement(
     complexity: String,
     alternatives: Option<String>,
     proposed_implementation: Option<String>,
-    tasks: Option<Vec<String>>,
-    resource_links: Option<Vec<String>>,
-    labels: Option<Vec<String>>,
-    assignees: Option<Vec<String>>,
+    tasks: Option<OneOrMany<String>>,
+    resource_links: Option<OneOrMany<String>>,
+    labels: Option<OneOrMany<String>>,
+    assignees: Option<OneOrMany<String>>,
 ) -> Result<String> {
     #[derive(serde::Serialize)]
     struct Issue {
@@ -27,11 +29,11 @@ pub(crate) async fn github_create_issue_enhancement(
     auth().await?;
 
     if assignees.as_ref().is_some_and(|v| !v.is_empty()) {
-        check_assignees(assignees.as_ref()).await?;
+        check_assignees(assignees.as_deref()).await?;
     }
 
     if labels.as_ref().is_some_and(|v| !v.is_empty()) {
-        check_labels(labels.as_ref()).await?;
+        check_labels(labels.as_deref()).await?;
     }
 
     let mut body = formatdoc!(
@@ -78,7 +80,7 @@ pub(crate) async fn github_create_issue_enhancement(
         body.push_str(&resource_links);
     }
 
-    let mut labels = labels.unwrap_or_default();
+    let mut labels = labels.unwrap_or_default().into_vec();
     labels.push("enhancement".to_owned());
 
     match complexity.as_str() {
@@ -92,7 +94,7 @@ pub(crate) async fn github_create_issue_enhancement(
         .create(&title)
         .body(&body)
         .labels(Some(labels))
-        .assignees(assignees)
+        .assignees(assignees.map(Into::into))
         .send()
         .await?;
 
@@ -101,7 +103,7 @@ pub(crate) async fn github_create_issue_enhancement(
     })
 }
 
-async fn check_labels(as_ref: Option<&Vec<String>>) -> Result<()> {
+async fn check_labels(as_ref: Option<&[String]>) -> Result<()> {
     let page = octocrab::instance()
         .issues(ORG, REPO)
         .list_labels_for_repo()
@@ -153,7 +155,7 @@ async fn check_labels(as_ref: Option<&Vec<String>>) -> Result<()> {
     Ok(())
 }
 
-async fn check_assignees(assignees: Option<&Vec<String>>) -> Result<()> {
+async fn check_assignees(assignees: Option<&[String]>) -> Result<()> {
     let page = octocrab::instance()
         .repos(ORG, REPO)
         .list_collaborators()

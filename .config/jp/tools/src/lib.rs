@@ -6,6 +6,7 @@ mod cargo;
 mod fs;
 mod git;
 mod github;
+mod util;
 mod web;
 
 use jp_tool::{Context, Outcome};
