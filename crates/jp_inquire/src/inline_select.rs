@@ -32,7 +32,7 @@ impl InlineOption {
 /// # Example
 ///
 /// ```no_run
-/// use jp_term::inquire::{InlineOption, InlineSelect};
+/// use jp_inquire::{InlineOption, InlineSelect};
 ///
 /// let options = vec![
 ///     InlineOption::new('y', "proceed with the action"),
