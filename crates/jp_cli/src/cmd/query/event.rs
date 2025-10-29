@@ -15,7 +15,7 @@ use jp_term::osc::hyperlink;
 use jp_tool::{AnswerType, Question};
 use serde_json::Value;
 
-use super::ResponseHandler;
+use super::{ResponseHandler, turn::TurnState};
 use crate::{Ctx, Error};
 
 #[derive(Debug, Default, PartialEq)]
@@ -63,6 +63,7 @@ impl StreamEventHandler {
     pub async fn handle_tool_call(
         &mut self,
         ctx: &mut Ctx,
+        turn_state: &mut TurnState,
         call: ToolCallRequest,
         handler: &mut ResponseHandler,
     ) -> Result<Option<String>, Error> {
@@ -118,8 +119,31 @@ impl StreamEventHandler {
                     );
                 }
                 Err(ToolError::NeedsInput { question }) => {
-                    let answer = if ctx.term.is_tty {
-                        prompt_user(&question)?
+                    // Check answers in priority order:
+                    // 1. Turn-level persisted answers
+                    // 2. Config-level automated answers
+                    // 3. Interactive prompt (or default)
+                    let answer = if let Some(answer) = turn_state
+                        .persisted_tool_answers
+                        .get(&call.name)
+                        .and_then(|tool_answers| tool_answers.get(&question.id))
+                    {
+                        answer.clone()
+                    } else if let Some(answer) = tool_config.get_answer(&question.id) {
+                        answer.clone()
+                    } else if ctx.term.is_tty {
+                        let (answer, persist_level) = prompt_user(&question)?;
+
+                        // Store turn-level answers for reuse across tool calls
+                        if persist_level == jp_tool::PersistLevel::Turn {
+                            turn_state
+                                .persisted_tool_answers
+                                .entry(call.name.clone())
+                                .or_default()
+                                .insert(question.id.clone(), answer.clone());
+                        }
+
+                        answer
                     } else {
                         question.default.unwrap_or_default()
                     };
@@ -131,21 +155,17 @@ impl StreamEventHandler {
         }
     }
 }
-fn prompt_user(question: &Question) -> Result<Value, Error> {
+
+fn prompt_user(question: &Question) -> Result<(Value, jp_tool::PersistLevel), Error> {
     match &question.answer_type {
-        AnswerType::Boolean => {
-            let mut inquiry = inquire::Confirm::new(&question.text);
-
-            if let Some(default) = question.default.as_ref().and_then(Value::as_bool) {
-                inquiry = inquiry.with_default(default);
-            }
-
-            inquiry.prompt().map(Into::into).map_err(Into::into)
+        AnswerType::Boolean => prompt_boolean_git_style(question),
+        AnswerType::Select { options } => {
+            let answer: Value = inquire::Select::new(&question.text, options.clone())
+                .prompt()
+                .map(Into::into)
+                .map_err(|e: inquire::error::InquireError| Error::from(e))?;
+            Ok((answer, jp_tool::PersistLevel::None))
         }
-        AnswerType::Select { options } => inquire::Select::new(&question.text, options.clone())
-            .prompt()
-            .map(Into::into)
-            .map_err(Into::into),
         AnswerType::Text => {
             let mut inquiry = inquire::Text::new(&question.text);
 
@@ -153,8 +173,34 @@ fn prompt_user(question: &Question) -> Result<Value, Error> {
                 inquiry = inquiry.with_default(default);
             }
 
-            inquiry.prompt().map(Into::into).map_err(Into::into)
+            let answer: Value = inquiry
+                .prompt()
+                .map(Into::into)
+                .map_err(|e: inquire::error::InquireError| Error::from(e))?;
+            Ok((answer, jp_tool::PersistLevel::None))
         }
+    }
+}
+
+fn prompt_boolean_git_style(question: &Question) -> Result<(Value, jp_tool::PersistLevel), Error> {
+    use jp_inquire::{InlineOption, InlineSelect};
+
+    let options = vec![
+        InlineOption::new('y', "yes, just this once"),
+        InlineOption::new('Y', "yes, and remember for this turn"),
+        InlineOption::new('n', "no, just this once"),
+        InlineOption::new('N', "no, and remember for this turn"),
+    ];
+
+    let select = InlineSelect::new(&question.text, options);
+    let answer = select.prompt()?;
+
+    match answer {
+        'y' => Ok((Value::Bool(true), jp_tool::PersistLevel::None)),
+        'Y' => Ok((Value::Bool(true), jp_tool::PersistLevel::Turn)),
+        'n' => Ok((Value::Bool(false), jp_tool::PersistLevel::None)),
+        'N' => Ok((Value::Bool(false), jp_tool::PersistLevel::Turn)),
+        _ => unreachable!(),
     }
 }
 

@@ -71,6 +71,7 @@ impl Rm {
 
             let confirm = Confirm::new("Are you sure?")
                 .with_default(false)
+                .with_confirm_on_input(true)
                 .with_help_message("this action cannot be undone");
 
             match confirm.prompt() {
