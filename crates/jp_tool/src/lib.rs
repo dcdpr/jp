@@ -73,3 +73,13 @@ impl From<Question> for Outcome {
         Self::NeedsInput { question }
     }
 }
+
+/// How long to remember an answer to a question.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PersistLevel {
+    /// Don't remember (just this once).
+    None,
+
+    /// Remember for this turn (all tool calls in this LLM interaction).
+    Turn,
+}

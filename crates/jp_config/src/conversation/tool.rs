@@ -218,6 +218,24 @@ pub struct ToolConfig {
     /// How to display the results of the tool in the terminal.
     #[setting(nested)]
     pub style: Option<DisplayStyleConfig>,
+
+    /// Automated responses to tool questions.
+    ///
+    /// This allows configuring predefined answers to questions that the tool
+    /// may ask during execution (e.g., "overwrite existing file?"). When an
+    /// answer is configured for a specific question ID, the tool will use it
+    /// automatically instead of prompting the user interactively.
+    ///
+    /// Question IDs are defined by the tool implementation and should be
+    /// documented by the tool. For example, `fs_create_file` uses
+    /// `overwrite_file` when a file already exists.
+    // TODO: We should add an enumeration of possible options:
+    //
+    // - Fixed answer
+    // - Prompt once per turn
+    // - Prompt once per conversation
+    #[setting(default = IndexMap::new())]
+    pub answers: IndexMap<String, Value>,
 }
 
 impl AssignKeyValue for PartialToolConfig {
@@ -232,6 +250,7 @@ impl AssignKeyValue for PartialToolConfig {
             "run" => self.run = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
             _ if kv.p("style") => self.style.assign(kv)?,
+            "answers" => self.answers = kv.try_object()?,
             _ => return missing_key(&kv),
         }
 
@@ -266,6 +285,21 @@ impl PartialConfigDelta for PartialToolConfig {
             run: delta_opt(self.run.as_ref(), next.run),
             result: delta_opt(self.result.as_ref(), next.result),
             style: delta_opt_partial(self.style.as_ref(), next.style),
+            answers: match (&self.answers, next.answers) {
+                (Some(prev), Some(next)) => Some(
+                    next.into_iter()
+                        .filter_map(|(k, next)| {
+                            let prev_val = prev.get(&k);
+                            if prev_val.is_some_and(|prev| prev == &next) {
+                                return None;
+                            }
+
+                            Some((k, next))
+                        })
+                        .collect(),
+                ),
+                (_, next) => next,
+            },
         }
     }
 }
@@ -287,6 +321,11 @@ impl ToPartial for ToolConfig {
             run: partial_opts(self.run.as_ref(), defaults.run),
             result: partial_opts(self.result.as_ref(), defaults.result),
             style: partial_opt_config(self.style.as_ref(), defaults.style),
+            answers: if self.answers.is_empty() {
+                defaults.answers
+            } else {
+                Some(self.answers.clone())
+            },
         }
     }
 }
@@ -758,6 +797,9 @@ pub enum RunMode {
     /// Always run the tool, without asking for confirmation.
     Always,
 
+    /// Never run the tool.
+    Never,
+
     /// Open an editor to edit the tool call before running it.
     Edit,
 }
@@ -769,6 +811,9 @@ pub enum ResultMode {
     /// Always deliver the results of the tool call.
     #[default]
     Always,
+
+    /// Never deliver the results of the tool call.
+    Never,
 
     /// Ask for confirmation before delivering the results of the tool call.
     Ask,
@@ -855,6 +900,15 @@ impl ToolConfigWithDefaults {
     #[must_use]
     pub fn style(&self) -> &DisplayStyleConfig {
         self.tool.style.as_ref().unwrap_or(&self.defaults.style)
+    }
+
+    /// Get an automated answer for a question.
+    ///
+    /// Returns the configured answer if one exists for the given question ID,
+    /// otherwise returns `None`.
+    #[must_use]
+    pub fn get_answer(&self, question_id: &str) -> Option<&Value> {
+        self.tool.answers.get(question_id)
     }
 }
 

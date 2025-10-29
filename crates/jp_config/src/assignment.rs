@@ -1256,17 +1256,17 @@ mod tests {
 
         let kv = KvAssignment::try_from_cli(":", r#"{"foo":"bar"}"#).unwrap();
         assert_eq!(kv.try_object_or_from_str::<Test, _>().unwrap(), Test {
-            foo: "bar".into(),
+            foo: "bar".into()
         });
 
         let kv = KvAssignment::try_from_cli("foo:", r#""bar""#).unwrap();
         assert_eq!(kv.try_object_or_from_str::<Test, _>().unwrap(), Test {
-            foo: "bar".into(),
+            foo: "bar".into()
         });
 
         let kv = KvAssignment::try_from_cli("foo", "bar").unwrap();
         assert_eq!(kv.try_object_or_from_str::<Test, _>().unwrap(), Test {
-            foo: "bar".into(),
+            foo: "bar".into()
         });
 
         let kv = KvAssignment::try_from_cli("foo:", "42").unwrap();

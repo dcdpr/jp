@@ -932,7 +932,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1054,7 +1054,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1759,8 +1759,7 @@ checksum = "f4c7245a08504955605670dbf141fceab975f15ca21570696aebe9d2e71576bd"
 [[package]]
 name = "inquire"
 version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2628910d0114e9139056161d8644a2026be7b117f8498943f9437748b04c9e0a"
+source = "git+https://github.com/JeanMertz/inquire?branch=submit-on-valid-parse#b85e8a83c81928e140a5e75f0fcc935164a509e9"
 dependencies = [
  "bitflags 2.9.4",
  "crossterm",
@@ -1959,6 +1958,7 @@ dependencies = [
  "jp_conversation",
  "jp_format",
  "jp_id",
+ "jp_inquire",
  "jp_llm",
  "jp_macro",
  "jp_mcp",
@@ -2058,6 +2058,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp_inquire"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "inquire",
+]
+
+[[package]]
 name = "jp_llm"
 version = "0.1.0"
 dependencies = [
@@ -2071,10 +2079,10 @@ dependencies = [
  "gemini_client_rs",
  "indexmap",
  "indoc",
- "inquire",
  "insta",
  "jp_config",
  "jp_conversation",
+ "jp_inquire",
  "jp_mcp",
  "jp_openrouter",
  "jp_test",
@@ -3324,7 +3332,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4051,7 +4059,7 @@ dependencies = [
  "fastrand",
  "once_cell",
  "rustix",
- "windows-sys 0.61.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4920,7 +4928,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

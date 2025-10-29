@@ -1,5 +1,6 @@
 mod event;
 mod response_handler;
+mod turn;
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -43,7 +44,7 @@ use url::Url;
 use super::{Output, attachment::register_attachment};
 use crate::{
     Ctx, PATH_STRING_PREFIX,
-    cmd::Success,
+    cmd::{Success, query::turn::TurnState},
     ctx::IntoPartialAppConfig,
     editor::{self, Editor},
     error::{Error, Result},
@@ -278,13 +279,14 @@ impl Query {
         if let Some(schema) = self.schema.clone() {
             new_messages.push(handle_structured_output(ctx, thread, schema).await?);
         } else {
+            let mut turn_state = TurnState::default();
             self.handle_stream(
                 ctx,
+                &mut turn_state,
                 thread,
                 ctx.config().assistant.tool_choice.clone(),
                 tools,
                 &mut new_messages,
-                0,
             )
             .await?;
         }
@@ -445,14 +447,14 @@ impl Query {
     async fn handle_stream(
         &self,
         ctx: &mut Ctx,
+        turn_state: &mut TurnState,
         mut thread: Thread,
         tool_choice: ToolChoice,
         tools: Vec<ToolDefinition>,
         messages: &mut Vec<MessagePair>,
-        mut tries: usize,
     ) -> Result<()> {
         let mut cancelled = false;
-        tries += 1;
+        turn_state.request_count += 1;
 
         let model_id = &ctx
             .config()
@@ -502,12 +504,7 @@ impl Query {
             .chat_completion_stream(&model, parameters, query)
             .await?;
 
-        let mut event_handler = StreamEventHandler {
-            content_tokens: String::new(),
-            reasoning_tokens: String::new(),
-            tool_calls: vec![],
-            tool_call_results: vec![],
-        };
+        let mut event_handler = StreamEventHandler::default();
 
         let mut printer =
             ResponseHandler::new(self.render_mode(), ctx.config().style.tool_call.show);
@@ -541,8 +538,8 @@ impl Query {
 
                     self.handle_event(
                         event,
-                        tries,
                         ctx,
+                        turn_state,
                         provider.as_ref(),
                         &thread,
                         &tool_choice,
@@ -565,8 +562,11 @@ impl Query {
             Some(content_tokens)
         } else if !cancelled && content_tokens.is_empty() && event_handler.tool_calls.is_empty() {
             let max_tries = 3;
-            if tries <= max_tries {
-                warn!(tries, max_tries, "Empty response received, retrying...");
+            if turn_state.request_count <= max_tries {
+                warn!(
+                    turn_state.request_count,
+                    max_tries, "Empty response received, retrying..."
+                );
 
                 if let Some(query) = thread.message.as_query_mut() {
                     query.push_str(" -- ");
@@ -579,16 +579,19 @@ impl Query {
 
                 return Box::pin(self.handle_stream(
                     ctx,
+                    turn_state,
                     thread,
                     tool_choice,
                     tools,
                     messages,
-                    tries,
                 ))
                 .await;
             }
 
-            error!(tries, "Failed to get a non-empty response.");
+            error!(
+                turn_state.request_count,
+                "Failed to get a non-empty response."
+            );
             Some("<no reply>".to_string())
         } else {
             None
@@ -623,16 +626,17 @@ impl Query {
         if !cancelled && !event_handler.tool_call_results.is_empty() {
             thread.history.push(message, None);
             thread.message = UserMessage::ToolCallResults(event_handler.tool_call_results);
+            turn_state.request_count = 0;
 
             Box::pin(self.handle_stream(
                 ctx,
+                turn_state,
                 thread,
                 // After the first tool call, we revert back to letting the LLM
                 // decide if/which tool to use.
                 ToolChoice::Auto,
                 tools,
                 messages,
-                0,
             ))
             .await?;
         }
@@ -644,8 +648,8 @@ impl Query {
     async fn handle_event(
         &self,
         event: std::result::Result<StreamEvent, jp_llm::Error>,
-        tries: usize,
         ctx: &mut Ctx,
+        turn_state: &mut TurnState,
         provider: &dyn provider::Provider,
         thread: &Thread,
         tool_choice: &ToolChoice,
@@ -655,6 +659,7 @@ impl Query {
         event_handler: &mut StreamEventHandler,
         metadata: &mut BTreeMap<String, Value>,
     ) -> Result<()> {
+        let tries = turn_state.request_count;
         let event = match event {
             Err(jp_llm::Error::RateLimit { retry_after }) => {
                 let max_tries = 5;
@@ -671,11 +676,11 @@ impl Query {
                 tokio::time::sleep(retry_after).await;
                 return Box::pin(self.handle_stream(
                     ctx,
+                    turn_state,
                     thread.clone(),
                     tool_choice.clone(),
                     tools.to_vec(),
                     messages,
-                    tries,
                 ))
                 .await;
             }
@@ -700,7 +705,9 @@ impl Query {
                 event_handler.handle_chat_chunk(ctx.config().style.reasoning.show, chunk)
             }
             StreamEvent::ToolCall(call) => {
-                event_handler.handle_tool_call(ctx, call, printer).await?
+                event_handler
+                    .handle_tool_call(ctx, turn_state, call, printer)
+                    .await?
             }
             StreamEvent::Metadata(key, data) => {
                 metadata.insert(key, data);

@@ -2,12 +2,12 @@ use std::{path::Path, sync::Arc};
 
 use crossterm::style::Stylize as _;
 use indexmap::IndexMap;
-use inquire::Confirm;
 use jp_config::conversation::tool::{
     OneOrManyTypes, ResultMode, RunMode, ToolConfigWithDefaults, ToolParameterConfig,
     ToolParameterItemsConfig, ToolSource,
 };
 use jp_conversation::message::ToolCallResult;
+use jp_inquire::{InlineOption, InlineSelect};
 use jp_mcp::{
     RawContent, ResourceContents,
     id::{McpServerId, McpToolId},
@@ -31,36 +31,6 @@ pub struct ToolDefinition {
     pub name: String,
     pub description: Option<String>,
     pub parameters: IndexMap<String, ToolParameterConfig>,
-}
-
-impl ToolDefinition {
-    /// Return a map of parameter names to JSON schemas.
-    #[must_use]
-    pub fn to_parameters_map(&self) -> Map<String, Value> {
-        self.parameters
-            .clone()
-            .into_iter()
-            .map(|(k, v)| (k, v.to_json_schema()))
-            .collect::<Map<_, _>>()
-    }
-
-    /// Return a JSON schema for the parameters of the tool.
-    #[must_use]
-    pub fn to_parameters_schema(&self) -> Value {
-        let required = self
-            .parameters
-            .iter()
-            .filter(|(_, cfg)| cfg.required)
-            .map(|(k, _)| k.clone())
-            .collect::<Vec<_>>();
-
-        serde_json::json!({
-            "type": "object",
-            "properties": self.to_parameters_map(),
-            "additionalProperties": false,
-            "required": required,
-        })
-    }
 }
 
 impl ToolDefinition {
@@ -92,107 +62,40 @@ impl ToolDefinition {
         }
     }
 
-    #[expect(clippy::too_many_lines)]
     pub async fn call(
         &self,
         id: String,
         mut arguments: Value,
         answers: &IndexMap<String, Value>,
         mcp_client: &jp_mcp::Client,
-        mut config: ToolConfigWithDefaults,
+        config: ToolConfigWithDefaults,
         root: &Path,
         editor: &Path,
     ) -> Result<ToolCallResult, ToolError> {
         info!(tool = %self.name, arguments = ?arguments, "Calling tool.");
 
-        if matches!(config.run(), RunMode::Edit) {
-            let mut args = serde_json::to_string_pretty(&arguments).map_err(|error| {
-                ToolError::SerializeArgumentsError {
-                    arguments: arguments.clone(),
-                    error,
-                }
-            })?;
-
-            arguments = loop {
-                open_editor::EditorCallBuilder::new()
-                    .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
-                    .edit_string_mut(&mut args)
-                    .map_err(|error| ToolError::OpenEditorError {
-                        arguments: arguments.clone(),
-                        error,
-                    })?;
-
-                // If the user removed all data from the argument, we consider the
-                // edit a no-op, and ask the user if they want to run the tool.
-                if args.trim().is_empty() {
-                    *config.run_mut() = RunMode::Ask;
-                    break serde_json::json!({});
-                }
-
-                // If we can't parse the arguments as valid JSON, we consider the
-                // input invalid, and ask the user if they want to re-open the
-                // editor.
-                match serde_json::from_str::<Value>(&args) {
-                    Ok(value) => break value,
-                    Err(error) => {
-                        let retry = Confirm::new("Re-open editor?")
-                            .with_default(true)
-                            .with_help_message(&format!("JSON parsing error: {error}"))
-                            .prompt()
-                            .unwrap_or(false);
-
-                        if !retry {
-                            return Err(ToolError::EditArgumentsError {
-                                arguments: arguments.clone(),
-                                error,
-                            });
-                        }
-                    }
-                }
-            };
-        }
-
-        // If the too call has answers to provide to the tool, it means the tool
-        // already ran once, and we should not ask for confirmation again.
-        let force_run = !answers.is_empty();
-
-        let should_run = match config.run() {
-            RunMode::Ask if !force_run => {
-                let mut question = format!(
-                    "Run {} {} tool",
-                    match config.source() {
-                        ToolSource::Builtin { .. } => "built-in",
-                        ToolSource::Local { .. } => "local",
-                        ToolSource::Mcp { .. } => "mcp",
-                    },
-                    self.name.as_str().bold().yellow(),
-                );
-
-                if let ToolSource::Mcp { server, tool } = config.source() {
-                    let tool = McpToolId::new(tool.as_ref().unwrap_or(&self.name));
-                    let server = server.as_ref().map(|s| McpServerId::new(s.clone()));
-
-                    let server_id = mcp_client
-                        .get_tool_server_id(&tool, server.as_ref())
-                        .await
-                        .map_err(ToolError::McpGetToolError)?;
-
-                    question = format!(
-                        "{} from {} server?",
-                        question,
-                        server_id.as_str().bold().blue()
-                    );
-                }
-
-                Confirm::new(&question)
-                    .with_default(true)
-                    .prompt()
-                    .unwrap_or(false)
-            }
-            _ => true,
+        // If the tool call has answers to provide to the tool, it means the
+        // tool already ran once, and we should not ask for confirmation again.
+        let cancel_reasoning = if answers.is_empty() {
+            self.prepare_run(
+                config.run(),
+                &mut arguments,
+                config.source(),
+                mcp_client,
+                editor,
+            )
+            .await?
+        } else {
+            None
         };
 
-        let mut result = if should_run {
+        let result = if let Some(content) = cancel_reasoning {
+            ToolCallResult {
+                id,
+                error: false,
+                content,
+            }
+        } else {
             match config.source() {
                 ToolSource::Local { tool } => {
                     self.call_local(id, &arguments, answers, &config, tool.as_deref(), root)?
@@ -209,55 +112,10 @@ impl ToolDefinition {
                 }
                 ToolSource::Builtin { .. } => todo!(),
             }
-        } else {
-            ToolCallResult {
-                id,
-                error: false,
-                content: "Tool execution skipped by user.".to_string(),
-            }
         };
 
         trace!(result = ?result, "Tool call completed.");
-
-        if matches!(config.result(), ResultMode::Edit) {
-            let content = open_editor::EditorCallBuilder::new()
-                .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
-                .edit_string(&result.content)
-                .map_err(|error| ToolError::OpenEditorError {
-                    arguments: arguments.clone(),
-                    error,
-                })?;
-
-            // If the user removed all data from the argument, we consider the
-            // edit a no-op, and ask the user if they want to deliver the tool
-            // results.
-            if content.trim().is_empty() {
-                *config.result_mut() = ResultMode::Ask;
-            } else {
-                result.content = content;
-            }
-        }
-
-        let should_deliver = match config.result() {
-            ResultMode::Ask => Confirm::new(&format!(
-                "Deliver the results of the {} tool call?",
-                self.name.as_str().bold().yellow(),
-            ))
-            .with_default(true)
-            .prompt()
-            .unwrap_or(false),
-            _ => true,
-        };
-
-        if !should_deliver {
-            return Ok(ToolCallResult {
-                id: result.id,
-                content: "Tool call result omitted by user.".into(),
-                error: false,
-            });
-        }
-
-        Ok(result)
+        self.prepare_result(result, config.result(), editor)
     }
 
     fn call_local(
@@ -415,6 +273,236 @@ impl ToolDefinition {
             error: result.is_error.unwrap_or_default(),
             content,
         })
+    }
+
+    /// Return a map of parameter names to JSON schemas.
+    #[must_use]
+    pub fn to_parameters_map(&self) -> Map<String, Value> {
+        self.parameters
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (k, v.to_json_schema()))
+            .collect::<Map<_, _>>()
+    }
+
+    /// Return a JSON schema for the parameters of the tool.
+    #[must_use]
+    pub fn to_parameters_schema(&self) -> Value {
+        let required = self
+            .parameters
+            .iter()
+            .filter(|(_, cfg)| cfg.required)
+            .map(|(k, _)| k.clone())
+            .collect::<Vec<_>>();
+
+        serde_json::json!({
+            "type": "object",
+            "properties": self.to_parameters_map(),
+            "additionalProperties": false,
+            "required": required,
+        })
+    }
+
+    #[expect(clippy::too_many_lines)]
+    async fn prepare_run(
+        &self,
+        mut run_mode: RunMode,
+        arguments: &mut Value,
+        source: &ToolSource,
+        mcp_client: &jp_mcp::Client,
+        editor: &Path,
+    ) -> Result<Option<String>, ToolError> {
+        loop {
+            match run_mode {
+                RunMode::Ask => match InlineSelect::new(
+                    {
+                        let mut question = format!(
+                            "Run {} {} tool",
+                            match source {
+                                ToolSource::Builtin { .. } => "built-in",
+                                ToolSource::Local { .. } => "local",
+                                ToolSource::Mcp { .. } => "mcp",
+                            },
+                            self.name.as_str().bold().yellow(),
+                        );
+
+                        if let ToolSource::Mcp { server, tool } = source {
+                            let tool = McpToolId::new(tool.as_ref().unwrap_or(&self.name));
+                            let server = server.as_ref().map(|s| McpServerId::new(s.clone()));
+
+                            let server_id = mcp_client
+                                .get_tool_server_id(&tool, server.as_ref())
+                                .await
+                                .map_err(ToolError::McpGetToolError)?;
+
+                            question = format!(
+                                "{} from {} server?",
+                                question,
+                                server_id.as_str().bold().blue()
+                            );
+                        }
+
+                        question
+                    },
+                    vec![
+                        InlineOption::new('y', "Run tool"),
+                        InlineOption::new('n', "Skip running tool"),
+                        InlineOption::new('e', "Run tool, but first edit arguments"),
+                        InlineOption::new('r', "Skip running tool, and tell assistant why"),
+                    ],
+                )
+                .with_default('y')
+                .prompt()
+                .unwrap_or('n')
+                {
+                    'y' => return Ok(None),
+                    'n' => return Ok(Some("Tool execution skipped by user.".to_string())),
+                    'e' => run_mode = RunMode::Edit,
+                    'r' => run_mode = RunMode::Never,
+                    _ => unreachable!(),
+                },
+                RunMode::Always => return Ok(None),
+                RunMode::Never => return Ok(Some("Tool execution skipped by user.".to_string())),
+                RunMode::Edit => {}
+            }
+
+            match run_mode {
+                // Never, with reasoning
+                RunMode::Never => {
+                    return Ok(Some(format!(
+                        "Tool execution skipped by user with reasoning:\n\n{}",
+                        open_editor::EditorCallBuilder::new()
+                            .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
+                            .edit_string("_Provide reasoning for skipping tool execution_")
+                            .map_err(|error| ToolError::OpenEditorError {
+                                arguments: arguments.clone(),
+                                error,
+                            })?
+                    )));
+                }
+                RunMode::Edit => {
+                    let mut args = serde_json::to_string_pretty(&arguments).map_err(|error| {
+                        ToolError::SerializeArgumentsError {
+                            arguments: arguments.clone(),
+                            error,
+                        }
+                    })?;
+
+                    *arguments = {
+                        open_editor::EditorCallBuilder::new()
+                            .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
+                            .edit_string_mut(&mut args)
+                            .map_err(|error| ToolError::OpenEditorError {
+                                arguments: arguments.clone(),
+                                error,
+                            })?;
+
+                        // If the user removed all data from the arguments, we
+                        // consider the edit a no-op, and ask the user if they
+                        // want to run the tool.
+                        if args.trim().is_empty() {
+                            run_mode = RunMode::Ask;
+                            continue;
+                        }
+
+                        match serde_json::from_str::<Value>(&args) {
+                            Ok(value) => value,
+
+                            // If we can't parse the arguments as valid JSON, we
+                            // consider the input invalid, and ask the user if
+                            // they want to re-open the editor.
+                            Err(error) => {
+                                println!("JSON parsing error: {error}");
+
+                                let retry = InlineSelect::new("Re-open editor?", vec![
+                                    InlineOption::new('y', "Open editor to edit arguments"),
+                                    InlineOption::new('n', "Skip editing, failing with error"),
+                                ])
+                                .with_default('y')
+                                .prompt()
+                                .unwrap_or('n');
+
+                                if retry == 'n' {
+                                    return Err(ToolError::EditArgumentsError {
+                                        arguments: arguments.clone(),
+                                        error,
+                                    });
+                                }
+
+                                continue;
+                            }
+                        }
+                    };
+
+                    return Ok(None);
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn prepare_result(
+        &self,
+        mut result: ToolCallResult,
+        result_mode: ResultMode,
+        editor: &Path,
+    ) -> Result<ToolCallResult, ToolError> {
+        loop {
+            let result_mode = match result_mode {
+                ResultMode::Ask => match InlineSelect::new(
+                    format!(
+                        "Deliver the results of the {} tool call?",
+                        self.name.as_str().bold().yellow(),
+                    ),
+                    vec![
+                        InlineOption::new('y', "Deliver results"),
+                        InlineOption::new('n', "Do not deliver results"),
+                        InlineOption::new('e', "Edit results manually"),
+                    ],
+                )
+                .with_default('y')
+                .prompt()
+                .unwrap_or('n')
+                {
+                    'y' => return Ok(result),
+                    'n' => ResultMode::Never,
+                    'e' => ResultMode::Edit,
+                    _ => unreachable!(),
+                },
+                ResultMode::Always => return Ok(result),
+                mode => mode,
+            };
+
+            match result_mode {
+                ResultMode::Never => {
+                    return Ok(ToolCallResult {
+                        id: result.id,
+                        content: "Tool call result omitted by user.".into(),
+                        error: false,
+                    });
+                }
+                ResultMode::Edit => {
+                    let content = open_editor::EditorCallBuilder::new()
+                        .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
+                        .edit_string(&result.content)
+                        .map_err(|error| ToolError::OpenEditorError {
+                            arguments: Value::Null,
+                            error,
+                        })?;
+
+                    // If the user removed all data from the result, we consider
+                    // the edit a no-op, and ask the user if they want to
+                    // deliver the tool results.
+                    if content.trim().is_empty() {
+                        continue;
+                    }
+
+                    result.content = content;
+                    return Ok(result);
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 }
 
