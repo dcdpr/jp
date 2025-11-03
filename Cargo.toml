@@ -12,6 +12,7 @@ jp_config = { path = "crates/jp_config" }
 jp_conversation = { path = "crates/jp_conversation" }
 jp_format = { path = "crates/jp_format" }
 jp_id = { path = "crates/jp_id" }
+jp_inquire = { path = "crates/jp_inquire" }
 jp_llm = { path = "crates/jp_llm" }
 jp_macro = { path = "crates/jp_macro" }
 jp_mcp = { path = "crates/jp_mcp" }
@@ -52,7 +53,7 @@ httpmock = { git = "https://github.com/alexliesenfeld/httpmock", default-feature
 ignore = { version = "0.4", default-features = false }
 indexmap = { version = "2", default-features = false }
 indoc = { version = "2", default-features = false }
-inquire = { version = "0.9", default-features = false }
+inquire = { git = "https://github.com/JeanMertz/inquire", branch = "submit-on-valid-parse", default-features = false } # <https://github.com/mikaelmello/inquire/pull/321>
 insta = { version = "1", default-features = false }
 itertools = { version = "0.14", default-features = false }
 json5 = { version = "0.4", default-features = false }
