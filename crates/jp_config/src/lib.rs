@@ -49,6 +49,7 @@ pub mod types;
 pub mod util; // TODO: Rename
 
 pub use error::Error;
+pub use partial::ToPartial;
 use relative_path::RelativePathBuf;
 pub use schematic::{Config, PartialConfig};
 use serde_json::Value;
@@ -59,7 +60,7 @@ use crate::{
     conversation::{ConversationConfig, PartialConversationConfig},
     delta::{PartialConfigDelta, delta_opt_vec},
     editor::{EditorConfig, PartialEditorConfig},
-    partial::{ToPartial, partial_opt},
+    partial::partial_opt,
     providers::{PartialProviderConfig, ProviderConfig},
     style::{PartialStyleConfig, StyleConfig},
     template::{PartialTemplateConfig, TemplateConfig},
@@ -324,6 +325,30 @@ impl PartialAppConfig {
     #[must_use]
     pub fn delta(&self, next: Self) -> Self {
         <Self as PartialConfigDelta>::delta(self, next)
+    }
+
+    /// Create a new partial configuration with stub values for testing
+    /// purposes.
+    ///
+    /// # Panics
+    ///
+    /// This function cannot panic.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn stub() -> Self {
+        use crate::{
+            conversation::tool::RunMode,
+            model::id::{PartialModelIdConfig, ProviderId},
+        };
+
+        let mut partial = Self::empty();
+        partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
+        partial.assistant.model.id = PartialModelIdConfig {
+            provider: Some(ProviderId::Ollama),
+            name: Some("world".try_into().expect("valid name")),
+        }
+        .into();
+        partial
     }
 }
 

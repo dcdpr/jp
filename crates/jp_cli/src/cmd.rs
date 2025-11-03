@@ -289,6 +289,7 @@ impl From<crate::error::Error> for Error {
             Bat(error) => return error.into(),
             Template(error) => return error.into(),
             Json(error) => return error.into(),
+            Toml(error) => return error.into(),
             Which(error) => return error.into(),
             ConfigLoader(error) => return error.into(),
             Tool(error) => return error.into(),
