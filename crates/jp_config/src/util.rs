@@ -486,7 +486,7 @@ mod tests {
         }
         .into();
 
-        partial.conversation.tools.defaults.run = Some(RunMode::Always);
+        partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
 
         let config = build(partial).unwrap();
         assert_eq!(
@@ -511,7 +511,7 @@ mod tests {
 
         let error = build(partial.clone()).unwrap_err();
         assert_matches!(error, Error::Schematic(MissingRequired(v)) if v == "run");
-        partial.conversation.tools.defaults.run = Some(RunMode::Always);
+        partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
 
         build(partial).unwrap();
     }
@@ -519,7 +519,7 @@ mod tests {
     #[test]
     fn test_build_sorted_instructions() {
         let mut partial = PartialAppConfig::empty();
-        partial.conversation.tools.defaults.run = Some(RunMode::Always);
+        partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
         partial.assistant.model.id = PartialModelIdConfig {
             provider: Some(ProviderId::Openrouter),
             name: Some("foo".parse().unwrap()),

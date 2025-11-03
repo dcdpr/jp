@@ -1,5 +1,5 @@
 [conversation.tools]
-'*'.run = "always"
+'*'.run = "unattended"
 cargo_check.enable = true
 cargo_expand.enable = true
 cargo_test.enable = true

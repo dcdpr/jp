@@ -1,6 +1,6 @@
 [conversation.tools.fs_grep_files]
 enable = false
-run = "always"
+run = "unattended"
 style.inline_results = "off"
 
 source = "local"
