@@ -1,5 +1,5 @@
 [conversation.tools]
-'*'.run = "always"
+'*'.run = "unattended"
 fs_read_file.enable = true
 fs_list_files.enable = true
 fs_grep_files.enable = true

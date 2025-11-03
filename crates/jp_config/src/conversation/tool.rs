@@ -794,11 +794,8 @@ pub enum RunMode {
     #[default]
     Ask,
 
-    /// Always run the tool, without asking for confirmation.
-    Always,
-
-    /// Never run the tool.
-    Never,
+    /// Run the tool without asking for confirmation.
+    Unattended,
 
     /// Open an editor to edit the tool call before running it.
     Edit,
@@ -810,10 +807,7 @@ pub enum RunMode {
 pub enum ResultMode {
     /// Always deliver the results of the tool call.
     #[default]
-    Always,
-
-    /// Never deliver the results of the tool call.
-    Never,
+    Unattended,
 
     /// Ask for confirmation before delivering the results of the tool call.
     Ask,

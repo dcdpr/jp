@@ -68,8 +68,8 @@ typewriter.code_delay = "0"
 typewriter.text_delay = "0"
 
 [mcp.servers.'*'.tools.'*']
-run = "always"
-result = "always"
+run = "unattended"
+result = "unattended"
 style.inline_results = "off"
 
 [mcp.servers.'*'.tools.github_create_issue_bug]

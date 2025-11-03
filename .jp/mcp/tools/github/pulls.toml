@@ -1,6 +1,6 @@
 [conversation.tools.github_pulls]
 enable = false
-run = "always"
+run = "unattended"
 style.inline_results = "off"
 
 source = "local"
