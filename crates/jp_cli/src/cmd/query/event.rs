@@ -442,7 +442,7 @@ mod tests {
                 handler: StreamEventHandler::default(),
                 chunk: CompletionChunk::Reasoning("Let me think...".into()),
                 show_reasoning: true,
-                output: Some("Let me think...".into()),
+                output: Some("> Let me think...".into()),
                 mutated_handler: StreamEventHandler {
                     reasoning_tokens: "Let me think...".into(),
                     ..Default::default()
