@@ -21,6 +21,7 @@ use jp_config::{
     assistant::{AssistantConfig, instructions::InstructionsConfig, tool_choice::ToolChoice},
     fs::{expand_tilde, load_partial},
     model::parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig},
+    style::reasoning::ReasoningDisplayConfig,
 };
 use jp_conversation::{
     AssistantMessage, Conversation, ConversationId, MessagePair, UserMessage,
@@ -702,7 +703,7 @@ impl Query {
 
         let data = match event {
             StreamEvent::ChatChunk(chunk) => {
-                event_handler.handle_chat_chunk(ctx.config().style.reasoning.show, chunk)
+                event_handler.handle_chat_chunk(ctx.config().style.reasoning.display, chunk)
             }
             StreamEvent::ToolCall(call) => {
                 event_handler
@@ -853,7 +854,7 @@ impl IntoPartialAppConfig for Query {
         }
 
         if *hide_reasoning {
-            partial.style.reasoning.show = Some(false);
+            partial.style.reasoning.display = Some(ReasoningDisplayConfig::Hidden);
         }
 
         if *hide_tool_calls {
