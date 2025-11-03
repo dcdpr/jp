@@ -61,7 +61,8 @@ PartialAppConfig {
             copy_link: None,
         },
         reasoning: PartialReasoningConfig {
-            show: None,
+            display: None,
+            summary_model: None,
         },
         tool_call: PartialToolCallConfig {
             show: None,

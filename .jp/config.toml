@@ -50,5 +50,8 @@ parameters.reasoning = "off"
 [style.code]
 copy_link = "osc8"
 
+[style.reasoning]
+display = "full"
+
 [conversation.tools.'*']
 run = "ask"

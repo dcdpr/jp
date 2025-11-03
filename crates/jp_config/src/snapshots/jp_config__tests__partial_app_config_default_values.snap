@@ -108,9 +108,8 @@ Ok(
                     ),
                 },
                 reasoning: PartialReasoningConfig {
-                    show: Some(
-                        true,
-                    ),
+                    display: None,
+                    summary_model: None,
                 },
                 tool_call: PartialToolCallConfig {
                     show: Some(

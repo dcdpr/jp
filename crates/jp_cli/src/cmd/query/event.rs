@@ -5,9 +5,12 @@ use indexmap::IndexMap;
 use jp_config::{
     conversation::tool::{
         ToolConfigWithDefaults,
-        style::{InlineResults, LinkStyle, Truncate},
+        style::{InlineResults, LinkStyle, TruncateLines},
     },
-    style::StyleConfig,
+    style::{
+        StyleConfig,
+        reasoning::{ReasoningDisplayConfig, TruncateChars},
+    },
 };
 use jp_conversation::message::{ToolCallRequest, ToolCallResult};
 use jp_llm::{CompletionChunk, ToolError};
@@ -29,19 +32,51 @@ pub(super) struct StreamEventHandler {
 impl StreamEventHandler {
     pub(super) fn handle_chat_chunk(
         &mut self,
-        show_reasoning: bool,
+        reasoning_display: ReasoningDisplayConfig,
         chunk: CompletionChunk,
     ) -> Option<String> {
         match chunk {
-            CompletionChunk::Reasoning(data) if !data.is_empty() => {
-                self.reasoning_tokens.push_str(&data);
+            CompletionChunk::Reasoning(ref data) if !data.is_empty() => {
+                let mut display = match reasoning_display {
+                    ReasoningDisplayConfig::Summary => todo!(),
+                    ReasoningDisplayConfig::Static if self.reasoning_tokens.is_empty() => {
+                        Some("_reasoning..._".to_owned())
+                    }
+                    ReasoningDisplayConfig::Full => Some(data.clone()),
+                    ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => {
+                        let remaining =
+                            characters.saturating_sub(self.reasoning_tokens.chars().count());
 
-                if !show_reasoning {
-                    return None;
+                        if remaining > 0 {
+                            let mut data: String = data.chars().take(remaining).collect();
+                            if data.chars().count() == remaining {
+                                data.push_str("...");
+                            }
+
+                            Some(data)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+
+                if matches!(
+                    reasoning_display,
+                    ReasoningDisplayConfig::Full | ReasoningDisplayConfig::Truncate(_)
+                ) && let Some(v) = display.as_mut()
+                {
+                    if self.reasoning_tokens.is_empty() {
+                        v.insert_str(0, "> ");
+                    }
+
+                    *v = v.replace('\n', "\n> ");
                 }
 
-                Some(data)
+                self.reasoning_tokens.push_str(data);
+                display
             }
+
             CompletionChunk::Content(mut data) if !data.is_empty() => {
                 let reasoning_ended =
                     !self.reasoning_tokens.is_empty() && self.content_tokens.is_empty();
@@ -50,7 +85,7 @@ impl StreamEventHandler {
 
                 // If the response includes reasoning, we add two newlines
                 // after the reasoning, but before the content.
-                if show_reasoning && reasoning_ended {
+                if !matches!(reasoning_display, ReasoningDisplayConfig::Hidden) && reasoning_ended {
                     data = format!("\n---\n\n{data}");
                 }
 
@@ -262,14 +297,14 @@ fn build_tool_call_result(
     fs::write(&path, &content)?;
 
     let max_lines = match tool_config.style().inline_results {
-        InlineResults::Truncate(Truncate { lines }) => lines,
+        InlineResults::Truncate(TruncateLines { lines }) => lines,
         _ => content.lines().count(),
     };
 
     if handler.render_tool_calls {
         let mut intro = "\nTool call result".to_owned();
         match tool_config.style().inline_results {
-            InlineResults::Truncate(Truncate { lines }) if lines < content.lines().count() => {
+            InlineResults::Truncate(TruncateLines { lines }) if lines < content.lines().count() => {
                 intro.push_str(&format!(" _(truncated to {lines} lines)_"));
             }
             _ => {}
@@ -378,6 +413,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[expect(clippy::too_many_lines)]
     fn test_stream_event_handler_handle_chat_chunk() {
         struct TestCase {
             handler: StreamEventHandler,
@@ -406,7 +442,7 @@ mod tests {
                 handler: StreamEventHandler::default(),
                 chunk: CompletionChunk::Reasoning("Let me think...".into()),
                 show_reasoning: true,
-                output: Some("Let me think...".into()),
+                output: Some("> Let me think...".into()),
                 mutated_handler: StreamEventHandler {
                     reasoning_tokens: "Let me think...".into(),
                     ..Default::default()
@@ -476,7 +512,13 @@ mod tests {
             },
         ) in cases
         {
-            let result = handler.handle_chat_chunk(show_reasoning, chunk);
+            let reasoning_display = if show_reasoning {
+                ReasoningDisplayConfig::Full
+            } else {
+                ReasoningDisplayConfig::Hidden
+            };
+
+            let result = handler.handle_chat_chunk(reasoning_display, chunk);
             assert_eq!(result, output, "Failed test case: {name}");
             assert_eq!(handler, mutated_handler, "Failed test case: {name}");
         }

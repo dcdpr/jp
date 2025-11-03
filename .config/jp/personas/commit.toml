@@ -22,7 +22,7 @@ params.arg = ["diff", "--cached"]
 
 # Hide all content except the final response.
 [style]
-reasoning.show = false
+reasoning.display = "hidden"
 tool_call.show = false
 
 [assistant]

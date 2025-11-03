@@ -73,29 +73,29 @@ pub enum InlineResults {
 
     /// Show the first N lines of the tool call results inline.
     #[variant(fallback)]
-    Truncate(Truncate),
+    Truncate(TruncateLines),
 }
 
 impl Default for InlineResults {
     fn default() -> Self {
-        Self::Truncate(Truncate::default())
+        Self::Truncate(TruncateLines::default())
     }
 }
 
 /// Truncate the tool call results to the first N lines.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Truncate {
+pub struct TruncateLines {
     /// The number of lines to show.
     pub lines: usize,
 }
 
-impl Default for Truncate {
+impl Default for TruncateLines {
     fn default() -> Self {
         Self { lines: 10 }
     }
 }
 
-impl TryFrom<&str> for Truncate {
+impl TryFrom<&str> for TruncateLines {
     type Error = ParseIntError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
@@ -103,7 +103,7 @@ impl TryFrom<&str> for Truncate {
     }
 }
 
-impl fmt::Display for Truncate {
+impl fmt::Display for TruncateLines {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.lines)
     }
