@@ -1,22 +1,29 @@
-use std::{fs, path::PathBuf, str::FromStr};
+mod parser;
+
+use std::{
+    fs::{self, OpenOptions},
+    io::{Read as _, Write as _},
+    path::PathBuf,
+    str::FromStr,
+};
 
 use duct::Expression;
-use jp_conversation::{ConversationId, UserMessage};
+use itertools::Itertools;
+use jp_config::{
+    AppConfig, Config as _, PartialAppConfig, ToPartial as _,
+    model::parameters::PartialReasoningConfig,
+};
+use jp_conversation::{ConversationId, UserMessage, message::Messages};
 use time::{UtcOffset, macros::format_description};
 
 use crate::{
     ctx::Ctx,
+    editor::parser::QueryDocument,
     error::{Error, Result},
 };
 
 /// The name of the file used to store the current query message.
 const QUERY_FILENAME: &str = "QUERY_MESSAGE.md";
-
-const CUT_MARKER: &[&str] = &[
-    "---------------------------------------8<---------------------------------------",
-    "--------------------- EVERYTHING BELOW THIS LINE IS IGNORED --------------------",
-    "--------------------------------------->8---------------------------------------",
-];
 
 /// How to edit the query.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -54,6 +61,9 @@ pub(crate) struct Options {
 
     /// The initial content to use.
     content: Option<String>,
+
+    /// Whether to force write the file, even if it already exists.
+    force_write: bool,
 }
 
 impl Options {
@@ -62,6 +72,7 @@ impl Options {
             cmd,
             cwd: None,
             content: None,
+            force_write: false,
         }
     }
 
@@ -76,6 +87,13 @@ impl Options {
     #[must_use]
     pub(crate) fn with_content(mut self, content: impl Into<String>) -> Self {
         self.content = Some(content.into());
+        self
+    }
+
+    /// Force write the file, even if it already exists.
+    #[must_use]
+    pub(crate) fn with_force_write(mut self, force_write: bool) -> Self {
+        self.force_write = force_write;
         self
     }
 }
@@ -136,7 +154,12 @@ impl Drop for RevertFileGuard {
 ///
 /// When the editor is closed, the contents are returned.
 pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFileGuard)> {
-    let Options { cmd, cwd, content } = options;
+    let Options {
+        cmd,
+        cwd,
+        content,
+        force_write,
+    } = options;
 
     let exists = path.exists();
     let guard = RevertFileGuard {
@@ -147,11 +170,23 @@ pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFil
 
     let existing_content = fs::read_to_string(&path).unwrap_or_default();
 
-    if !exists || existing_content.is_empty() {
+    if !exists || existing_content.is_empty() || force_write {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&path, content.unwrap_or_default())?;
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)?;
+
+        let mut current_content = String::new();
+        file.read_to_string(&mut current_content)?;
+
+        file.write_all(content.unwrap_or_default().as_bytes())?;
+        file.write_all(current_content.as_bytes())?;
     }
 
     // Open the editor
@@ -184,29 +219,117 @@ pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFil
 
 /// Open an editor for the user to input or edit text using a file in the workspace
 pub(crate) fn edit_query(
-    ctx: &Ctx,
+    ctx: &mut Ctx,
     conversation_id: &ConversationId,
-    initial_message: Option<String>,
+    query: Option<&str>,
     cmd: Expression,
-) -> Result<(String, PathBuf)> {
+    config_error: Option<&str>,
+) -> Result<(String, PathBuf, PartialAppConfig)> {
     let root = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
-    let history = ctx.workspace.get_messages(conversation_id);
+    let history = ctx.workspace.get_messages(conversation_id).to_messages();
+    let query_file_path = root.join(QUERY_FILENAME);
 
-    let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    let existing_content = fs::read_to_string(&query_file_path).unwrap_or_default();
+    let mut doc = QueryDocument::try_from(existing_content.as_str()).unwrap_or_default();
+
+    if let Some(v) = query
+        && doc.query.is_empty()
+    {
+        doc.query = v;
+    }
+
+    let config_value = build_config_text(ctx.config());
+    if doc.meta.config.value.is_empty() {
+        doc.meta.config.value = &config_value;
+    }
+
+    if let Some(error) = config_error {
+        doc.meta.config.error = Some(error);
+    }
+
+    let history_value = build_history_text(history);
+    doc.meta.history.value = &history_value;
+
+    let options = Options::new(cmd.clone())
+        .with_cwd(root)
+        .with_content(doc)
+        .with_force_write(true);
+
+    let (content, mut guard) = open(query_file_path.clone(), options)?;
+
+    let doc = QueryDocument::try_from(content.as_str()).unwrap_or_default();
+    let mut config = PartialAppConfig::empty();
+    if !doc.meta.config.value.is_empty() {
+        match toml::from_str::<PartialAppConfig>(doc.meta.config.value) {
+            Ok(v) => config = v,
+            Err(error) => {
+                let error = error.to_string();
+                return edit_query(ctx, conversation_id, None, cmd, Some(&error));
+            }
+        }
+    }
+
+    guard.disarm();
+    Ok((doc.query.to_owned(), query_file_path, config))
+}
+
+fn build_config_text(config: &AppConfig) -> String {
+    let model_id = &config.assistant.model.id;
+    let mut tools = config
+        .conversation
+        .tools
+        .iter()
+        .filter_map(|(k, cfg)| cfg.enable().then_some(k))
+        .sorted()
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if tools.is_empty() {
+        tools = "(none)".to_owned();
+    }
+
+    let mut active_config = PartialAppConfig::empty();
+    active_config.assistant.model.id = model_id.to_partial();
+    active_config.assistant.model.parameters.reasoning = config
+        .assistant
+        .model
+        .parameters
+        .reasoning
+        .map(|v| v.to_partial())
+        .or(Some(PartialReasoningConfig::Auto));
+
+    toml::to_string_pretty(&active_config).unwrap_or_default()
+}
+
+fn build_history_text(mut history: Messages) -> String {
+    let mut text = String::new();
+
+    if !history.is_empty() {
+        text.push_str("\n# Conversation History");
+    }
+
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
 
-    let mut initial_text = vec![];
-    for message in history.iter() {
+    let mut messages_with_config = vec![];
+    loop {
+        let partial = history.config();
+        let config = AppConfig::from_partial(partial).ok();
+        let Some(message) = history.pop() else {
+            break;
+        };
+
+        messages_with_config.push((message, config));
+    }
+
+    let mut messages = vec![];
+    for (message, config) in messages_with_config {
         let mut buf = String::new();
-        buf.push_str("# ");
-        buf.push_str(
-            &message
-                .timestamp
-                .to_offset(local_offset)
-                .format(&format)
-                .unwrap_or_else(|_| message.timestamp.to_string()),
-        );
-        buf.push_str("\n\n");
+        let timestamp = message
+            .timestamp
+            .to_offset(local_offset)
+            .format(&format)
+            .unwrap_or_else(|_| message.timestamp.to_string());
 
         let options = comrak::Options {
             render: comrak::RenderOptions {
@@ -219,26 +342,39 @@ pub(crate) fn edit_query(
             ..Default::default()
         };
 
-        buf.push_str("## ASSISTANT\n\n");
+        buf.push_str("\n\n## Assistant");
+
+        if let Some(cfg) = config {
+            buf.push_str(&format!(" ({})", cfg.assistant.model.id));
+        }
+
+        buf.push_str(&format!(" on {timestamp}"));
+
         if let Some(reasoning) = &message.reply.reasoning {
             buf.push_str(&comrak::markdown_to_commonmark(
-                &format!("### reasoning\n\n{reasoning}\n\n"),
+                &format!("\n\n### reasoning\n\n{reasoning}"),
                 &options,
             ));
         }
+
         if let Some(content) = &message.reply.content {
-            buf.push_str(&comrak::markdown_to_commonmark(
-                &format!(
-                    "{}{content}\n\n",
-                    if message.reply.reasoning.is_some() {
-                        "### response\n\n"
-                    } else {
-                        ""
-                    }
-                ),
-                &options,
-            ));
+            buf.push_str("\n\n");
+            buf.push_str(
+                comrak::markdown_to_commonmark(
+                    &format!(
+                        "{}{content}",
+                        if message.reply.reasoning.is_some() {
+                            "### response\n\n"
+                        } else {
+                            ""
+                        }
+                    ),
+                    &options,
+                )
+                .trim(),
+            );
         }
+
         for tool_call in &message.reply.tool_calls {
             let Ok(result) = serde_json::to_string_pretty(&tool_call) else {
                 continue;
@@ -253,8 +389,8 @@ pub(crate) fn edit_query(
         buf.push_str("\n\n");
         match &message.message {
             UserMessage::Query(query) => {
-                buf.push_str("## YOU\n\n");
-                buf.push_str(&comrak::markdown_to_commonmark(query, &options));
+                buf.push_str("## You\n\n");
+                buf.push_str(comrak::markdown_to_commonmark(query, &options).trim());
             }
             UserMessage::ToolCallResults(results) => {
                 for result in results {
@@ -267,43 +403,10 @@ pub(crate) fn edit_query(
         }
 
         buf.push('\n');
-        initial_text.push(buf);
+        messages.push(buf);
     }
 
-    initial_text.push(format!("model: {}\n", ctx.config().assistant.model.id));
-
-    if !initial_text.is_empty() {
-        let mut intro = String::new();
-        intro.push_str("\n\n");
-        intro.push_str(&CUT_MARKER.join("\n"));
-        intro.push('\n');
-        initial_text.push(intro);
-    }
-
-    if let Some(message) = initial_message {
-        initial_text.push(message.trim_end().to_owned());
-    }
-
-    initial_text.reverse();
-
-    let query_file_path = root.join(QUERY_FILENAME);
-
-    let options = Options::new(cmd)
-        .with_cwd(root)
-        .with_content(initial_text.join("\n"));
-    let (mut content, mut guard) = open(query_file_path.clone(), options)?;
-
-    let eof = CUT_MARKER
-        .iter()
-        .filter_map(|marker| content.find(marker))
-        .min()
-        .unwrap_or(content.len());
-
-    content.truncate(eof);
-    content = content.trim().to_owned();
-
-    // Disarm the guard, so the file is not reverted.
-    guard.disarm();
-
-    Ok((content, query_file_path))
+    messages.reverse();
+    text.extend(messages);
+    text
 }

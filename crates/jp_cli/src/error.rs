@@ -77,6 +77,9 @@ pub(crate) enum Error {
     #[error("JSON error")]
     Json(#[from] serde_json::Error),
 
+    #[error("TOML error")]
+    Toml(#[from] toml::de::Error),
+
     #[error("Cannot locate binary: {0}")]
     Which(#[from] which::Error),
 

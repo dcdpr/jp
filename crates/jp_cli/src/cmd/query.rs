@@ -16,7 +16,7 @@ use futures::StreamExt as _;
 use itertools::Itertools as _;
 use jp_attachment::Attachment;
 use jp_config::{
-    PartialAppConfig,
+    PartialAppConfig, PartialConfig as _,
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::{AssistantConfig, instructions::InstructionsConfig, tool_choice::ToolChoice},
     fs::{expand_tilde, load_partial},
@@ -237,7 +237,8 @@ impl Query {
         let conversation_id = ctx.workspace.active_conversation_id();
 
         ctx.configure_active_mcp_servers().await?;
-        let (user_query, query_file) = self.build_message(ctx, &conversation_id).await?;
+        let (user_query, editor_details) = self.build_message(ctx, &conversation_id).await?;
+        let query_file = editor_details.as_ref().map(|v| v.0.clone());
         let history = ctx.workspace.get_messages(&conversation_id).to_messages();
 
         if let UserMessage::Query(query) = &user_query {
@@ -292,7 +293,12 @@ impl Query {
             .await?;
         }
 
-        let reply = self.store_messages(ctx, conversation_id, new_messages)?;
+        let reply = self.store_messages(
+            ctx,
+            conversation_id,
+            new_messages,
+            editor_details.map(|v| v.1).as_ref(),
+        )?;
 
         // Clean up the query file.
         if let Some(path) = query_file {
@@ -314,7 +320,7 @@ impl Query {
         &self,
         ctx: &mut Ctx,
         conversation_id: &ConversationId,
-    ) -> Result<(UserMessage, Option<PathBuf>)> {
+    ) -> Result<(UserMessage, Option<(PathBuf, PartialAppConfig)>)> {
         // If replaying, remove the last message from the conversation, and use
         // its query message to build the new query.
         let mut message = self
@@ -347,7 +353,7 @@ impl Query {
             }
         }
 
-        let query_file_path = self.edit_message(&mut message, ctx, conversation_id)?;
+        let editor_details = self.edit_message(&mut message, ctx, conversation_id)?;
 
         if let UserMessage::Query(query) = &mut message
             && self.template
@@ -369,7 +375,7 @@ impl Query {
             *query = tmpl.render(&ctx.config().template.values)?;
         }
 
-        Ok((message, query_file_path))
+        Ok((message, editor_details))
     }
 
     fn update_active_conversation(&self, ctx: &mut Ctx) -> Result<ConversationId> {
@@ -402,7 +408,7 @@ impl Query {
         message: &mut UserMessage,
         ctx: &mut Ctx,
         conversation_id: &ConversationId,
-    ) -> Result<Option<PathBuf>> {
+    ) -> Result<Option<(PathBuf, PartialAppConfig)>> {
         // Editing only applies to queries, not tool-call results.
         let UserMessage::Query(query) = message else {
             return Ok(None);
@@ -436,12 +442,17 @@ impl Query {
 
         // If replaying, pass the last query as the text to be edited,
         // otherwise open an empty editor.
-        let query_file_path;
-        (*query, query_file_path) =
-            editor::edit_query(ctx, conversation_id, initial_message, editor)
-                .map(|(q, p)| (q, Some(p)))?;
+        let editor_details;
+        (*query, editor_details) = editor::edit_query(
+            ctx,
+            conversation_id,
+            initial_message.as_deref(),
+            editor,
+            None,
+        )
+        .map(|(q, p, c)| (q, Some((p, c))))?;
 
-        Ok(query_file_path)
+        Ok(editor_details)
     }
 
     #[expect(clippy::too_many_lines)]
@@ -761,6 +772,7 @@ impl Query {
         ctx: &mut Ctx,
         conversation_id: ConversationId,
         new_messages: Vec<MessagePair>,
+        editor_provided_config: Option<&PartialAppConfig>,
     ) -> Result<String> {
         let mut reply = String::new();
 
@@ -780,7 +792,14 @@ impl Query {
                 conversation_id,
                 message,
                 if self.new_conversation {
-                    Some(ctx.config().to_partial())
+                    let mut partial = ctx.config().to_partial();
+                    if let Some(config) = editor_provided_config {
+                        partial
+                            .merge(&(), config.clone())
+                            .map_err(jp_config::Error::from)?;
+                    }
+
+                    Some(partial)
                 } else {
                     let global = ctx.term.args.config.clone();
                     let partial = load_cli_cfg_args(
@@ -790,13 +809,19 @@ impl Query {
                     )?;
 
                     let partial_config = ctx.config().to_partial();
-                    let partial = IntoPartialAppConfig::apply_cli_config(
+                    let mut partial = IntoPartialAppConfig::apply_cli_config(
                         self,
                         None,
                         partial,
                         Some(&partial_config),
                     )
                     .map_err(|error| Error::CliConfig(error.to_string()))?;
+
+                    if let Some(config) = editor_provided_config {
+                        partial
+                            .merge(&(), config.clone())
+                            .map_err(jp_config::Error::from)?;
+                    }
 
                     Some(partial)
                 },

@@ -52,6 +52,7 @@ crossterm = { workspace = true }
 duct = { workspace = true }
 futures = { workspace = true }
 indexmap = { workspace = true }
+indoc = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
 itertools = { workspace = true, features = ["use_std"] }
 minijinja = { workspace = true }
@@ -82,7 +83,9 @@ url = { workspace = true }
 which = { workspace = true, features = ["real-sys"] }
 
 [dev-dependencies]
+indoc = { workspace = true }
 insta = { workspace = true, features = ["toml"] }
+pretty_assertions = { workspace = true, features = ["std"] }
 serial_test = { workspace = true }
 test-log = { workspace = true }
 

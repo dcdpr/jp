@@ -40,6 +40,16 @@ impl Messages {
         self.0.pop().map(|m| m.pair)
     }
 
+    /// Removes the first message from the list, or [`None`] if the list is
+    /// empty.
+    pub fn pop_front(&mut self) -> Option<MessagePair> {
+        if self.0.is_empty() {
+            return None;
+        }
+
+        Some(self.0.remove(0).pair)
+    }
+
     /// Adds a message to the list.
     pub fn push(&mut self, pair: MessagePair, config: Option<PartialAppConfig>) {
         let config_delta = self
@@ -74,6 +84,18 @@ impl Messages {
         if let Some(v) = self.0.last_mut() {
             v.config_delta = config_delta;
         }
+    }
+}
+
+impl From<Vec<MessagePair>> for Messages {
+    fn from(v: Vec<MessagePair>) -> Self {
+        Self(v.into_iter().map(MessagePairWithConfig::from).collect())
+    }
+}
+
+impl From<Vec<MessagePairWithConfig>> for Messages {
+    fn from(v: Vec<MessagePairWithConfig>) -> Self {
+        Self(v)
     }
 }
 
@@ -143,6 +165,18 @@ impl std::ops::Deref for MessagePairWithConfig {
 
     fn deref(&self) -> &Self::Target {
         &self.pair
+    }
+}
+
+impl From<(MessagePair, PartialAppConfig)> for MessagePairWithConfig {
+    fn from((pair, config_delta): (MessagePair, PartialAppConfig)) -> Self {
+        Self { pair, config_delta }
+    }
+}
+
+impl From<MessagePair> for MessagePairWithConfig {
+    fn from(pair: MessagePair) -> Self {
+        (pair, PartialAppConfig::empty()).into()
     }
 }
 
