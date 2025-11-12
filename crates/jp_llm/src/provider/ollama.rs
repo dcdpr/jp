@@ -12,7 +12,8 @@ use jp_config::{
     providers::llm::ollama::OllamaConfig,
 };
 use jp_conversation::{
-    AssistantMessage, MessagePair, UserMessage,
+    AssistantMessage, UserMessage,
+    event::{ConversationEvent, EventKind},
     thread::{Document, Documents, Thread},
 };
 use ollama_rs::{
@@ -330,9 +331,12 @@ impl TryFrom<(Thread, ToolChoice)> for OllamaMessages {
         // one more back in history, to avoid disjointing tool call requests and
         // their responses.
         let mut history_after_instructions = vec![];
-        while let Some(message) = history.pop() {
-            let tool_call_results = matches!(message.message, UserMessage::ToolCallResults(_));
-            history_after_instructions.insert(0, message);
+        while let Some(event) = history.pop() {
+            let tool_call_results = matches!(
+                event.kind,
+                EventKind::UserMessage(UserMessage::ToolCallResults(_))
+            );
+            history_after_instructions.insert(0, event);
 
             if !tool_call_results {
                 break;
@@ -342,7 +346,7 @@ impl TryFrom<(Thread, ToolChoice)> for OllamaMessages {
         let mut items = vec![];
         let history = history
             .into_iter()
-            .flat_map(message_pair_to_messages)
+            .flat_map(event_to_messages)
             .collect::<Vec<_>>();
 
         // System message first, if any.
@@ -424,12 +428,7 @@ impl TryFrom<(Thread, ToolChoice)> for OllamaMessages {
                 images: None,
                 thinking: None,
             });
-        }
 
-        if items
-            .last()
-            .is_some_and(|m| matches!(m.role, MessageRole::User))
-        {
             items.push(ChatMessage {
                 role: MessageRole::Assistant,
                 content: "Thank you for those details, I'll use them to inform my next response."
@@ -443,15 +442,15 @@ impl TryFrom<(Thread, ToolChoice)> for OllamaMessages {
         items.extend(
             history_after_instructions
                 .into_iter()
-                .flat_map(message_pair_to_messages),
+                .flat_map(event_to_messages),
         );
 
         // User query
         match message {
-            UserMessage::Query(text) => {
+            UserMessage::Query { query } => {
                 items.push(ChatMessage {
                     role: MessageRole::User,
-                    content: text,
+                    content: query,
                     tool_calls: vec![],
                     images: None,
                     thinking: None,
@@ -471,25 +470,24 @@ impl TryFrom<(Thread, ToolChoice)> for OllamaMessages {
         Ok(Self(items))
     }
 }
-fn message_pair_to_messages(msg: MessagePair) -> Vec<ChatMessage> {
-    let (user, assistant) = msg.split();
-
-    user_message_to_messages(user)
-        .into_iter()
-        .chain(assistant_message_to_messages(assistant))
-        .collect()
+fn event_to_messages(event: ConversationEvent) -> Vec<ChatMessage> {
+    match event.kind {
+        EventKind::UserMessage(user) => user_message_to_messages(user),
+        EventKind::AssistantMessage(assistant) => assistant_message_to_messages(assistant),
+        EventKind::ConfigDelta(_) => vec![],
+    }
 }
 
 fn user_message_to_messages(user: UserMessage) -> Vec<ChatMessage> {
     match user {
-        UserMessage::Query(query) if !query.is_empty() => vec![ChatMessage {
+        UserMessage::Query { query } if !query.is_empty() => vec![ChatMessage {
             role: MessageRole::User,
             content: query,
             tool_calls: vec![],
             images: None,
             thinking: None,
         }],
-        UserMessage::Query(_) => vec![],
+        UserMessage::Query { .. } => vec![],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
             .map(|result| ChatMessage {
@@ -558,7 +556,6 @@ mod tests {
     use std::{path::PathBuf, result::Result};
 
     use jp_config::providers::llm::LlmProviderConfig;
-    use jp_conversation::message::Messages;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -672,15 +669,13 @@ mod tests {
         let model_id = "ollama/llama3.1:8b".parse().unwrap();
         let model = ModelDetails::empty(model_id);
 
-        let message = UserMessage::Query("Test message".to_string());
-        let history = {
-            let mut messages = Messages::default();
-            messages.push(
-                MessagePair::new(message, AssistantMessage::new(PROVIDER)),
-                None,
-            );
-            messages
+        let message = UserMessage::Query {
+            query: "Test message".to_string(),
         };
+        let history = vec![
+            ConversationEvent::now(message),
+            ConversationEvent::now(AssistantMessage::new(PROVIDER)),
+        ];
 
         let vcr = vcr(&config.base_url);
         vcr.cassette(

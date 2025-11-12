@@ -17,11 +17,7 @@ use std::{
 pub use error::Error;
 use error::Result;
 pub use id::Id;
-use jp_config::PartialAppConfig;
-use jp_conversation::{
-    Conversation, ConversationId, MessagePair,
-    message::{Messages, MessagesRef},
-};
+use jp_conversation::{Conversation, ConversationId, event::ConversationEvent};
 use jp_storage::{DEFAULT_STORAGE_DIR, Storage};
 use state::{LocalState, State, UserState};
 use tracing::{debug, info, trace};
@@ -166,7 +162,7 @@ impl Workspace {
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
         // Workspace state
-        let (mut conversations, messages) = storage.load_conversations_and_messages()?;
+        let (mut conversations, events) = storage.load_conversations_and_events()?;
 
         // Local state
         let conversations_metadata = storage.load_conversations_metadata()?;
@@ -195,7 +191,7 @@ impl Workspace {
             local: LocalState {
                 active_conversation,
                 conversations,
-                messages,
+                events,
             },
             user: UserState {
                 conversations_metadata,
@@ -217,9 +213,9 @@ impl Workspace {
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
         storage.persist_conversations_metadata(&self.state.user.conversations_metadata)?;
-        storage.persist_conversations_and_messages(
+        storage.persist_conversations_and_events(
             &self.state.local.conversations,
-            &self.state.local.messages,
+            &self.state.local.events,
             &self
                 .state
                 .user
@@ -269,11 +265,11 @@ impl Workspace {
         );
 
         // Insert the old active conversation back into the list of
-        // conversations, but only if it has any messages attached.
+        // conversations, but only if it has any events attached.
         if self
             .state
             .local
-            .messages
+            .events
             .get(&old_active_conversation_id)
             .is_some_and(|v| !v.is_empty())
         {
@@ -313,7 +309,7 @@ impl Workspace {
         let id = ConversationId::default();
 
         self.state.local.conversations.insert(id, conversation);
-        self.state.local.messages.entry(id).or_default();
+        self.state.local.events.entry(id).or_default();
         id
     }
 
@@ -344,51 +340,40 @@ impl Workspace {
         &mut self.state.local.active_conversation
     }
 
-    /// Gets the messages for a specific conversation. Returns an empty slice if not found.
+    /// Gets the events for a specific conversation. Returns an empty slice if
+    /// not found.
     #[must_use]
-    pub fn get_messages(&self, id: &ConversationId) -> MessagesRef<'_> {
-        self.state
-            .local
-            .messages
-            .get(id)
-            .map_or_else(MessagesRef::default, |v| v.as_ref())
+    pub fn get_events(&self, id: &ConversationId) -> &[ConversationEvent] {
+        self.state.local.events.get(id).map_or(&[], |v| v.as_ref())
     }
 
-    /// Removes the last message from a conversation.
-    pub fn pop_message(&mut self, id: &ConversationId) -> Option<MessagePair> {
-        self.state
-            .local
-            .messages
-            .get_mut(id)
-            .and_then(Messages::pop)
+    /// Removes the last event from a conversation.
+    pub fn pop_event(&mut self, id: &ConversationId) -> Option<ConversationEvent> {
+        self.state.local.events.get_mut(id).and_then(Vec::pop)
     }
 
-    pub fn set_conversation_config(
-        &mut self,
-        id: &ConversationId,
-        config: PartialAppConfig,
-    ) -> Result<()> {
-        match self.state.local.messages.get_mut(id) {
-            Some(messages) => messages.set_config(config),
-            None => return Err(Error::NotFound("Conversation", id.to_string())),
-        }
+    //     pub fn set_conversation_config(
+    //         &mut self,
+    //         id: &ConversationId,
+    //         config: PartialAppConfig,
+    //     ) -> Result<()> {
+    //         match self.state.local.messages.get_mut(id) {
+    //             Some(messages) => messages.set_config(config),
+    //             None => return Err(Error::NotFound("Conversation", id.to_string())),
+    //         }
+    //
+    //         Ok(())
+    // >>>>>>> main
+    //     }
 
-        Ok(())
-    }
-
-    /// Adds a message to a conversation.
-    pub fn add_message(
-        &mut self,
-        id: ConversationId,
-        message: MessagePair,
-        config: Option<PartialAppConfig>,
-    ) {
+    /// Adds a event to a conversation.
+    pub fn add_event(&mut self, id: ConversationId, event: impl Into<ConversationEvent>) {
         self.state
             .local
-            .messages
+            .events
             .entry(id)
             .or_default()
-            .push(message, config);
+            .push(event.into());
     }
 
     /// Returns an iterator over all conversations, including the active one.

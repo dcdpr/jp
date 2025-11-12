@@ -1,6 +1,6 @@
 use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
-use jp_conversation::{ConversationId, message::Messages};
+use jp_conversation::{ConversationId, event::ConversationEvent};
 use jp_llm::{provider, structured};
 
 use crate::{Output, cmd::Success, ctx::Ctx};
@@ -34,7 +34,7 @@ impl Edit {
     pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
         let id = self.id.unwrap_or(active_id);
-        let messages = ctx.workspace.get_messages(&id).to_messages();
+        let events = ctx.workspace.get_events(&id).to_vec();
 
         if let Some(user) = self.local {
             match ctx.workspace.get_conversation_mut(&id) {
@@ -46,7 +46,7 @@ impl Edit {
         if let Some(title) = self.title {
             let title = match title {
                 Some(title) => title,
-                None => generate_titles(ctx.config(), messages, vec![]).await?,
+                None => generate_titles(ctx.config(), events, vec![]).await?,
             };
 
             match ctx.workspace.get_conversation_mut(&id) {
@@ -70,7 +70,7 @@ fn missing_conversation(id: &ConversationId) -> Output {
 
 async fn generate_titles(
     config: &AppConfig,
-    messages: Messages,
+    events: Vec<ConversationEvent>,
     mut rejected: Vec<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;
@@ -85,7 +85,7 @@ async fn generate_titles(
     let model_id = model.id.finalize(&config.providers.llm.aliases)?;
 
     let provider = provider::get_provider(model_id.provider, &config.providers.llm)?;
-    let query = structured::titles::titles(count, messages.clone(), &rejected)?;
+    let query = structured::titles::titles(count, events.clone(), &rejected)?;
     let titles: Vec<String> =
         structured::completion(provider.as_ref(), &model_id, &model.parameters, query).await?;
 
@@ -98,7 +98,7 @@ async fn generate_titles(
     match result.as_str() {
         "More..." => {
             rejected.extend(titles);
-            Box::pin(generate_titles(config, messages, rejected)).await
+            Box::pin(generate_titles(config, events, rejected)).await
         }
         "Manually enter a title" => {
             let title = inquire::Text::new("Title").prompt()?;

@@ -13,7 +13,10 @@ use jp_config::{
     AppConfig, Config as _, PartialAppConfig, ToPartial as _,
     model::parameters::PartialReasoningConfig,
 };
-use jp_conversation::{ConversationId, UserMessage, message::Messages};
+use jp_conversation::{
+    ConversationId, UserMessage,
+    event::{ConversationEvent, EventKind, conversation_config},
+};
 use time::{UtcOffset, macros::format_description};
 
 use crate::{
@@ -226,7 +229,7 @@ pub(crate) fn edit_query(
     config_error: Option<&str>,
 ) -> Result<(String, PathBuf, PartialAppConfig)> {
     let root = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
-    let history = ctx.workspace.get_messages(conversation_id).to_messages();
+    let history = ctx.workspace.get_events(conversation_id).to_vec();
     let query_file_path = root.join(QUERY_FILENAME);
 
     let existing_content = fs::read_to_string(&query_file_path).unwrap_or_default();
@@ -301,7 +304,7 @@ fn build_config_text(config: &AppConfig) -> String {
     toml::to_string_pretty(&active_config).unwrap_or_default()
 }
 
-fn build_history_text(mut history: Messages) -> String {
+fn build_history_text(mut history: Vec<ConversationEvent>) -> String {
     let mut text = String::new();
 
     if !history.is_empty() {
@@ -311,25 +314,25 @@ fn build_history_text(mut history: Messages) -> String {
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
     let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
 
-    let mut messages_with_config = vec![];
+    let mut events_with_config = vec![];
     loop {
-        let partial = history.config();
+        let partial = conversation_config(&history);
         let config = AppConfig::from_partial(partial).ok();
-        let Some(message) = history.pop() else {
+        let Some(event) = history.pop() else {
             break;
         };
 
-        messages_with_config.push((message, config));
+        events_with_config.push((event, config));
     }
 
     let mut messages = vec![];
-    for (message, config) in messages_with_config {
+    for (event, config) in events_with_config {
         let mut buf = String::new();
-        let timestamp = message
+        let timestamp = event
             .timestamp
             .to_offset(local_offset)
             .format(&format)
-            .unwrap_or_else(|_| message.timestamp.to_string());
+            .unwrap_or_else(|_| event.timestamp.to_string());
 
         let options = comrak::Options {
             render: comrak::RenderOptions {
@@ -342,67 +345,71 @@ fn build_history_text(mut history: Messages) -> String {
             ..Default::default()
         };
 
-        buf.push_str("\n\n## Assistant");
+        match event.kind {
+            EventKind::UserMessage(message) => match &message {
+                UserMessage::Query { query } => {
+                    buf.push_str("## You\n\n");
+                    buf.push_str(comrak::markdown_to_commonmark(query, &options).trim());
+                }
+                UserMessage::ToolCallResults(results) => {
+                    for result in results {
+                        buf.push_str("## TOOL CALL RESULT\n\n");
+                        buf.push_str("```\n");
+                        buf.push_str(&result.content);
+                        buf.push_str("\n```");
+                    }
+                }
+            },
+            EventKind::AssistantMessage(message) => {
+                buf.push_str("\n\n## Assistant");
 
-        if let Some(cfg) = config {
-            buf.push_str(&format!(" ({})", cfg.assistant.model.id));
-        }
+                if let Some(cfg) = config {
+                    buf.push_str(&format!(" ({})", cfg.assistant.model.id));
+                }
 
-        buf.push_str(&format!(" on {timestamp}"));
+                buf.push_str(&format!(" on {timestamp}"));
 
-        if let Some(reasoning) = &message.reply.reasoning {
-            buf.push_str(&comrak::markdown_to_commonmark(
-                &format!("\n\n### reasoning\n\n{reasoning}"),
-                &options,
-            ));
-        }
+                if let Some(reasoning) = &message.reasoning {
+                    buf.push_str(&comrak::markdown_to_commonmark(
+                        &format!("\n\n### reasoning\n\n{reasoning}"),
+                        &options,
+                    ));
+                }
 
-        if let Some(content) = &message.reply.content {
-            buf.push_str("\n\n");
-            buf.push_str(
-                comrak::markdown_to_commonmark(
-                    &format!(
-                        "{}{content}",
-                        if message.reply.reasoning.is_some() {
-                            "### response\n\n"
-                        } else {
-                            ""
-                        }
-                    ),
-                    &options,
-                )
-                .trim(),
-            );
-        }
+                if let Some(content) = &message.content {
+                    buf.push_str("\n\n");
+                    buf.push_str(
+                        comrak::markdown_to_commonmark(
+                            &format!(
+                                "{}{content}",
+                                if message.reasoning.is_some() {
+                                    "### response\n\n"
+                                } else {
+                                    ""
+                                }
+                            ),
+                            &options,
+                        )
+                        .trim(),
+                    );
+                }
 
-        for tool_call in &message.reply.tool_calls {
-            let Ok(result) = serde_json::to_string_pretty(&tool_call) else {
-                continue;
-            };
+                for tool_call in &message.tool_calls {
+                    let Ok(result) = serde_json::to_string_pretty(&tool_call) else {
+                        continue;
+                    };
 
-            buf.push_str("## TOOL CALL REQUEST\n\n");
-            buf.push_str("```json\n");
-            buf.push_str(&result);
-            buf.push_str("\n```");
-        }
-
-        buf.push_str("\n\n");
-        match &message.message {
-            UserMessage::Query(query) => {
-                buf.push_str("## You\n\n");
-                buf.push_str(comrak::markdown_to_commonmark(query, &options).trim());
-            }
-            UserMessage::ToolCallResults(results) => {
-                for result in results {
-                    buf.push_str("## TOOL CALL RESULT\n\n");
-                    buf.push_str("```\n");
-                    buf.push_str(&result.content);
+                    buf.push_str("## TOOL CALL REQUEST\n\n");
+                    buf.push_str("```json\n");
+                    buf.push_str(&result);
                     buf.push_str("\n```");
                 }
             }
+            EventKind::ConfigDelta(_) => continue,
         }
 
-        buf.push('\n');
+        buf.push_str("\n\n");
+
         messages.push(buf);
     }
 

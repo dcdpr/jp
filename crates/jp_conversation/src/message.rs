@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
-use jp_config::{PartialAppConfig, PartialConfig as _, model::id::ProviderId};
+use jp_config::model::id::ProviderId;
 use jp_id::{
     Id, NANOSECONDS_PER_DECISECOND,
     parts::{GlobalId, TargetId, Variant},
@@ -10,234 +10,17 @@ use jp_id::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::UtcDateTime;
-use tracing::warn;
 
 use crate::error::{Error, Result};
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Messages(Vec<MessagePairWithConfig>);
-
-impl Messages {
-    #[must_use]
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &MessagePair> {
-        self.0.iter().map(|m| &m.pair)
-    }
-
-    #[expect(clippy::should_implement_trait)]
-    #[must_use]
-    pub fn into_iter(self) -> impl DoubleEndedIterator<Item = MessagePair> {
-        self.0.into_iter().map(|m| m.pair)
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    /// Removes the last message from the list, or [`None`] if the list is
-    /// empty.
-    pub fn pop(&mut self) -> Option<MessagePair> {
-        self.0.pop().map(|m| m.pair)
-    }
-
-    /// Removes the first message from the list, or [`None`] if the list is
-    /// empty.
-    pub fn pop_front(&mut self) -> Option<MessagePair> {
-        if self.0.is_empty() {
-            return None;
-        }
-
-        Some(self.0.remove(0).pair)
-    }
-
-    /// Adds a message to the list.
-    pub fn push(&mut self, pair: MessagePair, config: Option<PartialAppConfig>) {
-        let config_delta = self
-            .config()
-            .delta(config.unwrap_or_else(PartialAppConfig::empty));
-
-        self.0.push(MessagePairWithConfig { pair, config_delta });
-    }
-
-    pub fn extend(&mut self, other: Messages) {
-        self.0.extend(other.0);
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    #[must_use]
-    pub fn as_ref(&self) -> MessagesRef<'_> {
-        MessagesRef(self.0.as_slice())
-    }
-
-    #[must_use]
-    pub fn config(&self) -> PartialAppConfig {
-        self.as_ref().config()
-    }
-
-    pub fn set_config(&mut self, next: PartialAppConfig) {
-        let config_delta = self.config().delta(next);
-
-        if let Some(v) = self.0.last_mut() {
-            v.config_delta = config_delta;
-        }
-    }
-}
-
-impl From<Vec<MessagePair>> for Messages {
-    fn from(v: Vec<MessagePair>) -> Self {
-        Self(v.into_iter().map(MessagePairWithConfig::from).collect())
-    }
-}
-
-impl From<Vec<MessagePairWithConfig>> for Messages {
-    fn from(v: Vec<MessagePairWithConfig>) -> Self {
-        Self(v)
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct MessagesRef<'a>(&'a [MessagePairWithConfig]);
-
-impl MessagesRef<'_> {
-    pub fn iter(&self) -> impl Iterator<Item = &MessagePairWithConfig> {
-        self.0.iter()
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    #[must_use]
-    pub fn last(&self) -> Option<&MessagePair> {
-        self.0.last().map(|m| &m.pair)
-    }
-
-    #[must_use]
-    pub fn to_messages(&self) -> Messages {
-        Messages(self.0.to_vec())
-    }
-
-    #[must_use]
-    pub fn config(&self) -> PartialAppConfig {
-        self.0
-            .iter()
-            .map(|m| m.config_delta.clone())
-            .reduce(|mut a, b| {
-                if let Err(error) = a.merge(&(), b) {
-                    warn!(?error, "Failed to merge configuration partial.");
-                }
-
-                a
-            })
-            .unwrap_or_else(PartialAppConfig::empty)
-    }
-}
-
-/// A message pair with the configuration delta.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MessagePairWithConfig {
-    /// The message pair.
-    #[serde(flatten)]
-    pair: MessagePair,
-
-    /// The delta of the configuration, relative to the previous message. The
-    /// first message in the list contains a full copy of the configuration at
-    /// the time of the message.
-    ///
-    /// If the config delta is empty, it means that the configuration has not
-    /// changed since the last message.
-    #[serde(default, skip_serializing_if = "PartialAppConfig::is_empty")]
-    config_delta: PartialAppConfig,
-}
-
-impl std::ops::Deref for MessagePairWithConfig {
-    type Target = MessagePair;
-
-    fn deref(&self) -> &Self::Target {
-        &self.pair
-    }
-}
-
-impl From<(MessagePair, PartialAppConfig)> for MessagePairWithConfig {
-    fn from((pair, config_delta): (MessagePair, PartialAppConfig)) -> Self {
-        Self { pair, config_delta }
-    }
-}
-
-impl From<MessagePair> for MessagePairWithConfig {
-    fn from(pair: MessagePair) -> Self {
-        (pair, PartialAppConfig::empty()).into()
-    }
-}
-
-/// A single exchange between user and LLM.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MessagePair {
-    /// The timestamp of the message pair.
-    pub timestamp: UtcDateTime,
-
-    /// The user message that was sent.
-    pub message: UserMessage,
-
-    /// The assistant message that was replied to the user.
-    pub reply: AssistantMessage,
-}
-
-impl MessagePair {
-    /// Creates a new message pair with the current timestamp.
-    #[must_use]
-    pub fn new(message: UserMessage, reply: AssistantMessage) -> Self {
-        Self {
-            timestamp: UtcDateTime::now(),
-            message,
-            reply,
-        }
-    }
-
-    #[must_use]
-    pub fn with_message(mut self, message: impl Into<UserMessage>) -> Self {
-        self.message = message.into();
-        self
-    }
-
-    #[must_use]
-    pub fn with_reasoning(mut self, reasoning: impl Into<String>) -> Self {
-        self.reply.reasoning = Some(reasoning.into());
-        self
-    }
-
-    #[must_use]
-    pub fn attach_metadata(mut self, key: impl Into<String>, metadata: impl Into<Value>) -> Self {
-        self.reply.metadata.insert(key.into(), metadata.into());
-        self
-    }
-
-    #[must_use]
-    pub fn with_reply(mut self, reply: impl Into<AssistantMessage>) -> Self {
-        self.reply = reply.into();
-        self
-    }
-
-    #[must_use]
-    pub fn split(self) -> (UserMessage, AssistantMessage) {
-        (self.message, self.reply)
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged, rename_all = "snake_case")]
 pub enum UserMessage {
-    Query(String),
+    Query {
+        #[serde(rename = "content")]
+        query: String,
+    },
+
     ToolCallResults(Vec<ToolCallResult>),
 }
 
@@ -245,7 +28,7 @@ impl UserMessage {
     #[must_use]
     pub fn query(&self) -> Option<&str> {
         match self {
-            Self::Query(query) if !query.is_empty() => Some(query),
+            Self::Query { query } if !query.is_empty() => Some(query),
             _ => None,
         }
     }
@@ -261,21 +44,21 @@ impl UserMessage {
     #[must_use]
     pub fn as_query_mut(&mut self) -> Option<&mut String> {
         match self {
-            Self::Query(query) => Some(query),
+            Self::Query { query } => Some(query),
             Self::ToolCallResults(_) => None,
         }
     }
 }
 
 impl From<String> for UserMessage {
-    fn from(message: String) -> Self {
-        Self::Query(message)
+    fn from(query: String) -> Self {
+        Self::Query { query }
     }
 }
 
 impl From<&str> for UserMessage {
     fn from(message: &str) -> Self {
-        Self::Query(message.to_string())
+        message.to_owned().into()
     }
 }
 
@@ -287,7 +70,9 @@ impl From<Vec<ToolCallResult>> for UserMessage {
 
 impl Default for UserMessage {
     fn default() -> Self {
-        Self::Query(String::new())
+        Self::Query {
+            query: String::new(),
+        }
     }
 }
 

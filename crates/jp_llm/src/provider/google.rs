@@ -13,8 +13,8 @@ use jp_config::{
     providers::llm::google::GoogleConfig,
 };
 use jp_conversation::{
-    AssistantMessage, MessagePair, UserMessage,
-    message::Messages,
+    AssistantMessage, UserMessage,
+    event::{ConversationEvent, EventKind},
     thread::{Document, Documents, Thread},
 };
 use serde_json::Value;
@@ -352,19 +352,19 @@ fn convert_tools(tools: Vec<ToolDefinition>, _strict: bool) -> Vec<types::Tool> 
 struct GoogleMessages(Vec<types::Content>);
 
 impl GoogleMessages {
-    fn build(history: Messages, message: UserMessage) -> Self {
+    fn build(history: Vec<ConversationEvent>, message: UserMessage) -> Self {
         // Message history
         let mut items = history
             .into_iter()
-            .flat_map(message_pair_to_messages)
+            .filter_map(event_to_message)
             .collect::<Vec<_>>();
 
         // User query
         match message {
-            UserMessage::Query(text) => {
+            UserMessage::Query { query } => {
                 items.push(types::Content {
                     role: Some(types::Role::User),
-                    parts: vec![types::ContentData::Text(text).into()],
+                    parts: vec![types::ContentData::Text(query).into()],
                 });
             }
             UserMessage::ToolCallResults(results) => {
@@ -386,18 +386,17 @@ impl GoogleMessages {
     }
 }
 
-fn message_pair_to_messages(msg: MessagePair) -> Vec<types::Content> {
-    let (user, assistant) = msg.split();
-
-    vec![
-        user_message_to_message(user),
-        assistant_message_to_message(assistant),
-    ]
+fn event_to_message(event: ConversationEvent) -> Option<types::Content> {
+    match event.kind {
+        EventKind::UserMessage(user) => Some(user_message_to_message(user)),
+        EventKind::AssistantMessage(assistant) => Some(assistant_message_to_message(assistant)),
+        EventKind::ConfigDelta(_) => None,
+    }
 }
 
 fn user_message_to_message(user: UserMessage) -> types::Content {
     let parts = match user {
-        UserMessage::Query(query) => vec![types::ContentData::Text(query).into()],
+        UserMessage::Query { query } => vec![types::ContentData::Text(query).into()],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
             .map(|result| {

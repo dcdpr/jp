@@ -11,7 +11,8 @@ use jp_config::{
     providers::llm::llamacpp::LlamacppConfig,
 };
 use jp_conversation::{
-    AssistantMessage, MessagePair, UserMessage,
+    AssistantMessage, UserMessage,
+    event::{ConversationEvent, EventKind},
     thread::{Document, Documents, Thread},
 };
 use openai::{
@@ -330,9 +331,12 @@ impl TryFrom<Thread> for Messages {
         // one more back in history, to avoid disjointing tool call requests and
         // their responses.
         let mut history_after_instructions = vec![];
-        while let Some(message) = history.pop() {
-            let tool_call_results = matches!(message.message, UserMessage::ToolCallResults(_));
-            history_after_instructions.insert(0, message);
+        while let Some(event) = history.pop() {
+            let tool_call_results = matches!(
+                event.kind,
+                EventKind::UserMessage(UserMessage::ToolCallResults(_))
+            );
+            history_after_instructions.insert(0, event);
 
             if !tool_call_results {
                 break;
@@ -342,7 +346,7 @@ impl TryFrom<Thread> for Messages {
         let mut items = vec![];
         let history = history
             .into_iter()
-            .flat_map(message_pair_to_messages)
+            .flat_map(event_to_messages)
             .collect::<Vec<_>>();
 
         // System message first, if any.
@@ -413,15 +417,15 @@ impl TryFrom<Thread> for Messages {
         items.extend(
             history_after_instructions
                 .into_iter()
-                .flat_map(message_pair_to_messages),
+                .flat_map(event_to_messages),
         );
 
         // User query
         match message {
-            UserMessage::Query(text) => {
+            UserMessage::Query { query } => {
                 items.push(ChatCompletionMessage {
                     role: ChatCompletionMessageRole::User,
-                    content: Some(text),
+                    content: Some(query),
                     ..Default::default()
                 });
             }
@@ -438,23 +442,22 @@ impl TryFrom<Thread> for Messages {
     }
 }
 
-fn message_pair_to_messages(msg: MessagePair) -> Vec<ChatCompletionMessage> {
-    let (user, assistant) = msg.split();
-
-    user_message_to_messages(user)
-        .into_iter()
-        .chain(Some(assistant_message_to_message(assistant)))
-        .collect()
+fn event_to_messages(event: ConversationEvent) -> Vec<ChatCompletionMessage> {
+    match event.kind {
+        EventKind::UserMessage(user) => user_message_to_messages(user),
+        EventKind::AssistantMessage(assistant) => vec![assistant_message_to_message(assistant)],
+        EventKind::ConfigDelta(_) => vec![],
+    }
 }
 
 fn user_message_to_messages(user: UserMessage) -> Vec<ChatCompletionMessage> {
     match user {
-        UserMessage::Query(query) if !query.is_empty() => vec![ChatCompletionMessage {
+        UserMessage::Query { query } if !query.is_empty() => vec![ChatCompletionMessage {
             role: ChatCompletionMessageRole::User,
             content: Some(query),
             ..Default::default()
         }],
-        UserMessage::Query(_) => vec![],
+        UserMessage::Query { .. } => vec![],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
             .map(|result| ChatCompletionMessage {

@@ -21,8 +21,8 @@ use jp_config::{
     providers::llm::anthropic::AnthropicConfig,
 };
 use jp_conversation::{
-    AssistantMessage, MessagePair, UserMessage,
-    message::Messages,
+    AssistantMessage, UserMessage,
+    event::{ConversationEvent, EventKind},
     thread::{Document, Documents, Thread},
 };
 use serde_json::{Value, json};
@@ -867,13 +867,17 @@ fn convert_tools(
 struct AnthropicMessages(Vec<types::Message>);
 
 impl AnthropicMessages {
-    fn build(history: Messages, message: UserMessage, cache_controls: &mut usize) -> Self {
+    fn build(
+        history: Vec<ConversationEvent>,
+        message: UserMessage,
+        cache_controls: &mut usize,
+    ) -> Self {
         let mut items = vec![];
 
         // Historical messages.
         let mut history = history
             .into_iter()
-            .flat_map(message_pair_to_messages)
+            .filter_map(event_to_message)
             .collect::<Vec<_>>();
 
         // Make sure to add cache control to the last history message.
@@ -900,11 +904,11 @@ impl AnthropicMessages {
 
         // User query
         match message {
-            UserMessage::Query(text) => {
+            UserMessage::Query { query } => {
                 items.push(types::Message {
                     role: types::MessageRole::User,
                     content: types::MessageContentList(vec![types::MessageContent::Text(
-                        text.into(),
+                        query.into(),
                     )]),
                 });
             }
@@ -927,18 +931,17 @@ impl AnthropicMessages {
     }
 }
 
-fn message_pair_to_messages(msg: MessagePair) -> Vec<types::Message> {
-    let (user, assistant) = msg.split();
-
-    vec![
-        user_message_to_message(user),
-        assistant_message_to_message(assistant),
-    ]
+fn event_to_message(event: ConversationEvent) -> Option<types::Message> {
+    match event.kind {
+        EventKind::UserMessage(user) => Some(user_message_to_message(user)),
+        EventKind::AssistantMessage(assistant) => Some(assistant_message_to_message(assistant)),
+        EventKind::ConfigDelta(_) => None,
+    }
 }
 
 fn user_message_to_message(user: UserMessage) -> types::Message {
     let list = match user {
-        UserMessage::Query(query) => vec![types::MessageContent::Text(query.into())],
+        UserMessage::Query { query } => vec![types::MessageContent::Text(query.into())],
         UserMessage::ToolCallResults(results) => results
             .into_iter()
             .map(|result| {

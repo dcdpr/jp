@@ -4,6 +4,7 @@ use jp_config::{
     PartialAppConfig,
     assignment::{AssignKeyValue as _, KvAssignment},
 };
+use jp_conversation::event::conversation_config;
 
 use super::TargetWithConversation;
 use crate::{Output, ctx::Ctx};
@@ -45,9 +46,10 @@ impl Set {
                 None => ctx.workspace.active_conversation_id(),
             };
 
-            let mut config = ctx.workspace.get_messages(&id).config();
+            let events = ctx.workspace.get_events(&id);
+            let mut config = conversation_config(events);
             config.assign(assignment)?;
-            ctx.workspace.set_conversation_config(&id, config)?;
+            ctx.workspace.add_event(id, config);
 
             return Ok(format!(
                 "Set configuration value for {} in conversation {id:?}",
