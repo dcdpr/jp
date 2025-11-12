@@ -2,9 +2,9 @@ use std::{collections::BTreeSet, error::Error, fs, path::Path};
 
 use async_trait::async_trait;
 use glob::Pattern;
-use ignore::{overrides::OverrideBuilder, WalkBuilder, WalkState};
+use ignore::{WalkBuilder, WalkState, overrides::OverrideBuilder};
 use jp_attachment::{
-    distributed_slice, linkme, typetag, Attachment, BoxedHandler, Handler, HANDLERS,
+    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
 };
 use jp_mcp::Client;
 use serde::{Deserialize, Serialize};
@@ -88,7 +88,49 @@ impl Handler for FileContent {
 
         let mut builder = OverrideBuilder::new(cwd);
         for pattern in &self.includes {
-            builder.add(pattern.as_str())?;
+            let mut pattern = pattern.as_str();
+
+            if pattern.starts_with('/') {
+                pattern = &pattern[1..];
+            }
+
+            // We are hiding hidden files or directories by default (see
+            // `hidden(true)`). If you were to add a pattern such as
+            // `/.foo/bar.txt`, then that file would still be ignored, because
+            // `/.foo` is a hidden directory and is not recursed. To fix this,
+            // we need to explicitly add the initial hidden directory, e.g.
+            // `/.foo`.
+            //
+            // The alternative is to never hide hidden files and directories by
+            // default, but that causes significant performance issues as we
+            // would traverse `.git` and other large hidden directories.
+            //
+            // We could just keep track of a large list of "potentially large"
+            // hidden directory patterns such as `.git` or `.hg`, but that would
+            // require ongoing maintenance and would be a bit of a hack.
+            //
+            // This too is a hack, but a more dynamic one that should hopefully
+            // work in most common cases, but either way, hopefully we can find
+            // a better solution in the future.
+            if pattern.starts_with('.')
+                // We only want to add the initial hidden directory if it's
+                // actually a directory, not a file.
+                && let Some((dir, _)) = pattern.split_once('.').and_then(|(_, dir)| dir.split_once('/'))
+            {
+                builder.add(&format!(".{dir}/"))?;
+            }
+
+            // If the pattern is a directory, add it recursively.
+            if cwd.join(pattern).is_dir() {
+                if pattern.ends_with('/') {
+                    pattern = &pattern[..pattern.len() - 1];
+                }
+
+                builder.add(&format!("{pattern}/**/*"))?;
+                continue;
+            }
+
+            builder.add(pattern)?;
         }
         for p in &self.excludes {
             builder.add(&format!("!{p}"))?;
@@ -133,6 +175,7 @@ impl Handler for FileContent {
                     let _result = tx.send(Attachment {
                         source: rel.to_string_lossy().to_string(),
                         content,
+                        ..Default::default()
                     });
 
                     WalkState::Continue
@@ -208,6 +251,7 @@ mod pat {
 #[cfg(test)]
 mod tests {
     use glob::Pattern;
+    use indexmap::IndexMap;
     use tempfile::tempdir;
     use url::Url;
 
@@ -264,21 +308,29 @@ mod tests {
 
         // Add as include
         handler.add(&uri_include).await?;
-        assert!(handler
-            .includes
-            .contains(&Pattern::new("/path/to/file.txt")?));
-        assert!(!handler
-            .excludes
-            .contains(&Pattern::new("/path/to/file.txt")?));
+        assert!(
+            handler
+                .includes
+                .contains(&Pattern::new("/path/to/file.txt")?)
+        );
+        assert!(
+            !handler
+                .excludes
+                .contains(&Pattern::new("/path/to/file.txt")?)
+        );
 
         // Add same path as exclude
         handler.add(&uri_exclude).await?;
-        assert!(!handler
-            .includes
-            .contains(&Pattern::new("/path/to/file.txt")?));
-        assert!(handler
-            .excludes
-            .contains(&Pattern::new("/path/to/file.txt")?));
+        assert!(
+            !handler
+                .includes
+                .contains(&Pattern::new("/path/to/file.txt")?)
+        );
+        assert!(
+            handler
+                .excludes
+                .contains(&Pattern::new("/path/to/file.txt")?)
+        );
 
         Ok(())
     }
@@ -316,7 +368,7 @@ mod tests {
         let mut handler = FileContent::default();
         handler.add(&Url::parse("file:/file.txt")?).await?;
 
-        let client = Client::default();
+        let client = Client::new(IndexMap::default());
         let attachments = handler.get(tmp.path(), client).await?;
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].source, "file.txt");

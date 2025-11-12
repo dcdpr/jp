@@ -13,6 +13,8 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+jp_tool = { workspace = true }
+
 base64 = { workspace = true, features = ["std"] }
 crossbeam-channel = { workspace = true, features = ["std"] }
 duct = { workspace = true }
@@ -30,6 +32,13 @@ octocrab = { workspace = true, features = [
     "timeout",
 ] }
 quick-xml = { workspace = true, features = ["encoding", "serialize"] }
+reqwest = { workspace = true, features = [
+    "charset",
+    "http2",
+    "json",
+    "rustls-tls",
+    "stream",
+] }
 serde = { workspace = true, features = ["std", "derive", "alloc"] }
 serde_json = { workspace = true, features = ["std", "preserve_order", "alloc"] }
 time = { workspace = true, features = ["serde-human-readable"] }
@@ -37,7 +46,8 @@ tokio = { workspace = true, features = ["full"] }
 url = { workspace = true, features = ["serde", "std"] }
 
 [dev-dependencies]
-pretty_assertions = { workspace = true }
+assert_matches = { workspace = true }
+pretty_assertions = { workspace = true, features = ["std"] }
 tempfile = { workspace = true }
 test-log = { workspace = true }
 

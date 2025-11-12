@@ -1,0 +1,20 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: expr
+---
+Ok(
+    Reply {
+        provider: Anthropic,
+        events: [
+            ToolCall(
+                ToolCallRequest {
+                    id: "toolu_01AwxriXHLygkS3YYygTo7HF",
+                    name: "run_me",
+                    arguments: {
+                        "bar": String("foo"),
+                    },
+                },
+            ),
+        ],
+    },
+)

@@ -1,30 +1,30 @@
-use confique::Config as Confique;
-use serde::{Deserialize, Serialize};
+//! Code block styling configuration.
 
-use super::LinkStyle;
+use schematic::Config;
+
 use crate::{
-    assignment::{set_error, AssignKeyValue, KvAssignment},
-    error::Result,
-    serde::de_from_str,
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    delta::{PartialConfigDelta, delta_opt},
+    partial::{ToPartial, partial_opt},
+    style::LinkStyle,
 };
 
 /// Code style configuration.
-#[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
-#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
-#[config(partial_attr(serde(deny_unknown_fields)))]
-pub struct Code {
+#[derive(Debug, Config)]
+#[config(rename_all = "snake_case")]
+pub struct CodeConfig {
     /// Theme to use for code blocks.
     ///
     /// This uses the [bat](https://github.com/sharkdp/bat) theme names.
-    #[config(default = "Monokai Extended")]
+    #[setting(default = "Monokai Extended")]
     pub theme: String,
 
     /// Whether to colorize code blocks.
-    #[config(default = true)]
+    #[setting(default = true)]
     pub color: bool,
 
     /// Show line numbers in code blocks.
-    #[config(default = false)]
+    #[setting(default = false)]
     pub line_numbers: bool,
 
     /// Show a link to the file containing the source code in code blocks.
@@ -32,7 +32,7 @@ pub struct Code {
     /// Can be one of: `off`, `full`, `osc8`.
     ///
     /// See: <https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda>
-    #[config(default = "osc8", deserialize_with = de_from_str)]
+    #[setting(default = "osc8")]
     pub file_link: LinkStyle,
 
     /// Similar to `file_link`, but adds a link with the scheme `copy://`.
@@ -55,34 +55,48 @@ pub struct Code {
     ///   end
     /// end)
     /// ```
-    #[config(default = "off", deserialize_with = de_from_str)]
+    #[setting(default = "off")]
     pub copy_link: LinkStyle,
 }
 
-impl Default for Code {
-    fn default() -> Self {
+impl AssignKeyValue for PartialCodeConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            "theme" => self.theme = kv.try_some_string()?,
+            "color" => self.color = kv.try_some_bool()?,
+            "line_numbers" => self.line_numbers = kv.try_some_bool()?,
+            "file_link" => self.file_link = kv.try_some_from_str()?,
+            "copy_link" => self.copy_link = kv.try_some_from_str()?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialCodeConfig {
+    fn delta(&self, next: Self) -> Self {
         Self {
-            theme: "Monokai Extended".to_string(),
-            color: true,
-            line_numbers: false,
-            file_link: LinkStyle::Osc8,
-            copy_link: LinkStyle::Off,
+            theme: delta_opt(self.theme.as_ref(), next.theme),
+            color: delta_opt(self.color.as_ref(), next.color),
+            line_numbers: delta_opt(self.line_numbers.as_ref(), next.line_numbers),
+            file_link: delta_opt(self.file_link.as_ref(), next.file_link),
+            copy_link: delta_opt(self.copy_link.as_ref(), next.copy_link),
         }
     }
 }
 
-impl AssignKeyValue for <Code as Confique>::Partial {
-    fn assign(&mut self, kv: KvAssignment) -> Result<()> {
-        let k = kv.key().as_str().to_owned();
-        match k.as_str() {
-            "theme" => self.theme = Some(kv.try_into_string()?),
-            "color" => self.color = Some(kv.try_into_bool()?),
-            "file_link" => self.file_link = Some(kv.try_into_string()?.parse()?),
-            "copy_link" => self.copy_link = Some(kv.try_into_string()?.parse()?),
+impl ToPartial for CodeConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
 
-            _ => return Err(set_error(kv.key())),
+        Self::Partial {
+            theme: partial_opt(&self.theme, defaults.theme),
+            color: partial_opt(&self.color, defaults.color),
+            line_numbers: partial_opt(&self.line_numbers, defaults.line_numbers),
+            file_link: partial_opt(&self.file_link, defaults.file_link),
+            copy_link: partial_opt(&self.copy_link, defaults.copy_link),
         }
-
-        Ok(())
     }
 }

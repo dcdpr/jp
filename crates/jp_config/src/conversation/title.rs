@@ -1,35 +1,49 @@
+//! Title configuration for conversations.
+
 pub mod generate;
 
-use confique::Config as Confique;
-use serde::{Deserialize, Serialize};
+use schematic::Config;
 
 use crate::{
-    assignment::{set_error, AssignKeyValue, KvAssignment},
-    error::Result,
-    serde::is_nested_empty,
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    conversation::title::generate::{GenerateConfig, PartialGenerateConfig},
+    delta::PartialConfigDelta,
+    partial::ToPartial,
 };
 
-/// LLM configuration.
-#[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
-#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
-#[config(partial_attr(serde(deny_unknown_fields)))]
-pub struct Title {
+/// Title configuration.
+#[derive(Debug, Config)]
+#[config(rename_all = "snake_case")]
+pub struct TitleConfig {
     /// Title generation configuration.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
-    pub generate: generate::Generate,
+    #[setting(nested)]
+    pub generate: GenerateConfig,
 }
 
-impl AssignKeyValue for <Title as Confique>::Partial {
-    fn assign(&mut self, mut kv: KvAssignment) -> Result<()> {
-        let k = kv.key().as_str().to_owned();
-        match k.as_str() {
-            "generate" => self.generate = kv.try_into_object()?,
-
-            _ if kv.trim_prefix("generate") => self.generate.assign(kv)?,
-
-            _ => return Err(set_error(kv.key())),
+impl AssignKeyValue for PartialTitleConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            _ if kv.p("generate") => self.generate.assign(kv)?,
+            _ => return missing_key(&kv),
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialTitleConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            generate: self.generate.delta(next.generate),
+        }
+    }
+}
+
+impl ToPartial for TitleConfig {
+    fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            generate: self.generate.to_partial(),
+        }
     }
 }

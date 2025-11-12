@@ -3,14 +3,15 @@ source: crates/jp_test/src/mock.rs
 expression: expr
 ---
 Ok(
-    Reply(
-        [
+    Reply {
+        provider: Openai,
+        events: [
             Reasoning(
                 "",
             ),
             Content(
-                "Hello! I’ve received your test message. How can I help you today?",
+                "Test message received. How can I assist you today?",
             ),
         ],
-    ),
+    },
 )

@@ -1,13 +1,17 @@
-inherit = "cargo"
+[conversation.tools.cargo_expand]
+enable = false
+run = "unattended"
+style.inline_results = "off"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
 description = "Expand the auto-generated Rust code for the given item."
 
-[[properties]]
-name = "package"
+[conversation.tools.cargo_expand.parameters.package]
 description = "Package to find the item in, required if working with a workspace."
 type = "string"
 
-[[properties]]
-name = "item"
+[conversation.tools.cargo_expand.parameters.item]
 description = "Local path to module or other named item to expand, e.g. os::unix::ffi"
 required = true
 type = "string"

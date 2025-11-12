@@ -1,4 +1,10 @@
-inherit = "cargo"
+[conversation.tools.fs_grep_files]
+enable = false
+run = "unattended"
+style.inline_results = "off"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
 description = """
 Grep files in the project's local filesystem.
 
@@ -12,24 +18,21 @@ specific pattern or limited to specific paths to narrow down the results with
 context.
 """
 
-[[properties]]
-name = "pattern"
+[conversation.tools.fs_grep_files.parameters.pattern]
 type = "string"
 required = true
 description = """
 Regular expression to filter the results by.
 """
 
-[[properties]]
-name = "context"
+[conversation.tools.fs_grep_files.parameters.context]
 type = "integer"
 default = 0
 description = """
 Number of lines of context to include before and after the matching lines.
 """
 
-[[properties]]
-name = "paths"
+[conversation.tools.fs_grep_files.parameters.paths]
 type = "array"
 items.type = "string"
 description = """

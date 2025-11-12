@@ -2,9 +2,9 @@ use std::{collections::BTreeSet, error::Error, path::Path};
 
 use async_trait::async_trait;
 use jp_attachment::{
-    distributed_slice, linkme, typetag, Attachment, BoxedHandler, Handler, HANDLERS,
+    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
 };
-use jp_mcp::{config::McpServerId, Client, ResourceContents};
+use jp_mcp::{Client, ResourceContents, id::McpServerId};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -93,6 +93,7 @@ impl Handler for McpResources {
             attachments.push(Attachment {
                 source: uri.to_string(),
                 content: Resource::from(resource).try_to_xml()?,
+                ..Default::default()
             });
         }
 

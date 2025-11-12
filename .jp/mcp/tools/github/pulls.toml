@@ -1,8 +1,13 @@
-inherit = "cargo"
+[conversation.tools.github_pulls]
+enable = false
+run = "unattended"
+style.inline_results = "off"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
 description = "Find one or more pull requests in the project's GitHub repository."
 
-[[properties]]
-name = "number"
+[conversation.tools.github_pulls.parameters.number]
 type = "integer"
 description = """
 Pull request number to get information about.
@@ -12,8 +17,7 @@ pull request contents. You can re-run the tool with the correct pull request
 number to get more details about a pull request.
 """
 
-[[properties]]
-name = "state"
+[conversation.tools.github_pulls.parameters.state]
 type = "string"
 enum = ["open", "closed"]
 description = """
@@ -22,8 +26,8 @@ Filter pull requests by their state.
 If unspecified, all pull requests will be returned.
 """
 
-[[properties]]
-name = "file_diffs"
+[conversation.tools.github_pulls.parameters.file_diffs]
+# TODO: ["string", "array"], because I've seen LLMs trip over this one.
 type = "array"
 items.type = "string"
 description = """

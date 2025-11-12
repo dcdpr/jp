@@ -1,9 +1,10 @@
 use duct::cmd;
+use jp_tool::Context;
 
-use crate::{Result, Workspace};
+use crate::Result;
 
 pub(crate) async fn cargo_expand(
-    workspace: &Workspace,
+    ctx: &Context,
     item: String,
     package: Option<String>,
 ) -> Result<String> {
@@ -17,7 +18,7 @@ pub(crate) async fn cargo_expand(
     let result = cmd("cargo", &args)
         .stdout_capture()
         .stderr_capture()
-        .dir(&workspace.path)
+        .dir(&ctx.root)
         .env("RUST_BACKTRACE", "1")
         .unchecked()
         .run()?;
@@ -49,8 +50,8 @@ mod tests {
     #[tokio::test]
     async fn test_cargo_expand() {
         let dir = tempfile::tempdir().unwrap();
-        let workspace = Workspace {
-            path: dir.path().to_owned(),
+        let ctx = Context {
+            root: dir.path().to_owned(),
         };
 
         std::fs::write(dir.path().join("Cargo.toml"), indoc::indoc! {r#"
@@ -67,7 +68,7 @@ mod tests {
         "#})
         .unwrap();
 
-        let result = cargo_expand(&workspace, "main".into(), None).await.unwrap();
+        let result = cargo_expand(&ctx, "main".into(), None).await.unwrap();
 
         assert_eq!(result, indoc::indoc! {r#"
             ```rust

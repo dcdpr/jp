@@ -1,4 +1,7 @@
-inherit = "cargo"
+[conversation.tools.github_create_issue_enhancement]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
 description = """
 File a new enhancement request in the project's GitHub repository.
 
@@ -26,8 +29,7 @@ File a new enhancement request in the project's GitHub repository.
   using lists, unless they are necessary to convey details about the issue.
 """
 
-[[properties]]
-name = "title"
+[conversation.tools.github_create_issue_enhancement.parameters.title]
 type = "string"
 required = true
 description = """
@@ -37,16 +39,14 @@ Should be a single line, not include any markdown except for backticks (`) where
 applicable. Keep the title short and descriptive.
 """
 
-[[properties]]
-name = "description"
+[conversation.tools.github_create_issue_enhancement.parameters.description]
 type = "string"
 required = true
 description = """
 A clear and concise description of what the enhancement request is about.
 """
 
-[[properties]]
-name = "context"
+[conversation.tools.github_create_issue_enhancement.parameters.context]
 type = "string"
 required = true
 description = """
@@ -54,8 +54,7 @@ What are you trying to do and how would you want to do it differently? Is it
 something you currently you cannot do? Is this related to an issue/problem?
 """
 
-[[properties]]
-name = "complexity"
+[conversation.tools.github_create_issue_enhancement.parameters.complexity]
 type = "string"
 enum = ["low", "medium", "high"]
 required = true
@@ -65,16 +64,14 @@ Complexity of the enhancement request.
 This is used to estimate the effort required to implement the enhancement.
 """
 
-[[properties]]
-name = "alternatives"
+[conversation.tools.github_create_issue_enhancement.parameters.alternatives]
 type = "string"
 description = """
 Can you achieve the same result doing it in an alternative way? Is the
 alternative considerable?
 """
 
-[[properties]]
-name = "proposed_implementation"
+[conversation.tools.github_create_issue_enhancement.parameters.proposed_implementation]
 type = "string"
 description = """
 Optional proposed implementation for the enhancement.
@@ -85,8 +82,7 @@ it should be limited in size, and optionally be pseudo-code to avoid making the
 implementation obsolete if the code is later changed.
 """
 
-[[properties]]
-name = "tasks"
+[conversation.tools.github_create_issue_enhancement.parameters.tasks]
 type = "array"
 items.type = "string"
 description = """
@@ -95,8 +91,7 @@ enhancement. Include links to specific lines of code where the task should
 happen at.
 """
 
-[[properties]]
-name = "resource_links"
+[conversation.tools.github_create_issue_enhancement.parameters.resource_links]
 type = "array"
 items.type = "string"
 description = """
@@ -125,8 +120,7 @@ The following resource links are supported:
 - lines: blob/{commit hash}/{file path}#L{start line}-L{end line}
 """
 
-[[properties]]
-name = "labels"
+[conversation.tools.github_create_issue_enhancement.parameters.labels]
 type = "array"
 items.type = "string"
 description = """
@@ -138,8 +132,7 @@ Additional labels to add to the issue.
   result in an error with a list of valid labels, so you can retry again.
 """
 
-[[properties]]
-name = "assignees"
+[conversation.tools.github_create_issue_enhancement.parameters.assignees]
 type = "array"
 items.type = "string"
 description = """

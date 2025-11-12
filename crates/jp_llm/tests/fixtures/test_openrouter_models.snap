@@ -5,28 +5,46 @@ expression: expr
 Ok(
     [
         ModelDetails {
-            provider: Openrouter,
-            slug: "openai/codex-mini",
+            id: ModelIdConfig {
+                provider: Openrouter,
+                name: Name(
+                    "google/gemini-2.5-flash-image",
+                ),
+            },
+            display_name: Some(
+                "Google: Gemini 2.5 Flash Image (Nano Banana)",
+            ),
             context_window: Some(
-                200000,
+                32768,
             ),
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: Some(
-                2025-05-16,
+                2025-10-07,
             ),
+            deprecated: None,
+            features: [],
         },
         ModelDetails {
-            provider: Openrouter,
-            slug: "meta-llama/llama-3.3-8b-instruct:free",
+            id: ModelIdConfig {
+                provider: Openrouter,
+                name: Name(
+                    "openai/gpt-5-pro",
+                ),
+            },
+            display_name: Some(
+                "OpenAI: GPT-5 Pro",
+            ),
             context_window: Some(
-                128000,
+                400000,
             ),
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: Some(
-                2025-05-14,
+                2025-10-06,
             ),
+            deprecated: None,
+            features: [],
         },
     ],
 )

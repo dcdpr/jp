@@ -23,16 +23,18 @@ jp_config = { workspace = true }
 jp_conversation = { workspace = true }
 jp_format = { workspace = true }
 jp_id = { workspace = true }
+jp_inquire = { workspace = true }
 jp_llm = { workspace = true }
+jp_macro = { workspace = true }
 jp_mcp = { workspace = true }
-jp_model = { workspace = true }
 jp_openrouter = { workspace = true }
-jp_query = { workspace = true }
 jp_storage = { workspace = true }
 jp_task = { workspace = true }
 jp_term = { workspace = true }
+jp_tool = { workspace = true }
 jp_workspace = { workspace = true }
 
+async-stream = { workspace = true }
 bat = { workspace = true, features = ["regex-onig"] }
 clap = { workspace = true, features = [
     "color",
@@ -49,18 +51,17 @@ comrak = { workspace = true }
 crossterm = { workspace = true }
 duct = { workspace = true }
 futures = { workspace = true }
-hex = { workspace = true, features = ["alloc"] }
+indexmap = { workspace = true }
 indoc = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
+itertools = { workspace = true, features = ["use_std"] }
 minijinja = { workspace = true }
-open-editor = { workspace = true }
 path-clean = { workspace = true }
+quick-xml = { workspace = true, features = ["serialize"] }
 reqwest = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
-sha1 = { workspace = true }
-sha2 = { workspace = true }
 strip-ansi-escapes = { workspace = true }
 termimad = { workspace = true }
 thiserror = { workspace = true }
@@ -79,10 +80,13 @@ tracing-subscriber = { workspace = true, features = [
     "valuable",
 ] }
 url = { workspace = true }
-which = { workspace = true }
+which = { workspace = true, features = ["real-sys"] }
 
 [dev-dependencies]
+indoc = { workspace = true }
 insta = { workspace = true, features = ["toml"] }
+pretty_assertions = { workspace = true, features = ["std"] }
+serial_test = { workspace = true }
 test-log = { workspace = true }
 
 [lints]

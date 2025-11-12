@@ -1,12 +1,12 @@
-bacon_version    := "3.16.0"
-binstall_version := "1.14.1"
-deny_version     := "0.18.3"
-expand_version   := "1.0.114"
-insta_version    := "1.43.1"
-jilu_version     := "0.13.1"
-llvm_cov_version := "0.6.16"
-nextest_version  := "0.9.99"
-shear_version    := "1.4.0"
+bacon_version    := "3.19.0"
+binstall_version := "1.15.7"
+deny_version     := "0.18.5"
+expand_version   := "1.0.118"
+insta_version    := "1.43.2"
+jilu_version     := "0.13.2"
+llvm_cov_version := "0.6.21"
+nextest_version  := "0.9.108"
+shear_version    := "1.6.0"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
@@ -27,9 +27,10 @@ issue-feat +ARGS="Please create a feature request for the following:\n\n": _inst
 
 # Open a commit message in the editor, using Jean-Pierre.
 [group('git')]
+[positional-arguments]
 commit +ARGS="Give me a commit message": _install-jp
     #!/usr/bin/env sh
-    if message=$(jp query --no-persist --new --cfg=personas/commit {{ARGS}}); then
+    if message=$(jp query --no-persist --new --cfg=personas/commit "$@"); then
         echo "$message" | sed -e 's/\x1b\[[0-9;]*[mGKHF]//g' | git commit --edit --file=-
     fi
 
@@ -50,7 +51,8 @@ build-docs: (_docs "build")
 preview-docs: (_docs "preview")
 
 # Live-check the code, using Clippy and Bacon.
-check: (bacon "check")
+check *FLAGS:
+    just bacon clippy {{FLAGS}}
 
 test *FLAGS: (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
     cargo nextest run --workspace --all-targets {{FLAGS}}
@@ -65,11 +67,12 @@ bacon CMD *FLAGS: (_install "bacon@" + bacon_version)
     @bacon {{CMD}} -- {{FLAGS}}
 
 [group('tools')]
-install-tools: _install-tools
+install-tools:
+    cargo install --locked --path .config/jp/tools --debug
 
 [group('tools')]
-serve-tools WORKSPACE TOOL:
-    @jp-tools '{{WORKSPACE}}' '{{TOOL}}'
+serve-tools CONTEXT TOOL:
+    @jp-tools {{quote(CONTEXT)}} {{quote(TOOL)}}
 
 # Run all ci tasks.
 [group('ci')]
@@ -143,9 +146,6 @@ shear-ci: (_install "cargo-expand@" + expand_version)
 
 @_install-binstall:
     cargo install {{quiet_flag}} --locked --version {{binstall_version}} cargo-binstall
-
-@_install-tools:
-    cargo install {{quiet_flag}} --locked --path .config/jp/tools
 
 [working-directory: 'docs']
 @_docs-install:

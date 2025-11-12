@@ -1,56 +1,63 @@
 mod event;
 mod response_handler;
+mod turn;
 
 use std::{
-    collections::BTreeMap,
-    convert::Infallible,
+    collections::{BTreeMap, HashSet},
     env, fs,
     path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
 };
 
-use clap::{builder::TypedValueParser as _, ArgAction};
-use event::{handle_tool_calls, StreamEventHandler};
+use clap::{ArgAction, builder::TypedValueParser as _};
+use event::{StreamEventHandler, handle_tool_calls};
 use futures::StreamExt as _;
+use itertools::Itertools as _;
+use jp_attachment::Attachment;
 use jp_config::{
+    PartialAppConfig, PartialConfig as _,
     assignment::{AssignKeyValue as _, KvAssignment},
-    assistant::Instructions,
-    expand_tilde,
-    mcp::{server::ToolId, ServerId},
-    PartialConfig,
+    assistant::{AssistantConfig, instructions::InstructionsConfig, tool_choice::ToolChoice},
+    fs::{expand_tilde, load_partial},
+    model::parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig},
+    style::reasoning::ReasoningDisplayConfig,
 };
 use jp_conversation::{
-    event::{ConversationEvent, EventKind},
-    thread::{Thread, ThreadBuilder},
     AssistantMessage, Conversation, ConversationId, UserMessage,
+    event::{ConversationEvent, EventKind, conversation_config},
+    thread::{Thread, ThreadBuilder},
 };
-use jp_llm::provider::{self, StreamEvent};
-use jp_mcp::{
-    config::McpServerId,
-    tool::{McpToolId, ToolChoice},
-    Tool,
+use jp_llm::{
+    StreamEvent, ToolError, provider,
+    query::{ChatQuery, StructuredQuery},
+    tool::{ToolDefinition, tool_definitions},
 };
-use jp_model::ModelId;
-use jp_query::query::{ChatQuery, StructuredQuery};
 use jp_task::task::TitleGeneratorTask;
 use jp_term::stdout;
 use jp_workspace::Workspace;
 use minijinja::{Environment, UndefinedBehavior};
 use response_handler::ResponseHandler;
-use tracing::{debug, info, trace};
+use serde_json::Value;
+use tracing::{debug, error, info, trace, warn};
 use url::Url;
 
-use super::{attachment::register_attachment, Output};
+use super::{Output, attachment::register_attachment};
 use crate::{
-    cmd::Success,
-    ctx::IntoPartialConfig,
+    Ctx, PATH_STRING_PREFIX,
+    cmd::{Success, query::turn::TurnState},
+    ctx::IntoPartialAppConfig,
     editor::{self, Editor},
     error::{Error, Result},
-    parser, Ctx, PATH_STRING_PREFIX,
+    load_cli_cfg_args, parser,
+    signals::SignalTo,
 };
 
-#[derive(Debug, clap::Args)]
+const EMPTY_RESPONSE_MESSAGE: &str = "The response appears to be empty. Please try again.";
+
+type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+#[derive(Debug, Default, clap::Args)]
 pub(crate) struct Query {
     /// The query to send. If not provided, uses `$JP_EDITOR`, `$VISUAL` or
     /// `$EDITOR` to open edit the query in an editor.
@@ -87,35 +94,41 @@ pub(crate) struct Query {
     #[arg(short = 'a', long = "attachment", value_parser = |s: &str| parser::attachment_url(s))]
     attachments: Vec<Url>,
 
-    /// Use specific MCP servers exclusively.
-    #[arg(short = 'm', long = "mcp", value_parser = |s: &str| Ok::<_, Infallible>(McpServerId::new(s)))]
-    mcp: Vec<McpServerId>,
-
-    /// Do not use any/specific configured MCP servers.
-    ///
-    /// If the flag is provided without a value, all MCP servers are disabled,
-    /// if a value is provided, only the specified servers are disabled.
-    ///
-    /// This flag can be combined with `--mcp` to re-enable specific MCP
-    /// servers after disabling all or some others.
-    #[arg(short = 'M', long = "no-mcp", value_parser = |s: &str| Ok::<_, Infallible>(McpServerId::new(s)))]
-    no_mcp: Option<Vec<McpServerId>>,
-
     /// Whether and how to edit the query.
+    ///
+    /// Setting this flag to `true`, omitting it, or using it as a boolean flag
+    /// (e.g. `--edit`) will use the default editor configured elsewhere, or
+    /// return an error if no editor is configured and one is required.
+    ///
+    /// If set to `false`, the editor will be disabled (similar to `--no-edit`),
+    /// which might result in an error if the editor is required.
+    ///
+    /// If set to any other value, it will be used as the command to open the
+    /// editor.
     #[arg(short = 'e', long = "edit", conflicts_with = "no_edit")]
     edit: Option<Option<Editor>>,
 
     /// Do not edit the query.
+    ///
+    /// See `--edit` for more details.
     #[arg(short = 'E', long = "no-edit", conflicts_with = "edit")]
     no_edit: bool,
 
     /// The model to use.
-    #[arg(short = 'o', long = "model", value_parser = ModelId::from_str)]
-    model: Option<ModelId>,
+    #[arg(short = 'm', long = "model")]
+    model: Option<String>,
 
     /// The model parameters to use.
-    #[arg(short = 'r', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KvAssignment::from_str)]
+    #[arg(short = 'p', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KvAssignment::from_str)]
     parameters: Vec<KvAssignment>,
+
+    /// Enable reasoning.
+    #[arg(short = 'r', long = "reasoning")]
+    reasoning: Option<ReasoningConfig>,
+
+    /// Disable reasoning.
+    #[arg(short = 'R', long = "no-reasoning")]
+    no_reasoning: bool,
 
     /// Do not display the reasoning content.
     ///
@@ -145,6 +158,46 @@ pub(crate) struct Query {
     #[arg(short = 'S', long = "no-stream", conflicts_with = "stream")]
     no_stream: bool,
 
+    /// The tool(s) to enable.
+    ///
+    /// If an existing tool is configured with a matching name, it will be
+    /// enabled for the duration of the query.
+    ///
+    /// If no arguments are provided, all configured tools will be enabled.
+    ///
+    /// You can provide this flag multiple times to enable multiple tools. It
+    /// can be combined with `--no-tools` to disable all enabled tools before
+    /// enabling a specific one.
+    #[arg(
+        short = 't',
+        long = "tool",
+        action = ArgAction::Append,
+        num_args = 0..=1,
+        value_parser = |s: &str| -> Result<Option<String>> {
+            if s.is_empty() { Ok(None) } else { Ok(Some(s.to_string())) }
+        },
+        default_missing_value = "",
+    )]
+    tools: Vec<Option<String>>,
+
+    /// Disable tools.
+    ///
+    /// If provided without a value, all enabled tools will be disabled,
+    /// otherwise pass the argument multiple times to disable one or more tools.
+    ///
+    /// Any tools that were enabled before this flag is set will be disabled.
+    #[arg(
+        short = 'T',
+        long = "no-tools",
+        action = ArgAction::Append,
+        num_args = 0..=1,
+        value_parser = |s: &str| -> Result<Option<String>> {
+            if s.is_empty() { Ok(None) } else { Ok(Some(s.to_string())) }
+        },
+        default_missing_value = "",
+    )]
+    no_tools: Vec<Option<String>>,
+
     /// The tool to use.
     ///
     /// If a value is provided, the tool matching the value will be used.
@@ -152,12 +205,12 @@ pub(crate) struct Query {
     /// Note that this setting is *not* persisted across queries. To persist
     /// tool choice behavior, set the `assistant.tool_choice` field in a
     /// configuration file.
-    #[arg(short = 't', long = "tool")]
-    tool_choice: Option<Option<String>>,
+    #[arg(short = 'u', long = "tool-use")]
+    tool_use: Option<Option<String>>,
 
     /// Disable tool use by the assistant.
-    #[arg(short = 'T', long = "no-tool")]
-    no_tool_choice: bool,
+    #[arg(short = 'U', long = "no-tool-use")]
+    no_tool_use: bool,
 }
 
 /// How to render the response to the user.
@@ -181,78 +234,68 @@ impl Query {
         trace!(args = ?self, "Received arguments.");
 
         let previous_id = self.update_active_conversation(ctx)?;
-        if ctx.config.assistant.model.id.is_none() {
-            return Err(Error::UndefinedModel.into());
-        }
+        let conversation_id = ctx.workspace.active_conversation_id();
 
         ctx.configure_active_mcp_servers().await?;
-        let (message, query_file) = self.build_message(ctx).await?;
+        let (user_query, editor_details) = self.build_message(ctx, &conversation_id).await?;
+        let query_file = editor_details.as_ref().map(|v| v.0.clone());
+        let history = ctx.workspace.get_events(&conversation_id).to_vec();
 
-        if let UserMessage::Query { query } = &message {
+        if let UserMessage::Query { query } = &user_query {
             if query.is_empty() {
                 return cleanup(ctx, previous_id, query_file.as_deref()).map_err(Into::into);
             }
 
-            // Generate title for new conversations.
+            // Generate title for new or empty conversations.
             if ctx.term.args.persist
-                && self.new_conversation
-                && ctx.config.conversation.title.generate.auto
+                && (self.new_conversation || history.is_empty())
+                && ctx.config().conversation.title.generate.auto
             {
                 debug!("Generating title for new conversation");
                 ctx.task_handler.spawn(TitleGeneratorTask::new(
-                    ctx.workspace.active_conversation_id(),
-                    &ctx.config,
-                    &ctx.workspace,
+                    conversation_id,
+                    history.clone(),
+                    ctx.config(),
                     Some(query.clone()),
                 )?);
             }
         }
 
-        let thread = self.build_thread(ctx, message.clone()).await?;
+        let tools =
+            tool_definitions(ctx.config().conversation.tools.iter(), &ctx.mcp_client).await?;
 
-        let mut events = vec![];
+        let mut attachments = vec![];
+        for attachment in &ctx.config().conversation.attachments {
+            register_attachment(ctx, &attachment.to_url()?, &mut attachments).await?;
+        }
+
+        let thread = build_thread(
+            user_query.clone(),
+            history,
+            attachments,
+            &ctx.config().assistant,
+            &tools,
+        )?;
+
+        let mut new_events =
+            self.create_initial_events(ctx, editor_details.map(|v| v.1).as_ref())?;
+
         if let Some(schema) = self.schema.clone() {
-            events.extend(handle_structured_output(ctx, thread, schema).await?);
+            new_events.extend(handle_structured_output(ctx, thread, schema).await?);
         } else {
-            self.handle_stream(ctx, thread, self.tool_choice(ctx), &mut events)
-                .await?;
+            let mut turn_state = TurnState::default();
+            self.handle_stream(
+                ctx,
+                &mut turn_state,
+                thread,
+                ctx.config().assistant.tool_choice.clone(),
+                tools,
+                &mut new_events,
+            )
+            .await?;
         }
 
-        let mut reply = String::new();
-        for event in events {
-            let conversation_id = ctx.workspace.active_conversation_id();
-            let mut content_size = 0;
-            let mut reasoning_size = 0;
-
-            if let EventKind::AssistantMessage(AssistantMessage {
-                reasoning, content, ..
-            }) = &event.kind
-            {
-                content_size = content.as_deref().unwrap_or_default().len();
-                reasoning_size = reasoning
-                    .as_ref()
-                    .map(ToString::to_string)
-                    .unwrap_or_default()
-                    .len();
-            }
-
-            trace!(
-                %conversation_id,
-                content_size,
-                reasoning_size,
-                "Storing event in conversation."
-            );
-
-            if let EventKind::AssistantMessage(AssistantMessage {
-                content: Some(content),
-                ..
-            }) = &event.kind
-            {
-                reply.push_str(content);
-            }
-
-            ctx.workspace.add_event(conversation_id, event);
-        }
+        let reply = store_events(ctx, conversation_id, new_events);
 
         // Clean up the query file.
         if let Some(path) = query_file {
@@ -261,7 +304,7 @@ impl Query {
 
         if self.schema.is_some() && !reply.is_empty() {
             if let RenderMode::Streamed = self.render_mode() {
-                stdout::typewriter(&reply, ctx.config.style.typewriter.code_delay)?;
+                stdout::typewriter(&reply, ctx.config().style.typewriter.code_delay.into())?;
             } else {
                 return Ok(Success::Json(serde_json::from_str(&reply)?));
             }
@@ -270,45 +313,44 @@ impl Query {
         Ok(Success::Ok)
     }
 
-    async fn build_message(&self, ctx: &mut Ctx) -> Result<(UserMessage, Option<PathBuf>)> {
-        let conversation_id = ctx.workspace.active_conversation_id();
-
-        // If replaying, remove the last user-message event from the
-        // conversation, and use its query message to build the new query.
-        let (mut message, tail) = self
+    async fn build_message(
+        &self,
+        ctx: &mut Ctx,
+        conversation_id: &ConversationId,
+    ) -> Result<(UserMessage, Option<(PathBuf, PartialAppConfig)>)> {
+        // If replaying, remove the last message from the conversation, and use
+        // its query message to build the new query.
+        let mut message = self
             .replay
             .then(|| {
-                let mut tail = vec![];
-
-                loop {
-                    match ctx.workspace.pop_event(&conversation_id)?.kind {
-                        EventKind::UserMessage(message) => {
-                            tail.reverse();
-                            return Some((message, tail));
-                        }
-                        event @ EventKind::AssistantMessage(_) => tail.push(event),
+                let mut user_message = None;
+                while let Some(event) = ctx.workspace.pop_event(conversation_id) {
+                    if let Some(message) = event.into_user_message() {
+                        user_message = Some(message);
+                        break;
                     }
                 }
+
+                user_message
             })
             .flatten()
-            .unwrap_or((
-                UserMessage::Query {
-                    query: String::new(),
-                },
-                vec![],
-            ));
+            .unwrap_or(UserMessage::Query {
+                query: String::new(),
+            });
 
         // If replaying a tool call, re-run the requested tool(s) and return the
         // new results.
         if let UserMessage::ToolCallResults(_) = &mut message {
-            let Some(EventKind::AssistantMessage(AssistantMessage { tool_calls, .. })) =
-                tail.last()
-            else {
-                return Err(Error::Replay("No assistant response found".into()));
-            };
+            let events = ctx.workspace.get_events(conversation_id);
+            for event in events.iter().rev() {
+                if let Some(response) = event.as_assistant_message() {
+                    let results = handle_tool_calls(ctx, response.tool_calls.clone()).await?;
+                    message = UserMessage::ToolCallResults(results);
+                    break;
+                }
+            }
 
-            let results = handle_tool_calls(ctx, tool_calls.clone()).await?;
-            message = UserMessage::ToolCallResults(results);
+            return Err(Error::Replay("No assistant response found".into()));
         }
 
         // If a query is provided, prepend it to the existing event. This is
@@ -323,7 +365,7 @@ impl Query {
             }
         }
 
-        let query_file_path = self.edit_message(&mut message, ctx, conversation_id)?;
+        let editor_details = self.edit_message(&mut message, ctx, conversation_id)?;
 
         if let UserMessage::Query { query } = &mut message
             && self.template
@@ -335,17 +377,17 @@ impl Query {
             let tmpl = env.get_template("query")?;
             // TODO: supported nested variables
             for var in tmpl.undeclared_variables(false) {
-                if ctx.config.template.values.contains_key(&var) {
+                if ctx.config().template.values.contains_key(&var) {
                     continue;
                 }
 
                 return Err(Error::TemplateUndefinedVariable(var));
             }
 
-            *query = tmpl.render(&ctx.config.template.values)?;
+            *query = tmpl.render(&ctx.config().template.values)?;
         }
 
-        Ok((message, query_file_path))
+        Ok((message, editor_details))
     }
 
     fn update_active_conversation(&self, ctx: &mut Ctx) -> Result<ConversationId> {
@@ -369,14 +411,6 @@ impl Query {
             ctx.workspace.set_active_conversation_id(id)?;
         }
 
-        // Persist specific CLI configurations for the active conversation.
-        let mut config = ctx.workspace.get_active_conversation().config().clone();
-        self.apply_persistent_cli_config(Some(&ctx.workspace), &mut config)
-            .map_err(|e| Error::CliConfig(e.to_string()))?;
-        ctx.workspace
-            .get_active_conversation_mut()
-            .set_config(config);
-
         Ok(last_active_conversation_id)
     }
 
@@ -385,34 +419,31 @@ impl Query {
         &self,
         message: &mut UserMessage,
         ctx: &mut Ctx,
-        conversation_id: ConversationId,
-    ) -> Result<Option<PathBuf>> {
+        conversation_id: &ConversationId,
+    ) -> Result<Option<(PathBuf, PartialAppConfig)>> {
+        // Editing only applies to queries, not tool-call results.
         let UserMessage::Query { query } = message else {
             return Ok(None);
         };
 
-        let mut editor = Editor::from_cli_or_config(self.edit.clone(), ctx.config.editor.clone());
-
-        // Explicitly disable editing if the `--no-edit` flag is set.
-        if self.no_edit || self.query.as_ref().is_some_and(|_| self.edit.is_none()) {
-            editor = Some(Editor::Disabled);
+        // If there is no query provided, but the user explicitly requested not
+        // to edit the query, we populate the query with a default message,
+        // since most LLM providers do not support empty queries.
+        if query.is_empty() && self.force_no_edit() {
+            "<no content>".clone_into(query);
         }
 
-        let editor = match editor {
-            None => return Ok(None),
-            Some(Editor::Default) => unreachable!("handled in `from_cli_or_config`"),
-            // If editing is disabled, we set the query as a single whitespace,
-            // which allows the query to pass through to the assistant.
-            Some(Editor::Disabled) => {
-                if query.is_empty() {
-                    " ".clone_into(query);
-                }
-                return Ok(None);
-            }
-            Some(cmd @ Editor::Command(_)) => match cmd.command() {
-                Some(cmd) => cmd,
-                None => return Ok(None),
-            },
+        // If a query is provided, and editing is not explicitly requested, we
+        // omit opening the editor.
+        if !query.is_empty() && !self.force_edit() {
+            return Ok(None);
+        }
+
+        let cmd = ctx.config().editor.command();
+        let editor = match cmd {
+            None if !query.is_empty() => return Ok(None),
+            None => return Err(Error::MissingEditor),
+            Some(cmd) => cmd,
         };
 
         let initial_message = if query.is_empty() {
@@ -423,74 +454,42 @@ impl Query {
 
         // If replaying, pass the last query as the text to be edited,
         // otherwise open an empty editor.
-        let query_file_path;
-        (*query, query_file_path) =
-            editor::edit_query(ctx, conversation_id, initial_message, editor)
-                .map(|(q, p)| (q, Some(p)))?;
+        let editor_details;
+        (*query, editor_details) = editor::edit_query(
+            ctx,
+            conversation_id,
+            initial_message.as_deref(),
+            editor,
+            None,
+        )
+        .map(|(q, p, c)| (q, Some((p, c))))?;
 
-        Ok(query_file_path)
-    }
-
-    fn tool_choice(&self, ctx: &Ctx) -> ToolChoice {
-        self.no_tool_choice
-            .then_some(ToolChoice::None)
-            .or_else(|| ctx.config.assistant.tool_choice.clone())
-            .unwrap_or(ToolChoice::Auto)
-    }
-
-    async fn build_thread(&self, ctx: &Ctx, message: UserMessage) -> Result<Thread> {
-        let conversation_id = ctx.workspace.active_conversation_id();
-        let tools = list_enabled_tools(ctx).await?;
-
-        let mut attachments = vec![];
-        for attachment in &ctx.config.conversation.attachments {
-            register_attachment(ctx, attachment, &mut attachments).await?;
-        }
-
-        let mut thread_builder = ThreadBuilder::default()
-            .with_system_prompt(ctx.config.assistant.system_prompt.clone())
-            .with_instructions(ctx.config.assistant.instructions.clone())
-            .with_attachments(attachments)
-            .with_history(ctx.workspace.get_events(&conversation_id).to_vec())
-            .with_message(message);
-
-        if !tools.is_empty() {
-            let instruction = Instructions::default()
-                .with_title("Tool Usage")
-                .with_description("How to leverage the tools available to you.".to_string())
-                .with_item("Use all the tools available to you to give the best possible answer.")
-                .with_item("Verify the tool name, description and parameters are correct.")
-                .with_item(
-                    "Even if you've reasoned yourself towards a solution, use any available tool \
-                     to verify your answer.",
-                );
-
-            thread_builder = thread_builder.with_instruction(instruction);
-        }
-
-        Ok(thread_builder.build()?)
+        Ok(editor_details)
     }
 
     #[expect(clippy::too_many_lines)]
     async fn handle_stream(
         &self,
         ctx: &mut Ctx,
+        turn_state: &mut TurnState,
         mut thread: Thread,
         tool_choice: ToolChoice,
+        tools: Vec<ToolDefinition>,
         events: &mut Vec<ConversationEvent>,
     ) -> Result<()> {
-        let tools = list_enabled_tools(ctx).await?;
+        let mut cancelled = false;
+        turn_state.request_count += 1;
+
         let model_id = &ctx
-            .config
+            .config()
             .assistant
             .model
             .id
-            .clone()
-            .ok_or(jp_model::Error::MissingId)?;
+            .finalize(&ctx.config().providers.llm.aliases)?;
 
-        let parameters = &ctx.config.assistant.model.parameters;
-        let provider = provider::get_provider(model_id.provider(), &ctx.config.assistant.provider)?;
-        let message = thread.message.clone();
+        let parameters = &ctx.config().assistant.model.parameters;
+        let provider = provider::get_provider(model_id.provider, &ctx.config().providers.llm)?;
+        let user_message = thread.message.clone();
         let query = ChatQuery {
             thread: thread.clone(),
 
@@ -507,75 +506,116 @@ impl Query {
             tool_choice: tool_choice.clone(),
             ..Default::default()
         };
+        let model = provider.model_details(&model_id.name).await?;
+
+        info!(
+            model = model
+                .display_name
+                .as_deref()
+                .unwrap_or(&model.id.to_string()),
+            tools = query.tools.iter().map(|v| &v.name).sorted().join(", "),
+            attachments = query
+                .thread
+                .attachments
+                .iter()
+                .map(|v| &v.source)
+                .sorted()
+                .join(", "),
+            "Chat query created."
+        );
+
         let mut stream = provider
-            .chat_completion_stream(model_id, parameters, query)
+            .chat_completion_stream(&model, parameters, query)
             .await?;
 
-        let mut event_handler = StreamEventHandler {
-            content_tokens: String::new(),
-            reasoning_tokens: String::new(),
-            tool_calls: vec![],
-            tool_call_results: vec![],
-        };
+        let mut event_handler = StreamEventHandler::default();
 
-        let mut printer = ResponseHandler::new(self.render_mode(), ctx.config.style.tool_call.show);
+        let mut printer =
+            ResponseHandler::new(self.render_mode(), ctx.config().style.tool_call.show);
         let mut metadata = BTreeMap::new();
 
-        while let Some(event) = stream.next().await {
-            let event = match event {
-                Err(jp_llm::Error::RateLimit { retry_after }) => {
-                    println!(
-                        "Rate limited, retrying in {} seconds.",
-                        retry_after.unwrap_or(0)
-                    );
-                    tokio::time::sleep(Duration::from_secs(retry_after.unwrap_or(0))).await;
-                    return Box::pin(self.handle_stream(ctx, thread, tool_choice, events)).await;
-                }
-                Err(jp_llm::Error::UnknownModel(model)) => {
-                    let available = provider
-                        .models()
-                        .await?
-                        .into_iter()
-                        .map(|v| v.slug)
-                        .collect();
+        loop {
+            jp_macro::select!(
+                biased,
+                ctx.signals.receiver.recv(),
+                |signal| {
+                    debug!(?signal, "Received signal.");
+                    match signal {
+                        // Stop processing events, but gracefully store the
+                        // conversation state.
+                        Ok(SignalTo::Shutdown) => {
+                            cancelled = true;
+                            break;
+                        }
+                        // Immediately stop processing events, and exit, without
+                        // storing the new conversation state.
+                        Ok(SignalTo::Quit) => return Ok(()),
+                        Ok(SignalTo::ReloadFromDisk) => {}
+                        Err(error) => error!(?error, "Failed to receive signal."),
+                    }
+                },
+                stream.next(),
+                |event| {
+                    let Some(event) = event else {
+                        break;
+                    };
 
-                    return Err(Error::UnknownModel { model, available });
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-                Ok(event) => event,
-            };
-
-            let data = match event {
-                StreamEvent::ChatChunk(chunk) => event_handler.handle_chat_chunk(ctx, chunk),
-                StreamEvent::ToolCall(call) => {
-                    event_handler
-                        .handle_tool_call(ctx, call, &mut printer)
-                        .await?
-                }
-                StreamEvent::Metadata(key, data) => {
-                    metadata.insert(key, data);
-                    continue;
-                }
-            };
-
-            let Some(data) = data else {
-                continue;
-            };
-
-            printer.handle(&data, ctx, false)?;
+                    self.handle_event(
+                        event,
+                        ctx,
+                        turn_state,
+                        provider.as_ref(),
+                        &thread,
+                        &tool_choice,
+                        &tools,
+                        events,
+                        &mut printer,
+                        &mut event_handler,
+                        &mut metadata,
+                    )
+                    .await?
+                },
+            );
         }
 
         // Ensure we handle the last line of the stream.
-        if !printer.buffer.is_empty() {
-            printer.handle("\n", ctx, false)?;
-        }
+        printer.drain(&ctx.config().style, false)?;
 
         let content_tokens = event_handler.content_tokens.trim().to_string();
         let content = if !content_tokens.is_empty() {
             Some(content_tokens)
-        } else if content_tokens.is_empty() && event_handler.tool_calls.is_empty() {
+        } else if !cancelled && content_tokens.is_empty() && event_handler.tool_calls.is_empty() {
+            let max_tries = 3;
+            if turn_state.request_count <= max_tries {
+                warn!(
+                    turn_state.request_count,
+                    max_tries, "Empty response received, retrying..."
+                );
+
+                if let Some(query) = thread.message.as_query_mut() {
+                    query.push_str(" -- ");
+                    if query.ends_with(EMPTY_RESPONSE_MESSAGE) {
+                        query.push_str(" Please try again.");
+                    } else {
+                        query.push_str(EMPTY_RESPONSE_MESSAGE);
+                    }
+                }
+
+                return Box::pin(self.handle_stream(
+                    ctx,
+                    turn_state,
+                    thread,
+                    tool_choice,
+                    tools,
+                    events,
+                ))
+                .await;
+            }
+
+            error!(
+                turn_state.request_count,
+                "Failed to get a non-empty response."
+            );
             Some("<no reply>".to_string())
         } else {
             None
@@ -595,33 +635,120 @@ impl Query {
             println!();
         }
 
-        let reply = ConversationEvent::new(AssistantMessage {
+        let assistant_message = ConversationEvent::now(AssistantMessage {
+            provider: model_id.provider,
             metadata,
             content,
             reasoning,
             tool_calls: event_handler.tool_calls.clone(),
         });
-        events.push(ConversationEvent::new(message.clone()));
-        events.push(reply.clone());
+        let user_message = ConversationEvent::now(user_message);
+
+        events.push(user_message.clone());
+        events.push(assistant_message.clone());
 
         // If the assistant asked for a tool call, we handle it within the same
         // "conversation turn", essentially going into a "loop" until no more
         // tool calls are requested.
-        if !event_handler.tool_call_results.is_empty() {
-            thread.history.push(ConversationEvent::new(message));
-            thread.history.push(reply);
+        if !cancelled && !event_handler.tool_call_results.is_empty() {
+            thread.history.push(user_message);
+            thread.history.push(assistant_message);
             thread.message = UserMessage::ToolCallResults(event_handler.tool_call_results);
+            turn_state.request_count = 0;
 
             Box::pin(self.handle_stream(
                 ctx,
+                turn_state,
                 thread,
                 // After the first tool call, we revert back to letting the LLM
                 // decide if/which tool to use.
                 ToolChoice::Auto,
+                tools,
                 events,
             ))
             .await?;
         }
+
+        Ok(())
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    async fn handle_event(
+        &self,
+        event: std::result::Result<StreamEvent, jp_llm::Error>,
+        ctx: &mut Ctx,
+        turn_state: &mut TurnState,
+        provider: &dyn provider::Provider,
+        thread: &Thread,
+        tool_choice: &ToolChoice,
+        tools: &[ToolDefinition],
+        events: &mut Vec<ConversationEvent>,
+        printer: &mut ResponseHandler,
+        event_handler: &mut StreamEventHandler,
+        metadata: &mut BTreeMap<String, Value>,
+    ) -> Result<()> {
+        let tries = turn_state.request_count;
+        let event = match event {
+            Err(jp_llm::Error::RateLimit { retry_after }) => {
+                let max_tries = 5;
+                if tries > max_tries {
+                    error!(tries, "Failed to get a non-rate-limited response.");
+                    return Err(Error::Llm(jp_llm::Error::RateLimit { retry_after: None }));
+                }
+
+                let retry_after = retry_after.unwrap_or(Duration::from_secs(2));
+                warn!(
+                    retry_after_secs = retry_after.as_secs(),
+                    tries, max_tries, "Rate limited, retrying..."
+                );
+                tokio::time::sleep(retry_after).await;
+                return Box::pin(self.handle_stream(
+                    ctx,
+                    turn_state,
+                    thread.clone(),
+                    tool_choice.clone(),
+                    tools.to_vec(),
+                    events,
+                ))
+                .await;
+            }
+            Err(jp_llm::Error::UnknownModel(model)) => {
+                let available = provider
+                    .models()
+                    .await?
+                    .into_iter()
+                    .map(|v| v.id.name.to_string())
+                    .collect();
+
+                return Err(Error::UnknownModel { model, available });
+            }
+            Err(e) => {
+                return Err(e.into());
+            }
+            Ok(event) => event,
+        };
+
+        let data = match event {
+            StreamEvent::ChatChunk(chunk) => {
+                event_handler.handle_chat_chunk(ctx.config().style.reasoning.display, chunk)
+            }
+            StreamEvent::ToolCall(call) => {
+                event_handler
+                    .handle_tool_call(ctx, turn_state, call, printer)
+                    .await?
+            }
+            StreamEvent::Metadata(key, data) => {
+                metadata.insert(key, data);
+                return Ok(());
+            }
+            StreamEvent::EndOfStream(_) => return Ok(()),
+        };
+
+        let Some(data) = data else {
+            return Ok(());
+        };
+
+        printer.handle(&data, &ctx.config().style, false)?;
 
         Ok(())
     }
@@ -636,90 +763,118 @@ impl Query {
         RenderMode::Auto
     }
 
-    /// Apply the CLI configurations that should be persisted in the conversation's
-    /// state.
-    fn apply_persistent_cli_config(
+    /// Returns `true` if editing is explicitly disabled.
+    ///
+    /// This signals that even if no query is provided, no editor should be
+    /// opened, but instead an empty query should be used.
+    ///
+    /// This can be used for example when requesting a tool call without needing
+    /// additional context to be provided.
+    fn force_no_edit(&self) -> bool {
+        self.no_edit || matches!(self.edit, Some(Some(Editor::Disabled)))
+    }
+
+    /// Returns `true` if editing is explicitly enabled.
+    ///
+    /// This means the `--edit` flag was provided (but not `--edit=false`),
+    /// which means the editor should be opened, regardless of whether a query
+    /// is provided as an argument.
+    fn force_edit(&self) -> bool {
+        !self.force_no_edit() && self.edit.is_some()
+    }
+
+    fn create_initial_events(
         &self,
-        workspace: Option<&Workspace>,
-        partial: &mut PartialConfig,
-    ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Update the model.
-        if let Some(id) = self.model.as_ref() {
-            partial.assistant.model.id = Some(id.to_owned());
-        }
-
-        // Update the model parameters.
-        for kv in self.parameters.clone() {
-            partial.assistant.model.parameters.assign(kv)?;
-        }
-
-        // Add attachments.
-        partial
-            .conversation
-            .attachments
-            .get_or_insert_default()
-            .extend(self.attachments.iter().cloned());
-
-        // Handle MCP servers.
-        if let Some(ids) = self.no_mcp.as_ref() {
-            let servers = partial.conversation.mcp_servers.get_or_insert_default();
-
-            if ids.is_empty() {
-                servers.clear();
-            }
-            for id in ids {
-                servers.retain(|v| v != id);
-            }
-        }
-
-        for id in &self.mcp {
-            // Ensure MCP server exists.
-            if let Some(workspace) = workspace {
-                workspace
-                    .get_mcp_server(id)
-                    .ok_or(Error::NotFound("MCP server", id.to_string()))?;
+        ctx: &mut Ctx,
+        editor_provided_config: Option<&PartialAppConfig>,
+    ) -> Result<Vec<ConversationEvent>> {
+        if self.new_conversation {
+            let mut partial = ctx.config().to_partial();
+            if let Some(config) = editor_provided_config {
+                partial
+                    .merge(&(), config.clone())
+                    .map_err(jp_config::Error::from)?;
             }
 
-            partial
-                .conversation
-                .mcp_servers
-                .get_or_insert_default()
-                .push(id.clone());
-        }
+            Ok(vec![ConversationEvent::now(partial)])
+        } else {
+            let global = ctx.term.args.config.clone();
+            let partial =
+                load_cli_cfg_args(PartialAppConfig::empty(), &global, Some(&ctx.workspace))?;
 
-        Ok(())
+            let partial_config = ctx.config().to_partial();
+            let mut partial =
+                IntoPartialAppConfig::apply_cli_config(self, None, partial, Some(&partial_config))
+                    .map_err(|error| Error::CliConfig(error.to_string()))?;
+
+            if let Some(config) = editor_provided_config {
+                partial
+                    .merge(&(), config.clone())
+                    .map_err(jp_config::Error::from)?;
+            }
+
+            if partial.is_empty() {
+                Ok(vec![])
+            } else {
+                Ok(vec![ConversationEvent::now(partial)])
+            }
+        }
     }
 }
 
-impl IntoPartialConfig for Query {
+impl IntoPartialAppConfig for Query {
     fn apply_cli_config(
         &self,
-        workspace: Option<&Workspace>,
-        mut partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
-        // 1. First apply CLI configurations that we also want to persist in the
-        //    conversation configuration state.
-        self.apply_persistent_cli_config(workspace, &mut partial)?;
+        _workspace: Option<&Workspace>,
+        mut partial: PartialAppConfig,
+        merged_config: Option<&PartialAppConfig>,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
+        let Self {
+            model,
+            template: _,
+            schema: _,
+            replay: _,
+            new_conversation: _,
+            local: _,
+            attachments,
+            edit,
+            no_edit,
+            tool_use,
+            no_tool_use,
+            query: _,
+            parameters,
+            hide_reasoning,
+            hide_tool_calls,
+            stream: _,
+            no_stream: _,
+            tools,
+            no_tools,
+            reasoning,
+            no_reasoning,
+        } = &self;
 
-        // 2. Then apply CLI configurations that we do not want to persist
-        //    between queries.
-        //
-        // Hide reasoning.
-        if self.hide_reasoning {
-            partial.style.reasoning.show = Some(false);
+        apply_model(&mut partial, model.as_deref(), merged_config);
+        apply_editor(&mut partial, edit.as_ref().map(|v| v.as_ref()), *no_edit);
+        apply_enable_tools(&mut partial, tools, no_tools, merged_config)?;
+        apply_tool_use(
+            &mut partial,
+            tool_use.as_ref().map(|v| v.as_deref()),
+            *no_tool_use,
+        )?;
+        apply_attachments(&mut partial, attachments);
+        apply_reasoning(&mut partial, reasoning.as_ref(), *no_reasoning);
+
+        for kv in parameters.clone() {
+            partial.assistant.model.parameters.assign(kv)?;
         }
-        // Hide tool calls.
-        if self.hide_tool_calls {
+
+        if *hide_reasoning {
+            partial.style.reasoning.display = Some(ReasoningDisplayConfig::Hidden);
+        }
+
+        if *hide_tool_calls {
             partial.style.tool_call.show = Some(false);
         }
-        // Tool choice.
-        partial.assistant.tool_choice = self.tool_choice.as_ref().map(|v| match v.as_deref() {
-            None | Some("true") => ToolChoice::Required,
-            Some(v) => match v {
-                "false" => ToolChoice::None,
-                _ => ToolChoice::Function(v.to_owned()),
-            },
-        });
 
         Ok(partial)
     }
@@ -727,8 +882,9 @@ impl IntoPartialConfig for Query {
     fn apply_conversation_config(
         &self,
         workspace: Option<&Workspace>,
-        partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        partial: PartialAppConfig,
+        _: Option<&PartialAppConfig>,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         // New conversations do not apply any existing conversation
         // configurations. This is handled by the other configuration layers
         // (files, environment variables, CLI arguments).
@@ -742,11 +898,280 @@ impl IntoPartialConfig for Query {
             return Ok(partial);
         };
 
-        Ok(jp_config::load_partial(
-            workspace.get_active_conversation().config().clone(),
-            partial,
-        ))
+        let id = workspace.active_conversation_id();
+        let config = conversation_config(workspace.get_events(&id));
+        load_partial(partial, config).map_err(Into::into)
     }
+}
+
+fn store_events(
+    ctx: &mut Ctx,
+    conversation_id: ConversationId,
+    events: Vec<ConversationEvent>,
+) -> String {
+    let mut reply = String::new();
+
+    for event in events {
+        match &event.kind {
+            EventKind::UserMessage(message) => {
+                debug!(
+                    conversation = %conversation_id,
+                    query_size_bytes = message.query().map_or(0, str::len),
+                    tool_call_results_count = message.tool_call_results().len(),
+                    "Storing user message in conversation."
+                );
+            }
+            EventKind::AssistantMessage(message) => {
+                debug!(
+                    conversation = %conversation_id,
+                    content_size_bytes = message.content.as_deref().unwrap_or_default().len(),
+                    reasoning_size_bytes = message.reasoning.as_deref().unwrap_or_default().len(),
+                    tool_calls_count = message.tool_calls.len(),
+                    "Storing assistant message in conversation."
+                );
+
+                if let Some(content) = &message.content {
+                    reply.push_str(content);
+                }
+            }
+            EventKind::ConfigDelta(_) => {
+                debug!(conversation = %conversation_id, "Storing config delta in conversation.");
+            }
+        }
+
+        ctx.workspace.add_event(conversation_id, event);
+    }
+
+    reply
+}
+
+fn build_thread(
+    user_message: UserMessage,
+    history: Vec<ConversationEvent>,
+    attachments: Vec<Attachment>,
+    assistant: &AssistantConfig,
+    tools: &[ToolDefinition],
+) -> Result<Thread> {
+    let mut thread_builder = ThreadBuilder::default()
+        .with_instructions(assistant.instructions.to_vec())
+        .with_attachments(attachments)
+        .with_history(history)
+        .with_message(user_message);
+
+    if let Some(system_prompt) = assistant.system_prompt.clone() {
+        thread_builder = thread_builder.with_system_prompt(system_prompt);
+    }
+
+    if !tools.is_empty() {
+        let instruction = InstructionsConfig::default()
+            .with_title("Tool Usage")
+            .with_description("How to leverage the tools available to you.".to_string())
+            .with_item("Use all the tools available to you to give the best possible answer.")
+            .with_item("Verify the tool name, description and parameters are correct.")
+            .with_item(
+                "Even if you've reasoned yourself towards a solution, use any available tool to \
+                 verify your answer.",
+            );
+
+        thread_builder = thread_builder.with_instruction(instruction);
+    }
+
+    Ok(thread_builder.build()?)
+}
+
+/// Apply the CLI model configuration to the partial configuration.
+fn apply_model(partial: &mut PartialAppConfig, model: Option<&str>, _: Option<&PartialAppConfig>) {
+    let Some(id) = model else { return };
+
+    partial.assistant.model.id = id.into();
+}
+
+/// Apply the CLI editor configuration to the partial configuration.
+fn apply_editor(partial: &mut PartialAppConfig, editor: Option<Option<&Editor>>, no_edit: bool) {
+    let Some(Some(editor)) = editor else {
+        return;
+    };
+
+    match (no_edit, editor) {
+        (true, _) | (_, Editor::Disabled) => {
+            partial.editor.cmd = None;
+            partial.editor.envs = None;
+        }
+        (_, Editor::Default) => {}
+        (_, Editor::Command(cmd)) => partial.editor.cmd = Some(cmd.clone()),
+    }
+}
+
+fn apply_enable_tools(
+    partial: &mut PartialAppConfig,
+    tools: &[Option<String>],
+    no_tools: &[Option<String>],
+    merged_config: Option<&PartialAppConfig>,
+) -> BoxedResult<()> {
+    let tools = if tools.is_empty() {
+        None
+    } else if tools.iter().any(Option::is_none) {
+        Some(vec![])
+    } else {
+        Some(tools.iter().filter_map(|v| v.as_deref()).collect())
+    };
+
+    let no_tools = if no_tools.is_empty() {
+        None
+    } else if no_tools.iter().any(Option::is_none) {
+        Some(vec![])
+    } else {
+        Some(no_tools.iter().filter_map(|v| v.as_deref()).collect())
+    };
+
+    let enable_all = tools.as_ref().is_some_and(Vec::is_empty);
+    let disable_all = no_tools.as_ref().is_some_and(Vec::is_empty);
+
+    if enable_all && disable_all {
+        return Err("cannot pass both --no-tools and --tools without arguments".into());
+    }
+
+    let existing_tools = merged_config.map_or(&partial.conversation.tools.tools, |v| {
+        &v.conversation.tools.tools
+    });
+
+    let missing = tools
+        .iter()
+        .flatten()
+        .chain(no_tools.iter().flatten())
+        .filter(|name| !existing_tools.contains_key(**name))
+        .collect::<HashSet<_>>();
+
+    if missing.len() == 1 {
+        return Err(ToolError::NotFound {
+            name: missing.iter().next().unwrap().to_string(),
+        }
+        .into());
+    } else if !missing.is_empty() {
+        return Err(ToolError::NotFoundN {
+            names: missing.into_iter().map(ToString::to_string).collect(),
+        }
+        .into());
+    }
+
+    // Disable all first, if all tools are to be disabled.
+    if disable_all {
+        partial
+            .conversation
+            .tools
+            .tools
+            .iter_mut()
+            .for_each(|(_, v)| v.enable = Some(false));
+    // Enable all tools first if all tools are to be enabled.
+    } else if enable_all {
+        partial
+            .conversation
+            .tools
+            .tools
+            .iter_mut()
+            .for_each(|(_, v)| v.enable = Some(true));
+    }
+
+    // Then enable individual tools.
+    if let Some(tools) = tools {
+        partial
+            .conversation
+            .tools
+            .tools
+            .iter_mut()
+            .filter(|(name, _)| tools.iter().any(|v| v == *name))
+            .for_each(|(_, v)| v.enable = Some(true));
+    }
+
+    // And finally disable individual tools.
+    if let Some(no_tools) = no_tools {
+        partial
+            .conversation
+            .tools
+            .tools
+            .iter_mut()
+            .filter(|(name, _)| no_tools.iter().any(|v| v == name))
+            .for_each(|(_, v)| v.enable = Some(false));
+    }
+
+    Ok(())
+}
+
+/// Apply the CLI tool use configuration to the partial configuration.
+///
+/// NOTE: This has to run *after* `apply_enable_tools` because it will return an
+/// error if the tool of choice is not enabled.
+fn apply_tool_use(
+    partial: &mut PartialAppConfig,
+    tool_choice: Option<Option<&str>>,
+    no_tool_choice: bool,
+) -> BoxedResult<()> {
+    if no_tool_choice || matches!(tool_choice, Some(Some("false"))) {
+        partial.assistant.tool_choice = Some(ToolChoice::None);
+        return Ok(());
+    }
+
+    let Some(tool) = tool_choice else {
+        return Ok(());
+    };
+
+    partial.assistant.tool_choice = match tool {
+        None | Some("true") => Some(ToolChoice::Required),
+        Some(v) => {
+            if !partial
+                .conversation
+                .tools
+                .tools
+                .iter()
+                .filter(|(_, cfg)| cfg.enable.is_some_and(|v| v))
+                .any(|(name, _)| name == v)
+            {
+                return Err(format!("tool choice '{v}' does not match any enabled tools").into());
+            }
+
+            Some(ToolChoice::Function(v.to_owned()))
+        }
+    };
+
+    Ok(())
+}
+
+/// Apply the CLI attachments to the partial configuration.
+fn apply_attachments(partial: &mut PartialAppConfig, attachments: &[Url]) {
+    if attachments.is_empty() {
+        return;
+    }
+
+    partial
+        .conversation
+        .attachments
+        .extend(attachments.iter().cloned().map(Into::into));
+}
+
+/// Apply the CLI reasoning configuration to the partial configuration.
+fn apply_reasoning(
+    partial: &mut PartialAppConfig,
+    reasoning: Option<&ReasoningConfig>,
+    no_reasoning: bool,
+) {
+    if no_reasoning {
+        partial.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Off);
+        return;
+    }
+
+    let Some(reasoning) = reasoning else {
+        return;
+    };
+
+    partial.assistant.model.parameters.reasoning = Some(match reasoning {
+        ReasoningConfig::Off => PartialReasoningConfig::Off,
+        ReasoningConfig::Auto => PartialReasoningConfig::Auto,
+        ReasoningConfig::Custom(custom) => PartialCustomReasoningConfig {
+            effort: Some(custom.effort),
+            exclude: Some(custom.exclude),
+        }
+        .into(),
+    });
 }
 
 /// Clean up empty queries.
@@ -777,21 +1202,20 @@ async fn handle_structured_output(
     schema: schemars::Schema,
 ) -> Result<Vec<ConversationEvent>> {
     let model_id = &ctx
-        .config
+        .config()
         .assistant
         .model
         .id
-        .clone()
-        .ok_or(jp_model::Error::MissingId)?;
+        .finalize(&ctx.config().providers.llm.aliases)?;
 
-    let parameters = &ctx.config.assistant.model.parameters;
-    let provider = provider::get_provider(model_id.provider(), &ctx.config.assistant.provider)?;
+    let parameters = &ctx.config().assistant.model.parameters;
+    let provider = provider::get_provider(model_id.provider, &ctx.config().providers.llm)?;
     let message = thread.message.clone();
-    let query =
-        StructuredQuery::new(schema, thread).map_err(|err| Error::Schema(err.to_string()))?;
+    let query = StructuredQuery::new(schema, thread);
 
+    let model = provider.model_details(&model_id.name).await?;
     let value = provider
-        .structured_completion(model_id, parameters, query)
+        .structured_completion(&model, parameters, query)
         .await?;
     let content = if ctx.term.is_tty {
         serde_json::to_string_pretty(&value)?
@@ -800,8 +1224,8 @@ async fn handle_structured_output(
     };
 
     Ok(vec![
-        ConversationEvent::new(message),
-        ConversationEvent::new(AssistantMessage::from(content)),
+        ConversationEvent::now(message),
+        ConversationEvent::now(AssistantMessage::from((model_id.provider, content))),
     ])
 }
 
@@ -869,29 +1293,184 @@ impl Line {
     }
 }
 
-async fn list_enabled_tools(ctx: &Ctx) -> Result<Vec<Tool>> {
-    let mut tools = vec![];
-    let all_tools = ctx.mcp_client.list_tools().await?;
-    for tool in all_tools {
-        let tool_id = McpToolId::new(&*tool.name);
-        let server_id = ctx.mcp_client.get_tool_server_id(&tool_id).await?;
-        let server_cfg = ctx
-            .config
-            .mcp
-            .get_server(&ServerId::new(server_id.as_str()));
+#[cfg(test)]
+mod tests {
+    use indexmap::IndexMap;
+    use jp_config::conversation::tool::PartialToolConfig;
 
-        if !server_cfg.enable {
-            continue;
-        }
+    use super::*;
 
-        let tool_cfg = server_cfg.get_tool(&ToolId::new(tool.name.as_ref()));
+    #[test]
+    #[expect(clippy::too_many_lines)]
+    fn test_query_tools_and_no_tools() {
+        // Create a partial configuration with a few tools.
+        let mut partial = PartialAppConfig::default();
+        partial.conversation.tools.tools = IndexMap::from_iter([
+            ("implicitly_enabled_tool".into(), PartialToolConfig {
+                enable: None,
+                ..Default::default()
+            }),
+            ("explicitly_enabled_tool".into(), PartialToolConfig {
+                enable: Some(true),
+                ..Default::default()
+            }),
+            ("explicitly_disabled_tool".into(), PartialToolConfig {
+                enable: Some(false),
+                ..Default::default()
+            }),
+        ]);
 
-        if !tool_cfg.enable {
-            continue;
-        }
+        // Keep all tools as-is.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                no_tools: vec![],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
 
-        tools.push(tool);
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            None,
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(true)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(false)
+        );
+
+        // Disable one tool.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                no_tools: vec![Some("implicitly_enabled_tool".into())],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            Some(false),
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(true)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(false)
+        );
+
+        // Enable one tool.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                tools: vec![Some("explicitly_disabled_tool".into())],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            Some(false),
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(true)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(true)
+        );
+
+        // Enable all tools.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                tools: vec![None],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            Some(true),
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(true)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(true)
+        );
+
+        // Disable all tools.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                no_tools: vec![None],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            Some(false),
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(false)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(false)
+        );
+
+        // Enable multiple tools.
+        partial = IntoPartialAppConfig::apply_cli_config(
+            &Query {
+                tools: vec![
+                    Some("explicitly_disabled_tool".into()),
+                    Some("explicitly_enabled_tool".into()),
+                ],
+                ..Default::default()
+            },
+            None,
+            partial,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
+            Some(false),
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
+            Some(true)
+        );
+        assert_eq!(
+            partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
+            Some(true)
+        );
     }
-
-    Ok(tools)
 }

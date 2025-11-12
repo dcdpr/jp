@@ -1,11 +1,17 @@
 use std::error::Error;
 
 use async_trait::async_trait;
-use jp_config::{assistant::Assistant, Config};
-use jp_conversation::{event::ConversationEvent, AssistantMessage, ConversationId, UserMessage};
-use jp_llm::{provider, structured_completion};
-use jp_model::ModelId;
-use jp_query::structured::conversation_titles;
+use jp_config::{
+    AppConfig,
+    model::{
+        ModelConfig,
+        id::ModelIdConfig,
+        parameters::{CustomReasoningConfig, ParametersConfig, ReasoningEffort},
+    },
+    providers::llm::LlmProviderConfig,
+};
+use jp_conversation::{ConversationId, UserMessage, event::ConversationEvent};
+use jp_llm::{provider, structured};
 use jp_workspace::Workspace;
 use tokio_util::sync::CancellationToken;
 use tracing::{trace, warn};
@@ -15,8 +21,9 @@ use crate::Task;
 #[derive(Debug)]
 pub struct TitleGeneratorTask {
     pub conversation_id: ConversationId,
-    pub model_id: ModelId,
-    pub assistant: Assistant,
+    pub model_id: ModelIdConfig,
+    pub parameters: ParametersConfig,
+    pub providers: LlmProviderConfig,
     pub events: Vec<ConversationEvent>,
     pub title: Option<String>,
 }
@@ -24,27 +31,47 @@ pub struct TitleGeneratorTask {
 impl TitleGeneratorTask {
     pub fn new(
         conversation_id: ConversationId,
-        config: &Config,
-        workspace: &Workspace,
+        mut events: Vec<ConversationEvent>,
+        config: &AppConfig,
         query: Option<String>,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let mut events = workspace.get_events(&conversation_id).to_vec();
         if let Some(query) = query {
-            events.push(ConversationEvent::new(UserMessage::Query { query }));
-            events.push(ConversationEvent::new(AssistantMessage::default()));
+            events.push(ConversationEvent::now(UserMessage::Query { query }));
         }
 
-        let model_id = config
-            .assistant
+        // Prefer the title generation model id, otherwise use the assistant
+        // model id.
+        let mut model = config
+            .conversation
+            .title
+            .generate
             .model
-            .id
             .clone()
-            .ok_or(jp_model::Error::MissingId)?;
+            .unwrap_or_else(|| ModelConfig {
+                id: config.assistant.model.id.clone(),
+                parameters: ParametersConfig::default(),
+            });
+
+        // Get the model ID from the model configuration.
+        let model_id = model.id.finalize(&config.providers.llm.aliases)?;
+
+        // If reasoning is explicitly enabled for title generation, use it,
+        // otherwise limit it to
+        if model.parameters.reasoning.is_none() {
+            model.parameters.reasoning = Some(
+                CustomReasoningConfig {
+                    effort: ReasoningEffort::Low,
+                    exclude: true,
+                }
+                .into(),
+            );
+        }
 
         Ok(Self {
             conversation_id,
             model_id,
-            assistant: config.assistant.clone(),
+            parameters: model.parameters,
+            providers: config.providers.llm.clone(),
             events,
             title: None,
         })
@@ -53,15 +80,11 @@ impl TitleGeneratorTask {
     async fn update_title(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!(conversation_id = %self.conversation_id, "Updating conversation title.");
 
-        let parameters = &self.assistant.model.parameters;
-        let provider_config = &self.assistant.provider;
-        let model_id = &self.model_id;
-        let provider_id = model_id.provider();
-
-        let provider = provider::get_provider(provider_id, provider_config)?;
-        let query = conversation_titles(1, self.events.clone(), &[])?;
-        let titles: Vec<String> =
-            structured_completion(provider.as_ref(), model_id, parameters, query).await?;
+        let provider = provider::get_provider(self.model_id.provider, &self.providers)?;
+        let query = structured::titles::titles(1, self.events.clone(), &[])?;
+        let titles: Vec<_> =
+            structured::completion(provider.as_ref(), &self.model_id, &self.parameters, query)
+                .await?;
 
         trace!(titles = ?titles, "Received conversation titles.");
         if let Some(title) = titles.into_iter().next() {
@@ -83,18 +106,22 @@ impl Task for TitleGeneratorTask {
         token: CancellationToken,
     ) -> Result<Box<dyn Task>, Box<dyn Error + Send + Sync>> {
         let id = self.conversation_id;
-        tokio::select! {
-            () = token.cancelled() => {
+        jp_macro::select!(
+            token.cancelled(),
+            |_cancel| {
                 trace!(conversation_id = %id, "Title generator task cancelled.");
-            }
-            result = self.update_title() => match result {
-                Ok(()) => trace!(conversation_id = %id, "Title generator task completed."),
-                Err(error) => {
-                    warn!(?error, conversation_id = %id, "Title generator task failed.");
-                    return Err(error)
+            },
+            self.update_title(),
+            |result| {
+                match result {
+                    Ok(()) => trace!(conversation_id = %id, "Title generator task completed."),
+                    Err(error) => {
+                        warn!(?error, conversation_id = %id, "Title generator task failed.");
+                        return Err(error);
+                    }
                 }
             }
-        };
+        );
 
         Ok(self)
     }

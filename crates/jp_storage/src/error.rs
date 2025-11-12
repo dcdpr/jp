@@ -14,7 +14,7 @@ pub enum Error {
     Conversation(#[from] jp_conversation::Error),
 
     #[error("Config error: {0}")]
-    Config(#[from] jp_config::Error),
+    Config(#[from] jp_config::error::Error),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

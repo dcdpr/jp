@@ -1,11 +1,12 @@
 use std::io::{self, IsTerminal as _};
 
-use jp_config::{Config, PartialConfig};
-use jp_mcp::{config::McpServer, server::embedded::EmbeddedServer};
+use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
+use jp_mcp::id::{McpServerId, McpToolId};
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
+use tokio::runtime::{Handle, Runtime};
 
-use crate::{Globals, Result};
+use crate::{Globals, Result, signals::SignalPair};
 
 /// Context for the CLI application
 pub(crate) struct Ctx {
@@ -13,7 +14,7 @@ pub(crate) struct Ctx {
     pub(crate) workspace: Workspace,
 
     /// Merged file/CLI configuration.
-    pub(crate) config: Config,
+    config: AppConfig,
 
     /// Global CLI arguments.
     pub(crate) term: Term,
@@ -22,6 +23,10 @@ pub(crate) struct Ctx {
     pub(crate) mcp_client: jp_mcp::Client,
 
     pub(crate) task_handler: jp_task::TaskHandler,
+
+    pub(crate) signals: SignalPair,
+
+    runtime: Runtime,
 }
 
 pub(crate) struct Term {
@@ -38,14 +43,13 @@ pub(crate) struct Term {
 
 impl Ctx {
     /// Create a new context with the given workspace
-    pub(crate) fn new(workspace: Workspace, args: Globals, config: Config) -> Self {
-        let tools = workspace
-            .mcp_tools()
-            .cloned()
-            .map(|v| (v.id.clone(), v))
-            .collect();
-
-        let server = EmbeddedServer::new(tools, workspace.root.clone());
+    pub(crate) fn new(
+        workspace: Workspace,
+        runtime: Runtime,
+        args: Globals,
+        config: AppConfig,
+    ) -> Self {
+        let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
         Self {
             workspace,
@@ -54,43 +58,95 @@ impl Ctx {
                 args,
                 is_tty: io::stdout().is_terminal(),
             },
-            mcp_client: jp_mcp::Client::default().with_embedded_server(server),
+            mcp_client,
             task_handler: TaskHandler::default(),
+            signals: SignalPair::new(&runtime),
+            runtime,
         }
+    }
+
+    /// Get immutable access to the configuration.
+    ///
+    /// NOTE: There is *NO* mutable access to the configuration *after*
+    /// configuration initialization. This is to simplify the cognetive
+    /// complexity of configuration lifecycle management throughout the lifetime
+    /// of the CLI application.
+    ///
+    /// Any changes to the configuration should be done using the "partial
+    /// configuration" API in [`jp_config`] *before* constructing the final
+    /// [`AppConfig`] object.
+    pub(crate) fn config(&self) -> &AppConfig {
+        &self.config
+    }
+
+    /// Get a runtime handle.
+    pub(crate) fn handle(&self) -> &Handle {
+        self.runtime.handle()
     }
 
     /// Activate and deactivate MCP servers based on the active conversation
     /// context.
     pub(crate) async fn configure_active_mcp_servers(&mut self) -> Result<()> {
-        let servers = self
-            .config
-            .conversation
-            .mcp_servers
-            .clone()
-            .iter()
-            .filter_map(|id| self.workspace.get_mcp_server(id).cloned())
-            .collect::<Vec<McpServer>>();
+        let mut server_ids = vec![];
 
-        self.mcp_client.handle_servers(&servers).await?;
+        for (name, cfg) in self.config.conversation.tools.iter() {
+            if !cfg.enable() {
+                continue;
+            }
+
+            let ToolSource::Mcp { server, tool } = &cfg.source() else {
+                continue;
+            };
+
+            let tool_name = tool.as_deref().unwrap_or(name);
+            let server_id = match server.as_deref() {
+                Some(server) => McpServerId::new(server),
+                None => self
+                    .mcp_client
+                    .get_tool_server_id(&McpToolId::new(tool_name), None)
+                    .await
+                    .cloned()?,
+            };
+
+            server_ids.push(server_id);
+        }
+
+        self.mcp_client.run_services(&server_ids).await?;
 
         Ok(())
     }
 }
 
-/// A trait for converting any type into a partial [`Config`].
-pub(crate) trait IntoPartialConfig {
+/// A trait for converting any type into a partial [`AppConfig`].
+pub(crate) trait IntoPartialAppConfig {
     fn apply_cli_config(
         &self,
         workspace: Option<&Workspace>,
-        partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>>;
+        partial: PartialAppConfig,
+
+        // Whenever called the `partial` argument might be empty, or contain
+        // any subset of the full configuration. This might prevent validating
+        // certain fields before applying them. In these situations, the
+        // `merged_config` argument can be used to provide the full
+        // configuration, and the partial configuration can be validated against
+        // it.
+        merged_config: Option<&PartialAppConfig>,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>>;
 
     #[expect(unused_variables)]
     fn apply_conversation_config(
         &self,
         workspace: Option<&Workspace>,
-        partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        partial: PartialAppConfig,
+
+        // Whenever called the `partial` argument might be empty, or contain
+        // any subset of the full configuration. This might prevent validating
+        // certain fields before applying them. In these situations, the
+        // `merged_config` argument can be used to provide the full
+        // configuration, and the partial configuration can be validated against
+        // it.
+        merged_config: Option<&PartialAppConfig>,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         Ok(partial)
     }
 }

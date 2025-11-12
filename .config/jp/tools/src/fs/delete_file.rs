@@ -1,12 +1,16 @@
 use std::{fs, path::PathBuf};
 
+use jp_tool::{AnswerType, Outcome, Question};
+use serde_json::{Map, Value};
+
 use super::utils::is_file_dirty;
 use crate::Error;
 
 pub(crate) async fn fs_delete_file(
     root: PathBuf,
+    answers: &Map<String, Value>,
     path: String,
-) -> std::result::Result<String, Error> {
+) -> std::result::Result<Outcome, Error> {
     let p = PathBuf::from(&path);
 
     if p.is_absolute() {
@@ -31,7 +35,22 @@ pub(crate) async fn fs_delete_file(
     };
 
     if is_file_dirty(&root, &p)? {
-        return Err("File has uncommitted changes. Please commit or discard first.".into());
+        match answers.get("delete_dirty_file").and_then(Value::as_bool) {
+            Some(true) => {}
+            Some(false) => {
+                return Err("File has uncommitted changes. Please stage or discard first.".into());
+            }
+            None => {
+                return Ok(Outcome::NeedsInput {
+                    question: Question {
+                        id: "delete_dirty_file".to_string(),
+                        text: format!("File '{path}' has uncommitted changes. Delete anyway?"),
+                        answer_type: AnswerType::Boolean,
+                        default: Some(Value::Bool(false)),
+                    },
+                });
+            }
+        }
     }
 
     fs::remove_file(&absolute_path)?;
@@ -42,5 +61,5 @@ pub(crate) async fn fs_delete_file(
         msg.push_str(" Removed empty parent directory.");
     }
 
-    Ok(msg)
+    Ok(msg.into())
 }

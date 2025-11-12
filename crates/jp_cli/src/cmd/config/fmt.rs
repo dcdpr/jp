@@ -1,9 +1,9 @@
 use std::fs;
 
-use jp_config::PartialConfig;
+use jp_config::PartialAppConfig;
 
 use super::Target;
-use crate::{cmd, ctx::Ctx, Error, Output, Success};
+use crate::{Error, Output, Success, cmd, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Fmt {
@@ -98,7 +98,7 @@ impl Fmt {
             Err(error) => return Err(Box::new(error)),
         };
 
-        config.format_content::<PartialConfig>()?;
+        config.format_content::<PartialAppConfig>()?;
 
         let curr = fs::read_to_string(&config.path)?;
         if self.check {

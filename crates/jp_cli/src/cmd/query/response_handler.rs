@@ -1,12 +1,12 @@
 use std::{fs, path::PathBuf, time::Duration};
 
 use crossterm::style::{Color, Stylize as _};
-use jp_config::style::LinkStyle;
+use jp_config::style::{LinkStyle, StyleConfig};
 use jp_term::{code, osc::hyperlink, stdout};
 use termimad::FmtText;
 
 use super::{Line, LineVariant, RenderMode};
-use crate::{Ctx, Error};
+use crate::Error;
 
 #[derive(Debug, Default)]
 pub(super) struct ResponseHandler {
@@ -48,32 +48,56 @@ impl ResponseHandler {
         }
     }
 
-    pub fn handle(&mut self, data: &str, ctx: &Ctx, raw: bool) -> Result<(), Error> {
+    pub fn drain(&mut self, style: &StyleConfig, raw: bool) -> Result<(), Error> {
+        if self.buffer.is_empty() {
+            return Ok(());
+        }
+
+        let line = Line::new(
+            self.buffer.drain(..).collect(),
+            self.in_fenced_code_block,
+            raw,
+        );
+
+        self.handle_inner(line, style)
+    }
+
+    pub fn handle(&mut self, data: &str, style: &StyleConfig, raw: bool) -> Result<(), Error> {
         self.buffer.push_str(data);
 
-        while let Some(Line { content, variant }) = self.get_line(raw) {
-            self.received.push(content);
-
-            let delay = match variant {
-                LineVariant::Code => ctx.config.style.typewriter.code_delay,
-                LineVariant::Raw => Duration::ZERO,
-                _ => ctx.config.style.typewriter.text_delay,
-            };
-
-            let lines = self.handle_line(&variant, ctx)?;
-
-            if !matches!(self.render_mode, RenderMode::Buffered) {
-                stdout::typewriter(&lines.join("\n"), delay)?;
-            }
-
-            self.parsed.extend(lines);
+        while let Some(line) = self.get_line(raw) {
+            self.handle_inner(line, style)?;
         }
 
         Ok(())
     }
 
+    fn handle_inner(&mut self, line: Line, style: &StyleConfig) -> Result<(), Error> {
+        let Line { content, variant } = line;
+        self.received.push(content);
+
+        let delay = match variant {
+            LineVariant::Code => style.typewriter.code_delay.into(),
+            LineVariant::Raw => Duration::ZERO,
+            _ => style.typewriter.text_delay.into(),
+        };
+
+        let lines = self.handle_line(&variant, style)?;
+        if !matches!(self.render_mode, RenderMode::Buffered) {
+            stdout::typewriter(&lines.join("\n"), delay)?;
+        }
+
+        self.parsed.extend(lines);
+
+        Ok(())
+    }
+
     #[expect(clippy::too_many_lines)]
-    fn handle_line(&mut self, variant: &LineVariant, ctx: &Ctx) -> Result<Vec<String>, Error> {
+    fn handle_line(
+        &mut self,
+        variant: &LineVariant,
+        style: &StyleConfig,
+    ) -> Result<Vec<String>, Error> {
         let Some(content) = self.received.last().map(String::as_str) else {
             return Ok(vec![]);
         };
@@ -87,12 +111,7 @@ impl ResponseHandler {
                 let mut buf = String::new();
                 let config = code::Config {
                     language: self.code_buffer.0.clone(),
-                    theme: ctx
-                        .config
-                        .style
-                        .code
-                        .color
-                        .then(|| ctx.config.style.code.theme.clone()),
+                    theme: style.code.color.then(|| style.code.theme.clone()),
                 };
 
                 if !code::format(content, &mut buf, &config)? {
@@ -104,7 +123,7 @@ impl ResponseHandler {
                     code::format(content, &mut buf, &config)?;
                 }
 
-                if ctx.config.style.code.line_numbers {
+                if style.code.line_numbers {
                     buf.insert_str(
                         0,
                         &format!("{:2} │ ", self.code_line)
@@ -129,14 +148,10 @@ impl ResponseHandler {
                 let path = self.persist_code_block()?;
                 let mut links = vec![];
 
-                match ctx.config.style.code.file_link {
+                match style.code.file_link {
                     LinkStyle::Off => {}
                     LinkStyle::Full => {
-                        links.push(format!(
-                            "{}see: file://{}",
-                            " ".repeat(*indent),
-                            path.display()
-                        ));
+                        links.push(format!("{}see: {}", " ".repeat(*indent), path.display()));
                     }
                     LinkStyle::Osc8 => {
                         links.push(format!(
@@ -150,7 +165,7 @@ impl ResponseHandler {
                     }
                 }
 
-                match ctx.config.style.code.copy_link {
+                match style.code.copy_link {
                     LinkStyle::Off => {}
                     LinkStyle::Full => {
                         links.push(format!(

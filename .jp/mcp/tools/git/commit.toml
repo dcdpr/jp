@@ -1,0 +1,18 @@
+[conversation.tools.git_commit]
+enable = false
+run = "unattended"
+style.inline_results = "full"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+description = """
+Commit the staged changes to the local git repository using the provided
+message.
+"""
+
+[conversation.tools.git_commit.parameters.message]
+type = "string"
+required = true
+description = """
+The commit message to use. Can be multiline.
+"""

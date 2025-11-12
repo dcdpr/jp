@@ -1,12 +1,13 @@
 use std::fs;
 
 use jp_config::{
+    PartialAppConfig,
     assignment::{AssignKeyValue as _, KvAssignment},
-    PartialConfig,
 };
+use jp_conversation::event::conversation_config;
 
 use super::TargetWithConversation;
-use crate::{ctx::Ctx, Error, Output};
+use crate::{Output, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Set {
@@ -45,11 +46,10 @@ impl Set {
                 None => ctx.workspace.active_conversation_id(),
             };
 
-            ctx.workspace
-                .get_conversation_mut(&id)
-                .ok_or(Error::NotFound("Conversation", id.to_string()))?
-                .config_mut()
-                .assign(assignment)?;
+            let events = ctx.workspace.get_events(&id);
+            let mut config = conversation_config(events);
+            config.assign(assignment)?;
+            ctx.workspace.add_event(id, config);
 
             return Ok(format!(
                 "Set configuration value for {} in conversation {id:?}",
@@ -62,7 +62,7 @@ impl Set {
             unreachable!("target is either a path, or a conversation")
         };
 
-        config.edit_content(|partial: &mut PartialConfig| {
+        config.edit_content(|partial: &mut PartialAppConfig| {
             partial.assign(assignment)?;
             Ok(())
         })?;

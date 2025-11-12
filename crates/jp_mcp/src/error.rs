@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::config::McpServerId;
+use crate::id::McpServerId;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -11,9 +11,6 @@ pub enum Error {
 
     #[error("MCP error: {0}")]
     Mcp(#[from] rmcp::Error),
-
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
 
     #[error("Timeout error: {0}")]
     Timeout(#[from] tokio::time::error::Elapsed),
@@ -30,12 +27,43 @@ pub enum Error {
     #[error("Duplicate tool configured: {0}")]
     DuplicateTool(String),
 
-    #[error("Checksum mismatch for tool: {tool} ({}), expected {expected}, got {got}", path.display())]
+    #[error("Missing environment variable: {0}")]
+    MissingEnv(#[from] std::env::VarError),
+
+    #[error("Checksum mismatch for server: {server} ({}), expected {expected}, got {got}", path.display())]
     ChecksumMismatch {
-        tool: String,
+        server: String,
         path: PathBuf,
         expected: String,
         got: String,
+    },
+
+    #[error("Cannot spawn process: {cmd}, error: {error}")]
+    CannotSpawnProcess {
+        cmd: String,
+        #[source]
+        error: std::io::Error,
+    },
+
+    #[error("Process error: {cmd}, error: {error}")]
+    ProcessError {
+        cmd: String,
+        #[source]
+        error: std::io::Error,
+    },
+
+    #[error("Cannot read file: {path}, error: {error}")]
+    CannotReadFile {
+        path: std::path::PathBuf,
+        #[source]
+        error: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    #[error("Cannot locate binary: {path}, error: {error}")]
+    CannotLocateBinary {
+        path: std::path::PathBuf,
+        #[source]
+        error: Box<dyn std::error::Error + Send + Sync>,
     },
 }
 

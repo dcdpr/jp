@@ -1,11 +1,11 @@
 use jp_attachment::Attachment;
-use jp_config::assistant::Instructions;
+use jp_config::assistant::instructions::InstructionsConfig;
 use serde::Serialize;
 
 use crate::{
+    UserMessage,
     error::{Error, Result},
     event::ConversationEvent,
-    UserMessage,
 };
 
 /// A wrapper for multiple messages, with convenience methods for adding
@@ -13,7 +13,7 @@ use crate::{
 #[derive(Debug, Default, Clone)]
 pub struct ThreadBuilder {
     pub system_prompt: Option<String>,
-    pub instructions: Vec<Instructions>,
+    pub instructions: Vec<InstructionsConfig>,
     pub attachments: Vec<Attachment>,
     pub history: Vec<ConversationEvent>,
     pub message: Option<UserMessage>,
@@ -27,13 +27,13 @@ impl ThreadBuilder {
     }
 
     #[must_use]
-    pub fn with_instructions(mut self, instructions: Vec<Instructions>) -> Self {
+    pub fn with_instructions(mut self, instructions: Vec<InstructionsConfig>) -> Self {
         self.instructions.extend(instructions);
         self
     }
 
     #[must_use]
-    pub fn with_instruction(mut self, instruction: Instructions) -> Self {
+    pub fn with_instruction(mut self, instruction: InstructionsConfig) -> Self {
         self.instructions.push(instruction);
         self
     }
@@ -80,7 +80,7 @@ impl ThreadBuilder {
 #[derive(Debug, Default, Clone)]
 pub struct Thread {
     pub system_prompt: Option<String>,
-    pub instructions: Vec<Instructions>,
+    pub instructions: Vec<InstructionsConfig>,
     pub attachments: Vec<Attachment>,
     pub history: Vec<ConversationEvent>,
     pub message: UserMessage,

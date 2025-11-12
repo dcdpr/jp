@@ -2,4 +2,17 @@
 source: crates/jp_test/src/mock.rs
 expression: expr
 ---
-"It looks like you're testing out our chat! That's perfectly fine - I'm here to help answer any questions or have a conversation with you. Is there anything specific you'd like to talk about, or are you just looking for some friendly chatter?"
+[
+    Ok(
+        ChatChunk(
+            Content(
+                "It looks like you sent a test message! That's perfectly fine. If you need help with anything or just want to chat, I'm here for you. Otherwise, feel free to send another test message (or not!)",
+            ),
+        ),
+    ),
+    Ok(
+        EndOfStream(
+            Completed,
+        ),
+    ),
+]

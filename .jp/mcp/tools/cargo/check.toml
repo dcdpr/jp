@@ -1,7 +1,12 @@
-inherit = "cargo"
+[conversation.tools.cargo_check]
+enable = false
+run = "unattended"
+style.inline_results = "off"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
 description = "Run `cargo check` for the given package, validating if the code compiles."
 
-[[properties]]
-name = "package"
+[conversation.tools.cargo_check.parameters.package]
 description = "Package to run check for, if unspecified, all workspace packages will be checked."
 type = "string"

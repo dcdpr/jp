@@ -1,64 +1,98 @@
-use std::collections::HashMap;
+//! Template configuration for Jean-Pierre.
 
-use confique::Config as Confique;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use schematic::Config;
+use serde_json::{Map, Value};
 
 use crate::{
-    assignment::{set_error, AssignKeyValue, KvAssignment, KvValue},
-    error::Result,
-    serde::is_none_or_default,
+    BoxedError,
+    assignment::{AssignKeyValue, KvAssignment, KvValue, missing_key, type_error},
+    delta::{PartialConfigDelta, delta_opt},
+    partial::{ToPartial, partial_opt},
 };
 
 /// Template configuration.
-#[derive(Debug, Clone, Default, PartialEq, Confique, Serialize, Deserialize)]
-#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
-#[config(partial_attr(serde(deny_unknown_fields)))]
-pub struct Template {
+#[derive(Debug, Config)]
+#[config(rename_all = "snake_case")]
+pub struct TemplateConfig {
     /// Template variable values used to render query templates.
-    #[config(default = {}, partial_attr(serde(skip_serializing_if = "is_none_or_default")))]
-    pub values: HashMap<String, Value>,
+    // #[setting(nested)] TODO
+    pub values: Map<String, Value>,
 }
 
-impl AssignKeyValue for <Template as Confique>::Partial {
-    fn assign(&mut self, mut kv: KvAssignment) -> Result<()> {
-        // let KvAssignment { key, value, .. } = kv;
+impl AssignKeyValue for PartialTemplateConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> Result<(), BoxedError> {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            _ if kv.p("values") => {
+                let remaining_key = kv.key_string();
+                if remaining_key.is_empty() {
+                    return type_error(kv.key(), &kv.value, &["object"]).map_err(Into::into);
+                }
 
-        let k = kv.key().as_str().to_owned();
-        match k.as_str() {
-            _ if kv.trim_prefix("values") => {
-                let mut parts = kv.key().segments().peekable();
-                let mut template_values = serde_json::Map::new();
-                let mut values = &mut template_values;
+                let values = self.values.get_or_insert_default();
+                let value = match kv.value {
+                    KvValue::Json(v) => v,
+                    KvValue::String(s) => Value::String(s),
+                };
 
-                while let Some(segment) = parts.next() {
+                let mut current = values;
+                let mut parts = remaining_key.split('.').peekable();
+                while let Some(part) = parts.next() {
                     if parts.peek().is_none() {
-                        values.insert(segment.to_owned(), match kv.value().clone() {
-                            KvValue::Json(v) => v,
-                            KvValue::String(v) => serde_json::Value::String(v),
-                        });
+                        current.insert(part.to_string(), value);
                         break;
                     }
 
-                    let next_val = values
-                        .entry(segment.to_owned())
-                        .and_modify(|v| match v {
-                            Value::Object(_) => {}
-                            v => *v = serde_json::json!({}),
-                        })
-                        .or_insert(serde_json::json!({}));
+                    let entry = current
+                        .entry(part.to_string())
+                        .or_insert_with(|| Value::Object(serde_json::Map::new()));
 
-                    values = match next_val {
-                        Value::Object(map) => map,
-                        _ => unreachable!(),
-                    };
+                    if let Value::Object(obj) = entry {
+                        current = obj;
+                    } else {
+                        return Err("Cannot set nested value on non-object".into());
+                    }
                 }
-
-                self.values.get_or_insert_default().extend(template_values);
             }
-            _ => return Err(set_error(kv.key())),
+            _ => return missing_key(&kv),
         }
 
         Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialTemplateConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            values: delta_opt(self.values.as_ref(), next.values),
+        }
+    }
+}
+
+impl ToPartial for TemplateConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            values: partial_opt(&self.values, defaults.values),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::assignment::KvAssignment;
+
+    #[test]
+    fn test_template_config_values() {
+        let mut p = PartialTemplateConfig::default();
+
+        let kv = KvAssignment::try_from_cli("values.name", "Homer").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(
+            p.values.as_ref().unwrap().get("name"),
+            Some(&Value::String("Homer".to_string()))
+        );
     }
 }

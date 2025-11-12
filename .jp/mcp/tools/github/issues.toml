@@ -1,8 +1,13 @@
-inherit = "cargo"
+[conversation.tools.github_issues]
+enable = false
+run = "unattended"
+style.inline_results = "off"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
 description = "Find one or more issues in the project's GitHub repository."
 
-[[properties]]
-name = "number"
+[conversation.tools.github_issues.parameters.number]
 type = "integer"
 description = """
 Issue number to get information about.

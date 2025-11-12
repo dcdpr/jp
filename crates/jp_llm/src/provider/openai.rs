@@ -1,38 +1,45 @@
 use std::env;
 
-use async_stream::stream;
+use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
+use indexmap::IndexMap;
 use jp_config::{
-    assistant,
-    model::parameters::{Parameters, Reasoning, ReasoningEffort},
+    assistant::tool_choice::ToolChoice,
+    conversation::tool::ToolParameterConfig,
+    model::{
+        id::{Name, ProviderId},
+        parameters::{CustomReasoningConfig, ParametersConfig, ReasoningEffort},
+    },
+    providers::llm::openai::OpenaiConfig,
 };
 use jp_conversation::{
+    AssistantMessage, UserMessage,
     event::{ConversationEvent, EventKind},
     thread::{Document, Documents, Thread},
-    AssistantMessage, UserMessage,
 };
-use jp_mcp::tool;
-use jp_model::{ModelId, ProviderId};
-use jp_query::query::ChatQuery;
 use openai_responses::{
-    types::{self, Include, Request, SummaryConfig},
     Client, CreateError, StreamError,
+    types::{self, Include, Request, SummaryConfig},
 };
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::Deserialize;
-use serde_json::Value;
-use time::{macros::date, OffsetDateTime};
+use serde_json::{Map, Value};
+use time::{OffsetDateTime, macros::date};
 use tracing::{debug, trace, warn};
 
 use super::{
-    handle_delta, Delta, Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply,
-    StreamEvent,
+    Delta, Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply, StreamEvent,
 };
 use crate::{
     error::{Error, Result},
-    provider::AccumulationState,
+    provider::ModelDeprecation,
+    query::ChatQuery,
+    stream::{accumulator::Accumulator, event::StreamEndReason},
+    tool::ToolDefinition,
 };
+
+static PROVIDER: ProviderId = ProviderId::Openai;
 
 #[derive(Debug, Clone)]
 pub struct Openai {
@@ -41,56 +48,22 @@ pub struct Openai {
     base_url: String,
 }
 
-impl Openai {
-    async fn create_request(
-        &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
-        query: ChatQuery,
-    ) -> Result<Request> {
-        let ChatQuery {
-            thread,
-            tools,
-            tool_choice,
-            tool_call_strict_mode,
-        } = query;
-
-        let model_details = self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.slug == model_id.slug());
-
-        let supports_reasoning = model_details
-            .as_ref()
-            .is_some_and(|d| d.reasoning.is_some());
-
-        let request = Request {
-            model: types::Model::Other(model_id.slug().to_owned()),
-            input: convert_thread(thread, supports_reasoning)?,
-            include: supports_reasoning.then_some(vec![Include::ReasoningEncryptedContent]),
-            store: Some(false),
-            tool_choice: Some(convert_tool_choice(tool_choice)),
-            tools: Some(convert_tools(tools, tool_call_strict_mode)),
-            temperature: parameters.temperature,
-            reasoning: parameters
-                .reasoning
-                .map(|r| convert_reasoning(r, model_details.and_then(|d| d.max_output_tokens))),
-            max_output_tokens: parameters.max_tokens.map(Into::into),
-            truncation: Some(types::Truncation::Auto),
-            top_p: parameters.top_p,
-            ..Default::default()
-        };
-
-        Ok(request)
-    }
-}
-
 #[async_trait]
 impl Provider for Openai {
+    async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
+        self.reqwest_client
+            .get(format!("{}/v1/models/{}", self.base_url, name))
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<ModelResponse>()
+            .await
+            .map_err(Into::into)
+            .and_then(map_model)
+    }
+
     async fn models(&self) -> Result<Vec<ModelDetails>> {
-        Ok(self
-            .reqwest_client
+        self.reqwest_client
             .get(format!("{}/v1/models", self.base_url))
             .send()
             .await?
@@ -100,42 +73,45 @@ impl Provider for Openai {
             .data
             .into_iter()
             .map(map_model)
-            .collect())
+            .collect::<Result<_>>()
     }
 
     async fn chat_completion(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model: &ModelDetails,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<Reply> {
         let client = self.client.clone();
-        let request = self.create_request(model_id, parameters, query).await?;
+        let request = create_request(model, parameters, query)?;
         client
             .create(request)
             .await?
             .map_err(Into::into)
             .and_then(map_response)
-            .map(Reply)
+            .map(|events| Reply {
+                provider: PROVIDER,
+                events,
+            })
     }
 
     async fn chat_completion_stream(
         &self,
-        model_id: &ModelId,
-        parameters: &Parameters,
+        model: &ModelDetails,
+        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = self.create_request(model_id, parameters, query).await?;
-        let stream = Box::pin(stream! {
-            let mut current_state = AccumulationState::default();
+        let request = create_request(model, parameters, query)?;
+        let stream = Box::pin(try_stream! {
+            let mut accumulator = Accumulator::new(200);
             let stream = client
                 .stream(request)
                 .or_else(handle_error);
 
             tokio::pin!(stream);
             while let Some(event) = stream.next().await {
-                if let Some(event) = map_event(event?, &mut current_state) {
+                for event in map_event(event?, &mut accumulator)? {
                     yield event;
                 }
             }
@@ -143,6 +119,43 @@ impl Provider for Openai {
 
         Ok(stream)
     }
+}
+
+fn create_request(
+    model: &ModelDetails,
+    parameters: &ParametersConfig,
+    query: ChatQuery,
+) -> Result<Request> {
+    let ChatQuery {
+        thread,
+        tools,
+        tool_choice,
+        tool_call_strict_mode,
+    } = query;
+
+    let reasoning_support = model.reasoning;
+    let supports_reasoning =
+        reasoning_support.is_some_and(|v| matches!(v, ReasoningDetails::Supported { .. }));
+    let reasoning = model.custom_reasoning_config(parameters.reasoning);
+
+    let request = Request {
+        model: types::Model::Other(model.id.name.to_string()),
+        input: convert_thread(thread, supports_reasoning)?,
+        include: supports_reasoning.then_some(vec![Include::ReasoningEncryptedContent]),
+        store: Some(false),
+        tool_choice: Some(convert_tool_choice(tool_choice)),
+        tools: Some(convert_tools(tools, tool_call_strict_mode)),
+        temperature: parameters.temperature,
+        reasoning: reasoning.map(|r| convert_reasoning(r, model.max_output_tokens)),
+        max_output_tokens: parameters.max_tokens.map(Into::into),
+        truncation: Some(types::Truncation::Auto),
+        top_p: parameters.top_p,
+        ..Default::default()
+    };
+
+    trace!(?request, "Sending request to OpenAI.");
+
+    Ok(request)
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,117 +176,228 @@ pub(crate) struct ModelResponse {
 }
 
 #[expect(clippy::too_many_lines)]
-fn map_model(model: ModelResponse) -> ModelDetails {
-    match model.id.as_str() {
+fn map_model(model: ModelResponse) -> Result<ModelDetails> {
+    let details = match model.id.as_str() {
         "o4-mini" | "o4-mini-2025-04-16" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o4-mini".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "o3-mini" | "o3-mini-2025-01-31" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o3-mini".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "o1-mini" | "o1-mini-2024-09-12" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o1-mini".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(65_536),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: o4-mini",
+                Some(date!(2025 - 10 - 27)),
+            )),
+            features: vec![],
         },
         "o3" | "o3-2025-04-16" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o3".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
+        },
+        "o3-pro" | "o3-pro-2025-06-10" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o3-pro".to_owned()),
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "o1" | "o1-2024-12-17" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o1".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "o1-pro" | "o1-pro-2025-03-19" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o1-pro".to_owned()),
             context_window: Some(200_000),
             max_output_tokens: Some(100_000),
-            reasoning: Some(ReasoningDetails::supported()),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-4.1" | "gpt-4.1-2025-04-14" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-4.1".to_owned()),
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-4o" | "gpt-4o-2024-08-06" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-4o".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "chatgpt-4o" | "chatgpt-4o-latest" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("ChatGPT-4o".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-4.1 nano".to_owned()),
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-4o mini".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2023 - 10 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => ModelDetails {
-            provider: ProviderId::Openai,
-            slug: model.id,
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-4.1 mini".to_owned()),
             context_window: Some(1_047_576),
             max_output_tokens: Some(32_768),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
+        },
+        "gpt-5-nano" | "gpt-5-nano-2025-08-07" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5 nano".to_owned()),
+            context_window: Some(400_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
+            knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
+        },
+        "gpt-5-mini" | "gpt-5-mini-2025-08-07" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5 mini".to_owned()),
+            context_window: Some(400_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
+            knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
+        },
+        "gpt-5" | "gpt-5-2025-08-07" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5".to_owned()),
+            context_window: Some(400_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
+            knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
+        },
+        "gpt-5-chat-latest" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5 Chat".to_owned()),
+            context_window: Some(128_000),
+            max_output_tokens: Some(16_384),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
+            knowledge_cutoff: Some(date!(2024 - 8 - 30)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
+        },
+        "gpt-oss-120b" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("gpt-oss-120b".to_owned()),
+            context_window: Some(131_072),
+            max_output_tokens: Some(131_072),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
+        },
+        "gpt-oss-20b" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("gpt-oss-20b".to_owned()),
+            context_window: Some(131_072),
+            max_output_tokens: Some(131_072),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
+        },
+        "o3-deep-research" | "o3-deep-research-2025-06-26" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o3-deep-research".to_owned()),
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
+        },
+        "o4-mini-deep-research" | "o4-mini-deep-research-2025-06-26" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("o4-mini-deep-research".to_owned()),
+            context_window: Some(200_000),
+            max_output_tokens: Some(100_000),
+            reasoning: Some(ReasoningDetails::supported(0, None)),
+            knowledge_cutoff: Some(date!(2024 - 6 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
         },
         id => {
             warn!(model = id, ?model, "Missing model details.");
-
-            ModelDetails {
-                provider: ProviderId::Openai,
-                slug: model.id,
-                context_window: None,
-                max_output_tokens: None,
-                reasoning: None,
-                knowledge_cutoff: None,
-            }
+            ModelDetails::empty((PROVIDER, id).try_into()?)
         }
-    }
+    };
+
+    Ok(details)
 }
 
 async fn handle_error(error: StreamError) -> std::result::Result<types::Event, Error> {
@@ -299,7 +423,7 @@ fn map_response(response: types::Response) -> Result<Vec<Event>> {
         .collect::<Result<Vec<_>>>()
 }
 
-fn map_event(event: types::Event, state: &mut AccumulationState) -> Option<Result<StreamEvent>> {
+fn map_event(event: types::Event, accumulator: &mut Accumulator) -> Result<Vec<StreamEvent>> {
     use types::Event;
 
     let delta: Delta = match event {
@@ -317,23 +441,41 @@ fn map_event(event: types::Event, state: &mut AccumulationState) -> Option<Resul
             ..
         } => {
             return match serde_json::to_value(reasoning) {
-                Ok(value) => Some(Ok(StreamEvent::Metadata("reasoning".to_owned(), value))),
-                Err(error) => Some(Err(error.into())),
+                Ok(value) => Ok(vec![StreamEvent::Metadata("reasoning".to_owned(), value)]),
+                Err(error) => Err(error.into()),
+            };
+        }
+        Event::OutputItemDone { .. } => return accumulator.drain(),
+        Event::ResponseIncomplete {
+            response:
+                types::Response {
+                    incomplete_details: Some(details),
+                    ..
+                },
+        } => match details.reason.as_str() {
+            "max_tokens" => return Ok(vec![StreamEvent::EndOfStream(StreamEndReason::MaxTokens)]),
+            reason => {
+                return Ok(vec![StreamEvent::EndOfStream(StreamEndReason::Other(
+                    reason.to_owned(),
+                ))]);
             }
+        },
+        Event::ResponseCompleted { .. } => {
+            return Ok(vec![StreamEvent::EndOfStream(StreamEndReason::Completed)]);
         }
         _ => {
             trace!(?event, "Ignoring Openai event");
-            return None;
+            return Ok(vec![]);
         }
     };
 
-    handle_delta(delta, state).transpose()
+    delta.into_stream_events(accumulator)
 }
 
-impl TryFrom<&assistant::provider::openai::Openai> for Openai {
+impl TryFrom<&OpenaiConfig> for Openai {
     type Error = Error;
 
-    fn try_from(config: &assistant::provider::openai::Openai) -> Result<Self> {
+    fn try_from(config: &OpenaiConfig) -> Result<Self> {
         let api_key = env::var(&config.api_key_env)
             .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
 
@@ -358,28 +500,75 @@ impl TryFrom<&assistant::provider::openai::Openai> for Openai {
     }
 }
 
-fn convert_tool_choice(choice: tool::ToolChoice) -> types::ToolChoice {
+fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {
     match choice {
-        tool::ToolChoice::Auto => types::ToolChoice::Auto,
-        tool::ToolChoice::None => types::ToolChoice::None,
-        tool::ToolChoice::Required => types::ToolChoice::Required,
-        tool::ToolChoice::Function(name) => types::ToolChoice::Function(name),
+        ToolChoice::Auto => types::ToolChoice::Auto,
+        ToolChoice::None => types::ToolChoice::None,
+        ToolChoice::Required => types::ToolChoice::Required,
+        ToolChoice::Function(name) => types::ToolChoice::Function(name),
     }
 }
 
-fn convert_tools(tools: Vec<jp_mcp::Tool>, strict: bool) -> Vec<types::Tool> {
+pub(crate) fn parameters_with_strict_mode(
+    parameters: IndexMap<String, ToolParameterConfig>,
+    strict: bool,
+) -> Map<String, Value> {
+    let required = parameters
+        .iter()
+        .filter(|(_, cfg)| strict || cfg.required)
+        .map(|(k, _)| k.clone())
+        .collect::<Vec<_>>();
+
+    let mut properties = parameters
+        .into_iter()
+        .map(|(k, v)| (k, v.to_json_schema()))
+        .collect::<Map<_, _>>();
+
+    // If `strict` mode is enabled, we have to adhere to the
+    // following rules:
+    //
+    // - `additionalProperties` must be set to `false` for each
+    // object in the `parameters`.
+    // - All fields in `properties` must be marked as `required`.
+    //
+    // See: <https://platform.openai.com/docs/guides/function-calling#strict-mode>
+    if strict {
+        properties.iter_mut().for_each(|(_, v)| {
+            let current = match v["type"].take() {
+                Value::String(s) if s != "null" => vec![s.into(), "null".into()],
+                v @ Value::String(_) => vec![v],
+                Value::Array(v) => std::iter::once("null".into()).chain(v).collect(),
+                _ => vec![],
+            };
+
+            v["type"] = Value::Array(current);
+        });
+    }
+
+    Map::from_iter([
+        ("type".to_owned(), "object".into()),
+        ("properties".to_owned(), properties.into()),
+        ("additionalProperties".to_owned(), (!strict).into()),
+        ("required".to_owned(), required.into()),
+    ])
+}
+
+fn convert_tools(tools: Vec<ToolDefinition>, strict: bool) -> Vec<types::Tool> {
     tools
         .into_iter()
         .map(|tool| types::Tool::Function {
-            name: tool.name.into(),
-            parameters: Value::Object(tool.input_schema.as_ref().clone()),
+            name: tool.name,
             strict,
-            description: tool.description.map(|v| v.to_string()),
+            description: tool.description,
+            parameters: parameters_with_strict_mode(tool.parameters, strict).into(),
         })
         .collect()
 }
 
-fn convert_reasoning(reasoning: Reasoning, max_tokens: Option<u32>) -> types::ReasoningConfig {
+fn convert_reasoning(
+    reasoning: CustomReasoningConfig,
+    max_tokens: Option<u32>,
+) -> types::ReasoningConfig {
     types::ReasoningConfig {
         summary: if reasoning.exclude {
             None
@@ -388,7 +577,7 @@ fn convert_reasoning(reasoning: Reasoning, max_tokens: Option<u32>) -> types::Re
         },
         effort: match reasoning.effort.abs_to_rel(max_tokens) {
             ReasoningEffort::High => Some(types::ReasoningEffort::High),
-            ReasoningEffort::Medium => Some(types::ReasoningEffort::Medium),
+            ReasoningEffort::Auto | ReasoningEffort::Medium => Some(types::ReasoningEffort::Medium),
             ReasoningEffort::Low => Some(types::ReasoningEffort::Low),
             ReasoningEffort::Absolute(_) => {
                 debug_assert!(false, "Reasoning effort must be relative.");
@@ -549,6 +738,7 @@ fn event_to_messages(event: ConversationEvent, reasoning: bool) -> Vec<types::In
         EventKind::AssistantMessage(assistant) => {
             assistant_message_to_messages(assistant, reasoning)
         }
+        EventKind::ConfigDelta(_) => vec![],
     }
 }
 
@@ -581,14 +771,18 @@ fn assistant_message_to_messages(
     supports_reasoning: bool,
 ) -> Vec<types::InputItem> {
     let AssistantMessage {
+        provider,
         metadata,
-        reasoning: _,
+        reasoning,
         content,
         tool_calls,
     } = assistant;
 
     let mut items = vec![];
-    if supports_reasoning && let Some(value) = metadata.get("reasoning").cloned() {
+    if supports_reasoning
+        && provider == PROVIDER
+        && let Some(value) = metadata.get("reasoning").cloned()
+    {
         match serde_json::from_value::<types::Reasoning>(value) {
             // If we don't have encrypted content, it means the initial request
             // was made without the `reasoning.encrypted_content` include. Since
@@ -605,6 +799,12 @@ fn assistant_message_to_messages(
             Ok(reasoning) => items.push(types::InputItem::Reasoning(reasoning)),
             Err(error) => warn!(?error, "Failed to parse OpenAI reasoning data. Ignoring."),
         }
+    } else if let Some(reasoning) = reasoning {
+        items.push(types::InputItem::InputMessage(types::APIInputMessage {
+            role: types::Role::Assistant,
+            content: types::ContentInput::Text(format!("<think>\n{reasoning}\n</think>\n\n")),
+            status: None,
+        }));
     }
 
     if let Some(text) = content {
@@ -619,7 +819,7 @@ fn assistant_message_to_messages(
         items.push(types::InputItem::FunctionCall(types::FunctionCall {
             call_id: tool_call.id,
             name: tool_call.name,
-            arguments: tool_call.arguments.to_string(),
+            arguments: Value::Object(tool_call.arguments).to_string(),
             status: None,
             id: None,
         }));
@@ -664,7 +864,7 @@ impl From<types::OutputItem> for Delta {
 mod tests {
     use std::path::PathBuf;
 
-    use jp_config::{Configurable as _, Partial as _};
+    use jp_config::providers::llm::LlmProviderConfig;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -676,13 +876,37 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn test_openai_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .openai;
+    async fn test_openai_model_details() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = LlmProviderConfig::default().openai;
+        let name: Name = "o4-mini".parse().unwrap();
 
+        let vcr = vcr();
+        vcr.cassette(
+            function_name!(),
+            |rule| {
+                rule.filter(|when| {
+                    when.any_request();
+                });
+            },
+            |recording, url| async move {
+                config.base_url = url;
+                if !recording {
+                    // dummy api key value when replaying a cassette
+                    config.api_key_env = "USER".to_owned();
+                }
+
+                Openai::try_from(&config)
+                    .unwrap()
+                    .model_details(&name)
+                    .await
+            },
+        )
+        .await
+    }
+
+    #[test(tokio::test)]
+    async fn test_openai_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = LlmProviderConfig::default().openai;
         let vcr = vcr();
         vcr.cassette(
             function_name!(),
@@ -713,13 +937,9 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_openai_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config =
-            assistant::Assistant::from_partial(assistant::AssistantPartial::default_values())
-                .unwrap()
-                .provider
-                .openai;
-
+        let mut config = LlmProviderConfig::default().openai;
         let model_id = "openai/o4-mini".parse().unwrap();
+        let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
                 message: "Test message".into(),
@@ -745,7 +965,7 @@ mod tests {
 
                 Openai::try_from(&config)
                     .unwrap()
-                    .chat_completion(&model_id, &Parameters::default(), query)
+                    .chat_completion(&model, &ParametersConfig::default(), query)
                     .await
             },
         )

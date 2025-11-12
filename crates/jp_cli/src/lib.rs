@@ -3,35 +3,43 @@ mod ctx;
 mod editor;
 mod error;
 mod parser;
+mod signals;
 
 use std::{
     error::Error as _,
     fmt,
-    io::{stdout, IsTerminal as _},
-    num::NonZeroI32,
+    io::{IsTerminal as _, stdout},
+    num::{NonZeroI32, NonZeroUsize},
     path::PathBuf,
     str::FromStr,
+    sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
 };
 
 use clap::{
-    builder::{BoolValueParser, TypedValueParser as _},
     ArgAction, Parser,
+    builder::{BoolValueParser, TypedValueParser as _},
 };
 use cmd::{Commands, Output, Success};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::Stylize as _;
-use ctx::{Ctx, IntoPartialConfig};
+use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
 use jp_config::{
+    PartialAppConfig,
     assignment::{AssignKeyValue as _, KvAssignment},
-    assistant::Instructions,
-    load_partial, load_partial_at_path, load_partial_at_path_recursive,
-    load_partials_with_inheritance, user_global_config_path, Config, PartialConfig,
+    fs::{load_partial, user_global_config_path},
+    util::{
+        build, find_file_in_load_path, load_envs, load_partial_at_path,
+        load_partial_at_path_recursive, load_partials_with_inheritance,
+    },
 };
-use jp_workspace::{user_data_dir, Workspace};
+use jp_workspace::{Workspace, user_data_dir};
 use serde_json::Value;
-use tracing::{debug, info, trace};
+use tokio::runtime::{self, Runtime};
+use tracing::{debug, info, trace, warn};
+
+static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
 
 const DEFAULT_STORAGE_DIR: &str = ".jp";
 
@@ -43,20 +51,35 @@ const PATH_STRING_PREFIX: char = '@';
 
 // Jean Pierre's LLM Toolkit.
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, long_version = env!("LONG_VERSION"), about, long_about = None)]
 struct Cli {
     #[command(flatten, next_help_heading = "Global Options")]
     globals: Globals,
 
+    #[command(flatten)]
+    root: RootOpts,
+
     #[command(subcommand, next_help_heading = "Options")]
     command: Commands,
+}
+
+/// The root options for the CLI.
+///
+/// These options are only available at the root level, e.g. `jp --foo` but not
+/// `jp query --foo`.
+#[derive(Parser)]
+pub struct RootOpts {
+    /// Number of threads to use for processing (default is number of available
+    /// cores)
+    #[arg(short = 't', long = "threads")]
+    pub threads: Option<NonZeroUsize>,
 }
 
 #[derive(Debug, clap::Args)]
 struct Globals {
     /// Override a configuration value for the duration of the command.
     #[arg(
-        short,
+        short = 'c',
         long = "cfg",
         global = true,
         action = ArgAction::Append,
@@ -82,11 +105,11 @@ struct Globals {
     /// Defaults to printing "error" messages. For each increase in verbosity,
     /// the log level is set to "warn", "info", "debug", and "trace"
     /// respectively.
-    #[arg(short, long, global = true, action = ArgAction::Count)]
+    #[arg(short = 'v', long, global = true, action = ArgAction::Count)]
     verbose: u8,
 
     /// Suppress all output, including errors.
-    #[arg(short, long, global = true)]
+    #[arg(short = 'q', long, global = true)]
     quiet: bool,
 
     /// Use OCI-compliant terminal links.
@@ -131,7 +154,7 @@ struct Globals {
     /// The workspace to use for the command.
     ///
     /// This can be either a path to a workspace directory, or a workspace ID.
-    #[arg(short, long, global = true, value_parser = WorkspaceIdOrPath::from_str)]
+    #[arg(short = 'w', long, global = true, value_parser = WorkspaceIdOrPath::from_str)]
     workspace: Option<WorkspaceIdOrPath>,
     // TODO
     // /// The format of the output.
@@ -209,14 +232,14 @@ impl fmt::Display for Cli {
     }
 }
 
-pub async fn run() {
+pub fn run() {
     let cli = Cli::parse();
     let is_tty = stdout().is_terminal();
 
     configure_logging(cli.globals.verbose, cli.globals.quiet);
     trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
 
-    let (code, output) = match run_inner(cli).await {
+    let (code, output) = match run_inner(cli) {
         Ok(output) if is_tty => (0, output_to_string(output)),
         Ok(output) => (0, parse_json_output(output)),
         Err(error) => parse_error(error, is_tty),
@@ -231,7 +254,7 @@ pub async fn run() {
     std::process::exit(code);
 }
 
-async fn run_inner(cli: Cli) -> Result<Success> {
+fn run_inner(cli: Cli) -> Result<Success> {
     match cli.command {
         Commands::Init(ref args) => args.run().map_err(Into::into),
         cmd => {
@@ -240,11 +263,16 @@ async fn run_inner(cli: Cli) -> Result<Success> {
                 workspace.disable_persistence();
             }
 
+            let runtime = build_runtime(cli.root.threads, "jp-worker")?;
             workspace.load()?;
 
-            let config = load_config(&cmd, Some(&workspace), &cli.globals.config)?;
-            let mut ctx = Ctx::new(workspace, cli.globals, config);
-            let output = cmd.run(&mut ctx).await;
+            let partial = load_partial_config(&cmd, Some(&workspace), &cli.globals.config)?;
+            let config = build(partial.clone())?;
+
+            let mut ctx = Ctx::new(workspace, runtime, cli.globals, config);
+            let handle = ctx.handle().clone();
+
+            let output = handle.block_on(cmd.run(&mut ctx));
             if output.is_err() {
                 tracing::info!("Error running command. Disabling workspace persistence.");
                 ctx.workspace.disable_persistence();
@@ -252,9 +280,11 @@ async fn run_inner(cli: Cli) -> Result<Success> {
 
             // Wait for background tasks to complete and sync their results to
             // the workspace.
-            ctx.task_handler
-                .sync(&mut ctx.workspace, Duration::from_secs(10))
-                .await
+            handle
+                .block_on(
+                    ctx.task_handler
+                        .sync(&mut ctx.workspace, Duration::from_secs(10)),
+                )
                 .map_err(Error::Task)?;
 
             output.map_err(Into::into)
@@ -357,33 +387,48 @@ fn load_partial_config(
     cmd: &Commands,
     workspace: Option<&Workspace>,
     overrides: &[KeyValueOrPath],
-) -> Result<PartialConfig> {
+) -> Result<PartialAppConfig> {
     // Load all partials in different file locations, the first loaded file
     // having the lowest precedence.
     let partials = load_partial_configs_from_files(workspace, std::env::current_dir().ok())?;
 
     // Load all partials, merging later partials over earlier ones, unless one
     // of the partials set `inherit = false`, then later partials are ignored.
-    let mut partial = load_partials_with_inheritance(partials);
+    let mut partial = load_partials_with_inheritance(partials)?;
 
     // Load environment variables.
-    partial = jp_config::load_envs(partial)?;
+    partial = load_envs(partial).map_err(|e| Error::CliConfig(e.to_string()))?;
 
     // Apply conversation-specific config, if needed.
     if let Some(workspace) = workspace {
         partial = cmd
-            .apply_conversation_config(Some(workspace), partial)
+            .apply_conversation_config(Some(workspace), partial, None)
             .map_err(|e| Error::CliConfig(e.to_string()))?;
     }
 
     // Load CLI-provided `--cfg` arguments. These are different from
     // command-specific CLI arguments, in that they are global, and allow you to
     // change any field in the [`Config`] struct.
+    partial = load_cli_cfg_args(partial, overrides, workspace)?;
+
+    // Load command-specific CLI arguments last (e.g. `jp query --model`).
+    partial = cmd
+        .apply_cli_config(workspace, partial, None)
+        .map_err(|e| Error::CliConfig(e.to_string()))?;
+
+    Ok(partial)
+}
+
+fn load_cli_cfg_args(
+    mut partial: PartialAppConfig,
+    overrides: &[KeyValueOrPath],
+    workspace: Option<&Workspace>,
+) -> Result<PartialAppConfig> {
     for field in overrides {
         match field {
             KeyValueOrPath::Path(path) if path.exists() => {
                 if let Some(p) = load_partial_at_path(path)? {
-                    partial = load_partial(p, partial);
+                    partial = load_partial(partial, p)?;
                 }
             }
             KeyValueOrPath::Path(path) => {
@@ -396,8 +441,7 @@ fn load_partial_config(
                         .config_load_paths
                         .iter()
                         .flatten()
-                        .filter(|p| p.is_relative())
-                        .map(|p| w.root.join(p))
+                        .map(|p| p.to_path(&w.root))
                 });
 
                 let mut found = false;
@@ -408,9 +452,9 @@ fn load_partial_config(
                         "Trying to load partial from config load path"
                     );
 
-                    if let Some(path) = jp_config::find_file_in_path(path, &load_path)? {
+                    if let Some(path) = find_file_in_load_path(path, &load_path) {
                         if let Some(p) = load_partial_at_path(path)? {
-                            partial = load_partial(p, partial);
+                            partial = load_partial(partial, p)?;
                         }
                         found = true;
                         break;
@@ -418,35 +462,13 @@ fn load_partial_config(
                 }
 
                 if !found {
-                    return Err(jp_config::Error::MissingConfigFile(path.clone()).into());
+                    return Err(Error::MissingConfigFile(path.clone()));
                 }
             }
-            KeyValueOrPath::KeyValue(kv) => partial.assign(kv.clone())?,
+            KeyValueOrPath::KeyValue(kv) => partial
+                .assign(kv.clone())
+                .map_err(|e| Error::CliConfig(e.to_string()))?,
         }
-    }
-
-    // Load command-specific CLI arguments last (e.g. `jp query --model`).
-    partial = cmd
-        .apply_cli_config(workspace, partial)
-        .map_err(|e| Error::CliConfig(e.to_string()))?;
-
-    // Apply custom defaults.
-    if partial.assistant.instructions.is_none() {
-        partial.assistant.instructions =
-            Some(vec![Instructions::new("How to respond to the user")
-                .with_item("Be concise")
-                .with_item("Use simple sentences. But feel free to use technical jargon.")
-                .with_item(
-                    "Do NOT overexplain basic concepts. Assume the user is technically proficient.",
-                )
-                .with_item(
-                    "AVOID flattering, corporate-ish or marketing language. Maintain a neutral \
-                     viewpoint.",
-                )
-                .with_item(
-                    "AVOID vague and / or generic claims which may seem correct but are not \
-                     substantiated by the context.",
-                )]);
     }
 
     Ok(partial)
@@ -455,18 +477,18 @@ fn load_partial_config(
 fn load_partial_configs_from_files(
     workspace: Option<&Workspace>,
     cwd: Option<PathBuf>,
-) -> Result<Vec<PartialConfig>> {
+) -> Result<Vec<PartialAppConfig>> {
     let mut partials = vec![];
 
-    // Load `$XDG_CONFIG_HOME/jp/config.toml`.
+    // Load `$XDG_CONFIG_HOME/jp/config.{toml,json,yaml}`.
     if let Some(user_global_config) = user_global_config_path(std::env::home_dir().as_deref())
-        .and_then(|p| load_partial_at_path(p).transpose())
+        .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
         .transpose()?
     {
         partials.push(user_global_config);
     }
 
-    // Load `$WORKSPACE_ROOT/.jp/config.toml`.
+    // Load `$WORKSPACE_ROOT/.jp/config.{toml,json,yaml}`.
     if let Some(workspace_config) = workspace
         .and_then(Workspace::storage_path)
         .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
@@ -475,8 +497,8 @@ fn load_partial_configs_from_files(
         partials.push(workspace_config);
     }
 
-    // Load `$CWD/.jp.toml`, recursing up the directory tree until either the
-    // root of the workspace, or filesystem is reached.
+    // Load `$CWD/.jp.{toml,json,yaml}`, recursing up the directory tree until
+    // either the root of the workspace, or filesystem is reached.
     if let Some(cwd_config) = cwd
         .and_then(|cwd| {
             load_partial_at_path_recursive(
@@ -490,7 +512,7 @@ fn load_partial_configs_from_files(
         partials.push(cwd_config);
     }
 
-    // Load `$XDG_DATA_HOME/jp/<workspace_the id>config.toml`.
+    // Load `$XDG_DATA_HOME/jp/<workspace_the id>config.{toml,json,yaml}`.
     if let Some(user_workspace_config) = workspace
         .and_then(Workspace::user_storage_path)
         .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
@@ -500,17 +522,6 @@ fn load_partial_configs_from_files(
     }
 
     Ok(partials)
-}
-
-/// Load the workspace configuration.
-fn load_config(
-    cmd: &Commands,
-    workspace: Option<&Workspace>,
-    overrides: &[KeyValueOrPath],
-) -> Result<Config> {
-    let partial = load_partial_config(cmd, workspace, overrides)?;
-
-    jp_config::build(partial).map_err(Into::into)
 }
 
 /// Find the workspace for the current directory.
@@ -567,23 +578,37 @@ fn configure_logging(verbose: u8, quiet: bool) {
     use tracing::level_filters::LevelFilter;
     use tracing_subscriber::fmt;
 
-    let (mut level, all) = match verbose {
-        0 => (LevelFilter::ERROR, false),
-        1 => (LevelFilter::WARN, false),
-        2 => (LevelFilter::INFO, false),
-        3 => (LevelFilter::DEBUG, false),
-        4 => (LevelFilter::TRACE, false),
-        _ => (LevelFilter::TRACE, true),
+    let (mut level, more) = match verbose {
+        0 => (LevelFilter::ERROR, 0),
+        1 => (LevelFilter::WARN, 0),
+        2 => (LevelFilter::INFO, 0),
+        3 => (LevelFilter::DEBUG, 0),
+        4 => (LevelFilter::TRACE, 0),
+        5 => (LevelFilter::TRACE, 1),
+        _ => (LevelFilter::TRACE, 2),
     };
 
     if quiet {
         level = LevelFilter::OFF;
     }
 
-    let mut filter = if all {
-        vec!["trace".to_owned()]
-    } else {
-        vec!["off".to_owned()]
+    let mut filter: Vec<_> = match more {
+        0 => vec!["off".to_owned()],
+        1 => vec![
+            [
+                "trace",
+                "h2=off",
+                "hyper_util=off",
+                "ignore=off",
+                "mio=off",
+                "reqwest=off",
+                "rustls=off",
+                "tokio=off",
+            ]
+            .to_vec()
+            .join(","),
+        ],
+        _ => vec!["trace".to_owned()],
     };
 
     for krate in [
@@ -611,14 +636,13 @@ fn configure_logging(verbose: u8, quiet: bool) {
         filter.push(format!("jp_{krate}={level}"));
     }
 
-    let format = fmt::format().with_target(false).compact();
+    let format = fmt::format().with_target(more > 0).compact();
 
     if level < LevelFilter::DEBUG {
         tracing_subscriber::fmt()
             .event_format(format)
             .without_time()
             .with_ansi(true)
-            .with_target(false)
             .with_writer(std::io::stderr)
             .with_env_filter(filter.join(","))
             .init();
@@ -626,10 +650,46 @@ fn configure_logging(verbose: u8, quiet: bool) {
         tracing_subscriber::fmt()
             .event_format(format)
             .with_ansi(true)
-            .with_target(false)
             .with_writer(std::io::stderr)
             .with_env_filter(filter.join(","))
             .init();
+    }
+}
+
+/// Get the number of worker threads to use.
+pub fn worker_threads() -> Option<NonZeroUsize> {
+    NonZeroUsize::new(WORKER_THREADS.load(Ordering::Relaxed))
+}
+
+/// Build an async runtime.
+///
+/// # Panics
+///
+/// Panics if called twice.
+pub(crate) fn build_runtime(threads: Option<NonZeroUsize>, thread_name: &str) -> Result<Runtime> {
+    let mut rt_builder = runtime::Builder::new_multi_thread();
+    rt_builder.max_blocking_threads(1024);
+    rt_builder.enable_all().thread_name(thread_name);
+
+    let worker_threads = threads.unwrap_or_else(num_threads).get();
+    WORKER_THREADS
+        .compare_exchange(0, worker_threads, Ordering::Acquire, Ordering::Relaxed)
+        .expect("double thread initialization");
+    rt_builder.worker_threads(worker_threads);
+
+    debug!(worker_threads, "Building runtime.");
+    rt_builder.build().map_err(Into::into)
+}
+
+/// Returns an estimate of the number of recommended threads that JP should
+/// spawn.
+pub fn num_threads() -> NonZeroUsize {
+    match std::thread::available_parallelism() {
+        Ok(count) => count,
+        Err(error) => {
+            warn!(%error, "Failed to determine available parallelism for thread count, defaulting to 1.");
+            std::num::NonZeroUsize::MIN
+        }
     }
 }
 

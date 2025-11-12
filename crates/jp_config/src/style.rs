@@ -1,84 +1,92 @@
+//! Style configuration for output formatting.
+
 pub mod code;
 pub mod reasoning;
 pub mod tool_call;
 pub mod typewriter;
 
-use std::str::FromStr;
-
-use confique::Config as Confique;
+use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    assignment::{set_error, AssignKeyValue, KvAssignment},
-    error::Result,
-    serde::is_nested_empty,
-    Error,
+    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    delta::PartialConfigDelta,
+    partial::ToPartial,
+    style::{
+        code::{CodeConfig, PartialCodeConfig},
+        reasoning::{PartialReasoningConfig, ReasoningConfig},
+        tool_call::{PartialToolCallConfig, ToolCallConfig},
+        typewriter::{PartialTypewriterConfig, TypewriterConfig},
+    },
 };
 
 /// Style configuration.
-#[derive(Debug, Clone, PartialEq, Confique, Serialize, Deserialize)]
-#[config(partial_attr(derive(Debug, Clone, PartialEq, Serialize)))]
-#[config(partial_attr(serde(deny_unknown_fields)))]
-pub struct Style {
+#[derive(Debug, Config)]
+#[config(rename_all = "snake_case")]
+pub struct StyleConfig {
     /// Fenced code block style.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
-    pub code: code::Code,
+    #[setting(nested)]
+    pub code: CodeConfig,
 
     /// Reasoning content style.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
-    pub reasoning: reasoning::Reasoning,
+    #[setting(nested)]
+    pub reasoning: ReasoningConfig,
 
     /// Tool call content style.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
-    pub tool_call: tool_call::ToolCall,
+    #[setting(nested)]
+    pub tool_call: ToolCallConfig,
 
-    // Typewriter style.
-    #[config(nested, partial_attr(serde(skip_serializing_if = "is_nested_empty")))]
-    pub typewriter: typewriter::Typewriter,
+    /// Typewriter style.
+    #[setting(nested)]
+    pub typewriter: TypewriterConfig,
 }
 
-impl AssignKeyValue for <Style as Confique>::Partial {
-    fn assign(&mut self, mut kv: KvAssignment) -> Result<()> {
-        let k = kv.key().as_str().to_owned();
-        match k.as_str() {
-            "code" => self.code = kv.try_into_object()?,
-            "reasoning" => self.reasoning = kv.try_into_object()?,
-            "typewriter" => self.typewriter = kv.try_into_object()?,
-
-            _ if kv.trim_prefix("code") => self.code.assign(kv)?,
-            _ if kv.trim_prefix("reasoning") => self.reasoning.assign(kv)?,
-            _ if kv.trim_prefix("tool_call") => self.reasoning.assign(kv)?,
-            _ if kv.trim_prefix("typewriter") => self.typewriter.assign(kv)?,
-
-            _ => return Err(set_error(kv.key())),
+impl AssignKeyValue for PartialStyleConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object()?,
+            _ if kv.p("code") => self.code.assign(kv)?,
+            _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
+            _ if kv.p("tool_call") => self.tool_call.assign(kv)?,
+            _ if kv.p("typewriter") => self.typewriter.assign(kv)?,
+            _ => return missing_key(&kv),
         }
 
         Ok(())
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LinkStyle {
-    #[default]
-    Full,
-    Osc8,
-    Off,
-}
-
-impl FromStr for LinkStyle {
-    type Err = Error;
-
-    fn from_str(style: &str) -> Result<Self> {
-        match style {
-            "full" => Ok(Self::Full),
-            "osc8" => Ok(Self::Osc8),
-            "off" => Ok(Self::Off),
-            _ => Err(Error::InvalidConfigValueType {
-                key: style.to_string(),
-                value: style.to_string(),
-                need: vec!["full".to_owned(), "osc8".to_owned(), "off".to_owned()],
-            }),
+impl PartialConfigDelta for PartialStyleConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            code: self.code.delta(next.code),
+            reasoning: self.reasoning.delta(next.reasoning),
+            tool_call: self.tool_call.delta(next.tool_call),
+            typewriter: self.typewriter.delta(next.typewriter),
         }
     }
+}
+
+impl ToPartial for StyleConfig {
+    fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            code: self.code.to_partial(),
+            reasoning: self.reasoning.to_partial(),
+            tool_call: self.tool_call.to_partial(),
+            typewriter: self.typewriter.to_partial(),
+        }
+    }
+}
+
+/// Formatting style for links.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, ConfigEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum LinkStyle {
+    /// No link.
+    Off,
+    /// Unformatted link.
+    Full,
+    /// Link with OSC-8 escape sequences.
+    #[default]
+    Osc8,
 }

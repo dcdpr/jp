@@ -17,12 +17,8 @@ use std::{
 pub use error::Error;
 use error::Result;
 pub use id::Id;
-use jp_conversation::{event::ConversationEvent, Conversation, ConversationId};
-use jp_mcp::{
-    config::{McpServer, McpServerId},
-    tool::McpTool,
-};
-use jp_storage::{Storage, DEFAULT_STORAGE_DIR, MCP_SERVERS_DIR};
+use jp_conversation::{Conversation, ConversationId, event::ConversationEvent};
+use jp_storage::{DEFAULT_STORAGE_DIR, Storage};
 use state::{LocalState, State, UserState};
 use tracing::{debug, info, trace};
 
@@ -166,8 +162,6 @@ impl Workspace {
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
         // Workspace state
-        let mcp_servers = storage.load_mcp_servers()?;
-        let mcp_tools = storage.load_mcp_tools()?;
         let (mut conversations, events) = storage.load_conversations_and_events()?;
 
         // Local state
@@ -175,8 +169,6 @@ impl Workspace {
 
         debug!(
             conversations = %conversations.len(),
-            mcp_servers = %mcp_servers.len(),
-            mcp_tools = %mcp_tools.len(),
             active_conversation_id = %conversations_metadata.active_conversation_id,
             "Loaded workspace state."
         );
@@ -200,8 +192,6 @@ impl Workspace {
                 active_conversation,
                 conversations,
                 events,
-                mcp_servers,
-                mcp_tools,
             },
             user: UserState {
                 conversations_metadata,
@@ -233,7 +223,6 @@ impl Workspace {
                 .active_conversation_id,
             &self.state.local.active_conversation,
         )?;
-        storage.persist_mcp_servers(&self.state.local.mcp_servers)?;
 
         info!(path = %self.root.display(), "Persisted state.");
         Ok(())
@@ -355,17 +344,27 @@ impl Workspace {
     /// not found.
     #[must_use]
     pub fn get_events(&self, id: &ConversationId) -> &[ConversationEvent] {
-        self.state
-            .local
-            .events
-            .get(id)
-            .map_or(&[], |v| v.as_slice())
+        self.state.local.events.get(id).map_or(&[], |v| v.as_ref())
     }
 
     /// Removes the last event from a conversation.
     pub fn pop_event(&mut self, id: &ConversationId) -> Option<ConversationEvent> {
         self.state.local.events.get_mut(id).and_then(Vec::pop)
     }
+
+    //     pub fn set_conversation_config(
+    //         &mut self,
+    //         id: &ConversationId,
+    //         config: PartialAppConfig,
+    //     ) -> Result<()> {
+    //         match self.state.local.messages.get_mut(id) {
+    //             Some(messages) => messages.set_config(config),
+    //             None => return Err(Error::NotFound("Conversation", id.to_string())),
+    //         }
+    //
+    //         Ok(())
+    // >>>>>>> main
+    //     }
 
     /// Adds a event to a conversation.
     pub fn add_event(&mut self, id: ConversationId, event: impl Into<ConversationEvent>) {
@@ -375,50 +374,6 @@ impl Workspace {
             .entry(id)
             .or_default()
             .push(event.into());
-    }
-
-    /// Returns an iterator over all configured MCP tools.
-    pub fn mcp_tools(&self) -> impl Iterator<Item = &McpTool> {
-        self.state.local.mcp_tools.values()
-    }
-
-    /// Returns an iterator over all configured MCP servers.
-    pub fn mcp_servers(&self) -> impl Iterator<Item = &McpServer> {
-        self.state.local.mcp_servers.values()
-    }
-
-    /// Returns the path to the MCP servers directory, if storage is enabled.
-    #[must_use]
-    pub fn mcp_servers_path(&self) -> Option<PathBuf> {
-        self.storage
-            .as_ref()
-            .map(|p| p.path().join(MCP_SERVERS_DIR))
-    }
-
-    /// Returns the path to the local MCP servers directory, if storage is
-    /// enabled, and local storage is configured.
-    #[must_use]
-    pub fn mcp_servers_local_path(&self) -> Option<PathBuf> {
-        self.storage
-            .as_ref()
-            .and_then(|p| p.user_storage_path().map(|p| p.join(MCP_SERVERS_DIR)))
-    }
-
-    /// Gets a reference to an MCP server by its ID.
-    #[must_use]
-    pub fn get_mcp_server(&self, id: &McpServerId) -> Option<&McpServer> {
-        self.state.local.mcp_servers.get(id)
-    }
-
-    /// Adds an MCP Server configuration.
-    pub fn create_mcp_server(&mut self, server: McpServer) -> Option<McpServer> {
-        let id = server.id.clone();
-        self.state.local.mcp_servers.insert(id, server)
-    }
-
-    /// Removes an MCP server configuration by ID.
-    pub fn remove_mcp_server(&mut self, id: &McpServerId) -> Option<McpServer> {
-        self.state.local.mcp_servers.remove(id)
     }
 
     /// Returns an iterator over all conversations, including the active one.
@@ -451,7 +406,7 @@ pub fn user_data_dir() -> Result<PathBuf> {
 mod tests {
     use std::{collections::HashMap, fs, time::Duration};
 
-    use jp_storage::{value::read_json, CONVERSATIONS_DIR, METADATA_FILE};
+    use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
     use tempfile::tempdir;
     use test_log::test;
     use time::UtcDateTime;

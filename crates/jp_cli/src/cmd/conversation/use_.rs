@@ -1,7 +1,7 @@
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 
-use crate::{ctx::Ctx, Output};
+use crate::{Output, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Use {

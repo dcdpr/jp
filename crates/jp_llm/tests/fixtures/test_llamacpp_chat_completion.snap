@@ -3,7 +3,12 @@ source: crates/jp_test/src/mock.rs
 expression: expr
 ---
 Ok(
-    Reply(
-        [],
-    ),
+    Reply {
+        provider: Llamacpp,
+        events: [
+            Content(
+                "Hello! How can I assist you today?",
+            ),
+        ],
+    },
 )

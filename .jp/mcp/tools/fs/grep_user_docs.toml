@@ -1,16 +1,20 @@
-inherit = "cargo"
+[conversation.tools.fs_grep_user_docs]
+enable = false
+run = "unattended"
+style.inline_results = "off"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
 description = "Grep the project's user documentation."
 
-[[properties]]
-name = "pattern"
+[conversation.tools.fs_grep_user_docs.parameters.pattern]
 type = "string"
 required = true
 description = """
 Regular expression to filter the results by.
 """
 
-[[properties]]
-name = "return_entire_file"
+[conversation.tools.fs_grep_user_docs.parameters.return_entire_file]
 type = "boolean"
 default = false
 description = """

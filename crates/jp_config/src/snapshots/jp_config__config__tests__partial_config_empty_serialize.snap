@@ -1,5 +1,0 @@
----
-source: crates/jp_config/src/config.rs
-expression: "PartialConfig::empty()"
----
-{}

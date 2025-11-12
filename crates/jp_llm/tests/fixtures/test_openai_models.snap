@@ -5,96 +5,154 @@ expression: expr
 Ok(
     [
         ModelDetails {
-            provider: Openai,
-            slug: "gpt-4-0613",
+            id: ModelIdConfig {
+                provider: Openai,
+                name: Name(
+                    "gpt-4-0613",
+                ),
+            },
+            display_name: None,
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: None,
+            deprecated: None,
+            features: [],
         },
         ModelDetails {
-            provider: Openai,
-            slug: "gpt-4",
+            id: ModelIdConfig {
+                provider: Openai,
+                name: Name(
+                    "gpt-4",
+                ),
+            },
+            display_name: None,
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: None,
+            deprecated: None,
+            features: [],
         },
         ModelDetails {
-            provider: Openai,
-            slug: "gpt-3.5-turbo",
+            id: ModelIdConfig {
+                provider: Openai,
+                name: Name(
+                    "gpt-3.5-turbo",
+                ),
+            },
+            display_name: None,
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: None,
+            deprecated: None,
+            features: [],
         },
         ModelDetails {
-            provider: Openai,
-            slug: "gpt-4o-audio-preview-2025-06-03",
+            id: ModelIdConfig {
+                provider: Openai,
+                name: Name(
+                    "sora-2-pro",
+                ),
+            },
+            display_name: None,
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: None,
+            deprecated: None,
+            features: [],
         },
         ModelDetails {
-            provider: Openai,
-            slug: "gpt-4.1-nano",
-            context_window: Some(
-                1047576,
-            ),
-            max_output_tokens: Some(
-                32768,
-            ),
-            reasoning: Some(
-                ReasoningDetails {
-                    supported: true,
-                    min_tokens: 0,
-                    max_tokens: None,
-                },
-            ),
-            knowledge_cutoff: Some(
-                2024-06-01,
-            ),
-        },
-        ModelDetails {
-            provider: Openai,
-            slug: "gpt-image-1",
+            id: ModelIdConfig {
+                provider: Openai,
+                name: Name(
+                    "gpt-audio-mini-2025-10-06",
+                ),
+            },
+            display_name: None,
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: None,
+            deprecated: None,
+            features: [],
         },
         ModelDetails {
-            provider: Openai,
-            slug: "codex-mini-latest",
+            id: ModelIdConfig {
+                provider: Openai,
+                name: Name(
+                    "gpt-realtime-mini",
+                ),
+            },
+            display_name: None,
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: None,
+            deprecated: None,
+            features: [],
         },
         ModelDetails {
-            provider: Openai,
-            slug: "gpt-4o-realtime-preview-2025-06-03",
+            id: ModelIdConfig {
+                provider: Openai,
+                name: Name(
+                    "gpt-realtime-mini-2025-10-06",
+                ),
+            },
+            display_name: None,
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: None,
+            deprecated: None,
+            features: [],
         },
         ModelDetails {
-            provider: Openai,
-            slug: "davinci-002",
+            id: ModelIdConfig {
+                provider: Openai,
+                name: Name(
+                    "sora-2",
+                ),
+            },
+            display_name: None,
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: None,
+            deprecated: None,
+            features: [],
         },
         ModelDetails {
-            provider: Openai,
-            slug: "babbage-002",
+            id: ModelIdConfig {
+                provider: Openai,
+                name: Name(
+                    "davinci-002",
+                ),
+            },
+            display_name: None,
             context_window: None,
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: None,
+            deprecated: None,
+            features: [],
+        },
+        ModelDetails {
+            id: ModelIdConfig {
+                provider: Openai,
+                name: Name(
+                    "babbage-002",
+                ),
+            },
+            display_name: None,
+            context_window: None,
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+            deprecated: None,
+            features: [],
         },
     ],
 )

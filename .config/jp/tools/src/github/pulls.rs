@@ -4,8 +4,10 @@ use url::Url;
 
 use super::auth;
 use crate::{
-    github::{handle_404, ORG, REPO},
-    to_xml, to_xml_with_root, Result,
+    Result,
+    github::{ORG, REPO, handle_404},
+    to_xml, to_xml_with_root,
+    util::OneOrMany,
 };
 
 /// The status of a issue or pull request.
@@ -19,14 +21,14 @@ pub enum State {
 pub(crate) async fn github_pulls(
     number: Option<u64>,
     state: Option<State>,
-    file_diffs: Option<Vec<String>>,
+    file_diffs: Option<OneOrMany<String>>,
 ) -> Result<String> {
     auth().await?;
 
     let file_diffs = file_diffs.unwrap_or_default();
 
     match number {
-        Some(number) if !file_diffs.is_empty() => diff(number, file_diffs).await,
+        Some(number) if !file_diffs.is_empty() => diff(number, file_diffs.into_vec()).await,
         Some(number) => get(number).await,
         None => list(state).await,
     }
@@ -150,7 +152,7 @@ async fn diff(number: u64, file_diffs: Vec<String>) -> Result<String> {
         })
         .collect();
 
-    to_xml_with_root(changed_files, "files")
+    to_xml_with_root(&changed_files, "files")
 }
 
 async fn list(state: Option<State>) -> Result<String> {

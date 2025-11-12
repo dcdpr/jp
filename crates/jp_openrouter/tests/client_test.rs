@@ -2,12 +2,12 @@ use std::{env, path::PathBuf};
 
 use futures::StreamExt as _;
 use jp_openrouter::{
+    Client,
     types::{
         chat::Message,
         request::{self, RequestMessage},
         response,
     },
-    Client,
 };
 use jp_test::{function_name, mock::Vcr};
 

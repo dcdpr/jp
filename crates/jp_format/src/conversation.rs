@@ -2,7 +2,10 @@ use std::fmt;
 
 use comfy_table::{Cell, CellAlignment, Row, Table};
 use crossterm::style::Stylize as _;
-use jp_conversation::{event::ConversationEvent, Conversation, ConversationId};
+use jp_conversation::{
+    Conversation, ConversationId,
+    event::{ConversationEvent, conversation_config},
+};
 use time::UtcDateTime;
 
 use crate::datetime::DateTimeFmt;
@@ -50,7 +53,7 @@ impl DetailsFmt {
 
         Self {
             id,
-            assistant_name: conversation.config().assistant.name.clone(),
+            assistant_name: conversation_config(messages).assistant.name.clone(),
             title: conversation.title,
             message_count: messages.len(),
             local: None,

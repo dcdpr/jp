@@ -129,6 +129,20 @@ pub enum FinishReason {
     Unknown,
 }
 
+impl FinishReason {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ToolCalls => "tool_calls",
+            Self::Stop => "stop",
+            Self::Length => "length",
+            Self::ContentFilter => "content_filter",
+            Self::Error => "error",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct NonStreamingMessage {
     pub role: String,

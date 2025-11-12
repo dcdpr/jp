@@ -1,9 +1,9 @@
-use jp_config::PartialConfig;
+use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 use url::Url;
 
 use super::validate_attachment;
-use crate::{ctx::Ctx, parser, IntoPartialConfig, Output};
+use crate::{IntoPartialAppConfig, Output, ctx::Ctx, parser};
 
 #[derive(Debug, clap::Args)]
 #[command(arg_required_else_help(true))]
@@ -27,20 +27,17 @@ impl Add {
     }
 }
 
-impl IntoPartialConfig for Add {
+impl IntoPartialAppConfig for Add {
     fn apply_cli_config(
         &self,
         _: Option<&Workspace>,
-        mut partial: PartialConfig,
-    ) -> std::result::Result<PartialConfig, Box<dyn std::error::Error + Send + Sync>> {
+        mut partial: PartialAppConfig,
+        _: Option<&PartialAppConfig>,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         for uri in &self.attachments {
             validate_attachment(uri)?;
 
-            partial
-                .conversation
-                .attachments
-                .get_or_insert_default()
-                .push(uri.clone());
+            partial.conversation.attachments.push(uri.clone().into());
         }
 
         Ok(partial)

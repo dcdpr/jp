@@ -44,6 +44,7 @@ jobs:
         uses: coverallsapp/github-action@648a8eb78e6d50909eff900e4ec85cab4524a45b # v2
         with:
           file: lcov.info
+          fail-on-error: false
       - if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:

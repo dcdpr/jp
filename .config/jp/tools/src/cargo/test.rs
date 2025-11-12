@@ -1,7 +1,8 @@
 use duct::cmd;
-use serde_json::{from_str, Value};
+use jp_tool::Context;
+use serde_json::{Value, from_str};
 
-use crate::{to_xml, Result, Workspace};
+use crate::{Result, to_xml};
 
 #[derive(serde::Serialize)]
 struct TestResult {
@@ -17,7 +18,7 @@ struct TestFailure {
 }
 
 pub(crate) async fn cargo_test(
-    workspace: &Workspace,
+    ctx: &Context,
     package: Option<String>,
     testname: Option<String>,
 ) -> Result<String> {
@@ -41,7 +42,7 @@ pub(crate) async fn cargo_test(
         "--message-format=libtest-json-plus",
         test_name
     )
-    .dir(&workspace.path)
+    .dir(&ctx.root)
     .env("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1")
     .env("RUST_BACKTRACE", "1")
     .unchecked()

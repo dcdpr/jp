@@ -3,11 +3,12 @@ source: crates/jp_test/src/mock.rs
 expression: expr
 ---
 Ok(
-    Reply(
-        [
+    Reply {
+        provider: Anthropic,
+        events: [
             Content(
-                "Hello! I'm ready to help you. What would you like to discuss or work on today?",
+                "Hello! I'm ready to help you with any questions or tasks you may have. What would you like to discuss?",
             ),
         ],
-    ),
+    },
 )

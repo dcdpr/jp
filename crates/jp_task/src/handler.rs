@@ -21,16 +21,18 @@ impl TaskHandler {
         self.tasks.spawn(async move {
             let now = tokio::time::Instant::now();
             loop {
-                tokio::select! {
-                    biased;
-                    () = tokio::time::sleep(Duration::from_millis(500)) => {
+                jp_macro::select!(
+                    biased,
+                    tokio::time::sleep(Duration::from_millis(500)),
+                    |_wake| {
                         trace!(name, elapsed_ms = %now.elapsed().as_millis(), "Task running...");
-                    }
-                    v = &mut task => {
+                    },
+                    &mut task,
+                    |v| {
                         debug!(name, elapsed_ms = %now.elapsed().as_millis(), "Task completed.");
-                        return v
+                        return v;
                     }
-                }
+                );
             }
         });
     }
@@ -71,25 +73,31 @@ impl TaskHandler {
         tokio::pin!(timeout);
 
         loop {
-            tokio::select! {
-                biased;
+            jp_macro::select!(
+                biased,
                 // Ask long-running tasks to stop.
-                () = &mut timeout => {
+                &mut timeout,
+                |_wake| {
                     if shutdown {
                         warn!("Tasks did not respond to cancellation signal. Forcing shutdown.");
                         self.tasks.shutdown().await;
                     } else {
-                        warn!("Task finalization timed out. Signalling cancellation to remaining tasks.");
+                        warn!(
+                            "Task finalization timed out. Signalling cancellation to remaining \
+                             tasks."
+                        );
                         self.cancel_token.cancel();
                     }
                     break;
-                }
-                task = self.tasks.join_next() => match task {
-                    Some(task) => handle_task_completion(task, tasks),
-                    None => break,
                 },
-                else => break,
-            }
+                self.tasks.join_next(),
+                |task| {
+                    match task {
+                        Some(task) => handle_task_completion(task, tasks),
+                        None => break,
+                    }
+                },
+            );
         }
     }
 }

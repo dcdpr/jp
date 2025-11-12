@@ -3,11 +3,15 @@ source: crates/jp_test/src/mock.rs
 expression: expr
 ---
 Ok(
-    Reply(
-        [
+    Reply {
+        provider: Google,
+        events: [
             Content(
-                "Hello! I received your message. How can I help you today?",
+                "Received.\n\nHow can I help you?",
+            ),
+            Finished(
+                Completed,
             ),
         ],
-    ),
+    },
 )

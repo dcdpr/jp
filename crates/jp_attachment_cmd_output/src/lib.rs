@@ -2,8 +2,8 @@ use std::{collections::BTreeSet, error::Error, path::Path};
 
 use async_trait::async_trait;
 use jp_attachment::{
-    distributed_slice, linkme, percent_decode_str, percent_encode_str, typetag, Attachment,
-    BoxedHandler, Handler, HANDLERS,
+    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, percent_decode_str,
+    percent_encode_str, typetag,
 };
 use jp_mcp::Client;
 use serde::{Deserialize, Serialize};
@@ -24,20 +24,24 @@ pub struct Commands(BTreeSet<Command>);
 struct Command {
     cmd: String,
     args: Vec<String>,
+    description: Option<String>,
 }
 
 impl Command {
     fn to_uri(&self, scheme: &str) -> Result<Url, Box<dyn std::error::Error + Send + Sync>> {
-        let query_pairs = self
+        let mut query_pairs = self
             .args
             .iter()
             .map(|v| format!("arg={}", percent_encode_str(v)))
-            .collect::<Vec<_>>()
-            .join("&");
+            .collect::<Vec<_>>();
+
+        if let Some(prefix) = &self.description {
+            query_pairs.push(format!("description={}", percent_encode_str(prefix)));
+        }
 
         let mut uri = format!("{scheme}://{}", &self.cmd);
         if !query_pairs.is_empty() {
-            uri.push_str(&format!("?{query_pairs}"));
+            uri.push_str(&format!("?{}", query_pairs.join("&")));
         }
 
         Ok(Url::parse(&uri)?)
@@ -121,8 +125,12 @@ impl Handler for Commands {
             };
 
             attachments.push(Attachment {
-                source: command.to_uri(self.scheme())?.to_string(),
+                source: std::iter::once(command.cmd.clone())
+                    .chain(command.args.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join(" "),
                 content: output.try_to_xml()?,
+                description: command.description.clone(),
             });
         }
 
@@ -138,14 +146,20 @@ fn uri_to_command(uri: &Url) -> Result<Command, Box<dyn Error + Send + Sync>> {
         .map(|v| percent_decode_str(&v))
         .collect::<Result<Vec<_>, _>>()?;
 
+    let description = uri
+        .query_pairs()
+        .find_map(|(k, v)| (k == "description").then(|| v.to_string()));
+
     Ok(Command {
         cmd: cmd.to_string(),
         args,
+        description,
     })
 }
 
 #[cfg(test)]
 mod tests {
+    use indexmap::IndexMap;
     use test_log::test;
 
     use super::*;
@@ -174,6 +188,15 @@ mod tests {
                 Ok(Command {
                     cmd: "ls".to_string(),
                     args: vec![],
+                    description: None,
+                }),
+            ),
+            (
+                "cmd://ls?description=hello%20world",
+                Ok(Command {
+                    cmd: "ls".to_string(),
+                    args: vec![],
+                    description: Some("hello world".to_string()),
                 }),
             ),
             (
@@ -181,6 +204,15 @@ mod tests {
                 Ok(Command {
                     cmd: "ls".to_string(),
                     args: vec!["-lah".to_string()],
+                    description: None,
+                }),
+            ),
+            (
+                "cmd://ls?arg=%2Dlah&description=hello%20world",
+                Ok(Command {
+                    cmd: "ls".to_string(),
+                    args: vec!["-lah".to_string()],
+                    description: Some("hello world".to_string()),
                 }),
             ),
             (
@@ -188,6 +220,7 @@ mod tests {
                 Ok(Command {
                     cmd: "git".to_string(),
                     args: vec!["diff".to_string(), "--cached".to_string()],
+                    description: None,
                 }),
             ),
             (
@@ -195,6 +228,7 @@ mod tests {
                 Ok(Command {
                     cmd: "ls".to_string(),
                     args: vec!["-l".to_string(), "-a".to_string(), "-h".to_string()],
+                    description: None,
                 }),
             ),
             (
@@ -219,16 +253,19 @@ mod tests {
         let commands = Commands(
             vec![
                 Command {
-                    cmd: "ls".to_string(),
+                    cmd: "ls".to_owned(),
                     args: vec![],
+                    description: None,
                 },
                 Command {
-                    cmd: "ls".to_string(),
-                    args: vec!["-a".to_string()],
+                    cmd: "ls".to_owned(),
+                    args: vec!["-a".to_owned()],
+                    description: None,
                 },
                 Command {
-                    cmd: "false".to_string(),
+                    cmd: "false".to_owned(),
                     args: vec![],
+                    description: Some("Run false".to_owned()),
                 },
             ]
             .into_iter()
@@ -241,34 +278,37 @@ mod tests {
         std::fs::write(path.join("file1"), "").unwrap();
         std::fs::write(path.join("file2"), "").unwrap();
 
-        let client = Client::default();
+        let client = Client::new(IndexMap::default());
         let attachments = commands.get(path, client).await.unwrap();
         assert_eq!(attachments, vec![
             Attachment {
-                source: "cmd://false".to_string(),
+                source: "false".to_string(),
                 content: indoc::indoc! {"
                     <Output>
                       <code>1</code>
                     </Output>"}
                 .to_owned(),
+                description: Some("Run false".to_owned()),
             },
             Attachment {
-                source: "cmd://ls".to_string(),
+                source: "ls".to_string(),
                 content: indoc::indoc! {"
                     <Output>
                       <stdout>dir\nfile1\nfile2\n</stdout>
                       <code>0</code>
                     </Output>"}
                 .to_owned(),
+                ..Default::default()
             },
             Attachment {
-                source: "cmd://ls?arg=%2Da".to_string(),
+                source: "ls -a".to_string(),
                 content: indoc::indoc! {"
                     <Output>
                       <stdout>.\n..\ndir\nfile1\nfile2\n</stdout>
                       <code>0</code>
                     </Output>"}
                 .to_owned(),
+                ..Default::default()
             },
         ]);
     }

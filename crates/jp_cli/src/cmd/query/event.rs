@@ -1,36 +1,27 @@
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-    time,
-};
+use std::{env, fs, time};
 
 use crossterm::style::Stylize as _;
-use hex::ToHex as _;
-use inquire::Confirm;
+use indexmap::IndexMap;
 use jp_config::{
-    mcp::{
-        server::{
-            checksum::Algorithm,
-            tool::{self},
-            ToolId,
-        },
-        tool_call, ServerId,
+    conversation::tool::{
+        ToolConfigWithDefaults,
+        style::{InlineResults, LinkStyle, TruncateLines},
     },
-    style::LinkStyle,
+    style::{
+        StyleConfig,
+        reasoning::{ReasoningDisplayConfig, TruncateChars},
+    },
 };
 use jp_conversation::message::{ToolCallRequest, ToolCallResult};
-use jp_llm::CompletionChunk;
-use jp_mcp::{tool::McpToolId, CallToolResult, Content, ResourceContents};
+use jp_llm::{CompletionChunk, ToolError};
 use jp_term::osc::hyperlink;
-use open_editor::{edit_mut_in_editor_with_opts, EditOptions};
+use jp_tool::{AnswerType, Question};
 use serde_json::Value;
-use sha1::{Digest as _, Sha1};
-use sha2::Sha256;
-use tracing::{info, trace};
 
-use super::ResponseHandler;
+use super::{ResponseHandler, turn::TurnState};
 use crate::{Ctx, Error};
 
+#[derive(Debug, Default, PartialEq)]
 pub(super) struct StreamEventHandler {
     pub reasoning_tokens: String,
     pub content_tokens: String,
@@ -41,30 +32,61 @@ pub(super) struct StreamEventHandler {
 impl StreamEventHandler {
     pub(super) fn handle_chat_chunk(
         &mut self,
-        ctx: &mut Ctx,
+        reasoning_display: ReasoningDisplayConfig,
         chunk: CompletionChunk,
     ) -> Option<String> {
         match chunk {
-            CompletionChunk::Reasoning(data) if !data.is_empty() => {
-                self.reasoning_tokens.push_str(&data);
+            CompletionChunk::Reasoning(ref data) if !data.is_empty() => {
+                let mut display = match reasoning_display {
+                    ReasoningDisplayConfig::Summary => todo!(),
+                    ReasoningDisplayConfig::Static if self.reasoning_tokens.is_empty() => {
+                        Some("_reasoning..._".to_owned())
+                    }
+                    ReasoningDisplayConfig::Full => Some(data.clone()),
+                    ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => {
+                        let remaining =
+                            characters.saturating_sub(self.reasoning_tokens.chars().count());
 
-                if !ctx.config.style.reasoning.show {
-                    return None;
+                        if remaining > 0 {
+                            let mut data: String = data.chars().take(remaining).collect();
+                            if data.chars().count() == remaining {
+                                data.push_str("...");
+                            }
+
+                            Some(data)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+
+                if matches!(
+                    reasoning_display,
+                    ReasoningDisplayConfig::Full | ReasoningDisplayConfig::Truncate(_)
+                ) && let Some(v) = display.as_mut()
+                {
+                    if self.reasoning_tokens.is_empty() {
+                        v.insert_str(0, "> ");
+                    }
+
+                    *v = v.replace('\n', "\n> ");
                 }
 
-                Some(data)
+                self.reasoning_tokens.push_str(data);
+                display
             }
+
             CompletionChunk::Content(mut data) if !data.is_empty() => {
-                let reasoning_ended = !self.reasoning_tokens.is_empty()
-                    && ctx.config.style.reasoning.show
-                    && self.content_tokens.is_empty();
+                let reasoning_ended =
+                    !self.reasoning_tokens.is_empty() && self.content_tokens.is_empty();
 
                 self.content_tokens.push_str(&data);
 
                 // If the response includes reasoning, we add two newlines
                 // after the reasoning, but before the content.
-                if reasoning_ended {
-                    data = format!("\n\n{data}");
+                if !matches!(reasoning_display, ReasoningDisplayConfig::Hidden) && reasoning_ended {
+                    data = format!("\n---\n\n{data}");
                 }
 
                 Some(data)
@@ -76,61 +98,165 @@ impl StreamEventHandler {
     pub async fn handle_tool_call(
         &mut self,
         ctx: &mut Ctx,
+        turn_state: &mut TurnState,
         call: ToolCallRequest,
         handler: &mut ResponseHandler,
     ) -> Result<Option<String>, Error> {
+        let Some(tool_config) = ctx.config().conversation.tools.get(&call.name) else {
+            return Err(Error::NotFound("tool", call.name.clone()));
+        };
+
+        let editor = ctx.config().editor.path().ok_or(Error::MissingEditor)?;
+
         self.tool_calls.push(call.clone());
+        let tool = jp_llm::tool::ToolDefinition::new(
+            &call.name,
+            tool_config.source(),
+            tool_config.description().map(str::to_owned),
+            tool_config.parameters().clone(),
+            &ctx.mcp_client,
+        )
+        .await?;
 
         if handler.render_tool_calls {
-            let data = indoc::formatdoc!(
-                "\n\n
-                    ---
-                    calling tool: **{}**
+            let mut title = format!("Calling tool **{}**", tool.name);
 
-                    arguments:
-                    ```json
-                    {:#}
-                    ```
+            if !call.arguments.is_empty() {
+                let arguments = serde_json::to_string_pretty(&call.arguments)?;
+                title.push_str(&format!(" with arguments:\n\n```json\n{arguments}\n```\n"));
+            }
 
-                ",
-                call.name,
-                call.arguments
-            );
-
-            handler.handle(&data, ctx, false)?;
+            let data = format!("\n{title}\n");
+            handler.handle(&data, &ctx.config().style, false)?;
         }
 
-        let result = call_tool(ctx, call.clone()).await?;
-        self.tool_call_results.push(result.clone());
-        build_tool_call_result(ctx, &call, &result, handler).await
+        let mut answers = IndexMap::new();
+        loop {
+            match tool
+                .call(
+                    call.id.clone(),
+                    Value::Object(call.arguments.clone()),
+                    &answers,
+                    &ctx.mcp_client,
+                    tool_config.clone(),
+                    &ctx.workspace.root,
+                    &editor,
+                )
+                .await
+            {
+                Ok(result) => {
+                    self.tool_call_results.push(result.clone());
+                    return build_tool_call_result(
+                        &ctx.config().style,
+                        &result,
+                        &tool_config,
+                        handler,
+                    );
+                }
+                Err(ToolError::NeedsInput { question }) => {
+                    // Check answers in priority order:
+                    // 1. Turn-level persisted answers
+                    // 2. Config-level automated answers
+                    // 3. Interactive prompt (or default)
+                    let answer = if let Some(answer) = turn_state
+                        .persisted_tool_answers
+                        .get(&call.name)
+                        .and_then(|tool_answers| tool_answers.get(&question.id))
+                    {
+                        answer.clone()
+                    } else if let Some(answer) = tool_config.get_answer(&question.id) {
+                        answer.clone()
+                    } else if ctx.term.is_tty {
+                        let (answer, persist_level) = prompt_user(&question)?;
+
+                        // Store turn-level answers for reuse across tool calls
+                        if persist_level == jp_tool::PersistLevel::Turn {
+                            turn_state
+                                .persisted_tool_answers
+                                .entry(call.name.clone())
+                                .or_default()
+                                .insert(question.id.clone(), answer.clone());
+                        }
+
+                        answer
+                    } else {
+                        question.default.unwrap_or_default()
+                    };
+
+                    answers.insert(question.id.clone(), answer);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
     }
 }
 
-async fn build_tool_call_result(
-    ctx: &Ctx,
-    call: &ToolCallRequest,
+fn prompt_user(question: &Question) -> Result<(Value, jp_tool::PersistLevel), Error> {
+    match &question.answer_type {
+        AnswerType::Boolean => prompt_boolean_git_style(question),
+        AnswerType::Select { options } => {
+            let answer: Value = inquire::Select::new(&question.text, options.clone())
+                .prompt()
+                .map(Into::into)
+                .map_err(|e: inquire::error::InquireError| Error::from(e))?;
+            Ok((answer, jp_tool::PersistLevel::None))
+        }
+        AnswerType::Text => {
+            let mut inquiry = inquire::Text::new(&question.text);
+
+            if let Some(default) = question.default.as_ref().and_then(Value::as_str) {
+                inquiry = inquiry.with_default(default);
+            }
+
+            let answer: Value = inquiry
+                .prompt()
+                .map(Into::into)
+                .map_err(|e: inquire::error::InquireError| Error::from(e))?;
+            Ok((answer, jp_tool::PersistLevel::None))
+        }
+    }
+}
+
+fn prompt_boolean_git_style(question: &Question) -> Result<(Value, jp_tool::PersistLevel), Error> {
+    use jp_inquire::{InlineOption, InlineSelect};
+
+    let options = vec![
+        InlineOption::new('y', "yes, just this once"),
+        InlineOption::new('Y', "yes, and remember for this turn"),
+        InlineOption::new('n', "no, just this once"),
+        InlineOption::new('N', "no, and remember for this turn"),
+    ];
+
+    let select = InlineSelect::new(&question.text, options);
+    let answer = select.prompt()?;
+
+    match answer {
+        'y' => Ok((Value::Bool(true), jp_tool::PersistLevel::None)),
+        'Y' => Ok((Value::Bool(true), jp_tool::PersistLevel::Turn)),
+        'n' => Ok((Value::Bool(false), jp_tool::PersistLevel::None)),
+        'N' => Ok((Value::Bool(false), jp_tool::PersistLevel::Turn)),
+        _ => unreachable!(),
+    }
+}
+
+fn build_tool_call_result(
+    style: &StyleConfig,
     result: &ToolCallResult,
+    tool_config: &ToolConfigWithDefaults,
     handler: &mut ResponseHandler,
 ) -> Result<Option<String>, Error> {
-    let tool_id = McpToolId::new(&call.name);
-    let server_id = ctx.mcp_client.get_tool_server_id(&tool_id).await?;
-    let server_cfg = ctx
-        .config
-        .mcp
-        .get_server(&ServerId::new(server_id.as_str()));
+    let content = if let Ok(json) = serde_json::from_str::<Value>(result.content.trim()) {
+        format!("```json\n{}\n```", serde_json::to_string_pretty(&json)?)
+    } else {
+        result.content.trim().to_owned()
+    };
 
-    let tool_cfg = server_cfg.get_tool(&ToolId::new(&call.name));
-
-    let mut lines = result.content.trim().lines().collect::<Vec<_>>();
-    let ext = lines
-        .first()
-        .and_then(|v| v.strip_prefix("```"))
-        .map(|v| {
-            v.chars()
-                .take_while(char::is_ascii_alphabetic)
-                .collect::<String>()
-        })
-        .map(|v| format!(".{v}"));
+    let mut lines = content.lines().collect::<Vec<_>>();
+    let mut ext = lines.first().and_then(|v| v.strip_prefix("```")).map(|v| {
+        v.chars()
+            .take_while(char::is_ascii_alphabetic)
+            .collect::<String>()
+    });
 
     if ext.is_some() {
         lines.remove(0);
@@ -138,6 +264,21 @@ async fn build_tool_call_result(
 
     if lines.last().is_some_and(|v| v.ends_with("```")) {
         lines.pop();
+    }
+
+    // See if we can detect the language by parsing the content.
+    //
+    // We only do this for "container" formats (e.g. XML starting with `<` or
+    // JSON starting with `{`) to avoid applying this too aggressively (e.g. a
+    // quoted string should not be treated as JSON unless explicitly defined as
+    // such).
+    if ext.is_none() {
+        if content.trim().starts_with('<') && quick_xml::de::from_str::<Value>(&content).is_ok() {
+            ext = Some("xml".to_owned());
+        } else if content.trim().starts_with('{') && serde_json::from_str::<Value>(&content).is_ok()
+        {
+            ext = Some("json".to_owned());
+        }
     }
 
     let content = lines.join("\n");
@@ -155,12 +296,25 @@ async fn build_tool_call_result(
     let path = env::temp_dir().join(file_name);
     fs::write(&path, &content)?;
 
-    let max_lines = match tool_cfg.style.inline_results {
-        tool_call::InlineResults::Truncate { lines } => lines,
+    let max_lines = match tool_config.style().inline_results {
+        InlineResults::Truncate(TruncateLines { lines }) => lines,
         _ => content.lines().count(),
     };
 
-    let mut data = String::new();
+    if handler.render_tool_calls {
+        let mut intro = "\nTool call result".to_owned();
+        match tool_config.style().inline_results {
+            InlineResults::Truncate(TruncateLines { lines }) if lines < content.lines().count() => {
+                intro.push_str(&format!(" _(truncated to {lines} lines)_"));
+            }
+            _ => {}
+        }
+        intro.push_str(":\n");
+
+        handler.handle(&intro, style, false)?;
+    }
+
+    let mut data = "\n".to_owned();
 
     if let Some(ext) = ext.as_ref() {
         data.push_str("```");
@@ -174,25 +328,33 @@ async fn build_tool_call_result(
     }
 
     if ext.is_some() {
-        data.push_str("\n```");
+        data.push_str("```");
     }
 
-    if matches!(tool_cfg.style.inline_results, tool_call::InlineResults::Off) {
+    if matches!(tool_config.style().inline_results, InlineResults::Off) {
         data.clear();
     }
 
     if handler.render_tool_calls {
-        handler.handle(&data, ctx, false)?;
+        if !data.ends_with('\n') {
+            data.push('\n');
+        }
+
+        handler.handle(&data, style, false)?;
     }
 
-    let link = match tool_cfg.style.results_file_link {
+    let link = match tool_config.style().results_file_link {
         LinkStyle::Off => None,
-        LinkStyle::Full => Some(format!("see: file://{}", path.display())),
+        LinkStyle::Full => Some(format!("see: {}\n\n", path.display())),
         LinkStyle::Osc8 => Some(format!(
-            "[{}]",
+            "[{}] [{}]\n\n",
             hyperlink(
                 format!("file://{}", path.display()),
                 "open in editor".red().to_string()
+            ),
+            hyperlink(
+                format!("copy://{}", path.display()),
+                "copy to clipboard".red().to_string()
             )
         )),
     };
@@ -200,143 +362,10 @@ async fn build_tool_call_result(
     if handler.render_tool_calls
         && let Some(link) = link
     {
-        handler.handle(&link, ctx, true)?;
+        handler.handle(&link, style, true)?;
     }
 
     Ok(None)
-}
-
-#[expect(clippy::too_many_lines)]
-async fn call_tool(ctx: &Ctx, mut call: ToolCallRequest) -> Result<ToolCallResult, Error> {
-    info!(tool = %call.name, arguments = %call.arguments, "Calling tool.");
-    let tool_id = McpToolId::new(&call.name);
-    let server_id = ctx.mcp_client.get_tool_server_id(&tool_id).await?;
-    let server_cfg = ctx
-        .config
-        .mcp
-        .get_server(&ServerId::new(server_id.as_str()));
-
-    let mut tool_cfg = server_cfg.get_tool(&ToolId::new(&call.name));
-
-    if let Some(checksum) = &server_cfg.binary_checksum {
-        let path = get_tool_binary_path(ctx, &tool_id).await?;
-        verify_file_checksum(&tool_id, &path, &checksum.value, checksum.algorithm)?;
-    }
-
-    if matches!(tool_cfg.run, tool::RunMode::Edit) {
-        let editor = ctx.config.editor.command().ok_or(Error::MissingEditor)?;
-        let args = serde_json::to_string_pretty(&call.arguments)?;
-
-        call.arguments = loop {
-            let args = open_editor::edit_in_editor_with_opts(&args, EditOptions {
-                editor: Some(open_editor::Editor::from(&editor)),
-                ..Default::default()
-            })
-            .map_err(|e| Error::Editor(e.to_string()))?;
-
-            // If the user removed all data from the argument, we consider the
-            // edit a no-op, and ask the user if they want to run the tool.
-            if args.is_empty() {
-                tool_cfg.run = tool::RunMode::Ask;
-                break serde_json::json!({});
-            }
-
-            // If we can't parse the arguments as valid JSON, we consider the
-            // input invalid, and ask the user if they want to re-open the
-            // editor.
-            match serde_json::from_str::<Value>(&args) {
-                Ok(value) => break value,
-                Err(error) => {
-                    let retry = Confirm::new("Re-open editor?")
-                        .with_default(true)
-                        .with_help_message(&format!("JSON parsing error: {error}"))
-                        .prompt()
-                        .unwrap_or(false);
-
-                    if !retry {
-                        return Err(error.into());
-                    }
-                }
-            }
-        };
-    }
-
-    let should_run = match tool_cfg.run {
-        tool::RunMode::Ask => Confirm::new(&format!(
-            "Run {} tool by {} server?",
-            call.name.clone().bold().yellow(),
-            server_id.as_str().bold().blue(),
-        ))
-        .with_default(true)
-        .prompt()
-        .unwrap_or(false),
-        _ => true,
-    };
-
-    let mut result = if should_run {
-        ctx.mcp_client.call_tool(&call.name, call.arguments).await?
-    } else {
-        CallToolResult::success(vec![Content::text("Tool call rejected by user.")])
-    };
-
-    trace!(result = ?result, "Tool call completed.");
-
-    if matches!(tool_cfg.result, tool::ResultMode::Edit) {
-        let editor = ctx.config.editor.command().ok_or(Error::MissingEditor)?;
-        let mut text = result
-            .content
-            .iter()
-            .filter_map(|c| c.as_text().map(|t| t.text.clone()))
-            .collect::<Vec<_>>()
-            .join("\n\n");
-
-        edit_mut_in_editor_with_opts(&mut text, EditOptions {
-            editor: Some(open_editor::Editor::from(editor)),
-            ..Default::default()
-        })
-        .map_err(|e| Error::Editor(e.to_string()))?;
-
-        result.content = text.split("\n\n").map(Content::text).collect();
-    }
-
-    let should_deliver = match tool_cfg.result {
-        tool::ResultMode::Ask => Confirm::new(&format!(
-            "Deliver the results of the {} tool call?",
-            call.name.clone().bold().yellow(),
-        ))
-        .with_default(true)
-        .prompt()
-        .unwrap_or(false),
-        _ => true,
-    };
-
-    let result = if should_deliver {
-        result
-    } else {
-        CallToolResult::success(vec![Content::text(
-            "Tool call results omitted.".to_string(),
-        )])
-    };
-
-    Ok(ToolCallResult {
-        id: call.id,
-        error: result.is_error.unwrap_or(false),
-        content: result
-            .content
-            .into_iter()
-            .filter_map(|c| match c.raw {
-                jp_mcp::RawContent::Text(text_content) => Some(text_content.text),
-                jp_mcp::RawContent::Resource(embedded_resource) => {
-                    match embedded_resource.resource {
-                        ResourceContents::TextResourceContents { text, .. } => Some(text),
-                        ResourceContents::BlobResourceContents { .. } => None,
-                    }
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n"),
-    })
 }
 
 pub(super) async fn handle_tool_calls(
@@ -344,57 +373,154 @@ pub(super) async fn handle_tool_calls(
     tool_calls: Vec<ToolCallRequest>,
 ) -> Result<Vec<ToolCallResult>, Error> {
     let mut results = vec![];
+
     for call in tool_calls {
-        results.push(call_tool(ctx, call).await?);
+        let Some(tool_config) = ctx.config().conversation.tools.get(&call.name) else {
+            return Err(Error::NotFound("tool", call.name.clone()));
+        };
+
+        let tool = jp_llm::tool::ToolDefinition::new(
+            &call.name,
+            tool_config.source(),
+            tool_config.description().map(str::to_owned),
+            tool_config.parameters().clone(),
+            &ctx.mcp_client,
+        )
+        .await?;
+        let editor = ctx.config().editor.path().ok_or(Error::MissingEditor)?;
+
+        results.push(
+            tool.call(
+                call.id,
+                Value::Object(call.arguments),
+                &IndexMap::new(),
+                &ctx.mcp_client,
+                tool_config,
+                &ctx.workspace.root,
+                &editor,
+            )
+            .await?,
+        );
     }
 
     Ok(results)
 }
 
-pub fn verify_file_checksum(
-    tool_id: &McpToolId,
-    path: &Path,
-    hash: &str,
-    algo: Algorithm,
-) -> Result<(), Error> {
-    let contents = fs::read(path)?;
-    let digest = match algo {
-        Algorithm::Sha256 => format!("{:x}", Sha256::digest(&contents)),
-        Algorithm::Sha1 => format!("{:x}", Sha1::digest(&contents)),
-    };
+#[cfg(test)]
+mod tests {
+    use indexmap::IndexMap;
 
-    if digest.eq_ignore_ascii_case(hash) {
-        return Ok(());
+    use super::*;
+
+    #[test]
+    #[expect(clippy::too_many_lines)]
+    fn test_stream_event_handler_handle_chat_chunk() {
+        struct TestCase {
+            handler: StreamEventHandler,
+            chunk: CompletionChunk,
+            show_reasoning: bool,
+            output: Option<String>,
+            mutated_handler: StreamEventHandler,
+        }
+
+        let cases = IndexMap::from([
+            ("empty content chunk", TestCase {
+                handler: StreamEventHandler::default(),
+                chunk: CompletionChunk::Content(String::new()),
+                show_reasoning: true,
+                output: None,
+                mutated_handler: StreamEventHandler::default(),
+            }),
+            ("empty reasoning chunk", TestCase {
+                handler: StreamEventHandler::default(),
+                chunk: CompletionChunk::Reasoning(String::new()),
+                show_reasoning: true,
+                output: None,
+                mutated_handler: StreamEventHandler::default(),
+            }),
+            ("reasoning chunk with show_reasoning=true", TestCase {
+                handler: StreamEventHandler::default(),
+                chunk: CompletionChunk::Reasoning("Let me think...".into()),
+                show_reasoning: true,
+                output: Some("> Let me think...".into()),
+                mutated_handler: StreamEventHandler {
+                    reasoning_tokens: "Let me think...".into(),
+                    ..Default::default()
+                },
+            }),
+            ("reasoning chunk with show_reasoning=false", TestCase {
+                handler: StreamEventHandler::default(),
+                chunk: CompletionChunk::Reasoning("Let me think...".into()),
+                show_reasoning: false,
+                output: None,
+                mutated_handler: StreamEventHandler {
+                    reasoning_tokens: "Let me think...".into(),
+                    ..Default::default()
+                },
+            }),
+            ("content after reasoning adds separator", TestCase {
+                handler: StreamEventHandler {
+                    reasoning_tokens: "I reasoned".into(),
+                    ..Default::default()
+                },
+                chunk: CompletionChunk::Content("Answer".into()),
+                show_reasoning: true,
+                output: Some("\n---\n\nAnswer".into()),
+                mutated_handler: StreamEventHandler {
+                    reasoning_tokens: "I reasoned".into(),
+                    content_tokens: "Answer".into(),
+                    ..Default::default()
+                },
+            }),
+            ("content after reasoning without show_reasoning", TestCase {
+                handler: StreamEventHandler {
+                    reasoning_tokens: "I reasoned".into(),
+                    ..Default::default()
+                },
+                chunk: CompletionChunk::Content("Answer".into()),
+                show_reasoning: false,
+                output: Some("Answer".into()),
+                mutated_handler: StreamEventHandler {
+                    reasoning_tokens: "I reasoned".into(),
+                    content_tokens: "Answer".into(),
+                    ..Default::default()
+                },
+            }),
+            ("subsequent content chunks accumulate", TestCase {
+                handler: StreamEventHandler {
+                    content_tokens: "Hello".into(),
+                    ..Default::default()
+                },
+                chunk: CompletionChunk::Content(" world".into()),
+                show_reasoning: false,
+                output: Some(" world".into()),
+                mutated_handler: StreamEventHandler {
+                    content_tokens: "Hello world".into(),
+                    ..Default::default()
+                },
+            }),
+        ]);
+
+        for (
+            name,
+            TestCase {
+                mut handler,
+                chunk,
+                show_reasoning,
+                output,
+                mutated_handler,
+            },
+        ) in cases
+        {
+            let reasoning_display = if show_reasoning {
+                ReasoningDisplayConfig::Full
+            } else {
+                ReasoningDisplayConfig::Hidden
+            };
+
+            let result = handler.handle_chat_chunk(reasoning_display, chunk);
+            assert_eq!(result, output, "Failed test case: {name}");
+            assert_eq!(handler, mutated_handler, "Failed test case: {name}");
+        }
     }
-
-    Err(Error::Mcp(jp_mcp::Error::ChecksumMismatch {
-        tool: tool_id.to_string(),
-        path: path.to_path_buf(),
-        expected: hash.to_string(),
-        got: digest.encode_hex(),
-    }))
-}
-
-/// Get the path to the binary for the given server, if the server is using
-/// the `stdio` transport.
-async fn get_tool_binary_path(ctx: &Ctx, id: &McpToolId) -> Result<PathBuf, Error> {
-    let server_id = ctx.mcp_client.get_tool_server_id(id).await?;
-    let path = if server_id.as_str() == "embedded" {
-        ctx.mcp_client.get_embedded_tool_path(id).await?
-    } else {
-        let server = ctx
-            .workspace
-            .get_mcp_server(&server_id)
-            .ok_or(Error::Mcp(jp_mcp::Error::UnknownServer(server_id.clone())))?;
-
-        let jp_mcp::transport::Transport::Stdio(transport) = &server.transport;
-
-        transport.command.clone()
-    };
-
-    if path.exists() {
-        return Ok(path);
-    }
-
-    which::which(path).map_err(Into::into)
 }

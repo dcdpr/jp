@@ -1,7 +1,10 @@
 mod error;
 pub mod provider;
-mod structured;
+pub mod query;
+mod stream;
+pub mod structured;
+pub mod tool;
 
-pub use error::Error;
-pub use provider::{CompletionChunk, Provider};
-pub use structured::completion as structured_completion;
+pub use error::{Error, ToolError};
+pub use provider::Provider;
+pub use stream::event::{CompletionChunk, StreamEvent};

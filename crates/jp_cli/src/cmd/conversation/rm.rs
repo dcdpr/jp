@@ -4,7 +4,7 @@ use jp_conversation::{Conversation, ConversationId};
 use jp_format::conversation::DetailsFmt;
 use jp_workspace::query::ConversationQuery;
 
-use crate::{cmd::Success, ctx::Ctx, Output};
+use crate::{Output, cmd::Success, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Rm {
@@ -71,6 +71,7 @@ impl Rm {
 
             let confirm = Confirm::new("Are you sure?")
                 .with_default(false)
+                .with_confirm_on_input(true)
                 .with_help_message("this action cannot be undone");
 
             match confirm.prompt() {

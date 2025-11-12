@@ -2,17 +2,41 @@ use std::path::PathBuf;
 
 use ignore::{WalkBuilder, WalkState};
 
-use crate::Error;
+use crate::{Error, util::OneOrMany};
 
-#[derive(Debug, serde::Serialize)]
-pub(crate) struct Files(pub Vec<String>);
+#[derive(Debug)]
+pub(crate) enum Files {
+    Empty,
+    List(Vec<String>),
+}
+
+impl Files {
+    pub(crate) fn into_files(self) -> Vec<String> {
+        match self {
+            Files::Empty => vec![],
+            Files::List(files) => files,
+        }
+    }
+}
+
+impl serde::Serialize for Files {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Files::Empty => serializer.serialize_str("No files found."),
+            Files::List(files) => files.serialize(serializer),
+        }
+    }
+}
 
 pub(crate) async fn fs_list_files(
     root: PathBuf,
-    prefixes: Option<Vec<String>>,
-    extensions: Option<Vec<String>>,
+    prefixes: Option<OneOrMany<String>>,
+    extensions: Option<OneOrMany<String>>,
 ) -> std::result::Result<Files, Error> {
-    let prefixes = prefixes.unwrap_or(vec![String::new()]);
+    let prefixes = prefixes.unwrap_or(OneOrMany::One(String::new())).into_vec();
 
     let mut entries = vec![];
     for prefix in &prefixes {
@@ -66,16 +90,21 @@ pub(crate) async fn fs_list_files(
         entries.extend(matches);
     }
 
+    if entries.is_empty() {
+        return Ok(Files::Empty);
+    }
+
     entries.sort();
     entries.dedup();
 
-    Ok(Files(entries))
+    Ok(Files::List(entries))
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
+    use assert_matches::assert_matches;
     use test_log::test;
 
     use super::*;
@@ -138,7 +167,6 @@ mod tests {
             },
         ) in cases
         {
-            eprintln!("test {name}");
             let tmp = tempfile::tempdir().unwrap();
             let root = tmp.path();
 
@@ -160,7 +188,22 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_eq!(files.0, expected);
+            assert_eq!(files.into_files(), expected, "test case: {name}");
         }
+    }
+
+    #[test(tokio::test)]
+    async fn test_empty_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let files = fs_list_files(
+            PathBuf::from(root),
+            Some(vec!["foo".to_owned()].into()),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_matches!(files, Files::Empty);
     }
 }

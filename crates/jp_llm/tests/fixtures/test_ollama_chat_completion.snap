@@ -3,11 +3,18 @@ source: crates/jp_test/src/mock.rs
 expression: expr
 ---
 Ok(
-    Reply(
-        [
+    Reply {
+        provider: Ollama,
+        events: [
             Content(
-                "This is a test! I'm receiving your message and responding accordingly. Please feel free to send me any questions or topics you'd like to discuss, and I'll do my best to help!",
+                "This is an automated response. It looks like you sent a test message! If you have any questions or need assistance, feel free to ask me anything, and I'll do my best to help. Otherwise,",
+            ),
+            Content(
+                " if you're just testing the waters (or in this case, the chat), that's perfectly fine too!",
+            ),
+            Finished(
+                Completed,
             ),
         ],
-    ),
+    },
 )

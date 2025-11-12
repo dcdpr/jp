@@ -4,7 +4,7 @@ expression: expr
 ---
 [
     ChatCompletion {
-        id: "gen-1747515689-vvCckq64UzF5CLZQ4juM",
+        id: "gen-1758051221-ZP94f4eigc8b57o5fTbS",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -25,14 +25,14 @@ expression: expr
                 },
             ),
         ],
-        created: 2025-05-17 21:01:29.0 +00:00:00,
+        created: 2025-09-16 19:33:42.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1747515689-vvCckq64UzF5CLZQ4juM",
+        id: "gen-1758051221-ZP94f4eigc8b57o5fTbS",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -53,14 +53,14 @@ expression: expr
                 },
             ),
         ],
-        created: 2025-05-17 21:01:29.0 +00:00:00,
+        created: 2025-09-16 19:33:42.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1747515689-vvCckq64UzF5CLZQ4juM",
+        id: "gen-1758051221-ZP94f4eigc8b57o5fTbS",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -72,7 +72,7 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            "Here is a son",
+                            "Here",
                         ),
                         reasoning: None,
                         tool_calls: [],
@@ -81,14 +81,14 @@ expression: expr
                 },
             ),
         ],
-        created: 2025-05-17 21:01:29.0 +00:00:00,
+        created: 2025-09-16 19:33:42.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1747515689-vvCckq64UzF5CLZQ4juM",
+        id: "gen-1758051221-ZP94f4eigc8b57o5fTbS",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -100,7 +100,7 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            "net that I've composed for your",
+                            " is a sonnet",
                         ),
                         reasoning: None,
                         tool_calls: [],
@@ -109,14 +109,14 @@ expression: expr
                 },
             ),
         ],
-        created: 2025-05-17 21:01:29.0 +00:00:00,
+        created: 2025-09-16 19:33:42.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1747515689-vvCckq64UzF5CLZQ4juM",
+        id: "gen-1758051221-ZP94f4eigc8b57o5fTbS",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -128,7 +128,7 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            " test:\n\nThis challenge, a",
+                            " that",
                         ),
                         reasoning: None,
                         tool_calls: [],
@@ -137,14 +137,14 @@ expression: expr
                 },
             ),
         ],
-        created: 2025-05-17 21:01:29.0 +00:00:00,
+        created: 2025-09-16 19:33:42.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1747515689-vvCckq64UzF5CLZQ4juM",
+        id: "gen-1758051221-ZP94f4eigc8b57o5fTbS",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -156,7 +156,7 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            " sonnet to be designed,",
+                            " I",
                         ),
                         reasoning: None,
                         tool_calls: [],
@@ -165,14 +165,14 @@ expression: expr
                 },
             ),
         ],
-        created: 2025-05-17 21:01:29.0 +00:00:00,
+        created: 2025-09-16 19:33:42.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1747515689-vvCckq64UzF5CLZQ4juM",
+        id: "gen-1758051221-ZP94f4eigc8b57o5fTbS",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -184,7 +184,7 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            "\nRequires a poet's touch, a careful han",
+                            " hope is fitting for",
                         ),
                         reasoning: None,
                         tool_calls: [],
@@ -193,14 +193,14 @@ expression: expr
                 },
             ),
         ],
-        created: 2025-05-17 21:01:29.0 +00:00:00,
+        created: 2025-09-16 19:33:42.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1747515689-vvCckq64UzF5CLZQ4juM",
+        id: "gen-1758051221-ZP94f4eigc8b57o5fTbS",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -212,7 +212,7 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            "d.\nThe structure strict, the meter",
+                            " your test",
                         ),
                         reasoning: None,
                         tool_calls: [],
@@ -221,14 +221,14 @@ expression: expr
                 },
             ),
         ],
-        created: 2025-05-17 21:01:29.0 +00:00:00,
+        created: 2025-09-16 19:33:42.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1747515689-vvCckq64UzF5CLZQ4juM",
+        id: "gen-1758051221-ZP94f4eigc8b57o5fTbS",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -240,7 +240,7 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            " well-defined,\nA",
+                            ":\n\nThe test",
                         ),
                         reasoning: None,
                         tool_calls: [],
@@ -249,14 +249,14 @@ expression: expr
                 },
             ),
         ],
-        created: 2025-05-17 21:01:29.0 +00:00:00,
+        created: 2025-09-16 19:33:42.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1747515689-vvCckq64UzF5CLZQ4juM",
+        id: "gen-1758051221-ZP94f4eigc8b57o5fTbS",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -268,7 +268,7 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            " test of skill, to make",
+                            " approaches",
                         ),
                         reasoning: None,
                         tool_calls: [],
@@ -277,7 +277,7 @@ expression: expr
                 },
             ),
         ],
-        created: 2025-05-17 21:01:29.0 +00:00:00,
+        created: 2025-09-16 19:33:42.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,

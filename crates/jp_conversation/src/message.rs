@@ -2,9 +2,10 @@
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
+use jp_config::model::id::ProviderId;
 use jp_id::{
-    parts::{GlobalId, TargetId, Variant},
     Id, NANOSECONDS_PER_DECISECOND,
+    parts::{GlobalId, TargetId, Variant},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -16,9 +17,10 @@ use crate::error::{Error, Result};
 #[serde(untagged, rename_all = "snake_case")]
 pub enum UserMessage {
     Query {
-        #[serde(rename = "message")]
+        #[serde(rename = "content")]
         query: String,
     },
+
     ToolCallResults(Vec<ToolCallResult>),
 }
 
@@ -36,6 +38,14 @@ impl UserMessage {
         match self {
             Self::ToolCallResults(results) if !results.is_empty() => results,
             _ => &[],
+        }
+    }
+
+    #[must_use]
+    pub fn as_query_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Query { query } => Some(query),
+            Self::ToolCallResults(_) => None,
         }
     }
 }
@@ -66,8 +76,17 @@ impl Default for UserMessage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+// TODO: An assistant message cannot be empty, so we should model this type such
+// that either `content` or `tool_calls` is present, or both, with optional
+// `reasoning`.
+//
+// E.g. make `Content` an enum, containing either `Text`, `ToolCalls` or
+// `TextWithToolCalls`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssistantMessage {
+    /// The provider that produced the message.
+    pub provider: ProviderId,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
 
@@ -106,9 +125,23 @@ pub struct AssistantMessage {
     pub metadata: BTreeMap<String, Value>,
 }
 
-impl<T: Into<String>> From<T> for AssistantMessage {
-    fn from(message: T) -> Self {
+impl AssistantMessage {
+    #[must_use]
+    pub fn new(provider: ProviderId) -> Self {
         Self {
+            provider,
+            metadata: BTreeMap::default(),
+            reasoning: None,
+            content: None,
+            tool_calls: vec![],
+        }
+    }
+}
+
+impl<T: Into<String>> From<(ProviderId, T)> for AssistantMessage {
+    fn from((provider, message): (ProviderId, T)) -> Self {
+        Self {
+            provider,
             metadata: BTreeMap::default(),
             reasoning: None,
             content: Some(message.into()),
@@ -121,12 +154,14 @@ impl<T: Into<String>> From<T> for AssistantMessage {
 pub struct ToolCallRequest {
     pub id: String,
     pub name: String,
-    pub arguments: serde_json::Value,
+    #[serde(with = "jp_serde::repr::base64_json_map")]
+    pub arguments: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCallResult {
     pub id: String,
+    #[serde(with = "jp_serde::repr::base64_string")]
     pub content: String,
     pub error: bool,
 }

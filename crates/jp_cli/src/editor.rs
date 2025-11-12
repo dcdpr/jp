@@ -1,26 +1,35 @@
-use std::{env, fs, path::PathBuf, str::FromStr};
+mod parser;
+
+use std::{
+    fs::{self, OpenOptions},
+    io::{Read as _, Write as _},
+    path::PathBuf,
+    str::FromStr,
+};
 
 use duct::Expression;
-use jp_config::editor;
-use jp_conversation::{event::EventKind, AssistantMessage, ConversationId, UserMessage};
-use time::{macros::format_description, UtcOffset};
+use itertools::Itertools;
+use jp_config::{
+    AppConfig, Config as _, PartialAppConfig, ToPartial as _,
+    model::parameters::PartialReasoningConfig,
+};
+use jp_conversation::{
+    ConversationId, UserMessage,
+    event::{ConversationEvent, EventKind, conversation_config},
+};
+use time::{UtcOffset, macros::format_description};
 
 use crate::{
     ctx::Ctx,
+    editor::parser::QueryDocument,
     error::{Error, Result},
 };
 
 /// The name of the file used to store the current query message.
 const QUERY_FILENAME: &str = "QUERY_MESSAGE.md";
 
-const CUT_MARKER: &[&str] = &[
-    "---------------------------------------8<---------------------------------------",
-    "--------------------- EVERYTHING BELOW THIS LINE IS IGNORED --------------------",
-    "--------------------------------------->8---------------------------------------",
-];
-
 /// How to edit the query.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) enum Editor {
     /// Use whatever editor is configured.
     #[default]
@@ -31,56 +40,6 @@ pub(crate) enum Editor {
 
     /// Do not edit the query.
     Disabled,
-}
-
-impl Editor {
-    /// Get the editor from the CLI, or the config, or `None`.
-    pub(crate) fn from_cli_or_config(
-        cli: Option<Option<Self>>,
-        config: jp_config::editor::Editor,
-    ) -> Option<Self> {
-        // If no CLI editor is configured, use the config editor, if any.
-        let Some(editor) = cli else {
-            return config.try_into().ok();
-        };
-
-        // `--edit` equals `None` in this case, which we treat as `Default`.
-        match editor.unwrap_or_default() {
-            // For the default editor, use the config editor, if any.
-            Editor::Default => config.try_into().ok(),
-
-            // Otherwise, use whatever is configured.
-            editor => Some(editor),
-        }
-    }
-
-    pub(crate) fn command(&self) -> Option<Expression> {
-        let cmd = match self {
-            Editor::Disabled | Editor::Default => return None,
-            Editor::Command(cmd) => cmd,
-        };
-
-        let (cmd, args) = cmd.split_once(' ').unwrap_or((cmd, ""));
-        let args = if args.is_empty() {
-            vec![]
-        } else {
-            args.split(' ').collect::<Vec<_>>()
-        };
-
-        Some(duct::cmd(cmd, &args))
-    }
-}
-
-impl TryFrom<editor::Editor> for Editor {
-    type Error = Error;
-
-    fn try_from(editor: editor::Editor) -> Result<Self> {
-        editor
-            .cmd
-            .or_else(|| editor.env_vars.iter().find_map(|var| env::var(var).ok()))
-            .map(Editor::Command)
-            .ok_or(Error::MissingEditor)
-    }
 }
 
 impl FromStr for Editor {
@@ -105,6 +64,9 @@ pub(crate) struct Options {
 
     /// The initial content to use.
     content: Option<String>,
+
+    /// Whether to force write the file, even if it already exists.
+    force_write: bool,
 }
 
 impl Options {
@@ -113,6 +75,7 @@ impl Options {
             cmd,
             cwd: None,
             content: None,
+            force_write: false,
         }
     }
 
@@ -127,6 +90,13 @@ impl Options {
     #[must_use]
     pub(crate) fn with_content(mut self, content: impl Into<String>) -> Self {
         self.content = Some(content.into());
+        self
+    }
+
+    /// Force write the file, even if it already exists.
+    #[must_use]
+    pub(crate) fn with_force_write(mut self, force_write: bool) -> Self {
+        self.force_write = force_write;
         self
     }
 }
@@ -187,7 +157,12 @@ impl Drop for RevertFileGuard {
 ///
 /// When the editor is closed, the contents are returned.
 pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFileGuard)> {
-    let Options { cmd, cwd, content } = options;
+    let Options {
+        cmd,
+        cwd,
+        content,
+        force_write,
+    } = options;
 
     let exists = path.exists();
     let guard = RevertFileGuard {
@@ -198,11 +173,23 @@ pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFil
 
     let existing_content = fs::read_to_string(&path).unwrap_or_default();
 
-    if !exists || existing_content.is_empty() {
+    if !exists || existing_content.is_empty() || force_write {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&path, content.unwrap_or_default())?;
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)?;
+
+        let mut current_content = String::new();
+        file.read_to_string(&mut current_content)?;
+
+        file.write_all(content.unwrap_or_default().as_bytes())?;
+        file.write_all(current_content.as_bytes())?;
     }
 
     // Open the editor
@@ -234,31 +221,118 @@ pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFil
 }
 
 /// Open an editor for the user to input or edit text using a file in the workspace
-#[expect(clippy::too_many_lines)]
 pub(crate) fn edit_query(
-    ctx: &Ctx,
-    conversation_id: ConversationId,
-    initial_message: Option<String>,
+    ctx: &mut Ctx,
+    conversation_id: &ConversationId,
+    query: Option<&str>,
     cmd: Expression,
-) -> Result<(String, PathBuf)> {
+    config_error: Option<&str>,
+) -> Result<(String, PathBuf, PartialAppConfig)> {
     let root = ctx.workspace.storage_path().unwrap_or(&ctx.workspace.root);
-    let history = ctx.workspace.get_events(&conversation_id);
+    let history = ctx.workspace.get_events(conversation_id).to_vec();
+    let query_file_path = root.join(QUERY_FILENAME);
 
-    let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    let existing_content = fs::read_to_string(&query_file_path).unwrap_or_default();
+    let mut doc = QueryDocument::try_from(existing_content.as_str()).unwrap_or_default();
+
+    if let Some(v) = query
+        && doc.query.is_empty()
+    {
+        doc.query = v;
+    }
+
+    let config_value = build_config_text(ctx.config());
+    if doc.meta.config.value.is_empty() {
+        doc.meta.config.value = &config_value;
+    }
+
+    if let Some(error) = config_error {
+        doc.meta.config.error = Some(error);
+    }
+
+    let history_value = build_history_text(history);
+    doc.meta.history.value = &history_value;
+
+    let options = Options::new(cmd.clone())
+        .with_cwd(root)
+        .with_content(doc)
+        .with_force_write(true);
+
+    let (content, mut guard) = open(query_file_path.clone(), options)?;
+
+    let doc = QueryDocument::try_from(content.as_str()).unwrap_or_default();
+    let mut config = PartialAppConfig::empty();
+    if !doc.meta.config.value.is_empty() {
+        match toml::from_str::<PartialAppConfig>(doc.meta.config.value) {
+            Ok(v) => config = v,
+            Err(error) => {
+                let error = error.to_string();
+                return edit_query(ctx, conversation_id, None, cmd, Some(&error));
+            }
+        }
+    }
+
+    guard.disarm();
+    Ok((doc.query.to_owned(), query_file_path, config))
+}
+
+fn build_config_text(config: &AppConfig) -> String {
+    let model_id = &config.assistant.model.id;
+    let mut tools = config
+        .conversation
+        .tools
+        .iter()
+        .filter_map(|(k, cfg)| cfg.enable().then_some(k))
+        .sorted()
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if tools.is_empty() {
+        tools = "(none)".to_owned();
+    }
+
+    let mut active_config = PartialAppConfig::empty();
+    active_config.assistant.model.id = model_id.to_partial();
+    active_config.assistant.model.parameters.reasoning = config
+        .assistant
+        .model
+        .parameters
+        .reasoning
+        .map(|v| v.to_partial())
+        .or(Some(PartialReasoningConfig::Auto));
+
+    toml::to_string_pretty(&active_config).unwrap_or_default()
+}
+
+fn build_history_text(mut history: Vec<ConversationEvent>) -> String {
+    let mut text = String::new();
+
+    if !history.is_empty() {
+        text.push_str("\n# Conversation History");
+    }
+
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
 
-    let mut initial_text = vec![];
-    for event in history {
+    let mut events_with_config = vec![];
+    loop {
+        let partial = conversation_config(&history);
+        let config = AppConfig::from_partial(partial).ok();
+        let Some(event) = history.pop() else {
+            break;
+        };
+
+        events_with_config.push((event, config));
+    }
+
+    let mut messages = vec![];
+    for (event, config) in events_with_config {
         let mut buf = String::new();
-        buf.push_str("# ");
-        buf.push_str(
-            &event
-                .timestamp
-                .to_offset(local_offset)
-                .format(&format)
-                .unwrap_or_else(|_| event.timestamp.to_string()),
-        );
-        buf.push_str("\n\n");
+        let timestamp = event
+            .timestamp
+            .to_offset(local_offset)
+            .format(&format)
+            .unwrap_or_else(|_| event.timestamp.to_string());
 
         let options = comrak::Options {
             render: comrak::RenderOptions {
@@ -271,107 +345,75 @@ pub(crate) fn edit_query(
             ..Default::default()
         };
 
-        match &event.kind {
-            EventKind::UserMessage(UserMessage::Query { query }) => {
-                buf.push_str("## YOU\n\n");
-                buf.push_str(&comrak::markdown_to_commonmark(query, &options));
-            }
-            EventKind::UserMessage(UserMessage::ToolCallResults(results)) => {
-                for result in results {
-                    buf.push_str("## TOOL CALL RESULT\n\n");
-                    buf.push_str("```\n");
-                    buf.push_str(&result.content);
+        match event.kind {
+            EventKind::UserMessage(message) => match &message {
+                UserMessage::Query { query } => {
+                    buf.push_str("## You\n\n");
+                    buf.push_str(comrak::markdown_to_commonmark(query, &options).trim());
+                }
+                UserMessage::ToolCallResults(results) => {
+                    for result in results {
+                        buf.push_str("## TOOL CALL RESULT\n\n");
+                        buf.push_str("```\n");
+                        buf.push_str(&result.content);
+                        buf.push_str("\n```");
+                    }
+                }
+            },
+            EventKind::AssistantMessage(message) => {
+                buf.push_str("\n\n## Assistant");
+
+                if let Some(cfg) = config {
+                    buf.push_str(&format!(" ({})", cfg.assistant.model.id));
+                }
+
+                buf.push_str(&format!(" on {timestamp}"));
+
+                if let Some(reasoning) = &message.reasoning {
+                    buf.push_str(&comrak::markdown_to_commonmark(
+                        &format!("\n\n### reasoning\n\n{reasoning}"),
+                        &options,
+                    ));
+                }
+
+                if let Some(content) = &message.content {
+                    buf.push_str("\n\n");
+                    buf.push_str(
+                        comrak::markdown_to_commonmark(
+                            &format!(
+                                "{}{content}",
+                                if message.reasoning.is_some() {
+                                    "### response\n\n"
+                                } else {
+                                    ""
+                                }
+                            ),
+                            &options,
+                        )
+                        .trim(),
+                    );
+                }
+
+                for tool_call in &message.tool_calls {
+                    let Ok(result) = serde_json::to_string_pretty(&tool_call) else {
+                        continue;
+                    };
+
+                    buf.push_str("## TOOL CALL REQUEST\n\n");
+                    buf.push_str("```json\n");
+                    buf.push_str(&result);
                     buf.push_str("\n```");
                 }
             }
-            _ => {}
+            EventKind::ConfigDelta(_) => continue,
         }
-        buf.push('\n');
 
-        buf.push_str("## ASSISTANT\n\n");
-        if let EventKind::AssistantMessage(AssistantMessage {
-            reasoning,
-            content,
-            tool_calls,
-            ..
-        }) = &event.kind
-        {
-            if let Some(reasoning) = &reasoning {
-                buf.push_str(&comrak::markdown_to_commonmark(
-                    &format!("### reasoning\n\n{reasoning}\n\n"),
-                    &options,
-                ));
-            }
-            if let Some(content) = &content {
-                buf.push_str(&comrak::markdown_to_commonmark(
-                    &format!(
-                        "{}{content}\n\n",
-                        if reasoning.is_some() {
-                            "### response\n\n"
-                        } else {
-                            ""
-                        }
-                    ),
-                    &options,
-                ));
-            }
-            for tool_call in tool_calls {
-                let Ok(result) = serde_json::to_string_pretty(&tool_call) else {
-                    continue;
-                };
-
-                buf.push_str("## TOOL CALL REQUEST\n\n");
-                buf.push_str("```json\n");
-                buf.push_str(&result);
-                buf.push_str("\n```");
-            }
-        }
         buf.push_str("\n\n");
 
-        initial_text.push(buf);
+        messages.push(buf);
     }
 
-    initial_text.push(format!(
-        "model: {}\n",
-        ctx.config
-            .assistant
-            .model
-            .id
-            .as_ref()
-            .map_or_else(|| "(unset)".to_owned(), ToString::to_string)
-    ));
-
-    if !initial_text.is_empty() {
-        let mut intro = String::new();
-        intro.push_str("\n\n");
-        intro.push_str(&CUT_MARKER.join("\n"));
-        intro.push('\n');
-        initial_text.push(intro);
-    }
-
-    if let Some(message) = initial_message {
-        initial_text.push(message.trim_end().to_owned());
-    }
-
-    initial_text.reverse();
-
-    let query_file_path = root.join(QUERY_FILENAME);
-
-    let options = Options::new(cmd)
-        .with_cwd(root)
-        .with_content(initial_text.join("\n"));
-    let (mut content, mut guard) = open(query_file_path.clone(), options)?;
-
-    let eof = CUT_MARKER
-        .iter()
-        .filter_map(|marker| content.find(marker))
-        .min()
-        .unwrap_or(content.len());
-
-    content.truncate(eof);
-
-    // Disarm the guard, so the file is not reverted.
-    guard.disarm();
-
-    Ok((content, query_file_path))
+    messages.reverse();
+    text.extend(messages);
+    text
 }
