@@ -13,7 +13,7 @@ pub struct ThreadBuilder {
     pub system_prompt: Option<String>,
     pub instructions: Vec<InstructionsConfig>,
     pub attachments: Vec<Attachment>,
-    events: Option<ConversationStream>,
+    pub events: Option<ConversationStream>,
 }
 
 impl ThreadBuilder {
