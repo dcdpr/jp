@@ -1,6 +1,5 @@
 use std::fs;
 
-use crossterm::style::Stylize as _;
 use jp_config::{
     PartialAppConfig,
     assignment::{AssignKeyValue as _, KvAssignment},
@@ -46,13 +45,16 @@ impl Set {
                 None => ctx.workspace.active_conversation_id(),
             };
 
-            let mut events = ctx.workspace.get_events_mut(&id).cloned().ok_or_else(|| {
-                format!("Conversation {} not found", id.to_string().bold().yellow())
-            })?;
+            // Get the delta between the current config and the new config.
+            let config = ctx.workspace.try_get_events(&id)?.config();
+            let mut new_config = config.clone();
+            new_config.assign(assignment)?;
+            let delta = config.delta(new_config);
 
-            let mut config = PartialAppConfig::empty();
-            config.assign(assignment)?;
-            events.add_config_delta(PartialAppConfig::empty());
+            // Store the delta in the conversation stream.
+            ctx.workspace
+                .try_get_events_mut(&id)?
+                .add_config_delta(delta);
 
             return Ok(format!(
                 "Set configuration value for {} in conversation {id:?}",

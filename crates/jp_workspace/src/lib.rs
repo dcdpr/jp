@@ -357,68 +357,29 @@ impl Workspace {
         self.state.local.events.get(id)
     }
 
+    /// Similar to [`Self::get_events`], but returns an error if the
+    /// conversation does not exist.
+    pub fn try_get_events(&self, id: &ConversationId) -> Result<&ConversationStream> {
+        self.get_events(id)
+            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
+    }
+
     /// Gets a mutable reference to the event stream for a specific conversation.
     #[must_use]
     pub fn get_events_mut(&mut self, id: &ConversationId) -> Option<&mut ConversationStream> {
         self.state.local.events.get_mut(id)
     }
 
+    /// Similar to [`Self::get_events_mut`], but returns an error if the
+    /// conversation does not exist.
+    pub fn try_get_events_mut(&mut self, id: &ConversationId) -> Result<&mut ConversationStream> {
+        self.get_events_mut(id)
+            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
+    }
+
     pub fn pop_event(&mut self, id: &ConversationId) -> Option<ConversationEventWithConfig> {
         self.get_events_mut(id).and_then(ConversationStream::pop)
     }
-
-    // pub fn add_event(&mut self, id: ConversationId, event: impl Into<ConversationEvent>) {
-    //     let event = event.into();
-    //     match &event.kind {
-    //         EventKind::ChatRequest(request) => {
-    //             debug!(
-    //                 conversation = %id,
-    //                 query_size_bytes = request.content.len(),
-    //                 "Storing chat request in conversation."
-    //             );
-    //         }
-    //         EventKind::ChatResponse(response) => {
-    //             debug!(
-    //                 conversation = %id,
-    //                 content_size_bytes = response.content.len(),
-    //                 variant = ?response.variant,
-    //                 "Storing chat response in conversation."
-    //             );
-    //         }
-    //         EventKind::ToolCallRequest(request) => {
-    //             debug!(
-    //                 conversation = %id,
-    //                 tool_name = %request.name,
-    //                 "Storing tool call request in conversation."
-    //             );
-    //         }
-    //         EventKind::ToolCallResponse(response) => {
-    //             debug!(
-    //                 conversation = %id,
-    //                 is_error = response.result.is_err(),
-    //                 "Storing tool call response in conversation."
-    //             );
-    //         }
-    //         EventKind::InquiryRequest(request) => {
-    //             debug!(
-    //                 conversation = %id,
-    //                 source = ?request.source,
-    //                 "Storing inquiry request in conversation."
-    //             );
-    //         }
-    //         EventKind::InquiryResponse(_) => {
-    //             debug!(
-    //                 conversation = %id,
-    //                 "Storing inquiry response in conversation."
-    //             );
-    //         }
-    //         EventKind::ConfigDelta(_) => {
-    //             debug!(conversation = %id, "Storing config delta in conversation.");
-    //         }
-    //     }
-    //
-    //     self.state.local.events.entry(id).or_default().push(event);
-    // }
 
     /// Returns an iterator over all conversations, including the active one.
     fn all_conversations(&self) -> impl Iterator<Item = (&ConversationId, &Conversation)> {
