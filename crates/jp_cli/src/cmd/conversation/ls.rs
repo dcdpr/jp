@@ -56,12 +56,12 @@ impl Ls {
             .workspace
             .conversations()
             .filter(|(_, c)| !self.local || c.user)
-            .map(|(id, c)| (id, c, ctx.workspace.get_messages(id)))
-            .map(|(id, c, messages)| Details {
+            .filter_map(|(id, c)| ctx.workspace.get_events(id).map(|events| (id, c, events)))
+            .map(|(id, c, events)| Details {
                 id: *id,
                 title: c.title.clone(),
-                messages: messages.len(),
-                last_message_at: messages.last().map(|m| m.timestamp),
+                messages: events.len(),
+                last_message_at: events.last().map(|m| m.timestamp),
                 local: c.user,
             })
             .collect::<Vec<_>>();
@@ -135,7 +135,7 @@ impl Ls {
         }
 
         let messages_fmt = if ctx.term.args.hyperlinks {
-            hyperlink(format!("jp://show-messages/{id}"), messages.to_string())
+            hyperlink(format!("jp://show-events/{id}"), messages.to_string())
         } else {
             messages.to_string()
         };

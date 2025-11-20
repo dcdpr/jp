@@ -2,7 +2,6 @@
 # Conversations, until encrypted.
 /.jp/conversations/*
 !/.jp/conversations/17462040864/
-!/.jp/conversations/17516205637/
 
 # Rust specific
 **/target

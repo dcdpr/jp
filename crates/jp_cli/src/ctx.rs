@@ -1,4 +1,7 @@
-use std::io::{self, IsTerminal as _};
+use std::{
+    io::{self, IsTerminal as _},
+    sync::Arc,
+};
 
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
 use jp_mcp::id::{McpServerId, McpToolId};
@@ -14,7 +17,7 @@ pub(crate) struct Ctx {
     pub(crate) workspace: Workspace,
 
     /// Merged file/CLI configuration.
-    config: AppConfig,
+    config: Arc<AppConfig>,
 
     /// Global CLI arguments.
     pub(crate) term: Term,
@@ -53,7 +56,7 @@ impl Ctx {
 
         Self {
             workspace,
-            config,
+            config: Arc::new(config),
             term: Term {
                 args,
                 is_tty: io::stdout().is_terminal(),
@@ -75,8 +78,8 @@ impl Ctx {
     /// Any changes to the configuration should be done using the "partial
     /// configuration" API in [`jp_config`] *before* constructing the final
     /// [`AppConfig`] object.
-    pub(crate) fn config(&self) -> &AppConfig {
-        &self.config
+    pub(crate) fn config(&self) -> Arc<AppConfig> {
+        self.config.clone()
     }
 
     /// Get a runtime handle.

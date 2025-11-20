@@ -21,8 +21,8 @@ use jp_config::{
     providers::llm::anthropic::AnthropicConfig,
 };
 use jp_conversation::{
-    AssistantMessage, MessagePair, UserMessage,
-    message::Messages,
+    ConversationStream,
+    event::{ChatResponse, ConversationEvent, EventKind},
     thread::{Document, Documents, Thread},
 };
 use serde_json::{Value, json};
@@ -174,7 +174,10 @@ fn call(
                 // See: <https://docs.claude.com/en/api/errors#http-errors>
                 AnthropicError::StreamError(e)
                     if ["rate_limit_error", "overloaded_error", "api_error"]
-                        .contains(&e.error_type.as_str()) =>
+                        .contains(&e.error_type.as_str())
+                        || e.error.as_ref().is_some_and(|v| {
+                            v.get("message").and_then(Value::as_str) == Some("Overloaded")
+                        }) =>
                 {
                     Error::RateLimit {
                         retry_after: Some(Duration::from_secs(3)),
@@ -231,12 +234,29 @@ fn chain(
     mut request: types::CreateMessagesRequest,
     events: Vec<StreamEvent>,
 ) -> EventStream {
-    let reply = AssistantMessage::from(Reply::from((PROVIDER, events)));
-    debug_assert!(reply.tool_calls.is_empty());
+    let events: Vec<ConversationEvent> = Reply::from((PROVIDER, events)).into();
+    debug_assert!(!events.iter().any(ConversationEvent::is_tool_call_request));
 
     let mut should_merge = true;
-    let previous_content = reply.content.clone().unwrap_or_default();
-    let message = assistant_message_to_message(reply);
+    let previous_content = events
+        .last()
+        .and_then(|e| e.as_chat_response().map(ChatResponse::content))
+        .unwrap_or_default()
+        .to_owned();
+
+    let message = events
+        .into_iter()
+        .filter_map(|event| convert_event(event, true).map(|v| v.1))
+        .fold(
+            types::Message {
+                role: types::MessageRole::Assistant,
+                ..Default::default()
+            },
+            |mut message, content| {
+                message.content.push(content);
+                message
+            },
+        );
 
     request.messages.push(message);
     request.messages.push(types::Message {
@@ -355,15 +375,14 @@ fn create_request(
         system_prompt,
         instructions,
         attachments,
-        history,
-        message,
+        events,
     } = thread;
 
     let mut cache_control_count = MAX_CACHE_CONTROL_COUNT;
 
     builder
         .model(model.id.name.clone())
-        .messages(AnthropicMessages::build(history, message, &mut cache_control_count).0);
+        .messages(AnthropicMessages::build(events, &mut cache_control_count).0);
 
     let tools = convert_tools(tools, tool_call_strict_mode, &mut cache_control_count);
 
@@ -548,6 +567,16 @@ fn create_request(
 #[expect(clippy::match_same_arms, clippy::too_many_lines)]
 fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
+        "claude-haiku-4-5" | "claude-haiku-4-5-20251001" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
+            context_window: Some(200_000),
+            max_output_tokens: Some(64_000),
+            reasoning: Some(ReasoningDetails::supported(1024, None)),
+            knowledge_cutoff: Some(date!(2025 - 7 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec!["interleaved-thinking", "context-editing"],
+        },
         "claude-sonnet-4-5" | "claude-sonnet-4-5-20250929" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
@@ -614,21 +643,6 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 7 - 1)),
             deprecated: Some(ModelDeprecation::Active),
-            features: vec![],
-        },
-        "claude-3-5-sonnet-latest"
-        | "claude-3-5-sonnet-20241022"
-        | "claude-3-5-sonnet-20240620" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(200_000),
-            max_output_tokens: Some(8_192),
-            reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(date!(2024 - 4 - 1)),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: claude-sonnet-4-5-20250929",
-                Some(date!(2025 - 10 - 22)),
-            )),
             features: vec![],
         },
         "claude-3-opus-latest" | "claude-3-opus-20240229" => ModelDetails {
@@ -867,18 +881,12 @@ fn convert_tools(
 struct AnthropicMessages(Vec<types::Message>);
 
 impl AnthropicMessages {
-    fn build(history: Messages, message: UserMessage, cache_controls: &mut usize) -> Self {
-        let mut items = vec![];
-
-        // Historical messages.
-        let mut history = history
-            .into_iter()
-            .flat_map(message_pair_to_messages)
-            .collect::<Vec<_>>();
+    fn build(events: ConversationStream, cache_controls: &mut usize) -> Self {
+        let mut messages = convert_events(events);
 
         // Make sure to add cache control to the last history message.
         if *cache_controls > 0
-            && let Some(message) = history.last_mut().and_then(|m| m.content.0.last_mut())
+            && let Some(message) = messages.last_mut().and_then(|m| m.content.0.last_mut())
         {
             *cache_controls = cache_controls.saturating_sub(1);
 
@@ -896,116 +904,111 @@ impl AnthropicMessages {
             }
         }
 
-        items.extend(history);
-
-        // User query
-        match message {
-            UserMessage::Query(text) => {
-                items.push(types::Message {
-                    role: types::MessageRole::User,
-                    content: types::MessageContentList(vec![types::MessageContent::Text(
-                        text.into(),
-                    )]),
-                });
-            }
-            UserMessage::ToolCallResults(results) => {
-                items.extend(results.into_iter().map(|result| types::Message {
-                    role: types::MessageRole::User,
-                    content: types::MessageContentList(vec![types::MessageContent::ToolResult(
-                        types::ToolResult {
-                            tool_use_id: result.id,
-                            content: Some(result.content),
-                            is_error: result.error,
-                            cache_control: None,
-                        },
-                    )]),
-                }));
-            }
-        }
-
-        Self(items)
+        Self(messages)
     }
 }
 
-fn message_pair_to_messages(msg: MessagePair) -> Vec<types::Message> {
-    let (user, assistant) = msg.split();
+/// Groups consecutive events into messages by role.
+///
+/// Events from the same role are combined into a single message with multiple
+/// content blocks.
+fn convert_events(events: ConversationStream) -> Vec<types::Message> {
+    events
+        .into_iter()
+        .filter_map(|event| {
+            let aliases = &event.config.providers.llm.aliases;
+            let is_anthropic = event
+                .config
+                .assistant
+                .model
+                .id
+                .finalize(aliases)
+                .is_ok_and(|id| id.provider == Some(PROVIDER));
 
-    vec![
-        user_message_to_message(user),
-        assistant_message_to_message(assistant),
-    ]
+            convert_event(event.event, is_anthropic)
+        })
+        .fold(vec![], |mut messages, (role, content)| {
+            match messages.last_mut() {
+                // If the last message has the same role, append content to it.
+                Some(last) if last.role == role => last.content.0.push(content),
+                // Different role or no messages yet, start a new message.
+                _ => messages.push(types::Message {
+                    role,
+                    content: types::MessageContentList(vec![content]),
+                }),
+            }
+
+            messages
+        })
 }
 
-fn user_message_to_message(user: UserMessage) -> types::Message {
-    let list = match user {
-        UserMessage::Query(query) => vec![types::MessageContent::Text(query.into())],
-        UserMessage::ToolCallResults(results) => results
-            .into_iter()
-            .map(|result| {
-                types::MessageContent::ToolResult(types::ToolResult {
-                    tool_use_id: result.id,
-                    content: Some(result.content),
-                    is_error: result.error,
-                    cache_control: None,
-                })
-            })
-            .collect(),
-    };
-
-    types::Message {
-        role: types::MessageRole::User,
-        content: types::MessageContentList(list),
-    }
-}
-
-fn assistant_message_to_message(assistant: AssistantMessage) -> types::Message {
-    let AssistantMessage {
-        provider,
-        reasoning,
-        content,
-        tool_calls,
-        metadata,
-    } = assistant;
-
-    let mut list = vec![];
-    if let Some(data) = metadata
-        .get("redacted_thinking")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-    {
-        list.push(types::MessageContent::RedactedThinking { data });
-    } else if let Some(thinking) = reasoning {
-        if provider == PROVIDER {
-            list.push(types::MessageContent::Thinking(Thinking {
-                thinking,
-                signature: metadata
-                    .get("signature")
+fn convert_event(
+    event: ConversationEvent,
+    is_anthropic: bool,
+) -> Option<(types::MessageRole, types::MessageContent)> {
+    match event.kind {
+        EventKind::ChatRequest(request) => Some((
+            types::MessageRole::User,
+            types::MessageContent::Text(request.content.into()),
+        )),
+        EventKind::ChatResponse(response) => {
+            // Check if this came from Anthropic originally
+            let content = if is_anthropic
+                && let Some(signature) = response
+                    .metadata()
+                    .and_then(|v| v.get("signature"))
                     .and_then(Value::as_str)
-                    .map(str::to_owned),
-            }));
-        } else {
-            list.push(types::MessageContent::Text(
-                format!("<think>\n{thinking}\n</think>\n\n").into(),
-            ));
+                    .map(str::to_owned)
+            {
+                types::MessageContent::Thinking(Thinking {
+                    thinking: response.into_content(),
+                    signature: Some(signature),
+                })
+            } else if is_anthropic
+                && let Some(data) = response
+                    .metadata()
+                    .and_then(|v| v.get("redacted_thinking"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            {
+                types::MessageContent::RedactedThinking { data }
+            } else if response.is_reasoning() {
+                // Reasoning from other providers - wrap in XML tags
+                types::MessageContent::Text(
+                    format!("<think>\n{}\n</think>\n\n", response.content()).into(),
+                )
+            } else {
+                types::MessageContent::Text(response.into_content().into())
+            };
+
+            Some((types::MessageRole::Assistant, content))
         }
-    }
+        EventKind::ToolCallRequest(request) => Some((
+            types::MessageRole::Assistant,
+            types::MessageContent::ToolUse(types::ToolUse {
+                id: request.id,
+                name: request.name,
+                input: Value::Object(request.arguments),
+                cache_control: None,
+            }),
+        )),
+        EventKind::ToolCallResponse(response) => {
+            let (content, is_error) = match response.result {
+                Ok(c) => (Some(c), false),
+                Err(e) => (Some(e), true),
+            };
 
-    if let Some(text) = content {
-        list.push(types::MessageContent::Text(text.into()));
-    }
-
-    for tool_call in tool_calls {
-        list.push(types::MessageContent::ToolUse(types::ToolUse {
-            id: tool_call.id,
-            input: Value::Object(tool_call.arguments),
-            name: tool_call.name,
-            cache_control: None,
-        }));
-    }
-
-    types::Message {
-        role: types::MessageRole::Assistant,
-        content: types::MessageContentList(list),
+            Some((
+                types::MessageRole::User,
+                types::MessageContent::ToolResult(types::ToolResult {
+                    tool_use_id: response.id,
+                    content,
+                    is_error,
+                    cache_control: None,
+                }),
+            ))
+        }
+        EventKind::InquiryRequest(_) | EventKind::InquiryResponse(_) => None,
     }
 }
 
@@ -1039,6 +1042,7 @@ mod tests {
         model::parameters::{CustomReasoningConfig, ReasoningEffort},
         providers::llm::LlmProviderConfig,
     };
+    use jp_conversation::ConversationStream;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -1111,7 +1115,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                message: "Test message".into(),
+                events: ConversationStream::default().with_chat_request("Test message"),
                 ..Default::default()
             },
             ..Default::default()
@@ -1148,7 +1152,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                message: "Test message".into(),
+                events: ConversationStream::default().with_chat_request("Test message"),
                 ..Default::default()
             },
             tool_choice: ToolChoice::Function("run_me".to_owned()),
@@ -1176,7 +1180,7 @@ mod tests {
                     }),
                 ]),
             }],
-            ..Default::default()
+            tool_call_strict_mode: false,
         };
 
         let vcr = vcr();
@@ -1211,8 +1215,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                // See: <https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#thinking-redaction>
-                message: "ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB".into(),
+                events: ConversationStream::default().with_chat_request("ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB"),
                 ..Default::default()
             },
             ..Default::default()
@@ -1268,10 +1271,11 @@ mod tests {
         let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
         let mut model = ModelDetails::empty(model_id);
         model.max_output_tokens = Some(1024);
-
         let query = ChatQuery {
             thread: Thread {
-                message: "Give me a 2000 word explainer about Kirigami-inspired parachutes".into(),
+                events: ConversationStream::default().with_chat_request(
+                    "Give me a 2000 word explainer about Kirigami-inspired parachutes",
+                ),
                 ..Default::default()
             },
             ..Default::default()
@@ -1310,7 +1314,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                message: "Test message".into(),
+                events: ConversationStream::default().with_chat_request("Test message"),
                 ..Default::default()
             },
             ..Default::default()

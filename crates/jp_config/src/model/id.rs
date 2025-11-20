@@ -107,6 +107,15 @@ impl fmt::Display for ModelIdOrAliasConfig {
     }
 }
 
+impl fmt::Display for PartialModelIdOrAliasConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Id(id) => id.fmt(f),
+            Self::Alias(alias) => f.write_str(alias),
+        }
+    }
+}
+
 impl ModelIdOrAliasConfig {
     /// Finalize the model ID configuration.
     ///
@@ -127,6 +136,26 @@ impl ModelIdOrAliasConfig {
                 .get(alias)
                 .cloned()
                 .map_or_else(|| ModelIdConfig::from_str(alias), Ok),
+        }
+    }
+}
+
+impl PartialModelIdOrAliasConfig {
+    /// See [`ModelIdOrAliasConfig::finalize`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration cannot be resolved.
+    pub fn finalize(
+        &self,
+        aliases: &IndexMap<String, PartialModelIdConfig>,
+    ) -> Result<PartialModelIdConfig, ModelIdConfigError> {
+        match &self {
+            Self::Id(id) => Ok(id.clone()),
+            Self::Alias(alias) => aliases
+                .get(alias)
+                .cloned()
+                .map_or_else(|| PartialModelIdConfig::from_str(alias), Ok),
         }
     }
 }
@@ -180,6 +209,17 @@ impl ToPartial for ModelIdConfig {
 impl fmt::Display for ModelIdConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.provider, self.name)
+    }
+}
+
+impl fmt::Display for PartialModelIdConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (&self.provider, &self.name) {
+            (Some(provider), Some(name)) => write!(f, "{provider}/{name}"),
+            (Some(provider), None) => write!(f, "{provider}"),
+            (None, Some(name)) => write!(f, "{name}"),
+            (None, None) => Ok(()),
+        }
     }
 }
 

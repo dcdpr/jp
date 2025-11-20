@@ -1,4 +1,4 @@
-use jp_conversation::message::ToolCallRequest;
+use jp_conversation::event::ToolCallRequest;
 
 use crate::{CompletionChunk, Error, StreamEvent, stream::delta::Delta};
 

@@ -7,11 +7,11 @@ Ok(
         id: ModelIdConfig {
             provider: Google,
             name: Name(
-                "gemini-2.5-flash-preview-05-20",
+                "gemini-2.5-flash-lite",
             ),
         },
         display_name: Some(
-            "Gemini 2.5 Flash Preview 05-20",
+            "Gemini 2.5 Flash-Lite",
         ),
         context_window: Some(
             1048576,

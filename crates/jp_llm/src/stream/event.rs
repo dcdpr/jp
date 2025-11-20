@@ -1,4 +1,4 @@
-use jp_conversation::message::ToolCallRequest;
+use jp_conversation::event::ToolCallRequest;
 use serde_json::Value;
 
 /// Represents an event yielded by the chat completion stream.

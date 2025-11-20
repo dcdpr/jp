@@ -22,12 +22,12 @@
     rustdoc::all,
     unused_doc_comments
 )]
-#![allow(
+#![expect(
     clippy::derive_partial_eq_without_eq,
     reason = "schematic derives PartialEq but not Eq. We *could* do \
               `#[config(partial(derive(Eq))]`, but it's not worth it."
 )]
-#![allow(
+#![expect(
     rustdoc::private_intra_doc_links,
     reason = "we don't host the docs, and use them mainly for LSP integration"
 )]
@@ -47,6 +47,8 @@ pub mod style;
 pub mod template;
 pub mod types;
 pub mod util; // TODO: Rename
+
+use std::sync::Arc;
 
 pub use error::Error;
 pub use partial::ToPartial;
@@ -349,6 +351,18 @@ impl PartialAppConfig {
         }
         .into();
         partial
+    }
+}
+
+impl From<AppConfig> for PartialAppConfig {
+    fn from(config: AppConfig) -> Self {
+        config.to_partial()
+    }
+}
+
+impl From<Arc<AppConfig>> for PartialAppConfig {
+    fn from(config: Arc<AppConfig>) -> Self {
+        config.to_partial()
     }
 }
 

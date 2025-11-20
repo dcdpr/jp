@@ -1,5 +1,5 @@
 when:
-  path: "/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent"
+  path: "/v1beta/models/gemini-2.5-flash-lite:generateContent"
   method: POST
   body: "{\"contents\":[{\"parts\":[{\"text\":\"Test message\"}],\"role\":\"user\"}],\"generationConfig\":{}}"
 then:
@@ -7,4 +7,4 @@ then:
   header:
     - name: content-type
       value: application/json; charset=UTF-8
-  body: "{\n  \"candidates\": [\n    {\n      \"content\": {\n        \"parts\": [\n          {\n            \"text\": \"Received.\\n\\nHow can I help you?\"\n          }\n        ],\n        \"role\": \"model\"\n      },\n      \"finishReason\": \"STOP\",\n      \"index\": 0\n    }\n  ],\n  \"usageMetadata\": {\n    \"promptTokenCount\": 3,\n    \"candidatesTokenCount\": 9,\n    \"totalTokenCount\": 103,\n    \"promptTokensDetails\": [\n      {\n        \"modality\": \"TEXT\",\n        \"tokenCount\": 3\n      }\n    ],\n    \"thoughtsTokenCount\": 91\n  },\n  \"modelVersion\": \"models/gemini-2.5-flash-preview-05-20\",\n  \"responseId\": \"vTr6aMevLZz1kdUP1OSegAY\"\n}\n"
+  body: "{\n  \"candidates\": [\n    {\n      \"content\": {\n        \"parts\": [\n          {\n            \"text\": \"This is a test message. How can I help you today?\"\n          }\n        ],\n        \"role\": \"model\"\n      },\n      \"finishReason\": \"STOP\",\n      \"index\": 0\n    }\n  ],\n  \"usageMetadata\": {\n    \"promptTokenCount\": 3,\n    \"candidatesTokenCount\": 13,\n    \"totalTokenCount\": 16,\n    \"promptTokensDetails\": [\n      {\n        \"modality\": \"TEXT\",\n        \"tokenCount\": 3\n      }\n    ]\n  },\n  \"modelVersion\": \"gemini-2.5-flash-lite\",\n  \"responseId\": \"NB4faZvkA425vdIP-fKqqAg\"\n}\n"

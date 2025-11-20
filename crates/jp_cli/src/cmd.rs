@@ -164,6 +164,18 @@ pub(crate) struct Error {
     /// This is hidden from the user in TTY mode, unless the `--verbose` flag is
     /// set.
     pub(super) metadata: Vec<(String, Value)>,
+
+    /// Whether to disable persistence when this error is encountered.
+    pub(super) disable_persistence: bool,
+}
+
+impl Error {
+    pub(super) fn with_persistence(self, persist: bool) -> Self {
+        Self {
+            disable_persistence: !persist,
+            ..self
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -178,6 +190,7 @@ impl From<i32> for Error {
             code: code.try_into().unwrap_or(NonZeroI32::new(1).unwrap()),
             message: None,
             metadata: vec![],
+            disable_persistence: true,
         }
     }
 }
@@ -224,6 +237,7 @@ impl From<(i32, String, Vec<(String, Value)>)> for Error {
             code: code.try_into().unwrap_or(NonZeroI32::new(1).unwrap()),
             message: Some(message),
             metadata: metadata.into_iter().collect(),
+            disable_persistence: true,
         }
     }
 }
@@ -308,7 +322,6 @@ impl From<crate::error::Error> for Error {
             .into(),
             Editor(error) => [("message", "Editor error".into()), ("error", error.clone())].into(),
             Task(error) => with_cause(error.as_ref(), "Task error"),
-            Replay(error) => [("message", "Replay error".to_owned()), ("error", error)].into(),
             TemplateUndefinedVariable(var) => [
                 ("message", "Undefined template variable".to_owned()),
                 ("variable", var),

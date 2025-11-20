@@ -6,7 +6,7 @@ expression: expr
     Ok(
         ChatChunk(
             Content(
-                "Received! Your test message came through.",
+                "This is a test message. How can I help you today?",
             ),
         ),
     ),

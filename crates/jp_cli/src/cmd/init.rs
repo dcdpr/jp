@@ -251,7 +251,7 @@ fn default_model() -> Option<ModelIdConfig> {
         .or_else(|| {
             env::var("GEMINI_API_KEY")
                 .is_ok()
-                .then(|| "google/gemini-2.5-flash-preview-05-20".parse().ok())
+                .then(|| "google/gemini-2.5-flash-lite".parse().ok())
                 .flatten()
         })
 }

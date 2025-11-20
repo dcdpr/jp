@@ -4,7 +4,7 @@ expression: expr
 ---
 Ok(
     ChatCompletion {
-        id: "gen-1758051221-QOC8MwzAPw6cfxtJlo0l",
+        id: "gen-1763647030-yEXrLOkNcchEIFTg9705",
         provider: "Anthropic",
         choices: [
             NonStreaming(
@@ -14,7 +14,7 @@ Ok(
                     message: NonStreamingMessage {
                         role: "assistant",
                         content: Some(
-                            "Here's a haiku for your test:\n\nBlank page awaits\nPen in hand, thoughts take flight\nWisdom flows freely",
+                            "Here is a haiku for your test:\n\nCarefully tread through,\nThoughtful answers take focus,\nEmbrace the journey.",
                         ),
                         reasoning: None,
                         tool_calls: [],
@@ -24,18 +24,18 @@ Ok(
                 },
             ),
         ],
-        created: 2025-09-16 19:33:42.0 +00:00:00,
+        created: 2025-11-20 13:57:10.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletion,
         system_fingerprint: None,
         usage: Some(
             Usage {
-                completion_tokens: 32,
+                completion_tokens: 33,
                 completion_tokens_details: None,
                 cost: None,
                 prompt_tokens: 17,
                 prompt_tokens_details: None,
-                total_tokens: 49,
+                total_tokens: 50,
             },
         ),
     },

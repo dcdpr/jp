@@ -119,10 +119,10 @@ impl PartialEq for Error {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
-    #[error("Tool not found")]
+    #[error("Tool not found: {name}")]
     NotFound { name: String },
 
-    #[error("Tools not found")]
+    #[error("Tools not found: {}", names.join(", "))]
     NotFoundN { names: Vec<String> },
 
     #[error("Disabled in configuration")]

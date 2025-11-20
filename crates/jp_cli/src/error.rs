@@ -71,9 +71,6 @@ pub(crate) enum Error {
     #[error("Undefined template variable: {0}")]
     TemplateUndefinedVariable(String),
 
-    #[error("Replay error: {0}")]
-    Replay(String),
-
     #[error("JSON error")]
     Json(#[from] serde_json::Error),
 

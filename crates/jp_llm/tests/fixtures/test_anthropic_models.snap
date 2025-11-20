@@ -8,6 +8,39 @@ Ok(
             id: ModelIdConfig {
                 provider: Anthropic,
                 name: Name(
+                    "claude-haiku-4-5-20251001",
+                ),
+            },
+            display_name: Some(
+                "Claude Haiku 4.5",
+            ),
+            context_window: Some(
+                200000,
+            ),
+            max_output_tokens: Some(
+                64000,
+            ),
+            reasoning: Some(
+                Supported {
+                    min_tokens: 1024,
+                    max_tokens: None,
+                },
+            ),
+            knowledge_cutoff: Some(
+                2025-07-01,
+            ),
+            deprecated: Some(
+                Active,
+            ),
+            features: [
+                "interleaved-thinking",
+                "context-editing",
+            ],
+        },
+        ModelDetails {
+            id: ModelIdConfig {
+                provider: Anthropic,
+                name: Name(
                     "claude-sonnet-4-5-20250929",
                 ),
             },
@@ -170,38 +203,6 @@ Ok(
             id: ModelIdConfig {
                 provider: Anthropic,
                 name: Name(
-                    "claude-3-5-sonnet-20241022",
-                ),
-            },
-            display_name: Some(
-                "Claude Sonnet 3.5 (New)",
-            ),
-            context_window: Some(
-                200000,
-            ),
-            max_output_tokens: Some(
-                8192,
-            ),
-            reasoning: Some(
-                Unsupported,
-            ),
-            knowledge_cutoff: Some(
-                2024-04-01,
-            ),
-            deprecated: Some(
-                Deprecated {
-                    note: "recommended replacement: claude-sonnet-4-5-20250929",
-                    retire_at: Some(
-                        2025-10-22,
-                    ),
-                },
-            ),
-            features: [],
-        },
-        ModelDetails {
-            id: ModelIdConfig {
-                provider: Anthropic,
-                name: Name(
                     "claude-3-5-haiku-20241022",
                 ),
             },
@@ -222,38 +223,6 @@ Ok(
             ),
             deprecated: Some(
                 Active,
-            ),
-            features: [],
-        },
-        ModelDetails {
-            id: ModelIdConfig {
-                provider: Anthropic,
-                name: Name(
-                    "claude-3-5-sonnet-20240620",
-                ),
-            },
-            display_name: Some(
-                "Claude Sonnet 3.5 (Old)",
-            ),
-            context_window: Some(
-                200000,
-            ),
-            max_output_tokens: Some(
-                8192,
-            ),
-            reasoning: Some(
-                Unsupported,
-            ),
-            knowledge_cutoff: Some(
-                2024-04-01,
-            ),
-            deprecated: Some(
-                Deprecated {
-                    note: "recommended replacement: claude-sonnet-4-5-20250929",
-                    retire_at: Some(
-                        2025-10-22,
-                    ),
-                },
             ),
             features: [],
         },

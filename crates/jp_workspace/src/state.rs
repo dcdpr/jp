@@ -1,6 +1,6 @@
 //! Represents the in-memory state of the workspace.
 
-use jp_conversation::{Conversation, ConversationId, ConversationsMetadata, message::Messages};
+use jp_conversation::{Conversation, ConversationId, ConversationStream, ConversationsMetadata};
 use jp_tombmap::TombMap;
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,7 @@ pub(crate) struct LocalState {
     pub conversations: TombMap<ConversationId, Conversation>,
 
     #[serde(skip_serializing_if = "TombMap::is_empty")]
-    pub messages: TombMap<ConversationId, Messages>,
+    pub events: TombMap<ConversationId, ConversationStream>,
 }
 
 /// Represents the entire in-memory local state.

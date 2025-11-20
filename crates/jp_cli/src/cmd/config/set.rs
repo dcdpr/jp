@@ -45,9 +45,16 @@ impl Set {
                 None => ctx.workspace.active_conversation_id(),
             };
 
-            let mut config = ctx.workspace.get_messages(&id).config();
-            config.assign(assignment)?;
-            ctx.workspace.set_conversation_config(&id, config)?;
+            // Get the delta between the current config and the new config.
+            let config = ctx.workspace.try_get_events(&id)?.config();
+            let mut new_config = config.clone();
+            new_config.assign(assignment)?;
+            let delta = config.delta(new_config);
+
+            // Store the delta in the conversation stream.
+            ctx.workspace
+                .try_get_events_mut(&id)?
+                .add_config_delta(delta);
 
             return Ok(format!(
                 "Set configuration value for {} in conversation {id:?}",
@@ -57,7 +64,7 @@ impl Set {
         }
 
         let Some(mut config) = self.target.target.config_file(ctx)? else {
-            unreachable!("target is either a path, or a conversation")
+            unreachable!("target must be either a path, or a conversation")
         };
 
         config.edit_content(|partial: &mut PartialAppConfig| {

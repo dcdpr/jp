@@ -6,7 +6,7 @@ expression: expr
     Ok(
         ChatChunk(
             Content(
-                "It looks like you sent a test message! That's perfectly fine. If you need help with anything or just want to chat, I'm here for you. Otherwise, feel free to send another test message (or not!)",
+                "It seems like you're just sending a test message! That's perfectly fine. I'm here to listen and respond, so feel free to send me any questions or topics you'd like to discuss. What's on your mind?",
             ),
         ),
     ),

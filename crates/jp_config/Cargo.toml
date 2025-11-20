@@ -20,7 +20,6 @@ duct = { workspace = true }
 duct_sh = { workspace = true }
 glob = { workspace = true }
 indexmap = { workspace = true }
-json5 = { workspace = true }
 path-clean = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 relative-path = { workspace = true, features = ["serde", "alloc", "std"] }
@@ -37,6 +36,7 @@ schematic = { workspace = true, features = [
 ] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+serde_json5 = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true, features = ["parse", "serde", "display", "preserve_order"] }

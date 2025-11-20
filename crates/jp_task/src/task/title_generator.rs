@@ -5,12 +5,12 @@ use jp_config::{
     AppConfig,
     model::{
         ModelConfig,
-        id::{ModelIdConfig, ProviderId},
+        id::ModelIdConfig,
         parameters::{CustomReasoningConfig, ParametersConfig, ReasoningEffort},
     },
     providers::llm::LlmProviderConfig,
 };
-use jp_conversation::{AssistantMessage, ConversationId, MessagePair, message::Messages};
+use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{provider, structured};
 use jp_workspace::Workspace;
 use tokio_util::sync::CancellationToken;
@@ -24,33 +24,16 @@ pub struct TitleGeneratorTask {
     pub model_id: ModelIdConfig,
     pub parameters: ParametersConfig,
     pub providers: LlmProviderConfig,
-    pub messages: Messages,
+    pub events: ConversationStream,
     pub title: Option<String>,
 }
 
 impl TitleGeneratorTask {
     pub fn new(
         conversation_id: ConversationId,
-        mut messages: Messages,
+        events: ConversationStream,
         config: &AppConfig,
-        query: Option<String>,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        if let Some(query) = query {
-            messages.push(
-                MessagePair::new(
-                    query.into(),
-                    // TODO: We have to use a placeholder here, because the
-                    // assistant message is not yet generated, while some LLM
-                    // providers (such as Anthropic) require a non-empty message to
-                    // generate a response.
-                    //
-                    // Is there a better way to do this?
-                    AssistantMessage::from((ProviderId::Anthropic, "<RESPONSE PENDING>")),
-                ),
-                None,
-            );
-        }
-
         // Prefer the title generation model id, otherwise use the assistant
         // model id.
         let mut model = config
@@ -84,7 +67,7 @@ impl TitleGeneratorTask {
             model_id,
             parameters: model.parameters,
             providers: config.providers.llm.clone(),
-            messages,
+            events,
             title: None,
         })
     }
@@ -93,7 +76,7 @@ impl TitleGeneratorTask {
         trace!(conversation_id = %self.conversation_id, "Updating conversation title.");
 
         let provider = provider::get_provider(self.model_id.provider, &self.providers)?;
-        let query = structured::titles::titles(1, self.messages.clone(), &[])?;
+        let query = structured::titles::titles(1, self.events.clone(), &[])?;
         let titles: Vec<_> =
             structured::completion(provider.as_ref(), &self.model_id, &self.parameters, query)
                 .await?;

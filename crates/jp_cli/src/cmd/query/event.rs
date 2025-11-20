@@ -1,8 +1,9 @@
-use std::{env, fs, time};
+use std::{env, fs, path::PathBuf, time};
 
 use crossterm::style::Stylize as _;
 use indexmap::IndexMap;
 use jp_config::{
+    AppConfig,
     conversation::tool::{
         ToolConfigWithDefaults,
         style::{InlineResults, LinkStyle, TruncateLines},
@@ -12,21 +13,24 @@ use jp_config::{
         reasoning::{ReasoningDisplayConfig, TruncateChars},
     },
 };
-use jp_conversation::message::{ToolCallRequest, ToolCallResult};
-use jp_llm::{CompletionChunk, ToolError};
+use jp_conversation::{
+    self,
+    event::{ToolCallRequest, ToolCallResponse},
+};
+use jp_llm::{CompletionChunk, ToolError, tool::ToolDefinition};
 use jp_term::osc::hyperlink;
 use jp_tool::{AnswerType, Question};
 use serde_json::Value;
 
 use super::{ResponseHandler, turn::TurnState};
-use crate::{Ctx, Error};
+use crate::Error;
 
 #[derive(Debug, Default, PartialEq)]
 pub(super) struct StreamEventHandler {
     pub reasoning_tokens: String,
     pub content_tokens: String,
     pub tool_calls: Vec<ToolCallRequest>,
-    pub tool_call_results: Vec<ToolCallResult>,
+    pub tool_call_responses: Vec<ToolCallResponse>,
 }
 
 impl StreamEventHandler {
@@ -97,24 +101,27 @@ impl StreamEventHandler {
 
     pub async fn handle_tool_call(
         &mut self,
-        ctx: &mut Ctx,
+        cfg: &AppConfig,
+        mcp_client: &jp_mcp::Client,
+        root: PathBuf,
+        is_tty: bool,
         turn_state: &mut TurnState,
         call: ToolCallRequest,
         handler: &mut ResponseHandler,
     ) -> Result<Option<String>, Error> {
-        let Some(tool_config) = ctx.config().conversation.tools.get(&call.name) else {
+        let Some(tool_config) = cfg.conversation.tools.get(&call.name) else {
             return Err(Error::NotFound("tool", call.name.clone()));
         };
 
-        let editor = ctx.config().editor.path().ok_or(Error::MissingEditor)?;
+        let editor = cfg.editor.path().ok_or(Error::MissingEditor)?;
 
         self.tool_calls.push(call.clone());
-        let tool = jp_llm::tool::ToolDefinition::new(
+        let tool = ToolDefinition::new(
             &call.name,
             tool_config.source(),
             tool_config.description().map(str::to_owned),
             tool_config.parameters().clone(),
-            &ctx.mcp_client,
+            mcp_client,
         )
         .await?;
 
@@ -127,7 +134,7 @@ impl StreamEventHandler {
             }
 
             let data = format!("\n{title}\n");
-            handler.handle(&data, &ctx.config().style, false)?;
+            handler.handle(&data, &cfg.style, false)?;
         }
 
         let mut answers = IndexMap::new();
@@ -137,21 +144,16 @@ impl StreamEventHandler {
                     call.id.clone(),
                     Value::Object(call.arguments.clone()),
                     &answers,
-                    &ctx.mcp_client,
+                    mcp_client,
                     tool_config.clone(),
-                    &ctx.workspace.root,
+                    &root,
                     &editor,
                 )
                 .await
             {
                 Ok(result) => {
-                    self.tool_call_results.push(result.clone());
-                    return build_tool_call_result(
-                        &ctx.config().style,
-                        &result,
-                        &tool_config,
-                        handler,
-                    );
+                    self.tool_call_responses.push(result.clone());
+                    return build_tool_call_response(&cfg.style, &result, &tool_config, handler);
                 }
                 Err(ToolError::NeedsInput { question }) => {
                     // Check answers in priority order:
@@ -166,7 +168,7 @@ impl StreamEventHandler {
                         answer.clone()
                     } else if let Some(answer) = tool_config.get_answer(&question.id) {
                         answer.clone()
-                    } else if ctx.term.is_tty {
+                    } else if is_tty {
                         let (answer, persist_level) = prompt_user(&question)?;
 
                         // Store turn-level answers for reuse across tool calls
@@ -239,16 +241,16 @@ fn prompt_boolean_git_style(question: &Question) -> Result<(Value, jp_tool::Pers
     }
 }
 
-fn build_tool_call_result(
+fn build_tool_call_response(
     style: &StyleConfig,
-    result: &ToolCallResult,
+    response: &ToolCallResponse,
     tool_config: &ToolConfigWithDefaults,
     handler: &mut ResponseHandler,
 ) -> Result<Option<String>, Error> {
-    let content = if let Ok(json) = serde_json::from_str::<Value>(result.content.trim()) {
+    let content = if let Ok(json) = serde_json::from_str::<Value>(response.content().trim()) {
         format!("```json\n{}\n```", serde_json::to_string_pretty(&json)?)
     } else {
-        result.content.trim().to_owned()
+        response.content().trim().to_owned()
     };
 
     let mut lines = content.lines().collect::<Vec<_>>();
@@ -366,44 +368,6 @@ fn build_tool_call_result(
     }
 
     Ok(None)
-}
-
-pub(super) async fn handle_tool_calls(
-    ctx: &Ctx,
-    tool_calls: Vec<ToolCallRequest>,
-) -> Result<Vec<ToolCallResult>, Error> {
-    let mut results = vec![];
-
-    for call in tool_calls {
-        let Some(tool_config) = ctx.config().conversation.tools.get(&call.name) else {
-            return Err(Error::NotFound("tool", call.name.clone()));
-        };
-
-        let tool = jp_llm::tool::ToolDefinition::new(
-            &call.name,
-            tool_config.source(),
-            tool_config.description().map(str::to_owned),
-            tool_config.parameters().clone(),
-            &ctx.mcp_client,
-        )
-        .await?;
-        let editor = ctx.config().editor.path().ok_or(Error::MissingEditor)?;
-
-        results.push(
-            tool.call(
-                call.id,
-                Value::Object(call.arguments),
-                &IndexMap::new(),
-                &ctx.mcp_client,
-                tool_config,
-                &ctx.workspace.root,
-                &editor,
-            )
-            .await?,
-        );
-    }
-
-    Ok(results)
 }
 
 #[cfg(test)]

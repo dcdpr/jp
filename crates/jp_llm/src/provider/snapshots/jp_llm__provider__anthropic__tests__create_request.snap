@@ -12,7 +12,12 @@ Ok(
                         Text(
                             Text {
                                 text: "Test message",
-                                cache_control: None,
+                                cache_control: Some(
+                                    CacheControl {
+                                        kind: Ephemeral,
+                                        ttl: None,
+                                    },
+                                ),
                             },
                         ),
                     ],
