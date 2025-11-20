@@ -259,7 +259,7 @@ impl From<Reply> for Vec<ConversationEvent> {
             match event {
                 Event::Content(v) => events.push(ConversationEvent::now(ChatResponse::message(v))),
                 Event::Reasoning(v) => {
-                    events.push(ConversationEvent::now(ChatResponse::reasoning(v)))
+                    events.push(ConversationEvent::now(ChatResponse::reasoning(v)));
                 }
                 Event::ToolCall(v) => events.push(ConversationEvent::now(v)),
                 Event::Metadata(k, v) => {
