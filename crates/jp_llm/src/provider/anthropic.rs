@@ -1013,7 +1013,7 @@ fn convert_event(
                 }),
             ))
         }
-        _ => None,
+        EventKind::InquiryRequest(_) | EventKind::InquiryResponse(_) => None,
     }
 }
 
