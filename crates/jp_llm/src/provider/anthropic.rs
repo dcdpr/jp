@@ -22,7 +22,7 @@ use jp_config::{
 };
 use jp_conversation::{
     ConversationStream,
-    event::EventKind,
+    event::{ChatResponse, ConversationEvent, EventKind},
     thread::{Document, Documents, Thread},
 };
 use serde_json::{Value, json};
@@ -161,36 +161,30 @@ fn call(
             .messages()
             .create_stream(request.clone())
             .await
-            .map_err(|e| {
-                // Anthropic's API is notoriously unreliable, so we special-case
-                // a few common errors that most of the times resolve themselves
-                // when retried.
+            .map_err(|e| match e {
+                AnthropicError::RateLimit { retry_after } => Error::RateLimit {
+                    retry_after: retry_after.map(Duration::from_secs),
+                },
+
+                // Anthropic's API is notoriously unreliable, so we
+                // special-case a few common errors that most of the times
+                // resolve themselves when retried.
                 //
                 // See: <https://docs.claude.com/en/docs/build-with-claude/streaming#error-events>
                 // See: <https://docs.claude.com/en/api/errors#http-errors>
-                let retry_after: Option<u64> = match &e {
-                    AnthropicError::RateLimit { retry_after } => retry_after.or(Some(3)),
-                    AnthropicError::StreamError(e) => {
-                        if ["rate_limit_error", "overloaded_error", "api_error"]
-                            .contains(&e.error_type.as_str())
-                            || e.error.as_ref().is_some_and(|v| {
-                                v.get("message").and_then(Value::as_str) == Some("Overloaded")
-                            })
-                        {
-                            Some(3)
-                        } else {
-                            None
-                        }
+                AnthropicError::StreamError(e)
+                    if ["rate_limit_error", "overloaded_error", "api_error"]
+                        .contains(&e.error_type.as_str())
+                        || e.error.as_ref().is_some_and(|v| {
+                            v.get("message").and_then(Value::as_str) == Some("Overloaded")
+                        }) =>
+                {
+                    Error::RateLimit {
+                        retry_after: Some(Duration::from_secs(3)),
                     }
-                    _ => None,
-                };
-
-                match retry_after {
-                    Some(retry_after) => Error::RateLimit {
-                        retry_after: Some(Duration::from_secs(retry_after)),
-                    },
-                    None => Error::from(e),
                 }
+
+                _ => Error::from(e),
             });
 
         tokio::pin!(stream);
@@ -215,7 +209,7 @@ fn call(
                     {
                         debug!("Max tokens reached, auto-requesting more tokens.");
 
-                        for await event in chain(client.clone(), request.clone(), &events) {
+                        for await event in chain(client.clone(), request.clone(), events) {
                             yield event?;
                         }
                         return;
@@ -238,57 +232,33 @@ fn call(
 fn chain(
     client: Client,
     mut request: types::CreateMessagesRequest,
-    events: &[StreamEvent],
+    events: Vec<StreamEvent>,
 ) -> EventStream {
-    // Extract content from the stream events for continuation
-    let mut reasoning_content = vec![];
-    let mut message_content = vec![];
-    let mut has_tool_calls = false;
-
-    for event in events {
-        match event {
-            StreamEvent::ChatChunk(CompletionChunk::Reasoning(text)) => {
-                reasoning_content.push(text.clone());
-            }
-            StreamEvent::ChatChunk(CompletionChunk::Content(text)) => {
-                message_content.push(text.clone());
-            }
-            StreamEvent::ToolCall(_) => {
-                has_tool_calls = true;
-            }
-            _ => {}
-        }
-    }
-
-    debug_assert!(
-        !has_tool_calls,
-        "Cannot chain when tool calls were requested"
-    );
+    let events: Vec<ConversationEvent> = Reply::from((PROVIDER, events)).into();
+    debug_assert!(!events.iter().any(ConversationEvent::is_tool_call_request));
 
     let mut should_merge = true;
-    let previous_content = message_content.join("");
+    let previous_content = events
+        .last()
+        .and_then(|e| e.as_chat_response().map(ChatResponse::content))
+        .unwrap_or_default()
+        .to_owned();
 
-    // Build assistant message from the accumulated content
-    let mut content_blocks = vec![];
+    let message = events
+        .into_iter()
+        .filter_map(|event| convert_event(event, true).map(|v| v.1))
+        .fold(
+            types::Message {
+                role: types::MessageRole::Assistant,
+                ..Default::default()
+            },
+            |mut message, content| {
+                message.content.push(content);
+                message
+            },
+        );
 
-    let reasoning = reasoning_content.join("");
-    if !reasoning.is_empty() {
-        content_blocks.push(types::MessageContent::Text(
-            format!("<think>\n{reasoning}\n</think>\n\n").into(),
-        ));
-    }
-
-    if !previous_content.is_empty() {
-        content_blocks.push(types::MessageContent::Text(previous_content.clone().into()));
-    }
-
-    if !content_blocks.is_empty() {
-        request.messages.push(types::Message {
-            role: types::MessageRole::Assistant,
-            content: types::MessageContentList(content_blocks),
-        });
-    }
-
+    request.messages.push(message);
     request.messages.push(types::Message {
         role: types::MessageRole::User,
         content: types::MessageContentList(vec![types::MessageContent::Text(
@@ -960,70 +930,7 @@ fn convert_events(events: ConversationStream) -> Vec<types::Message> {
                 .finalize(aliases)
                 .is_ok_and(|id| id.provider == Some(PROVIDER));
 
-            match event.event.kind {
-                EventKind::ChatRequest(request) => Some((
-                    types::MessageRole::User,
-                    types::MessageContent::Text(request.content.into()),
-                )),
-                EventKind::ChatResponse(response) => {
-                    // Check if this came from Anthropic originally
-                    let content = if is_anthropic
-                        && let Some(signature) = response
-                            .metadata()
-                            .and_then(|v| v.get("signature"))
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                    {
-                        types::MessageContent::Thinking(Thinking {
-                            thinking: response.into_content(),
-                            signature: Some(signature),
-                        })
-                    } else if is_anthropic
-                        && let Some(data) = response
-                            .metadata()
-                            .and_then(|v| v.get("redacted_thinking"))
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                    {
-                        types::MessageContent::RedactedThinking { data }
-                    } else if response.is_reasoning() {
-                        // Reasoning from other providers - wrap in XML tags
-                        types::MessageContent::Text(
-                            format!("<think>\n{}\n</think>\n\n", response.content()).into(),
-                        )
-                    } else {
-                        types::MessageContent::Text(response.into_content().into())
-                    };
-
-                    Some((types::MessageRole::Assistant, content))
-                }
-                EventKind::ToolCallRequest(request) => Some((
-                    types::MessageRole::Assistant,
-                    types::MessageContent::ToolUse(types::ToolUse {
-                        id: request.id,
-                        name: request.name,
-                        input: Value::Object(request.arguments),
-                        cache_control: None,
-                    }),
-                )),
-                EventKind::ToolCallResponse(response) => {
-                    let (content, is_error) = match response.result {
-                        Ok(c) => (Some(c), false),
-                        Err(e) => (Some(e), true),
-                    };
-
-                    Some((
-                        types::MessageRole::User,
-                        types::MessageContent::ToolResult(types::ToolResult {
-                            tool_use_id: response.id,
-                            content,
-                            is_error,
-                            cache_control: None,
-                        }),
-                    ))
-                }
-                _ => None,
-            }
+            convert_event(event.event, is_anthropic)
         })
         .fold(vec![], |mut messages, (role, content)| {
             match messages.last_mut() {
@@ -1038,6 +945,76 @@ fn convert_events(events: ConversationStream) -> Vec<types::Message> {
 
             messages
         })
+}
+
+fn convert_event(
+    event: ConversationEvent,
+    is_anthropic: bool,
+) -> Option<(types::MessageRole, types::MessageContent)> {
+    match event.kind {
+        EventKind::ChatRequest(request) => Some((
+            types::MessageRole::User,
+            types::MessageContent::Text(request.content.into()),
+        )),
+        EventKind::ChatResponse(response) => {
+            // Check if this came from Anthropic originally
+            let content = if is_anthropic
+                && let Some(signature) = response
+                    .metadata()
+                    .and_then(|v| v.get("signature"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            {
+                types::MessageContent::Thinking(Thinking {
+                    thinking: response.into_content(),
+                    signature: Some(signature),
+                })
+            } else if is_anthropic
+                && let Some(data) = response
+                    .metadata()
+                    .and_then(|v| v.get("redacted_thinking"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            {
+                types::MessageContent::RedactedThinking { data }
+            } else if response.is_reasoning() {
+                // Reasoning from other providers - wrap in XML tags
+                types::MessageContent::Text(
+                    format!("<think>\n{}\n</think>\n\n", response.content()).into(),
+                )
+            } else {
+                types::MessageContent::Text(response.into_content().into())
+            };
+
+            Some((types::MessageRole::Assistant, content))
+        }
+        EventKind::ToolCallRequest(request) => Some((
+            types::MessageRole::Assistant,
+            types::MessageContent::ToolUse(types::ToolUse {
+                id: request.id,
+                name: request.name,
+                input: Value::Object(request.arguments),
+                cache_control: None,
+            }),
+        )),
+        EventKind::ToolCallResponse(response) => {
+            let (content, is_error) = match response.result {
+                Ok(c) => (Some(c), false),
+                Err(e) => (Some(e), true),
+            };
+
+            Some((
+                types::MessageRole::User,
+                types::MessageContent::ToolResult(types::ToolResult {
+                    tool_use_id: response.id,
+                    content,
+                    is_error,
+                    cache_control: None,
+                }),
+            ))
+        }
+        _ => None,
+    }
 }
 
 impl From<types::MessageContent> for Delta {

@@ -7,7 +7,7 @@ Ok(
         provider: Anthropic,
         events: [
             Content(
-                "Hi there! I'm ready to help. What would you like to discuss?",
+                "I'm ready to help. What would you like to discuss or work on?",
             ),
         ],
     },

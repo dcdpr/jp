@@ -451,7 +451,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_google_model_details() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().google;
-        let name: Name = "gemini-2.5-flash-preview-05-20".parse().unwrap();
+        let name: Name = "gemini-2.5-flash-lite".parse().unwrap();
         let vcr = vcr();
         vcr.cassette(
             function_name!(),
@@ -503,7 +503,7 @@ mod tests {
     #[test(tokio::test)]
     async fn test_google_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().google;
-        let model_id = "google/gemini-2.5-flash-preview-05-20".parse().unwrap();
+        let model_id = "google/gemini-2.5-flash-lite".parse().unwrap();
         let model = ModelDetails::empty(model_id);
         let mut stream = ConversationStream::default();
         stream.add_chat_request(ChatRequest::from("Test message"));
@@ -549,7 +549,7 @@ mod tests {
     async fn test_google_chat_completion_stream()
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = LlmProviderConfig::default().google;
-        let model_id = "google/gemini-2.5-flash-preview-05-20".parse().unwrap();
+        let model_id = "google/gemini-2.5-flash-lite".parse().unwrap();
         let model = ModelDetails::empty(model_id);
         let mut stream = ConversationStream::default();
         stream.add_chat_request(ChatRequest::from("Test message"));

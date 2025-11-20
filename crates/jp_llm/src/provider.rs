@@ -20,7 +20,7 @@ use jp_config::{
     },
     providers::llm::LlmProviderConfig,
 };
-use jp_conversation::event::ToolCallRequest;
+use jp_conversation::event::{ChatResponse, ConversationEvent, ToolCallRequest};
 use llamacpp::Llamacpp;
 use ollama::Ollama;
 use openai::Openai;
@@ -248,6 +248,32 @@ impl std::ops::Deref for Reply {
 impl std::ops::DerefMut for Reply {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.events
+    }
+}
+
+impl From<Reply> for Vec<ConversationEvent> {
+    fn from(reply: Reply) -> Self {
+        let mut events = vec![];
+
+        for event in reply.events {
+            match event {
+                Event::Content(v) => events.push(ConversationEvent::now(ChatResponse::message(v))),
+                Event::Reasoning(v) => {
+                    events.push(ConversationEvent::now(ChatResponse::reasoning(v)))
+                }
+                Event::ToolCall(v) => events.push(ConversationEvent::now(v)),
+                Event::Metadata(k, v) => {
+                    if let Some(ChatResponse::Reasoning { metadata, .. }) =
+                        events.last_mut().and_then(|e| e.as_chat_response_mut())
+                    {
+                        metadata.insert(k, v);
+                    }
+                }
+                Event::Finished(_) => {}
+            }
+        }
+
+        events
     }
 }
 
