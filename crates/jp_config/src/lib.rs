@@ -22,12 +22,12 @@
     rustdoc::all,
     unused_doc_comments
 )]
-#![allow(
+#![expect(
     clippy::derive_partial_eq_without_eq,
     reason = "schematic derives PartialEq but not Eq. We *could* do \
               `#[config(partial(derive(Eq))]`, but it's not worth it."
 )]
-#![allow(
+#![expect(
     rustdoc::private_intra_doc_links,
     reason = "we don't host the docs, and use them mainly for LSP integration"
 )]

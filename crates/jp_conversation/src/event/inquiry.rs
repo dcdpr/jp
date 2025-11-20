@@ -1,3 +1,5 @@
+//! See [`InquiryRequest`] and [`InquiryResponse`].
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -6,7 +8,7 @@ use serde_json::Value;
 /// This event can be triggered by tools, the assistant, or even the user,
 /// when additional information is needed before proceeding. The system should
 /// pause execution and wait for a corresponding `InquiryResponse` event.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InquiryRequest {
     /// Unique identifier for this inquiry.
     ///
@@ -21,33 +23,19 @@ pub struct InquiryRequest {
 }
 
 impl InquiryRequest {
+    /// Creates a new inquiry request.
     #[must_use]
-    pub fn new(id: String, source: InquirySource, question: InquiryQuestion) -> Self {
+    pub const fn new(id: String, source: InquirySource, question: InquiryQuestion) -> Self {
         Self {
             id,
             source,
             question,
         }
     }
-
-    #[must_use]
-    pub fn from_tool(id: String, tool_name: String, question: InquiryQuestion) -> Self {
-        Self::new(id, InquirySource::Tool { name: tool_name }, question)
-    }
-
-    #[must_use]
-    pub fn from_assistant(id: String, question: InquiryQuestion) -> Self {
-        Self::new(id, InquirySource::Assistant, question)
-    }
-
-    #[must_use]
-    pub fn from_user(id: String, question: InquiryQuestion) -> Self {
-        Self::new(id, InquirySource::User, question)
-    }
 }
 
 /// The source/origin of an inquiry.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum InquirySource {
     /// The inquiry originates from a tool execution.
@@ -70,7 +58,7 @@ pub enum InquirySource {
 }
 
 /// A question requiring an answer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InquiryQuestion {
     /// The question text to display.
     pub text: String,
@@ -87,8 +75,9 @@ pub struct InquiryQuestion {
 }
 
 impl InquiryQuestion {
+    /// Creates a new inquiry question.
     #[must_use]
-    pub fn new(text: String, answer_type: InquiryAnswerType) -> Self {
+    pub const fn new(text: String, answer_type: InquiryAnswerType) -> Self {
         Self {
             text,
             answer_type,
@@ -96,30 +85,34 @@ impl InquiryQuestion {
         }
     }
 
+    /// Sets the default value for the question.
     #[must_use]
     pub fn with_default(mut self, default: Value) -> Self {
         self.default = Some(default);
         self
     }
 
+    /// Creates a new boolean inquiry question.
     #[must_use]
-    pub fn boolean(text: String) -> Self {
+    pub const fn boolean(text: String) -> Self {
         Self::new(text, InquiryAnswerType::Boolean)
     }
 
+    /// Creates a new select inquiry question.
     #[must_use]
-    pub fn select(text: String, options: Vec<Value>) -> Self {
+    pub const fn select(text: String, options: Vec<Value>) -> Self {
         Self::new(text, InquiryAnswerType::Select { options })
     }
 
+    /// Creates a new text inquiry question.
     #[must_use]
-    pub fn text(text: String) -> Self {
+    pub const fn text(text: String) -> Self {
         Self::new(text, InquiryAnswerType::Text)
     }
 }
 
 /// The type of answer expected for an inquiry.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InquiryAnswerType {
     /// Boolean yes/no question.
@@ -141,7 +134,7 @@ pub enum InquiryAnswerType {
 ///
 /// This event MUST be in response to an `InquiryRequest` event, with a
 /// matching `id`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InquiryResponse {
     /// ID matching the corresponding `InquiryRequest`.
     pub id: String,
@@ -157,36 +150,43 @@ pub struct InquiryResponse {
 }
 
 impl InquiryResponse {
+    /// Creates a new inquiry response.
     #[must_use]
-    pub fn new(id: String, answer: Value) -> Self {
+    pub const fn new(id: String, answer: Value) -> Self {
         Self { id, answer }
     }
 
+    /// Creates a new boolean inquiry response.
     #[must_use]
-    pub fn boolean(id: String, answer: bool) -> Self {
+    pub const fn boolean(id: String, answer: bool) -> Self {
         Self::new(id, Value::Bool(answer))
     }
 
+    /// Creates a new select inquiry response.
     #[must_use]
     pub fn select(id: String, answer: impl Into<Value>) -> Self {
         Self::new(id, answer.into())
     }
 
+    /// Creates a new text inquiry response.
     #[must_use]
-    pub fn text(id: String, answer: String) -> Self {
+    pub const fn text(id: String, answer: String) -> Self {
         Self::new(id, Value::String(answer))
     }
 
+    /// Returns the answer as a boolean, if applicable.
     #[must_use]
     pub fn as_bool(&self) -> Option<bool> {
         self.answer.as_bool()
     }
 
+    /// Returns the answer as a string, if applicable.
     #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         self.answer.as_str()
     }
 
+    /// Returns the answer as a string, if applicable.
     #[must_use]
     pub fn as_string(&self) -> Option<String> {
         self.answer.as_str().map(ToString::to_string)
@@ -199,9 +199,11 @@ mod tests {
 
     #[test]
     fn test_inquiry_request_serialization() {
-        let request = InquiryRequest::from_tool(
+        let request = InquiryRequest::new(
             "test-id".to_string(),
-            "file_editor".to_string(),
+            InquirySource::Tool {
+                name: "file_editor".to_string(),
+            },
             InquiryQuestion::boolean("Do you want to proceed?".to_string())
                 .with_default(Value::Bool(false)),
         );

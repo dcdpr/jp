@@ -1,3 +1,5 @@
+//! See [`ConversationEvent`] and [`EventKind`].
+
 mod chat;
 mod inquiry;
 mod tool_call;
@@ -12,14 +14,18 @@ pub use self::{
 };
 
 /// A single event in a conversation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationEvent {
+    /// The timestamp of the event.
     pub timestamp: UtcDateTime,
+
+    /// The kind of event.
     #[serde(flatten)]
     pub kind: EventKind,
 }
 
 impl ConversationEvent {
+    /// Create a new event with the given timestamp and kind.
     #[must_use]
     pub fn new(event: impl Into<EventKind>, timestamp: impl Into<UtcDateTime>) -> Self {
         Self {
@@ -28,13 +34,15 @@ impl ConversationEvent {
         }
     }
 
+    /// Create a new event with the current timestamp and kind.
     #[must_use]
     pub fn now(event: impl Into<EventKind>) -> Self {
         Self::new(event, UtcDateTime::now())
     }
 
+    /// Returns `true` if the event is a "request".
     #[must_use]
-    pub fn is_request(&self) -> bool {
+    pub const fn is_request(&self) -> bool {
         matches!(
             self.kind,
             EventKind::ChatRequest(_)
@@ -43,8 +51,9 @@ impl ConversationEvent {
         )
     }
 
+    /// Returns `true` if the event is a "response".
     #[must_use]
-    pub fn is_response(&self) -> bool {
+    pub const fn is_response(&self) -> bool {
         matches!(
             self.kind,
             EventKind::ChatResponse(_)
@@ -53,27 +62,31 @@ impl ConversationEvent {
         )
     }
 
+    /// Returns `true` if the event is a [`ChatRequest`].
     #[must_use]
-    pub fn is_chat_request(&self) -> bool {
+    pub const fn is_chat_request(&self) -> bool {
         matches!(self.kind, EventKind::ChatRequest(_))
     }
 
+    /// Returns a reference to the [`ChatRequest`], if applicable.
     #[must_use]
-    pub fn as_chat_request(&self) -> Option<&ChatRequest> {
+    pub const fn as_chat_request(&self) -> Option<&ChatRequest> {
         match &self.kind {
             EventKind::ChatRequest(request) => Some(request),
             _ => None,
         }
     }
 
+    /// Returns a mutable reference to the [`ChatRequest`], if applicable.
     #[must_use]
-    pub fn as_chat_request_mut(&mut self) -> Option<&mut ChatRequest> {
+    pub const fn as_chat_request_mut(&mut self) -> Option<&mut ChatRequest> {
         match &mut self.kind {
             EventKind::ChatRequest(request) => Some(request),
             _ => None,
         }
     }
 
+    /// Consumes the event and returns the [`ChatRequest`], if applicable.
     #[must_use]
     pub fn into_chat_request(self) -> Option<ChatRequest> {
         match self.kind {
@@ -82,19 +95,31 @@ impl ConversationEvent {
         }
     }
 
+    /// Returns `true` if the event is a [`ChatResponse`].
     #[must_use]
-    pub fn is_chat_response(&self) -> bool {
+    pub const fn is_chat_response(&self) -> bool {
         matches!(self.kind, EventKind::ChatResponse(_))
     }
 
+    /// Returns a reference to the [`ChatResponse`], if applicable.
     #[must_use]
-    pub fn as_chat_response(&self) -> Option<&ChatResponse> {
+    pub const fn as_chat_response(&self) -> Option<&ChatResponse> {
         match &self.kind {
             EventKind::ChatResponse(response) => Some(response),
             _ => None,
         }
     }
 
+    /// Returns a mutable reference to the [`ChatResponse`], if applicable.
+    #[must_use]
+    pub const fn as_chat_response_mut(&mut self) -> Option<&mut ChatResponse> {
+        match &mut self.kind {
+            EventKind::ChatResponse(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    /// Consumes the event and returns the [`ChatResponse`], if applicable.
     #[must_use]
     pub fn into_chat_response(self) -> Option<ChatResponse> {
         match self.kind {
@@ -103,19 +128,31 @@ impl ConversationEvent {
         }
     }
 
+    /// Returns `true` if the event is a [`ToolCallRequest`].
     #[must_use]
-    pub fn is_tool_call_request(&self) -> bool {
+    pub const fn is_tool_call_request(&self) -> bool {
         matches!(self.kind, EventKind::ToolCallRequest(_))
     }
 
+    /// Returns a reference to the [`ToolCallRequest`], if applicable.
     #[must_use]
-    pub fn as_tool_call_request(&self) -> Option<&ToolCallRequest> {
+    pub const fn as_tool_call_request(&self) -> Option<&ToolCallRequest> {
         match &self.kind {
             EventKind::ToolCallRequest(request) => Some(request),
             _ => None,
         }
     }
 
+    /// Returns a mutable reference to the [`ToolCallRequest`], if applicable.
+    #[must_use]
+    pub const fn as_tool_call_request_mut(&mut self) -> Option<&mut ToolCallRequest> {
+        match &mut self.kind {
+            EventKind::ToolCallRequest(request) => Some(request),
+            _ => None,
+        }
+    }
+
+    /// Consumes the event and returns the [`ToolCallRequest`], if applicable.
     #[must_use]
     pub fn into_tool_call_request(self) -> Option<ToolCallRequest> {
         match self.kind {
@@ -124,19 +161,31 @@ impl ConversationEvent {
         }
     }
 
+    /// Returns `true` if the event is a [`ToolCallResponse`].
     #[must_use]
-    pub fn is_tool_call_response(&self) -> bool {
+    pub const fn is_tool_call_response(&self) -> bool {
         matches!(self.kind, EventKind::ToolCallResponse(_))
     }
 
+    /// Returns a reference to the [`ToolCallResponse`], if applicable.
     #[must_use]
-    pub fn as_tool_call_response(&self) -> Option<&ToolCallResponse> {
+    pub const fn as_tool_call_response(&self) -> Option<&ToolCallResponse> {
         match &self.kind {
             EventKind::ToolCallResponse(response) => Some(response),
             _ => None,
         }
     }
 
+    /// Returns a mutable reference to the [`ToolCallResponse`], if applicable.
+    #[must_use]
+    pub const fn as_tool_call_response_mut(&mut self) -> Option<&mut ToolCallResponse> {
+        match &mut self.kind {
+            EventKind::ToolCallResponse(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    /// Consumes the event and returns the [`ToolCallResponse`], if applicable.
     #[must_use]
     pub fn into_tool_call_response(self) -> Option<ToolCallResponse> {
         match self.kind {
@@ -145,19 +194,31 @@ impl ConversationEvent {
         }
     }
 
+    /// Returns `true` if the event is a [`InquiryRequest`].
     #[must_use]
-    pub fn is_inquiry_request(&self) -> bool {
+    pub const fn is_inquiry_request(&self) -> bool {
         matches!(self.kind, EventKind::InquiryRequest(_))
     }
 
+    /// Returns a reference to the [`InquiryRequest`], if applicable.
     #[must_use]
-    pub fn as_inquiry_request(&self) -> Option<&InquiryRequest> {
+    pub const fn as_inquiry_request(&self) -> Option<&InquiryRequest> {
         match &self.kind {
             EventKind::InquiryRequest(request) => Some(request),
             _ => None,
         }
     }
 
+    /// Returns a mutable reference to the [`InquiryRequest`], if applicable.
+    #[must_use]
+    pub const fn as_inquiry_request_mut(&mut self) -> Option<&mut InquiryRequest> {
+        match &mut self.kind {
+            EventKind::InquiryRequest(request) => Some(request),
+            _ => None,
+        }
+    }
+
+    /// Consumes the event and returns the [`InquiryRequest`], if applicable.
     #[must_use]
     pub fn into_inquiry_request(self) -> Option<InquiryRequest> {
         match self.kind {
@@ -166,19 +227,31 @@ impl ConversationEvent {
         }
     }
 
+    /// Returns `true` if the event is a [`InquiryResponse`].
     #[must_use]
-    pub fn is_inquiry_response(&self) -> bool {
+    pub const fn is_inquiry_response(&self) -> bool {
         matches!(self.kind, EventKind::InquiryResponse(_))
     }
 
+    /// Returns a reference to the [`InquiryResponse`], if applicable.
     #[must_use]
-    pub fn as_inquiry_response(&self) -> Option<&InquiryResponse> {
+    pub const fn as_inquiry_response(&self) -> Option<&InquiryResponse> {
         match &self.kind {
             EventKind::InquiryResponse(response) => Some(response),
             _ => None,
         }
     }
 
+    /// Returns a mutable reference to the [`InquiryResponse`], if applicable.
+    #[must_use]
+    pub const fn as_inquiry_response_mut(&mut self) -> Option<&mut InquiryResponse> {
+        match &mut self.kind {
+            EventKind::InquiryResponse(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    /// Consumes the event and returns the [`InquiryResponse`], if applicable.
     #[must_use]
     pub fn into_inquiry_response(self) -> Option<InquiryResponse> {
         match self.kind {
@@ -189,7 +262,7 @@ impl ConversationEvent {
 }
 
 /// A type of event in a conversation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventKind {
     /// A chat request event.

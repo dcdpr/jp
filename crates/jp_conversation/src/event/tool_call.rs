@@ -1,10 +1,13 @@
+//! See [`ToolCallRequest`] and [`ToolCallResponse`].
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::{Map, Value};
 
 /// A tool call request event - requesting execution of a tool.
 ///
 /// This event is typically triggered by the assistant as part of its response,
 /// but can also be triggered automatically by the client.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCallRequest {
     /// Unique identifier for this tool call
     pub id: String,
@@ -14,16 +17,13 @@ pub struct ToolCallRequest {
 
     /// Arguments to pass to the tool
     #[serde(with = "jp_serde::repr::base64_json_map")]
-    pub arguments: serde_json::Map<String, serde_json::Value>,
+    pub arguments: Map<String, Value>,
 }
 
 impl ToolCallRequest {
+    /// Creates a new tool call request.
     #[must_use]
-    pub fn new(
-        id: String,
-        name: String,
-        arguments: serde_json::Map<String, serde_json::Value>,
-    ) -> Self {
+    pub const fn new(id: String, name: String, arguments: Map<String, Value>) -> Self {
         Self {
             id,
             name,
@@ -34,17 +34,20 @@ impl ToolCallRequest {
 
 /// A tool call response event - the result of executing a tool.
 ///
-/// This event MUST be in response to a `ToolCallRequest` event, with a matching `id`.
-#[derive(Debug, Clone, PartialEq)]
+/// This event MUST be in response to a `ToolCallRequest` event, with a matching
+/// `id`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolCallResponse {
     /// ID matching the corresponding `ToolCallRequest`
     pub id: String,
 
-    /// The result of executing the tool: `Ok(content)` on success, `Err(error)` on failure
+    /// The result of executing the tool: `Ok(content)` on success, `Err(error)`
+    /// on failure
     pub result: Result<String, String>,
 }
 
 impl ToolCallResponse {
+    /// Get the content of the response, either the result or the error.
     #[must_use]
     pub fn content(&self) -> &str {
         match &self.result {
@@ -52,6 +55,8 @@ impl ToolCallResponse {
         }
     }
 
+    /// Consume the response and get the content, either the result or the
+    /// error.
     #[must_use]
     pub fn into_content(self) -> String {
         match self.result {
@@ -67,6 +72,7 @@ impl Serialize for ToolCallResponse {
         S: Serializer,
     {
         #[derive(Serialize)]
+        #[allow(clippy::allow_attributes, clippy::missing_docs_in_private_items)]
         struct Helper<'a> {
             id: &'a str,
             #[serde(with = "jp_serde::repr::base64_string")]
@@ -95,6 +101,7 @@ impl<'de> Deserialize<'de> for ToolCallResponse {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[allow(clippy::allow_attributes, clippy::missing_docs_in_private_items)]
         struct Helper {
             id: String,
             #[serde(with = "jp_serde::repr::base64_string")]

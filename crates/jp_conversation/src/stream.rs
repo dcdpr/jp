@@ -1,3 +1,5 @@
+//! See [`ConversationStream`].
+
 use jp_config::{PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize};
 use tracing::error;
@@ -7,6 +9,7 @@ use crate::event::{
     ToolCallRequest, ToolCallResponse,
 };
 
+/// An internal representation of events in a conversation stream.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InternalEvent {
@@ -22,23 +25,37 @@ pub enum InternalEvent {
     /// considered to have the default configuration.
     ConfigDelta(Box<PartialAppConfig>),
 
+    /// An event in the conversation stream.
     #[serde(untagged)]
     Event(ConversationEvent),
 }
 
 impl InternalEvent {
+    /// Convert an internal event into an [`ConversationEvent`]. Returns `None`
+    /// if the event is a config delta.
     #[must_use]
     pub fn into_event(self) -> Option<ConversationEvent> {
         match self {
-            InternalEvent::Event(event) => Some(event),
-            InternalEvent::ConfigDelta(_) => None,
+            Self::Event(event) => Some(event),
+            Self::ConfigDelta(_) => None,
         }
     }
 }
 
+/// A stream of events that make up a conversation.
 #[derive(Debug, PartialEq, Clone)]
 pub struct ConversationStream {
+    /// The base configuration for the conversation.
+    ///
+    /// This is the configuration that is used when the conversation is first
+    /// created, and is used as the default configuration for all events in the
+    /// stream, until a config delta is encountered to amend it.
+    ///
+    /// This is stored separately from the events in the stream, to guarantee a
+    /// stream always has a base configuration.
     base_config: PartialAppConfig,
+
+    /// The events in the stream.
     events: Vec<InternalEvent>,
 }
 
@@ -49,20 +66,24 @@ impl Default for ConversationStream {
 }
 
 impl ConversationStream {
+    /// Create a new [`ConversationStream`] with the given base configuration.
     #[must_use]
-    pub fn new(base_config: PartialAppConfig) -> Self {
+    pub const fn new(base_config: PartialAppConfig) -> Self {
         Self {
             base_config,
             events: Vec::new(),
         }
     }
 
+    /// Set the base configuration for the stream.
     #[must_use]
     pub fn with_base_config(mut self, base_config: PartialAppConfig) -> Self {
         self.base_config = base_config;
         self
     }
 
+    /// Returns `true` if the stream is empty. This only considers
+    /// [`ConversationEvent`]s.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         !self
@@ -71,6 +92,8 @@ impl ConversationStream {
             .any(|e| matches!(e, InternalEvent::Event(_)))
     }
 
+    /// Returns the number of events in the stream. This only considers
+    /// [`ConversationEvent`]s.
     #[must_use]
     pub fn len(&self) -> usize {
         self.events
@@ -142,7 +165,9 @@ impl ConversationStream {
     pub fn push_with_config_delta(&mut self, event: impl Into<ConversationEventWithConfig>) {
         let ConversationEventWithConfig { event, config } = event.into();
 
-        let last_config = self.last().map_or(self.base_config.clone(), |v| v.config);
+        let last_config = self
+            .last()
+            .map_or_else(|| self.base_config.clone(), |v| v.config);
         let config_delta = last_config.delta(config);
 
         if !config_delta.is_empty() {
@@ -152,85 +177,121 @@ impl ConversationStream {
         self.push(event);
     }
 
+    /// Push a [`ConversationEvent`] onto the stream.
     pub fn push(&mut self, event: impl Into<ConversationEvent>) {
         self.events.push(InternalEvent::Event(event.into()));
     }
 
+    /// Push a [`ConversationEvent`] of type [`EventKind::ChatRequest`] onto the
+    /// stream.
     pub fn add_chat_request(&mut self, event: impl Into<ChatRequest>) {
         self.push(ConversationEvent::now(event.into()));
     }
 
+    /// Add a [`ConversationEvent`] of type [`EventKind::ChatRequest`] onto the
+    /// stream.
     #[must_use]
     pub fn with_chat_request(mut self, event: impl Into<ChatRequest>) -> Self {
         self.add_chat_request(event);
         self
     }
 
+    /// Push a [`ConversationEvent`] of type [`EventKind::ChatResponse`] onto
+    /// the stream.
     pub fn add_chat_response(&mut self, event: impl Into<ChatResponse>) {
         self.push(ConversationEvent::now(event.into()));
     }
 
+    /// Add a [`ConversationEvent`] of type [`EventKind::ChatResponse`] onto the
+    /// stream.
     #[must_use]
     pub fn with_chat_response(mut self, event: impl Into<ChatResponse>) -> Self {
         self.add_chat_response(event);
         self
     }
 
+    /// Push a [`ConversationEvent`] of type [`EventKind::ToolCallRequest`] onto
+    /// the stream.
     pub fn add_tool_call_request(&mut self, event: impl Into<ToolCallRequest>) {
         self.push(ConversationEvent::now(event.into()));
     }
 
+    /// Add a [`ConversationEvent`] of type [`EventKind::ToolCallRequest`] onto
+    /// the stream.
     #[must_use]
     pub fn with_tool_call_request(mut self, event: impl Into<ToolCallRequest>) -> Self {
         self.add_tool_call_request(event);
         self
     }
 
+    /// Push a [`ConversationEvent`] of type [`EventKind::ToolCallResponse`] onto
+    /// the stream.
     pub fn add_tool_call_response(&mut self, event: impl Into<ToolCallResponse>) {
         self.push(ConversationEvent::now(event.into()));
     }
 
+    /// Add a [`ConversationEvent`] of type [`EventKind::ToolCallResponse`] onto
+    /// the stream.
     #[must_use]
     pub fn with_tool_call_response(mut self, event: impl Into<ToolCallResponse>) -> Self {
         self.add_tool_call_response(event);
         self
     }
 
+    /// Push a [`ConversationEvent`] of type [`EventKind::InquiryRequest`] onto
+    /// the stream.
     pub fn add_inquiry_request(&mut self, event: impl Into<InquiryRequest>) {
         self.push(ConversationEvent::now(event.into()));
     }
 
+    /// Add a [`ConversationEvent`] of type [`EventKind::InquiryRequest`] onto
+    /// the stream.
     #[must_use]
     pub fn with_inquiry_request(mut self, event: impl Into<InquiryRequest>) -> Self {
         self.add_inquiry_request(event);
         self
     }
 
+    /// Push a [`ConversationEvent`] of type [`EventKind::InquiryResponse`] onto
+    /// the stream.
     pub fn add_inquiry_response(&mut self, event: impl Into<InquiryResponse>) {
         self.push(ConversationEvent::now(event.into()));
     }
 
+    /// Add a [`ConversationEvent`] of type [`EventKind::InquiryResponse`] onto
+    /// the stream.
     #[must_use]
     pub fn with_inquiry_response(mut self, event: impl Into<InquiryResponse>) -> Self {
         self.add_inquiry_response(event);
         self
     }
 
+    /// Returns the last [`ConversationEvent`] in the stream, wrapped in a
+    /// [`ConversationEventWithConfigRef`], containing the [`PartialAppConfig`]
+    /// at the time the event was added.
     #[must_use]
     pub fn last(&self) -> Option<ConversationEventWithConfigRef<'_>> {
         self.iter().last()
     }
 
+    /// Similar to [`Self::last`], but returns a mutable reference to the last
+    /// event.
     #[must_use]
     pub fn last_mut(&mut self) -> Option<ConversationEventWithConfigMut<'_>> {
         self.iter_mut().last()
     }
 
+    /// Returns the first [`ConversationEvent`] in the stream, wrapped in a
+    /// [`ConversationEventWithConfigRef`], containing the [`PartialAppConfig`]
+    /// at the time the event was added.
     #[must_use]
     pub fn first(&self) -> Option<ConversationEventWithConfigRef<'_>> {
         self.iter().next()
     }
 
+    /// Pops the last [`ConversationEvent`] from the stream, returning it wrapped
+    /// in a [`ConversationEventWithConfig`], containing the
+    /// [`PartialAppConfig`] at the time the event was added.
     #[must_use]
     pub fn pop(&mut self) -> Option<ConversationEventWithConfig> {
         loop {
@@ -239,9 +300,9 @@ impl ConversationStream {
                 None => return None,
 
                 // If the last event is a `ConversationEvent`, we handle it.
-                Some(InternalEvent::Event(_)) => {
-                    self.last().map_or(self.base_config.clone(), |v| v.config)
-                }
+                Some(InternalEvent::Event(_)) => self
+                    .last()
+                    .map_or_else(|| self.base_config.clone(), |v| v.config),
 
                 // Any other event we remove, and continue.
                 _ => {
@@ -257,6 +318,9 @@ impl ConversationStream {
         }
     }
 
+    /// Returns an iterator over the events in the stream, wrapped in a
+    /// [`ConversationEventWithConfigRef`], containing the
+    /// [`PartialAppConfig`] at the time the event was added.
     #[must_use]
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = ConversationEventWithConfigRef<'_>> {
         Iter {
@@ -267,6 +331,8 @@ impl ConversationStream {
         }
     }
 
+    /// Similar to [`Self::iter`], but returns a mutable iterator over the
+    /// events in the stream.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = ConversationEventWithConfigMut<'_>> {
         IterMut {
             iter: self.events.iter_mut(),
@@ -296,8 +362,12 @@ impl IntoIterator for ConversationStream {
     }
 }
 
+/// An owned iterator over the events in a conversation stream.
 pub struct IntoIter {
+    /// The configuration state for the next event in the iterator.
     current_config: PartialAppConfig,
+
+    /// The iterator over the events in the stream.
     inner_iter: std::vec::IntoIter<InternalEvent>,
 }
 
@@ -358,10 +428,18 @@ impl DoubleEndedIterator for IntoIter {
     }
 }
 
+/// An iterator over the borrowed events in a conversation stream.
 struct Iter<'a> {
+    /// The stream being iterated over.
     stream: &'a ConversationStream,
+
+    /// The configuration state for the first, next event in the iterator.
     front_config: PartialAppConfig,
+
+    /// The index of the `next` event in the iterator.
     front: usize,
+
+    /// The index of the `next_back` event in the iterator.
     back: usize,
 }
 
@@ -418,9 +496,13 @@ impl DoubleEndedIterator for Iter<'_> {
     }
 }
 
+/// An iterator over the mutable events in a conversation stream.
 pub struct IterMut<'a> {
-    iter: std::slice::IterMut<'a, InternalEvent>,
+    /// The configuration state for the first, next event in the iterator.
     front_config: PartialAppConfig,
+
+    /// The iterator over the events in the stream.
+    iter: std::slice::IterMut<'a, InternalEvent>,
 }
 
 impl<'a> Iterator for IterMut<'a> {
@@ -447,37 +529,52 @@ impl<'a> Iterator for IterMut<'a> {
     }
 }
 
+/// A reference to a [`ConversationEvent`] with its configuration.
 #[derive(Debug, PartialEq, Clone)]
 pub struct ConversationEventWithConfigRef<'a> {
+    /// The event.
     pub event: &'a ConversationEvent,
+
+    /// The configuration.
     pub config: PartialAppConfig,
 }
 
+/// A mutable reference to a [`ConversationEvent`] with its configuration.
 #[derive(Debug, PartialEq)]
 pub struct ConversationEventWithConfigMut<'a> {
+    /// The event.
     pub event: &'a mut ConversationEvent,
+
+    /// The configuration.
     pub config: PartialAppConfig,
 }
 
+/// A [`ConversationEvent`] with its configuration.
 #[derive(Debug, PartialEq, Clone)]
 pub struct ConversationEventWithConfig {
+    /// The event.
     pub event: ConversationEvent,
+
+    /// The configuration.
     pub config: PartialAppConfig,
 }
 
 impl ConversationEventWithConfig {
+    /// Consume the type and return the underlying [`ConversationEvent`].
     #[must_use]
     pub fn into_inner(self) -> ConversationEvent {
         self.event
     }
 
+    /// Consume the type and return the underlying [`EventKind`].
     #[must_use]
     pub fn into_kind(self) -> EventKind {
         self.event.kind
     }
 
+    /// Return a reference to the underlying [`EventKind`].
     #[must_use]
-    pub fn kind(&self) -> &EventKind {
+    pub const fn kind(&self) -> &EventKind {
         &self.event.kind
     }
 }
@@ -494,13 +591,12 @@ impl From<ConversationEventWithConfigRef<'_>> for ConversationEventWithConfig {
 impl FromIterator<ConversationEventWithConfig> for ConversationStream {
     fn from_iter<T: IntoIterator<Item = ConversationEventWithConfig>>(iter: T) -> Self {
         let mut events = iter.into_iter();
-        let (base_config, first_event) = events
-            .next()
-            .map_or((PartialAppConfig::empty(), None), |e| {
-                (e.config, Some(e.event))
-            });
+        let (base_config, first_event) = events.next().map_or_else(
+            || (PartialAppConfig::empty(), None),
+            |e| (e.config, Some(e.event)),
+        );
 
-        let mut stream = ConversationStream::new(base_config);
+        let mut stream = Self::new(base_config);
         if let Some(event) = first_event {
             stream.push(event);
         }
@@ -568,7 +664,7 @@ impl<'de> Deserialize<'de> for ConversationStream {
         }
 
         match events.remove(0) {
-            InternalEvent::ConfigDelta(base_config) => Ok(ConversationStream {
+            InternalEvent::ConfigDelta(base_config) => Ok(Self {
                 base_config: *base_config,
                 events,
             }),

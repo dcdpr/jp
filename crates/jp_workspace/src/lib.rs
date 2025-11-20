@@ -539,7 +539,7 @@ mod tests {
         let conversation_id = workspace.conversations().next().unwrap().0;
         let metadata_file = storage
             .join(CONVERSATIONS_DIR)
-            .join(conversation_id.to_dirname(None).unwrap())
+            .join(conversation_id.to_dirname(None))
             .join(METADATA_FILE);
 
         assert!(metadata_file.is_file());

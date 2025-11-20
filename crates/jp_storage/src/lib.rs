@@ -216,7 +216,7 @@ impl Storage {
             .chain(iter::once((active_conversation_id, active_conversation)));
 
         for (id, conversation) in all_conversations {
-            let dir_name = id.to_dirname(conversation.title.as_deref())?;
+            let dir_name = id.to_dirname(conversation.title.as_deref());
             let conv_dir = if conversation.user {
                 user_conversations_dir.join(dir_name)
             } else {
@@ -356,7 +356,7 @@ fn remove_unused_conversation_dirs(
     // Gather all possible conversation directory names
     let mut dirs = vec![];
     for conversations_dir in &[workspace_conversations_dir, user_conversations_dir] {
-        let pat = id.to_dirname(None)?;
+        let pat = id.to_dirname(None);
         dirs.push(conversations_dir.join(&pat));
         for entry in fs::read_dir(conversations_dir).ok().into_iter().flatten() {
             let path = entry?.path();
@@ -502,25 +502,24 @@ mod tests {
     #[test]
     fn test_conversation_dir_name_generation() {
         let id = ConversationId::from_str("jp-c17457886043-otvo8").unwrap();
-        assert_eq!(id.to_dirname(None).unwrap(), "17457886043");
+        assert_eq!(id.to_dirname(None), "17457886043");
         assert_eq!(
-            id.to_dirname(Some("Simple Title")).unwrap(),
+            id.to_dirname(Some("Simple Title")),
             "17457886043-simple-title"
         );
         assert_eq!(
-            id.to_dirname(Some(" Title with spaces & chars!")).unwrap(),
+            id.to_dirname(Some(" Title with spaces & chars!")),
             "17457886043-title-with-spaces---chars" // Sanitized
         );
         assert_eq!(
             id.to_dirname(Some(
                 "A very long title that definitely exceeds the sixty character limit for testing \
                  purposes"
-            ))
-            .unwrap(),
+            )),
             "17457886043-a-very-long-title-that-definitely-exceeds-the-sixty" // Truncated
         );
         assert_eq!(
-            id.to_dirname(Some("")).unwrap(), // Empty title
+            id.to_dirname(Some("")), // Empty title
             "17457886043"
         );
     }
