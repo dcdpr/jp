@@ -58,14 +58,6 @@ impl ThreadBuilder {
         self
     }
 
-    // #[must_use]
-    // pub fn with_event(mut self, event: impl Into<ConversationEvent>) -> Self {
-    //     if let Some(stream) = &mut self.events {
-    //         stream.push(event.into());
-    //     }
-    //     self
-    // }
-
     pub fn build(self) -> Result<Thread> {
         let ThreadBuilder {
             system_prompt,

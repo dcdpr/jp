@@ -7,7 +7,6 @@ use std::{
 };
 
 pub use error::Error;
-use jp_config::PartialAppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream, ConversationsMetadata};
 use jp_id::Id as _;
 use jp_tombmap::TombMap;
@@ -238,13 +237,9 @@ impl Storage {
             write_json(&meta_path, conversation)?;
 
             let events_path = conv_dir.join(EVENTS_FILE);
-            if let Some(stream) = events.get(id) {
-                write_json(&events_path, stream)?;
-            } else {
-                write_json(
-                    &events_path,
-                    &ConversationStream::new(PartialAppConfig::default()),
-                )?;
+            match events.get(id) {
+                Some(stream) => write_json(&events_path, stream)?,
+                None => write_json(&events_path, &ConversationStream::default())?,
             }
         }
 

@@ -188,35 +188,6 @@ impl ConversationEvent {
             _ => None,
         }
     }
-
-    // #[must_use]
-    // pub fn is_config_delta(&self) -> bool {
-    //     matches!(self.kind, EventKind::ConfigDelta(_))
-    // }
-    //
-    // #[must_use]
-    // pub fn as_config_delta(&self) -> Option<&ConfigDelta> {
-    //     match &self.kind {
-    //         EventKind::ConfigDelta(delta) => Some(delta),
-    //         _ => None,
-    //     }
-    // }
-    //
-    // #[must_use]
-    // pub fn as_config_delta_mut(&mut self) -> Option<&mut ConfigDelta> {
-    //     match &mut self.kind {
-    //         EventKind::ConfigDelta(delta) => Some(delta),
-    //         _ => None,
-    //     }
-    // }
-    //
-    // #[must_use]
-    // pub fn into_config_delta(self) -> Option<ConfigDelta> {
-    //     match self.kind {
-    //         EventKind::ConfigDelta(delta) => Some(delta),
-    //         _ => None,
-    //     }
-    // }
 }
 
 /// A type of event in a conversation.
@@ -301,18 +272,6 @@ impl From<InquiryResponse> for EventKind {
     }
 }
 
-// impl From<ConfigDelta> for EventKind {
-//     fn from(delta: ConfigDelta) -> Self {
-//         Self::ConfigDelta(delta)
-//     }
-// }
-//
-// impl From<PartialAppConfig> for EventKind {
-//     fn from(config: PartialAppConfig) -> Self {
-//         Self::ConfigDelta(ConfigDelta::new(config))
-//     }
-// }
-
 impl From<ChatRequest> for ConversationEvent {
     fn from(request: ChatRequest) -> Self {
         Self::now(request)
@@ -348,15 +307,3 @@ impl From<InquiryResponse> for ConversationEvent {
         Self::now(response)
     }
 }
-
-// impl From<ConfigDelta> for ConversationEvent {
-//     fn from(delta: ConfigDelta) -> Self {
-//         Self::now(delta)
-//     }
-// }
-//
-// impl From<PartialAppConfig> for ConversationEvent {
-//     fn from(config: PartialAppConfig) -> Self {
-//         Self::now(ConfigDelta::new(config))
-//     }
-// }

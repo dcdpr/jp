@@ -18,9 +18,7 @@ pub use error::Error;
 use error::Result;
 pub use id::Id;
 use jp_config::PartialAppConfig;
-use jp_conversation::{
-    Conversation, ConversationId, ConversationStream, stream::ConversationEventWithConfig,
-};
+use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::{DEFAULT_STORAGE_DIR, Storage};
 use state::{LocalState, State, UserState};
 use tracing::{debug, info, trace};
@@ -391,10 +389,6 @@ impl Workspace {
             .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
     }
 
-    pub fn pop_event(&mut self, id: &ConversationId) -> Option<ConversationEventWithConfig> {
-        self.get_events_mut(id).and_then(ConversationStream::pop)
-    }
-
     /// Returns an iterator over all conversations, including the active one.
     fn all_conversations(&self) -> impl Iterator<Item = (&ConversationId, &Conversation)> {
         self.state.local.conversations.iter().chain(iter::once((
@@ -532,8 +526,7 @@ mod tests {
 
         let mut workspace = Workspace::new(&root);
 
-        let partial = PartialAppConfig::empty();
-        let id = workspace.create_conversation(Conversation::default(), partial);
+        let id = workspace.create_conversation(Conversation::default(), PartialAppConfig::empty());
         workspace.set_active_conversation_id(id).unwrap();
         assert!(!storage.exists());
 
@@ -587,9 +580,8 @@ mod tests {
         let mut workspace = Workspace::new(PathBuf::new());
         assert!(workspace.state.local.conversations.is_empty());
 
-        let partial = PartialAppConfig::empty();
         let conversation = Conversation::default();
-        let id = workspace.create_conversation(conversation.clone(), partial);
+        let id = workspace.create_conversation(conversation.clone(), PartialAppConfig::empty());
         assert_eq!(
             workspace.state.local.conversations.get(&id),
             Some(&conversation)

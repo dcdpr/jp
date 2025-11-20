@@ -2,10 +2,13 @@
 source: crates/jp_test/src/mock.rs
 expression: expr
 ---
-Err(
-    Anthropic(
-        Unknown(
-            "{\"message\":\"Request did not match any route or mock\"}",
-        ),
-    ),
+Ok(
+    Reply {
+        provider: Anthropic,
+        events: [
+            Content(
+                "Hi there! I'm ready to help. What would you like to discuss?",
+            ),
+        ],
+    },
 )
