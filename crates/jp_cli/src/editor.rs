@@ -356,15 +356,14 @@ fn build_history_text(history: &ConversationStream) -> String {
                 }
             }
             EventKind::ToolCallResponse(response) => {
-                let is_error = response.result.is_err();
-                buf.push_str(&format!("\n\n## Tool Call Result on {timestamp}\n\n"));
+                if response.result.is_ok() {
+                    buf.push_str(&format!("\n\n## Tool Call Result on {timestamp}\n\n"));
+                } else {
+                    buf.push_str(&format!("\n\n## Tool Call **Error** on {timestamp}\n\n"));
+                }
                 buf.push_str("```\n");
                 buf.push_str(&response.result.clone().unwrap_or_else(|err| err));
                 buf.push_str("\n```");
-
-                if is_error {
-                    buf.push_str("\n\n_Error occurred during tool execution._");
-                }
             }
             EventKind::InquiryRequest(request) => {
                 buf.push_str(&format!(
