@@ -48,6 +48,8 @@ pub mod template;
 pub mod types;
 pub mod util; // TODO: Rename
 
+use std::sync::Arc;
+
 pub use error::Error;
 pub use partial::ToPartial;
 use relative_path::RelativePathBuf;
@@ -349,6 +351,18 @@ impl PartialAppConfig {
         }
         .into();
         partial
+    }
+}
+
+impl From<AppConfig> for PartialAppConfig {
+    fn from(config: AppConfig) -> Self {
+        config.to_partial()
+    }
+}
+
+impl From<Arc<AppConfig>> for PartialAppConfig {
+    fn from(config: Arc<AppConfig>) -> Self {
+        config.to_partial()
     }
 }
 

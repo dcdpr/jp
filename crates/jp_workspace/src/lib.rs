@@ -297,6 +297,13 @@ impl Workspace {
             .find_map(|(i, c)| (id == i).then_some(c))
     }
 
+    /// Similar to [`Self::get_conversation`], but returns an error if the
+    /// conversation does not exist.
+    pub fn try_get_conversation(&self, id: &ConversationId) -> Result<&Conversation> {
+        self.get_conversation(id)
+            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
+    }
+
     /// Gets a mutable reference to a conversation by its ID.
     #[must_use]
     pub fn get_conversation_mut(&mut self, id: &ConversationId) -> Option<&mut Conversation> {
@@ -318,7 +325,7 @@ impl Workspace {
     pub fn create_conversation(
         &mut self,
         conversation: Conversation,
-        config: PartialAppConfig,
+        config: impl Into<PartialAppConfig>,
     ) -> ConversationId {
         let id = ConversationId::default();
 
@@ -327,7 +334,7 @@ impl Workspace {
             .local
             .events
             .entry(id)
-            .or_insert_with(|| ConversationStream::new(config));
+            .or_insert_with(|| ConversationStream::new(config.into()));
         id
     }
 

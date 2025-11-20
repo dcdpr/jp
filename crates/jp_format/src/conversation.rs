@@ -43,22 +43,16 @@ impl DetailsFmt {
     #[must_use]
     pub fn new(
         id: ConversationId,
-        conversation: Conversation,
-        events: Option<&ConversationStream>,
+        conversation: &Conversation,
+        events: &ConversationStream,
     ) -> Self {
-        let last_message_at = events.and_then(|e| e.iter().map(|m| m.event.timestamp).max());
-        let message_count = events.map_or(0, |e| e.iter().count());
-
-        let config = events
-            .and_then(|stream| stream.iter().last())
-            .map(|e| e.config)
-            .unwrap_or_default();
+        let last_message_at = events.iter().map(|m| m.event.timestamp).max();
 
         Self {
             id,
-            assistant_name: config.assistant.name.clone(),
-            title: conversation.title,
-            message_count,
+            assistant_name: events.config().assistant.name.clone(),
+            title: conversation.title.clone(),
+            message_count: events.len(),
             local: None,
             active_conversation: None,
             last_message_at,
