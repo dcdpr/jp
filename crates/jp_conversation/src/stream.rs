@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use tracing::error;
 
 use crate::event::{
-    ChatRequest, ChatResponse, ConfigDelta, ConversationEvent, EventKind, InquiryRequest,
-    InquiryResponse, ToolCallRequest, ToolCallResponse,
+    ChatRequest, ChatResponse, ConversationEvent, EventKind, InquiryRequest, InquiryResponse,
+    ToolCallRequest, ToolCallResponse,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -20,7 +20,7 @@ pub enum InternalEvent {
     ///
     /// Any non-config events before the first `ConfigDelta` event are
     /// considered to have the default configuration.
-    ConfigDelta(ConfigDelta),
+    ConfigDelta(Box<PartialAppConfig>),
 
     #[serde(untagged)]
     Event(ConversationEvent),
@@ -93,7 +93,7 @@ impl ConversationStream {
     pub fn config(&self) -> PartialAppConfig {
         let mut config = self.base_config.clone();
         let iter = self.events.iter().filter_map(|event| match event {
-            InternalEvent::ConfigDelta(ConfigDelta(delta)) => Some(*delta.clone()),
+            InternalEvent::ConfigDelta(delta) => Some(*delta.clone()),
             InternalEvent::Event(_) => None,
         });
 
@@ -122,12 +122,15 @@ impl ConversationStream {
         }
     }
 
-    pub fn add_config_delta(&mut self, delta: impl Into<ConfigDelta>) {
-        self.events.push(InternalEvent::ConfigDelta(delta.into()));
+    /// Add a config delta to the stream.
+    pub fn add_config_delta(&mut self, delta: impl Into<PartialAppConfig>) {
+        self.events
+            .push(InternalEvent::ConfigDelta(Box::new(delta.into())));
     }
 
+    /// Add a config delta to the stream.
     #[must_use]
-    pub fn with_config_delta(mut self, delta: impl Into<ConfigDelta>) -> Self {
+    pub fn with_config_delta(mut self, delta: impl Into<PartialAppConfig>) -> Self {
         self.add_config_delta(delta);
         self
     }
@@ -307,7 +310,7 @@ impl Iterator for IntoIter {
 
             match event {
                 InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = self.current_config.merge(&(), delta.into_inner()) {
+                    if let Err(error) = self.current_config.merge(&(), *delta) {
                         error!(%error, "Failed to merge config delta.");
                     }
                 }
@@ -341,7 +344,7 @@ impl DoubleEndedIterator for IntoIter {
                     // them) to apply all pending deltas to our temporary
                     // config.
                     for internal_event in self.inner_iter.as_slice() {
-                        if let InternalEvent::ConfigDelta(ConfigDelta(delta)) = internal_event
+                        if let InternalEvent::ConfigDelta(delta) = internal_event
                             && let Err(error) = config.merge(&(), *delta.clone())
                         {
                             error!(%error, "Failed to merge config delta.");
@@ -372,7 +375,7 @@ impl<'a> Iterator for Iter<'a> {
 
             match event {
                 InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = self.front_config.merge(&(), delta.clone().into_inner()) {
+                    if let Err(error) = self.front_config.merge(&(), *delta.clone()) {
                         error!(%error, "Failed to merge config delta.");
                     }
                 }
@@ -402,7 +405,7 @@ impl DoubleEndedIterator for Iter<'_> {
             let mut config = self.stream.base_config.clone();
             for internal_event in &self.stream.events[..self.back] {
                 if let InternalEvent::ConfigDelta(delta) = internal_event
-                    && let Err(error) = config.merge(&(), delta.clone().into_inner())
+                    && let Err(error) = config.merge(&(), *delta.clone())
                 {
                     error!(%error, "Failed to merge config delta.");
                 }
@@ -427,7 +430,7 @@ impl<'a> Iterator for IterMut<'a> {
         for event in self.iter.by_ref() {
             match event {
                 InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = self.front_config.merge(&(), delta.clone().into_inner()) {
+                    if let Err(error) = self.front_config.merge(&(), *delta.clone()) {
                         error!(%error, "Failed to merge config delta.");
                     }
                 }
@@ -544,7 +547,7 @@ impl Serialize for ConversationStream {
     {
         let mut stream: Vec<InternalEvent> = Vec::with_capacity(self.events.len() + 1);
 
-        stream.push(InternalEvent::ConfigDelta(ConfigDelta::new(
+        stream.push(InternalEvent::ConfigDelta(Box::new(
             self.base_config.clone(),
         )));
         stream.extend(self.events.iter().cloned());
@@ -566,7 +569,7 @@ impl<'de> Deserialize<'de> for ConversationStream {
 
         match events.remove(0) {
             InternalEvent::ConfigDelta(base_config) => Ok(ConversationStream {
-                base_config: base_config.into_inner(),
+                base_config: *base_config,
                 events,
             }),
             InternalEvent::Event(_) => Err(Error::custom(

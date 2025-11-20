@@ -1,5 +1,4 @@
 mod chat;
-mod config_delta;
 mod inquiry;
 mod tool_call;
 
@@ -8,7 +7,6 @@ use time::UtcDateTime;
 
 pub use self::{
     chat::{ChatRequest, ChatResponse},
-    config_delta::ConfigDelta,
     inquiry::{InquiryAnswerType, InquiryQuestion, InquiryRequest, InquiryResponse, InquirySource},
     tool_call::{ToolCallRequest, ToolCallResponse},
 };
