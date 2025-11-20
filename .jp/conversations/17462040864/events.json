@@ -1,6 +1,113 @@
 [
   {
-    "type": "config_delta"
+    "type": "config_delta",
+    "inherit": true,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "instructions": [],
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "anthropic",
+          "name": "claude-3-sonnet-20240229"
+        },
+        "parameters": {
+          "stop_words": [],
+          "other": {}
+        }
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": true,
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "claude-3-haiku-20240307"
+            },
+            "parameters": {
+              "reasoning": "off",
+              "stop_words": [],
+              "other": {}
+            }
+          }
+        }
+      },
+      "tools": {}
+    },
+    "style": {
+      "code": {
+        "theme": "Monokai Extended",
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "tool_call": {
+        "show": true
+      },
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ]
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "aliases": {},
+        "anthropic": {
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      },
+      "mcp": {}
+    }
   },
   {
     "timestamp": "2025-05-02 16:43:28.835976",
