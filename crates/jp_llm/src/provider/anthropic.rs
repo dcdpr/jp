@@ -567,6 +567,16 @@ fn create_request(
 #[expect(clippy::match_same_arms, clippy::too_many_lines)]
 fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
+        "claude-haiku-4-5" | "claude-haiku-4-5-20251001" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
+            context_window: Some(200_000),
+            max_output_tokens: Some(64_000),
+            reasoning: Some(ReasoningDetails::supported(1024, None)),
+            knowledge_cutoff: Some(date!(2025 - 7 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec!["interleaved-thinking", "context-editing"],
+        },
         "claude-sonnet-4-5" | "claude-sonnet-4-5-20250929" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
@@ -633,21 +643,6 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(date!(2024 - 7 - 1)),
             deprecated: Some(ModelDeprecation::Active),
-            features: vec![],
-        },
-        "claude-3-5-sonnet-latest"
-        | "claude-3-5-sonnet-20241022"
-        | "claude-3-5-sonnet-20240620" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(200_000),
-            max_output_tokens: Some(8_192),
-            reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(date!(2024 - 4 - 1)),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: claude-sonnet-4-5-20250929",
-                Some(date!(2025 - 10 - 22)),
-            )),
             features: vec![],
         },
         "claude-3-opus-latest" | "claude-3-opus-20240229" => ModelDetails {

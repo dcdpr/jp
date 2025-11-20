@@ -8,19 +8,19 @@ Ok(
             id: ModelIdConfig {
                 provider: Openrouter,
                 name: Name(
-                    "google/gemini-2.5-flash-image",
+                    "x-ai/grok-4.1-fast",
                 ),
             },
             display_name: Some(
-                "Google: Gemini 2.5 Flash Image (Nano Banana)",
+                "xAI: Grok 4.1 Fast",
             ),
             context_window: Some(
-                32768,
+                2000000,
             ),
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: Some(
-                2025-10-07,
+                2025-11-19,
             ),
             deprecated: None,
             features: [],
@@ -29,19 +29,19 @@ Ok(
             id: ModelIdConfig {
                 provider: Openrouter,
                 name: Name(
-                    "openai/gpt-5-pro",
+                    "google/gemini-3-pro-preview",
                 ),
             },
             display_name: Some(
-                "OpenAI: GPT-5 Pro",
+                "Google: Gemini 3 Pro Preview",
             ),
             context_window: Some(
-                400000,
+                1048576,
             ),
             max_output_tokens: None,
             reasoning: None,
             knowledge_cutoff: Some(
-                2025-10-06,
+                2025-11-18,
             ),
             deprecated: None,
             features: [],

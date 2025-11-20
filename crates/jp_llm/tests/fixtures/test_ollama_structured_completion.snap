@@ -2,10 +2,8 @@
 source: crates/jp_test/src/mock.rs
 expression: expr
 ---
-Err(
-    Ollama(
-        Other(
-            "{\"message\":\"Request did not match any route or mock\"}",
-        ),
-    ),
+Ok(
+    Object {
+        "description": String("Generate 3 concise, descriptive factual titles for this conversation."),
+    },
 )
