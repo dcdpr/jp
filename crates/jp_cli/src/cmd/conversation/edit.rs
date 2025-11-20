@@ -1,6 +1,6 @@
 use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
-use jp_conversation::{ConversationId, event::ConversationEvent};
+use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{provider, structured};
 
 use crate::{Output, cmd::Success, ctx::Ctx};
@@ -34,7 +34,6 @@ impl Edit {
     pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
         let id = self.id.unwrap_or(active_id);
-        let events = ctx.workspace.get_events(&id).to_vec();
 
         if let Some(user) = self.local {
             match ctx.workspace.get_conversation_mut(&id) {
@@ -44,9 +43,15 @@ impl Edit {
         }
 
         if let Some(title) = self.title {
-            let title = match title {
-                Some(title) => title,
-                None => generate_titles(ctx.config(), events, vec![]).await?,
+            let title = if let Some(title) = title {
+                title
+            } else {
+                let cfg = ctx.config();
+                let events = ctx.workspace.get_events(&id).cloned().ok_or_else(|| {
+                    format!("Conversation {} not found", id.to_string().bold().yellow())
+                })?;
+
+                generate_titles(&cfg, events, vec![]).await?
             };
 
             match ctx.workspace.get_conversation_mut(&id) {
@@ -70,7 +75,7 @@ fn missing_conversation(id: &ConversationId) -> Output {
 
 async fn generate_titles(
     config: &AppConfig,
-    events: Vec<ConversationEvent>,
+    events: ConversationStream,
     mut rejected: Vec<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;

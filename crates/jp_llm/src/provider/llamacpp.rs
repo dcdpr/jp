@@ -11,8 +11,8 @@ use jp_config::{
     providers::llm::llamacpp::LlamacppConfig,
 };
 use jp_conversation::{
-    AssistantMessage, UserMessage,
-    event::{ConversationEvent, EventKind},
+    ConversationStream,
+    event::{EventKind, ToolCallResponse},
     thread::{Document, Documents, Thread},
 };
 use openai::{
@@ -23,7 +23,6 @@ use openai::{
         ChatCompletionMessageRole, ToolCallFunction, structured_output::ToolCallFunctionDefinition,
     },
 };
-use serde::Serialize;
 use serde_json::Value;
 use tracing::{debug, trace};
 
@@ -309,200 +308,111 @@ fn convert_tool_choice(choice: &ToolChoice) -> chat::ToolChoice {
 }
 
 fn convert_thread(thread: Thread) -> Result<Vec<ChatCompletionMessage>> {
-    Messages::try_from(thread).map(|v| v.0)
-}
+    let Thread {
+        system_prompt,
+        instructions,
+        attachments,
+        events,
+    } = thread;
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize)]
-pub struct Messages(pub Vec<ChatCompletionMessage>);
+    let mut items = vec![];
 
-impl TryFrom<Thread> for Messages {
-    type Error = Error;
+    // Build system prompt with instructions and attachments
+    let mut system_parts = vec![];
 
-    fn try_from(thread: Thread) -> Result<Self> {
-        let Thread {
-            system_prompt,
-            instructions,
-            attachments,
-            mut history,
-            message,
-        } = thread;
+    if let Some(system_prompt) = system_prompt {
+        system_parts.push(system_prompt);
+    }
 
-        // If the last history message is a tool call response, we need to go
-        // one more back in history, to avoid disjointing tool call requests and
-        // their responses.
-        let mut history_after_instructions = vec![];
-        while let Some(event) = history.pop() {
-            let tool_call_results = matches!(
-                event.kind,
-                EventKind::UserMessage(UserMessage::ToolCallResults(_))
-            );
-            history_after_instructions.insert(0, event);
-
-            if !tool_call_results {
-                break;
-            }
-        }
-
-        let mut items = vec![];
-        let history = history
-            .into_iter()
-            .flat_map(event_to_messages)
-            .collect::<Vec<_>>();
-
-        // System message first, if any.
-        if let Some(system_prompt) = system_prompt {
-            items.push(ChatCompletionMessage {
-                role: ChatCompletionMessageRole::System,
-                content: Some(system_prompt),
-                ..Default::default()
-            });
-        }
-
-        // Historical messages second, these are static.
-        items.extend(history);
-
-        // Group multiple contents blocks into a single message.
-        let mut content = vec![];
-
-        if !instructions.is_empty() {
-            content.push(
-                "Before we continue, here are some contextual details that will help you generate \
-                 a better response."
-                    .to_string(),
-            );
-        }
-
-        // Then instructions in XML tags.
-        for instruction in &instructions {
-            content.push(instruction.try_to_xml()?);
-        }
-
-        // Then large list of attachments, formatted as XML.
-        if !attachments.is_empty() {
-            let documents: Documents = attachments
-                .into_iter()
-                .enumerate()
-                .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
-                .map(Document::from)
-                .collect::<Vec<_>>()
-                .into();
-
-            content.push(documents.try_to_xml()?);
-        }
-
-        // Attach all data, and add a "fake" acknowledgement by the assistant.
-        //
-        // See `provider::openrouter` for more information.
-        if !content.is_empty() {
-            items.push(ChatCompletionMessage {
-                role: ChatCompletionMessageRole::User,
-                content: Some(content.join("\n\n")),
-                ..Default::default()
-            });
-        }
-
-        if items
-            .last()
-            .is_some_and(|m| matches!(m.role, ChatCompletionMessageRole::User))
-        {
-            items.push(ChatCompletionMessage {
-                role: ChatCompletionMessageRole::Assistant,
-                content: Some(
-                    "Thank you for those details, I'll use them to inform my next response.".into(),
-                ),
-                ..Default::default()
-            });
-        }
-
-        items.extend(
-            history_after_instructions
-                .into_iter()
-                .flat_map(event_to_messages),
+    if !instructions.is_empty() {
+        system_parts.push(
+            "Before we continue, here are some contextual details that will help you generate a \
+             better response."
+                .to_string(),
         );
 
-        // User query
-        match message {
-            UserMessage::Query { query } => {
-                items.push(ChatCompletionMessage {
-                    role: ChatCompletionMessageRole::User,
-                    content: Some(query),
-                    ..Default::default()
-                });
-            }
-            UserMessage::ToolCallResults(results) => {
-                items.extend(results.into_iter().map(|result| ChatCompletionMessage {
-                    role: ChatCompletionMessageRole::Tool,
-                    content: Some(result.content),
-                    ..Default::default()
-                }));
-            }
+        for instruction in &instructions {
+            system_parts.push(instruction.try_to_xml()?);
         }
-
-        Ok(Self(items))
     }
-}
 
-fn event_to_messages(event: ConversationEvent) -> Vec<ChatCompletionMessage> {
-    match event.kind {
-        EventKind::UserMessage(user) => user_message_to_messages(user),
-        EventKind::AssistantMessage(assistant) => vec![assistant_message_to_message(assistant)],
-        EventKind::ConfigDelta(_) => vec![],
-    }
-}
-
-fn user_message_to_messages(user: UserMessage) -> Vec<ChatCompletionMessage> {
-    match user {
-        UserMessage::Query { query } if !query.is_empty() => vec![ChatCompletionMessage {
-            role: ChatCompletionMessageRole::User,
-            content: Some(query),
-            ..Default::default()
-        }],
-        UserMessage::Query { .. } => vec![],
-        UserMessage::ToolCallResults(results) => results
+    if !attachments.is_empty() {
+        let documents: Documents = attachments
             .into_iter()
-            .map(|result| ChatCompletionMessage {
-                role: ChatCompletionMessageRole::Tool,
-                content: Some(result.content),
-                tool_call_id: Some(result.id),
-                ..Default::default()
-            })
-            .collect(),
+            .enumerate()
+            .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
+            .map(Document::from)
+            .collect::<Vec<_>>()
+            .into();
+
+        system_parts.push(documents.try_to_xml()?);
     }
+
+    // Add system message if we have any system content
+    if !system_parts.is_empty() {
+        items.push(ChatCompletionMessage {
+            role: ChatCompletionMessageRole::System,
+            content: Some(system_parts.join("\n\n")),
+            ..Default::default()
+        });
+    }
+
+    let messages = convert_events(events);
+    items.extend(messages);
+
+    Ok(items)
 }
 
-fn assistant_message_to_message(assistant: AssistantMessage) -> ChatCompletionMessage {
-    let AssistantMessage {
-        content,
-        tool_calls,
-        ..
-    } = assistant;
-
-    let mut message = ChatCompletionMessage {
-        role: ChatCompletionMessageRole::Assistant,
-        content,
-        tool_calls: Some(
-            tool_calls
-                .into_iter()
-                .map(|call| chat::ToolCall {
-                    id: call.id,
+fn convert_events(events: ConversationStream) -> Vec<ChatCompletionMessage> {
+    events
+        .into_iter()
+        .filter_map(|event| match event.into_kind() {
+            EventKind::ChatRequest(request) => Some(ChatCompletionMessage {
+                role: ChatCompletionMessageRole::User,
+                content: Some(request.content),
+                ..Default::default()
+            }),
+            EventKind::ChatResponse(response) => Some(ChatCompletionMessage {
+                role: ChatCompletionMessageRole::Assistant,
+                content: Some(response.into_content()),
+                ..Default::default()
+            }),
+            EventKind::ToolCallRequest(request) => Some(ChatCompletionMessage {
+                role: ChatCompletionMessageRole::Assistant,
+                tool_calls: Some(vec![chat::ToolCall {
+                    id: request.id.clone(),
                     r#type: chat::FunctionType::Function,
                     function: ToolCallFunction {
-                        name: call.name,
-                        arguments: Value::Object(call.arguments).to_string(),
+                        name: request.name.clone(),
+                        arguments: Value::Object(request.arguments.clone()).to_string(),
                     },
+                }]),
+                ..Default::default()
+            }),
+            EventKind::ToolCallResponse(ToolCallResponse { id, result }) => {
+                Some(ChatCompletionMessage {
+                    role: ChatCompletionMessageRole::Tool,
+                    tool_call_id: Some(id),
+                    content: Some(match result {
+                        Ok(content) | Err(content) => content,
+                    }),
+                    ..Default::default()
                 })
-                .collect(),
-        ),
-        ..Default::default()
-    };
-
-    if message.content.as_ref().is_none_or(String::is_empty)
-        && message.tool_calls.as_ref().is_none_or(Vec::is_empty)
-    {
-        message.content = Some("<no response>".to_owned());
-    }
-
-    message
+            }
+            _ => None,
+        })
+        .fold(vec![], |mut messages, message| match messages.last_mut() {
+            Some(last) if message.tool_calls.is_some() && last.tool_calls.is_some() => {
+                last.tool_calls
+                    .get_or_insert_default()
+                    .extend(message.tool_calls.unwrap_or_default());
+                messages
+            }
+            _ => {
+                messages.push(message);
+                messages
+            }
+        })
 }
 
 #[cfg(test)]
@@ -547,7 +457,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                message: "Test message".into(),
+                events: ConversationStream::default().with_chat_request("Test message"),
                 ..Default::default()
             },
             ..Default::default()

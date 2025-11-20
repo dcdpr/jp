@@ -1,9 +1,17 @@
-use jp_config::{PartialAppConfig, PartialConfig};
+mod chat;
+mod config_delta;
+mod inquiry;
+mod tool_call;
+
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
-use tracing::warn;
 
-use crate::{AssistantMessage, UserMessage};
+pub use self::{
+    chat::{ChatRequest, ChatResponse},
+    config_delta::ConfigDelta,
+    inquiry::{InquiryAnswerType, InquiryQuestion, InquiryRequest, InquiryResponse, InquirySource},
+    tool_call::{ToolCallRequest, ToolCallResponse},
+};
 
 /// A single event in a conversation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,9 +23,9 @@ pub struct ConversationEvent {
 
 impl ConversationEvent {
     #[must_use]
-    pub fn new(event: impl Into<EventKind>, timestamp: UtcDateTime) -> Self {
+    pub fn new(event: impl Into<EventKind>, timestamp: impl Into<UtcDateTime>) -> Self {
         Self {
-            timestamp,
+            timestamp: timestamp.into(),
             kind: event.into(),
         }
     }
@@ -28,191 +36,327 @@ impl ConversationEvent {
     }
 
     #[must_use]
-    pub fn config(&self) -> PartialAppConfig {
-        match &self.kind {
-            EventKind::ConfigDelta(config) => config.clone(),
-            EventKind::UserMessage(_) | EventKind::AssistantMessage(_) => PartialAppConfig::empty(),
-        }
+    pub fn is_request(&self) -> bool {
+        matches!(
+            self.kind,
+            EventKind::ChatRequest(_)
+                | EventKind::ToolCallRequest(_)
+                | EventKind::InquiryRequest(_)
+        )
     }
 
     #[must_use]
-    pub fn is_user_message(&self) -> bool {
-        matches!(self.kind, EventKind::UserMessage(_))
+    pub fn is_response(&self) -> bool {
+        matches!(
+            self.kind,
+            EventKind::ChatResponse(_)
+                | EventKind::ToolCallResponse(_)
+                | EventKind::InquiryResponse(_)
+        )
     }
 
     #[must_use]
-    pub fn as_user_message(&self) -> Option<&UserMessage> {
+    pub fn is_chat_request(&self) -> bool {
+        matches!(self.kind, EventKind::ChatRequest(_))
+    }
+
+    #[must_use]
+    pub fn as_chat_request(&self) -> Option<&ChatRequest> {
         match &self.kind {
-            EventKind::UserMessage(message) => Some(message),
+            EventKind::ChatRequest(request) => Some(request),
             _ => None,
         }
     }
 
     #[must_use]
-    pub fn into_user_message(self) -> Option<UserMessage> {
+    pub fn as_chat_request_mut(&mut self) -> Option<&mut ChatRequest> {
+        match &mut self.kind {
+            EventKind::ChatRequest(request) => Some(request),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn into_chat_request(self) -> Option<ChatRequest> {
         match self.kind {
-            EventKind::UserMessage(message) => Some(message),
+            EventKind::ChatRequest(request) => Some(request),
             _ => None,
         }
     }
 
     #[must_use]
-    pub fn is_assistant_message(&self) -> bool {
-        matches!(self.kind, EventKind::AssistantMessage(_))
+    pub fn is_chat_response(&self) -> bool {
+        matches!(self.kind, EventKind::ChatResponse(_))
     }
 
     #[must_use]
-    pub fn as_assistant_message(&self) -> Option<&AssistantMessage> {
+    pub fn as_chat_response(&self) -> Option<&ChatResponse> {
         match &self.kind {
-            EventKind::AssistantMessage(message) => Some(message),
+            EventKind::ChatResponse(response) => Some(response),
             _ => None,
         }
     }
 
     #[must_use]
-    pub fn into_assistant_message(self) -> Option<AssistantMessage> {
+    pub fn into_chat_response(self) -> Option<ChatResponse> {
         match self.kind {
-            EventKind::AssistantMessage(message) => Some(message),
+            EventKind::ChatResponse(response) => Some(response),
             _ => None,
         }
     }
 
     #[must_use]
-    pub fn is_config_delta(&self) -> bool {
-        matches!(self.kind, EventKind::ConfigDelta(_))
+    pub fn is_tool_call_request(&self) -> bool {
+        matches!(self.kind, EventKind::ToolCallRequest(_))
     }
 
     #[must_use]
-    pub fn as_config_delta(&self) -> Option<&PartialAppConfig> {
+    pub fn as_tool_call_request(&self) -> Option<&ToolCallRequest> {
         match &self.kind {
-            EventKind::ConfigDelta(config) => Some(config),
+            EventKind::ToolCallRequest(request) => Some(request),
             _ => None,
         }
     }
 
     #[must_use]
-    pub fn into_config_delta(self) -> Option<PartialAppConfig> {
+    pub fn into_tool_call_request(self) -> Option<ToolCallRequest> {
         match self.kind {
-            EventKind::ConfigDelta(config) => Some(config),
+            EventKind::ToolCallRequest(request) => Some(request),
             _ => None,
         }
     }
-}
 
-/// Return the configuration for a conversation from all
-/// [`EventKind::ConfigDelta`] events.
-///
-/// We start at the first event, and then merge any subsequent events into the
-/// final [`PartialAppConfig`].
-pub fn conversation_config(events: &[ConversationEvent]) -> PartialAppConfig {
-    events
-        .iter()
-        .map(ConversationEvent::config)
-        .reduce(|mut a, b| {
-            if let Err(error) = a.merge(&(), b) {
-                warn!(?error, "Failed to merge configuration partial.");
-            }
+    #[must_use]
+    pub fn is_tool_call_response(&self) -> bool {
+        matches!(self.kind, EventKind::ToolCallResponse(_))
+    }
 
-            a
-        })
-        .unwrap_or_else(PartialAppConfig::empty)
+    #[must_use]
+    pub fn as_tool_call_response(&self) -> Option<&ToolCallResponse> {
+        match &self.kind {
+            EventKind::ToolCallResponse(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn into_tool_call_response(self) -> Option<ToolCallResponse> {
+        match self.kind {
+            EventKind::ToolCallResponse(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_inquiry_request(&self) -> bool {
+        matches!(self.kind, EventKind::InquiryRequest(_))
+    }
+
+    #[must_use]
+    pub fn as_inquiry_request(&self) -> Option<&InquiryRequest> {
+        match &self.kind {
+            EventKind::InquiryRequest(request) => Some(request),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn into_inquiry_request(self) -> Option<InquiryRequest> {
+        match self.kind {
+            EventKind::InquiryRequest(request) => Some(request),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_inquiry_response(&self) -> bool {
+        matches!(self.kind, EventKind::InquiryResponse(_))
+    }
+
+    #[must_use]
+    pub fn as_inquiry_response(&self) -> Option<&InquiryResponse> {
+        match &self.kind {
+            EventKind::InquiryResponse(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn into_inquiry_response(self) -> Option<InquiryResponse> {
+        match self.kind {
+            EventKind::InquiryResponse(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    // #[must_use]
+    // pub fn is_config_delta(&self) -> bool {
+    //     matches!(self.kind, EventKind::ConfigDelta(_))
+    // }
+    //
+    // #[must_use]
+    // pub fn as_config_delta(&self) -> Option<&ConfigDelta> {
+    //     match &self.kind {
+    //         EventKind::ConfigDelta(delta) => Some(delta),
+    //         _ => None,
+    //     }
+    // }
+    //
+    // #[must_use]
+    // pub fn as_config_delta_mut(&mut self) -> Option<&mut ConfigDelta> {
+    //     match &mut self.kind {
+    //         EventKind::ConfigDelta(delta) => Some(delta),
+    //         _ => None,
+    //     }
+    // }
+    //
+    // #[must_use]
+    // pub fn into_config_delta(self) -> Option<ConfigDelta> {
+    //     match self.kind {
+    //         EventKind::ConfigDelta(delta) => Some(delta),
+    //         _ => None,
+    //     }
+    // }
 }
 
 /// A type of event in a conversation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[expect(clippy::large_enum_variant)]
 pub enum EventKind {
-    /// A user message event.
-    UserMessage(UserMessage),
-
-    /// An assistant message event.
-    AssistantMessage(AssistantMessage),
-
-    /// A configuration delta event.
+    /// A chat request event.
     ///
-    /// This event is emitted when the configuration of the conversation changes
-    /// compared to the last `ConfigDelta` event.
-    ConfigDelta(PartialAppConfig),
-    // TODO
-    // /// A chat request event.
-    // ///
-    // /// This event is usually triggered by the user, but can also be
-    // /// triggered automatically. It always originates from the client-side
-    // /// (e.g. the `jp` binary, or some other client).
-    // ChatRequest(ChatRequest),
-    //
-    // /// A chat response event.
-    // ///
-    // /// This event MUST be in response to a `ChatRequest` event. Multiple
-    // /// responses can be sent for a single request. This happens for example
-    // /// when the assistant reasons about the request before answering. The
-    // /// reasoning and answering are separate `ChatResponse` events.
-    // ChatResponse(ChatResponse),
-    //
-    // /// A tool call request event.
-    // ///
-    // /// This event is usually triggered by the assistant, but can also be
-    // /// triggered automatically by the client (e.g. the `jp` binary, or some
-    // /// other client).
-    // ///
-    // ///
-    // /// This event MUST be in response to a `ChatRequest` event, and its
-    // /// `request_id` field MUST match the `request_id` field of the request.
-    // ToolCallRequest(ToolCallRequest),
-    //
-    // /// A tool call response event.
-    // ///
-    // /// This event MUST be in response to a `ToolCallRequest` event, and its
-    // /// `request_id` field MUST match the `request_id` field of the request.
-    // ToolCallResponse(ToolCallResponse),
-    //
-    // /// An inquiry request event.
-    // ///
-    // /// This event indicates that an inquiry is being made by either a tool,
-    // /// the assistant or the user to which *some entity* has to respond
-    // (using `InquiryResponse` with the proper answer).
-    // InquiryRequest(InquiryRequest),
-    //
-    // /// An inquiry response event.
-    // ///
-    // /// This event MUST be in response to an `InquiryRequest` event, and its
-    // /// `request_id` field MUST match the `request_id` field of the request.
-    // InquiryResponse(InquiryResponse),
-    //
-    // /// The configuration state of the conversation is updated.
-    // ///
-    // /// When this event is emitted, all subsequent events in the stream are
-    // /// bound to the new configuration.
-    // ///
-    // /// This is a *delta* event, meaning that it is merged on top of all
-    // /// other `ConfigDelta` events in the stream.
-    // ///
-    // /// Any non-config events before the first `ConfigDelta` event are
-    // /// considered to have the default configuration.
-    // ConfigDelta(ConfigDelta),
+    /// This event is usually triggered by the user, but can also be
+    /// triggered automatically. It always originates from the client-side
+    /// (e.g. the `jp` binary, or some other client).
+    ChatRequest(ChatRequest),
+
+    /// A chat response event.
+    ///
+    /// This event MUST be in response to a `ChatRequest` event. Multiple
+    /// responses can be sent for a single request. This happens for example
+    /// when the assistant reasons about the request before answering. The
+    /// reasoning and answering are separate `ChatResponse` events.
+    ChatResponse(ChatResponse),
+
+    /// A tool call request event.
+    ///
+    /// This event is usually triggered by the assistant, but can also be
+    /// triggered automatically by the client (e.g. the `jp` binary, or some
+    /// other client).
+    ToolCallRequest(ToolCallRequest),
+
+    /// A tool call response event.
+    ///
+    /// This event MUST be in response to a `ToolCallRequest` event, and its
+    /// `id` field MUST match the `id` field of the request.
+    ToolCallResponse(ToolCallResponse),
+
+    /// An inquiry request event.
+    ///
+    /// This event indicates that an inquiry is being made by either a tool,
+    /// the assistant or the user to which *some entity* has to respond
+    /// (using `InquiryResponse` with the proper answer).
+    InquiryRequest(InquiryRequest),
+
+    /// An inquiry response event.
+    ///
+    /// This event MUST be in response to an `InquiryRequest` event, and its
+    /// `id` field MUST match the `id` field of the request.
+    InquiryResponse(InquiryResponse),
 }
 
-impl From<UserMessage> for EventKind {
-    fn from(message: UserMessage) -> Self {
-        Self::UserMessage(message)
+impl From<ChatRequest> for EventKind {
+    fn from(request: ChatRequest) -> Self {
+        Self::ChatRequest(request)
     }
 }
 
-impl From<AssistantMessage> for EventKind {
-    fn from(message: AssistantMessage) -> Self {
-        Self::AssistantMessage(message)
+impl From<ChatResponse> for EventKind {
+    fn from(response: ChatResponse) -> Self {
+        Self::ChatResponse(response)
     }
 }
 
-impl From<PartialAppConfig> for EventKind {
-    fn from(config: PartialAppConfig) -> Self {
-        Self::ConfigDelta(config)
+impl From<ToolCallRequest> for EventKind {
+    fn from(request: ToolCallRequest) -> Self {
+        Self::ToolCallRequest(request)
     }
 }
 
-impl From<PartialAppConfig> for ConversationEvent {
-    fn from(config: PartialAppConfig) -> Self {
-        Self::new(config, UtcDateTime::now())
+impl From<ToolCallResponse> for EventKind {
+    fn from(response: ToolCallResponse) -> Self {
+        Self::ToolCallResponse(response)
     }
 }
+
+impl From<InquiryRequest> for EventKind {
+    fn from(request: InquiryRequest) -> Self {
+        Self::InquiryRequest(request)
+    }
+}
+
+impl From<InquiryResponse> for EventKind {
+    fn from(response: InquiryResponse) -> Self {
+        Self::InquiryResponse(response)
+    }
+}
+
+// impl From<ConfigDelta> for EventKind {
+//     fn from(delta: ConfigDelta) -> Self {
+//         Self::ConfigDelta(delta)
+//     }
+// }
+//
+// impl From<PartialAppConfig> for EventKind {
+//     fn from(config: PartialAppConfig) -> Self {
+//         Self::ConfigDelta(ConfigDelta::new(config))
+//     }
+// }
+
+impl From<ChatRequest> for ConversationEvent {
+    fn from(request: ChatRequest) -> Self {
+        Self::now(request)
+    }
+}
+
+impl From<ChatResponse> for ConversationEvent {
+    fn from(response: ChatResponse) -> Self {
+        Self::now(response)
+    }
+}
+
+impl From<ToolCallRequest> for ConversationEvent {
+    fn from(request: ToolCallRequest) -> Self {
+        Self::now(request)
+    }
+}
+
+impl From<ToolCallResponse> for ConversationEvent {
+    fn from(response: ToolCallResponse) -> Self {
+        Self::now(response)
+    }
+}
+
+impl From<InquiryRequest> for ConversationEvent {
+    fn from(request: InquiryRequest) -> Self {
+        Self::now(request)
+    }
+}
+
+impl From<InquiryResponse> for ConversationEvent {
+    fn from(response: InquiryResponse) -> Self {
+        Self::now(response)
+    }
+}
+
+// impl From<ConfigDelta> for ConversationEvent {
+//     fn from(delta: ConfigDelta) -> Self {
+//         Self::now(delta)
+//     }
+// }
+//
+// impl From<PartialAppConfig> for ConversationEvent {
+//     fn from(config: PartialAppConfig) -> Self {
+//         Self::now(ConfigDelta::new(config))
+//     }
+// }

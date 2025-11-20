@@ -2,10 +2,7 @@ use std::fmt;
 
 use comfy_table::{Cell, CellAlignment, Row, Table};
 use crossterm::style::Stylize as _;
-use jp_conversation::{
-    Conversation, ConversationId,
-    event::{ConversationEvent, conversation_config},
-};
+use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use time::UtcDateTime;
 
 use crate::datetime::DateTimeFmt;
@@ -47,15 +44,21 @@ impl DetailsFmt {
     pub fn new(
         id: ConversationId,
         conversation: Conversation,
-        messages: &[ConversationEvent],
+        events: Option<&ConversationStream>,
     ) -> Self {
-        let last_message_at = messages.iter().map(|m| m.timestamp).max();
+        let last_message_at = events.and_then(|e| e.iter().map(|m| m.event.timestamp).max());
+        let message_count = events.map_or(0, |e| e.iter().count());
+
+        let config = events
+            .and_then(|stream| stream.iter().last())
+            .map(|e| e.config)
+            .unwrap_or_default();
 
         Self {
             id,
-            assistant_name: conversation_config(messages).assistant.name.clone(),
+            assistant_name: config.assistant.name.clone(),
             title: conversation.title,
-            message_count: messages.len(),
+            message_count,
             local: None,
             active_conversation: None,
             last_message_at,

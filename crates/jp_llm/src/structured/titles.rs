@@ -1,13 +1,13 @@
 use std::error::Error;
 
-use jp_conversation::{event::ConversationEvent, thread::ThreadBuilder};
+use jp_conversation::{ConversationStream, event::ChatRequest, thread::ThreadBuilder};
 use serde_json::Value;
 
 use crate::query::StructuredQuery;
 
 pub fn titles(
     count: usize,
-    messages: Vec<ConversationEvent>,
+    mut events: ConversationStream,
     rejected: &[String],
 ) -> Result<StructuredQuery, Box<dyn Error + Send + Sync>> {
     let schema = schemars::json_schema!({
@@ -62,10 +62,8 @@ pub fn titles(
     }
 
     let mapping = |value: &mut Value| value.get_mut("titles").map(Value::take);
-    let thread = ThreadBuilder::default()
-        .with_history(messages)
-        .with_message(message)
-        .build()?;
+    events.add_chat_request(ChatRequest::from(message));
+    let thread = ThreadBuilder::default().with_events(events).build()?;
 
     Ok(StructuredQuery::new(schema, thread).with_mapping(mapping))
 }

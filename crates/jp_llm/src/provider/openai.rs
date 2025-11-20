@@ -14,8 +14,8 @@ use jp_config::{
     providers::llm::openai::OpenaiConfig,
 };
 use jp_conversation::{
-    AssistantMessage, UserMessage,
-    event::{ConversationEvent, EventKind},
+    ConversationStream,
+    event::{EventKind, ToolCallResponse},
     thread::{Document, Documents, Thread},
 };
 use openai_responses::{
@@ -26,7 +26,7 @@ use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use time::{OffsetDateTime, macros::date};
-use tracing::{debug, trace, warn};
+use tracing::{trace, warn};
 
 use super::{
     Delta, Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply, StreamEvent,
@@ -596,67 +596,35 @@ struct Inputs(Vec<types::InputListItem>);
 impl TryFrom<(Thread, bool)> for Inputs {
     type Error = Error;
 
-    #[expect(clippy::too_many_lines)]
     fn try_from((thread, supports_reasoning): (Thread, bool)) -> Result<Self> {
         let Thread {
             system_prompt,
             instructions,
             attachments,
-            mut history,
-            message,
+            events,
         } = thread;
 
-        // If the last history message is a tool call response, we need to go
-        // one more back in history, to avoid disjointing tool call requests and
-        // their responses.
-        let mut history_after_instructions = vec![];
-        while let Some(event) = history.pop() {
-            let tool_call_results = matches!(
-                event.kind,
-                EventKind::UserMessage(UserMessage::ToolCallResults(_))
-            );
-            history_after_instructions.insert(0, event);
-
-            if !tool_call_results {
-                break;
-            }
-        }
-
         let mut items = vec![];
-        let history = history
-            .into_iter()
-            .flat_map(|v| event_to_messages(v, supports_reasoning))
-            .collect::<Vec<_>>();
 
-        // System message first, if any.
+        // Build system prompt with instructions and attachments
+        let mut system_parts = vec![];
+
         if let Some(system_prompt) = system_prompt {
-            items.push(types::InputItem::InputMessage(types::APIInputMessage {
-                role: types::Role::System,
-                content: types::ContentInput::Text(system_prompt),
-                status: None,
-            }));
+            system_parts.push(system_prompt);
         }
-
-        // Historical messages second, these are static.
-        items.extend(history);
-
-        // Group multiple contents blocks into a single message.
-        let mut content = vec![];
 
         if !instructions.is_empty() {
-            content.push(
+            system_parts.push(
                 "Before we continue, here are some contextual details that will help you generate \
                  a better response."
                     .to_string(),
             );
+
+            for instruction in &instructions {
+                system_parts.push(instruction.try_to_xml()?);
+            }
         }
 
-        // Then instructions in XML tags.
-        for instruction in &instructions {
-            content.push(instruction.try_to_xml()?);
-        }
-
-        // Then large list of attachments, formatted as XML.
         if !attachments.is_empty() {
             let documents: Documents = attachments
                 .into_iter()
@@ -666,65 +634,21 @@ impl TryFrom<(Thread, bool)> for Inputs {
                 .collect::<Vec<_>>()
                 .into();
 
-            content.push(documents.try_to_xml()?);
+            system_parts.push(documents.try_to_xml()?);
         }
 
-        // Attach all data, and add a "fake" acknowledgement by the assistant.
-        //
-        // See `provider::openrouter` for more information.
-        if !content.is_empty() {
+        // Add system message if we have any system content
+        if !system_parts.is_empty() {
             items.push(types::InputItem::InputMessage(types::APIInputMessage {
-                role: types::Role::User,
-                content: types::ContentInput::List(
-                    content
-                        .into_iter()
-                        .map(|text| types::ContentItem::Text { text })
-                        .collect(),
-                ),
+                role: types::Role::System,
+                content: types::ContentInput::Text(system_parts.join("\n\n")),
                 status: None,
             }));
         }
 
-        if items.last().is_some_and(|m| match m {
-            types::InputItem::InputMessage(message) => matches!(message.role, types::Role::User),
-            _ => false,
-        }) {
-            items.push(types::InputItem::InputMessage(types::APIInputMessage {
-                role: types::Role::Assistant,
-                content: types::ContentInput::Text(
-                    "Thank you for those details, I'll use them to inform my next response."
-                        .to_string(),
-                ),
-                status: None,
-            }));
-        }
-
-        items.extend(
-            history_after_instructions
-                .into_iter()
-                .flat_map(|v| event_to_messages(v, supports_reasoning)),
-        );
-
-        // User query
-        match message {
-            UserMessage::Query { query } => {
-                items.push(types::InputItem::InputMessage(types::APIInputMessage {
-                    role: types::Role::User,
-                    content: types::ContentInput::Text(query),
-                    status: None,
-                }));
-            }
-            UserMessage::ToolCallResults(results) => {
-                items.extend(results.into_iter().map(|result| {
-                    types::InputItem::FunctionCallOutput(types::FunctionCallOutput {
-                        call_id: result.id,
-                        output: result.content,
-                        id: None,
-                        status: None,
-                    })
-                }));
-            }
-        }
+        // Convert all events to messages
+        let messages = convert_events(events, supports_reasoning);
+        items.extend(messages);
 
         Ok(Self(
             items.into_iter().map(types::InputListItem::Item).collect(),
@@ -732,100 +656,87 @@ impl TryFrom<(Thread, bool)> for Inputs {
     }
 }
 
-fn event_to_messages(event: ConversationEvent, reasoning: bool) -> Vec<types::InputItem> {
-    match event.kind {
-        EventKind::UserMessage(user) => user_message_to_messages(user),
-        EventKind::AssistantMessage(assistant) => {
-            assistant_message_to_messages(assistant, reasoning)
-        }
-        EventKind::ConfigDelta(_) => vec![],
-    }
-}
+/// Converts a single event into `OpenAI` input items.
+///
+/// Note: `OpenAI` requires separate items for different content types.
+fn convert_events(events: ConversationStream, supports_reasoning: bool) -> Vec<types::InputItem> {
+    events
+        .into_iter()
+        .flat_map(|event| {
+            let aliases = &event.config.providers.llm.aliases;
+            let is_openai = event
+                .config
+                .assistant
+                .model
+                .id
+                .finalize(aliases)
+                .is_ok_and(|id| id.provider == Some(PROVIDER));
 
-fn user_message_to_messages(user: UserMessage) -> Vec<types::InputItem> {
-    match user {
-        UserMessage::Query { query } if !query.is_empty() => {
-            vec![types::InputItem::InputMessage(types::APIInputMessage {
-                role: types::Role::User,
-                content: types::ContentInput::Text(query),
-                status: None,
-            })]
-        }
-        UserMessage::Query { .. } => vec![],
-        UserMessage::ToolCallResults(results) => results
-            .into_iter()
-            .map(|result| {
-                types::InputItem::FunctionCallOutput(types::FunctionCallOutput {
-                    call_id: result.id,
-                    output: result.content,
-                    id: None,
-                    status: None,
-                })
-            })
-            .collect(),
-    }
-}
-
-fn assistant_message_to_messages(
-    assistant: AssistantMessage,
-    supports_reasoning: bool,
-) -> Vec<types::InputItem> {
-    let AssistantMessage {
-        provider,
-        metadata,
-        reasoning,
-        content,
-        tool_calls,
-    } = assistant;
-
-    let mut items = vec![];
-    if supports_reasoning
-        && provider == PROVIDER
-        && let Some(value) = metadata.get("reasoning").cloned()
-    {
-        match serde_json::from_value::<types::Reasoning>(value) {
-            // If we don't have encrypted content, it means the initial request
-            // was made without the `reasoning.encrypted_content` include. Since
-            // we don't enable persistent sessions, we can't return the
-            // reasoning data without the encrypted content section, or the
-            // OpenAI API will return an error.
-            //
-            // This should normally never happen, since we always ask for this
-            // data to be included in the OpenAI responses.
-            Ok(reasoning) if reasoning.encrypted_content.is_none() => {
-                debug!(?reasoning, "Reasoning missing encrypted content. Ignoring.");
+            match event.into_kind() {
+                EventKind::ChatRequest(request) => {
+                    vec![types::InputItem::InputMessage(types::APIInputMessage {
+                        role: types::Role::User,
+                        content: types::ContentInput::Text(request.content),
+                        status: None,
+                    })]
+                }
+                EventKind::ChatResponse(response) => {
+                    // Check if this came from OpenAI originally (has reasoning
+                    // metadata)
+                    if supports_reasoning
+                        && is_openai
+                        && response.is_reasoning()
+                        && let Some(value) = response
+                            .metadata()
+                            .and_then(|v| v.get("reasoning"))
+                            .cloned()
+                        && let Ok(reasoning) = serde_json::from_value::<types::Reasoning>(value)
+                        && reasoning.encrypted_content.is_some()
+                    {
+                        vec![types::InputItem::Reasoning(reasoning)]
+                    } else if response.is_reasoning() {
+                        // Unsupported reasoning content - wrap in XML tags
+                        vec![types::InputItem::InputMessage(types::APIInputMessage {
+                            role: types::Role::Assistant,
+                            content: types::ContentInput::Text(format!(
+                                "<think>\n{}\n</think>\n\n",
+                                response.content()
+                            )),
+                            status: None,
+                        })]
+                    } else {
+                        vec![types::InputItem::InputMessage(types::APIInputMessage {
+                            role: types::Role::Assistant,
+                            content: types::ContentInput::Text(response.into_content()),
+                            status: None,
+                        })]
+                    }
+                }
+                EventKind::ToolCallRequest(request) => {
+                    vec![types::InputItem::FunctionCall(types::FunctionCall {
+                        call_id: request.id,
+                        name: request.name,
+                        arguments: Value::Object(request.arguments).to_string(),
+                        status: None,
+                        id: None,
+                    })]
+                }
+                EventKind::ToolCallResponse(ToolCallResponse { id, result }) => {
+                    vec![types::InputItem::FunctionCallOutput(
+                        types::FunctionCallOutput {
+                            call_id: id,
+                            output: match result {
+                                Ok(content) | Err(content) => content,
+                            },
+                            id: None,
+                            status: None,
+                        },
+                    )]
+                }
+                _ => vec![],
             }
-
-            Ok(reasoning) => items.push(types::InputItem::Reasoning(reasoning)),
-            Err(error) => warn!(?error, "Failed to parse OpenAI reasoning data. Ignoring."),
-        }
-    } else if let Some(reasoning) = reasoning {
-        items.push(types::InputItem::InputMessage(types::APIInputMessage {
-            role: types::Role::Assistant,
-            content: types::ContentInput::Text(format!("<think>\n{reasoning}\n</think>\n\n")),
-            status: None,
-        }));
-    }
-
-    if let Some(text) = content {
-        items.push(types::InputItem::InputMessage(types::APIInputMessage {
-            role: types::Role::Assistant,
-            content: types::ContentInput::Text(text),
-            status: None,
-        }));
-    }
-
-    for tool_call in tool_calls {
-        items.push(types::InputItem::FunctionCall(types::FunctionCall {
-            call_id: tool_call.id,
-            name: tool_call.name,
-            arguments: Value::Object(tool_call.arguments).to_string(),
-            status: None,
-            id: None,
-        }));
-    }
-
-    items
+        })
+        .collect()
 }
 
 impl From<types::OutputItem> for Delta {
@@ -942,7 +853,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                message: "Test message".into(),
+                events: ConversationStream::default().with_chat_request("Test message"),
                 ..Default::default()
             },
             ..Default::default()

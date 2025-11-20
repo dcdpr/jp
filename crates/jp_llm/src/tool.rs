@@ -6,7 +6,7 @@ use jp_config::conversation::tool::{
     OneOrManyTypes, ResultMode, RunMode, ToolConfigWithDefaults, ToolParameterConfig,
     ToolParameterItemsConfig, ToolSource,
 };
-use jp_conversation::message::ToolCallResult;
+use jp_conversation::event::ToolCallResponse;
 use jp_inquire::{InlineOption, InlineSelect};
 use jp_mcp::{
     RawContent, ResourceContents,
@@ -71,7 +71,7 @@ impl ToolDefinition {
         config: ToolConfigWithDefaults,
         root: &Path,
         editor: &Path,
-    ) -> Result<ToolCallResult, ToolError> {
+    ) -> Result<ToolCallResponse, ToolError> {
         info!(tool = %self.name, arguments = ?arguments, "Calling tool.");
 
         // If the tool call has answers to provide to the tool, it means the
@@ -90,10 +90,9 @@ impl ToolDefinition {
         };
 
         let result = if let Some(content) = cancel_reasoning {
-            ToolCallResult {
+            ToolCallResponse {
                 id,
-                error: false,
-                content,
+                result: Ok(content),
             }
         } else {
             match config.source() {
@@ -126,20 +125,25 @@ impl ToolDefinition {
         config: &ToolConfigWithDefaults,
         tool: Option<&str>,
         root: &Path,
-    ) -> Result<ToolCallResult, ToolError> {
+    ) -> Result<ToolCallResponse, ToolError> {
         let name = tool.unwrap_or(&self.name);
 
         // TODO: Should we enforce at a type-level this for all tool calls, even
         // MCP?
-        if let Some(args) = arguments.as_object() {
-            validate_tool_arguments(
+        if let Some(args) = arguments.as_object()
+            && let Err(error) = validate_tool_arguments(
                 args,
                 &config
                     .parameters()
                     .iter()
                     .map(|(k, v)| (k.to_owned(), v.required))
                     .collect(),
-            )?;
+            )
+        {
+            return Ok(ToolCallResponse {
+                id,
+                result: Err(format!("Invalid arguments: {error}")),
+            });
         }
 
         let command = {
@@ -207,34 +211,31 @@ impl ToolDefinition {
                 };
 
                 if output.status.success() {
-                    Ok(ToolCallResult {
+                    Ok(ToolCallResponse {
                         id,
-                        error: false,
-                        content,
+                        result: Ok(content),
                     })
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    Ok(ToolCallResult {
+                    Ok(ToolCallResponse {
                         id,
-                        error: true,
-                        content: json!({
+                        result: Err(json!({
                             "message": format!("Tool '{name}' execution failed."),
                             "stderr": stderr,
                             "stdout": content,
                         })
-                        .to_string(),
+                        .to_string()),
                     })
                 }
             }
-            Err(error) => Ok(ToolCallResult {
+            Err(error) => Ok(ToolCallResponse {
                 id,
-                error: true,
-                content: json!({
+                result: Err(json!({
                     "message": format!(
                         "Failed to execute command '{command:?}': {error}",
                     ),
                 })
-                .to_string(),
+                .to_string()),
             }),
         }
     }
@@ -246,7 +247,7 @@ impl ToolDefinition {
         mcp_client: &jp_mcp::Client,
         server: Option<&str>,
         tool: Option<&str>,
-    ) -> Result<ToolCallResult, ToolError> {
+    ) -> Result<ToolCallResponse, ToolError> {
         let name = tool.unwrap_or(&self.name);
 
         let result = mcp_client
@@ -268,10 +269,13 @@ impl ToolDefinition {
             .collect::<Vec<_>>()
             .join("\n\n");
 
-        Ok(ToolCallResult {
+        Ok(ToolCallResponse {
             id,
-            error: result.is_error.unwrap_or_default(),
-            content,
+            result: if result.is_error.unwrap_or_default() {
+                Err(content)
+            } else {
+                Ok(content)
+            },
         })
     }
 
@@ -445,10 +449,10 @@ impl ToolDefinition {
 
     fn prepare_result(
         &self,
-        mut result: ToolCallResult,
+        mut result: ToolCallResponse,
         result_mode: ResultMode,
         editor: &Path,
-    ) -> Result<ToolCallResult, ToolError> {
+    ) -> Result<ToolCallResponse, ToolError> {
         match result_mode {
             ResultMode::Ask => match InlineSelect::new(
                 format!(
@@ -467,10 +471,9 @@ impl ToolDefinition {
             {
                 'y' => return Ok(result),
                 'n' => {
-                    return Ok(ToolCallResult {
+                    return Ok(ToolCallResponse {
                         id: result.id,
-                        content: "Tool call result omitted by user.".into(),
-                        error: false,
+                        result: Ok("Tool call result omitted by user.".into()),
                     });
                 }
                 'e' => {}
@@ -482,7 +485,7 @@ impl ToolDefinition {
 
         let content = open_editor::EditorCallBuilder::new()
             .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
-            .edit_string(&result.content)
+            .edit_string(result.content())
             .map_err(|error| ToolError::OpenEditorError {
                 arguments: Value::Null,
                 error,
@@ -494,7 +497,7 @@ impl ToolDefinition {
             return self.prepare_result(result, ResultMode::Ask, editor);
         }
 
-        result.content = content;
+        result.result = Ok(content);
         Ok(result)
     }
 }

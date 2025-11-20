@@ -12,9 +12,8 @@ use jp_config::{
     providers::llm::openrouter::OpenrouterConfig,
 };
 use jp_conversation::{
-    AssistantMessage, UserMessage,
-    event::{ConversationEvent, EventKind},
-    message::ToolCallRequest,
+    ConversationStream,
+    event::{ChatResponse, EventKind, ToolCallRequest},
     thread::{Document, Documents, Thread},
 };
 use jp_openrouter::{
@@ -372,60 +371,28 @@ pub struct RequestMessages(pub Vec<RequestMessage>);
 impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
     type Error = Error;
 
-    #[expect(clippy::too_many_lines)]
     fn try_from((model_id, thread): (&ModelIdConfig, Thread)) -> Result<Self> {
         let Thread {
             system_prompt,
             instructions,
             attachments,
-            mut history,
-            message,
+            events,
         } = thread;
 
-        // If the last history message is a tool call response, we need to go
-        // one more back in history, to avoid disjointing tool call requests and
-        // their responses.
-        let mut history_after_instructions = vec![];
-        while let Some(event) = history.pop() {
-            let tool_call_results = matches!(
-                event.kind,
-                EventKind::UserMessage(UserMessage::ToolCallResults(_))
-            );
-            history_after_instructions.insert(0, event);
-
-            if !tool_call_results {
-                break;
-            }
-        }
-
         let mut messages = vec![];
-        let mut history = history
-            .into_iter()
-            .flat_map(event_to_messages)
-            .collect::<Vec<_>>();
+
+        // Build system prompt with instructions and attachments
+        let mut content = vec![];
 
         // System message first, if any.
         //
         // Cached (1/4), as it's not expected to change.
         if let Some(system_prompt) = system_prompt {
-            messages.push(
-                Message::default()
-                    .with_text(&system_prompt)
-                    .with_cache()
-                    .system(),
-            );
+            content.push(Content::Text {
+                text: system_prompt,
+                cache_control: Some(CacheControl::Ephemeral),
+            });
         }
-
-        // Historical messages second, these are static.
-        //
-        // Make sure to add cache control (2/4) to the last history message.
-        if let Some(message) = history.last_mut().and_then(|m| m.chat_message_mut()) {
-            message.cached();
-        }
-        messages.extend(history);
-
-        // Group multiple contents blocks into a single message.
-        let mut content = vec![];
 
         if !instructions.is_empty() {
             content.push(Content::Text {
@@ -434,29 +401,22 @@ impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
                     .to_string(),
                 cache_control: None,
             });
+
+            // Then instructions in XML tags.
+            //
+            // Cached (3/4), (for the last instruction), as it's not expected to
+            // change.
+            let mut instructions = instructions.iter().peekable();
+            while let Some(instruction) = instructions.next() {
+                content.push(Content::Text {
+                    text: instruction.try_to_xml()?,
+                    cache_control: instructions
+                        .peek()
+                        .map_or(Some(CacheControl::Ephemeral), |_| None),
+                });
+            }
         }
 
-        // Then instructions in XML tags.
-        //
-        // Cached (3/4), (for the last instruction), as it's not expected to
-        // change.
-        let mut instructions = instructions.iter().peekable();
-        while let Some(instruction) = instructions.next() {
-            content.push(Content::Text {
-                text: instruction.try_to_xml()?,
-                cache_control: instructions
-                    .peek()
-                    .map_or(Some(CacheControl::Ephemeral), |_| None),
-            });
-        }
-
-        // Then large list of attachments, formatted as XML.
-        //
-        // see: <https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/long-context-tips>
-        // see: <https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-xml-tags>
-        //
-        // Cached (4/4), more likely to change, but we'll keep the previous
-        // cache if changed.
         if !attachments.is_empty() {
             let documents: Documents = attachments
                 .into_iter()
@@ -472,61 +432,14 @@ impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
             });
         }
 
-        // Attach all data, and add a "fake" acknowledgement by the assistant.
-        //
-        // We insert the contextual data _before_ the last message pair, so that
-        // there is a correct flow between the user and assistant when the
-        // assistant requests a tool call.
-        //
-        // For example instead of:
-        //
-        // - ... history ...
-        // - U: <user query>
-        // - A: <tool call request>
-        // - U: <instructions, attachments, etc...>
-        // - A: Thank you for those details, ...
-        // - U: <tool call response>
-        //
-        // We want:
-        //
-        // - ... history ...
-        // - U: <instructions, attachments, etc...>
-        // - A: Thank you for those details, ...
-        // - U: <user query>
-        // - A: <tool call request>
-        // - U: <tool call response>
+        // Add system message if we have any system content
         if !content.is_empty() {
-            messages.push(Message::default().with_content(content).user());
-            messages.push(
-                Message::default()
-                    .with_text(
-                        "Thank you for those details, I'll use them to inform my next response.",
-                    )
-                    .assistant(),
-            );
+            messages.push(Message::default().with_content(content).system());
         }
 
-        messages.extend(
-            history_after_instructions
-                .into_iter()
-                .flat_map(event_to_messages),
-        );
-
-        // User query
-        match message {
-            UserMessage::Query { query } => {
-                messages.push(Message::default().with_text(query).user());
-            }
-            UserMessage::ToolCallResults(results) => {
-                messages.extend(results.into_iter().map(|result| {
-                    RequestMessage::Tool(tool::Message {
-                        tool_call_id: result.id,
-                        content: result.content,
-                        name: None,
-                    })
-                }));
-            }
-        }
+        // Convert all events to messages
+        let event_messages = convert_events(events);
+        messages.extend(event_messages);
 
         // Only Anthropic and Google models support explicit caching.
         if !model_id.name.starts_with("anthropic") && !model_id.name.starts_with("google") {
@@ -543,72 +456,56 @@ impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
     }
 }
 
-fn event_to_messages(event: ConversationEvent) -> Vec<RequestMessage> {
-    match event.kind {
-        EventKind::UserMessage(user) => user_message_to_messages(user),
-        EventKind::AssistantMessage(assistant) => {
-            vec![assistant_message_to_message(assistant)]
-        }
-        EventKind::ConfigDelta(_) => vec![],
-    }
-}
-
-fn user_message_to_messages(user: UserMessage) -> Vec<RequestMessage> {
-    match user {
-        UserMessage::Query { query } if !query.is_empty() => {
-            vec![Message::default().with_text(query).user()]
-        }
-        UserMessage::Query { .. } => vec![],
-        UserMessage::ToolCallResults(results) => results
-            .into_iter()
-            .map(|result| {
-                RequestMessage::Tool(tool::Message {
-                    tool_call_id: result.id,
-                    content: result.content,
-                    name: None,
-                })
-            })
-            .collect(),
-    }
-}
-
-fn assistant_message_to_message(assistant: AssistantMessage) -> RequestMessage {
-    let AssistantMessage {
-        provider: _,
-        metadata: _,
-        reasoning,
-        content,
-        tool_calls,
-    } = assistant;
-
-    let mut message = Message::default();
-    if let Some(content) = content {
-        message = message.with_text(content);
-    }
-    if let Some(reasoning) = reasoning {
-        message = message.with_reasoning(reasoning);
-    }
-    message.tool_calls = tool_calls
+/// Converts a single event into `OpenRouter` request messages.
+fn convert_events(events: ConversationStream) -> Vec<RequestMessage> {
+    events
         .into_iter()
-        .map(|call| ToolCall::Function {
-            id: Some(call.id),
-            index: 0,
-            function: FunctionCall {
-                name: Some(call.name),
-                arguments: if call.arguments.is_empty() {
-                    None
-                } else {
-                    serde_json::to_string(&call.arguments).ok()
-                },
+        .flat_map(|event| match event.event.kind {
+            EventKind::ChatRequest(request) => {
+                vec![Message::default().with_text(request.content).user()]
+            }
+            EventKind::ChatResponse(response) => match response {
+                ChatResponse::Message { message } => {
+                    vec![Message::default().with_text(message).assistant()]
+                }
+                ChatResponse::Reasoning { reasoning, .. } => {
+                    vec![Message::default().with_reasoning(reasoning).assistant()]
+                }
             },
+            EventKind::ToolCallRequest(request) => {
+                let message = Message {
+                    tool_calls: vec![ToolCall::Function {
+                        id: Some(request.id.clone()),
+                        index: 0,
+                        function: FunctionCall {
+                            name: Some(request.name),
+                            arguments: if request.arguments.is_empty() {
+                                None
+                            } else {
+                                serde_json::to_string(&request.arguments).ok()
+                            },
+                        },
+                    }],
+                    ..Default::default()
+                };
+
+                vec![message.assistant()]
+            }
+            EventKind::ToolCallResponse(response) => {
+                let content = match response.result {
+                    Ok(content) => content,
+                    Err(error) => error,
+                };
+
+                vec![RequestMessage::Tool(tool::Message {
+                    tool_call_id: response.id,
+                    content,
+                    name: None,
+                })]
+            }
+            EventKind::InquiryRequest(_) | EventKind::InquiryResponse(_) => vec![],
         })
-        .collect();
-
-    if message.content.is_empty() && message.tool_calls.is_empty() {
-        message.content = vec![Content::text("<no response>")];
-    }
-
-    message.assistant()
+        .collect()
 }
 
 #[cfg(test)]
@@ -665,7 +562,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                message: "Test message".into(),
+                events: ConversationStream::default().with_chat_request("Test message"),
                 ..Default::default()
             },
             ..Default::default()

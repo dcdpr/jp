@@ -10,7 +10,7 @@ use jp_config::{
     },
     providers::llm::LlmProviderConfig,
 };
-use jp_conversation::{ConversationId, UserMessage, event::ConversationEvent};
+use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{provider, structured};
 use jp_workspace::Workspace;
 use tokio_util::sync::CancellationToken;
@@ -24,21 +24,16 @@ pub struct TitleGeneratorTask {
     pub model_id: ModelIdConfig,
     pub parameters: ParametersConfig,
     pub providers: LlmProviderConfig,
-    pub events: Vec<ConversationEvent>,
+    pub events: ConversationStream,
     pub title: Option<String>,
 }
 
 impl TitleGeneratorTask {
     pub fn new(
         conversation_id: ConversationId,
-        mut events: Vec<ConversationEvent>,
+        events: ConversationStream,
         config: &AppConfig,
-        query: Option<String>,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        if let Some(query) = query {
-            events.push(ConversationEvent::now(UserMessage::Query { query }));
-        }
-
         // Prefer the title generation model id, otherwise use the assistant
         // model id.
         let mut model = config

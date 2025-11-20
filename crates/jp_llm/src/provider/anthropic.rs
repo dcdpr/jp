@@ -21,8 +21,8 @@ use jp_config::{
     providers::llm::anthropic::AnthropicConfig,
 };
 use jp_conversation::{
-    AssistantMessage, UserMessage,
-    event::{ConversationEvent, EventKind},
+    ConversationStream,
+    event::EventKind,
     thread::{Document, Documents, Thread},
 };
 use serde_json::{Value, json};
@@ -161,27 +161,36 @@ fn call(
             .messages()
             .create_stream(request.clone())
             .await
-            .map_err(|e| match e {
-                AnthropicError::RateLimit { retry_after } => Error::RateLimit {
-                    retry_after: retry_after.map(Duration::from_secs),
-                },
-
-                // Anthropic's API is notoriously unreliable, so we
-                // special-case a few common errors that most of the times
-                // resolve themselves when retried.
+            .map_err(|e| {
+                // Anthropic's API is notoriously unreliable, so we special-case
+                // a few common errors that most of the times resolve themselves
+                // when retried.
                 //
                 // See: <https://docs.claude.com/en/docs/build-with-claude/streaming#error-events>
                 // See: <https://docs.claude.com/en/api/errors#http-errors>
-                AnthropicError::StreamError(e)
-                    if ["rate_limit_error", "overloaded_error", "api_error"]
-                        .contains(&e.error_type.as_str()) =>
-                {
-                    Error::RateLimit {
-                        retry_after: Some(Duration::from_secs(3)),
+                let retry_after: Option<u64> = match &e {
+                    AnthropicError::RateLimit { retry_after } => retry_after.or(Some(3)),
+                    AnthropicError::StreamError(e) => {
+                        if ["rate_limit_error", "overloaded_error", "api_error"]
+                            .contains(&e.error_type.as_str())
+                            || e.error.as_ref().is_some_and(|v| {
+                                v.get("message").and_then(Value::as_str) == Some("Overloaded")
+                            })
+                        {
+                            Some(3)
+                        } else {
+                            None
+                        }
                     }
-                }
+                    _ => None,
+                };
 
-                _ => Error::from(e),
+                match retry_after {
+                    Some(retry_after) => Error::RateLimit {
+                        retry_after: Some(Duration::from_secs(retry_after)),
+                    },
+                    None => Error::from(e),
+                }
             });
 
         tokio::pin!(stream);
@@ -206,7 +215,7 @@ fn call(
                     {
                         debug!("Max tokens reached, auto-requesting more tokens.");
 
-                        for await event in chain(client.clone(), request.clone(), events) {
+                        for await event in chain(client.clone(), request.clone(), &events) {
                             yield event?;
                         }
                         return;
@@ -229,16 +238,57 @@ fn call(
 fn chain(
     client: Client,
     mut request: types::CreateMessagesRequest,
-    events: Vec<StreamEvent>,
+    events: &[StreamEvent],
 ) -> EventStream {
-    let reply = AssistantMessage::from(Reply::from((PROVIDER, events)));
-    debug_assert!(reply.tool_calls.is_empty());
+    // Extract content from the stream events for continuation
+    let mut reasoning_content = vec![];
+    let mut message_content = vec![];
+    let mut has_tool_calls = false;
+
+    for event in events {
+        match event {
+            StreamEvent::ChatChunk(CompletionChunk::Reasoning(text)) => {
+                reasoning_content.push(text.clone());
+            }
+            StreamEvent::ChatChunk(CompletionChunk::Content(text)) => {
+                message_content.push(text.clone());
+            }
+            StreamEvent::ToolCall(_) => {
+                has_tool_calls = true;
+            }
+            _ => {}
+        }
+    }
+
+    debug_assert!(
+        !has_tool_calls,
+        "Cannot chain when tool calls were requested"
+    );
 
     let mut should_merge = true;
-    let previous_content = reply.content.clone().unwrap_or_default();
-    let message = assistant_message_to_message(reply);
+    let previous_content = message_content.join("");
 
-    request.messages.push(message);
+    // Build assistant message from the accumulated content
+    let mut content_blocks = vec![];
+
+    let reasoning = reasoning_content.join("");
+    if !reasoning.is_empty() {
+        content_blocks.push(types::MessageContent::Text(
+            format!("<think>\n{reasoning}\n</think>\n\n").into(),
+        ));
+    }
+
+    if !previous_content.is_empty() {
+        content_blocks.push(types::MessageContent::Text(previous_content.clone().into()));
+    }
+
+    if !content_blocks.is_empty() {
+        request.messages.push(types::Message {
+            role: types::MessageRole::Assistant,
+            content: types::MessageContentList(content_blocks),
+        });
+    }
+
     request.messages.push(types::Message {
         role: types::MessageRole::User,
         content: types::MessageContentList(vec![types::MessageContent::Text(
@@ -355,15 +405,14 @@ fn create_request(
         system_prompt,
         instructions,
         attachments,
-        history,
-        message,
+        events,
     } = thread;
 
     let mut cache_control_count = MAX_CACHE_CONTROL_COUNT;
 
     builder
         .model(model.id.name.clone())
-        .messages(AnthropicMessages::build(history, message, &mut cache_control_count).0);
+        .messages(AnthropicMessages::build(events, &mut cache_control_count).0);
 
     let tools = convert_tools(tools, tool_call_strict_mode, &mut cache_control_count);
 
@@ -867,22 +916,12 @@ fn convert_tools(
 struct AnthropicMessages(Vec<types::Message>);
 
 impl AnthropicMessages {
-    fn build(
-        history: Vec<ConversationEvent>,
-        message: UserMessage,
-        cache_controls: &mut usize,
-    ) -> Self {
-        let mut items = vec![];
-
-        // Historical messages.
-        let mut history = history
-            .into_iter()
-            .filter_map(event_to_message)
-            .collect::<Vec<_>>();
+    fn build(events: ConversationStream, cache_controls: &mut usize) -> Self {
+        let mut messages = convert_events(events);
 
         // Make sure to add cache control to the last history message.
         if *cache_controls > 0
-            && let Some(message) = history.last_mut().and_then(|m| m.content.0.last_mut())
+            && let Some(message) = messages.last_mut().and_then(|m| m.content.0.last_mut())
         {
             *cache_controls = cache_controls.saturating_sub(1);
 
@@ -900,116 +939,105 @@ impl AnthropicMessages {
             }
         }
 
-        items.extend(history);
+        Self(messages)
+    }
+}
 
-        // User query
-        match message {
-            UserMessage::Query { query } => {
-                items.push(types::Message {
-                    role: types::MessageRole::User,
-                    content: types::MessageContentList(vec![types::MessageContent::Text(
-                        query.into(),
-                    )]),
-                });
-            }
-            UserMessage::ToolCallResults(results) => {
-                items.extend(results.into_iter().map(|result| types::Message {
-                    role: types::MessageRole::User,
-                    content: types::MessageContentList(vec![types::MessageContent::ToolResult(
-                        types::ToolResult {
-                            tool_use_id: result.id,
-                            content: Some(result.content),
-                            is_error: result.error,
+/// Groups consecutive events into messages by role.
+///
+/// Events from the same role are combined into a single message with multiple
+/// content blocks.
+fn convert_events(events: ConversationStream) -> Vec<types::Message> {
+    events
+        .into_iter()
+        .filter_map(|event| {
+            let aliases = &event.config.providers.llm.aliases;
+            let is_anthropic = event
+                .config
+                .assistant
+                .model
+                .id
+                .finalize(aliases)
+                .is_ok_and(|id| id.provider == Some(PROVIDER));
+
+            match event.event.kind {
+                EventKind::ChatRequest(request) => Some((
+                    types::MessageRole::User,
+                    types::MessageContent::Text(request.content.into()),
+                )),
+                EventKind::ChatResponse(response) => {
+                    // Check if this came from Anthropic originally
+                    let content = if is_anthropic
+                        && let Some(signature) = response
+                            .metadata()
+                            .and_then(|v| v.get("signature"))
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    {
+                        types::MessageContent::Thinking(Thinking {
+                            thinking: response.into_content(),
+                            signature: Some(signature),
+                        })
+                    } else if is_anthropic
+                        && let Some(data) = response
+                            .metadata()
+                            .and_then(|v| v.get("redacted_thinking"))
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    {
+                        types::MessageContent::RedactedThinking { data }
+                    } else if response.is_reasoning() {
+                        // Reasoning from other providers - wrap in XML tags
+                        types::MessageContent::Text(
+                            format!("<think>\n{}\n</think>\n\n", response.content()).into(),
+                        )
+                    } else {
+                        types::MessageContent::Text(response.into_content().into())
+                    };
+
+                    Some((types::MessageRole::Assistant, content))
+                }
+                EventKind::ToolCallRequest(request) => Some((
+                    types::MessageRole::Assistant,
+                    types::MessageContent::ToolUse(types::ToolUse {
+                        id: request.id,
+                        name: request.name,
+                        input: Value::Object(request.arguments),
+                        cache_control: None,
+                    }),
+                )),
+                EventKind::ToolCallResponse(response) => {
+                    let (content, is_error) = match response.result {
+                        Ok(c) => (Some(c), false),
+                        Err(e) => (Some(e), true),
+                    };
+
+                    Some((
+                        types::MessageRole::User,
+                        types::MessageContent::ToolResult(types::ToolResult {
+                            tool_use_id: response.id,
+                            content,
+                            is_error,
                             cache_control: None,
-                        },
-                    )]),
-                }));
+                        }),
+                    ))
+                }
+                _ => None,
             }
-        }
+        })
+        .fold(vec![], |mut messages, (role, content)| {
+            match messages.last_mut() {
+                // If the last message has the same role, append content to it.
+                Some(last) if last.role == role => last.content.0.push(content),
+                // Different role or no messages yet, start a new message.
+                _ => messages.push(types::Message {
+                    role,
+                    content: types::MessageContentList(vec![content]),
+                }),
+            }
 
-        Self(items)
-    }
-}
-
-fn event_to_message(event: ConversationEvent) -> Option<types::Message> {
-    match event.kind {
-        EventKind::UserMessage(user) => Some(user_message_to_message(user)),
-        EventKind::AssistantMessage(assistant) => Some(assistant_message_to_message(assistant)),
-        EventKind::ConfigDelta(_) => None,
-    }
-}
-
-fn user_message_to_message(user: UserMessage) -> types::Message {
-    let list = match user {
-        UserMessage::Query { query } => vec![types::MessageContent::Text(query.into())],
-        UserMessage::ToolCallResults(results) => results
-            .into_iter()
-            .map(|result| {
-                types::MessageContent::ToolResult(types::ToolResult {
-                    tool_use_id: result.id,
-                    content: Some(result.content),
-                    is_error: result.error,
-                    cache_control: None,
-                })
-            })
-            .collect(),
-    };
-
-    types::Message {
-        role: types::MessageRole::User,
-        content: types::MessageContentList(list),
-    }
-}
-
-fn assistant_message_to_message(assistant: AssistantMessage) -> types::Message {
-    let AssistantMessage {
-        provider,
-        reasoning,
-        content,
-        tool_calls,
-        metadata,
-    } = assistant;
-
-    let mut list = vec![];
-    if let Some(data) = metadata
-        .get("redacted_thinking")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-    {
-        list.push(types::MessageContent::RedactedThinking { data });
-    } else if let Some(thinking) = reasoning {
-        if provider == PROVIDER {
-            list.push(types::MessageContent::Thinking(Thinking {
-                thinking,
-                signature: metadata
-                    .get("signature")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-            }));
-        } else {
-            list.push(types::MessageContent::Text(
-                format!("<think>\n{thinking}\n</think>\n\n").into(),
-            ));
-        }
-    }
-
-    if let Some(text) = content {
-        list.push(types::MessageContent::Text(text.into()));
-    }
-
-    for tool_call in tool_calls {
-        list.push(types::MessageContent::ToolUse(types::ToolUse {
-            id: tool_call.id,
-            input: Value::Object(tool_call.arguments),
-            name: tool_call.name,
-            cache_control: None,
-        }));
-    }
-
-    types::Message {
-        role: types::MessageRole::Assistant,
-        content: types::MessageContentList(list),
-    }
+            messages
+        })
 }
 
 impl From<types::MessageContent> for Delta {
@@ -1042,6 +1070,7 @@ mod tests {
         model::parameters::{CustomReasoningConfig, ReasoningEffort},
         providers::llm::LlmProviderConfig,
     };
+    use jp_conversation::ConversationStream;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -1114,7 +1143,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                message: "Test message".into(),
+                events: ConversationStream::default().with_chat_request("Test message"),
                 ..Default::default()
             },
             ..Default::default()
@@ -1151,7 +1180,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                message: "Test message".into(),
+                events: ConversationStream::default().with_chat_request("Test message"),
                 ..Default::default()
             },
             tool_choice: ToolChoice::Function("run_me".to_owned()),
@@ -1179,7 +1208,7 @@ mod tests {
                     }),
                 ]),
             }],
-            ..Default::default()
+            tool_call_strict_mode: false,
         };
 
         let vcr = vcr();
@@ -1214,8 +1243,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                // See: <https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#thinking-redaction>
-                message: "ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB".into(),
+                events: ConversationStream::default().with_chat_request("ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB"),
                 ..Default::default()
             },
             ..Default::default()
@@ -1271,10 +1299,11 @@ mod tests {
         let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
         let mut model = ModelDetails::empty(model_id);
         model.max_output_tokens = Some(1024);
-
         let query = ChatQuery {
             thread: Thread {
-                message: "Give me a 2000 word explainer about Kirigami-inspired parachutes".into(),
+                events: ConversationStream::default().with_chat_request(
+                    "Give me a 2000 word explainer about Kirigami-inspired parachutes",
+                ),
                 ..Default::default()
             },
             ..Default::default()
@@ -1313,7 +1342,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                message: "Test message".into(),
+                events: ConversationStream::default().with_chat_request("Test message"),
                 ..Default::default()
             },
             ..Default::default()

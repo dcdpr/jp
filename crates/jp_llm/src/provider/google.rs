@@ -13,12 +13,12 @@ use jp_config::{
     providers::llm::google::GoogleConfig,
 };
 use jp_conversation::{
-    AssistantMessage, UserMessage,
-    event::{ConversationEvent, EventKind},
+    ConversationStream,
+    event::EventKind,
     thread::{Document, Documents, Thread},
 };
 use serde_json::Value;
-use tracing::trace;
+use tracing::{debug, trace};
 
 use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply};
 use crate::{
@@ -98,6 +98,12 @@ impl Provider for Google {
     ) -> Result<EventStream> {
         let client = self.client.clone();
         let request = create_request(model, parameters, query)?;
+        debug!(stream = true, "Google chat completion stream request.");
+        trace!(
+            request = serde_json::to_string(&request).unwrap_or_default(),
+            "Request payload."
+        );
+
         let slug = model.id.name.clone();
         let stream = Box::pin(stream! {
             let mut accumulator = Accumulator::new(200);
@@ -134,11 +140,10 @@ fn create_request(
         system_prompt,
         instructions,
         attachments,
-        history,
-        message,
+        events,
     } = thread;
 
-    let tools = convert_tools(tools, tool_call_strict_mode);
+    let tools = convert_tools(tools);
 
     #[expect(clippy::cast_possible_wrap)]
     let max_output_tokens = parameters
@@ -146,7 +151,8 @@ fn create_request(
         .or(model.max_output_tokens)
         .map(|v| v as i32);
 
-    let tool_config = (!tools.is_empty()).then_some(convert_tool_choice(tool_choice));
+    let tool_config =
+        (!tools.is_empty()).then_some(convert_tool_choice(tool_choice, tool_call_strict_mode));
     let reasoning = model.custom_reasoning_config(parameters.reasoning);
 
     // Add thinking config if the model requires it, or if it supports it,
@@ -213,7 +219,7 @@ fn create_request(
         } else {
             Some(types::Content { parts, role: None })
         },
-        contents: GoogleMessages::build(history, message).0,
+        contents: convert_events(events),
         tools,
         tool_config,
         generation_config: Some(types::GenerationConfig {
@@ -256,6 +262,12 @@ fn map_response(
     response: types::GenerateContentResponse,
     accumulator: &mut Accumulator,
 ) -> Result<Vec<StreamEvent>> {
+    debug!("Received response from Google API.");
+    trace!(
+        response = serde_json::to_string(&response).unwrap_or_default(),
+        "Response payload."
+    );
+
     response
         .candidates
         .into_iter()
@@ -316,9 +328,10 @@ impl TryFrom<&GoogleConfig> for Google {
     }
 }
 
-fn convert_tool_choice(choice: ToolChoice) -> types::ToolConfig {
+fn convert_tool_choice(choice: ToolChoice, strict: bool) -> types::ToolConfig {
     let (mode, allowed_function_names) = match choice {
         ToolChoice::None => (types::FunctionCallingMode::None, vec![]),
+        ToolChoice::Auto if strict => (types::FunctionCallingMode::Validated, vec![]),
         ToolChoice::Auto => (types::FunctionCallingMode::Auto, vec![]),
         ToolChoice::Required => (types::FunctionCallingMode::Any, vec![]),
         ToolChoice::Function(name) => (types::FunctionCallingMode::Any, vec![name]),
@@ -332,7 +345,7 @@ fn convert_tool_choice(choice: ToolChoice) -> types::ToolConfig {
     }
 }
 
-fn convert_tools(tools: Vec<ToolDefinition>, _strict: bool) -> Vec<types::Tool> {
+fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
     tools
         .into_iter()
         .map(|tool| {
@@ -349,109 +362,57 @@ fn convert_tools(tools: Vec<ToolDefinition>, _strict: bool) -> Vec<types::Tool> 
         .collect()
 }
 
-struct GoogleMessages(Vec<types::Content>);
-
-impl GoogleMessages {
-    fn build(history: Vec<ConversationEvent>, message: UserMessage) -> Self {
-        // Message history
-        let mut items = history
-            .into_iter()
-            .filter_map(event_to_message)
-            .collect::<Vec<_>>();
-
-        // User query
-        match message {
-            UserMessage::Query { query } => {
-                items.push(types::Content {
-                    role: Some(types::Role::User),
-                    parts: vec![types::ContentData::Text(query).into()],
-                });
-            }
-            UserMessage::ToolCallResults(results) => {
-                items.extend(results.into_iter().map(|result| types::Content {
-                    role: Some(types::Role::User),
-                    parts: vec![types::ContentData::FunctionResponse(
-                        types::FunctionResponse {
-                            name: result.id,
-                            response: types::FunctionResponsePayload {
-                                content: serde_json::Value::String(result.content),
+fn convert_events(events: ConversationStream) -> Vec<types::Content> {
+    events
+        .into_iter()
+        .filter_map(|event| {
+            Some(match event.event.kind {
+                EventKind::ChatRequest(request) => (
+                    types::Role::User,
+                    types::ContentData::Text(request.content).into(),
+                ),
+                EventKind::ChatResponse(response) => (types::Role::Model, types::ContentPart {
+                    thought: response.is_reasoning(),
+                    data: types::ContentData::Text(response.into_content()),
+                    metadata: None,
+                }),
+                EventKind::ToolCallRequest(request) => (
+                    types::Role::Model,
+                    types::ContentData::FunctionCall(types::FunctionCall {
+                        name: request.id,
+                        arguments: Value::Object(request.arguments),
+                    })
+                    .into(),
+                ),
+                EventKind::ToolCallResponse(response) => (
+                    types::Role::User,
+                    types::ContentData::FunctionResponse(types::FunctionResponse {
+                        name: response.id,
+                        response: types::FunctionResponsePayload {
+                            content: match response.result {
+                                Ok(content) => Value::String(content),
+                                Err(error) => Value::String(error),
                             },
                         },
-                    ).into()],
-                }));
+                    })
+                    .into(),
+                ),
+                _ => return None,
+            })
+        })
+        .fold(vec![], |mut messages, (role, part)| {
+            match messages.last_mut() {
+                // If the last message has the same role, append part to it
+                Some(last) if last.role == Some(role) => last.parts.push(part),
+                // Different role or no messages yet, start a new message
+                _ => messages.push(types::Content {
+                    role: Some(role),
+                    parts: vec![part],
+                }),
             }
-        }
 
-        Self(items)
-    }
-}
-
-fn event_to_message(event: ConversationEvent) -> Option<types::Content> {
-    match event.kind {
-        EventKind::UserMessage(user) => Some(user_message_to_message(user)),
-        EventKind::AssistantMessage(assistant) => Some(assistant_message_to_message(assistant)),
-        EventKind::ConfigDelta(_) => None,
-    }
-}
-
-fn user_message_to_message(user: UserMessage) -> types::Content {
-    let parts = match user {
-        UserMessage::Query { query } => vec![types::ContentData::Text(query).into()],
-        UserMessage::ToolCallResults(results) => results
-            .into_iter()
-            .map(|result| {
-                types::ContentData::FunctionResponse(types::FunctionResponse {
-                    name: result.id,
-                    response: types::FunctionResponsePayload {
-                        content: Value::String(result.content),
-                    },
-                })
-                .into()
-            })
-            .collect(),
-    };
-
-    types::Content {
-        role: Some(types::Role::User),
-        parts,
-    }
-}
-
-fn assistant_message_to_message(assistant: AssistantMessage) -> types::Content {
-    let AssistantMessage {
-        reasoning,
-        content,
-        tool_calls,
-        ..
-    } = assistant;
-
-    let mut parts = vec![];
-    if let Some(thinking) = reasoning {
-        parts.push(types::ContentPart {
-            thought: true,
-            data: types::ContentData::Text(thinking),
-            metadata: None,
-        });
-    }
-
-    if let Some(text) = content {
-        parts.push(types::ContentData::Text(text).into());
-    }
-
-    for tool_call in tool_calls {
-        parts.push(
-            types::ContentData::FunctionCall(types::FunctionCall {
-                name: tool_call.id,
-                arguments: Value::Object(tool_call.arguments),
-            })
-            .into(),
-        );
-    }
-
-    types::Content {
-        role: Some(types::Role::Model),
-        parts,
-    }
+            messages
+        })
 }
 
 impl From<types::ContentPart> for Delta {
@@ -476,6 +437,7 @@ mod tests {
     use std::path::PathBuf;
 
     use jp_config::providers::llm::LlmProviderConfig;
+    use jp_conversation::{ConversationStream, event::ChatRequest, thread::ThreadBuilder};
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -543,12 +505,16 @@ mod tests {
         let mut config = LlmProviderConfig::default().google;
         let model_id = "google/gemini-2.5-flash-preview-05-20".parse().unwrap();
         let model = ModelDetails::empty(model_id);
+        let mut stream = ConversationStream::default();
+        stream.add_chat_request(ChatRequest::from("Test message"));
         let query = ChatQuery {
-            thread: Thread {
-                message: "Test message".into(),
-                ..Default::default()
-            },
-            ..Default::default()
+            thread: ThreadBuilder::default()
+                .with_events(stream)
+                .build()
+                .unwrap(),
+            tools: vec![],
+            tool_choice: ToolChoice::Auto,
+            tool_call_strict_mode: false,
         };
 
         let vcr = vcr();
@@ -585,12 +551,16 @@ mod tests {
         let mut config = LlmProviderConfig::default().google;
         let model_id = "google/gemini-2.5-flash-preview-05-20".parse().unwrap();
         let model = ModelDetails::empty(model_id);
+        let mut stream = ConversationStream::default();
+        stream.add_chat_request(ChatRequest::from("Test message"));
         let query = ChatQuery {
-            thread: Thread {
-                message: "Test message".into(),
-                ..Default::default()
-            },
-            ..Default::default()
+            thread: ThreadBuilder::default()
+                .with_events(stream)
+                .build()
+                .unwrap(),
+            tools: vec![],
+            tool_choice: ToolChoice::Auto,
+            tool_call_strict_mode: false,
         };
 
         let vcr = vcr();

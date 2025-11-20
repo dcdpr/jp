@@ -1,10 +1,10 @@
 use std::fs;
 
+use crossterm::style::Stylize as _;
 use jp_config::{
     PartialAppConfig,
     assignment::{AssignKeyValue as _, KvAssignment},
 };
-use jp_conversation::event::conversation_config;
 
 use super::TargetWithConversation;
 use crate::{Output, ctx::Ctx};
@@ -46,10 +46,13 @@ impl Set {
                 None => ctx.workspace.active_conversation_id(),
             };
 
-            let events = ctx.workspace.get_events(&id);
-            let mut config = conversation_config(events);
+            let mut events = ctx.workspace.get_events_mut(&id).cloned().ok_or_else(|| {
+                format!("Conversation {} not found", id.to_string().bold().yellow())
+            })?;
+
+            let mut config = PartialAppConfig::empty();
             config.assign(assignment)?;
-            ctx.workspace.add_event(id, config);
+            events.add_config_delta(PartialAppConfig::empty());
 
             return Ok(format!(
                 "Set configuration value for {} in conversation {id:?}",
@@ -59,7 +62,7 @@ impl Set {
         }
 
         let Some(mut config) = self.target.target.config_file(ctx)? else {
-            unreachable!("target is either a path, or a conversation")
+            unreachable!("target must be either a path, or a conversation")
         };
 
         config.edit_content(|partial: &mut PartialAppConfig| {

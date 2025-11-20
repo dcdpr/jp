@@ -12,8 +12,8 @@ use jp_config::{
     providers::llm::ollama::OllamaConfig,
 };
 use jp_conversation::{
-    AssistantMessage, UserMessage,
-    event::{ConversationEvent, EventKind},
+    ConversationStream,
+    event::{ChatResponse, EventKind},
     thread::{Document, Documents, Thread},
 };
 use ollama_rs::{
@@ -317,54 +317,22 @@ struct OllamaMessages(Vec<ChatMessage>);
 impl TryFrom<(Thread, ToolChoice)> for OllamaMessages {
     type Error = Error;
 
-    #[expect(clippy::too_many_lines)]
     fn try_from((thread, tool_choice): (Thread, ToolChoice)) -> Result<Self> {
         let Thread {
             system_prompt,
             instructions,
             attachments,
-            mut history,
-            message,
+            events,
         } = thread;
 
-        // If the last history message is a tool call response, we need to go
-        // one more back in history, to avoid disjointing tool call requests and
-        // their responses.
-        let mut history_after_instructions = vec![];
-        while let Some(event) = history.pop() {
-            let tool_call_results = matches!(
-                event.kind,
-                EventKind::UserMessage(UserMessage::ToolCallResults(_))
-            );
-            history_after_instructions.insert(0, event);
-
-            if !tool_call_results {
-                break;
-            }
-        }
-
         let mut items = vec![];
-        let history = history
-            .into_iter()
-            .flat_map(event_to_messages)
-            .collect::<Vec<_>>();
 
-        // System message first, if any.
+        // Build system prompt with instructions and attachments
+        let mut system_parts = vec![];
+
         if let Some(system_prompt) = system_prompt {
-            items.push(ChatMessage {
-                role: MessageRole::System,
-                content: system_prompt,
-                tool_calls: vec![],
-                images: None,
-                thinking: None,
-            });
+            system_parts.push(system_prompt);
         }
-
-        // Historical messages second, these are static.
-        items.extend(history);
-
-        // Group multiple contents blocks into a single message.
-        let mut content = vec![];
 
         if !instructions.is_empty() {
             // TODO: Poor-man's version of API-based tool choice. Needed until
@@ -375,7 +343,7 @@ impl TryFrom<(Thread, ToolChoice)> for OllamaMessages {
                 // there is no need to instruct the model any further.
                 ToolChoice::Auto | ToolChoice::None => {}
                 ToolChoice::Required => {
-                    content.push(
+                    system_parts.push(
                         // sigh.. Shouting seems to be a tad bit more effective.
                         "IMPORTANT: You MUST use one or more functions or tools available to you. \
                          DO NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR \
@@ -384,7 +352,7 @@ impl TryFrom<(Thread, ToolChoice)> for OllamaMessages {
                     );
                 }
                 ToolChoice::Function(name) => {
-                    content.push(format!(
+                    system_parts.push(format!(
                         "IMPORTANT: You MUST use the function or tool named '{name}' available to \
                          you. DO NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR \
                          DETAILS. JUST RUN IT."
@@ -392,19 +360,17 @@ impl TryFrom<(Thread, ToolChoice)> for OllamaMessages {
                 }
             }
 
-            content.push(
+            system_parts.push(
                 "Before we continue, here are some contextual details that will help you generate \
                  a better response."
                     .to_string(),
             );
+
+            for instruction in &instructions {
+                system_parts.push(instruction.try_to_xml()?);
+            }
         }
 
-        // Then instructions in XML tags.
-        for instruction in &instructions {
-            content.push(instruction.try_to_xml()?);
-        }
-
-        // Then large list of attachments, formatted as XML.
         if !attachments.is_empty() {
             let documents: Documents = attachments
                 .into_iter()
@@ -414,131 +380,75 @@ impl TryFrom<(Thread, ToolChoice)> for OllamaMessages {
                 .collect::<Vec<_>>()
                 .into();
 
-            content.push(documents.try_to_xml()?);
+            system_parts.push(documents.try_to_xml()?);
         }
 
-        // Attach all data, and add a "fake" acknowledgement by the assistant.
-        //
-        // See `provider::openrouter` for more information.
-        if !content.is_empty() {
+        // Add system message if we have any system content
+        if !system_parts.is_empty() {
             items.push(ChatMessage {
-                role: MessageRole::User,
-                content: content.join("\n\n"),
-                tool_calls: vec![],
-                images: None,
-                thinking: None,
-            });
-
-            items.push(ChatMessage {
-                role: MessageRole::Assistant,
-                content: "Thank you for those details, I'll use them to inform my next response."
-                    .into(),
+                role: MessageRole::System,
+                content: system_parts.join("\n\n"),
                 tool_calls: vec![],
                 images: None,
                 thinking: None,
             });
         }
 
-        items.extend(
-            history_after_instructions
-                .into_iter()
-                .flat_map(event_to_messages),
-        );
-
-        // User query
-        match message {
-            UserMessage::Query { query } => {
-                items.push(ChatMessage {
-                    role: MessageRole::User,
-                    content: query,
-                    tool_calls: vec![],
-                    images: None,
-                    thinking: None,
-                });
-            }
-            UserMessage::ToolCallResults(results) => {
-                items.extend(results.into_iter().map(|result| ChatMessage {
-                    role: MessageRole::Tool,
-                    content: result.content,
-                    tool_calls: vec![],
-                    images: None,
-                    thinking: None,
-                }));
-            }
-        }
+        items.extend(convert_events(events));
 
         Ok(Self(items))
     }
 }
-fn event_to_messages(event: ConversationEvent) -> Vec<ChatMessage> {
-    match event.kind {
-        EventKind::UserMessage(user) => user_message_to_messages(user),
-        EventKind::AssistantMessage(assistant) => assistant_message_to_messages(assistant),
-        EventKind::ConfigDelta(_) => vec![],
-    }
-}
 
-fn user_message_to_messages(user: UserMessage) -> Vec<ChatMessage> {
-    match user {
-        UserMessage::Query { query } if !query.is_empty() => vec![ChatMessage {
-            role: MessageRole::User,
-            content: query,
-            tool_calls: vec![],
-            images: None,
-            thinking: None,
-        }],
-        UserMessage::Query { .. } => vec![],
-        UserMessage::ToolCallResults(results) => results
-            .into_iter()
-            .map(|result| ChatMessage {
-                role: MessageRole::Tool,
-                content: result.content,
-                tool_calls: vec![],
+fn convert_events(events: ConversationStream) -> Vec<ChatMessage> {
+    events
+        .into_iter()
+        .filter_map(|event| match event.into_kind() {
+            EventKind::ChatRequest(request) => Some(ChatMessage::user(request.content)),
+            EventKind::ChatResponse(response) => match response {
+                ChatResponse::Message { message } => Some(ChatMessage::assistant(message)),
+                ChatResponse::Reasoning { reasoning, .. } => Some(ChatMessage {
+                    role: MessageRole::Assistant,
+                    content: String::new(),
+                    tool_calls: vec![],
+                    images: None,
+                    thinking: Some(reasoning),
+                }),
+            },
+            EventKind::ToolCallRequest(request) => Some(ChatMessage {
+                role: MessageRole::Assistant,
+                content: String::new(),
+                tool_calls: vec![ToolCall {
+                    function: ToolCallFunction {
+                        name: request.name,
+                        arguments: Value::Object(request.arguments),
+                    },
+                }],
                 images: None,
                 thinking: None,
-            })
-            .collect(),
-    }
-}
-
-fn assistant_message_to_messages(assistant: AssistantMessage) -> Vec<ChatMessage> {
-    let AssistantMessage {
-        reasoning,
-        content,
-        tool_calls,
-        ..
-    } = assistant;
-
-    let mut items = vec![];
-    if let Some(text) = content {
-        items.push(ChatMessage {
-            role: MessageRole::Assistant,
-            content: text,
-            tool_calls: vec![],
-            images: None,
-            thinking: reasoning,
-        });
-    }
-
-    if !tool_calls.is_empty() {
-        items.push(ChatMessage {
-            role: MessageRole::Assistant,
-            content: String::new(),
-            tool_calls: tool_calls
-                .into_iter()
-                .map(|call| ToolCall {
-                    function: ToolCallFunction {
-                        name: call.name,
-                        arguments: Value::Object(call.arguments),
-                    },
-                })
-                .collect(),
-            images: None,
-            thinking: None,
-        });
-    }
-
-    items
+            }),
+            EventKind::ToolCallResponse(response) => {
+                Some(ChatMessage::tool(match response.result {
+                    Ok(content) => content,
+                    Err(error) => error,
+                }))
+            }
+            _ => None,
+        })
+        .fold(vec![], |mut messages, message| match messages.last_mut() {
+            Some(last)
+                if last.role == message.role
+                    && message.thinking.is_some()
+                    && last.thinking.is_none() =>
+            {
+                last.thinking = message.thinking;
+                messages
+            }
+            _ => {
+                messages.push(message);
+                messages
+            }
+        })
 }
 
 impl From<ToolCall> for Delta {
@@ -556,6 +466,7 @@ mod tests {
     use std::{path::PathBuf, result::Result};
 
     use jp_config::providers::llm::LlmProviderConfig;
+    use jp_conversation::event::ChatResponse;
     use jp_test::{function_name, mock::Vcr};
     use test_log::test;
 
@@ -601,7 +512,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                message: "Test message".into(),
+                events: ConversationStream::default().with_chat_request("Test message"),
                 ..Default::default()
             },
             ..Default::default()
@@ -634,7 +545,7 @@ mod tests {
         let model = ModelDetails::empty(model_id);
         let query = ChatQuery {
             thread: Thread {
-                message: "Test message".into(),
+                events: ConversationStream::default().with_chat_request("Test message"),
                 ..Default::default()
             },
             ..Default::default()
@@ -668,14 +579,9 @@ mod tests {
         let mut config = LlmProviderConfig::default().ollama;
         let model_id = "ollama/llama3.1:8b".parse().unwrap();
         let model = ModelDetails::empty(model_id);
-
-        let message = UserMessage::Query {
-            query: "Test message".to_string(),
-        };
-        let history = vec![
-            ConversationEvent::now(message),
-            ConversationEvent::now(AssistantMessage::new(PROVIDER)),
-        ];
+        let history = ConversationStream::default()
+            .with_chat_request("Test message")
+            .with_chat_response(ChatResponse::reasoning("Test response"));
 
         let vcr = vcr(&config.base_url);
         vcr.cassette(

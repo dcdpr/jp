@@ -3,23 +3,31 @@ use jp_config::assistant::instructions::InstructionsConfig;
 use serde::Serialize;
 
 use crate::{
-    UserMessage,
+    ConversationStream,
     error::{Error, Result},
-    event::ConversationEvent,
 };
 
-/// A wrapper for multiple messages, with convenience methods for adding
-/// specific message types and content.
-#[derive(Debug, Default, Clone)]
+/// A builder for creating a Thread with events.
+#[derive(Debug, Clone, Default)]
 pub struct ThreadBuilder {
     pub system_prompt: Option<String>,
     pub instructions: Vec<InstructionsConfig>,
     pub attachments: Vec<Attachment>,
-    pub history: Vec<ConversationEvent>,
-    pub message: Option<UserMessage>,
+    events: Option<ConversationStream>,
 }
 
 impl ThreadBuilder {
+    /// Creates a new builder with the given initial configuration.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            system_prompt: None,
+            instructions: Vec::new(),
+            attachments: Vec::new(),
+            events: None,
+        }
+    }
+
     #[must_use]
     pub fn with_system_prompt(mut self, system_prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(system_prompt.into());
@@ -28,62 +36,62 @@ impl ThreadBuilder {
 
     #[must_use]
     pub fn with_instructions(mut self, instructions: Vec<InstructionsConfig>) -> Self {
-        self.instructions.extend(instructions);
+        self.instructions = instructions;
         self
     }
 
     #[must_use]
-    pub fn with_instruction(mut self, instruction: InstructionsConfig) -> Self {
+    pub fn add_instruction(mut self, instruction: InstructionsConfig) -> Self {
         self.instructions.push(instruction);
         self
     }
 
     #[must_use]
     pub fn with_attachments(mut self, attachments: Vec<Attachment>) -> Self {
-        self.attachments.extend(attachments);
+        self.attachments = attachments;
         self
     }
 
     #[must_use]
-    pub fn with_history(mut self, history: Vec<ConversationEvent>) -> Self {
-        self.history.extend(history);
+    pub fn with_events(mut self, events: ConversationStream) -> Self {
+        self.events = Some(events);
         self
     }
 
-    #[must_use]
-    pub fn with_message(mut self, message: impl Into<UserMessage>) -> Self {
-        self.message = Some(message.into());
-        self
-    }
+    // #[must_use]
+    // pub fn with_event(mut self, event: impl Into<ConversationEvent>) -> Self {
+    //     if let Some(stream) = &mut self.events {
+    //         stream.push(event.into());
+    //     }
+    //     self
+    // }
 
     pub fn build(self) -> Result<Thread> {
         let ThreadBuilder {
             system_prompt,
             instructions,
             attachments,
-            history,
-            message,
+            events,
         } = self;
 
-        let message = message.ok_or(Error::Thread("Missing message".to_string()))?;
+        let events =
+            events.ok_or_else(|| Error::Thread("Event stream not initialized".to_string()))?;
 
         Ok(Thread {
             system_prompt,
             instructions,
             attachments,
-            history,
-            message,
+            events,
         })
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Thread {
     pub system_prompt: Option<String>,
     pub instructions: Vec<InstructionsConfig>,
     pub attachments: Vec<Attachment>,
-    pub history: Vec<ConversationEvent>,
-    pub message: UserMessage,
+    pub events: ConversationStream,
 }
 
 /// Structure for document collection

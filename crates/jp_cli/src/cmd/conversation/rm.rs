@@ -89,7 +89,11 @@ impl Rm {
                 let mut query = ConversationQuery::new(active_id, &mut conversations);
                 query.last_active_conversation_id().copied()
             }
-            .unwrap_or_else(|| ctx.workspace.create_conversation(Conversation::default()));
+            .unwrap_or_else(|| {
+                let partial = ctx.config().to_partial();
+                ctx.workspace
+                    .create_conversation(Conversation::default(), partial)
+            });
 
             ctx.workspace.set_active_conversation_id(new_active_id)?;
         }

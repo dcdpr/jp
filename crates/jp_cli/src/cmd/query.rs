@@ -11,12 +11,12 @@ use std::{
 };
 
 use clap::{ArgAction, builder::TypedValueParser as _};
-use event::{StreamEventHandler, handle_tool_calls};
+use event::StreamEventHandler;
 use futures::StreamExt as _;
 use itertools::Itertools as _;
 use jp_attachment::Attachment;
 use jp_config::{
-    PartialAppConfig, PartialConfig as _,
+    AppConfig, PartialAppConfig, PartialConfig as _,
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::{AssistantConfig, instructions::InstructionsConfig, tool_choice::ToolChoice},
     fs::{expand_tilde, load_partial},
@@ -24,8 +24,8 @@ use jp_config::{
     style::reasoning::ReasoningDisplayConfig,
 };
 use jp_conversation::{
-    AssistantMessage, Conversation, ConversationId, UserMessage,
-    event::{ConversationEvent, EventKind, conversation_config},
+    Conversation, ConversationId, ConversationStream,
+    event::{ChatRequest, ChatResponse},
     thread::{Thread, ThreadBuilder},
 };
 use jp_llm::{
@@ -45,15 +45,15 @@ use url::Url;
 use super::{Output, attachment::register_attachment};
 use crate::{
     Ctx, PATH_STRING_PREFIX,
-    cmd::{Success, query::turn::TurnState},
+    cmd::{self, Success, query::turn::TurnState},
     ctx::IntoPartialAppConfig,
     editor::{self, Editor},
     error::{Error, Result},
-    load_cli_cfg_args, parser,
-    signals::SignalTo,
+    parser,
+    signals::{SignalRx, SignalTo},
 };
 
-const EMPTY_RESPONSE_MESSAGE: &str = "The response appears to be empty. Please try again.";
+const EMPTY_RESPONSE_MESSAGE: &str = " -- The response appears to be empty. Please try again.";
 
 type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -228,179 +228,204 @@ pub(crate) enum RenderMode {
     Buffered,
 }
 
+impl RenderMode {
+    pub fn is_streamed(self) -> bool {
+        matches!(self, Self::Streamed)
+    }
+}
+
 impl Query {
+    #[expect(clippy::too_many_lines)]
     pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
+        let cfg = ctx.config();
 
-        let previous_id = self.update_active_conversation(ctx)?;
+        let previous_id = self.update_active_conversation(&mut ctx.workspace, cfg.to_partial())?;
         let conversation_id = ctx.workspace.active_conversation_id();
-
-        ctx.configure_active_mcp_servers().await?;
-        let (user_query, editor_details) = self.build_message(ctx, &conversation_id).await?;
-        let query_file = editor_details.as_ref().map(|v| v.0.clone());
-        let history = ctx.workspace.get_events(&conversation_id).to_vec();
-
-        if let UserMessage::Query { query } = &user_query {
-            if query.is_empty() {
-                return cleanup(ctx, previous_id, query_file.as_deref()).map_err(Into::into);
-            }
-
-            // Generate title for new or empty conversations.
-            if ctx.term.args.persist
-                && (self.new_conversation || history.is_empty())
-                && ctx.config().conversation.title.generate.auto
-            {
-                debug!("Generating title for new conversation");
-                ctx.task_handler.spawn(TitleGeneratorTask::new(
-                    conversation_id,
-                    history.clone(),
-                    ctx.config(),
-                    Some(query.clone()),
-                )?);
-            }
+        if let Some(delta) = get_config_delta_from_cli(&cfg, &ctx.workspace, &conversation_id) {
+            ctx.workspace
+                .get_events_mut(&conversation_id)
+                .expect("TODO: add this invariant to the type system")
+                .add_config_delta(delta);
         }
 
-        let tools =
-            tool_definitions(ctx.config().conversation.tools.iter(), &ctx.mcp_client).await?;
+        ctx.configure_active_mcp_servers().await?;
+
+        let root = ctx
+            .workspace
+            .storage_path()
+            .unwrap_or(&ctx.workspace.root)
+            .to_path_buf();
+
+        let (query_file, editor_provided_config) = self.build_conversation(
+            ctx.workspace
+                .get_events_mut(&conversation_id)
+                .expect("TODO: add this invariant to the type system"),
+            &cfg,
+            root,
+        )?;
+
+        if ctx
+            .workspace
+            .get_events(&conversation_id)
+            .is_none_or(ConversationStream::is_empty)
+        {
+            return cleanup(ctx, previous_id, query_file.as_deref()).map_err(Into::into);
+        }
+
+        if !editor_provided_config.is_empty() {
+            ctx.workspace
+                .get_events_mut(&conversation_id)
+                .expect("TODO: add this invariant to the type system")
+                .add_config_delta(editor_provided_config);
+        }
+
+        let stream = ctx
+            .workspace
+            .get_events(&conversation_id)
+            .cloned()
+            .unwrap_or_default();
+
+        // Generate title for new or empty conversations.
+        if (self.new_conversation || stream.is_empty())
+            && ctx.term.args.persist
+            && cfg.conversation.title.generate.auto
+        {
+            debug!("Generating title for new conversation");
+            ctx.task_handler.spawn(TitleGeneratorTask::new(
+                conversation_id,
+                stream.clone(),
+                &cfg,
+            )?);
+        }
+
+        let tools = tool_definitions(cfg.conversation.tools.iter(), &ctx.mcp_client).await?;
 
         let mut attachments = vec![];
-        for attachment in &ctx.config().conversation.attachments {
+        for attachment in &cfg.conversation.attachments {
             register_attachment(ctx, &attachment.to_url()?, &mut attachments).await?;
         }
 
-        let thread = build_thread(
-            user_query.clone(),
-            history,
-            attachments,
-            &ctx.config().assistant,
-            &tools,
-        )?;
+        // Keep track of the number of events in the stream, so that we can
+        // later append new events to the end.
+        let current_events = stream.len();
 
-        let mut new_events =
-            self.create_initial_events(ctx, editor_details.map(|v| v.1).as_ref())?;
+        let mut thread = build_thread(stream, attachments, &cfg.assistant, &tools)?;
 
+        let mut result = Output::Ok(Success::Ok);
         if let Some(schema) = self.schema.clone() {
-            new_events.extend(handle_structured_output(ctx, thread, schema).await?);
+            result = handle_structured_output(
+                &cfg,
+                ctx.term.is_tty,
+                &mut thread,
+                schema,
+                self.render_mode(),
+            )
+            .await;
         } else {
             let mut turn_state = TurnState::default();
-            self.handle_stream(
-                ctx,
-                &mut turn_state,
-                thread,
-                ctx.config().assistant.tool_choice.clone(),
-                tools,
-                &mut new_events,
-            )
-            .await?;
+            if let Err(error) = self
+                .handle_stream(
+                    &cfg,
+                    &mut ctx.signals.receiver,
+                    &ctx.mcp_client,
+                    ctx.workspace.root.clone(),
+                    ctx.term.is_tty,
+                    &mut turn_state,
+                    &mut thread,
+                    cfg.assistant.tool_choice.clone(),
+                    tools,
+                    conversation_id,
+                )
+                .await
+            {
+                result = Output::Err(cmd::Error::from(error).with_persistence(true));
+            }
         }
 
-        let reply = store_events(ctx, conversation_id, new_events);
+        let stream = ctx
+            .workspace
+            .get_events_mut(&conversation_id)
+            .expect("TODO: add this invariant to the type system");
+
+        for event in thread.events.into_iter().skip(current_events) {
+            stream.push_with_config_delta(event);
+        }
 
         // Clean up the query file.
         if let Some(path) = query_file {
             fs::remove_file(path)?;
         }
 
-        if self.schema.is_some() && !reply.is_empty() {
-            if let RenderMode::Streamed = self.render_mode() {
-                stdout::typewriter(&reply, ctx.config().style.typewriter.code_delay.into())?;
-            } else {
-                return Ok(Success::Json(serde_json::from_str(&reply)?));
-            }
-        }
-
-        Ok(Success::Ok)
+        result
     }
 
-    async fn build_message(
+    fn build_conversation(
         &self,
-        ctx: &mut Ctx,
-        conversation_id: &ConversationId,
-    ) -> Result<(UserMessage, Option<(PathBuf, PartialAppConfig)>)> {
-        // If replaying, remove the last message from the conversation, and use
-        // its query message to build the new query.
-        let mut message = self
+        stream: &mut ConversationStream,
+        config: &AppConfig,
+        root: PathBuf,
+    ) -> Result<(Option<PathBuf>, PartialAppConfig)> {
+        // If replaying, remove all events up-to-and-including the last
+        // `ChatRequest` event, which we'll replay.
+        //
+        // If not replaying (or replaying but no chat request event exists), we
+        // create a new `ChatRequest` event, to populate with either the
+        // provided query, or the contents of the text editor.
+        let mut request = self
             .replay
-            .then(|| {
-                let mut user_message = None;
-                while let Some(event) = ctx.workspace.pop_event(conversation_id) {
-                    if let Some(message) = event.into_user_message() {
-                        user_message = Some(message);
-                        break;
-                    }
-                }
-
-                user_message
-            })
+            .then(|| stream.trim_chat_request())
             .flatten()
-            .unwrap_or(UserMessage::Query {
-                query: String::new(),
-            });
+            .unwrap_or_default();
 
-        // If replaying a tool call, re-run the requested tool(s) and return the
-        // new results.
-        if let UserMessage::ToolCallResults(_) = &mut message {
-            let events = ctx.workspace.get_events(conversation_id);
-            for event in events.iter().rev() {
-                if let Some(response) = event.as_assistant_message() {
-                    let results = handle_tool_calls(ctx, response.tool_calls.clone()).await?;
-                    message = UserMessage::ToolCallResults(results);
-                    break;
-                }
-            }
-
-            return Err(Error::Replay("No assistant response found".into()));
-        }
-
-        // If a query is provided, prepend it to the existing event. This is
-        // only relevant for replays, otherwise the existing message is empty,
-        // and we replace it with the provided query.
+        // If a query is provided, prepend it to the chat request. This is only
+        // relevant for replays, otherwise the chat request is still empty, so
+        // we replace it with the provided query.
         if let Some(text) = &self.query {
             let text = text.join(" ");
-            match &mut message {
-                UserMessage::Query { query } if query.is_empty() => text.clone_into(query),
-                UserMessage::Query { query } => *query = format!("{text}\n\n{query}"),
-                UserMessage::ToolCallResults(_) => {}
-            }
+            let sep = if request.is_empty() { "" } else { "\n\n" };
+            *request = format!("{text}{sep}{request}");
         }
 
-        let editor_details = self.edit_message(&mut message, ctx, conversation_id)?;
+        let editor_details = self.edit_message(&mut request, stream, config, root)?;
 
-        if let UserMessage::Query { query } = &mut message
-            && self.template
-        {
+        if self.template {
             let mut env = Environment::empty();
             env.set_undefined_behavior(UndefinedBehavior::SemiStrict);
-            env.add_template("query", query)?;
+            env.add_template("query", &request.content)?;
 
             let tmpl = env.get_template("query")?;
             // TODO: supported nested variables
             for var in tmpl.undeclared_variables(false) {
-                if ctx.config().template.values.contains_key(&var) {
+                if config.template.values.contains_key(&var) {
                     continue;
                 }
 
                 return Err(Error::TemplateUndefinedVariable(var));
             }
 
-            *query = tmpl.render(&ctx.config().template.values)?;
+            *request = tmpl.render(&config.template.values)?;
         }
 
-        Ok((message, editor_details))
+        stream.add_chat_request(request);
+
+        Ok(editor_details)
     }
 
-    fn update_active_conversation(&self, ctx: &mut Ctx) -> Result<ConversationId> {
+    fn update_active_conversation(
+        &self,
+        ws: &mut Workspace,
+        cfg: PartialAppConfig,
+    ) -> Result<ConversationId> {
         // Store the (old) active conversation ID, so that we can restore to it,
         // if the current conversation is aborted early (e.g. because of an
         // empty query or any other error).
-        let last_active_conversation_id = ctx.workspace.active_conversation_id();
+        let last_active_conversation_id = ws.active_conversation_id();
 
         // Set new active conversation if requested.
         if self.new_conversation {
-            let id = ctx
-                .workspace
-                .create_conversation(Conversation::default().with_local(self.local));
+            let id = ws.create_conversation(Conversation::default().with_local(self.local), cfg);
 
             debug!(
                 %id,
@@ -408,7 +433,7 @@ impl Query {
                 "Creating new active conversation due to --new flag."
             );
 
-            ctx.workspace.set_active_conversation_id(id)?;
+            ws.set_active_conversation_id(id)?;
         }
 
         Ok(last_active_conversation_id)
@@ -417,79 +442,65 @@ impl Query {
     // Open the editor for the query, if requested.
     fn edit_message(
         &self,
-        message: &mut UserMessage,
-        ctx: &mut Ctx,
-        conversation_id: &ConversationId,
-    ) -> Result<Option<(PathBuf, PartialAppConfig)>> {
-        // Editing only applies to queries, not tool-call results.
-        let UserMessage::Query { query } = message else {
-            return Ok(None);
-        };
-
+        request: &mut ChatRequest,
+        stream: &mut ConversationStream,
+        config: &AppConfig,
+        root: PathBuf,
+    ) -> Result<(Option<PathBuf>, PartialAppConfig)> {
         // If there is no query provided, but the user explicitly requested not
         // to edit the query, we populate the query with a default message,
         // since most LLM providers do not support empty queries.
-        if query.is_empty() && self.force_no_edit() {
-            "<no content>".clone_into(query);
+        //
+        // See `force_no_edit` why this can be useful.
+        if request.is_empty() && self.force_no_edit() {
+            "<no additional context provided>".clone_into(request);
         }
 
         // If a query is provided, and editing is not explicitly requested, we
         // omit opening the editor.
-        if !query.is_empty() && !self.force_edit() {
-            return Ok(None);
+        if !request.is_empty() && !self.force_edit() {
+            return Ok((None, PartialAppConfig::empty()));
         }
 
-        let cmd = ctx.config().editor.command();
-        let editor = match cmd {
-            None if !query.is_empty() => return Ok(None),
+        let editor = match config.editor.command() {
+            None if !request.is_empty() => return Ok((None, PartialAppConfig::empty())),
             None => return Err(Error::MissingEditor),
             Some(cmd) => cmd,
         };
 
-        let initial_message = if query.is_empty() {
-            None
-        } else {
-            Some(query.to_owned())
-        };
+        let (content, query_file, editor_provided_config) =
+            editor::edit_query(config, root, stream, request.as_str(), editor, None)?;
+        request.content = content;
 
-        // If replaying, pass the last query as the text to be edited,
-        // otherwise open an empty editor.
-        let editor_details;
-        (*query, editor_details) = editor::edit_query(
-            ctx,
-            conversation_id,
-            initial_message.as_deref(),
-            editor,
-            None,
-        )
-        .map(|(q, p, c)| (q, Some((p, c))))?;
-
-        Ok(editor_details)
+        Ok((Some(query_file), editor_provided_config))
     }
 
-    #[expect(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines, clippy::too_many_arguments)]
     async fn handle_stream(
         &self,
-        ctx: &mut Ctx,
+        cfg: &AppConfig,
+        signals: &mut SignalRx,
+        mcp_client: &jp_mcp::Client,
+        root: PathBuf,
+        is_tty: bool,
         turn_state: &mut TurnState,
-        mut thread: Thread,
+        thread: &mut Thread,
         tool_choice: ToolChoice,
         tools: Vec<ToolDefinition>,
-        events: &mut Vec<ConversationEvent>,
+        conversation_id: ConversationId,
     ) -> Result<()> {
+        let mut result = Ok(());
         let mut cancelled = false;
         turn_state.request_count += 1;
 
-        let model_id = &ctx
-            .config()
+        let model_id = cfg
             .assistant
             .model
             .id
-            .finalize(&ctx.config().providers.llm.aliases)?;
+            .finalize(&cfg.providers.llm.aliases)?;
 
-        let parameters = &ctx.config().assistant.model.parameters;
-        let provider = provider::get_provider(model_id.provider, &ctx.config().providers.llm)?;
-        let user_message = thread.message.clone();
+        let parameters = &cfg.assistant.model.parameters;
+        let provider = provider::get_provider(model_id.provider, &cfg.providers.llm)?;
         let query = ChatQuery {
             thread: thread.clone(),
 
@@ -530,14 +541,13 @@ impl Query {
 
         let mut event_handler = StreamEventHandler::default();
 
-        let mut printer =
-            ResponseHandler::new(self.render_mode(), ctx.config().style.tool_call.show);
+        let mut printer = ResponseHandler::new(self.render_mode(), cfg.style.tool_call.show);
         let mut metadata = BTreeMap::new();
 
         loop {
             jp_macro::select!(
                 biased,
-                ctx.signals.receiver.recv(),
+                signals.recv(),
                 |signal| {
                     debug!(?signal, "Received signal.");
                     match signal {
@@ -560,26 +570,37 @@ impl Query {
                         break;
                     };
 
-                    self.handle_event(
-                        event,
-                        ctx,
-                        turn_state,
-                        provider.as_ref(),
-                        &thread,
-                        &tool_choice,
-                        &tools,
-                        events,
-                        &mut printer,
-                        &mut event_handler,
-                        &mut metadata,
-                    )
-                    .await?
+                    if let Err(error) = self
+                        .handle_event(
+                            event,
+                            cfg,
+                            mcp_client,
+                            root.clone(),
+                            is_tty,
+                            signals,
+                            turn_state,
+                            provider.as_ref(),
+                            thread,
+                            &tool_choice,
+                            &tools,
+                            &mut printer,
+                            &mut event_handler,
+                            &mut metadata,
+                            conversation_id,
+                        )
+                        .await
+                    {
+                        error!(?error, "Received error while handling conversation event.");
+                        cancelled = true;
+                        result = Err(error);
+                        break;
+                    }
                 },
             );
         }
 
         // Ensure we handle the last line of the stream.
-        printer.drain(&ctx.config().style, false)?;
+        printer.drain(&cfg.style, false)?;
 
         let content_tokens = event_handler.content_tokens.trim().to_string();
         let content = if !content_tokens.is_empty() {
@@ -592,22 +613,25 @@ impl Query {
                     max_tries, "Empty response received, retrying..."
                 );
 
-                if let Some(query) = thread.message.as_query_mut() {
-                    query.push_str(" -- ");
-                    if query.ends_with(EMPTY_RESPONSE_MESSAGE) {
-                        query.push_str(" Please try again.");
-                    } else {
-                        query.push_str(EMPTY_RESPONSE_MESSAGE);
-                    }
+                // Append retry message to the last ChatRequest
+                if let Some(mut request) = thread.events.last_mut()
+                    && let Some(request) = request.as_chat_request_mut()
+                    && !request.ends_with(EMPTY_RESPONSE_MESSAGE)
+                {
+                    request.push_str(EMPTY_RESPONSE_MESSAGE);
                 }
 
                 return Box::pin(self.handle_stream(
-                    ctx,
+                    cfg,
+                    signals,
+                    mcp_client,
+                    root,
+                    is_tty,
                     turn_state,
                     thread,
                     tool_choice,
                     tools,
-                    events,
+                    conversation_id,
                 ))
                 .await;
             }
@@ -635,57 +659,75 @@ impl Query {
             println!();
         }
 
-        let assistant_message = ConversationEvent::now(AssistantMessage {
-            provider: model_id.provider,
-            metadata,
-            content,
-            reasoning,
-            tool_calls: event_handler.tool_calls.clone(),
-        });
-        let user_message = ConversationEvent::now(user_message);
+        // Emit reasoning response if present
+        if let Some(v) = reasoning {
+            thread
+                .events
+                .add_chat_response(ChatResponse::reasoning(v).with_metadata(metadata));
+        }
 
-        events.push(user_message.clone());
-        events.push(assistant_message.clone());
+        // Emit message response if present
+        if let Some(v) = content {
+            thread.events.add_chat_response(ChatResponse::message(v));
+        }
 
-        // If the assistant asked for a tool call, we handle it within the same
-        // "conversation turn", essentially going into a "loop" until no more
-        // tool calls are requested.
-        if !cancelled && !event_handler.tool_call_results.is_empty() {
-            thread.history.push(user_message);
-            thread.history.push(assistant_message);
-            thread.message = UserMessage::ToolCallResults(event_handler.tool_call_results);
+        // Emit tool call request events.
+        for tool_call in event_handler.tool_calls {
+            thread.events.add_tool_call_request(tool_call);
+        }
+
+        let has_tool_call_responses = !event_handler.tool_call_responses.is_empty();
+        for response in event_handler.tool_call_responses {
+            thread.events.add_tool_call_response(response);
+        }
+
+        // If a cancellation was requested, we DO NOT deliver the responses
+        // to the assistant. We DO store the responses to disk, such that a
+        // new invocation of the CLI picks up where we left off.
+        //
+        // If not cancelled, we deliver the tool call results to the
+        // assistant in a loop. Rebuild thread with all events so far.
+        if !cancelled && has_tool_call_responses {
             turn_state.request_count = 0;
 
             Box::pin(self.handle_stream(
-                ctx,
+                cfg,
+                signals,
+                mcp_client,
+                root,
+                is_tty,
                 turn_state,
                 thread,
                 // After the first tool call, we revert back to letting the LLM
                 // decide if/which tool to use.
                 ToolChoice::Auto,
                 tools,
-                events,
+                conversation_id,
             ))
             .await?;
         }
 
-        Ok(())
+        result
     }
 
     #[expect(clippy::too_many_arguments)]
     async fn handle_event(
         &self,
         event: std::result::Result<StreamEvent, jp_llm::Error>,
-        ctx: &mut Ctx,
+        cfg: &AppConfig,
+        mcp_client: &jp_mcp::Client,
+        root: PathBuf,
+        is_tty: bool,
+        signals: &mut SignalRx,
         turn_state: &mut TurnState,
         provider: &dyn provider::Provider,
-        thread: &Thread,
+        thread: &mut Thread,
         tool_choice: &ToolChoice,
         tools: &[ToolDefinition],
-        events: &mut Vec<ConversationEvent>,
         printer: &mut ResponseHandler,
         event_handler: &mut StreamEventHandler,
         metadata: &mut BTreeMap<String, Value>,
+        conversation_id: ConversationId,
     ) -> Result<()> {
         let tries = turn_state.request_count;
         let event = match event {
@@ -703,12 +745,16 @@ impl Query {
                 );
                 tokio::time::sleep(retry_after).await;
                 return Box::pin(self.handle_stream(
-                    ctx,
+                    cfg,
+                    signals,
+                    mcp_client,
+                    root,
+                    is_tty,
                     turn_state,
-                    thread.clone(),
+                    thread,
                     tool_choice.clone(),
                     tools.to_vec(),
-                    events,
+                    conversation_id,
                 ))
                 .await;
             }
@@ -730,11 +776,11 @@ impl Query {
 
         let data = match event {
             StreamEvent::ChatChunk(chunk) => {
-                event_handler.handle_chat_chunk(ctx.config().style.reasoning.display, chunk)
+                event_handler.handle_chat_chunk(cfg.style.reasoning.display, chunk)
             }
             StreamEvent::ToolCall(call) => {
                 event_handler
-                    .handle_tool_call(ctx, turn_state, call, printer)
+                    .handle_tool_call(cfg, mcp_client, root, is_tty, turn_state, call, printer)
                     .await?
             }
             StreamEvent::Metadata(key, data) => {
@@ -748,7 +794,7 @@ impl Query {
             return Ok(());
         };
 
-        printer.handle(&data, &ctx.config().style, false)?;
+        printer.handle(&data, &cfg.style, false)?;
 
         Ok(())
     }
@@ -782,44 +828,23 @@ impl Query {
     fn force_edit(&self) -> bool {
         !self.force_no_edit() && self.edit.is_some()
     }
+}
 
-    fn create_initial_events(
-        &self,
-        ctx: &mut Ctx,
-        editor_provided_config: Option<&PartialAppConfig>,
-    ) -> Result<Vec<ConversationEvent>> {
-        if self.new_conversation {
-            let mut partial = ctx.config().to_partial();
-            if let Some(config) = editor_provided_config {
-                partial
-                    .merge(&(), config.clone())
-                    .map_err(jp_config::Error::from)?;
-            }
+fn get_config_delta_from_cli(
+    cfg: &AppConfig,
+    ws: &Workspace,
+    conversation_id: &ConversationId,
+) -> Option<PartialAppConfig> {
+    let partial = ws
+        .get_events(conversation_id)
+        .map_or_else(PartialAppConfig::empty, ConversationStream::config);
 
-            Ok(vec![ConversationEvent::now(partial)])
-        } else {
-            let global = ctx.term.args.config.clone();
-            let partial =
-                load_cli_cfg_args(PartialAppConfig::empty(), &global, Some(&ctx.workspace))?;
-
-            let partial_config = ctx.config().to_partial();
-            let mut partial =
-                IntoPartialAppConfig::apply_cli_config(self, None, partial, Some(&partial_config))
-                    .map_err(|error| Error::CliConfig(error.to_string()))?;
-
-            if let Some(config) = editor_provided_config {
-                partial
-                    .merge(&(), config.clone())
-                    .map_err(jp_config::Error::from)?;
-            }
-
-            if partial.is_empty() {
-                Ok(vec![])
-            } else {
-                Ok(vec![ConversationEvent::now(partial)])
-            }
-        }
+    let partial = partial.delta(cfg.to_partial());
+    if partial.is_empty() {
+        return None;
     }
+
+    Some(partial)
 }
 
 impl IntoPartialAppConfig for Query {
@@ -899,55 +924,16 @@ impl IntoPartialAppConfig for Query {
         };
 
         let id = workspace.active_conversation_id();
-        let config = conversation_config(workspace.get_events(&id));
+        let config = workspace
+            .get_events(&id)
+            .map_or_else(PartialAppConfig::empty, ConversationStream::config);
+
         load_partial(partial, config).map_err(Into::into)
     }
 }
 
-fn store_events(
-    ctx: &mut Ctx,
-    conversation_id: ConversationId,
-    events: Vec<ConversationEvent>,
-) -> String {
-    let mut reply = String::new();
-
-    for event in events {
-        match &event.kind {
-            EventKind::UserMessage(message) => {
-                debug!(
-                    conversation = %conversation_id,
-                    query_size_bytes = message.query().map_or(0, str::len),
-                    tool_call_results_count = message.tool_call_results().len(),
-                    "Storing user message in conversation."
-                );
-            }
-            EventKind::AssistantMessage(message) => {
-                debug!(
-                    conversation = %conversation_id,
-                    content_size_bytes = message.content.as_deref().unwrap_or_default().len(),
-                    reasoning_size_bytes = message.reasoning.as_deref().unwrap_or_default().len(),
-                    tool_calls_count = message.tool_calls.len(),
-                    "Storing assistant message in conversation."
-                );
-
-                if let Some(content) = &message.content {
-                    reply.push_str(content);
-                }
-            }
-            EventKind::ConfigDelta(_) => {
-                debug!(conversation = %conversation_id, "Storing config delta in conversation.");
-            }
-        }
-
-        ctx.workspace.add_event(conversation_id, event);
-    }
-
-    reply
-}
-
 fn build_thread(
-    user_message: UserMessage,
-    history: Vec<ConversationEvent>,
+    events: ConversationStream,
     attachments: Vec<Attachment>,
     assistant: &AssistantConfig,
     tools: &[ToolDefinition],
@@ -955,8 +941,7 @@ fn build_thread(
     let mut thread_builder = ThreadBuilder::default()
         .with_instructions(assistant.instructions.to_vec())
         .with_attachments(attachments)
-        .with_history(history)
-        .with_message(user_message);
+        .with_events(events);
 
     if let Some(system_prompt) = assistant.system_prompt.clone() {
         thread_builder = thread_builder.with_system_prompt(system_prompt);
@@ -973,7 +958,7 @@ fn build_thread(
                  verify your answer.",
             );
 
-        thread_builder = thread_builder.with_instruction(instruction);
+        thread_builder = thread_builder.add_instruction(instruction);
     }
 
     Ok(thread_builder.build()?)
@@ -1197,36 +1182,43 @@ fn cleanup(
 }
 
 async fn handle_structured_output(
-    ctx: &mut Ctx,
-    thread: Thread,
+    cfg: &AppConfig,
+    is_tty: bool,
+    thread: &mut Thread,
     schema: schemars::Schema,
-) -> Result<Vec<ConversationEvent>> {
-    let model_id = &ctx
-        .config()
+    render_mode: RenderMode,
+) -> Output {
+    let model_id = cfg
         .assistant
         .model
         .id
-        .finalize(&ctx.config().providers.llm.aliases)?;
-
-    let parameters = &ctx.config().assistant.model.parameters;
-    let provider = provider::get_provider(model_id.provider, &ctx.config().providers.llm)?;
-    let message = thread.message.clone();
-    let query = StructuredQuery::new(schema, thread);
-
+        .finalize(&cfg.providers.llm.aliases)?;
+    let parameters = &cfg.assistant.model.parameters;
+    let provider = provider::get_provider(model_id.provider, &cfg.providers.llm)?;
+    let query = StructuredQuery::new(schema, thread.clone());
     let model = provider.model_details(&model_id.name).await?;
-    let value = provider
+
+    let result = provider
         .structured_completion(&model, parameters, query)
         .await?;
-    let content = if ctx.term.is_tty {
-        serde_json::to_string_pretty(&value)?
+
+    let content = serde_json::to_string(&result)?;
+    thread
+        .events
+        .add_chat_response(ChatResponse::message(&content));
+
+    let content = if is_tty {
+        serde_json::to_string_pretty(&result)?
     } else {
-        serde_json::to_string(&value)?
+        content
     };
 
-    Ok(vec![
-        ConversationEvent::now(message),
-        ConversationEvent::now(AssistantMessage::from((model_id.provider, content))),
-    ])
+    if render_mode.is_streamed() {
+        stdout::typewriter(&content, cfg.style.typewriter.code_delay.into())?;
+        return Ok(Success::Ok);
+    }
+
+    Ok(Success::Json(result))
 }
 
 #[expect(clippy::needless_pass_by_value)]

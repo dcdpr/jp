@@ -7,9 +7,8 @@ use std::{
 };
 
 pub use error::Error;
-use jp_conversation::{
-    Conversation, ConversationId, ConversationsMetadata, event::ConversationEvent,
-};
+use jp_config::PartialAppConfig;
+use jp_conversation::{Conversation, ConversationId, ConversationStream, ConversationsMetadata};
 use jp_id::Id as _;
 use jp_tombmap::TombMap;
 use tracing::{trace, warn};
@@ -21,7 +20,7 @@ use crate::{
 
 type ConversationsAndEvents = (
     TombMap<ConversationId, Conversation>,
-    TombMap<ConversationId, Vec<ConversationEvent>>,
+    TombMap<ConversationId, ConversationStream>,
 );
 
 pub const DEFAULT_STORAGE_DIR: &str = ".jp";
@@ -195,7 +194,7 @@ impl Storage {
     pub fn persist_conversations_and_events(
         &mut self,
         conversations: &TombMap<ConversationId, Conversation>,
-        events: &TombMap<ConversationId, Vec<ConversationEvent>>,
+        events: &TombMap<ConversationId, ConversationStream>,
         active_conversation_id: &ConversationId,
         active_conversation: &Conversation,
     ) -> Result<()> {
@@ -238,9 +237,15 @@ impl Storage {
             let meta_path = conv_dir.join(METADATA_FILE);
             write_json(&meta_path, conversation)?;
 
-            let events = events.get(id).map_or(vec![], Vec::clone);
             let events_path = conv_dir.join(EVENTS_FILE);
-            write_json(&events_path, &events)?;
+            if let Some(stream) = events.get(id) {
+                write_json(&events_path, stream)?;
+            } else {
+                write_json(
+                    &events_path,
+                    &ConversationStream::new(PartialAppConfig::default()),
+                )?;
+            }
         }
 
         // Don't mark active conversation as removed.
@@ -334,14 +339,12 @@ fn load_conversations_and_events_from_dir(path: &Path) -> Result<ConversationsAn
         };
 
         let events_path = path.join(EVENTS_FILE);
-        match read_json::<Vec<ConversationEvent>>(&events_path) {
-            Ok(data) => {
-                events.insert(conversation_id, data);
+        match read_json::<ConversationStream>(&events_path) {
+            Ok(stream) => {
+                events.insert(conversation_id, stream);
             }
             Err(error) => {
-                warn!(%error, ?events_path, "Failed to load events. Skipping.");
-                let data = fs::read_to_string(&events_path).unwrap_or_default();
-                warn!(%error, ?events_path, data, "Failed to load messages. Skipping.");
+                warn!(%error, ?events_path, "Failed to load event stream. Skipping.");
             }
         }
     }

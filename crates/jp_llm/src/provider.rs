@@ -20,7 +20,7 @@ use jp_config::{
     },
     providers::llm::LlmProviderConfig,
 };
-use jp_conversation::{AssistantMessage, message::ToolCallRequest};
+use jp_conversation::event::ToolCallRequest;
 use llamacpp::Llamacpp;
 use ollama::Ollama;
 use openai::Openai;
@@ -248,30 +248,6 @@ impl std::ops::Deref for Reply {
 impl std::ops::DerefMut for Reply {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.events
-    }
-}
-
-impl From<Reply> for AssistantMessage {
-    fn from(reply: Reply) -> Self {
-        let mut message = AssistantMessage::new(reply.provider);
-
-        for event in reply.events {
-            match event {
-                Event::Content(content) => {
-                    message.content.get_or_insert_default().push_str(&content);
-                }
-                Event::Reasoning(content) => {
-                    message.reasoning.get_or_insert_default().push_str(&content);
-                }
-                Event::ToolCall(call) => message.tool_calls.push(call),
-                Event::Metadata(key, metadata) => {
-                    message.metadata.insert(key, metadata);
-                }
-                Event::Finished(_) => {}
-            }
-        }
-
-        message
     }
 }
 

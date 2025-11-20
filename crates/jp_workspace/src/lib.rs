@@ -17,7 +17,10 @@ use std::{
 pub use error::Error;
 use error::Result;
 pub use id::Id;
-use jp_conversation::{Conversation, ConversationId, event::ConversationEvent};
+use jp_config::PartialAppConfig;
+use jp_conversation::{
+    Conversation, ConversationId, ConversationStream, stream::ConversationEventWithConfig,
+};
 use jp_storage::{DEFAULT_STORAGE_DIR, Storage};
 use state::{LocalState, State, UserState};
 use tracing::{debug, info, trace};
@@ -305,11 +308,19 @@ impl Workspace {
     }
 
     /// Creates a new conversation.
-    pub fn create_conversation(&mut self, conversation: Conversation) -> ConversationId {
+    pub fn create_conversation(
+        &mut self,
+        conversation: Conversation,
+        config: PartialAppConfig,
+    ) -> ConversationId {
         let id = ConversationId::default();
 
         self.state.local.conversations.insert(id, conversation);
-        self.state.local.events.entry(id).or_default();
+        self.state
+            .local
+            .events
+            .entry(id)
+            .or_insert_with(|| ConversationStream::new(config));
         id
     }
 
@@ -340,41 +351,74 @@ impl Workspace {
         &mut self.state.local.active_conversation
     }
 
-    /// Gets the events for a specific conversation. Returns an empty slice if
-    /// not found.
+    /// Gets the event stream for a specific conversation.
     #[must_use]
-    pub fn get_events(&self, id: &ConversationId) -> &[ConversationEvent] {
-        self.state.local.events.get(id).map_or(&[], |v| v.as_ref())
+    pub fn get_events(&self, id: &ConversationId) -> Option<&ConversationStream> {
+        self.state.local.events.get(id)
     }
 
-    /// Removes the last event from a conversation.
-    pub fn pop_event(&mut self, id: &ConversationId) -> Option<ConversationEvent> {
-        self.state.local.events.get_mut(id).and_then(Vec::pop)
+    /// Gets a mutable reference to the event stream for a specific conversation.
+    #[must_use]
+    pub fn get_events_mut(&mut self, id: &ConversationId) -> Option<&mut ConversationStream> {
+        self.state.local.events.get_mut(id)
     }
 
-    //     pub fn set_conversation_config(
-    //         &mut self,
-    //         id: &ConversationId,
-    //         config: PartialAppConfig,
-    //     ) -> Result<()> {
-    //         match self.state.local.messages.get_mut(id) {
-    //             Some(messages) => messages.set_config(config),
-    //             None => return Err(Error::NotFound("Conversation", id.to_string())),
+    pub fn pop_event(&mut self, id: &ConversationId) -> Option<ConversationEventWithConfig> {
+        self.get_events_mut(id).and_then(ConversationStream::pop)
+    }
+
+    // pub fn add_event(&mut self, id: ConversationId, event: impl Into<ConversationEvent>) {
+    //     let event = event.into();
+    //     match &event.kind {
+    //         EventKind::ChatRequest(request) => {
+    //             debug!(
+    //                 conversation = %id,
+    //                 query_size_bytes = request.content.len(),
+    //                 "Storing chat request in conversation."
+    //             );
     //         }
-    //
-    //         Ok(())
-    // >>>>>>> main
+    //         EventKind::ChatResponse(response) => {
+    //             debug!(
+    //                 conversation = %id,
+    //                 content_size_bytes = response.content.len(),
+    //                 variant = ?response.variant,
+    //                 "Storing chat response in conversation."
+    //             );
+    //         }
+    //         EventKind::ToolCallRequest(request) => {
+    //             debug!(
+    //                 conversation = %id,
+    //                 tool_name = %request.name,
+    //                 "Storing tool call request in conversation."
+    //             );
+    //         }
+    //         EventKind::ToolCallResponse(response) => {
+    //             debug!(
+    //                 conversation = %id,
+    //                 is_error = response.result.is_err(),
+    //                 "Storing tool call response in conversation."
+    //             );
+    //         }
+    //         EventKind::InquiryRequest(request) => {
+    //             debug!(
+    //                 conversation = %id,
+    //                 source = ?request.source,
+    //                 "Storing inquiry request in conversation."
+    //             );
+    //         }
+    //         EventKind::InquiryResponse(_) => {
+    //             debug!(
+    //                 conversation = %id,
+    //                 "Storing inquiry response in conversation."
+    //             );
+    //         }
+    //         EventKind::ConfigDelta(_) => {
+    //             debug!(conversation = %id, "Storing config delta in conversation.");
+    //         }
     //     }
-
-    /// Adds a event to a conversation.
-    pub fn add_event(&mut self, id: ConversationId, event: impl Into<ConversationEvent>) {
-        self.state
-            .local
-            .events
-            .entry(id)
-            .or_default()
-            .push(event.into());
-    }
+    //
+    //     self.state.local.events.entry(id).or_default().push(event);
+    // }
 
     /// Returns an iterator over all conversations, including the active one.
     fn all_conversations(&self) -> impl Iterator<Item = (&ConversationId, &Conversation)> {
@@ -513,7 +557,8 @@ mod tests {
 
         let mut workspace = Workspace::new(&root);
 
-        let id = workspace.create_conversation(Conversation::default());
+        let partial = PartialAppConfig::empty();
+        let id = workspace.create_conversation(Conversation::default(), partial);
         workspace.set_active_conversation_id(id).unwrap();
         assert!(!storage.exists());
 
@@ -567,8 +612,9 @@ mod tests {
         let mut workspace = Workspace::new(PathBuf::new());
         assert!(workspace.state.local.conversations.is_empty());
 
+        let partial = PartialAppConfig::empty();
         let conversation = Conversation::default();
-        let id = workspace.create_conversation(conversation.clone());
+        let id = workspace.create_conversation(conversation.clone(), partial);
         assert_eq!(
             workspace.state.local.conversations.get(&id),
             Some(&conversation)
