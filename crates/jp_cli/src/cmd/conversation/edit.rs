@@ -1,4 +1,3 @@
-use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
 use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{provider, structured};
@@ -36,46 +35,29 @@ impl Edit {
         let id = self.id.unwrap_or(active_id);
 
         if let Some(user) = self.local {
-            match ctx.workspace.get_conversation_mut(&id) {
-                Some(conversation) => conversation.user = user.unwrap_or(!conversation.user),
-                None => return missing_conversation(&id),
-            }
+            let conversation = ctx.workspace.try_get_conversation_mut(&id)?;
+            conversation.user = user.unwrap_or(!conversation.user);
         }
 
         if let Some(title) = self.title {
-            let title = if let Some(title) = title {
-                title
-            } else {
-                let cfg = ctx.config();
-                let events = ctx.workspace.get_events(&id).cloned().ok_or_else(|| {
-                    format!("Conversation {} not found", id.to_string().bold().yellow())
-                })?;
-
-                generate_titles(&cfg, events, vec![]).await?
+            let events = ctx.workspace.try_get_events(&id)?;
+            let title = match title {
+                Some(title) => title,
+                None => generate_titles(&ctx.config(), events, vec![]).await?,
             };
 
-            match ctx.workspace.get_conversation_mut(&id) {
-                Some(conversation) => conversation.title = Some(title),
-                None => return missing_conversation(&id),
-            }
+            ctx.workspace.try_get_conversation_mut(&id)?.title = Some(title);
         } else if self.no_title {
-            match ctx.workspace.get_conversation_mut(&id) {
-                Some(conversation) => conversation.title = None,
-                None => return missing_conversation(&id),
-            }
+            ctx.workspace.try_get_conversation_mut(&id)?.title = None;
         }
 
         Ok(Success::Message("Conversation updated.".into()))
     }
 }
 
-fn missing_conversation(id: &ConversationId) -> Output {
-    Err(format!("Conversation {} not found", id.to_string().bold().yellow()).into())
-}
-
 async fn generate_titles(
     config: &AppConfig,
-    events: ConversationStream,
+    events: &ConversationStream,
     mut rejected: Vec<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;

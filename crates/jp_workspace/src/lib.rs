@@ -307,6 +307,13 @@ impl Workspace {
         self.state.local.conversations.get_mut(id)
     }
 
+    /// Similar to [`Self::get_conversation_mut`], but returns an error if the
+    /// conversation does not exist.
+    pub fn try_get_conversation_mut(&mut self, id: &ConversationId) -> Result<&mut Conversation> {
+        self.get_conversation_mut(id)
+            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
+    }
+
     /// Creates a new conversation.
     pub fn create_conversation(
         &mut self,
