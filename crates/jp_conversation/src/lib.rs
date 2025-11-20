@@ -23,10 +23,6 @@
     unused_doc_comments
 )]
 #![expect(
-    rustdoc::private_intra_doc_links,
-    reason = "we don't host the docs, and use them mainly for LSP integration"
-)]
-#![expect(
     clippy::multiple_crate_versions,
     reason = "we need to update rmcp to update base64"
 )]

@@ -104,8 +104,8 @@ impl ConversationStream {
 
     /// Get the merged configuration of the stream.
     ///
-    /// This takes the base configuration, and merges all [`ConfigDelta`]
-    /// events in the stream from first to last, including any delta's that come
+    /// This takes the base configuration, and merges all `ConfigDelta` events
+    /// in the stream from first to last, including any delta's that come
     /// *after* the last conversation event.
     ///
     /// If you need the configuration state of the last event in the stream, use
