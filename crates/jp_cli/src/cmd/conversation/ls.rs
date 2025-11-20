@@ -1,6 +1,6 @@
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
-use jp_conversation::{ConversationId, ConversationStream};
+use jp_conversation::ConversationId;
 use jp_term::osc::hyperlink;
 use time::{UtcDateTime, UtcOffset, macros::format_description};
 
@@ -56,12 +56,12 @@ impl Ls {
             .workspace
             .conversations()
             .filter(|(_, c)| !self.local || c.user)
-            .map(|(id, c)| (id, c, ctx.workspace.get_events(id)))
+            .filter_map(|(id, c)| ctx.workspace.get_events(id).map(|events| (id, c, events)))
             .map(|(id, c, events)| Details {
                 id: *id,
                 title: c.title.clone(),
-                messages: events.map_or(0, ConversationStream::len),
-                last_message_at: events.and_then(|stream| stream.last().map(|m| m.timestamp)),
+                messages: events.len(),
+                last_message_at: events.last().map(|m| m.timestamp),
                 local: c.user,
             })
             .collect::<Vec<_>>();
