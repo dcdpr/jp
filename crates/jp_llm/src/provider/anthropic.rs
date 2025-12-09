@@ -12,12 +12,10 @@ use async_anthropic::{
 use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
+use indexmap::IndexMap;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
-    model::{
-        id::{Name, ProviderId},
-        parameters::ParametersConfig,
-    },
+    model::id::{Name, ProviderId},
     providers::llm::anthropic::AnthropicConfig,
 };
 use jp_conversation::{
@@ -25,17 +23,20 @@ use jp_conversation::{
     event::{ChatResponse, ConversationEvent, EventKind},
     thread::{Document, Documents, Thread},
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use time::macros::date;
 use tracing::{debug, info, trace, warn};
 
-use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply};
+use super::Provider;
 use crate::{
-    CompletionChunk, StreamEvent,
     error::{Error, Result},
-    provider::ModelDeprecation,
+    event::{Event, FinishReason},
+    model::{ModelDeprecation, ModelDetails, ReasoningDetails},
     query::ChatQuery,
-    stream::{accumulator::Accumulator, delta::Delta, event::StreamEndReason},
+    stream::{
+        EventStream,
+        aggregator::tool_call_request::{AggregationError, ToolCallRequestAggregator},
+    },
     tool::ToolDefinition,
 };
 
@@ -46,6 +47,9 @@ static PROVIDER: ProviderId = ProviderId::Anthropic;
 ///
 /// We detect where we inject cache controls and make sure to not exceed this limit.
 const MAX_CACHE_CONTROL_COUNT: usize = 4;
+
+const THINKING_SIGNATURE_KEY: &str = "anthropic_thinking_signature";
+const REDACTED_THINKING_KEY: &str = "anthropic_redacted_thinking";
 
 #[derive(Debug, Clone)]
 pub struct Anthropic {
@@ -66,65 +70,53 @@ impl Provider for Anthropic {
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
-        let (mut after_id, mut models) = self
-            .client
-            .models()
-            .list()
-            .await
-            .map(|list| (list.has_more.then_some(list.last_id).flatten(), list.data))?;
+        let mut all_models = vec![];
+        let mut after_id = None;
 
-        while let Some(id) = &after_id {
-            let (id, data) = self
+        loop {
+            let path = match after_id {
+                Some(id) => format!("/v1/models?after_id={id}"),
+                None => "/v1/models".to_string(),
+            };
+
+            let models;
+            (after_id, models) = self
                 .client
-                .get::<ListModelsResponse>(&format!("/v1/models?after_id={id}"))
+                .get::<ListModelsResponse>(&path)
                 .await
                 .map(|list| (list.has_more.then_some(list.last_id).flatten(), list.data))?;
 
-            models.extend(data);
-            after_id = id;
+            all_models.extend(models);
+
+            if after_id.is_none() {
+                break;
+            }
         }
 
-        models
+        all_models
             .into_iter()
             .map(|v| map_model(v, &self.beta))
             .collect::<Result<_>>()
     }
 
-    async fn chat_completion(
-        &self,
-        model: &ModelDetails,
-        parameters: &ParametersConfig,
-        query: ChatQuery,
-    ) -> Result<Reply> {
-        let request = create_request(model, parameters, query, false, &self.beta)?;
-
-        debug!(stream = false, "Anthropic chat completion request.");
-        trace!(
-            request = serde_json::to_string(&request).unwrap_or_default(),
-            "Request payload."
-        );
-
-        self.client
-            .messages()
-            .create(request)
-            .await
-            .map_err(Into::into)
-            .and_then(map_response)
-            .map(|events| Reply {
-                provider: PROVIDER,
-                events,
-            })
-    }
-
     async fn chat_completion_stream(
         &self,
         model: &ModelDetails,
-        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let chain_on_max_tokens = parameters.max_tokens.is_none() && self.chain_on_max_tokens;
-        let request = create_request(model, parameters, query, true, &self.beta)?;
+        let chain_on_max_tokens = query
+            .thread
+            .events
+            .config()?
+            .assistant
+            .model
+            .parameters
+            .max_tokens
+            .is_none()
+            && self.chain_on_max_tokens;
+
+        let request = create_request(model, query, true, &self.beta)?;
 
         debug!(stream = true, "Anthropic chat completion stream request.");
         trace!(
@@ -149,7 +141,7 @@ fn call(
     chain_on_max_tokens: bool,
 ) -> EventStream {
     Box::pin(try_stream!({
-        let mut accumulator = Accumulator::new(200);
+        let mut tool_call_aggregator = ToolCallRequestAggregator::new();
         let mut events = vec![];
 
         // If a tool call is requested, we cannot chain on max tokens, as the
@@ -188,23 +180,17 @@ fn call(
             });
 
         tokio::pin!(stream);
-        while let Some(event) = stream.next().await {
-            for event in map_event(event?, &mut accumulator)? {
-                if event.is_tool_call() {
-                    tool_calls_requested = true;
-                }
-
-                if !tool_calls_requested && chain_on_max_tokens {
-                    events.push(event.clone());
-                }
-
+        while let Some(event) = stream.next().await.transpose()? {
+            if let Some(event) = map_event(event, &mut tool_call_aggregator)? {
                 match event {
                     // If the assistant has reached the maximum number of
                     // tokens, and we are in a state in which we can request
                     // more tokens, we do so by sending a new request and
                     // chaining those events onto the previous ones, keeping the
                     // existing stream of events alive.
-                    StreamEvent::EndOfStream(StreamEndReason::MaxTokens)
+                    //
+                    // TODO: generalize this for any provider.
+                    Event::Finished(FinishReason::MaxTokens)
                         if !tool_calls_requested && chain_on_max_tokens =>
                     {
                         debug!("Max tokens reached, auto-requesting more tokens.");
@@ -214,16 +200,25 @@ fn call(
                         }
                         return;
                     }
-                    eos @ StreamEvent::EndOfStream(_) => {
-                        yield eos;
+                    done @ Event::Finished(_) => {
+                        yield done;
                         return;
                     }
-                    event => yield event,
+                    Event::Part { event, index } => {
+                        if event.is_tool_call_request() {
+                            tool_calls_requested = true;
+                        } else if chain_on_max_tokens {
+                            events.push(event.clone());
+                        }
+
+                        yield Event::Part { event, index };
+                    }
+                    flush @ Event::Flush { .. } => yield flush,
                 }
             }
         }
 
-        yield StreamEvent::EndOfStream(StreamEndReason::Completed);
+        yield Event::Finished(FinishReason::Completed);
     }))
 }
 
@@ -232,9 +227,8 @@ fn call(
 fn chain(
     client: Client,
     mut request: types::CreateMessagesRequest,
-    events: Vec<StreamEvent>,
+    events: Vec<ConversationEvent>,
 ) -> EventStream {
-    let events: Vec<ConversationEvent> = Reply::from((PROVIDER, events)).into();
     debug_assert!(!events.iter().any(ConversationEvent::is_tool_call_request));
 
     let mut should_merge = true;
@@ -262,38 +256,54 @@ fn chain(
     request.messages.push(types::Message {
         role: types::MessageRole::User,
         content: types::MessageContentList(vec![types::MessageContent::Text(
-            "Please continue from where you left off.".into(),
+            "Please continue from where you left off. DO NOT reason or mention being asked to \
+             continue the conversation, just do it. DO NOT produce any tokens that overlap with \
+             the already generated tokens, start exactly from the token that was generated last."
+                .into(),
         )]),
     });
 
     Box::pin(try_stream!({
         for await event in call(client, request, true) {
-            match event? {
-                StreamEvent::ChatChunk(chunk) => match chunk {
-                    // When chaining new events, the reasoning content is
-                    // irrelevant, as it will contain text such as "the user
-                    // asked me to continue [...]".
-                    CompletionChunk::Reasoning(_) => continue,
-                    CompletionChunk::Content(mut text) => {
-                        // Merge the new content with the previous content, if
-                        // there is any overlap. Sometimes the assistant will
-                        // start a chaining response with a small amount of
-                        // content that was already seen in the previous
-                        // response, and we want to avoid duplicating that.
-                        if should_merge {
-                            let merge_point = find_merge_point(&previous_content, &text, 500);
-                            text.replace_range(..merge_point, "");
-                        }
+            let mut event = event?;
 
-                        // After receiving the first content event, we can
-                        // stop merging.
-                        should_merge = false;
-
-                        yield StreamEvent::ChatChunk(CompletionChunk::Content(text));
-                    }
-                },
-                event => yield event,
+            // When chaining new events, the reasoning content is irrelevant, as
+            // it will contain text such as "the user asked me to continue
+            // [...]".
+            //
+            // NOTE: we should never end up in a situation in which we want to
+            // continue an existing reasoning stint from the previous request,
+            // as the model is configured to reason with less tokens than the
+            // total maximum number of tokens allowed, so we do not need to
+            // worry about omitting valid reasoning content here.
+            if event
+                .as_conversation_event()
+                .and_then(ConversationEvent::as_chat_response)
+                .is_some_and(ChatResponse::is_reasoning)
+            {
+                continue;
             }
+
+            // Merge the new content with the previous content, if there is any
+            // overlap. Sometimes the assistant will start a chaining response
+            // with a small amount of content that was already seen in the
+            // previous response, and we want to avoid duplicating that.
+            if let Some(content) = event
+                .as_conversation_event_mut()
+                .and_then(ConversationEvent::as_chat_response_mut)
+                .map(ChatResponse::content_mut)
+            {
+                if should_merge {
+                    let merge_point = find_merge_point(&previous_content, content, 500);
+                    content.replace_range(..merge_point, "");
+                }
+
+                // After receiving the first content event, we can
+                // stop merging.
+                should_merge = false;
+            }
+
+            yield event;
         }
 
         return;
@@ -350,12 +360,16 @@ impl BetaFeatures {
     fn context_1m(&self) -> bool {
         self.0.iter().any(|h| h == "context-1m-2025-08-07")
     }
+
+    /// See: <https://platform.claude.com/docs/en/build-with-claude/structured-outputs>
+    fn structured_outputs(&self) -> bool {
+        self.0.iter().any(|h| h == "structured-outputs-2025-10-27")
+    }
 }
 
 #[expect(clippy::too_many_lines)]
 fn create_request(
     model: &ModelDetails,
-    parameters: &ParametersConfig,
     query: ChatQuery,
     stream: bool,
     beta: &BetaFeatures,
@@ -379,12 +393,19 @@ fn create_request(
     } = thread;
 
     let mut cache_control_count = MAX_CACHE_CONTROL_COUNT;
+    let config = events.config()?;
 
     builder
         .model(model.id.name.clone())
         .messages(AnthropicMessages::build(events, &mut cache_control_count).0);
 
-    let tools = convert_tools(tools, tool_call_strict_mode, &mut cache_control_count);
+    let tools = convert_tools(
+        tools,
+        tool_call_strict_mode
+            && model.features.contains(&"structured-outputs")
+            && beta.structured_outputs(),
+        &mut cache_control_count,
+    );
 
     let mut system_content = vec![];
 
@@ -437,23 +458,15 @@ fn create_request(
         }));
     }
 
-    let tool_choice_function = match tool_choice.clone() {
-        ToolChoice::Function(name) => Some(name),
-        _ => None,
-    };
-
-    // If there is only one tool, we can set the tool choice to "required",
-    // since that gets us the same behavior, but avoids the issue of not
-    // supporting reasoning when using the "function" tool choice.
-    //
     // From testing, it seems that sending a single tool with the
     // "function" tool choice can result in incorrect API responses from
     // Anthropic. I (Jean) have an open support case with Anthropic to dig into
     // this finding more.
-    if tools.len() == 1 && tool_choice_function.is_some() {
+    if tools.len() == 1 && matches!(tool_choice, ToolChoice::Function(_)) {
         tool_choice = ToolChoice::Required;
     }
 
+    let parameters = &config.assistant.model.parameters;
     let max_tokens = parameters
         .max_tokens
         .or(model.max_output_tokens)
@@ -470,21 +483,27 @@ fn create_request(
     let reasoning_config = model.custom_reasoning_config(parameters.reasoning);
 
     // See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#extended-thinking-with-tool-use>
-    if reasoning_config.is_some()
-        && let Some(tool) = tool_choice_function
-    {
+    if reasoning_config.is_some() && tool_choice.is_forced_call() {
         info!(
-            tool,
+            ?tool_choice,
             "Anthropic API does not support reasoning when tool_choice forces tool use. Switching \
              to soft-force mode."
         );
         tool_choice = ToolChoice::Auto;
         system_content.push(types::SystemContent::Text(types::Text {
-            text: format!(
-                "IMPORTANT: You MUST use the function or tool named '{tool}' available to you. DO \
-                 NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR DETAILS. JUST RUN \
-                 IT."
-            ),
+            text: {
+                let msg = "IMPORTANT:";
+                let msg = if let Some(tool) = tool_choice.function_name() {
+                    format!("{msg} You MUST use the function named '{tool}' available to you.")
+                } else {
+                    format!("{msg} You MUST use AT LEAST ONE tool available to you.")
+                };
+
+                format!(
+                    "{msg} DO NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR \
+                     DETAILS. JUST RUN IT."
+                )
+            },
             cache_control: None,
         }));
     }
@@ -501,7 +520,7 @@ fn create_request(
 
     if let Some(config) = reasoning_config {
         let (min_budget, mut max_budget) = match model.reasoning {
-            Some(ReasoningDetails::Supported {
+            Some(ReasoningDetails::Budgetted {
                 min_tokens,
                 max_tokens,
             }) => (min_tokens, max_tokens.unwrap_or(u32::MAX)),
@@ -552,7 +571,7 @@ fn create_request(
             Some(Value::Object(strategy)) => strategy,
             // If no strategy is provided, but the `context_editing` feature is
             // enabled, use the default strategy.
-            _ => serde_json::Map::from_iter([(
+            _ => Map::from_iter([(
                 "edits".into(),
                 json!([{"type": "clear_tool_uses_20250919"}]),
             )]),
@@ -564,15 +583,29 @@ fn create_request(
     builder.build().map_err(Into::into)
 }
 
-#[expect(clippy::match_same_arms, clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
+        "claude-opus-4-5" | "claude-opus-4-5-20251101" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
+            context_window: Some(200_000),
+            max_output_tokens: Some(64_000),
+            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
+            knowledge_cutoff: Some(date!(2025 - 7 - 1)),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![
+                "interleaved-thinking",
+                "context-editing",
+                "structured-outputs",
+            ],
+        },
         "claude-haiku-4-5" | "claude-haiku-4-5-20251001" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::supported(1024, None)),
+            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(date!(2025 - 7 - 1)),
             deprecated: Some(ModelDeprecation::Active),
             features: vec!["interleaved-thinking", "context-editing"],
@@ -586,27 +619,35 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
                 Some(200_000)
             },
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::supported(1024, None)),
+            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(date!(2025 - 7 - 1)),
             deprecated: Some(ModelDeprecation::Active),
-            features: vec!["interleaved-thinking", "context-editing"],
+            features: vec![
+                "interleaved-thinking",
+                "context-editing",
+                "structured-outputs",
+            ],
         },
         "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
-            reasoning: Some(ReasoningDetails::supported(1024, None)),
+            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
             deprecated: Some(ModelDeprecation::Active),
-            features: vec!["interleaved-thinking", "context-editing"],
+            features: vec![
+                "interleaved-thinking",
+                "context-editing",
+                "structured-outputs",
+            ],
         },
         "claude-opus-4-0" | "claude-opus-4-20250514" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
-            reasoning: Some(ReasoningDetails::supported(1024, None)),
+            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
             deprecated: Some(ModelDeprecation::Active),
             features: vec!["interleaved-thinking", "context-editing"],
@@ -620,7 +661,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
                 Some(200_000)
             },
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::supported(1024, None)),
+            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(date!(2025 - 3 - 1)),
             deprecated: Some(ModelDeprecation::Active),
             features: vec!["interleaved-thinking", "context-editing"],
@@ -630,7 +671,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             display_name: Some(model.display_name),
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::supported(1024, None)),
+            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(date!(2024 - 11 - 1)),
             deprecated: Some(ModelDeprecation::Active),
             features: vec![],
@@ -679,43 +720,11 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
     Ok(details)
 }
 
-fn map_response(response: types::CreateMessagesResponse) -> Result<Vec<Event>> {
-    debug!("Received response from Anthropic API.");
-    trace!(
-        response = serde_json::to_string(&response).unwrap_or_default(),
-        "Response payload."
-    );
-
-    response
-        .content
-        .into_iter()
-        .filter_map(|item| {
-            let metadata = match &item {
-                types::MessageContent::Thinking(Thinking { signature, .. }) => {
-                    signature.clone().map(|v| ("signature", v))
-                }
-                types::MessageContent::RedactedThinking { data } => {
-                    Some(("redacted_thinking", data.clone()))
-                }
-                _ => None,
-            };
-
-            let v: Option<Result<Event>> = Delta::from(item).into();
-            v.map(|v| (v, metadata))
-        })
-        .flat_map(|item| match item {
-            (v, _) if v.is_err() => vec![v],
-            (v, None) => vec![v],
-            (v, Some((key, value))) => vec![v, Ok(Event::metadata(key, value))],
-        })
-        .collect::<Result<_>>()
-}
-
 fn map_event(
     event: types::MessagesStreamEvent,
-    accumulator: &mut Accumulator,
-) -> Result<Vec<StreamEvent>> {
-    use types::{ContentBlockDelta::*, MessagesStreamEvent::*};
+    agg: &mut ToolCallRequestAggregator,
+) -> Result<Option<Event>> {
+    use types::MessagesStreamEvent::*;
 
     trace!(
         event = serde_json::to_string(&event).unwrap_or_default(),
@@ -723,48 +732,14 @@ fn map_event(
     );
 
     match event {
-        MessageStart { message, .. } => message
-            .content
-            .into_iter()
-            .map(|c| Delta::from(c).into_stream_events(accumulator))
-            .try_fold(vec![], |mut acc, events| {
-                acc.extend(events?);
-                Ok(acc)
-            }),
-        ContentBlockStart { content_block, .. } => {
-            Delta::from(content_block).into_stream_events(accumulator)
-        }
-        ContentBlockDelta { delta, .. } => match delta {
-            TextDelta { text } => Delta::content(text).into_stream_events(accumulator),
-            ThinkingDelta { thinking } => {
-                Delta::reasoning(thinking).into_stream_events(accumulator)
-            }
-            InputJsonDelta { partial_json } => {
-                Delta::tool_call("", "", partial_json).into_stream_events(accumulator)
-            }
-
-            // This is only used for thinking blocks, and we need to store this
-            // signature to pass it back to the assistant in the message
-            // history.
-            //
-            // See: <https://docs.anthropic.com/en/docs/build-with-claude/streaming#thinking-delta>
-            SignatureDelta { signature } => Ok(vec![StreamEvent::metadata("signature", signature)]),
-        },
-        MessageDelta { delta, .. }
-            if delta.stop_reason.as_ref().is_some_and(|v| v == "tool_use") =>
-        {
-            Delta::tool_call_finished().into_stream_events(accumulator)
-        }
-        ContentBlockStop { .. } => accumulator.drain(),
-        MessageDelta { delta, .. }
-            if delta
-                .stop_reason
-                .as_ref()
-                .is_some_and(|v| v == "max_tokens") =>
-        {
-            Ok(vec![StreamEvent::EndOfStream(StreamEndReason::MaxTokens)])
-        }
-        _ => Ok(vec![]),
+        ContentBlockStart {
+            content_block,
+            index,
+        } => Ok(map_content_start(content_block, index, agg)),
+        ContentBlockDelta { delta, index } => Ok(map_content_delta(delta, index, agg)),
+        ContentBlockStop { index } => map_content_stop(index, agg),
+        MessageDelta { delta, .. } => Ok(map_message_delta(delta)),
+        _ => Ok(None),
     }
 }
 
@@ -806,7 +781,7 @@ fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {
 
 fn convert_tools(
     tools: Vec<ToolDefinition>,
-    _strict: bool,
+    strict: bool,
     cache_controls: &mut usize,
 ) -> Vec<types::Tool> {
     let mut tools: Vec<_> = tools
@@ -815,6 +790,7 @@ fn convert_tools(
             types::Tool::Custom(types::CustomTool {
                 name: tool.name,
                 description: tool.description,
+                strict: strict.then_some(true),
                 input_schema: {
                     let required = tool
                         .parameters
@@ -833,6 +809,7 @@ fn convert_tools(
                         kind: types::ToolInputSchemaKind::Object,
                         properties,
                         required,
+                        additional_properties: strict.then_some(false),
                     }
                 },
                 cache_control: None,
@@ -916,7 +893,14 @@ fn convert_events(events: ConversationStream) -> Vec<types::Message> {
     events
         .into_iter()
         .filter_map(|event| {
+            // FIXME: `aliases` is empty here, because of an issue in `query.rs`
+            // where we merge different configs... It has to do with us using
+            // `PartialAppConfig::empty()` as a base config there.
             let aliases = &event.config.providers.llm.aliases;
+
+            // dbg!(&aliases);
+            // dbg!(&event.config.assistant.model.id);
+
             let is_anthropic = event
                 .config
                 .assistant
@@ -946,28 +930,34 @@ fn convert_event(
     event: ConversationEvent,
     is_anthropic: bool,
 ) -> Option<(types::MessageRole, types::MessageContent)> {
-    match event.kind {
+    let ConversationEvent { kind, metadata, .. } = event;
+
+    match kind {
         EventKind::ChatRequest(request) => Some((
             types::MessageRole::User,
             types::MessageContent::Text(request.content.into()),
         )),
         EventKind::ChatResponse(response) => {
             // Check if this came from Anthropic originally
+            // dbg!(&is_anthropic);
+            // dbg!(&metadata);
+
             let content = if is_anthropic
-                && let Some(signature) = response
-                    .metadata()
-                    .and_then(|v| v.get("signature"))
+                && response.is_reasoning()
+                && let signature = metadata
+                    .get(THINKING_SIGNATURE_KEY)
                     .and_then(Value::as_str)
                     .map(str::to_owned)
+                && signature.is_some()
             {
                 types::MessageContent::Thinking(Thinking {
                     thinking: response.into_content(),
-                    signature: Some(signature),
+                    signature,
                 })
             } else if is_anthropic
-                && let Some(data) = response
-                    .metadata()
-                    .and_then(|v| v.get("redacted_thinking"))
+                && response.is_reasoning()
+                && let Some(data) = metadata
+                    .get(REDACTED_THINKING_KEY)
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             {
@@ -1012,420 +1002,429 @@ fn convert_event(
     }
 }
 
-impl From<types::MessageContent> for Delta {
-    fn from(item: types::MessageContent) -> Self {
-        match item {
-            types::MessageContent::Text(text) => Delta::content(text.text),
-            types::MessageContent::Thinking(thinking) => Delta::reasoning(thinking.thinking),
-            types::MessageContent::RedactedThinking { .. } => Delta::reasoning(String::new()),
-            types::MessageContent::ToolUse(tool_use) => {
-                Delta::tool_call(tool_use.id, tool_use.name, match &tool_use.input {
-                    Value::Object(map) if !map.is_empty() => tool_use.input.to_string(),
-                    _ => String::new(),
-                })
-            }
-            types::MessageContent::ToolResult(_) => {
-                debug_assert!(false, "Unexpected message content: {item:?}");
-                Delta::default()
-            }
+fn map_content_start(
+    item: types::MessageContent,
+    index: usize,
+    agg: &mut ToolCallRequestAggregator,
+) -> Option<Event> {
+    use types::MessageContent::*;
+
+    let mut metadata = IndexMap::new();
+    let kind: EventKind = match item {
+        ToolUse(types::ToolUse { id, name, .. }) => {
+            *agg = ToolCallRequestAggregator::new();
+            agg.add_chunk(index, Some(id), Some(name), None);
+            return None;
         }
-    }
-}
+        Text(text) => ChatResponse::message(text.text).into(),
+        Thinking(types::Thinking {
+            thinking,
+            signature,
+        }) => {
+            if let Some(signature) = signature
+                && !signature.is_empty()
+            {
+                metadata.insert(THINKING_SIGNATURE_KEY.to_owned(), signature.into());
+            }
 
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use indexmap::IndexMap;
-    use jp_config::{
-        conversation::tool::{OneOrManyTypes, ToolParameterConfig, ToolParameterItemsConfig},
-        model::parameters::{CustomReasoningConfig, ReasoningEffort},
-        providers::llm::LlmProviderConfig,
+            ChatResponse::reasoning(thinking).into()
+        }
+        RedactedThinking { data } => {
+            metadata.insert(REDACTED_THINKING_KEY.to_owned(), data.into());
+            ChatResponse::reasoning("").into()
+        }
+        ToolResult(_) => unreachable!("never triggered by the API"),
     };
-    use jp_conversation::ConversationStream;
-    use jp_test::{function_name, mock::Vcr};
-    use test_log::test;
 
-    use super::*;
+    Some(Event::Part {
+        event: ConversationEvent::now(kind).with_metadata(metadata),
+        index,
+    })
+}
 
-    fn vcr() -> Vcr {
-        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-        Vcr::new("https://api.anthropic.com", fixtures)
-    }
-
-    #[test(tokio::test)]
-    async fn test_anthropic_model_details() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = LlmProviderConfig::default().anthropic;
-        let name: Name = "claude-3-5-haiku-latest".parse().unwrap();
-
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = url;
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
-                }
-
-                Anthropic::try_from(&config)
-                    .unwrap()
-                    .model_details(&name)
-                    .await
-            },
-        )
-        .await
-    }
-
-    #[test(tokio::test)]
-    async fn test_anthropic_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = LlmProviderConfig::default().anthropic;
-
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = url;
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
-                }
-
-                Anthropic::try_from(&config).unwrap().models().await
-            },
-        )
-        .await
-    }
-
-    #[test(tokio::test)]
-    async fn test_anthropic_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
-    {
-        let mut config = LlmProviderConfig::default().anthropic;
-        let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
-        let model = ModelDetails::empty(model_id);
-        let query = ChatQuery {
-            thread: Thread {
-                events: ConversationStream::default().with_chat_request("Test message"),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = url;
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
-                }
-
-                Anthropic::try_from(&config)
-                    .unwrap()
-                    .chat_completion(&model, &ParametersConfig::default(), query)
-                    .await
-            },
-        )
-        .await
-    }
-
-    #[test(tokio::test)]
-    async fn test_anthropic_tool_call() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = LlmProviderConfig::default().anthropic;
-        let model_id = "anthropic/claude-3-7-sonnet-latest".parse().unwrap();
-        let model = ModelDetails::empty(model_id);
-        let query = ChatQuery {
-            thread: Thread {
-                events: ConversationStream::default().with_chat_request("Test message"),
-                ..Default::default()
-            },
-            tool_choice: ToolChoice::Function("run_me".to_owned()),
-            tools: vec![ToolDefinition {
-                name: "run_me".to_owned(),
-                description: None,
-                parameters: IndexMap::from_iter([
-                    ("foo".to_owned(), ToolParameterConfig {
-                        kind: OneOrManyTypes::One("string".into()),
-                        default: Some("foo".into()),
-                        description: None,
-                        required: false,
-                        enumeration: vec![],
-                        items: None,
-                    }),
-                    ("bar".to_owned(), ToolParameterConfig {
-                        kind: OneOrManyTypes::Many(vec!["string".into(), "array".into()]),
-                        default: None,
-                        description: None,
-                        required: true,
-                        enumeration: vec!["foo".into(), vec!["foo", "bar"].into()],
-                        items: Some(ToolParameterItemsConfig {
-                            kind: "string".to_owned(),
-                        }),
-                    }),
-                ]),
-            }],
-            tool_call_strict_mode: false,
-        };
-
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = url;
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
-                }
-
-                Anthropic::try_from(&config)
-                    .unwrap()
-                    .chat_completion(&model, &ParametersConfig::default(), query)
-                    .await
-            },
-        )
-        .await
-    }
-
-    #[test(tokio::test)]
-    async fn test_anthropic_redacted_thinking()
-    -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = LlmProviderConfig::default().anthropic;
-        let model_id = "anthropic/claude-3-7-sonnet-latest".parse().unwrap();
-        let model = ModelDetails::empty(model_id);
-        let query = ChatQuery {
-            thread: Thread {
-                events: ConversationStream::default().with_chat_request("ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB"),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = url;
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
-                }
-
-                let parameters = ParametersConfig {
-                    reasoning: Some(
-                        CustomReasoningConfig {
-                            effort: ReasoningEffort::Medium,
-                            exclude: false,
-                        }
-                        .into(),
-                    ),
-                    ..Default::default()
-                };
-
-                let events = Anthropic::try_from(&config)
-                    .unwrap()
-                    .chat_completion(&model, &parameters, query.clone())
-                    .await
-                    .unwrap()
-                    .into_inner();
-
-                assert!(events.iter().any(
-                    |event| matches!(event, Event::Metadata(k, _) if k == "redacted_thinking")
-                ));
-
-                events
-            },
-        )
-        .await
-    }
-
-    #[test(tokio::test)]
-    async fn test_anthropic_request_chaining() -> std::result::Result<(), Box<dyn std::error::Error>>
-    {
-        let mut config = LlmProviderConfig::default().anthropic;
-        let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
-        let mut model = ModelDetails::empty(model_id);
-        model.max_output_tokens = Some(1024);
-        let query = ChatQuery {
-            thread: Thread {
-                events: ConversationStream::default().with_chat_request(
-                    "Give me a 2000 word explainer about Kirigami-inspired parachutes",
-                ),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = url;
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
-                }
-
-                Anthropic::try_from(&config)
-                    .unwrap()
-                    .chat_completion_stream(&model, &ParametersConfig::default(), query)
-                    .await
-                    .unwrap()
-                    .collect::<Vec<_>>()
-                    .await
-            },
-        )
-        .await
-    }
-
-    #[test]
-    fn test_create_request() {
-        let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
-        let model = ModelDetails::empty(model_id);
-        let query = ChatQuery {
-            thread: Thread {
-                events: ConversationStream::default().with_chat_request("Test message"),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        let parameters = ParametersConfig {
-            top_p: Some(1.0),
-            top_k: Some(40),
-            reasoning: Some(
-                CustomReasoningConfig {
-                    effort: ReasoningEffort::Medium,
-                    exclude: false,
-                }
-                .into(),
-            ),
-            ..Default::default()
-        };
-
-        let request = create_request(&model, &parameters, query, false, &BetaFeatures::default());
-
-        insta::assert_debug_snapshot!(request);
-    }
-
-    #[test]
-    fn test_find_merge_point_edge_cases() {
-        struct TestCase {
-            left: &'static str,
-            right: &'static str,
-            expected: &'static str,
-            max_search: usize,
+fn map_content_delta(
+    delta: types::ContentBlockDelta,
+    index: usize,
+    agg: &mut ToolCallRequestAggregator,
+) -> Option<Event> {
+    let mut metadata = IndexMap::new();
+    let kind: EventKind = match delta {
+        types::ContentBlockDelta::TextDelta { text } => ChatResponse::message(text).into(),
+        types::ContentBlockDelta::ThinkingDelta { thinking } => {
+            ChatResponse::reasoning(thinking).into()
         }
-
-        let cases = IndexMap::from([
-            ("no overlap", TestCase {
-                left: "Hello",
-                right: " world",
-                expected: "Hello world",
-                max_search: 500,
-            }),
-            ("single word overlap", TestCase {
-                left: "The quick brown",
-                right: "brown fox",
-                expected: "The quick brown fox",
-                max_search: 500,
-            }),
-            ("minimal overlap (5 chars)", TestCase {
-                expected: "abcdefghij",
-                left: "abcdefgh",
-                right: "defghij",
-                max_search: 500,
-            }),
-            (
-                "below minimum overlap (4 chars) - should not merge",
-                TestCase {
-                    left: "abcd",
-                    right: "abcd",
-                    expected: "abcdabcd",
-                    max_search: 500,
-                },
-            ),
-            ("complete overlap", TestCase {
-                left: "Hello world",
-                right: "world",
-                expected: "Hello world",
-                max_search: 500,
-            }),
-            ("overlap with punctuation", TestCase {
-                left: "Hello, how are",
-                right: "how are you?",
-                expected: "Hello, how are you?",
-                max_search: 500,
-            }),
-            ("overlap with whitespace", TestCase {
-                left: "Hello     ",
-                right: "     world",
-                expected: "Hello     world",
-                max_search: 500,
-            }),
-            ("unicode overlap", TestCase {
-                left: "Hello 世界",
-                right: "世界 friend",
-                expected: "Hello 世界 friend",
-                max_search: 500,
-            }),
-            ("long overlap", TestCase {
-                left: "The quick brown fox jumps",
-                right: "fox jumps over the lazy dog",
-                expected: "The quick brown fox jumpsfox jumps over the lazy dog",
-                max_search: 8,
-            }),
-            ("empty right", TestCase {
-                left: "Hello",
-                right: "",
-                expected: "Hello",
-                max_search: 500,
-            }),
-        ]);
-
-        for (
-            name,
-            TestCase {
-                left,
-                right,
-                expected,
-                max_search,
-            },
-        ) in cases
-        {
-            let pos = find_merge_point(left, right, max_search);
-            let result = format!("{left}{}", &right[pos..]);
-            assert_eq!(result, expected, "Failed test case: {name}");
+        // This is only used for thinking blocks, and we need to store this
+        // signature to pass it back to the assistant in the message
+        // history.
+        //
+        // See: <https://docs.anthropic.com/en/docs/build-with-claude/streaming#thinking-delta>
+        types::ContentBlockDelta::SignatureDelta { signature } => {
+            metadata.insert(THINKING_SIGNATURE_KEY.to_owned(), signature.into());
+            ChatResponse::reasoning("").into()
         }
+        types::ContentBlockDelta::InputJsonDelta { partial_json } => {
+            agg.add_chunk(index, None, None, Some(&partial_json));
+            return None;
+        }
+    };
+
+    Some(Event::Part {
+        event: ConversationEvent::now(kind).with_metadata(metadata),
+        index,
+    })
+}
+
+fn map_content_stop(index: usize, agg: &mut ToolCallRequestAggregator) -> Result<Option<Event>> {
+    // Check if we're buffering a tool call request
+    match agg.finalize(index) {
+        Ok(tool_call) => {
+            return Ok(Some(Event::Part {
+                event: ConversationEvent::now(tool_call),
+                index,
+            }));
+        }
+        Err(AggregationError::UnknownIndex) => {}
+        Err(error) => return Err(error.into()),
+    }
+
+    Ok(Some(Event::flush(index)))
+}
+
+fn map_message_delta(delta: types::MessageDelta) -> Option<Event> {
+    match delta.stop_reason?.as_str() {
+        "max_tokens" => Some(Event::Finished(FinishReason::MaxTokens)),
+        _ => None,
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use indexmap::IndexMap;
+//     use jp_config::{
+//         conversation::tool::{OneOrManyTypes, ToolParameterConfig, ToolParameterItemsConfig},
+//         providers::llm::LlmProviderConfig,
+//     };
+//     use jp_conversation::event::ChatRequest;
+//     use jp_test::{Result, fn_name, mock::Vcr};
+//     use test_log::test;
+//
+//     use super::*;
+//     use crate::test::Req;
+//
+//     const MAGIC_STRING: &str = "ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB";
+//     const TEST_MODEL: &str = "anthropic/claude-haiku-4-5";
+//
+//     fn vcr() -> Vcr {
+//         Vcr::new("https://api.anthropic.com", env!("CARGO_MANIFEST_DIR"))
+//     }
+//
+//     async fn run_chat_completion(
+//         test_name: impl AsRef<str>,
+//         requests: impl IntoIterator<Item = Req>,
+//         config: Option<LlmProviderConfig>,
+//     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+//         crate::test::run_chat_completion(
+//             test_name,
+//             env!("CARGO_MANIFEST_DIR"),
+//             ProviderId::Anthropic,
+//             config.unwrap_or_default(),
+//             requests.into_iter().collect(),
+//         )
+//         .await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_anthropic_model_details() -> Result {
+//         let mut config = LlmProviderConfig::default().anthropic;
+//         let name: Name = "claude-3-5-haiku-latest".parse().unwrap();
+//
+//         let vcr = vcr();
+//         vcr.cassette(
+//             fn_name!(),
+//             |rule| {
+//                 rule.filter(|when| {
+//                     when.any_request();
+//                 });
+//             },
+//             |recording, url| async move {
+//                 config.base_url = url;
+//                 if !recording {
+//                     // dummy api key value when replaying a cassette
+//                     config.api_key_env = "USER".to_owned();
+//                 }
+//
+//                 Anthropic::try_from(&config)
+//                     .unwrap()
+//                     .model_details(&name)
+//                     .await
+//             },
+//         )
+//         .await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_anthropic_models() -> Result {
+//         let mut config = LlmProviderConfig::default().anthropic;
+//
+//         let vcr = vcr();
+//         vcr.cassette(
+//             fn_name!(),
+//             |rule| {
+//                 rule.filter(|when| {
+//                     when.any_request();
+//                 });
+//             },
+//             |recording, url| async move {
+//                 config.base_url = url;
+//                 if !recording {
+//                     // dummy api key value when replaying a cassette
+//                     config.api_key_env = "USER".to_owned();
+//                 }
+//
+//                 Anthropic::try_from(&config).unwrap().models().await
+//             },
+//         )
+//         .await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_anthropic_no_stream() -> Result {
+//         let request = Req::new()
+//             .stream(false)
+//             .model(TEST_MODEL)
+//             .enable_reasoning()
+//             .event(ChatRequest::from("Test message"));
+//
+//         run_chat_completion(fn_name!(), Some(request), None).await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_anthropic_stream() -> Result {
+//         let request = Req::new()
+//             .stream(true)
+//             .model(TEST_MODEL)
+//             .enable_reasoning()
+//             .event(ChatRequest::from("Test message"));
+//
+//         run_chat_completion(fn_name!(), Some(request), None).await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_anthropic_multi_turn() -> Result {
+//         let base = Req::new().stream(true).model(TEST_MODEL).enable_reasoning();
+//
+//         let requests = vec![
+//             base.clone().chat_request("Test message"),
+//             base.clone().chat_request("Repeat my previous message"),
+//         ];
+//
+//         run_chat_completion(fn_name!(), requests, None).await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_anthropic_tool_call() -> Result {
+//         let base = Req::new()
+//             .model(TEST_MODEL)
+//             .enable_reasoning()
+//             .event(ChatRequest::from("Test message"))
+//             .tool_choice_fn("run_me")
+//             .tool_call_strict_mode(false)
+//             .tool("run_me", vec![
+//                 ("foo", ToolParameterConfig {
+//                     kind: OneOrManyTypes::One("string".into()),
+//                     default: Some("foo".into()),
+//                     description: None,
+//                     required: false,
+//                     enumeration: vec![],
+//                     items: None,
+//                 }),
+//                 ("bar", ToolParameterConfig {
+//                     kind: OneOrManyTypes::Many(vec!["string".into(), "array".into()]),
+//                     default: None,
+//                     description: None,
+//                     required: true,
+//                     enumeration: vec!["foo".into(), vec!["foo", "bar"].into()],
+//                     items: Some(ToolParameterItemsConfig {
+//                         kind: "string".to_owned(),
+//                     }),
+//                 }),
+//             ]);
+//
+//         let cases = vec![
+//             ("streaming", base.clone().stream(true)),
+//             ("no_streaming", base.clone()),
+//             ("strict", base.clone().tool_call_strict_mode(true)),
+//             ("required", base.clone().tool_choice(ToolChoice::Required)),
+//             ("auto", base.clone().tool_choice(ToolChoice::Auto)),
+//             ("no_reasoning", base.clone().reasoning(None)),
+//         ];
+//
+//         for (name, request) in cases {
+//             run_chat_completion(format!("{}_{name}", fn_name!()), Some(request), None).await?;
+//         }
+//
+//         Ok(())
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_anthropic_redacted_thinking() -> Result {
+//         let base = Req::new()
+//             .stream(true)
+//             .model(TEST_MODEL)
+//             .enable_reasoning()
+//             .assert(|events| {
+//                 assert!(events.iter().any(
+//                         |event| matches!(event, Event::Part { event, .. } if event.metadata.contains_key(REDACTED_THINKING_KEY))
+//                     ));
+//             });
+//
+//         let requests = vec![
+//             base.clone().chat_request(MAGIC_STRING),
+//             base.clone()
+//                 .chat_request("Do you have access to your redacted thinking content?"),
+//         ];
+//
+//         run_chat_completion(fn_name!(), requests, None).await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_anthropic_request_chaining() -> Result {
+//         let request = Req::new()
+//             .stream(true)
+//             .model_details(ModelDetails {
+//                 id: TEST_MODEL.parse().unwrap(),
+//                 max_output_tokens: Some(1024),
+//                 context_window: None,
+//                 display_name: None,
+//                 reasoning: None,
+//                 knowledge_cutoff: None,
+//                 deprecated: None,
+//                 features: vec![],
+//             })
+//             .enable_reasoning()
+//             .chat_request("Give me a 2000 word explainer about Kirigami-inspired parachutes");
+//
+//         run_chat_completion(fn_name!(), Some(request), None).await
+//     }
+//
+//     // #[test]
+//     // fn test_create_request() {
+//     //     let model_id = "anthropic/claude-3-5-haiku-latest".parse().unwrap();
+//     //     let model = ModelDetails::empty(model_id);
+//     //     let query = ChatQuery {
+//     //         thread: Thread {
+//     //             events: ConversationStream::default().with_chat_request("Test message"),
+//     //             ..Default::default()
+//     //         },
+//     //         ..Default::default()
+//     //     };
+//     //
+//     //     // let parameters = ParametersConfig {
+//     //     //     top_p: Some(1.0),
+//     //     //     top_k: Some(40),
+//     //     //     reasoning: Some(
+//     //     //         CustomReasoningConfig {
+//     //     //             effort: ReasoningEffort::Medium,
+//     //     //             exclude: false,
+//     //     //         }
+//     //     //         .into(),
+//     //     //     ),
+//     //     //     ..Default::default()
+//     //     // };
+//     //
+//     //     let request = create_request(&model, query, false, &BetaFeatures::default());
+//     //
+//     //     insta::assert_debug_snapshot!(request);
+//     // }
+//
+//     #[test]
+//     fn test_find_merge_point_edge_cases() {
+//         struct TestCase {
+//             left: &'static str,
+//             right: &'static str,
+//             expected: &'static str,
+//             max_search: usize,
+//         }
+//
+//         let cases = IndexMap::from([
+//             ("no overlap", TestCase {
+//                 left: "Hello",
+//                 right: " world",
+//                 expected: "Hello world",
+//                 max_search: 500,
+//             }),
+//             ("single word overlap", TestCase {
+//                 left: "The quick brown",
+//                 right: "brown fox",
+//                 expected: "The quick brown fox",
+//                 max_search: 500,
+//             }),
+//             ("minimal overlap (5 chars)", TestCase {
+//                 expected: "abcdefghij",
+//                 left: "abcdefgh",
+//                 right: "defghij",
+//                 max_search: 500,
+//             }),
+//             (
+//                 "below minimum overlap (4 chars) - should not merge",
+//                 TestCase {
+//                     left: "abcd",
+//                     right: "abcd",
+//                     expected: "abcdabcd",
+//                     max_search: 500,
+//                 },
+//             ),
+//             ("complete overlap", TestCase {
+//                 left: "Hello world",
+//                 right: "world",
+//                 expected: "Hello world",
+//                 max_search: 500,
+//             }),
+//             ("overlap with punctuation", TestCase {
+//                 left: "Hello, how are",
+//                 right: "how are you?",
+//                 expected: "Hello, how are you?",
+//                 max_search: 500,
+//             }),
+//             ("overlap with whitespace", TestCase {
+//                 left: "Hello     ",
+//                 right: "     world",
+//                 expected: "Hello     world",
+//                 max_search: 500,
+//             }),
+//             ("unicode overlap", TestCase {
+//                 left: "Hello 世界",
+//                 right: "世界 friend",
+//                 expected: "Hello 世界 friend",
+//                 max_search: 500,
+//             }),
+//             ("long overlap", TestCase {
+//                 left: "The quick brown fox jumps",
+//                 right: "fox jumps over the lazy dog",
+//                 expected: "The quick brown fox jumpsfox jumps over the lazy dog",
+//                 max_search: 8,
+//             }),
+//             ("empty right", TestCase {
+//                 left: "Hello",
+//                 right: "",
+//                 expected: "Hello",
+//                 max_search: 500,
+//             }),
+//         ]);
+//
+//         for (
+//             name,
+//             TestCase {
+//                 left,
+//                 right,
+//                 expected,
+//                 max_search,
+//             },
+//         ) in cases
+//         {
+//             let pos = find_merge_point(left, right, max_search);
+//             let result = format!("{left}{}", &right[pos..]);
+//             assert_eq!(result, expected, "Failed test case: {name}");
+//         }
+//     }
+// }

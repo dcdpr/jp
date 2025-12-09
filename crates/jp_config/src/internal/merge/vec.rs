@@ -44,6 +44,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use test_log::test;
+
     use super::*;
     use crate::types::vec::MergedVecStrategy;
 

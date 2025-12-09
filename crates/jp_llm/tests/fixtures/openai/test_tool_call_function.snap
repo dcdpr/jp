@@ -1,0 +1,73 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_002ce1b0557d13c00169381b45195c81918a7f4d8adb3edefc"),
+                    "openai_encrypted_content": String("gAAAAABpOBtHXaW7weHV5VwS_Q_5rvbFnK2Slz7pmBfWaTdSkV-Mcslsh2Kjbq6akKHM8Z_ZdtecBfavq178kWKssK04tNJ2rllOYQ5x9ARJ-BpcL4B8kR-IG4S2nJRKL0-SlReygP83bJnyHowt_uVsK_NcEnGMhOk4QN44nCdRfnnvXuxcyc3Ljfz4Uwf3pp9s8er2egdDa9NFInTKGTiAVXhKlbmj1dvxqnH3JY0wZ7IVK34pbznaZjXoIz5XlDt2HgyB1eWoQIosJOADRuIfWL1w-maIXyV_3oG33ClEGFb1zkCJT4WrNK9gvSDEv8ivhWicLkfk14zd2FM_SMA5a2yk3Ey1qZmY_MySY54gck5L5KuTJlf-yDfuedAdrf_HhUcdLvXW_SE2RI4IVHAGLowdOxU9W5OkOg7mCG-3h0rpIH2B7Yfpixifiv2TxXMqAI8rawTVCPb8CUvJ-5NNiFx75hciBP0FR4SXt_7pzMWUekNWKtDSvOlEDsuLvGn1b2wopdpu-0OJJsjGNTHL0cct1lPK7McNprqOq75DFnyEfm8BZzyNtxO7Q5Vw5z12tik7cbDw62jtDfXG8ZkI9oBZ5VcM-KE81aHWiGlvHWPzC2uUBzc-M931PjDkQ8VxZMAnnTahVL36cmZ4QlqXRGUi-6PxHIUwH3L9aOKJ9FVqgo6-WHdU5pW6laD6R24NNy5TuyKtKNXubA0OkCpD5BtNZ7n7ttGk2guveu7HLD3ve2g4EEbvCzmWoCNUM_-9FzQhJebCmnccXRT-fklN6DJNH_4J7OKMTereL1W3UxqU7GenLZtE4RQPr_0J-paeKALh3PY7sgIBtrjdsWIy16OqOVgyM_fRj__zfecfz8Ky0wYWfRiO0GXEzA5n6PoxfoM4KtWBSpPbJFl4eBiBMCv9NXZPd_srjkgqo6chQ_-ZJ_mcFfSQsKveDtJDwRZ31KEFIHpSSR-dgBks7D-Dx5Cb_fAcyhr1g36AI15kKFPfo34AYKr__tldGZOtH4XmMOSZN9ewGYT3FqReJApSaUeb06E8runHiyT9zEvkRn3q9Cqid4Wo_GqVFjKyecQc_rxZyKjOzwEPNWGS5knJYjQSQDo1JsDi09zKR9GE-Ikz9fJr2sNnGzV9q3nPq54QomYi8_pYe8bazc6GSqpqiPG2_Rxh17doAFCPOhYcvvOdhA0l4tKGF6T9Nayt3RiQiBWYexmkM7tM-UyEdhE85crehF2OAkl0G0WxYPbIBKwHOyJfilVmG1D2TrTJwNLeD48LBh337NqdJrE9GUyZqoQgrpBP7jjQZZs3NLYhB7mROePC7r2LdBvRwPRArjC3XUbK7xzHl2EcNL7rjhpBlUogZE1AB2KpJ4NbSbxFlZYqecmRGRA3bfg61JB9OtxeFussZmuJIQlaBbZpj27alzt1wekvTvyKl_w8JGjJsbN8WLqM0U59SfTItrZAfNEdFRAYPFgejfiog4FdtyGyw0-F24-QazWvx0NN8yvNxY258mP8OCkxR_EYdz-3i7ZsRaSMnyWIZPZtkRRPL4gctQZQvdf67h-hi1key8wa9JYwa7dzRG1a20xLQmzYMxk7IbS9WxqP-3KbQtAT6Zd6bV_1HL1TMzo0oaJ89NLe7O14PD4H1NAZbAsWE3hQQQN836MTZEXEyDaU4TCL_C0PFbP_jw1-NTiwr-gKEECNn--VsGZtbpWipn1vBNTAikCJApeCZ4TUhoqQZmQQ9WyUI_siQHEkz2IWBvjReZ7wjNV8Hlo2x4Ua60E1_ZzPVfcCl9BIjqib0L6veBvqYvf4KEtxYWHmcWMy-Bvg40WEhy0nTOI9rNChFswOf4CwlD_XSG1kXKy3G9WoTtebq-Xh_gEVLf1-LEbgm9XBjlXzz4R5MAamAp4dTtWbyFnuo7bw-Wvum-2OSdDFj-Ais_158tguhXW7928eynR3zwiFfBJV5YGW4dSbXRA2y1cn3ei7I20zBakJPXZOqAAWN5u6uZ_DqWu8k3Nbwz35RGG--xANAXSLQ2Almr2kTpD52x1_5hQCf7oHwCbuBUyjUCf8X_gyeWsACHcwHcOAG6N7jNvF81lOb3aMsOmQjCo3cn6Y-ezx29TYYO4AxdXUzjIGncjOZmg6gIoxxMnjr9iaV1req4CX8-wvI3eBx2SAFvq4HV4vIgkzefSZZ8bH6knLNHHafPsBWQ=="),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_vOqlCcGJny9uX95eqtLtR9yF",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Tool call completed — result: working!",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_002ce1b0557d13c00169381b48add0819192278633c354908e"),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

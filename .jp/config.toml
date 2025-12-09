@@ -13,6 +13,9 @@ anthropic.beta_headers = [
     "context-1m-2025-08-07",
     "interleaved-thinking-2025-05-14",
     "context-management-2025-06-27",
+    # TODO: This should be automatically added if a tool has `strict` set to
+    # `true`.
+    "structured-outputs-2025-11-13",
 ]
 
 [providers.llm.aliases]
@@ -20,13 +23,13 @@ anthropic.beta_headers = [
 anthropic = "anthropic/claude-sonnet-4-5"
 claude = "anthropic/claude-sonnet-4-5"
 sonnet = "anthropic/claude-sonnet-4-5"
-opus = "anthropic/claude-opus-4-1"
-haiku = "anthropic/claude-3-5-haiku-latest"
+opus = "anthropic/claude-opus-4-5"
+haiku = "anthropic/claude-haiku-4-5"
 # OpenAI aliases
-openai = "openai/gpt-5"
-chatgpt = "openai/gpt-5"
-gpt = "openai/gpt-5"
-gpt5 = "openai/gpt-5"
+openai = "openai/gpt-5.1"
+chatgpt = "openai/gpt-5.1"
+gpt = "openai/gpt-5.1"
+gpt5 = "openai/gpt-5.1"
 gpt5-mini = "openai/gpt-5-mini"
 gpt-mini = "openai/gpt-5-mini"
 gpt5-nano = "openai/gpt-5-nano"
@@ -37,9 +40,9 @@ codex = "openai/gpt-5-codex"
 gpt-5-codex = "openai/gpt-5-codex"
 codex-mini = "openai/codex-mini-latest"
 # Google aliases
-google = "google/gemini-2.5-pro"
-gemini = "google/gemini-2.5-pro"
-gemini-pro = "google/gemini-2.5-pro"
+google = "google/gemini-3-pro-preview"
+gemini = "google/gemini-3-pro-preview"
+gemini-pro = "google/gemini-3-pro-preview"
 gemini-flash = "google/gemini-2.5-flash"
 gemini-lite = "google/gemini-2.5-flash-lite"
 

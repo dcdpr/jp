@@ -18,7 +18,7 @@ use crate::{
 };
 
 /// Provider configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ProviderConfig {
     /// LLM provider configurations.

@@ -1,0 +1,466 @@
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": null,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"candidates": [{"content": {"parts": [{"text": "OK"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 3,"candidatesTokenCount": 1,"totalTokenCount": 4,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "6xo4abnSIcPPnsEP25TX-AE"}
+
+    data: {"candidates": [{"content": {"parts": [{"text": ". I see your test message. How can I help you today?"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 3,"candidatesTokenCount": 15,"totalTokenCount": 18,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "6xo4abnSIcPPnsEP25TX-AE"}
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+    - name: key
+      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "OK. I see your test message. How can I help you today?"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Repeat my previous message"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": true,
+          "thinkingBudget": 12800,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"candidates": [{"content": {"parts": [{"text": "**Echoing a prompt**\n\nI'm currently focused on repeating the user's last message.  I've processed the request, understood the instruction to echo the provided text. Currently, I'm simply repeating: \"Test message\".\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 24,"totalTokenCount": 56,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 24}],"thoughtsTokenCount": 32},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Bo4admDB_7cnsEPq465qAI"}
+
+    data: {"candidates": [{"content": {"parts": [{"text": "Test message"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 24,"candidatesTokenCount": 1,"totalTokenCount": 57,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 24}],"thoughtsTokenCount": 32},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Bo4admDB_7cnsEPq465qAI"}
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+    - name: key
+      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "OK. I see your test message. How can I help you today?"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Repeat my previous message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "thought": true,
+              "text": "**Echoing a prompt**\\n\\nI'm currently focused on repeating the user's last message.  I've processed the request, understood the instruction to echo the provided text. Currently, I'm simply repeating: \"Test message\".\\n\\n\\n"
+            },
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Testing tool call"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "run_me",
+              "description": "",
+              "parameters": null,
+              "parametersJsonSchema": {
+                "type": "object",
+                "properties": {
+                  "foo": {
+                    "default": "foo",
+                    "type": "string"
+                  },
+                  "bar": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "foo"
+                        ]
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "enum": [
+                          [
+                            "foo",
+                            "bar"
+                          ]
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "bar"
+                ]
+              },
+              "response": null
+            }
+          ]
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "ANY",
+          "allowedFunctionNames": [
+            "run_me"
+          ]
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": null,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"run_me\",\"args\": {\"bar\": \"foo\"}}}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0,\"finishMessage\": \"Model generated function call(s).\"}],\"usageMetadata\": {\"promptTokenCount\": 137,\"candidatesTokenCount\": 15,\"totalTokenCount\": 152,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 137}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"7Ro4aZ_fDv3NnsEPjP-Y2AE\"}"
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+    - name: key
+      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "OK. I see your test message. How can I help you today?"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Repeat my previous message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "thought": true,
+              "text": "**Echoing a prompt**\\n\\nI'm currently focused on repeating the user's last message.  I've processed the request, understood the instruction to echo the provided text. Currently, I'm simply repeating: \"Test message\".\\n\\n\\n"
+            },
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Testing tool call"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "",
+                "name": "run_me",
+                "args": {
+                  "bar": "foo"
+                }
+              }
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "",
+                "name": "run_me",
+                "response": {
+                  "content": "The secret code is: 42"
+                }
+              }
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": null,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"candidates": [{"content": {"parts": [{"text": "Testing tool call"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 119,"candidatesTokenCount": 3,"totalTokenCount": 122,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 119}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Ro4aabNJbnhnsEP7ZuguAQ"}
+
+    data: {"candidates": [{"content": {"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 119,"candidatesTokenCount": 3,"totalTokenCount": 122,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 119}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Ro4aabNJbnhnsEP7ZuguAQ"}
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+    - name: key
+      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "OK. I see your test message. How can I help you today?"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Repeat my previous message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "thought": true,
+              "text": "**Echoing a prompt**\\n\\nI'm currently focused on repeating the user's last message.  I've processed the request, understood the instruction to echo the provided text. Currently, I'm simply repeating: \"Test message\".\\n\\n\\n"
+            },
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Testing tool call"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "",
+                "name": "run_me",
+                "args": {
+                  "bar": "foo"
+                }
+              }
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "",
+                "name": "run_me",
+                "response": {
+                  "content": "The secret code is: 42"
+                }
+              }
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "Testing tool call"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "What was the result of the previous tool call?"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": true,
+          "thinkingBudget": 12800,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"candidates": [{"content": {"parts": [{"text": "**Retrieving Past Output**\n\nI'm focusing now on the retrieval of the previous tool call's output. I recall the `print(default_api.run_me(bar = \"foo\"))` call, which provided the secret code. I'm actively working to ensure I can consistently access and utilize this type of information.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 134,"totalTokenCount": 203,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 134}],"thoughtsTokenCount": 69},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Ro4afOuPI7onsEPx7SYoA8"}
+
+    data: {"candidates": [{"content": {"parts": [{"text": "**Accessing Key Information**\n\nI'm zeroing in on extracting the core data from the previous tool call's output. Specifically, I'm parsing the response to `print(default_api.run_me(bar = \"foo\"))`, which yielded `{\"run_me_response\": {\"content\": \"The secret code is: 4 2\"}}`. I now realize the \"content\" field is the vital piece; it holds the user's requested \"secret code: 4 2\".\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 134,"totalTokenCount": 236,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 134}],"thoughtsTokenCount": 102},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Ro4afOuPI7onsEPx7SYoA8"}
+
+    data: {"candidates": [{"content": {"parts": [{"text": "The result of the previous tool call was: \"The secret code is: 42\"."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 134,"candidatesTokenCount": 17,"totalTokenCount": 253,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 134}],"thoughtsTokenCount": 102},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Ro4afOuPI7onsEPx7SYoA8"}

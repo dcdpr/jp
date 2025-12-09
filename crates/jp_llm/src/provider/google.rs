@@ -1,36 +1,38 @@
-use std::env;
+use std::{collections::HashMap, env};
 
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
 use gemini_client_rs::{GeminiClient, types};
+use indexmap::IndexMap;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
         id::{ModelIdConfig, Name, ProviderId},
-        parameters::ParametersConfig,
+        parameters::ReasoningEffort,
     },
     providers::llm::google::GoogleConfig,
 };
 use jp_conversation::{
     ConversationStream,
-    event::EventKind,
+    event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest},
     thread::{Document, Documents, Thread},
 };
 use serde_json::Value;
 use tracing::{debug, trace};
 
-use super::{Event, EventStream, ModelDetails, Provider, ReasoningDetails, Reply};
+use super::{EventStream, Provider};
 use crate::{
-    CompletionChunk, StreamEvent,
     error::{Error, Result},
-    provider::Delta,
+    event::{Event, FinishReason},
+    model::{ModelDetails, ReasoningDetails},
     query::ChatQuery,
-    stream::{accumulator::Accumulator, event::StreamEndReason},
     tool::ToolDefinition,
 };
 
 static PROVIDER: ProviderId = ProviderId::Google;
+
+const THOUGHT_SIGNATURE_KEY: &str = "google_thought_signature";
 
 #[derive(Debug, Clone)]
 pub struct Google {
@@ -60,75 +62,75 @@ impl Provider for Google {
             .collect())
     }
 
-    async fn chat_completion(
-        &self,
-        model: &ModelDetails,
-        parameters: &ParametersConfig,
-        query: ChatQuery,
-    ) -> Result<Reply> {
-        let request = create_request(model, parameters, query)?;
-
-        self.client
-            .generate_content(&model.id.name, &request)
-            .await
-            .map_err(Into::into)
-            .and_then(|v| map_response(v, &mut Accumulator::default()))
-            .map(|events| Reply {
-                provider: PROVIDER,
-                events: events
-                    .into_iter()
-                    .map(|e| match e {
-                        StreamEvent::ChatChunk(chunk) => match chunk {
-                            CompletionChunk::Content(content) => Event::Content(content),
-                            CompletionChunk::Reasoning(reasoning) => Event::Reasoning(reasoning),
-                        },
-                        StreamEvent::ToolCall(call) => Event::ToolCall(call),
-                        StreamEvent::Metadata(key, value) => Event::Metadata(key, value),
-                        StreamEvent::EndOfStream(eos) => Event::Finished(eos),
-                    })
-                    .collect(),
-            })
-    }
-
     async fn chat_completion_stream(
         &self,
         model: &ModelDetails,
-        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = create_request(model, parameters, query)?;
+        let request = create_request(model, query)?;
+        let slug = model.id.name.clone();
+
         debug!(stream = true, "Google chat completion stream request.");
         trace!(
             request = serde_json::to_string(&request).unwrap_or_default(),
             "Request payload."
         );
 
-        let slug = model.id.name.clone();
-        let stream = Box::pin(stream! {
-            let mut accumulator = Accumulator::new(200);
-            let stream = client
-                .stream_content(&slug, &request)
-                .await?
-                .map_err(Error::from);
-
-            tokio::pin!(stream);
-            while let Some(event) = stream.next().await {
-                for event in map_response(event?, &mut accumulator)? {
-                    yield Ok(event);
-                }
-            }
-        });
-
-        Ok(stream)
+        Ok(call(client, request, slug, 0))
     }
 }
 
-fn create_request(
-    model: &ModelDetails,
-    parameters: &ParametersConfig,
-    query: ChatQuery,
-) -> Result<types::GenerateContentRequest> {
+fn call(
+    client: GeminiClient,
+    request: types::GenerateContentRequest,
+    model: Name,
+    tries: usize,
+) -> EventStream {
+    Box::pin(stream! {
+        let mut state = IndexMap::new();
+        let stream = client
+            .stream_content(&model, &request)
+            .await?
+            .map_err(Error::from);
+
+        tokio::pin!(stream);
+        while let Some(event) = stream.next().await {
+            for event in map_response(event?, &mut state)? {
+                // Sometimes the API returns an "unexpected tool call" error, if
+                // a previous turn had tools available but those were made
+                // unavailable in follow-up turns. This is a known issue:
+                //
+                // > Gemini models occasionally fail when invoking a tool,
+                // > returning an UNEXPECTED_TOOL_CALL error. A temporary
+                // > workaround is to retry the request.
+                //
+                // source: <https://developer.watson-orchestrate.ibm.com/release/knownissues>
+                //
+                // We already set the tool calling to `none` to prevent the
+                // model from trying to call tools when none are available, but
+                // this is to no avail, as we still observe the same behavior.
+                //
+                // So as a last resort, we do three retries to force the model
+                // to generate a proper response, before giving up.
+                let should_retry = matches!(&event, Event::Finished(FinishReason::Other(Value::String(s))) if s == "UNEXPECTED_TOOL_CALL");
+
+                if should_retry && tries < 3 {
+                    let mut next_stream = call(client.clone(), request.clone(), model.clone(), tries + 1);
+                    while let Some(item) = next_stream.next().await {
+                      yield item;
+                    }
+                    return;
+                }
+
+                yield Ok(event);
+            }
+        }
+    })
+}
+
+#[expect(clippy::too_many_lines)]
+fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<types::GenerateContentRequest> {
     let ChatQuery {
         thread,
         tools,
@@ -143,6 +145,9 @@ fn create_request(
         events,
     } = thread;
 
+    let config = events.config()?;
+    let parameters = &config.assistant.model.parameters;
+
     let tools = convert_tools(tools);
 
     #[expect(clippy::cast_possible_wrap)]
@@ -151,8 +156,22 @@ fn create_request(
         .or(model.max_output_tokens)
         .map(|v| v as i32);
 
-    let tool_config =
-        (!tools.is_empty()).then_some(convert_tool_choice(tool_choice, tool_call_strict_mode));
+    // We need to explicitly disallow any tool calls if there are no tools
+    // available. This is because Gemini can "see" tool calls in its history and
+    // try to call them again, even if they are not available.
+    //
+    // See also: <https://github.com/googleapis/python-genai/issues/1818>
+    let tool_config = if tools.is_empty() {
+        types::ToolConfig {
+            function_calling_config: types::FunctionCallingConfig {
+                mode: types::FunctionCallingMode::None,
+                allowed_function_names: vec![],
+            },
+        }
+    } else {
+        convert_tool_choice(tool_choice, tool_call_strict_mode)
+    };
+
     let reasoning = model.custom_reasoning_config(parameters.reasoning);
 
     // Add thinking config if the model requires it, or if it supports it,
@@ -162,17 +181,38 @@ fn create_request(
         .filter(|details| (details.min_tokens() > 0) || reasoning.is_some())
         .map(|details| types::ThinkingConfig {
             include_thoughts: reasoning.is_some_and(|v| !v.exclude),
-            thinking_budget: reasoning.map(|v| {
-                // TODO: Once the `gemini` crate supports `-1` for "auto"
-                // thinking, use that here if `effort` is `Auto`.
-                //
-                // See: <https://ai.google.dev/gemini-api/docs/thinking#set-budget>
-                #[expect(clippy::cast_sign_loss)]
-                v.effort
-                    .to_tokens(max_output_tokens.unwrap_or(32_000) as u32)
-                    .min(details.max_tokens().unwrap_or(u32::MAX))
-                    .max(details.min_tokens())
-            }),
+            thinking_budget: match details {
+                ReasoningDetails::Leveled { .. } => None,
+                _ => reasoning.map(|v| {
+                    // TODO: Once the `gemini` crate supports `-1` for "auto"
+                    // thinking, use that here if `effort` is `Auto`.
+                    //
+                    // See: <https://ai.google.dev/gemini-api/docs/thinking#set-budget>
+                    #[expect(clippy::cast_sign_loss)]
+                    v.effort
+                        .to_tokens(max_output_tokens.unwrap_or(32_000) as u32)
+                        .min(details.max_tokens().unwrap_or(u32::MAX))
+                        .max(details.min_tokens())
+                }),
+            },
+            thinking_level: match details {
+                ReasoningDetails::Leveled { low, high, .. } => {
+                    let level = reasoning.map(|v| {
+                        v.effort
+                            .abs_to_rel(max_output_tokens.map(i32::cast_unsigned))
+                    });
+
+                    match level {
+                        Some(ReasoningEffort::Low) if low => Some(types::ThinkingLevel::Low),
+                        Some(ReasoningEffort::High) if high => Some(types::ThinkingLevel::High),
+                        // Any other level is unsupported and treated as
+                        // high (since the documentation specifies this is
+                        // the default).
+                        _ => Some(types::ThinkingLevel::High),
+                    }
+                }
+                _ => None,
+            },
         });
 
     let parts = {
@@ -209,6 +249,7 @@ fn create_request(
                 data,
                 thought: false,
                 metadata: None,
+                thought_signature: None,
             })
             .collect::<Vec<_>>()
     };
@@ -221,7 +262,7 @@ fn create_request(
         },
         contents: convert_events(events),
         tools,
-        tool_config,
+        tool_config: Some(tool_config),
         generation_config: Some(types::GenerationConfig {
             max_output_tokens,
             #[expect(clippy::cast_lossless)]
@@ -245,12 +286,18 @@ fn map_model(model: types::Model) -> ModelDetails {
         reasoning: model
             .base_model_id
             .starts_with("gemini-2.5-pro")
-            .then_some(ReasoningDetails::supported(128, Some(32768)))
+            .then_some(ReasoningDetails::budgetted(128, Some(32768)))
             .or_else(|| {
                 model
                     .base_model_id
                     .starts_with("gemini-2.5-flash")
-                    .then_some(ReasoningDetails::supported(0, Some(24576)))
+                    .then_some(ReasoningDetails::budgetted(0, Some(24576)))
+            })
+            .or_else(|| {
+                model
+                    .base_model_id
+                    .starts_with("gemini-3")
+                    .then_some(ReasoningDetails::leveled(true, false, true))
             }),
         knowledge_cutoff: None,
         deprecated: None,
@@ -258,10 +305,37 @@ fn map_model(model: types::Model) -> ModelDetails {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContentMode {
+    Reasoning,
+    Message,
+    FunctionCall,
+}
+
+impl ContentMode {
+    fn is_reasoning(self) -> bool {
+        matches!(self, Self::Reasoning)
+    }
+}
+
+struct CandidateState {
+    current_virtual_index: usize,
+    last_mode: Option<ContentMode>,
+}
+
+impl CandidateState {
+    fn new(base_index: usize) -> Self {
+        Self {
+            current_virtual_index: base_index * 1000,
+            last_mode: None,
+        }
+    }
+}
+
 fn map_response(
     response: types::GenerateContentResponse,
-    accumulator: &mut Accumulator,
-) -> Result<Vec<StreamEvent>> {
+    state: &mut IndexMap<usize, CandidateState>,
+) -> Result<Vec<Event>> {
     debug!("Received response from Google API.");
     trace!(
         response = serde_json::to_string(&response).unwrap_or_default(),
@@ -271,7 +345,7 @@ fn map_response(
     response
         .candidates
         .into_iter()
-        .flat_map(|v| map_candidate(v, accumulator))
+        .flat_map(|v| map_candidate(v, state))
         .try_fold(vec![], |mut acc, events| {
             acc.extend(events);
             Ok(acc)
@@ -280,36 +354,111 @@ fn map_response(
 
 fn map_candidate(
     candidate: types::Candidate,
-    accumulator: &mut Accumulator,
-) -> Result<Vec<StreamEvent>> {
-    let mut events: Vec<StreamEvent> = candidate
-        .content
-        .parts
-        .into_iter()
-        .map(|v| Delta::from(v).into_stream_events(accumulator))
-        .try_fold(vec![], |mut acc, events| {
-            acc.extend(events?);
-            Ok::<_, Error>(acc)
-        })?;
+    states: &mut IndexMap<usize, CandidateState>,
+) -> Result<Vec<Event>> {
+    let types::Candidate {
+        content,
+        finish_reason,
+        index,
+        ..
+    } = candidate;
 
-    // The model has finished generating tokens, drain the accumulator.
-    if candidate.finish_reason.is_some() {
-        events.extend(accumulator.drain()?);
+    let mut events = Vec::new();
+    let index = index.unwrap_or_default() as usize;
+    let state = states
+        .entry(index)
+        .or_insert_with(|| CandidateState::new(index));
+
+    for part in content.into_iter().flat_map(|v| v.parts) {
+        let types::ContentPart {
+            thought,
+            data,
+            thought_signature,
+            ..
+        } = part;
+
+        // Determine what "mode" the content is in.
+        let mode = if matches!(data, types::ContentData::FunctionCall(_)) {
+            ContentMode::FunctionCall
+        } else if thought {
+            ContentMode::Reasoning
+        } else {
+            ContentMode::Message
+        };
+
+        // If we change from one mode to another, flush the current index, and
+        // increment the current (virtual) index by one.
+        if state.last_mode.is_some_and(|v| v != mode) {
+            events.push(Event::flush(state.current_virtual_index));
+
+            state.current_virtual_index += 1;
+        }
+
+        // Store the current mode for the next iteration.
+        state.last_mode = Some(mode);
+
+        let index = state.current_virtual_index;
+        let mut event = match data {
+            types::ContentData::Text(text) if mode.is_reasoning() => Event::Part {
+                event: ConversationEvent::now(ChatResponse::reasoning(text)),
+                index,
+            },
+            types::ContentData::Text(text) => Event::Part {
+                event: ConversationEvent::now(ChatResponse::message(text)),
+                index,
+            },
+            types::ContentData::FunctionCall(types::FunctionCall {
+                id,
+                name,
+                arguments,
+            }) => Event::Part {
+                event: ConversationEvent::now(ToolCallRequest {
+                    id: id.unwrap_or_default(),
+                    name,
+                    arguments: match arguments {
+                        serde_json::Value::Object(map) => map,
+                        v => serde_json::Map::from_iter([("input".into(), v)]),
+                    },
+                }),
+                index,
+            },
+            _ => continue,
+        };
+
+        if let Some(v) = thought_signature
+            && let Event::Part { event, .. } = &mut event
+        {
+            event.add_metadata_field(THOUGHT_SIGNATURE_KEY, v);
+        }
+
+        events.push(event);
     }
 
-    match candidate.finish_reason {
-        Some(types::FinishReason::MaxTokens) => {
-            events.push(StreamEvent::EndOfStream(StreamEndReason::MaxTokens));
+    if let Some(reason) = finish_reason {
+        // For `MaxTokens`, we do not flush any indices, as we assume the active
+        // indices aren't complete yet. The caller can still decide to flush
+        // manually.
+        if matches!(reason, types::FinishReason::MaxTokens) {
+            events.push(Event::Finished(FinishReason::MaxTokens));
+            return Ok(events);
         }
-        Some(types::FinishReason::Stop) => {
-            events.push(StreamEvent::EndOfStream(StreamEndReason::Completed));
+
+        events.extend(
+            states
+                .values()
+                .map(|s| Event::flush(s.current_virtual_index)),
+        );
+
+        match reason {
+            types::FinishReason::Stop => {
+                events.push(Event::Finished(FinishReason::Completed));
+            }
+            v => {
+                events.push(Event::Finished(FinishReason::Other(serde_json::to_value(
+                    &v,
+                )?)));
+            }
         }
-        Some(v) => {
-            events.push(StreamEvent::EndOfStream(StreamEndReason::Other(
-                serde_json::to_string(&v)?,
-            )));
-        }
-        _ => {}
     }
 
     Ok(events)
@@ -363,10 +512,25 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
 }
 
 fn convert_events(events: ConversationStream) -> Vec<types::Content> {
+    // Google requires the `ToolCallResponse` to contain the name of the tool
+    // call from the `ToolCallRequest`, even though they also share the same ID.
+    //
+    // We don't store tool call names in `ToolCallResponse`, so we have to track
+    // that here by storing the names of `ToolCallRequest`s, keyed by IDs, and
+    // then using them for `ToolCallResponse`s with the same ID.
+    //
+    // This assumes that the invariant holds that a request always precedes its
+    // response, but if that is untrue, we silently proceed without erroring.
+    let mut tool_call_names = HashMap::new();
+
     events
         .into_iter()
         .filter_map(|event| {
-            Some(match event.event.kind {
+            let ConversationEvent {
+                kind, mut metadata, ..
+            } = event.event;
+
+            let (role, mut part) = match kind {
                 EventKind::ChatRequest(request) => (
                     types::Role::User,
                     types::ContentData::Text(request.content).into(),
@@ -375,11 +539,16 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
                     thought: response.is_reasoning(),
                     data: types::ContentData::Text(response.into_content()),
                     metadata: None,
+                    thought_signature: None,
                 }),
                 EventKind::ToolCallRequest(request) => (
                     types::Role::Model,
                     types::ContentData::FunctionCall(types::FunctionCall {
-                        name: request.id,
+                        name: {
+                            tool_call_names.insert(request.id.clone(), request.name.clone());
+                            request.name
+                        },
+                        id: Some(request.id),
                         arguments: Value::Object(request.arguments),
                     })
                     .into(),
@@ -387,7 +556,8 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
                 EventKind::ToolCallResponse(response) => (
                     types::Role::User,
                     types::ContentData::FunctionResponse(types::FunctionResponse {
-                        name: response.id,
+                        name: tool_call_names.remove(&response.id).unwrap_or_default(),
+                        id: Some(response.id),
                         response: types::FunctionResponsePayload {
                             content: match response.result {
                                 Ok(content) => Value::String(content),
@@ -398,7 +568,13 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
                     .into(),
                 ),
                 _ => return None,
-            })
+            };
+
+            part.thought_signature = metadata
+                .shift_remove(THOUGHT_SIGNATURE_KEY)
+                .and_then(|v| v.as_str().map(str::to_owned));
+
+            Some((role, part))
         })
         .fold(vec![], |mut messages, (role, part)| {
             match messages.last_mut() {
@@ -415,178 +591,268 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
         })
 }
 
-impl From<types::ContentPart> for Delta {
-    fn from(item: types::ContentPart) -> Self {
-        match &item.data {
-            types::ContentData::Text(text) if item.thought => Delta::reasoning(text.clone()),
-            types::ContentData::Text(text) => Delta::content(text.clone()),
-            types::ContentData::InlineData(inline_data) => Delta::content(inline_data.data.clone()),
-            types::ContentData::FunctionCall(function_call) => Delta::tool_call(
-                function_call.name.clone(),
-                function_call.name.clone(),
-                function_call.arguments.to_string(),
-            )
-            .finished(),
-            _ => Delta::default(),
-        }
-    }
-}
+// impl From<types::ContentPart> for Delta {
+//     fn from(item: types::ContentPart) -> Self {
+//         let types::ContentPart {
+//             thought,
+//             data,
+//             thought_signature,
+//             ..
+//         } = item;
+//
+//         let delta = match data {
+//             types::ContentData::Text(text) if thought => Delta::reasoning(text),
+//             types::ContentData::Text(text) => Delta::content(text.clone()),
+//             types::ContentData::InlineData(inline_data) => Delta::content(inline_data.data),
+//             types::ContentData::FunctionCall(types::FunctionCall {
+//                 id,
+//                 name,
+//                 arguments,
+//             }) => Delta::tool_call(id.unwrap_or_default(), name, arguments.to_string()).finished(),
+//             _ => Delta::default(),
+//         };
+//
+//         match thought_signature {
+//             Some(v) => delta.with_metadata(THOUGHT_SIGNATURE_KEY, v),
+//             None => delta,
+//         }
+//     }
+// }
 
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use jp_config::providers::llm::LlmProviderConfig;
-    use jp_conversation::{ConversationStream, event::ChatRequest, thread::ThreadBuilder};
-    use jp_test::{function_name, mock::Vcr};
-    use test_log::test;
-
-    use super::*;
-
-    fn vcr() -> Vcr {
-        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-        Vcr::new("https://generativelanguage.googleapis.com/v1beta", fixtures)
-    }
-
-    #[test(tokio::test)]
-    async fn test_google_model_details() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = LlmProviderConfig::default().google;
-        let name: Name = "gemini-2.5-flash-lite".parse().unwrap();
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = format!("{url}/v1beta");
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
-                }
-
-                Google::try_from(&config)
-                    .unwrap()
-                    .model_details(&name)
-                    .await
-            },
-        )
-        .await
-    }
-
-    #[test(tokio::test)]
-    async fn test_google_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = LlmProviderConfig::default().google;
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = format!("{url}/v1beta");
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
-                }
-
-                Google::try_from(&config).unwrap().models().await
-            },
-        )
-        .await
-    }
-
-    #[test(tokio::test)]
-    async fn test_google_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = LlmProviderConfig::default().google;
-        let model_id = "google/gemini-2.5-flash-lite".parse().unwrap();
-        let model = ModelDetails::empty(model_id);
-        let mut stream = ConversationStream::default();
-        stream.add_chat_request(ChatRequest::from("Test message"));
-        let query = ChatQuery {
-            thread: ThreadBuilder::default()
-                .with_events(stream)
-                .build()
-                .unwrap(),
-            tools: vec![],
-            tool_choice: ToolChoice::Auto,
-            tool_call_strict_mode: false,
-        };
-
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = format!("{url}/v1beta");
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
-                }
-
-                Google::try_from(&config)
-                    .unwrap()
-                    .chat_completion(&model, &ParametersConfig::default(), query)
-                    .await
-                    .map(|mut v| {
-                        v.truncate(10);
-                        v
-                    })
-            },
-        )
-        .await
-    }
-
-    #[test(tokio::test)]
-    async fn test_google_chat_completion_stream()
-    -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = LlmProviderConfig::default().google;
-        let model_id = "google/gemini-2.5-flash-lite".parse().unwrap();
-        let model = ModelDetails::empty(model_id);
-        let mut stream = ConversationStream::default();
-        stream.add_chat_request(ChatRequest::from("Test message"));
-        let query = ChatQuery {
-            thread: ThreadBuilder::default()
-                .with_events(stream)
-                .build()
-                .unwrap(),
-            tools: vec![],
-            tool_choice: ToolChoice::Auto,
-            tool_call_strict_mode: false,
-        };
-
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = format!("{url}/v1beta");
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
-                }
-
-                Google::try_from(&config)
-                    .unwrap()
-                    .chat_completion_stream(&model, &ParametersConfig::default(), query)
-                    .await
-                    .unwrap()
-                    .collect::<Vec<_>>()
-                    .await
-            },
-        )
-        .await
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//     use jp_config::providers::llm::LlmProviderConfig;
+//     use jp_conversation::{ConversationStream, event::ChatRequest, thread::ThreadBuilder};
+//     use jp_test::{Result, fn_name, mock::Vcr};
+//     use test_log::test;
+//
+//     use super::*;
+//     use crate::test::Req;
+//
+//     const TEST_MODEL: &str = "google/gemini-2.5-flash-lite";
+//
+//     fn vcr() -> Vcr {
+//         Vcr::new(
+//             "https://generativelanguage.googleapis.com/v1beta",
+//             env!("CARGO_MANIFEST_DIR"),
+//         )
+//     }
+//
+//     async fn run_chat_completion(
+//         test_name: impl AsRef<str>,
+//         requests: impl IntoIterator<Item = Req>,
+//         config: Option<LlmProviderConfig>,
+//     ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+//         crate::test::run_chat_completion(
+//             test_name,
+//             env!("CARGO_MANIFEST_DIR"),
+//             ProviderId::Google,
+//             config.unwrap_or_default(),
+//             requests.into_iter().collect(),
+//         )
+//         .await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_google_model_details() -> std::result::Result<(), Box<dyn std::error::Error>> {
+//         let mut config = LlmProviderConfig::default().google;
+//         let name: Name = "gemini-2.5-flash-lite".parse().unwrap();
+//         let vcr = vcr();
+//         vcr.cassette(
+//             fn_name!(),
+//             |rule| {
+//                 rule.filter(|when| {
+//                     when.any_request();
+//                 });
+//             },
+//             |recording, url| async move {
+//                 config.base_url = format!("{url}/v1beta");
+//                 if !recording {
+//                     // dummy api key value when replaying a cassette
+//                     config.api_key_env = "USER".to_owned();
+//                 }
+//
+//                 Google::try_from(&config)
+//                     .unwrap()
+//                     .model_details(&name)
+//                     .await
+//             },
+//         )
+//         .await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_google_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
+//         let mut config = LlmProviderConfig::default().google;
+//         let vcr = vcr();
+//         vcr.cassette(
+//             fn_name!(),
+//             |rule| {
+//                 rule.filter(|when| {
+//                     when.any_request();
+//                 });
+//             },
+//             |recording, url| async move {
+//                 config.base_url = format!("{url}/v1beta");
+//                 if !recording {
+//                     // dummy api key value when replaying a cassette
+//                     config.api_key_env = "USER".to_owned();
+//                 }
+//
+//                 Google::try_from(&config).unwrap().models().await
+//             },
+//         )
+//         .await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_google_chat_completion() -> Result {
+//         let mut config = LlmProviderConfig::default().google;
+//         let model_id = "google/gemini-2.5-flash-lite".parse().unwrap();
+//         let model = ModelDetails::empty(model_id);
+//         let mut stream = ConversationStream::default();
+//         stream.add_chat_request(ChatRequest::from("Test message"));
+//         let query = ChatQuery {
+//             thread: ThreadBuilder::default()
+//                 .with_events(stream)
+//                 .build()
+//                 .unwrap(),
+//             tools: vec![],
+//             tool_choice: ToolChoice::Auto,
+//             tool_call_strict_mode: false,
+//         };
+//
+//         let vcr = vcr();
+//         vcr.cassette(
+//             fn_name!(),
+//             |rule| {
+//                 rule.filter(|when| {
+//                     when.any_request();
+//                 });
+//             },
+//             |recording, url| async move {
+//                 config.base_url = format!("{url}/v1beta");
+//                 if !recording {
+//                     // dummy api key value when replaying a cassette
+//                     config.api_key_env = "USER".to_owned();
+//                 }
+//
+//                 Google::try_from(&config)
+//                     .unwrap()
+//                     .chat_completion(&model, query)
+//                     .await
+//                     .map(|mut v| {
+//                         v.truncate(10);
+//                         v
+//                     })
+//             },
+//         )
+//         .await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_google_chat_completion_stream()
+//     -> std::result::Result<(), Box<dyn std::error::Error>> {
+//         let mut config = LlmProviderConfig::default().google;
+//         let model_id = "google/gemini-2.5-flash-lite".parse().unwrap();
+//         let model = ModelDetails::empty(model_id);
+//         let mut stream = ConversationStream::default();
+//         stream.add_chat_request(ChatRequest::from("Test message"));
+//         let query = ChatQuery {
+//             thread: ThreadBuilder::default()
+//                 .with_events(stream)
+//                 .build()
+//                 .unwrap(),
+//             tools: vec![],
+//             tool_choice: ToolChoice::Auto,
+//             tool_call_strict_mode: false,
+//         };
+//
+//         let vcr = vcr();
+//         vcr.cassette(
+//             fn_name!(),
+//             |rule| {
+//                 rule.filter(|when| {
+//                     when.any_request();
+//                 });
+//             },
+//             |recording, url| async move {
+//                 config.base_url = format!("{url}/v1beta");
+//                 if !recording {
+//                     // dummy api key value when replaying a cassette
+//                     config.api_key_env = "USER".to_owned();
+//                 }
+//
+//                 Google::try_from(&config)
+//                     .unwrap()
+//                     .chat_completion_stream(&model, query)
+//                     .await
+//                     .unwrap()
+//                     .collect::<Vec<_>>()
+//                     .await
+//             },
+//         )
+//         .await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_google_gemini_3() -> std::result::Result<(), Box<dyn std::error::Error>> {
+//         let mut config = LlmProviderConfig::default().google;
+//         let model = map_model(types::Model {
+//             name: "models/gemini-3-pro-preview".to_owned(),
+//             base_model_id: "gemini-3-pro-preview".to_owned(),
+//             version: "3-pro-preview-11-2025".to_owned(),
+//             display_name: "Gemini 3 Pro Preview".to_owned(),
+//             description: Some("Gemini 3 Pro Preview".to_owned()),
+//             input_token_limit: 1_048_576,
+//             output_token_limit: 65536,
+//             supported_generation_methods: vec![
+//                 "generateContent".to_owned(),
+//                 "countTokens".to_owned(),
+//                 "createCachedContent".to_owned(),
+//                 "batchGenerateContent".to_owned(),
+//             ],
+//             temperature: Some(1.0),
+//             max_temperature: Some(2.0),
+//             top_p: Some(0.95),
+//             top_k: Some(64.0),
+//         });
+//         let mut stream = ConversationStream::default();
+//         stream.add_chat_request(ChatRequest::from("Test message"));
+//         let query = ChatQuery {
+//             thread: ThreadBuilder::default()
+//                 .with_events(stream)
+//                 .build()
+//                 .unwrap(),
+//             tools: vec![],
+//             tool_choice: ToolChoice::Auto,
+//             tool_call_strict_mode: false,
+//         };
+//
+//         let vcr = vcr();
+//         vcr.cassette(
+//             fn_name!(),
+//             |rule| {
+//                 rule.filter(|when| {
+//                     when.any_request();
+//                 });
+//             },
+//             |recording, url| async move {
+//                 config.base_url = format!("{url}/v1beta");
+//                 if !recording {
+//                     // dummy api key value when replaying a cassette
+//                     config.api_key_env = "USER".to_owned();
+//                 }
+//
+//                 Google::try_from(&config)
+//                     .unwrap()
+//                     .chat_completion_stream(&model, query)
+//                     .await
+//                     .unwrap()
+//                     .collect::<Vec<_>>()
+//                     .await
+//             },
+//         )
+//         .await
+//     }
+// }

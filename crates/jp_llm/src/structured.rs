@@ -2,7 +2,7 @@
 
 pub mod titles;
 
-use jp_config::model::{id::ModelIdConfig, parameters::ParametersConfig};
+use jp_config::model::id::ModelIdConfig;
 use serde::de::DeserializeOwned;
 
 use crate::{error::Result, provider::Provider, query::StructuredQuery};
@@ -22,13 +22,10 @@ pub(crate) const SCHEMA_TOOL_NAME: &str = "generate_structured_data";
 pub async fn completion<T: DeserializeOwned>(
     provider: &dyn Provider,
     model_id: &ModelIdConfig,
-    parameters: &ParametersConfig,
     query: StructuredQuery,
 ) -> Result<T> {
     let model = provider.model_details(&model_id.name).await?;
-    let value = provider
-        .structured_completion(&model, parameters, query)
-        .await?;
+    let value = provider.structured_completion(&model, query).await?;
 
     serde_json::from_value(value).map_err(Into::into)
 }

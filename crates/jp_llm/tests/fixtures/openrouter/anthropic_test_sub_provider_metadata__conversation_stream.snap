@@ -1,0 +1,157 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:49:32.414133",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "openrouter",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:49:30.488185",
+    "delta": {
+      "assistant": {
+        "model": {
+          "id": {
+            "name": "anthropic/claude-haiku-4.5"
+          },
+          "parameters": {
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Test message"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "The user has sent \"Test message\" - this appears to be just a test to see if I'm working and responding. I should provide a friendly, brief response confirming that I'm here and ready to help.",
+    "metadata": {
+      "anthropic_thinking_signature": "RXVzQ0NrZ0lDaEFCR0FJcVFHSkY5MTJ5L2lMczkxS0JtVnNWN0RKeDBmOXNINkJBTzZIMG03UVpwemk4R2paUGxIbkNsNlpMN2NqOHRkckdMTmUvcEwzVTZpLzMrREhZelF1amNRUVNERTkvd0VkQ280WCtXL201YnhvTUVRYXM0TWsxL0k5bXJGVzRJakJCMlNFYklQTCtvOTFIZDlqcWhNRDIrazhPODFrY254V2xycXZZOStWUWFpYWpaT1U3aU9QRU1aZ25HQUZhek80cTBBSHVXMDBVUXg1Y1NuZDV6S0F0UFM4Ly9WKzdGdkJhaXBtNVRubWhpNmFNbnFwVkRqY2lRZDdMbTFxVkxqakdKVmUyUUNYZUZVS0c5QVdwOFQ1ZDVIVkZsM1JFWVBhYWhTL2RNb0M1dVI5NmxsRHl0Wlh6L3NjNzBmb1FjMndjZEdSZWpkbFMvRTNkbjl6NGxaOVkvR2g0bm8rUlplR0hXTzRJZHVmZTQyV1R5eG5xaFdraUhEV2V3MUJZZk4ycjVSd05GWkpoazdJeCtPV1Z1VlRHYkFvUU1tOHJRbWl2citvWUhuTUxXQ1k3UDRlSFVtOW9wSkdqMVUzb2wwSjJwamlOWlNXd0phRkp4a0R1SDNDbjgzeVBHQUU9",
+      "openrouter_metadata": [
+        {
+          "index": 0,
+          "field": "YW50aHJvcGljX3RoaW5raW5nX3NpZ25hdHVyZQ=="
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Hello! I'm here and ready to help. What would you like to know or discuss?"
+  }
+]

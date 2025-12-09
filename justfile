@@ -1,4 +1,4 @@
-bacon_version    := "3.19.0"
+bacon_version    := "3.20.1"
 binstall_version := "1.15.7"
 deny_version     := "0.18.5"
 expand_version   := "1.0.118"
@@ -55,7 +55,7 @@ check *FLAGS:
     just bacon clippy {{FLAGS}}
 
 test *FLAGS: (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
-    cargo nextest run --workspace --all-targets {{FLAGS}}
+    cargo nextest run --workspace --all-targets --no-fail-fast {{FLAGS}}
 
 testw *FLAGS:
     just bacon test {{FLAGS}}

@@ -1,0 +1,156 @@
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Testing tool call"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "run_me",
+              "description": "",
+              "parameters": null,
+              "parametersJsonSchema": {
+                "type": "object",
+                "properties": {
+                  "foo": {
+                    "default": "foo",
+                    "type": "string"
+                  },
+                  "bar": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "foo"
+                        ]
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "enum": [
+                          [
+                            "foo",
+                            "bar"
+                          ]
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "bar"
+                ]
+              },
+              "response": null
+            }
+          ]
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "ANY",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": null,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"run_me\",\"args\": {\"bar\": \"foo\"}}}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0,\"finishMessage\": \"Model generated function call(s).\"}],\"usageMetadata\": {\"promptTokenCount\": 59,\"candidatesTokenCount\": 15,\"totalTokenCount\": 74,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 59}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"_Bo4aejgE52cvdIPsv_zoQY\"}"
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+    - name: key
+      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Testing tool call"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "",
+                "name": "run_me",
+                "args": {
+                  "bar": "foo"
+                }
+              }
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "",
+                "name": "run_me",
+                "response": {
+                  "content": "working!"
+                }
+              }
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": null,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: "data: {\"candidates\": [{\"content\": {\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 35,\"totalTokenCount\": 35,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 35}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"_Bo4aZCSJ5K5xN8P2OG56AY\"}"

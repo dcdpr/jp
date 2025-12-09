@@ -1,0 +1,188 @@
+when:
+  path: /chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "llama3:latest",
+      "messages": [
+        {
+          "role": "user",
+          "content": "I am testing the structured completion API."
+        }
+      ],
+      "stream": true,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "generate_structured_data",
+            "description": "This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\\n\\n1 + 1 = ?",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "answer"
+              ]
+            },
+            "strict": true
+          }
+        }
+      ],
+      "tool_choice": "required"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1765284607,"id":"chatcmpl-1NSmviA6JLbZMHjGN7qD0Be0SBWnKrMe","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"id":"KFF1FoVrCmSYMOXFraDsnUGOo3vOOJg8","type":"function","function":{"name":"generate_structured_data","arguments":""}}]}}],"created":1765284607,"id":"chatcmpl-1NSmviA6JLbZMHjGN7qD0Be0SBWnKrMe","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\""}}]}}],"created":1765284607,"id":"chatcmpl-1NSmviA6JLbZMHjGN7qD0Be0SBWnKrMe","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"answer"}}]}}],"created":1765284607,"id":"chatcmpl-1NSmviA6JLbZMHjGN7qD0Be0SBWnKrMe","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":"}}]}}],"created":1765284607,"id":"chatcmpl-1NSmviA6JLbZMHjGN7qD0Be0SBWnKrMe","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"2}"}}]}}],"created":1765284607,"id":"chatcmpl-1NSmviA6JLbZMHjGN7qD0Be0SBWnKrMe","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":"tool_calls","index":0,"delta":{}}],"created":1765284608,"id":"chatcmpl-1NSmviA6JLbZMHjGN7qD0Be0SBWnKrMe","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk","usage":{"completion_tokens":22,"prompt_tokens":268,"total_tokens":290},"timings":{"prompt_n":250,"prompt_ms":506.121,"prompt_per_token_ms":2.0244839999999997,"prompt_per_second":493.95302704294033,"predicted_n":22,"predicted_ms":422.612,"predicted_per_token_ms":19.209636363636363,"predicted_per_second":52.057206137071354}}
+
+    data: [DONE]
+---
+when:
+  path: /chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "llama3:latest",
+      "messages": [
+        {
+          "role": "system",
+          "content": "<instruction>\\n  <title>Structured Data Validation Error</title>\\n  <description>The following error occurred while validating the structured data. Please try again.</description>\\n  <Items>\\n    <item>You thought 1 + 1 = 2? Think again!</item>\\n  </Items>\\n  <examples/>\\n</instruction>"
+        },
+        {
+          "role": "user",
+          "content": "I am testing the structured completion API."
+        }
+      ],
+      "stream": true,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "generate_structured_data",
+            "description": "This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\\n\\n1 + 1 = ?",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "answer"
+              ]
+            },
+            "strict": true
+          }
+        }
+      ],
+      "tool_choice": "required"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1765284611,"id":"chatcmpl-amAFuTSW3euOqJb9GL0Nfu0a2XMiNmBY","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"id":"yFwKLtUkFXaZh2zKwlrgmUZxqPyNfTeD","type":"function","function":{"name":"generate_structured_data","arguments":""}}]}}],"created":1765284611,"id":"chatcmpl-amAFuTSW3euOqJb9GL0Nfu0a2XMiNmBY","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\""}}]}}],"created":1765284611,"id":"chatcmpl-amAFuTSW3euOqJb9GL0Nfu0a2XMiNmBY","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"answer"}}]}}],"created":1765284611,"id":"chatcmpl-amAFuTSW3euOqJb9GL0Nfu0a2XMiNmBY","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":"}}]}}],"created":1765284611,"id":"chatcmpl-amAFuTSW3euOqJb9GL0Nfu0a2XMiNmBY","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"3}"}}]}}],"created":1765284611,"id":"chatcmpl-amAFuTSW3euOqJb9GL0Nfu0a2XMiNmBY","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":"tool_calls","index":0,"delta":{}}],"created":1765284611,"id":"chatcmpl-amAFuTSW3euOqJb9GL0Nfu0a2XMiNmBY","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk","usage":{"completion_tokens":22,"prompt_tokens":319,"total_tokens":341},"timings":{"prompt_n":310,"prompt_ms":651.497,"prompt_per_token_ms":2.1016032258064516,"prompt_per_second":475.82721025576484,"predicted_n":22,"predicted_ms":417.759,"predicted_per_token_ms":18.989045454545455,"predicted_per_second":52.66194145428344}}
+
+    data: [DONE]
+---
+when:
+  path: /chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "llama3:latest",
+      "messages": [
+        {
+          "role": "system",
+          "content": "<instruction>\\n  <title>Structured Data Validation Error</title>\\n  <description>The following error occurred while validating the structured data. Please try again.</description>\\n  <Items>\\n    <item>You thought 1 + 1 = 2? Think again!</item>\\n  </Items>\\n  <examples/>\\n</instruction>"
+        },
+        {
+          "role": "system",
+          "content": "<instruction>\\n  <title>Structured Data Validation Error</title>\\n  <description>The following error occurred while validating the structured data. Please try again.</description>\\n  <Items>\\n    <item>You thought 1 + 1 = 3? Think again!</item>\\n  </Items>\\n  <examples/>\\n</instruction>"
+        },
+        {
+          "role": "user",
+          "content": "I am testing the structured completion API."
+        }
+      ],
+      "stream": true,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "generate_structured_data",
+            "description": "This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\\n\\n1 + 1 = ?",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "answer"
+              ]
+            },
+            "strict": true
+          }
+        }
+      ],
+      "tool_choice": "required"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1765284613,"id":"chatcmpl-bWgzBRc7Q0t7AEdliX3H4T78Kuu9ZUgg","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"id":"VlCeAx5crbHXxBLkwNmfUaEghneQZ4it","type":"function","function":{"name":"generate_structured_data","arguments":""}}]}}],"created":1765284613,"id":"chatcmpl-bWgzBRc7Q0t7AEdliX3H4T78Kuu9ZUgg","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\""}}]}}],"created":1765284613,"id":"chatcmpl-bWgzBRc7Q0t7AEdliX3H4T78Kuu9ZUgg","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"answer"}}]}}],"created":1765284613,"id":"chatcmpl-bWgzBRc7Q0t7AEdliX3H4T78Kuu9ZUgg","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":"}}]}}],"created":1765284613,"id":"chatcmpl-bWgzBRc7Q0t7AEdliX3H4T78Kuu9ZUgg","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"2}"}}]}}],"created":1765284613,"id":"chatcmpl-bWgzBRc7Q0t7AEdliX3H4T78Kuu9ZUgg","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk"}
+
+    data: {"choices":[{"finish_reason":"tool_calls","index":0,"delta":{}}],"created":1765284613,"id":"chatcmpl-bWgzBRc7Q0t7AEdliX3H4T78Kuu9ZUgg","model":"llama3:latest","system_fingerprint":"b5740-fa4a9f2a","object":"chat.completion.chunk","usage":{"completion_tokens":22,"prompt_tokens":391,"total_tokens":413},"timings":{"prompt_n":388,"prompt_ms":803.753,"prompt_per_token_ms":2.071528350515464,"prompt_per_second":482.735367706248,"predicted_n":22,"predicted_ms":417.691,"predicted_per_token_ms":18.985954545454543,"predicted_per_second":52.67051480639995}}
+
+    data: [DONE]

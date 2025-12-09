@@ -18,6 +18,8 @@ jp_tool = { workspace = true }
 base64 = { workspace = true, features = ["std"] }
 crossbeam-channel = { workspace = true, features = ["std"] }
 duct = { workspace = true }
+fancy-regex = { workspace = true, features = ["perf", "std", "unicode"] }
+glob = { workspace = true }
 grep-printer = { workspace = true }
 grep-regex = { workspace = true }
 grep-searcher = { workspace = true }

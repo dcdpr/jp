@@ -1,0 +1,108 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpOBtd3oUSxwN6UXo1kk-ZvCbAjnsl4Uhb5B0fdHgGQx0ryzJhuSdbfrdnnPmsxW_1rXS3zfxX2ZZDnvwRqKS_klVcHjandHmbcBYyc5iD78GdaY7hAAWz3aDOzLtBns9GC9-DU7fXXOtCx7jWFgMi-bL8gIzbrzKvfdfP0iXdb5fg2GuTibUA2W-A3FZAa-1nTonwMgtiWoZkSEiLwH9MQGK_ZuL2gVZPM2W3xm7maFItWfDLEZY9Bi3bP5xUh8uAk2FwJ1CcraY71L2V0B98tXREp9vkt9dYBlyTwkmKBiGQCJqZzSjTEUL9CBB5-1WJIzprkVLdHXqaHFtKVP-NWFK66Elvma9SDlrNJf9097lZs6mWjcXo01MqU9wdF8eUs-ya6HCDMlHnKycrt6UXIXG8YcfmjqPoi6AI3YCI9JFCge5k66yZPWHzRjDR4VGHOwm_N3DlXolbRY45WF1tX3JSOG45XRClSDKm96iLGWofbS2brU7sZ9oOJDYWsQyM93lqjJrB4yl-VtkP_4gcw35T1mkPC-LZmA59BG_EMe9u46kk7MDuV0MoT4p2H-42re432a6R6CMc1m6EeWu8iqMkHc24ZD_4KVHM1Hvc5cS8_HKcJvRFYbbdE-LidmovWcOXJmStvqjO85clLAD9gBhfPGmLfBpj6HiRvO6hMTepWCMRw0m_Ht_ASD50SuIRrN7TpSgyRRSn6i8EujULobrgn5VFKFGvMG30E1wPzfkJ1d67QwR0HjrqOQrqnRlZUPKzjUVmNvBtm7Tbm6dsMNU5pKumw_jYOVb78Qy0m4oT1dB6FTJUdTAjriW30-3dj993VJsyIHQoJm2E-DbDG56WrfHOtQ84dNVXfPwMbXhekZ53L4wBgXphKoMfBJl5tzyJSy_RBS_Tk90YA-K-2ra5OWrkMwYopeKEqY1M9Ak5QB-N1kbWPMxy4cKM9SivD1SnBLFXsePiaKRBzYRAKH3SAJK2YY3L43euJgiTw1BqgCFu177lLGkIAbbnHwBQfMbmGKcSjKQuDjC4uNefKjfEktQm02Xbn3rMGqtysAUW3HQvQVNj1RkFKYt_tWSzq5eUZZBTgPyXDKBwddN4JR60XCBjtlAoNbupVUuBxzw1sTTPGAs7M_s0wKNNeeEyiMqjUsE0aThvxgp_iZK-qMF6GVaaaRI-2yYhJNAMt4xnHKFe0kEG9UbdD-8fiF53lhhcKNTFfGK8OrrJDs_xhqIL0I3VVX5PS2xF7paCQ0ConG54tjn7BvW-v2Gp9HTcyxESYfCBBItJDJMSnoGoLnsXynb7Jba1DK3ubZX3AzBUREGsxEzRMxk0neOF3JEAmfBTUe9hTdByWP0jAP5E3Lyca5sWAkDqfp70DdxEyjK19dKZkKnzYSsxjc9VD4uoH64Db1BBh11VTqlPyRbdQ8IHAoKJJJd2pDzp4m5Ua2-p7j9HwMoQs6xDT7l5FeyLAUPzH199a9unqmDmqMsfI6sjJQIZ7vrU42MQpL6lupqk4YqD_2AJXYOUmn_oVrM-NNjMfPhRgFlwnfXHscbdUmV5AwD2n7Jtd1xbnHVyzZAOWD8z_ctrpmcCkTxe5wpxOtZpz-XdX9xeayM0dS9FUJ0KmOYnUJ5hBqNdneLSPHL8gAmksLjje_P19OghgEFzI2nJe1htWe4TrCXMLV6ftlJokgGwMrbaYYwUurmxmHO4kJO5Mdrcdkvu32KjHh_2xm1l5EWuUpHCBRPL0_Vs7kONToPWEDY1iEWw8GUKoHCTpmkB-15JFndBxAiUasSlpoHQfwwEMAIJHGqcFkgnxcx37WN-Wr6WTYKlEVUvFLj7P7V1EbSblaH9_AB-cKT2zlyaMB1vH_1TYDtYA6bArwO9Ojsp1ozXdnX_mqiTypFdJvXqRkYdBfMqtdl8UN4iTvZNUQbAHBp49JFOo3R_nKokUb9BqXWXHRnec4yKx4GuN1xfyZQZSDR5ukyGgpfiCJkPh6P0hNHwFpQX9W98MsEKDQ0_cRjygc04oLnSANU1HBAtoL_IiOQ8RXTd_DfsQU9i1oHxCbfMQvRGWhz5XQJdwV8Yr3Y7pDky9uti0vldObkgLXwprg6DtoSJwmCSIw0moXdS8dsJ5t3PMobWYbgwnotXupjo6ujDOgLKDCgAg1mBZ82F8FIA3AFXAyWMCkhcDQeYyd_jwgg6FciMlzhUKiK09WfT6dGsXiBIipJ4RnFI12oe5bYGeCSbaq-yVlat4Q29Upoh7-fDJvaX4B_XGWL6T7BZ563DGSdquJNDSm0J0Vng4fqFkhw3fyGpSwYeLdcHlRr3_e5tO1jDxNcmNdKICvDQjm6fzkkv96yncss="),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_00b6a149ea7da2850169381b59f1b08190ada96f7f6607fe39"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_8cNloZcsdH0xQoKdxT4qIfxw",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("foo"),
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 2,
+            metadata: {},
+        },
+        Finished(
+            Other(
+                String("tool_calls"),
+            ),
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpOBtgKYykK6hfTgpv4WYwxKxViOavv3yuWhqzsjn5bocViFyNQOoyY0ZXDNo8Nu6O04BIU-DluOyNAvo3TmRNWGGvAy3H6CHJCJP8KXmgj8-T3EfuezXH4CLng8RY_KwSS69nObwSKKqZbURy0sWmYI5VDJK5sfcW6OR59mrkpyXW41_ldIsMBangwunZkGeEtvxb8xDnhACCZC8raEtG6gC361RhdqkzDaV531WL6aqa8Y3l_WBV3RDTUley-wGlFUpihr9Wnz_RLy4pWwwlJ3M-1NdoBySthqTGgZmjxQi02A85RUoBrV_I2Oi4UZL6pdyqPcMMYphg6D0niYkYra10jJFRe7gomSMy4KAtJ9y8DmrsquG4r1quDtwbaRPlGuIU7w-p7JMXQ3b0egL5Xsuf1jRhwfMqNkSg-pJqVNUNwHRNBFXkEX145CqSy_2bi-4O9ofTbhILMaoHKO3HTReU73F9LCrnpT5zn43OQCqxnthcEaBteqcX7XPjcoYJMPcPPVHWxMv6gblAc4qqMQT8xfIRKbrPTsP6tlG9GB1ss-V2z_0euO1y1cElsOtD3LGxTiO_LCV_JLqYVqC4FNHZMVsGS0rm6BYvEzoOkqjoaU6WUAE2puJtZMLcvBXn2OP22xy1Tni7K1XZ7RShSm1VhE43aSCLbYcSNt58rKJA-nuNXpgbF4Y8XRWjbfW2-JF92Amxn0r5t_kvNxQ5E2hEUDeEmZwnMS1CUrliqUKBUdW-36Lf3EAgPNUCgpRpgyFVo3wrT4p66q-h8In6L9-_Srm2eIoZCxBRSF33nm3uTeSuuGOuVDJXQtPVBJlUqhrs5y74xvfQowU8TNpiX_ipdXatYa9ug2CnCyZmhwjpDhvjLNloHCHW4WOc9unDgZIjvLBqx4_qepHkcgB6bQDMeJyHTBnQGVSgRa2CmO6RSR5nQmyS1XwnbwrbkUEzl2h3zTGFamhH1DcjFKj-q-PjNUG5nhClyiukctuIWc9tTGZIy9R4uR6NfeY6S4YW-Zp1zftYiZDRe_FRl4_FJiBW6d6L7c3LV6aPBHAsAkt352RPdlhhD2gnrQx7D91M1ljsZvzmNqPLh6Yfk1GmLUfXYEzzD0MYOrT72vKVCmyuLB53xmpHh88Nxhx6JPcdmTDmCKix36eN7vIRXioOk90ZqOIVvAouP4Z_k8mN8Bl7hUFnAJS20AVlX1X9I16tLj8b90MH5oN4sEDGP4VU0kYxAo4AxK3iC6LAvpQxSi796w0d-M-0X6jFQiGFNiJSggaGVy6o8UHNo_uAkdaRxpQIGm6Z6RzBOTnAs1Ope6n2NKj8iAqtznrtX73rpiffMCSa6YnovoE4YBpIRM-FKZQXhZf4RqqKf_igoywg8Do2fC9T9YfDqbfGkQLVDS9ED82_pge2BfT2aN-fSiH4UlZCe7we3sbKg2h6CKwMcn0ddPPh4IHmrwFZZK55KMwRKReybBmeTe7wbJG7GZFdK9q2nT--vi7uLcKItYeaCnz_fn6eR0tCMJjyTRENqioeKGiQDGe54bbwPUmYh70pm1hA0rjETRujs_EgqAiV5ws7SLb9kV27V1-21TMKTeamNOO7M1UVejMToHmfCAuDB1wHsBEkRBOlf7uVWa22mC8_VCcDtetB_TnrhBU7TfYjQ-jbacB68nvF43XMn5-0VRbbFOcLh87aQSeKVVw_2Iv3PQcnv9RNdIziG14qb-QXW6ER"),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_0b76e5dc147c33ee0169381b5e25848190bf44fc9b5cb59fc8"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Tool call successful.\n\nFunction returned: \"working!\"\nArguments sent: {\"foo\": \"foo\", \"bar\": [\"foo\", \"bar\"]}\n\nDo you want to run another test or pass different arguments?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

@@ -1,0 +1,53 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "GzsQfJpaZqJQU6UbggNhDsy2T6nKQujL",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("test"),
+                            "bar": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "It seems the testing tool executed successfully! The response \"working!\" indicates that the tool call with the arguments `{\"foo\": \"test\", \"bar\": \"foo\"}` has completed as expected.\n\nIf you need any further actions or have more tests to run, feel free to let me know!",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

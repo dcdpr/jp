@@ -105,11 +105,11 @@ mod tests {
     use std::collections::HashMap;
 
     use assert_matches::assert_matches;
-    use test_log::test;
 
     use super::*;
 
-    #[test(tokio::test)]
+    #[tokio::test]
+    #[test_log::test]
     async fn test_list_files() {
         struct TestCase {
             prefixes: Vec<&'static str>,
@@ -192,7 +192,8 @@ mod tests {
         }
     }
 
-    #[test(tokio::test)]
+    #[tokio::test]
+    #[test_log::test]
     async fn test_empty_list() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();

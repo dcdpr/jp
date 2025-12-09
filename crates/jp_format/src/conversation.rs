@@ -50,7 +50,7 @@ impl DetailsFmt {
 
         Self {
             id,
-            assistant_name: events.config().assistant.name.clone(),
+            assistant_name: events.config().ok().and_then(|c| c.assistant.name.clone()),
             title: conversation.title.clone(),
             message_count: events.len(),
             local: None,

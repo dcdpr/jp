@@ -1,0 +1,2088 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4-0613",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-3.5-turbo",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.1-codex-max",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.1-2025-11-13",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.1",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.1-codex",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.1-codex-mini",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "davinci-002",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "babbage-002",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-3.5-turbo-instruct",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-3.5-turbo-instruct-0914",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "dall-e-3",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "dall-e-2",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4-1106-preview",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-3.5-turbo-1106",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "tts-1-hd",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "tts-1-1106",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "tts-1-hd-1106",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "text-embedding-3-small",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "text-embedding-3-large",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4-0125-preview",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4-turbo-preview",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-3.5-turbo-0125",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4-turbo",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4-turbo-2024-04-09",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o",
+            ),
+        },
+        display_name: Some(
+            "GPT-4o",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: Some(
+            16384,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-2024-05-13",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-mini-2024-07-18",
+            ),
+        },
+        display_name: Some(
+            "GPT-4o mini",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: Some(
+            16384,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-mini",
+            ),
+        },
+        display_name: Some(
+            "GPT-4o mini",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: Some(
+            16384,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-2024-08-06",
+            ),
+        },
+        display_name: Some(
+            "GPT-4o",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: Some(
+            16384,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "chatgpt-4o-latest",
+            ),
+        },
+        display_name: Some(
+            "ChatGPT-4o",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: Some(
+            16384,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-audio-preview",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-realtime-preview",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "omni-moderation-latest",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "omni-moderation-2024-09-26",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-realtime-preview-2024-12-17",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-audio-preview-2024-12-17",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-mini-realtime-preview-2024-12-17",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-mini-audio-preview-2024-12-17",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o1-2024-12-17",
+            ),
+        },
+        display_name: Some(
+            "o1",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o1",
+            ),
+        },
+        display_name: Some(
+            "o1",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-mini-realtime-preview",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-mini-audio-preview",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "computer-use-preview",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o3-mini",
+            ),
+        },
+        display_name: Some(
+            "o3-mini",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o3-mini-2025-01-31",
+            ),
+        },
+        display_name: Some(
+            "o3-mini",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-2024-11-20",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "computer-use-preview-2025-03-11",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-search-preview-2025-03-11",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-search-preview",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-mini-search-preview-2025-03-11",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-mini-search-preview",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-transcribe",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-mini-transcribe",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o1-pro-2025-03-19",
+            ),
+        },
+        display_name: Some(
+            "o1-pro",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o1-pro",
+            ),
+        },
+        display_name: Some(
+            "o1-pro",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-mini-tts",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o3-2025-04-16",
+            ),
+        },
+        display_name: Some(
+            "o3",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o4-mini-2025-04-16",
+            ),
+        },
+        display_name: Some(
+            "o4-mini",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o3",
+            ),
+        },
+        display_name: Some(
+            "o3",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o4-mini",
+            ),
+        },
+        display_name: Some(
+            "o4-mini",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4.1-2025-04-14",
+            ),
+        },
+        display_name: Some(
+            "GPT-4.1",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: Some(
+            32768,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4.1",
+            ),
+        },
+        display_name: Some(
+            "GPT-4.1",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: Some(
+            32768,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4.1-mini-2025-04-14",
+            ),
+        },
+        display_name: Some(
+            "GPT-4.1 mini",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: Some(
+            32768,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4.1-mini",
+            ),
+        },
+        display_name: Some(
+            "GPT-4.1 mini",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: Some(
+            32768,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4.1-nano-2025-04-14",
+            ),
+        },
+        display_name: Some(
+            "GPT-4.1 nano",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: Some(
+            32768,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4.1-nano",
+            ),
+        },
+        display_name: Some(
+            "GPT-4.1 nano",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: Some(
+            32768,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-image-1",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "codex-mini-latest",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o3-pro",
+            ),
+        },
+        display_name: Some(
+            "o3-pro",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-realtime-preview-2025-06-03",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-audio-preview-2025-06-03",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o3-pro-2025-06-10",
+            ),
+        },
+        display_name: Some(
+            "o3-pro",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o4-mini-deep-research",
+            ),
+        },
+        display_name: Some(
+            "o4-mini-deep-research",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o3-deep-research",
+            ),
+        },
+        display_name: Some(
+            "o3-deep-research",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-transcribe-diarize",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o3-deep-research-2025-06-26",
+            ),
+        },
+        display_name: Some(
+            "o3-deep-research",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "o4-mini-deep-research-2025-06-26",
+            ),
+        },
+        display_name: Some(
+            "o4-mini-deep-research",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-06-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5-chat-latest",
+            ),
+        },
+        display_name: Some(
+            "GPT-5 Chat",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: Some(
+            16384,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-08-30,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5-2025-08-07",
+            ),
+        },
+        display_name: Some(
+            "GPT-5",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-08-30,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5",
+            ),
+        },
+        display_name: Some(
+            "GPT-5",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-08-30,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5-mini-2025-08-07",
+            ),
+        },
+        display_name: Some(
+            "GPT-5 mini",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-08-30,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5-mini",
+            ),
+        },
+        display_name: Some(
+            "GPT-5 mini",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-08-30,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5-nano-2025-08-07",
+            ),
+        },
+        display_name: Some(
+            "GPT-5 nano",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-08-30,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5-nano",
+            ),
+        },
+        display_name: Some(
+            "GPT-5 nano",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: None,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-08-30,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-audio-2025-08-28",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-realtime",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-realtime-2025-08-28",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-audio",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5-codex",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-image-1-mini",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5-pro-2025-10-06",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5-pro",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-audio-mini",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-audio-mini-2025-10-06",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5-search-api",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-realtime-mini",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-realtime-mini-2025-10-06",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "sora-2",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "sora-2-pro",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5-search-api-2025-10-14",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.1-chat-latest",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-3.5-turbo-16k",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "tts-1",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "whisper-1",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "text-embedding-ada-002",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+]

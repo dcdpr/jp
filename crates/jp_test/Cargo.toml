@@ -16,6 +16,9 @@ version.workspace = true
 httpmock = { workspace = true, features = ["record"] }
 insta = { workspace = true, features = ["colors"] }
 saphyr = { workspace = true, features = ["encoding"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+test-log = { workspace = true }
 
 [lints]
 workspace = true

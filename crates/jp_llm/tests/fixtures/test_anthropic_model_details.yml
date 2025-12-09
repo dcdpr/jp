@@ -1,9 +1,0 @@
-when:
-  path: /v1/models/claude-3-5-haiku-latest
-  method: GET
-then:
-  status: 200
-  header:
-    - name: content-type
-      value: application/json
-  body: "{\"type\":\"model\",\"id\":\"claude-3-5-haiku-20241022\",\"display_name\":\"Claude Haiku 3.5\",\"created_at\":\"2024-10-22T00:00:00Z\"}"

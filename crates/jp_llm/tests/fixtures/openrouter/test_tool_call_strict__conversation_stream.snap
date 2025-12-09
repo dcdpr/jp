@@ -1,0 +1,174 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:51:56.239993",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "openrouter",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Testing tool call"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "",
+    "metadata": {
+      "openai_encrypted_content": "Z0FBQUFBQnBPQnRsdC1qSHdRWlR0bjJnVVh2UWtMZWxNekwzTEdsMURrTVd1UWlLMlc2bEFoSWh2MjRSLU4wYTRVNkoxSFdqdnJYRlg4VTRqTnVULUViMWlYU0JTeGVMbmZTVUx1VmxhamNkdHNyWlV0U1JSaEIxUDktYVkzQ0pJOVdCN2tMU1FDNG9TdmkxaEdJemw2dk1UUjNwMDVGSzg4SXBuOFVTRER5aVBiRGIzZTVPNG9pZHhXZlk5eFdqU19CeFE0YldyTk53MHRGZDdtbVphSVBCQXhQdXdPT3ZKWmxCVWRpMExpN25pTEUza1Fxc0RVS055S21EQlFnSFI3XzdqWEdiY2JwMFY3MDM2Rkl3YXFlWDFySWgtVjU1MHRqYk01WW1rMFFjOFpMcXVYNGZaZVVsTzBZZjFhLWY2R21fejNnblVUNUlOWXk4aXVoMFJMaG5kY25lSHhvVWFXSlF1czVueDFrdkM3R21qQ1YzUDJsM2J5cnNNajUzVGo2aU13UE12TkJ2LTJJVHg3Wk5jNEE0aFFMbDJnTlR6bnUwS3UyZWlOd1Z4TVU3ZlJSbl9oZUhZREhPa0h5TGF5ZXBacXlGZHJuYkN1aVFKMmYzVl84VzZ0V0NPUWlBcUhFeHZmaXBzX3lGSjFwQnh0YjJpX2hKYllzZ2RaSGM2VGJ4X0FrM183bnJHYmVPam9LbXRZLWszNGw5aEVWZk1SdUE2TzhldmN0NUpJamJBbXlEQ0RMbUxWVjF6VnV5b3FwMmM3VHlLWFNYUTRyTlNLMmhZTFlfMzBLdFJRZmxDZW92d3NPNEhXcF9oWGZtbWJieE9CWmdSRTZRQTZjdDRxazh3bmRqVnlJbE9vblppYkpKRFNmTEozZUxmOWxta1BqbVkwU0htc0tfWEtlcFhuX3M1ZldEMWpZbnNKdHZWd3lBZWNjVlE3S1VoMTNrS0xEQlVNYWxQdzhERFZGbHRDSkl2NVp6MFlNOFRLaWNuN0dnXy1GQXQxakdNY3JBU0dIWl9DbGozUmtCMEp3ai1QYk5rcEUzMXZFSGo4TUlQR2xxMzlKWm93b3dpOFAwREI2MXVlR3ZVaW5ZX1haT1NIWEN3a21zOEJnMDFzd0l3RXFBYzRnNi1vcWZFOTV4RlFZNUc1LUN1QV9BaXlDakFnMjFKR0JJNWVxLW8wY0FJQVZPRGlIR0M2Tm01YzdwT1BUaHBJTm9kZE9rbGFGQ1FQTERXdXl5SVU0YVpwMWJkbnloU1dnRFk1aUwwNzdqUWo4VXFfVjg5anZHUl9FeE5fdERLaHRoQm9ya0tQcWF4WVRoUU95STFmQ2NXMGl6NnVWZXpWU2Z6RWpxTUNBWnBfZU5qWGM5eDBOTTBCdEVCRndPZVFNS1VVMHR0UjY5bHRuXzBvd1BtVExxX0lUeHBUS05ESEdMQVE4UHhGQWI2SjBLbGFsVzlRY1labzR5Y2RIcU9TSGMxWjdMU1ZQd3ZUUlVFUmdWTHdjMU05M0tWcXprSWdPLTZFR3RzcHVELWk5S0hkYzk5Smg0QnlrQm5DZ0R3dEZjbXI1SlM3NXM4Z3ZkdE5JejI3VHVlZlotVTRFSm10U0o4anJqUlRTSlNxSV9tOXJJbGUwblYtM1BZY2xpOHN4anJkcnpIaklUaTVfV1VMZ3Z4MWx6dUlwU0ZvaklnTmIzNWl5RUhNc2JGWHh4MDIyR1ljR29Wanp4ZG82V3NodkdqcEdiT2hNT1d3TGp3cUpTQXJVZWdfaXVUYVhiQnNiNlhiOHhWUnI3dVVIUHJDMUkweXh6QXphY3dFektRVnB4dG5EdHJEWkhmUFpUbmNUQmdvU2FhWjZHeHpLNXUtQ1lNaVpncUJKcFcwa0RVS1VWSmlZQnVEcDNSY1BVNlR5R0QyRkdHbTJxUFNVZ3lhS08xMlpGbXk0eGt5X2NzNFJaMUdweE0wSkhJRFZucWdyenMxWjFobWp3cm9nbE9jbkcwazAzNDQ3bTF0S0Nmc1FrNkEwWF8xUjh3VldVRFhLSTk5SnR1SDV3RHp0b2Q1QTV4bkFIZHNTbGVKcXRUNzJITDJ2Q3cyeERvczhNeWNzQWlWaU9kdFZfYzNyWWtkT3g1UWFVUHhobXJvaFpYRVhtLWV6VGZlamVSVWVCeUtQaVRmRzJZZmFLWjZoZWFmMTZQYWV4cXNqS3ZBemFneUU4RGxNemFWU09LTC1mYmJHQktPLUFMUVdvZHF6V3JwY0RJSkhmMFNaNzB0RTRFWTc0a3dRYklQQ29qVWNqS21LbmlEbHpaaWZXNlhWR2tsVlhwTmpTM1Z6V0RWaEg0QkJTVVVWM0RNV3FXd2g5cFdDMGp2aGU1VXdFS05nVmFyUkpBQ2RVc3BhcGg5d0tQdDQ4QnNDTEdLdXh0NEcwNnh0d1RjUnBNUGNYeU9FMkQxU3I3U3NDaU9ld0t0bUtEQ3VzMjNocmFhWGFIR3E1VkJBZVVSV0tpZkFfdmZpRkJZNDlfMHRObWhEenFJUFNnNndJMjV2b09kWWJWRVY3ZzRLTUUwVlFHTTBmbkMzenAxQ05fSWdhaGtHcWktQUR1UlZOMTVXdi0yMGc1Zz09",
+      "openrouter_metadata": [
+        {
+          "id": "cnNfMDAyZDQxNjI0NjBhMTI2ZDAxNjkzODFiNjI4YmQwODE5N2FjY2VhODlmMTdkNjA2ODU=",
+          "index": 0,
+          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_request",
+    "id": "call_Sk916JJ8gLyVXGodm2VnuJ9k",
+    "name": "run_me",
+    "arguments": {
+      "foo": "Zm9v",
+      "bar": [
+        "Zm9v",
+        "YmFy"
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_response",
+    "id": "call_Sk916JJ8gLyVXGodm2VnuJ9k",
+    "content": "d29ya2luZyE=",
+    "is_error": false
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Acknowledging tool test**\n\nI need to respond to the user who mentioned \"Testing tool call.\" It seems they want confirmation that the function worked. The internal tool call returned \"working!\" so I'll confirm that. I also want to keep it concise and mention the payload they provided, which was {\"foo\":\"foo\",\"bar\":[\"foo\",\"bar\"]}. My response will be: \"Tool call successful — run_me returned 'working!'. Payload used: {\"foo\":\"foo\",\"bar\":[\"foo\",\"bar\"]}. Anything else you'd like to test?\"",
+    "metadata": {
+      "openai_encrypted_content": "Z0FBQUFBQnBPQnRzWEVjYUJzZTJ3LWRxVURJQWk3dWJxQldha2paakppZXNlTUhySXY4X3ppcnNLNC1uWDMxUXVSZlZMMWFhS2ZjdU5JbFZYSU8xMThyT0ZDZXU0elV0a0QteXRPcTVFVnhJbXd2Tk5meXlQVl9fcEgwQTE5YlNNdDUzdXdMcTF6R09pREtzXzAzMWpVNmlfdEhFZEtNZjRvcVJPY2FRc3NDYnlSQmxCOGd2X0FDSEV2emhSOHdVckF6WUxERHVWUzVrM19zZWswb29aWGNfQ0pfMnBxZkRYR19DZkJPZjRBQVBNdmh0RTF0RHY3Q0dpNXlVMFJGSXYxemFjTk14UFhCQldjSnZzM1JYVGszZWJhYjRSLWU3LUpDbXMyUjRMaXVpVU9idklFejVTZThBMEJlRzBycWpIa3lzRk12ZVFQVkx4X1BaVmpTTnpsQjdtVGhWckZqcHB1enN1aDVJNmR4ZnEwckJfaXR4SUtoTkVkV3ZPckgwR1NjQlVrMW81THFGaUVFM1hQaDgyWjdTakNFOWdtM1Flazd3MV9KT1BkTG5tUFZIa3lmcW93T0F3ZE5IUU1FVlFmNV80NElCMkxNcU5uaFJUVVZpM3VCZUJqMERnYXljbGZwLWhEa1Z5RG11dzlrMWZRS1M0dnc1ZEctUVp4RklYY2JLd29tTWg2Z0hxLUtPTmtjTFIzb0Y5YkhNZ2ZROENEV1lJa0hldzNwMTJWQno1MVRZeTlEN2VDQ29Ra3A2ajFKakUtbmFsZXdUb1BaX2lOUHVBVkczWXBFUjZMTDZWcjI2UHExTHFNemhyQ1FwTVh1ck5pOVdGX0FERS1seEp5QnlWMmNWQTc4SndVN2ZDSFB6X0ZDWjIzRUxVSEh6YkVRTDRvSkk5U181NS1OSmdEOHFpbm9peTVNVlRZTGtSY0hNaUxVMWZUWk54M3NEM1kwLWFmVDE3amNUQlVPOEdhWUxQODRKQmF2dGZvRFJqZ09aNjI2UWZRcHhOVFJaTkl6RHY5YmhySzFWWEtXSXRpVF9pdnVQTVNwaUFCbWl6QTJkUmZTdWFWVEhRYW15ay04czVhZE1hMGQwTGtZT3V5Z1lCZnhHdmtjRDI0NzJZS2pDU2N2aHN1ZjZhYUdUZ21mMHF6Q002NnBxLWNqUzVDcXdEajJnSmpvZHlpb3Vockg1S1R4dGoxemNkbHAwY2FyUURlYktDLS1oV2JjWVVOSlNNUFpvUm9CUVlsRXpUamY5cEFOdTJRc0c2b0xlYlhyakxtdnhwUFNURnFfYnJlQVF4T0lMX1B5b05SS3NmRnQ3NHpRQkZSYTVHWl8yZzF6N3l5cVptM2dJVzZVa2k1Ni1NaG5RX2ZNbFVCZDM1eDJkNmpkNWRTRHh0bUhaNFI0RFUtUWJLTUU4b2E4Q0RpdWprMk14SkswcEN0cXRzS1BYQ2lmenFZOVJaNkswNk5Dc0ZUdHItcl9CMERBVk4wVlIwU2ppOVRGZkthYjUyWTVXaXFWRmFBV2tfd3ROckl3TFJTb1BDU3hpdmxkYmdUMExpYlEwdUVrUUc5a1dTMUttYkV2N1FXQXBIdmhJNkhkVXAwZXI3dENuekF1WUZUR2VuS1MtWVBreWYxeklIRjlrblFSMXJ1Njh2V3Q2cUJpYXB1UU9nSmtjcjduaDlSVlc3VTZrbHExdHRiU1JvMld2bG42TTZOQWpOZmlRQ0UxcmxaeUlIX183WDc2cG5MaXU1TkJ2WTlkaUdwN3dMQW1tRWRrMG5YNmhpTFd5Q1NtaEJ4MnRLOTEwT1dZRXBnQTc2RU5CVFNyUzY3ODhRMlNwdUxJS0s4Wjh1cmVnRVpvR21DRzNoU0hVMzRmOTQ3M3VVZV9TVnIwYl9JMUM3NkF0VWtXOTB3dlptZ2JsZlV1UE1fVzEwQjA4MEdJOUl3Y3BJMjBLV01MQzlOM3daT3pmRmtKVkZxbFlLYnRfWTE0QnhQMDZ3anZ5ZjV5YWJUbm1MNzRRa01RM21Tb2tiSFlnSU9Jb1BQNWx1aE1BTllEQnU5eS1KOG5JNFZUSDA5R3VfdWxhR3dwQkxmNnd5ZzdKcngwUjBnRXItZ1RTN3FPd0psdUthN0E2UDJxRzBQUG9JemFzMnBUT19heTVUYTAzTW1fOWRyN2g3SWszQ1FRUFptYms3NnFISVpyV05pVTZPaFlaMVVZanBTemZqbWhVMVYyR3d1MW5qUEtvd0FLQlExYnVPdG95OGVoc29uMHZTdEtBaG4ySTdXM3I1SWM1SkZ1NHp6QlFmMEd3LTYtejJsSkdiVmUyb2hKODJEbjBlaU5qZ3J0TWt6UnpqaGc4V2I3U2xQYllWOUJBVWp0ZDd3Z3d6Umt2T3FVcGVQT2QyYlZWdkw3aFo4ZGtaRUw4Rm5FaWVlUU83WEk4czcwTFN3cU9BdlNlWndpLW8wWTZsM1pRYjhTOW1iSVZDZUUtRWQxbjFMeFlYdjN6QXo3d2hZN0RFZWVMamdTbkNlMngxT2hJVDA5R0FQVkJCSGh6eEtOR1c2clMxdDhGSzF5c0hjTmp5Z2owY0p0Q01zMUJ5ZHNpUTNCcnpxd1BzUT09",
+      "openrouter_metadata": [
+        {
+          "id": "cnNfMDUwOGFiNzQwOTQ3N2E2NTAxNjkzODFiNjY1YzIwODE5NmJhNWJlZmYzYmI0ZjIxNjM=",
+          "index": 0,
+          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Tool call succeeded. The function returned: \"working!\"\n\nPayload sent: {\"foo\":\"foo\", \"bar\":[\"foo\",\"bar\"]}\n\nWant me to run it again with different inputs or test another function?"
+  }
+]
