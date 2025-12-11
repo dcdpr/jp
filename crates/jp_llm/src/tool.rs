@@ -183,7 +183,7 @@ impl ToolDefinition {
 
             let expression = if command.shell {
                 let cmd = std::iter::once(program.clone())
-                    .chain(command.args.iter().cloned())
+                    .chain(args.iter().cloned())
                     .collect::<Vec<_>>()
                     .join(" ");
 
