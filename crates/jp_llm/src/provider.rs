@@ -655,3 +655,272 @@ impl ReasoningExtractor {
         self.buffer.clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use jp_config::{
+        assistant::tool_choice::ToolChoice,
+        conversation::tool::{OneOrManyTypes, ToolParameterConfig, item::ToolParameterItemConfig},
+        providers::llm::LlmProviderConfig,
+    };
+    use jp_conversation::event::ChatRequest;
+    use jp_test::{Result, fn_name};
+
+    use super::*;
+    use crate::{structured, test::TestRequest};
+
+    macro_rules! test_all_providers {
+        ($($fn:ident),* $(,)?) => {
+            mod anthropic { use super::*; $(test_all_providers!(func; $fn, ProviderId::Anthropic);)* }
+            mod google    { use super::*; $(test_all_providers!(func; $fn, ProviderId::Google);)* }
+            mod openai    { use super::*; $(test_all_providers!(func; $fn, ProviderId::Openai);)* }
+            mod openrouter{ use super::*; $(test_all_providers!(func; $fn, ProviderId::Openrouter);)* }
+            mod ollama    { use super::*; $(test_all_providers!(func; $fn, ProviderId::Ollama);)* }
+            mod llamacpp  { use super::*; $(test_all_providers!(func; $fn, ProviderId::Llamacpp);)* }
+        };
+        (func; $fn:ident, $provider:ty) => {
+            paste::paste! {
+                #[test_log::test(tokio::test)]
+                async fn [< test_ $fn >]() -> Result {
+                    $fn($provider, fn_name!()).await
+                }
+            }
+        };
+    }
+
+    async fn run_test(
+        provider: ProviderId,
+        test_name: impl AsRef<str>,
+        requests: impl IntoIterator<Item = TestRequest>,
+    ) -> Result {
+        crate::test::run_chat_completion(
+            test_name,
+            env!("CARGO_MANIFEST_DIR"),
+            provider,
+            LlmProviderConfig::default(),
+            requests.into_iter().collect(),
+        )
+        .await
+    }
+
+    async fn chat_completion_nostream(provider: ProviderId, test_name: &str) -> Result {
+        let request = TestRequest::chat(provider)
+            .stream(false)
+            .enable_reasoning()
+            .event(ChatRequest::from("Test message"));
+
+        run_test(provider, test_name, Some(request)).await
+    }
+
+    async fn chat_completion_stream(provider: ProviderId, test_name: &str) -> Result {
+        let request = TestRequest::chat(provider)
+            .stream(true)
+            .enable_reasoning()
+            .event(ChatRequest::from("Test message"));
+
+        run_test(provider, test_name, Some(request)).await
+    }
+
+    fn tool_call_base(provider: ProviderId) -> TestRequest {
+        TestRequest::chat(provider)
+            .event(ChatRequest::from("Testing tool call"))
+            .tool("run_me", vec![
+                ("foo", ToolParameterConfig {
+                    kind: OneOrManyTypes::One("string".into()),
+                    default: Some("foo".into()),
+                    description: None,
+                    required: false,
+                    enumeration: vec![],
+                    items: None,
+                }),
+                ("bar", ToolParameterConfig {
+                    kind: OneOrManyTypes::Many(vec!["string".into(), "array".into()]),
+                    default: None,
+                    description: None,
+                    required: true,
+                    enumeration: vec!["foo".into(), vec!["foo", "bar"].into()],
+                    items: Some(ToolParameterItemConfig {
+                        kind: OneOrManyTypes::One("string".into()),
+                        default: None,
+                        required: false,
+                        description: None,
+                        enumeration: vec![],
+                    }),
+                }),
+            ])
+    }
+
+    async fn tool_call_nostream(provider: ProviderId, test_name: &str) -> Result {
+        let requests = vec![
+            tool_call_base(provider),
+            TestRequest::tool_call_response(Ok("working!"), false),
+        ];
+
+        run_test(provider, test_name, requests).await
+    }
+
+    async fn tool_call_stream(provider: ProviderId, test_name: &str) -> Result {
+        let requests = vec![
+            tool_call_base(provider).stream(true),
+            TestRequest::tool_call_response(Ok("working!"), false),
+        ];
+
+        run_test(provider, test_name, requests).await
+    }
+
+    async fn tool_call_strict(provider: ProviderId, test_name: &str) -> Result {
+        let requests = vec![
+            tool_call_base(provider).tool_call_strict_mode(true),
+            TestRequest::tool_call_response(Ok("working!"), false),
+        ];
+
+        run_test(provider, test_name, requests).await
+    }
+
+    /// Without reasoning, "forced" tool calls should work as expected.
+    async fn tool_call_required_no_reasoning(provider: ProviderId, test_name: &str) -> Result {
+        let requests = vec![
+            tool_call_base(provider).tool_choice(ToolChoice::Required),
+            TestRequest::tool_call_response(Ok("working!"), true),
+        ];
+
+        run_test(provider, test_name, requests).await
+    }
+
+    /// With reasoning, some models do not support "forced" tool calls, so
+    /// provider implementations should fall back to trying to instruct the
+    /// model to use the tool through regular textual instructions.
+    async fn tool_call_required_reasoning(provider: ProviderId, test_name: &str) -> Result {
+        let requests = vec![
+            tool_call_base(provider)
+                .tool_choice(ToolChoice::Required)
+                .enable_reasoning(),
+            TestRequest::tool_call_response(Ok("working!"), false),
+        ];
+
+        run_test(provider, test_name, requests).await
+    }
+
+    async fn tool_call_auto(provider: ProviderId, test_name: &str) -> Result {
+        let requests = vec![
+            tool_call_base(provider).tool_choice(ToolChoice::Auto),
+            TestRequest::tool_call_response(Ok("working!"), false),
+        ];
+
+        run_test(provider, test_name, requests).await
+    }
+
+    async fn tool_call_function(provider: ProviderId, test_name: &str) -> Result {
+        let requests = vec![
+            tool_call_base(provider).tool_choice_fn("run_me"),
+            TestRequest::tool_call_response(Ok("working!"), true),
+        ];
+
+        run_test(provider, test_name, requests).await
+    }
+
+    async fn tool_call_reasoning(provider: ProviderId, test_name: &str) -> Result {
+        let requests = vec![
+            tool_call_base(provider).enable_reasoning(),
+            TestRequest::tool_call_response(Ok("working!"), false),
+        ];
+
+        run_test(provider, test_name, requests).await
+    }
+
+    async fn structured_completion_success(provider: ProviderId, test_name: &str) -> Result {
+        let request =
+            TestRequest::chat(provider).chat_request("I am testing the structured completion API.");
+        let history = request.as_thread().unwrap().events.clone();
+        let request = TestRequest::Structured {
+            query: structured::titles::titles(3, history, &[]).unwrap(),
+            model: match request {
+                TestRequest::Chat { model, .. } => model,
+                _ => unreachable!(),
+            },
+            assert: Arc::new(|_| {}),
+        };
+
+        run_test(provider, test_name, Some(request)).await
+    }
+
+    async fn structured_completion_error(provider: ProviderId, test_name: &str) -> Result {
+        let request =
+            TestRequest::chat(provider).chat_request("I am testing the structured completion API.");
+        let thread = request.as_thread().cloned().unwrap();
+        let query = StructuredQuery::new(
+            schemars::json_schema!({
+                "type": "object",
+                "description": "1 + 1 = ?",
+                "required": ["answer"],
+                "additionalProperties": false,
+                "properties": { "answer": { "type": "integer" } },
+            }),
+            thread,
+        )
+        .with_validator(move |value| {
+            value
+                .get("answer")
+                .ok_or("Missing `answer` field.".to_owned())?
+                .as_u64()
+                .ok_or("Answer must be an integer".to_owned())
+                .and_then(|v| Err(format!("You thought 1 + 1 = {v}? Think again!")))
+        });
+
+        let request = TestRequest::Structured {
+            query,
+            model: match request {
+                TestRequest::Chat { model, .. } => model,
+                _ => unreachable!(),
+            },
+            assert: Arc::new(|results| {
+                results.iter().all(std::result::Result::is_err);
+            }),
+        };
+
+        run_test(provider, test_name, Some(request)).await
+    }
+
+    async fn model_details(provider: ProviderId, test_name: &str) -> Result {
+        let request = TestRequest::ModelDetails {
+            assert: Arc::new(|_| {}),
+        };
+
+        run_test(provider, test_name, Some(request)).await
+    }
+
+    async fn multi_turn_conversation(provider: ProviderId, test_name: &str) -> Result {
+        let requests = vec![
+            TestRequest::chat(provider).chat_request("Test message"),
+            TestRequest::chat(provider)
+                .enable_reasoning()
+                .chat_request("Repeat my previous message"),
+            tool_call_base(provider).tool_choice_fn("run_me"),
+            TestRequest::tool_call_response(Ok("The secret code is: 42"), true),
+            TestRequest::chat(provider)
+                .enable_reasoning()
+                .chat_request("What was the result of the previous tool call?"),
+        ];
+
+        run_test(provider, test_name, requests).await
+    }
+
+    test_all_providers![
+        chat_completion_nostream,
+        chat_completion_stream,
+        tool_call_auto,
+        tool_call_function,
+        tool_call_reasoning,
+        tool_call_nostream,
+        tool_call_required_no_reasoning,
+        tool_call_required_reasoning,
+        tool_call_stream,
+        tool_call_strict,
+        structured_completion_success,
+        structured_completion_error,
+        model_details,
+        multi_turn_conversation,
+    ];
+}

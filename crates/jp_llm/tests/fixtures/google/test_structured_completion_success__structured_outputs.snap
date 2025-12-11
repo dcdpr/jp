@@ -1,0 +1,11 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  [
+    "Testing Structured Completion",
+    "API Test",
+    "Structured Data Test"
+  ]
+]

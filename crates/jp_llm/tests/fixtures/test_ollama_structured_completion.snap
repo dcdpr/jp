@@ -1,9 +1,0 @@
----
-source: crates/jp_test/src/mock.rs
-expression: expr
----
-Ok(
-    Object {
-        "description": String("Generate 3 concise, descriptive factual titles for this conversation."),
-    },
-)

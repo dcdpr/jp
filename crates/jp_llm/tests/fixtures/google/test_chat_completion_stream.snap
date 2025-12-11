@@ -1,0 +1,55 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Confirming System Readiness**\n\nI've processed the test message and interpreted it as a system check. My current strategy involves directly acknowledging the message as a test and confirming the system's readiness to proceed with more complex tasks. I plan to construct a response that is concise and clearly indicates that I'm active and listening.\n\n\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Developing an Appropriate Response**\n\nI'm now refining the draft response, aiming for optimal conciseness and helpfulness. The objective is to convey both acknowledgment and proactive availability. I've considered several options, like a direct confirmation of reception and a proactive invitation to proceed, and I've settled on a concise, combined approach. The final touch involves ensuring a polite and welcoming tone.\n\n\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Test message received! I'm here and ready to help. What can I do for you?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

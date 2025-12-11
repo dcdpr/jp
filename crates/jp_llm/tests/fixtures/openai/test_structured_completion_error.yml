@@ -1,0 +1,328 @@
+when:
+  path: /v1/responses
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-5-mini",
+      "input": [
+        {
+          "type": "message",
+          "role": "system",
+          "content": []
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": "I am testing the structured completion API."
+        }
+      ],
+      "include": [
+        "reasoning.encrypted_content"
+      ],
+      "instructions": null,
+      "max_output_tokens": null,
+      "metadata": null,
+      "parallel_tool_calls": null,
+      "previous_response_id": null,
+      "reasoning": null,
+      "service_tier": null,
+      "store": false,
+      "stream": true,
+      "temperature": null,
+      "text": null,
+      "tool_choice": {
+        "name": "generate_structured_data",
+        "type": "function"
+      },
+      "tools": [
+        {
+          "type": "function",
+          "name": "generate_structured_data",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "answer": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "answer"
+            ]
+          },
+          "strict": true,
+          "description": "This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\\n\\n1 + 1 = ?"
+        }
+      ],
+      "top_p": null,
+      "truncation": "auto",
+      "user": null
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |-
+    event: response.created
+    data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_062f2bd60990306c0169381b277fd881a288756e2d8e383fa5","object":"response","created_at":1765284647,"status":"in_progress","background":false,"error":null,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[],"parallel_tool_calls":true,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"generate_structured_data"},"tools":[{"type":"function","description":"This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\n\n1 + 1 = ?","name":"generate_structured_data","parameters":{"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false,"required":["answer"]},"strict":true}],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":null,"user":null,"metadata":{}}}
+
+    event: response.in_progress
+    data: {"type":"response.in_progress","sequence_number":1,"response":{"id":"resp_062f2bd60990306c0169381b277fd881a288756e2d8e383fa5","object":"response","created_at":1765284647,"status":"in_progress","background":false,"error":null,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[],"parallel_tool_calls":true,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"generate_structured_data"},"tools":[{"type":"function","description":"This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\n\n1 + 1 = ?","name":"generate_structured_data","parameters":{"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false,"required":["answer"]},"strict":true}],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":null,"user":null,"metadata":{}}}
+
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"rs_062f2bd60990306c0169381b27c50081a2922d731d42867457","type":"reasoning","encrypted_content":"gAAAAABpOBsnanOWscQdtPXt7YS32JHdoQIP90df6cbC-CnKowYGBFgHTNe1PEE0U0KV0k2-yWT0BVfeUT5KRW7OMk1iN-sJMTk5OiheY2CSaVWdtaYby280JUqn0VL8mPQBqLe_Cs6wZkVJoXEG5-Z626wD-xEWn3yKBjzZEV6EPu1852E0GsAKkERzq4bbtEkAQGm089VzElond71Mf44Ls5ciMcVx88BsOi7YcADFnI11S4Smivg7eaVd2zRg4etCBHwFW4CfcHnmYNOgZ942w-DveeT5FP2c6RggeCE6gXT-vZ4hwLibaZI1gfDZ5PwnlXfyy3tIo9NQZli5oQcwI4sCducKprOZYmhBWQGKNl55j6VgVcQr4MkBrNhDpEdLct825LI1syJcI8xH-e0nAmhjEuE-cvdOicW7kdwy2L0KCy8fYXE-D6U1ZKwG0rEAtDtG-0hlupMBWcwVew1umhVvbNEkmaE68lBncdEmQCNroWRhjh5mhbeZv2O3DIWHVV-noIbSdXb-9DodyNWvR9Zcdwv7SbBTAfEBupMVWkn4MgXDbWUJse_yDw9plPYZNjw0-jBJKG9AlAngmSwCkIOzjF2K8l6MEwde2HtLvVX15qsxXDBiMnCDGZFpk7ysPTjh-KssGv2VtusvUAOAZzoENtMcCpdVM1Lxtxrkz8af0XpMrruzSH2wCP5JfRmyK1kWRN9QweK9nXVnpRTvLx8kARTxWd3Su57YepvkL5NhZtnUfYojVTJaERaS1Nkt_72aGTu4qPjRubBOkMS85Ylx3Rwi4m97tZSVODH8d-krEQcvu4AHRHUX1ExnvRbW6PLB9W1bQcG6XM8A5Xn4nopLDOCgog==","summary":[]}}
+
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","sequence_number":3,"output_index":0,"item":{"id":"rs_062f2bd60990306c0169381b27c50081a2922d731d42867457","type":"reasoning","encrypted_content":"gAAAAABpOBsxxpy9uEfVQZawW3oFvK8BeNYxeBMzVNjJAd_I7hjuCWdK9rIjnl0JD3107NKUS0rOMe2I_I2rFkwZKTKfLa3uMyC95CdwkLRY-nNwQd35LuzTjuIJk2S7QbJvuIK1rFnh3gTA7-jWDJnjKuWYz9c0X9DPPd_s-xrJsFl1633XcG1Nq8DVLuzfHHvsXxNhBdTf3JYnljSWxHAJ85Ia0yZBdr5cnUQjbWSmhNmyGvk4nnNh-A9jc-Fln7VVow63N_-uLx0zydgzwnqY3M-kGKpWFXKGmzpTZ5DfAxLdfP0EsEaul1qJ0x0gijwV0XRN7UKy2EyVfnJKK3r-7WY2lfwfa7OEJjNK76nItvKtWt92kiuqYhwzLsKMZ5RtpWa057wSmbO6JCXqkO55xceFW-eYd-vqfyzgBSjbUzMV97_2OGzaVmXC39AhwNpr8-U13rEGMwJREG79SAWdXZ2bzG9t8EHABG98aAkFgTO4fIPVN7kSzG0u2W7iShID6gEKK_sY_NwaL2lYv-P7QWfxjoR9QHxpVRO2VPVBbd5y9RUCGYAOwYUC9uehn1hMePzV_aY6atixBo_rZfdnkJpXF2ROD1kVoe8xz2h1ABKhFHEFfUAgUyz3pLVD5UPw7jOR39j2XkAIBpn5rPC3e_JFh4zpktfGk6QgkweXdg8f8JC_BuQRlQMb2HJk6VmS0rV1pav7JY2LkzBE3ItEh0urhGLXQUIARlKb6LTvNHtZX0IRwn4JDqjT1GDlJhUVLNHek968S8AvSgqCGuEMaddfGmFpLO8opdU_EjnFvApiZYKNeXi0uTda9eJRAUFatO5K126H9kb6QbWuhpDvgo5wAKxEdlvx--cfiRpwfbhgXRpTq4P-Oe78zvteGzI22pENIRe1Rs5V4K06blezM-6nXHbVxYlA8I8_LiNopU6UZEAe5MsmH5bRNe-Hg60Os80lZ7nq58OwBL38mptofOVvSiVo1r3Ww-zLGHuS5K_nH-7H8ERn6PLQfRF1f2Ec9IvQj61mxuiU20pOQjL-eiBOn-WR1qnjVaUu17cJzVJZMrbKbQ2NNmLJF3Hefu5pAMHCiMHucL4LPY8zEqYiGpjUet8R55QVDS9WZ-V2tQYj_40NOqP9rYNBT1TkEj_J1RIj15elRhfK0iURPmeSfJ24YB3k1OrToIbPI2Gxg4F2daIwhbereb970hcPMmPrKac6_nBrX5z4R3UuulFq0aXiTB_IwR0iovm2TnYYBKK1leij4YjdHu0a5NS0jbCqyHyzEy4_1GDpVUFXw1oqkOGelmlg11GzuAlSb2Cd6wXKILj2AqQYyOZO9HEhg30GNXM1ateYxFVawAWtinV2XdfpQrPaADjYducfb6B2GHlyn4X7wFq2fOA_d0emszkQijYipLCCcNAnfza-nvgbgW47UU09zpL9Oeu5s4j4Zle_TEr_NT9yPbV1k_JwymR97l8T9kb1zi7iW6kGd_nVi3bDAwuwPQpYU1Hi-_NIz-ulqYpX-W-8_A1hKVnYFZ9odayrN8X7ByBrxBhMGzvpK7tHdkmLZ_gcY3-MHpoBlB34SkO8hXr87SwTKA6RPiCHtUYKIVBKOKbdW1zNOwg6lMF264ZHbdZkYmOhGFy7-k_g1Gwvbz73EYBsAOVNm_04x1M3cAmk0gFcgnc3BdNx9E92yRnItbVSQIA53LYz1rJVDW2zqWsaorFbVgW7T3FiiObmtL742ZNvQhMU9EjdSYWEbjki1aYk645B-X5JCxXb8ZJ-IeDbv3qUu69iWvX5yuNbIMtRXgHdfCW3JDJNP7gJ4825Vd7m-rF79TqA6UFo7a5luSiAljfkJGgBM5GwEq_fQyYYpl-79SZKPvkjakJys817YYTeGtdmUM26hGS1iqxVVI5gb2XA8oETzU_WkStz9Nt96SW5BDgnUQl16bE1a8RuZtRpSUddJg14j_g94Z1GFcLcvBAo_mew5E62ENG9sFK3Bake_NVUSD32GEQkZWKKyzmirpj6fr8wcVEjhyljjRpSasPEx3XlQ8spKTXgy_PuQvUdpXZPxFPILmnAtWAXaKqpdVTFkkNzj2QHS1nXTCM0RngGF5RCuMYerUFA9smI_F_3K3VF7Z9cISkbpmfTDPeeYLdAxDRYadit3fysp2cNoCVKq3UF4LMtUWphZffekkcXlm3vTFIlQBu2UWsRckbefQt-vqeYLq99U92JsqtunQqoywLIqnvlNm03rk63KZCDkGZOOgDKjbQeFNIUbjSRa2Cb97OK_k1Dc5ueqErs_nrOwKgbUu3C3lgrm1E8MAfs_XbBnox_9MAKH_Xwy1mqMOYrQwxDXThz69IjyzRMZV68OVuL65TN6LLnJv7mlTFH-VKcIDdgdPLy2EDP7BomnRMHtq13KKwOIAy5uxdBd44BXI-guUuBVAoBzOMMkJDHkCUs4kbXpchwh7Tvnh1iFus3Gw2ufL0bB_xtCK86Zg-fUgT0z9KN8KPkz3zxdGd7x9PBfxEeiJcmPX3P6DSWiRyBaxpjMzsaC0F_EHfFTO5wjAHCc75GSm-F11PnSmDo6W2XYtJeVr2p8FOCyPaBkoq3tdLxXpiMmwdXnY3-9CLD8QXjpV_K2457FYopZdVlyYhfHkSUPS2pTvVEVuyZmj_-gWONgflMR2IfEVnyjpglMzyBrm5pSaPpnk9DcCeuVZpKmYnll1ur2vsRINeVIpDFmJR-22FMyL9f_vj51uD2_Qf-xX8UI4qqfWSlmnq4caaPtvTvAMklzXuLM7F2Gbrjg8RQx9aegPBCwTy57cIOouq3Dh579d8Ie0mS49TaQaLOveCKvalvW-Li1XPTdG8gT_3BTRS6Ca8s7PwabS8cUgQ-1tlrXNryWgESCFe-y8Yy51vb9No5MaV2sanbK-xZM0xyhkOLx6XTZrUjUdPALHwf88R-pZhxKJ-QspVmzOyl1TF6b3wtIThPgUl786j-ZbFfcKz6Sqc9HXZCHOAGekuJ_o9w8KCMIHossoJyn-p7KYGUcqc_SImuTzjn6gdGaLCXwDwoAcQm6_6heytB1j8rUhoxo_HJ-xe1_cIPL4TaXxykXP8drF-mAJS2tiirRaC4A_uG906_8zlyYNXSwRdj-iZHWPcJmhRh2rFYWbSvdug3MGcghgzRUPCQwjsEIzc57S89Ygm9awinB30KI3v-dVARfAyocEf9RaNap7-jG3tV6UkapjZtyTFWp-kvE3v24BZSnt5V9tXlpHZEFNgD-IjhI4pl7U6kXxN6O16KnAt5EeSzbtUjSrRoXWrAbXI_Rlefb_ooYTl4_r0n_eN_-YY17VCOA37X4HlBjEds48esJO8nzGR0PNhdZMHhDZKsTvxsQ94Sl-iy3Y7NifTDJrVvTtNoGoN2XF2fjG0GddzVGE3hrf7TVnKItrOsGsOe_PnD1tKxuBv7GRnsm0_YtGnXn0cjg8j1a2ttw8R0hwcZWqWXh7piEcfZqFV_1n6FUSUHtNNUrghW4GtxK04uB_KGSQZDrKPg4ZkLZ66MiljdDRhMY-1fhhAF-VscgUR_pqL_52qTRsyyEgNnZOLHwZml2B-HmI7t3DcVzGBdXm6TL3ZX5D5d3nK22na2oenOpT4BvTivJSQcWTEA52uHzXvT28qb-HaEYJbpTNNxLM0FZNl8fmlmI7UNRtoAGEoHJYJgO2SRBJ9DA75XPiUtW7eGs8JKZ5psEXdDgUaEeo-FIYEBTBaeRwABgKNO0SXD1hmF1qaRS7ZMnXDax2OhWkL2LOlxZ848lkzDHCz_s3xzbwTHj0v-pdZNOtbuT4e6Zc5M4Dj9VidTSASjQGAbcM6Sssg7Vd-0jy3Vdw-aCFLHFQpwE9mvHFGDUA4t1denRW_pSt8GgFgPFbplRWGGpHc4su5uPt0PKy0O4PSHdRAuLADk9n4kxA9dME4yeF3V_uhQun8y1FXwUVX20juZK69x6Ip9zd6IPiLBYrCqfjMraGa2Jl4jR1ePurvXNvfIDr9aVoBKbbGgTn18meD9XTyjpdae8V8p","summary":[]}}
+
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","sequence_number":4,"output_index":1,"item":{"id":"fc_062f2bd60990306c0169381b3199f481a2b84a9a3aee97c960","type":"function_call","status":"in_progress","arguments":"","call_id":"call_d5RteHsYh5csLvitpZkfUvwl","name":"generate_structured_data"}}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":5,"item_id":"fc_062f2bd60990306c0169381b3199f481a2b84a9a3aee97c960","output_index":1,"delta":"{\"","obfuscation":"TpnZIra94fj1qU"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":6,"item_id":"fc_062f2bd60990306c0169381b3199f481a2b84a9a3aee97c960","output_index":1,"delta":"answer","obfuscation":"PADYtLwiTv"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":7,"item_id":"fc_062f2bd60990306c0169381b3199f481a2b84a9a3aee97c960","output_index":1,"delta":"\":","obfuscation":"6mst8wI6QyYsz3"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":8,"item_id":"fc_062f2bd60990306c0169381b3199f481a2b84a9a3aee97c960","output_index":1,"delta":"2","obfuscation":"vAa71Uvm9XxgKH3"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":9,"item_id":"fc_062f2bd60990306c0169381b3199f481a2b84a9a3aee97c960","output_index":1,"delta":"}","obfuscation":"Cn9ncK5DbaoMPsz"}
+
+    event: response.function_call_arguments.done
+    data: {"type":"response.function_call_arguments.done","sequence_number":10,"item_id":"fc_062f2bd60990306c0169381b3199f481a2b84a9a3aee97c960","output_index":1,"arguments":"{\"answer\":2}"}
+
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","sequence_number":11,"output_index":1,"item":{"id":"fc_062f2bd60990306c0169381b3199f481a2b84a9a3aee97c960","type":"function_call","status":"completed","arguments":"{\"answer\":2}","call_id":"call_d5RteHsYh5csLvitpZkfUvwl","name":"generate_structured_data"}}
+
+    event: response.completed
+    data: {"type":"response.completed","sequence_number":12,"response":{"id":"resp_062f2bd60990306c0169381b277fd881a288756e2d8e383fa5","object":"response","created_at":1765284647,"status":"completed","background":false,"error":null,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[{"id":"rs_062f2bd60990306c0169381b27c50081a2922d731d42867457","type":"reasoning","encrypted_content":"gAAAAABpOBsx7OTiQwixD560X-ZjEnsSIhwzqqUC74g7aKjuZjzRdRqifTAr67ETkpdNuemkag6RsXoj8cBZj00ch5J_EXIfku-uIJy62v8nvrqtmRDmvgcfVMxOf5Xja-ZRJvkDzt_BP6KO20p5o5cUm21Ll3rkpACQXqlTaqmLwVTDAdpP2YSuYfGBcZxcWoIcDKKjysMxSuYuCIxn6ZETuiRnk182agFfSdAA0Hb-LfV8MPQhC_08P9w4IZWO1Es2LuCScUbQxRR6xhUigQ3ev6cXtjWOofXMqoiIsTIFNd7jlZ7aX_QwCvE7cIjquZPSe8kRiyhKZTtDfu2cmPiMpWrG3SXqmtCa1Nowh5vZj73dRTmlpw5QPgp14CydiaX0nO3YjWpEnBSnBm0iINlta-JeHj4o11hhExSg7aFOmtCPczSV7Ex5NROkuebBPWH3PY1SQD40MxzTsen9-LckMf-_66WOFn4Ojl60x9pXDgt5uBx-AK39GJylTw0sIwA5N1mAEsgDI4iAGHsRzfqCg2pWMbAbgu4ZHzGEWVjvpckufOD31s_8feAMH997UvITgO0l0-sll9oXuE-Cg5LqzCM4kPa_kwLwguhYOraCsqbkRn0S4CzDfdCzHBu8h3u74ZV9Sl8JJgxEY3PgvXnIXRfuBUfVd_mhIUiMMhd4REgYW2TtTlj9fd66vzQPutDpSQ2-ExGnH2pqzHbA4G-WcduvV9HdycoWpf7jukRreRgNboXTQDc6iMepCHfhBGnbNXEB35Denjtlv-H27U1pY4T5Tsf5YOSWFq0yYnYm70MGbZ-5pD0s0iPiIh4aBunzUrinV9Umz14pMvZFqd0BU3MkbVr_AOXWGAFwjxtET14sz5XgG0MjKfK0HmyoKdrA2OPVmwNgfr0vkqU-2R3I4UpmLBQjNTgrr-_NOCN0uCbziB3gzNRWV3wLfhYVBRc5Zdf9v_rqGt3y1c1KO8WiQKCiNd9D8yuf3K1DiBGfMQLaTbOZclSyGho-DjBaFIUW0q4WJDQEypDKn2mzJyy96PRo2YfD-J6AUBAlCgwaqDvdoLpaMurmNPEBjlxJDI74dXqeAFLv9k--ONt3ephjWNZVpozMuEU7YcqHf0t45QNOazxO8A-5vmvu1QRCjG1XdwTZg3lWbD1SF4tjgEd-8NMTGiQsDXs4xIV7VIYvrIVQyXdI2IvfDZyA4Z0sAY98gqs08zXQRUs_ms7UsEtQtobN8_j491eLYyZQWlRRmSB1GW3UsMjiyraPEpGBp4dpk_X4aL-Wbgb_shuS2BlD5J62V0ZmtBmWME-kARRALM3mkbOGeA5-DfTI6kbwzB6SH7zQuF5ddtyBO59ZFMifgCWUVyKVNmrAklTmqd4BKjVdsqyKt7a1wIKWDJqG6P2akXFIyKwfPomEI5ZAD64uvPCVcIhm0mmQoJOmmZK99nIUzveiu_dPpqlH8UMiC1JNWo4n7M_VcU1ozBBdo7I1FX0ZZ4qo1hk8YE3Yi0mGx-9bX0hf-qMctvJN0zk_bgnG1yAbYp6V73YHdVu7GvlMP6V36LQJkJbSg-H5Ekej726rMHad-H7ICzjV_sodPVFd9NJl_yj_HXcWB0K8kuaWTYuSm2GV5Nbl3IS4qv_beV6sakBuD52g-IpY1Zne58DDOpZSP0uUKTJz_XMPTy-9YECRFtKSObaTG_zYZfTRhiVzWzGlUlEodjtaYCTT6BPieSfp_DGaK0Ml2O3SwDZ-GVANheas0-_wz7OM7CSZBDyPZJD3XYB0XVJYNjeaYOA5VBTz-5DtqQHrJd4AG67d8T-5LQnnp0r_6RxbIMzO3Iwo32z5-Dy7N68rCpqGsf12Ds8IdAv9mJOyddKM2hrcGBAu_GtG5ZQ-mF7z5xfkVM0m00gtW5k50ns_Yw_EYqbWn60z2rC1O726ohYlMIUIVzWpWfMAIDujSomFwq0DPwNBuq7CgW4bkk-VkZV6FB4bmZslX2_jKEL9d7JD456vlhZHMQFzPtbcgAHQbzSkvjyXEq0WXnmmsXPdJizXwC3v3m2RrdXdPX7mUqzwPyhwMNWs0NkCahdKBHF0hh_a5oJ3ZFRTrg-6zz389DgYd5oa60-xQqC2M2R-32u-e8D90wzB72QDMHoB1BebDyj4NVhf4x359qHt32Tr9P-A-TOyakj5pbKSJGkJ63xQrCPg6TPYK3X3tgVNIgZqy1ttRaiE-5FKH5oAObymwVeVz9hnIhjqat7rzIEgwrphTZgtAtyRuyCP0eIDdiuAimCMiYTwnX6GfbtK4yjiRFh5hxJ6205WJ6xZnIlmutdIZh-3FtcEc76_WPFx0ImfwA84efAN_WLUYIZpwiQp-VUvikk3pLNANboICk7hkA7bMZGAmKzdR7mKAt3nEJtH0v0umLzd9JLOmNMQby5WO_4ywxIYM49IS0dKuaipfrNwP83mL0X4rrUpwWcx-TqZZoxfMLK8w2Uh9-qe4qnTj-Db455BBxvfA1m7kW7r2S6B5vnjxesq7EqR1IPm6_3iQnKn2JNcoZdJDXvcNlZghp5xrjaWebAdgJnr-lIR58Dgr7DFzIY2gq3F5v1Ge0eQKybi4vkcnGZ-JG6NzcjlWOCKE486OW7uexPGVE_g0V2JH_Rf7Va5ciuhKBpC9VhE4ygR6lYTLlXQFBBZ-4p6wh3A5fgvsB8df7et7VVpGMf_BL3b_E0rws9hWf2Hh8CU0fq1YZw4iNG6g7CeEZKhqZ5VRUBHEd2jwpx3YiKi19ynA1fWSan_q_yaXJCiPMfbFdMc6wJc_myf7Y1q08tWH8cejmcpmE3x1h8LT1dncJaUZyUMWust-OBLmOM8CBe4Eq819lY_B313T7Ih7yFZqLy5rU8_Wy8ozs2hIgch33MC3121KnAKi49gMFtAWWhN-8sU9CL0JMpw01Cux4PEB-Y8uBM-rzVcNzLWRtaNA6vRG9SZkKGq76oFVQtXMSNzMitW1XS27XWLQhg9hDHPKK6xSPDqBOWwu8-rn_vcJxiR7FUuTisX_ObEMKS5g01ZcT75nUNAEVhBDbrA_nBKO_z34ER_TAoV50dAlh9mc_E8W5-Mn19KBQ-3b6-Vf2vfQipgb58YBjd4v0V3DYb3QYgCa6CKNwnQo32__oizZPprexP8NoHwDU1Xz8Q9f0biFk9klafSA56NMNAwWKipxrT5uXbeGydr8_7cCXx9YG4z-VumqH0Ek4VUTvSd-KlJtWDYPjoVxuo1EFycWoySzGABbriPTo5VHy-0EeJzRTQP58CFijYza5jJtfIgE_FU0RrpQGu0KyHZ2h5tbliq5XLwY6i9T91m3Kgc2d0_wDes8QvJ1PNUbXI-IdzNqG529UN_Cy1-XsBAz7xESzEEUbg-Up7F1uMLGNqyaOexFFscpp3jFEueCtjqMQoLhr6UGhFcQqNItM1Sa0FJy3qYgn0MYUnAAsB6UXVhOXRjem8lE0I18lbYFrNKtgPm8SMyIFu8LX25315ENYCjPu2ZkduE8Tm-BWzX0mbXzPMko5ZV_gRJvXs2nr9KWdivz1FTy6RZTs9HWSLdX_xhx3lT9_Sjx1Tq8DCxyQDqVuUjHXrWmdiVd_ARnIHVB3tPqgMODRkXy8Qlrn69v3HcCXGInooVgBxZLypgGonXX796BNqs2MC663zss-rPDWbU_vJflcwgfrrBM1Sr0cJncwn1EmdLgDEIo_nUfABs5TIVxiyBu39955WunbPzxEjFV6EW1Y8iwgWJZKuBRsWz2Uw-idqLNuuvYntnevqo7Ajca_lzIDH6QLgRwxSykJ1HwoA3x3EA2Xif3wVLn9X37fAeNmqSXNSGp2lcpTonb9SmU_76T9W5tu6MXkK3xFNcUgqr_hLho1b3mTYNqQ89hnWtIj_376HPWJbbzYCnEd8uGR3xAvKqmz_7mcAEqsja-xuAtX-F_kloWZf5lYinr77nSg9c0L0doyKpr01wKF3ct8h3KjLtCH9heY3mESW1I3q24GYkhkwNDYOHHXKur_VD1mMTVLUG1YkqBaV6","summary":[]},{"id":"fc_062f2bd60990306c0169381b3199f481a2b84a9a3aee97c960","type":"function_call","status":"completed","arguments":"{\"answer\":2}","call_id":"call_d5RteHsYh5csLvitpZkfUvwl","name":"generate_structured_data"}],"parallel_tool_calls":true,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"default","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"generate_structured_data"},"tools":[{"type":"function","description":"This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\n\n1 + 1 = ?","name":"generate_structured_data","parameters":{"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false,"required":["answer"]},"strict":true}],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":{"input_tokens":141,"input_tokens_details":{"cached_tokens":0},"output_tokens":470,"output_tokens_details":{"reasoning_tokens":448},"total_tokens":611},"user":null,"metadata":{}}}
+---
+when:
+  path: /v1/responses
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-5-mini",
+      "input": [
+        {
+          "type": "message",
+          "role": "system",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "<instruction>\\n  <title>Structured Data Validation Error</title>\\n  <description>The following error occurred while validating the structured data. Please try again.</description>\\n  <Items>\\n    <item>You thought 1 + 1 = 2? Think again!</item>\\n  </Items>\\n  <examples/>\\n</instruction>"
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": "I am testing the structured completion API."
+        }
+      ],
+      "include": [
+        "reasoning.encrypted_content"
+      ],
+      "instructions": null,
+      "max_output_tokens": null,
+      "metadata": null,
+      "parallel_tool_calls": null,
+      "previous_response_id": null,
+      "reasoning": null,
+      "service_tier": null,
+      "store": false,
+      "stream": true,
+      "temperature": null,
+      "text": null,
+      "tool_choice": {
+        "name": "generate_structured_data",
+        "type": "function"
+      },
+      "tools": [
+        {
+          "type": "function",
+          "name": "generate_structured_data",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "answer": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "answer"
+            ]
+          },
+          "strict": true,
+          "description": "This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\\n\\n1 + 1 = ?"
+        }
+      ],
+      "top_p": null,
+      "truncation": "auto",
+      "user": null
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |-
+    event: response.created
+    data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_0582d75f09cbfee90169381b32155881a18beacf4d12a5b3f9","object":"response","created_at":1765284658,"status":"in_progress","background":false,"error":null,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[],"parallel_tool_calls":true,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"generate_structured_data"},"tools":[{"type":"function","description":"This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\n\n1 + 1 = ?","name":"generate_structured_data","parameters":{"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false,"required":["answer"]},"strict":true}],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":null,"user":null,"metadata":{}}}
+
+    event: response.in_progress
+    data: {"type":"response.in_progress","sequence_number":1,"response":{"id":"resp_0582d75f09cbfee90169381b32155881a18beacf4d12a5b3f9","object":"response","created_at":1765284658,"status":"in_progress","background":false,"error":null,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[],"parallel_tool_calls":true,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"generate_structured_data"},"tools":[{"type":"function","description":"This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\n\n1 + 1 = ?","name":"generate_structured_data","parameters":{"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false,"required":["answer"]},"strict":true}],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":null,"user":null,"metadata":{}}}
+
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"rs_0582d75f09cbfee90169381b32a04881a1940c60baf9ed73b9","type":"reasoning","encrypted_content":"gAAAAABpOBsyQAYPCM7U-2wD8N-5bTRAsZSc3Z4BDMvAEHnqMsqTrymbYDNNHPG4aek6AHQjV3HIZPGlq906aKxjcsvQygMekB7mHX36zssrOvJYN7l5nNBawPs612cJLDpbfvZKbDadnC0eGYIoFW2xfnQVejWpzDWjBlArbuIcOSf0FHYlFuY6C5qMTQJ7rMoBL_lG4HRplA30UeH3mAhrPL86miHjgoGUW5uF0R7QIzEwCcO8YXTK7e_jd2mUnh0ZXhjbRDNRc87BUkSJ0l4WC3WKaH1HF6P3I319tcRXh0H-0x4d89tL7-gMVLMk8eOM5uNWBjVWR4_j70Uc5TyIdseUBAXzbhQApXtHT0QdD-N07D5VSIKKC01InVF6gDS1dwmzs7otV56TS_s0BeA0Ltl6dpifBvEIcEaQ3nZb4zEnV7j3ieI7OioulYJiTNVf3LL1qjRcUj_UpaXGB4ALJCwTLitqCo-S46Tew8UETlKdxJ5KqyTRMkeSMtdevWOdGW2MIb1mukP5-AQfyn21FGIg0XJDbWs8VE4Ck0LpxNDbvOxhKKY_Sncv5JWkhoKDa_b9vMFNlENb9S_RW3jobyKXX2GrQ7536AHG8NR6GDDy4dTHF8XOisVE2vrOPVoE4CLOhvAZSFjV8Zs_BGIKj3AU5aOITAYwfxi5iSTIUv91sQ-lUz4ujTHVsijDH_hb1adB1Zu9tR8bELMTm_NqCzpXXabTIwtlLb0okT5LuIjqZvP3L92GwtUkuSKX5REUADgQYLsrgJBBj96AyeNj0it3hHbWPNMv1phwDl6qU1aDL6tGSl5wqfWKWweTiVJCfaN66g0DRat_9EYwkQbe8VF9vU8nIg==","summary":[]}}
+
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","sequence_number":3,"output_index":0,"item":{"id":"rs_0582d75f09cbfee90169381b32a04881a1940c60baf9ed73b9","type":"reasoning","encrypted_content":"gAAAAABpOBs1PGrDgnKpc0odPDZXZnlOu9uVZW_J52wZN5KC4iwjfSPyF2TYm7BEfNIN6qufOmM1Qpx9wQfy-1M-mqN55sWGpSYnN2TgTLsUMZdJmobc4Bxk8A5C1xpb6eB41a1V4px5SW_pzFqYpIBA3OZsiPR4y8xpLaIf75PtYCZED19m3FMohzX9yF-AwKBKWHM4ZmL1UkFRDzWxS0Szw9io2jDzbkxw0ARp4C6uul1u5gQ_M6Ev12NDCMwR8CidlxiOYL9dYRTYy_1_HR52wMyJWCH3_UevMi75jFlU5UL1KuhRCS8maurn7jRbtHY3IbjlDpze5t-hEVkPg-HBZfWH5-33TpA6tmfF8-8okooRkwO9YRAZsNSRXckxncmHzp244y_IICysqcxGf4ZeXcF9iDA9-UJvpDiHKC8PiJZ_BtIitoMwm1u6v8kwUu6M8GCMEhUUsWbEImMKcUU95HjwpUKtusg7293_Mw3BlCaD8oMkaaWbHZfqOMjMdUrH5NW6jNcL5JLKZifEcn7OfftAvCYitQ3Sc4XCDVOzc2ZFAibRtnl3oq6P7iENWKW6QA2v2TfNRpgF3n-txcQJt4sE2qqxpk81cLj-y2g7T7EmftqbKPO7i7C7WLXuWTjffOMNkdw14uB4xlwttpWwfhFfSTL8U-XKzFvYKnOBSzy9aQHiaIVUJjeK7yjlAps9fbdK6p2LFmMZPvrQYeT8M-d1qfiWqsq3FO1hXnJyXOZAHCNWm7qGt_syp3L6RUpdRYtXI3ztShclVywDtfm8a3lxMDCgXUQrtSjhQBQxgL_7U8VNIWBkqkykP-J5Md1N3x0SzpE5KY2Az1U-krA3zd7n03GqmhI-TNC7R3mMaSGr964WRabwVRNB51fRUfa2hXsUZFGo7TY7dTHAZCoHsZIYVShwNWFqICmwU309msBASV0Aocou0A1P54O1b4dnZx3DvIIbFAE5ZLd6_LK-JNsAp0EpnJZWz8xDpA9MxOA3iWTHlL1UXDhPBwAPbbm9mox6TTehcWYjaLN9u0ObKw6CjFI5umuUc-cQxW9NKT2o6HPYRc-LLTBQWLQWXt7I4FlEPWkKwDIlL2Ev8kvpmRmFQ7FZ9Gque8jqDtNBLAp2p0F_u_1P2FqDZrH5gn6DyjfhH2Kops2QHySFOES1gGhzynjtMDBoxEKBB8hbCcBFbOiG_iiw5ECS_oI4FgG4OQOMVXW0ZgGjcA1sVLlaK2kDCEHMReZd5opmAEfhq3Gg4FgyCE1vPbRul-L1I-Md4o44TfSUW1cbjgAptyN4sGDxb8e_PsiPQjglIMjK6NGXLbeRromNeFYzLkdjPjs5A3fUlYRj3uUKIcOpQ4BGFjdX7cL4fAYg7vB6b8pAeKwpQVWaHZoEwCiqouVxwx7hAw1WvSkqJWPRDadF0riZ8AyZKiMp8HKZ5Y-cCIWKprcWCLHI75WZZDYY4LKbANPRLiaZsBqDAhKh2vjm3PpM_G1B7WziZo00ZOSSbP8V5Pk8q1jMeWED-OrXsHuvBiZ_1x6beMFXedOj1A7kjLb1ubCYLUA8DtPX2BCGJ6BelymJW2YYkn1csrSAafomLq1mAoKsXRasCa5yXp-x9akvzsRPg0zHhgeF4Ss8g2W0gTMNAD2EOwZCNWbw-gEtnfrXBncRL3R_mVVsN37Y84lmGxSsJvotVI7xrTOrPYsV5-NNZKiBbdD1f4z2uHK7HyY3-fr2aGyljGUgCZmy1-1e0qgnoQVfnvDEi0DAG28gbdS2jf6uvvW1etX1txglBrJFnjWymyZmvGXG0YqcnQoAVhpQ7dD3nAH6JJKLnfe868rA4535GDZljmfXuiuHUKmrR885a8kRZO7Irb80HVT2cjLmagBpuPjQ0X9qwEId-g2J7as-4zxf_5qIvh9Bxch-VfQFPUd7idQkOmofexeoTGngAXYfI6BlRD75R0YseCnXUnfEReVWHD7xz2oLPQZPba2m8SZ81N1MvBuN8iJVjEdkH4vFyVLVx5TTl72V3a-PoAEa_FHxm2kr-Djn7X1GWnUqjazyaJeiWhszmC9ndCTzI1lI0HJJxpkqMOVjyXbAjbRiDDzKprSJL97YsWkBNdhAOGNqOiCwOOLJy7s0HPeozKTtqA==","summary":[]}}
+
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","sequence_number":4,"output_index":1,"item":{"id":"fc_0582d75f09cbfee90169381b3525fc81a1bc7b000f96634747","type":"function_call","status":"in_progress","arguments":"","call_id":"call_c4fcy48ELLPkigpwcq0o9FKU","name":"generate_structured_data"}}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":5,"item_id":"fc_0582d75f09cbfee90169381b3525fc81a1bc7b000f96634747","output_index":1,"delta":"{\"","obfuscation":"v21JJgpiShekFd"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":6,"item_id":"fc_0582d75f09cbfee90169381b3525fc81a1bc7b000f96634747","output_index":1,"delta":"answer","obfuscation":"GB4MmmYQgA"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":7,"item_id":"fc_0582d75f09cbfee90169381b3525fc81a1bc7b000f96634747","output_index":1,"delta":"\":","obfuscation":"EZgN4S2ZMX9dNJ"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":8,"item_id":"fc_0582d75f09cbfee90169381b3525fc81a1bc7b000f96634747","output_index":1,"delta":"2","obfuscation":"tfd79QdTFpIcaw5"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":9,"item_id":"fc_0582d75f09cbfee90169381b3525fc81a1bc7b000f96634747","output_index":1,"delta":"}","obfuscation":"hj1n0vmYuBlWS8Q"}
+
+    event: response.function_call_arguments.done
+    data: {"type":"response.function_call_arguments.done","sequence_number":10,"item_id":"fc_0582d75f09cbfee90169381b3525fc81a1bc7b000f96634747","output_index":1,"arguments":"{\"answer\":2}"}
+
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","sequence_number":11,"output_index":1,"item":{"id":"fc_0582d75f09cbfee90169381b3525fc81a1bc7b000f96634747","type":"function_call","status":"completed","arguments":"{\"answer\":2}","call_id":"call_c4fcy48ELLPkigpwcq0o9FKU","name":"generate_structured_data"}}
+
+    event: response.completed
+    data: {"type":"response.completed","sequence_number":12,"response":{"id":"resp_0582d75f09cbfee90169381b32155881a18beacf4d12a5b3f9","object":"response","created_at":1765284658,"status":"completed","background":false,"error":null,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[{"id":"rs_0582d75f09cbfee90169381b32a04881a1940c60baf9ed73b9","type":"reasoning","encrypted_content":"gAAAAABpOBs1xpOw9RSDqCiRnejjYzcMNz2V8f1CDXVxLR0AI5yuDLiUVBFvlfHz_br3IQK4tD5ngldrgibAxL-eHnyTO3nJa1XH6WQSuB4Has07YILuSOMwp_CLc_txIurwdor5gThOMG2xJKI4iPosCoMY0a8O7Fkjq1C09UWCr3ktZRYoRjMkFJrCeUpHhYG5SNQckF74DbKdTrb_ZzkxTyrdgIA5lbGqigNoIgx8re0mQVbbxWJR2B6LMmUlVsQojC5_q6Nhc0MsuUF6mf77PTw5Sn3wezI6Jwx_OMuN3vcpi0HP-LfvEYoYBhDmQBbZqHMviVwwbRxvcGhMUOJzY4aL7o469-DDcG4GYzuSZaaV9l8S_JuHvJuDuf2YJZeI6Aokl3GMUrG6gU4-Njc2LQa1Bvivwm2iLK5HlyZjWLCdk3xuEKQocvqFXodA1SQFi5EU5p2YFzS1-Rs-_HJQNjblgODMXOtoZ32jKtevhYbpaRTKepSGXVxAXEnNfFlyGIMMBTdKljNLqndrcmbHyn3zxtNbIRy7WijtvA5iGiZyk54PJyq9aVzXPG9CbjeKc6RYpHfTsYkYKsHqbRFD48_CAlUsrrY986pqj7txEs2Of4vk5hnryJN2vLNyOggyw1x71Nxohu4AjKrZb1etGtpxNnInP_I9bdG69S1IDmSoETfYi72O7WQyif0zfChQYUlsL78RNYlRdtriKOimSfsoDjw-Sg1NgCa7b2uA0onFTJ2ImQzoXduPieknl9Iq8pUprtp0pmHdriIQiVkQSJnnsKMGXjReli0oYEKvH3CwuGV4A9_k4hC_Cd7lnq2jshq3XFbdB6L0iy3om7wRFLm-cKvuxieH893Pdk14r9NwIX7hbKAefwvXuoEbIrtzLUuzYJ4889vK9UnCGjJMTQNVIRFQZUjeQXaOgegQB3ZvZfcXhQeWV-8746CstcR96PYY-Z7fKSfsXg11inESq3MaDsi1H-kq7VrNZ9c0LMeesxOcukmlRaiRFbJTn9OXL6vIXC91pKv4FBLTG2ooMEsbW0js0p2hjH2d8dUzC_w73ohWvsLrR29vqwCYpQI3ouoKGCu2gxwfmlCJ5NPs0n4ELz7pMFE_Q8kXdvQLOc9dqZdNORCWJ8Jq3p0M5AR4XEYZ2OwK6KyH03Ika2hlYPbLPM7ZF2HYyOEcGbWtbv9UhH--u1PqFhen0TmDUgqwXiVE8Oty5CEkgpaG_r_Ru1QaT_WpaU8cTAsGLjwyeOzFjsK961MGWFjEGt2QbkgxDydap3mfoF8MGeq6HvzvBdNY1ShGrYAzGfe80Ai6muu89rLcK4bqt5AebNJkrqGQhef95OIPFGUAEvmazOR2ix_pYvSAe4T2pgI8kw7xcyfiS7OxXZw1ZGqXn7ytefl3S0R37wYa_lSdGr4PFRBbBMDXdWlGUEhwSe_B8TLP1TYuwEGvUQb_jsoP86h187N9OMQH6qpuqQhWaXlwPq_Izzl9aVS3UEtPhZJf6493QOFBRFYJs1lpW7Qkm39Nzlmhv0borxObthJzHL_2CKh9adaj1tWjZ2S9hhi-USPUztdlmWHLKQeg-bBGIiaxrTMKUgNyMz5JlKuv8FZBl_kPxrpqyEHv_1nk1gXeK8_XQlGydi-oUNVoxpWXEVk-QlEufimD2l3XzOr0nOIuFktKoijHf5lChFMo9dEA-UIKSJOXQNEGTxdEj4ZbMYuTh-PZCz0CiNXF0pjqVZr_Qd907nS0KlNAkBOccwAP98MH-8QppVRz4T5cfGYVDveKBnz5bqGfIhx7x2Quc6V7JhC12bugksLRZ0wx76MnQBwQrn3gwo9Y9zT1lzKqv7fuZOCI30TrtRvFyAiknskMfovhUpnBlB1xBihl9wfrjJyFGXcJtQlDlozizmv69xX7YVSAp-VtXM6Xrmw4ZHMvK5dua1ERS6nETJAgYoGejDN1e_7Idipukb2z8VjI1R--qeHOwf11GJVetfKOcFfdF1le8Xnlc8Lq7gp2RSN1HSOSpw5j3vcelzIOdSdmfuIzGLkyy5Sql5EjzDHX3qsg5p-M7uIeKmFINzj78kgWnP87AcstWRZUMvX2bUmlyxHAwbvAE1yGkw5va4enNKpC0DS2uLO4l4RZ0w==","summary":[]},{"id":"fc_0582d75f09cbfee90169381b3525fc81a1bc7b000f96634747","type":"function_call","status":"completed","arguments":"{\"answer\":2}","call_id":"call_c4fcy48ELLPkigpwcq0o9FKU","name":"generate_structured_data"}],"parallel_tool_calls":true,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"default","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"generate_structured_data"},"tools":[{"type":"function","description":"This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\n\n1 + 1 = ?","name":"generate_structured_data","parameters":{"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false,"required":["answer"]},"strict":true}],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":{"input_tokens":212,"input_tokens_details":{"cached_tokens":0},"output_tokens":214,"output_tokens_details":{"reasoning_tokens":192},"total_tokens":426},"user":null,"metadata":{}}}
+---
+when:
+  path: /v1/responses
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-5-mini",
+      "input": [
+        {
+          "type": "message",
+          "role": "system",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "<instruction>\\n  <title>Structured Data Validation Error</title>\\n  <description>The following error occurred while validating the structured data. Please try again.</description>\\n  <Items>\\n    <item>You thought 1 + 1 = 2? Think again!</item>\\n  </Items>\\n  <examples/>\\n</instruction>"
+            },
+            {
+              "type": "input_text",
+              "text": "<instruction>\\n  <title>Structured Data Validation Error</title>\\n  <description>The following error occurred while validating the structured data. Please try again.</description>\\n  <Items>\\n    <item>You thought 1 + 1 = 2? Think again!</item>\\n  </Items>\\n  <examples/>\\n</instruction>"
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": "I am testing the structured completion API."
+        }
+      ],
+      "include": [
+        "reasoning.encrypted_content"
+      ],
+      "instructions": null,
+      "max_output_tokens": null,
+      "metadata": null,
+      "parallel_tool_calls": null,
+      "previous_response_id": null,
+      "reasoning": null,
+      "service_tier": null,
+      "store": false,
+      "stream": true,
+      "temperature": null,
+      "text": null,
+      "tool_choice": {
+        "name": "generate_structured_data",
+        "type": "function"
+      },
+      "tools": [
+        {
+          "type": "function",
+          "name": "generate_structured_data",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "answer": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "answer"
+            ]
+          },
+          "strict": true,
+          "description": "This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\\n\\n1 + 1 = ?"
+        }
+      ],
+      "top_p": null,
+      "truncation": "auto",
+      "user": null
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |-
+    event: response.created
+    data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_0a20a1e947eefc630169381b35873c81a39b9c3489122421dd","object":"response","created_at":1765284661,"status":"in_progress","background":false,"error":null,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[],"parallel_tool_calls":true,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"generate_structured_data"},"tools":[{"type":"function","description":"This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\n\n1 + 1 = ?","name":"generate_structured_data","parameters":{"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false,"required":["answer"]},"strict":true}],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":null,"user":null,"metadata":{}}}
+
+    event: response.in_progress
+    data: {"type":"response.in_progress","sequence_number":1,"response":{"id":"resp_0a20a1e947eefc630169381b35873c81a39b9c3489122421dd","object":"response","created_at":1765284661,"status":"in_progress","background":false,"error":null,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[],"parallel_tool_calls":true,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"generate_structured_data"},"tools":[{"type":"function","description":"This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\n\n1 + 1 = ?","name":"generate_structured_data","parameters":{"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false,"required":["answer"]},"strict":true}],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":null,"user":null,"metadata":{}}}
+
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"rs_0a20a1e947eefc630169381b35c46881a39aa95a01e9a17f7f","type":"reasoning","encrypted_content":"gAAAAABpOBs1vIk-qRBIcT2ka1XHX5my0ARzEZPe63vHt_NhreXWjbTNEe-7MxsgZQvxK_zMqFhBfWqGQ4fEHig_IhiBh4_JpjnqOHJZG3m4tgNt-vhbBMf-3DGgZ3396OxhSajb5eiX8ajxTeTD176cgHMIE6GmGUTQ4JVTa0tFnAmQHry-QfmLbis9q0SVan9kugKVkEbset95APC8FR2mIzsZn69NRTjT4M4F-iRTqVp936KqlKLbLw6FdO91tjmfNQ8v-82lRUQ9Rj7xzFOWjq9i8FFS1exmTfNmk7ZL4dRnu0pY-1arl1uwmU0IPjtE91wmacQfv_8BKhemdvN295X6aXcEKxzW6vDKcFxRYWhE7vjVytSKt4okjoxZ2LBcAR-g8n3yrrie8iOKDLrvWIlk1YrNytwzTAwkRyS2zTfVzguRwbCqms2PHXX4zHkCMxo3H4MFgvHe_DVd_rEU4xeiX8ZL_OkCnhj0dV0o_8dAqBf0DeHtWceFLfZ6ugm7ym8E4Kqm0vVcbCSA4JDsWoGlkNduAhX4-L7xJzC-LloRoghcS5VaSUTN0EAObniha7oIfk5C737wZyJfp6A4Y4u0HemBx91hQkio3iL4nB9h4NdtkXhaiHlmui9MFfqz7vjsamDmSQBbtdwUh5CbatDrfFKkObRtkdiILmtUPhDR_qn0TwCwkWBi_vQAf-8Gl1Tnw-okELSkNSphI6sVll6cmlACFIVOiTnwZSqEE0jSk9G4p63NV_UjPJFTS7JLTBvgM_KInt3NRB94m7r-8kIaCeRA80pZYNJBIAY3g_jpo5pueEeXX0MDCIiSWEu6FNUQQDYL1eDLIUG6p9yELzTSiZcmpw==","summary":[]}}
+
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","sequence_number":3,"output_index":0,"item":{"id":"rs_0a20a1e947eefc630169381b35c46881a39aa95a01e9a17f7f","type":"reasoning","encrypted_content":"gAAAAABpOBs7-HJbTAd1_jXvT4D80X49JH5R0TRGRd0fYLiYVA5c6WzLCvaGmGvhqEhxIfryfE04CGxOxd1jRuqZlD-wFBeQ67h9p64wWUAtNWuhVPpAgHnntsv4p_WE78XBr01F-HPIkY9pmJ2Ag1uhyxHN7u6x-CKpcufxoGjQ5b8ECu-_9hSPZAbnD8Uqj_ZlSjYdwBJoDaZyPN9BhvQ1guPwgihXY95t-sgWyPqOCmdnI3qk2s9TNZ5c9IjToMIrYIkHWs8GLPh7zjUyvHNrw-x7ehV9pQEs38Bx-m3C51Zpc5FFSnwVfLes5ZZUwVJWpTYZ8bz9TCQiC3OKtKEOvsVvUCo8RVqywc0B54n8EqZsAg-TH9rNJHfRgoGfZ30z_AOV3x5L8w4DXT0tuJvmPzoRdg0OMitn3MVm3QLWUQd_kYxWTM7xcC6WLAotClA0_BrmS_KHeWX03_4rl_SGBOhDmCdLtVx9zLHX2djllHKa3Mm0n51BC9X57z85uN8BlFhcS0QFtB7sw9M--Zs9Ll2kcXX5PLP2Qzd4fCnJLOiWJKEMxKN-e-GJ0ylLYYqmQgUf_FBR6UuT4jHRE2ornre6xuqoesvHlCUaL1G7lYM3O1CgOWqHYnDlPWyetKnckMLHRgyaACdwGFxdiyRN2yV9tZMBKqrvtE3-Cip8aShzY-gV54qATUga6h1IrfjlDXrOM6CIwMiRjiwBBJ1jAQeLUQ0UvYj5gGWQQaVDv42VtLUw9Lf8hCwEb9JlwroQ4gEUyt-Dw5g2NarluI3g_mqE9inDHdED3blRfZk8-wxpkcrdkHkpTZKyAIIlPca45uHc8Y_TSco4S7Mx8b5M2I740CB75zlRv4tUOFLbcxacwS5z2PKZai3RkanmZ5adGll6kPGUyV1RQVqlxoiJwI0hjJYuSmf6ucaT81hcJszUN6eSV0E2JdzGIxkvKSsAR57RQdCX8bB_HowwsIqF794ne-Jbpmy8_pLeyqJNw0b-j16xlX8uZA23Nynw2i4j0SON3wbgFqAo9GizaAIdcwZYbb_DCi0S2x7EWvck0v6fYNbkYS9Hrz3i6pe1g4M_cEY1QwM0Rqfw9qZyQBuIwdVX6ckQmyBCpEZ8amY64buQpUrUEBJNzj-3iYd7gvTsN2_HXuJsrVW5eApLN6n8BdhtS1LKZoT_V4FwIo2RT5EtXg8LZt6nw_-5k2e9P5N08OIu4_8EPP0nudeDDtaNmf5NXb6FyWfuC0KmrXB05p8ux8xUfDdVSmx284U1JGNUxXQSAgXKwZndcE8EpKaiVMVRsOwfBDnHB6OBMi50VaXxqjiz4m0KKXzOxhLCy8_xCrKpd7fO3yuQuM2tplyQXYe7HCqw5Clx405MmsJPsnEvkY421JqKWKZnrZQYTXr1EzKE2x8R48pxJNTLSr7HLC12CvcgdHP6Ux48OEvIAzoe627Y5BHJzUrgfk9quAOC3-gzvPn9CIKKFueNmQdG0xFZiAK1iWCsrYrBlhtNbepSo9Y1v9K9ooDYf5IyCV3deVeSXKS990C_lWC5SJqjd4g_OklfrdSxPCTL1qNMDjHRP2gumrBeb_gorWhHIq_sls_FWkObkBVAj1V0ShZnGAiRup_pjiYZ8FXPaqFO1Y6hNrIPa4d69LsdlgWbtYYd_S2KI3f7iyKd9rOq1wtmzAqPaNa_CkQffBVMKzyyQ_E9Xmuukm1zEIXMysVgl3a1HQRp-T63c5U1hAVQSMYtJItUDd_NjOnSI1ZvZmwZ3-TYiUEs2J43JZz46eKDs1IUHyKBOICSk8-e_jkF6S7ij7z0NOFEJ1WWzoVKicFEavksFWy2dXaAHLuJDIt_DzojJkWhJPAMLOHSANx8ABEAivdf66u7ijHCte594tAuVZ71gkfnlNQqKrbFYOLcp1olfBPFrTRK96XYYkKthe-v587vSTZthW1M2Cxbo6N_ythaG6cNJgXmVWMlD6XNcaBjv322oDT2wVQzpUw9L8GeZlfZEeGVCVWEyKanxdVlMu3SsLOR8AlD-HrIf1KBnKax28PKSDAD","summary":[]}}
+
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","sequence_number":4,"output_index":1,"item":{"id":"fc_0a20a1e947eefc630169381b3bce3081a388a839ee89de1db8","type":"function_call","status":"in_progress","arguments":"","call_id":"call_jhpeEwixuBycZd8Kt3ENxnnj","name":"generate_structured_data"}}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":5,"item_id":"fc_0a20a1e947eefc630169381b3bce3081a388a839ee89de1db8","output_index":1,"delta":"{\"","obfuscation":"jfCFMKK8ggXG7r"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":6,"item_id":"fc_0a20a1e947eefc630169381b3bce3081a388a839ee89de1db8","output_index":1,"delta":"answer","obfuscation":"VPZkAPCOoT"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":7,"item_id":"fc_0a20a1e947eefc630169381b3bce3081a388a839ee89de1db8","output_index":1,"delta":"\":","obfuscation":"gl7i4Tj8kAh9Ha"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":8,"item_id":"fc_0a20a1e947eefc630169381b3bce3081a388a839ee89de1db8","output_index":1,"delta":"2","obfuscation":"qzF9zBhzDvjOsgB"}
+
+    event: response.function_call_arguments.delta
+    data: {"type":"response.function_call_arguments.delta","sequence_number":9,"item_id":"fc_0a20a1e947eefc630169381b3bce3081a388a839ee89de1db8","output_index":1,"delta":"}","obfuscation":"sfVVzCDDFx65wpU"}
+
+    event: response.function_call_arguments.done
+    data: {"type":"response.function_call_arguments.done","sequence_number":10,"item_id":"fc_0a20a1e947eefc630169381b3bce3081a388a839ee89de1db8","output_index":1,"arguments":"{\"answer\":2}"}
+
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","sequence_number":11,"output_index":1,"item":{"id":"fc_0a20a1e947eefc630169381b3bce3081a388a839ee89de1db8","type":"function_call","status":"completed","arguments":"{\"answer\":2}","call_id":"call_jhpeEwixuBycZd8Kt3ENxnnj","name":"generate_structured_data"}}
+
+    event: response.completed
+    data: {"type":"response.completed","sequence_number":12,"response":{"id":"resp_0a20a1e947eefc630169381b35873c81a39b9c3489122421dd","object":"response","created_at":1765284661,"status":"completed","background":false,"error":null,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[{"id":"rs_0a20a1e947eefc630169381b35c46881a39aa95a01e9a17f7f","type":"reasoning","encrypted_content":"gAAAAABpOBs8llC0WKMMYwQTNZXXSAlIYuyvhXQ01-G8sR2gD5CFOlVHPJlsJv8ddOSDGCtRFmAUmUyq7EOLVRTICMJITntthQBWgEiepGDuCWb25_G2NRvBmi2bOC4dU72NOstbjW2Y8T0PwMLOsQfsnl_IlRAe0QGzAKpFSy1coouIRlPUuQELEvTwM7hCPaEnYQV9nN2w3tCI7GXubn1gGlLb26L6kr70PhDRwx5VSecP2e0bIs1GZzV07rtbtDi4U25Z9qSIj3qJPxguGOXaGaXEDF6gVUSt1VQ2NE9Nbo1NLhvVUpd6_x6XanrO7GmuECTAaZmWdYxEkqToVo2rQ3LR6IOQCU9OKAOrjdmUguaX37fWWyLZOZ7ZsETo6eXlf7BZNbBpTrk77hnQoLPgFo4lRy_NO7mBnhtEewncSZ09c_HTWRWsOcqhtxrWQIuiod4VJZfF59b6O5jR-W02uovkGUbLlkP5y1AxydPwJERx6tP04F9Ny5TFgWVEcs4Hp6bdS5r8unhbkNPXoPPxTcKssvYMsHRaUvXh14KNPjmYXscLRKqQ7CayhYUbJvMCBvXqf8-CEjdA1uB6q-ICL55nF6fHzb-HEc4CVGXG98Sz80DT3TdSJLZMPKht9JxNeLKec4UU-D-zjS1DXw9NP_kFWDp3dqovUcETj3I52h5ZgbuI478e7uclORTnpEfXRm-O68I2kAsfegO7_vSPI0542dfUde2rP30pqrdKjOpSjXVQkbcad7j22QuAa5a1_UTBCAb8xHDBMysW3_FUFmJbfCZLlS-bxLxlm2nqhqo2h5_qOL_A7dNVVzuR6YcLV4qhUz3iyVvbxIzzd6yvFN-1-5C1jwXdx8BQfi2eCQNIuZpx6815Uf0u7ssCBiAHJyLrIXqJ6yHcSEiAaS9rIVYzNsWUSFgJcqfL52VSGcIbnBPVdztJJrnHOUcZ1jToNABCp5Suy5tapaUTm3oYueUxcIZ1TCIccYm9a68oZ2aNOzdlSHBMRFaZT9BycwoGXnV2lDmf4RoMargyaOKJ3PUJf31_8Pt9NAvA2i02az_0YFlUHJuTPm7fw_W6ixyzIzE85Qk5ncAf_79t1kb3RMLHV2GytyIai026RfrFmKzyFGV39x1L8EmQUFbe5yj_juzDPr5hYhnNYJcBW-jXn_HnSB8ltX2XqMQwHl1tDWHZBKE0yJyc4emXEWO4Ef3rNzu-dpMZ3vBKTlGT8IdckcoIOrqgyO_joxjoV5oEWf3JjXZ_HKDvK7NfGy3sTTA3l8Xi1dwMdrzOpToLJxTlPudK9R-DX5cndP1UJHsoJlNptIctnMUZOJ08NpAYYW8tSXTrNEOT4JZJjroj_sey3Em9R1zzHGTNtwABS8qnNBB3XrxMi1kpE4kBf89M16pDwMBrAkQ4PNHiAk1yQd2fwKQ4IGi4uvZeC4OrF1WX8rnQK-cJibb59kRZPIF5EjhySp82LCBUcbByZf2RuHYZ9mBSl9X1TkK4SzNhSYvQeoxqyX-FjpXoAdtHZIWmbDvw11Evgtw5hae55DcpyRqUgMl4ldYogDwrCjuKkIDzSg4z5OYxsonlLlNG7HLIhJPUyk9rsJI4mCgQ7vvjffz9eTZk-qnFWbdISr8uWx4GLg8Zx8tej8RcQ_Fhc8q--jddxyaLyt36n8hJtmFepAvrAyBCFXshuyojaxx1-ZohReqf857Bw1i7Ga5esL9gVbEHWz0ZQ-jOZq-nTZ9FBMb4ATRnotD-hgyiPcHZxbTg5dVwFWFXEQrfJHtDlvma0jDjayqoRUjWWSpObJVcfwBYsbaVqOsmkSp-spPV5Lhy1c978x8ylYrLgBEntJGJxDYXod10FO_MZnnlCRQBiyIRmzO4X-usC1FaUh-tp_ETlI-H8Nc0CkSg5DeNJtIopB43C7rfcPSQfMhm11sE9FWUBndKroqQGkRYT78dOJhr5HD6eMGEFOd7iLez-sasPScMXlMLEgdpPKm64gGiO7YPuQloaJnjDSob-SVPSfD-mk8zMzyapem3_sb3Ipc8J9QLtV1WibmY","summary":[]},{"id":"fc_0a20a1e947eefc630169381b3bce3081a388a839ee89de1db8","type":"function_call","status":"completed","arguments":"{\"answer\":2}","call_id":"call_jhpeEwixuBycZd8Kt3ENxnnj","name":"generate_structured_data"}],"parallel_tool_calls":true,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"default","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":{"type":"function","name":"generate_structured_data"},"tools":[{"type":"function","description":"This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\n\n1 + 1 = ?","name":"generate_structured_data","parameters":{"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false,"required":["answer"]},"strict":true}],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":{"input_tokens":278,"input_tokens_details":{"cached_tokens":0},"output_tokens":150,"output_tokens_details":{"reasoning_tokens":128},"total_tokens":428},"user":null,"metadata":{}}}

@@ -1,0 +1,155 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:51:36.338113",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "openrouter",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:51:31.945964",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Test message"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Acknowledging test message**\n\nThe user sent a \"Test message,\" so I think they want me to acknowledge it. I should keep my response concise. Maybe it would be good to say I'm functional and ready to help! I could also ask if they want to test any specific features or if there's something specific they'd like assistance with. This way, I'm keeping the conversation open and inviting!",
+    "metadata": {
+      "openai_encrypted_content": "Z0FBQUFBQnBPQnRZYnJKQ21jdHJxd1o2aUhCa2l5eE9EY3R6c0E3UWJ2S1dCVjVjaTJUaWhjdEd3X0ZnLVJtT3NCeXdvUHF6LWd2VXZYVFNoMHVZVHM0YTZjdlBoUHlVd3NDLXlaOXhtbzRwTGFTQjhpZmI1WTZ4SmtQVEYzZkNIakhBaXhWbHpkY1pndWQ2b2ZuWk9uSG82VG1Bb1E5OXdHSUIyQVB1OFNWUDlub3Y5eUc2SkFvWU90Z2FUQV9lRUF3NllXVHZMakx2ZTlicnl3Ym9zQUllSVhXYXAzMUY3emt1R1BSOVRSYnduVTF4cXpFRG1sRGtZZUVuUzZOLW00aUQteXgyWm5fZU5rMTB1ektVckFzaGZaZ3Ric1ozRXJJOUpaN25RcEFmLVd4QklSZl92Rm5jTmwtbnE5NDB6TUpiQjBzcHh2eXhiWnBZRS1BY0NjR3FiSUxVRjkxcG5LbGw2S0YycDBHUEF5ODg5WTNLcWRHSk9jZTJKYzB2ek9wajNHd3l1dDE3VV80UU82aDVwcEhkR3lobUhrRzRaWGMzWS10QVBmWlpRUGk3RnhJVnB6UTZyRjd2dGZSVUE2QlhYcmRKbW1Oa0xhNWJRa1h2ZVVOUFVDZTEtNXV2WXFLbHZ2aWJzdDhueVZVclg5VTRyVm5rZVBvdjNaNTNoYlMxM1MtZDU0VzlmV3dlNEJud1pNTnFNZzNMS2xHZ1dQWlpoNFd0S29TOWYyekVMUzZTWUpOS2hFQy16WmFER2V0Wk9VbnZWaVpncU1kdllOSHEzV3NVVFN4WVR0czhZMzBXRk5Gd3EtU3B5ZGs0QXlpc1h5anZURlpuZ1loeTU3bHg2UDZwaUFXb1Z4el9pSDhVbHA2SHlodXB2NVBHNmlFVGpOMk56VHRvZEhNdzVDa2x5cmVoQ2NxV0d4RE8zaFFXT1c2SU03eEY0ZGl3SXhvMktuTkNsZ1NJcV9HdUp4dHEwQWNqcmszeGRrd2R2eWF3MHBvU0hieVNTb3VLcDRxSWFpc1Z5cldIa2FKd2JLdUE2U0hrbjQ4U2k4c011QnlqclJMWXNaeGQzTHp3bGtrTnR0OUs0dnF0ZFpzVHVrRHV2a1ZsYnVUZ2pEVjFRV2lEY05kM29Tc2p1ZmNuN1M1VUdIQ2puZ2tXdnh0X3R2VXJZTWE2YTdJbVl1LUtmT1pzaXlyNnFSYVRraWF1ZWJfU29femVMTi1reVVfTTV0ODQxTHJyMkw1Q3JoWlhUT3RLZEhNaDA0ekZ2bHhiQnNpc1VOZ0dNdTdDLXNfTER2cVFPaG5xdTc4NzZKRTYtVEFnT0E3MWlTaldEMWFyM0xxMTR3MXQ4N09MOFdrc0JXcjF3X0FUeU9rS0NZdEQtSVBqUC0xQWJVOHRXN0ExdElWbWVCUTVFa2ZYbmR3UHBnTXdyRlQyOW5mQ2hNSW5ybmF5T1RwVnUyRUdFSmpyb3hVYWhhb043c0xqWUgwUHZ3PT0=",
+      "openrouter_metadata": [
+        {
+          "id": "cnNfMDQxNDE4Nzc4NTk4MjQ5YTAxNjkzODFiNTQ5N2Y4ODE5MGE5MGQ5ZTgzN2Q0YmI2ZTI=",
+          "index": 0,
+          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Received your test message — I'm here and working. How can I help you today?"
+  }
+]

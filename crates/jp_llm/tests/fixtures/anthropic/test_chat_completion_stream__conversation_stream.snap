@@ -1,0 +1,148 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:49:31.748941",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "anthropic",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:49:30.482633",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Test message"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "The user has sent \"Test message\" - this appears to be a simple test to see if I'm responding. I should acknowledge this in a friendly and helpful way.",
+    "metadata": {
+      "anthropic_thinking_signature": "RXI4Q0NrWUlDaGdDS2tDT2JFYnBJSEdGaUlEc1ltT1pOaGRYTllVcThxL2Q5cVNkbC9WUkJybVJsbEM2SWhDTERXQjN3eTIxamtIY0VPQi93T3ZkNFcvTkNqN1duWmhKTXZHTEVnd0ttUEtkVlV3TGJUMXA0WUFhRERKYzFXMUNpdGtpeHM1SURTSXdPbEVUTU13NjQ0Y283WEhnVHpHM1RDS01xZFdRZ3hrUExmbDNBZlFITjBZdFdTcEVJOEFZeXNIb2FibjZmOEg0S3FZQnd2eGdtWUo0b2FrZmdMRWo0K1ZlSXZYZ0JpNFJRZjVjb1k5NHk5V1B1clFUUlJ6b0JnV1VxYzlUR1E1NmdvT1VMZ0l3U1Vza29jOXVHVE9NZ1VVUFp1b1JHL3VpMlgxd0hCTGphdnI2bDRCYWRNV1BlcE95RSs2SENXaGozNWVRNFROYlFRLzhYK2twVGVpVlRKeEEraFUvcXRWVkRlUTlUUjlOckcvNUp2YjhydWNJbytqK1A4UVplU21LeHZ3YzY1Y0w1N2xZK3NoYVYra25TNjBmTzVTUXUySmQwUmdC"
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Hello! I'm here and ready to help. Feel free to ask me anything or let me know what you'd like to discuss. 😊"
+  }
+]

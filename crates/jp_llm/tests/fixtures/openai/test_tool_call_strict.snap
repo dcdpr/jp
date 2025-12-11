@@ -1,0 +1,77 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_0fc1be88a9426d3a0169381b4ea6588194954eb7f447a6a776"),
+                    "openai_encrypted_content": String("gAAAAABpOBtRtWS4_Z_BS-xzBYOQ8uFZh0woaLddZj4HgflhYOfxA3fPNOJgR1yfw6e9gQo5fNtoZDNeJA-tFpwm3573HfIyern9tT5G_Lz-zvQR9i8roULu9XzsWr30SGvs2NVOfPTVNwN5-KogqmOQIiKDkO4LA8GVD7GwfTSDuzgVb3vi5RgrRU-HjxwF-NQtZFj8951cDgxcC6qazm-GeoIaEePJfaByB2jvKSd3-0iEwEky6rNjQ-ZeK9fl9xv73TetneSja69PfSFQbixqsJ4VyiQE00c62PUSLyoQHmzWLjYU09peO7aRRKadiq5MV5PYAXIq_0L7yDJh3CPnElfqpstRgvWg-25el6PNPo4Bc9jxVYCEVWudKUK94u6Vt5IusXDiaTlZoMYrqz04W8bpMCB6lU8ZItcb0_bN6NVSDlXlGpYJgoladc_oszC3b2nCpIVxDvTx8ngRO0Bv93812hWiYzdBPqCL6jz-15YCwWDBzi7jsxOcqOoJ5pFgOTCpyVQgAEyiFNJIA4Jb1-tuBr_ngYM1ZZy3HhRTDcEcA9o1okpTyjkZ_Am44T5U9gtKWKyKpQ3la-7CHvYrrMI66zuvLbRG6OoJQlvvPaDiDWODYLUROlSnfwybqHXgtNPgHjX1uVW9BeBE6kNomW6_TGWIafzJig_CNaGNK28_VARBREX6yh8tqnWlqBj7KtP9FtZPQ_UPpibJsreC43l81Wnk5QEVxF2z_F5WHPspjbihcqkK_wqEQghlrInM4MdZ6UZpN6pmmP78dFPL7Wcr3VI0-NPIcx9SVYY5Wj9MeMnvskqANOnQ6WkKD5DEcF5gHXHiDDTtf0jvtHSnwfrkgo2JzyujtelWcpiIWZNmQUAkE9Z02rSdOwFZS-A45Q-ZUIbZ2MniQqKjBKLlNtts_auHxySHWHkQQScdgt_gD3SBAwDuXzYZynvtz1ZFqwcNkZocnWfTTvjjCrxny9swH-_uQhgUtl9982rupxitAIJ-g0cjoHmP74Q0oLwwuxKyn9Pp6OVzDgDeiJmFa1SWUojlszRr-rZoZrn5o_xZ8gpAJHfmkpomJGAza58Y9m1gdKKVODi78nGw4AlQA6CeqJZsaoVmUSgJQhyJ-tZZwl9JgHFDnZRn367Ou1xQKNRZ25lnSza1IBapLnlIyh54v9pS-8aUZzC32BNM5qtnSsnnccSsWAuGBoewHl78jQwMmJifzLB6kspiJ7XGMyIAP8xUP13eKIAf9J2LCfxmzDkuO5Vsc2_ZvWvTrCPb7cc_EMmFxxJ1184tqv-AkNyCSlY0U6y1-jVg9DYay87L8mZ8V1L-6phDSeDfGz3CEAVSwr3BebMblagAwTvj5a-XjQDMAjrWpD9pf7nqWGmWvBJwTsAX4MU7hkRNvZwKd3_EY4_cQvUqB6Qed3HpGWiVog5peJKeWI5hxox_wRj6VqR-Nug1JN7y8xQM6SFDDzKbu03y-zQnqblcV7-nyx_uJ7aRnaT25q85EDMD-bQgQQR9Rj2087Cy8zDSvV6NsDzPWh3yQOrA_-kDdWvQyMzLpO01xQYObDtIqagXI8VIwio7YOLzQwhBf8P1KdumoVMCQnZTwWQz3W3euh_h-k-k38iKT5-RZQNQXRXQWSlMSl55lOg5QEkrrPkkBtOvDN9ULD_TIVPJmYYun4Ed0Q1znLRmnJ8A0hLbD91uht_-mak01tviB8qjCAjkw5MBbXDSuuzsctLV9Xxgv9pZxWOAO25_77Bj5zVd0lknAdBXGoC-BDEhF8wN5BbCFJhPQVspHog58u3XXDQSIJaWUthYZpENrnBWK2vesqB0Iw9Ml5VDuqvTYsRfj6YBCWVLW4iok8tkPCeJYZi8PqBSnIvP3ZLcoUM6ev7O3wQz5ejAmOMQx1u3eFz2AscywhCYK6OYKKGqaoLp1tbdCvZa4_490y-LYDqRzp1_2z4TdxINx9Zh1IMOzuGQC_HCK0GSn2BdXU8r16DhMDP2EREataQ7790DKMOY4aCKPPLkoYGaQfqu2Rn3M1MsPV4CiAC-XzKP6qpJrmGF5BpCj6Q9vCQKjcVRUANhFk9vOG0x82DSgwYEiOe15juRZrs2IVFVApFp2XfyDIyw4FoF0YR_EDbH3p0Xd42IdBcUBmXN-f3VqHNFgPbDl2h9JWHmtPrzY46FVAKrLCaOqt3fq7zhPE6Ha9-7TQ=="),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_imHkEdSBZkl08aOuSK6Wf4H0",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("test"),
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Tool call completed: working!",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_0fc1be88a9426d3a0169381b5283b8819483185e178c8d467b"),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

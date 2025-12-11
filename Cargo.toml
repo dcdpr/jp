@@ -50,7 +50,7 @@ grep-printer = { version = "0.2", default-features = false }
 grep-regex = { version = "0.1", default-features = false }
 grep-searcher = { version = "0.1", default-features = false }
 hex = { version = "0.4", default-features = false }
-httpmock = { git = "https://github.com/alexliesenfeld/httpmock", default-features = false }
+httpmock = { git = "https://github.com/JeanMertz/httpmock", branch = "tweaks", default-features = false }
 ignore = { version = "0.4", default-features = false }
 indexmap = { version = "2", default-features = false }
 indoc = { version = "2", default-features = false }
@@ -64,6 +64,7 @@ ollama-rs = { version = "0.3", default-features = false }
 open-editor = { version = "1", default-features = false }
 openai = { git = "https://github.com/JeanMertz/openai", branch = "tmp", default-features = false } # <https://github.com/rellfy/openai/pull/57>
 openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs", default-features = false } # <https://github.com/m1guelpf/openai-responses-rs/pull/6>
+paste = { version = "1", default-features = false }
 path-clean = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
@@ -73,7 +74,7 @@ reqwest = { version = "0.12", default-features = false }
 reqwest-eventsource = { version = "0.6", default-features = false }
 rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", rev = "18346b94e4e71463a06d93852cfc26c683ca5b83" }
 rusqlite = { version = "0.37", default-features = false }
-saphyr = { version = "0.0.6", default-features = false }
+saphyr = { git = "https://github.com/JeanMertz/saphyr", branch = "jean/fix-valid-literal-block-scalar-check", default-features = false } # <https://github.com/saphyr-rs/saphyr/pull/90>
 schemars = { version = "1.0.0-alpha.17", default-features = false }
 schemars_08 = { package = "schemars", version = "0.8.22", default-features = false }
 schematic = { git = "https://github.com/JeanMertz/schematic", branch = "merged", default-features = false }

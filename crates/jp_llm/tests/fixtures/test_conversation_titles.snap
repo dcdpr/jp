@@ -1,9 +1,0 @@
----
-source: crates/jp_test/src/mock.rs
-expression: expr
----
-[
-    "Test Message Interaction",
-    "Brief Chat Exchange",
-    "Sample Dialogue Processing",
-]
