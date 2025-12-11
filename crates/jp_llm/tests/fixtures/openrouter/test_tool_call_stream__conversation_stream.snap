@@ -1,0 +1,174 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:51:55.776833",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "openrouter",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Testing tool call"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Planning tool call**\n\nI see that we have minimal tools available, specifically `functions.run_me` with parameters for a string and an array. The user's request likely suggests they want a test run for this tool call. I’ll set the parameters with `foo` as \"test\" and `bar` as [\"foo\", \"bar\"], which is valid. Now, I’ll proceed by calling `functions.run_me` through the commentary channel and then present the result once it's returned. Let's get this done!",
+    "metadata": {
+      "openai_encrypted_content": "Z0FBQUFBQnBPQnRsTi1Ta2oyM3llcjVoX1NvYkRNQTBzZ3dCZk9nQU85UXVvZXhyR1BkNUs5ZjIwRzZIWlZrRW5FUFJ4UzIxSU1oSi16a0VsOEJ1Zi13WlJwUWlWQk44T0ZweTRjdGQ0SzFXWUw0LXNYVmVOeVBUVFFEZkhfVDZKQ05GTXZqM3BEa2NmbElUV0RqYkREQnpIcURoS2ZEUTVlQ18xZWRPbVJDdDJ4NkdQbkNSQVdjR1ZKeXh6UDA1NTc1S0RwVWNxS3lwTmFXOUx2V0FyT29UTW1QRGJvaURMbGxTdUpfRXowMjROQXN4RlAzSUQ4Nm9zUGVoZTBjOElGbVJLWGpXck9GWWlMNWRwdUEzcHdQcWYxUHVRYS1ObVpYNjVLeExOaEc3ZWpGM3RaTTJSV0dkbXY3eU1JUE9LV3hxQ1pkOGpfQmZfRFp6cU41UVZEeEJHRmZTeENObkVabndwOGRSVlNtWWxnX3VVYm80Tk5sLWdKazFINGY3cFA0cl94eEladEtGbHlzalExT0ozYVl3cFE2dlp1WjM5QUwyUkNHOFZrOUhtaEM5OVhnM3hJb25SRG5XMUpYUThlQWpUeU9MVTR4bE4xSnhyTlBRbHdTU2xoR1RWSkYzMUw1WDFNUS1TajFiVG5jU2pCRldBNFgxQmVLS3JnczZPanhsWVo3ZlVVLWZiRENBZlBaNDRFT0dnVl9ZQ0p2X1U5NGZOa0VGYWpQLVNjNlluazBRQmRFb0h3RmtucWt5MUVSQWlKbjlZYVM0WGxPMGtmTm9ScGpURE85bldVWGlqWmhsdTZIMkJIdklLbVd6U1h3UWw1Unh5Zk9sN0l2UnQ2T2pzTTJ5NHhZbW5XLTVsdVFpUU0zaV8zRWFSb01CM3NGczRyWHVFdHY5SXVHUnFMbmY3anQxcUtvSXFsUlc3ZFNxdjVuUktjVHNzaTlmNWk3a0kzSGNSdklMMUtnZnhvUUw5NEdIeWRsZkE3bXZvOTZjZThvcEd3b25lbmY3MEpoU1VnaW5TQU93X2dhU09nWW01cVZKdFFiRDBQVnR0alNod1UyRVFxcUhMVkx6RGlrM2pBY3JHcU1wUXFNTFRCWTdiS19fUnNhWXFlOFJ5eXNsMDBTT2xreC14d1V1WVRmWmV6UW9UeE1oYmZmSDJhRzdfUjFDYndsN0FmazQzdU9IYUtZU2FONEZMRXpub3pKdHRMcHZkTm1HT2VRWE5HbmpqamI5RTdBV3I0aFVPNjdoRmJja1Z2UjlqRlM3bUxLYjRmNDVIX1lzZTg3Q3IwVVNLYjBiVnItYXpiVGM5U0JzUkZvMmVXdF9aT2gxWEtRRkpyT0V1OS1QOUdsbFR1VjB5a0tEX0lsOElsMnVJREFQdDZiRERfdG5hU0V1eE9iWVdWU0ZDRW1EQy1OdjZRYjVVT3ZXQWZxZG15OXU5LUllc1ZkM0hWaDBKeGRHUGJlaVR2RWJURGZCN1FScHh5ZEN0RUdyVnJ2aFlJclRlY0RnU0R5Y0dEUERwdXRDT293bS1HT3J2R09wY0JVRHpaX0N3UEptb2tHNnp3ejBNQnpTVVpuVFUtdmx2RnJFbG9wekJOWjV1UmFDNWUtdTBkaXE0MXBCVmtnaXpaei14Z3FDeDlESU9XejZjMnlkeW1BcUFEZ01ISjZERU1mRHB6UUFYMGppVXZwYlp5c0lzQXhjWVpEd1NXdUxFX0VGSlQ1dm1lV29WYTFwZWVTa3dSYkRkdU5wVi1lTUsxTjNITEtQaGhUSVhyWkptcXlfZ3hiLUVWWVZzUEthWURnNzBNRUw3bTVYWU05QUxRQmZZTXJPUEtWRm9Da0NaRjlNSF9DZmtSV212ZGhNRmV2NUh6elRsNGVqWVR4UUtHaXcxNkk4S214enl0RmZBV2xwZzBJcFhIcmVBMkdnT3pyQ0J6eW8tbUxkYXc3UU95dGgya3JHUWY4cVMzMEV5M1c2UlR1cExhal9LbXNnMGtKQVRwRTlCVmdWaExNamd4NVRhUTcxMkdubGxwb2todVN4UDJoMmRpaVVRSDhRbjNqUU0xQVM0Nm9BbHdiZmtmODBKb25WdXQtaWdQMF9WZjdxYWd4UEttNzRWRWNVV01sZDdjYmF6Qkl6cTZ6QVlsbmVLOWVwODkyN1h0ZFl1cEZ2MVJHM1ZGQzdWZzJpVFlJOUdXWjJRWnl6ODY0eldGN0EyZWJUNkxRaEpYU0cxMEZ1NV9NVUtFM3hxbEgtcjFORDhhUG5rN2YyR1ZlRlpGNXNZTFdfczVKUzU1eDEtVjVhMjlfM05OcjJIZURqVXdYWkJPbmQ0dVRsbmVScUR5TS1kWE8wUTloQzREWVhxSjNXcUpzWDl1aWR6NWRZVjB2RWkzZlNyR1JlTXAtZWpUejgyNHp6R1Bnb2NuYzdOQThXX3I0X3Z3dm1jR1R3a01uNW1TQXZSSGdwNU0zWVBKZ29Ca0piTkJ1akdBUHZXbFV3WjFWUGVtSTU3QkRyTkYyQS1ubTlubGtRLUJoZGZ2MFBUMnp1bmRMX2hjTTVkQzNOTWs0S0dOVm0wSkpyWmJ5R21iZ3NmWGxHMjJhX0FJRlNLM1Y2enVUTElrQlZ6UWVDdThHSW1ycmNNd2ZHSXlyVzVlY2FMMzhDeWpLTTlfMi01NktXX0prNUJ2QUN1NWxrRmlzak9pS0xFWndaRm1yZ3VYVHJHN0VHVTNVWVk2a24zNXdPUG1YU2VvS25zQ3cyQ0h0UXRWYlV0b3Nud1ZwMHFRPT0=",
+      "openrouter_metadata": [
+        {
+          "id": "cnNfMGViNzA1NWQwNTIzZjY0ZjAxNjkzODFiNWZiNTA4ODE5MzkxNTI5N2FiODVmNzhjZmY=",
+          "index": 0,
+          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_request",
+    "id": "call_LKyNzSEaykep4WFbJITKXobU",
+    "name": "run_me",
+    "arguments": {
+      "foo": "dGVzdA==",
+      "bar": [
+        "Zm9v",
+        "YmFy"
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_response",
+    "id": "call_LKyNzSEaykep4WFbJITKXobU",
+    "content": "d29ya2luZyE=",
+    "is_error": false
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Confirming test results**\n\nThe user wrote \"Testing tool call\". They previously invoked a function called run_me, which returned “working!” So, I need to acknowledge that the test succeeded and keep my response concise. I could confirm the function output and offer to provide more details or next steps. I think I’ll say: \"Test succeeded. I called run_me with args {‘foo’: ‘test’, ‘bar’: [‘foo’, ‘bar’]} and it returned ‘working!’. Want to run another test or ask about the function?\"",
+    "metadata": {
+      "openai_encrypted_content": "Z0FBQUFBQnBPQnRybDVWM2hiaGhlZ3lSZ0owcXY2TThXa2VUV2VqaDFGLWpobFV2NGxiZEVNc0I4b3F6Q0xpc2w0YUlLYzZHZkRQazJKRUQ2WWppZmsweWxZWXZUNzhMR1VselRzUUZyQ0QyWUtybjRzVGhsR1lwbGFkamh5UGRLWmsydTZmVDI0WVVaVndjZHZDclhkdmZmeWJsTmtiMU9YQnhIc19lWmVaRWt5d1hWQTdfR0M5WEl5QmhJZW1IRW9BeVdJWXpvUmlocksxd0RyQjBUam52aG5lU3dwRUR1Q3JDV1pwMHdTMnptQkl0TFhQcHBfNnZmWHpIT0RITnlXN3NtTmRJbk1STi1vNjlEYWg0dzFSZWZfMlM4Ym5kcUl2bUtaYmJ5NWtuU0VYeTN3cUljVW0wTUZqZXBWb1hzbm1LRUJYTURhNWdQWDVOZThZWWJWbHlxdGk4RG9hdGprelRqYzd1QU1WdW04cGtDbFZCbExvOE5hSDBuMy0yUWlwNXpYcDZHTGJaaUpBVlZncVNQeWdkSmVoZnFNS2N5ZU9KOXJock16VmVPTklDXzdtX2Z0UWpaRkJrazJzby1VaUtWTnNqcV9VVTE0eTBhZ05mSmdURzRLejFNYWNYQzN5S0pHUTQxVXZCMGhXWFhESjl0Mlk5RjRqVXhUVnB3cko2bHNaRlVkQ0ZUampJM2lqdnBQSUhfcWlhWVc0ZUcxVXVqNERJMzlNS3J1VDQ4c3BmV2MxNTRjTWM1RFdRb3Y3d1Q5bG9qOWs1X1ZXNFFHZnR2aEh3R1JyLUJEQ0p1LTJQNUozUG1MZ2Zid2JDVFE0akl0T0haNy1fbkFscl9jaDl1OXo2NHdJM1FwUW94YlFLX1JEQ21kMXRyYThVbVpIWFN3R1NQekxYTWFBSWhhSk5WX2ZXSWZtMGdfdEdKVlFfS0lsdklHUkhiR1ZYM2dETjR2REUwczlnemllSldnQi01akI3X1NpN19sb0VZM2I0enRxQ1loSUFMbnJ6bmtMV2ZkVFVFLTBNS01NWkRXRzdtZmhGVHdRT3VMMlYxbXdwOVRuQ3VfTkdxVGNIcExlczExQmtzT05HWjR3UkdVemI1WXM0cVBSMnBFWlcyV3FuZEdLdW5GZlBnaWt5NTNsYXFYWjRHTG1ucmRjcXVGS0VUY2hpV2lTaTFKTVFyQ0hidmpPbDA0eHFIOUl2cGJJalJEN0dZZk16ckViYmg3Z0ZSeXdWOXlsQ0dac1Y0VDhfelNFZDQteTdfYWpLbTBVWFpHX1ItX3ZDRW9FaVdRdHFqaDhDbWZ4QUtpV0lLcUQ1Vm9mSWVwRjBlTnAtLXMtWG1YQmNVbmJlUVMzRHNtbVBGUUNoNTZjZzVINlVVZGJXbUFFREpjQ0RlZlRzSWl3YWVTQ09adXhYbFl4YXZGc0FQVF9XOTMxekx0MlI0N0tkeE1OZ3pmNzZDZ1FVaUVIQTljSzNtV2hzcm5wOUppUzJhdXpuMW4wRmExS0lORDVZTTNsV05PMFF6eWtEU2N4TVlfUk4zS1k0Wm1vbFoxNVpQWFN4VkswUjI4NjhoLUk2a3dvbkRxU0o0TFVHOElreE5IdTNjeHM1REV2el9ON0o3c01PUkxFcnAzdXFpNHBBczR4WDN4M2JUN1pjZC1hcjNGbzdCZmJyYjN2VHBrYkFBbXk4YnpXYi1ENzNSaGo1WnJFZjZuZE03bTBlR3E2ZGZtLVpaU3BIZVFMdm1NVU5IcTdURFNtY05DN3RkZE1aUFpOQzZCVVhaZ1dlMFM5SmQ2UDMyWjVVbXdWVHZPU2VnLUUyVW5mVkNRMWZmNjZianlKNmNxVUJ5S21JZVk3ZEFReFgwNDFpUnJZNkZET25XMkxBOXJBYkd6My1xem9BaEEtc3hXUXFJT2pPSEVtMEV5ZnpuMXVBaVlRbXVfVm5rSDczLTR5TlA2ZDBJZmZCclVKa0NGaHlTNWpMOThyaWUzR2VRSnUwUHdmSUZFWTVjcmRpeG5XQUdldmlMdXl2c1drMHVYaTVoaWJxXzlRSXdXR2lzemE4SXF2cjZHYm1UODU2VV9VWXBzbFBKOGZfQ0F2Q2xwYWZGQzVCVUxXa2dqNS01ams4TUdTSFpnOTVvMUZaaVhCcDF5ejFlMDRfQnFxdnZPdW1jNG1HNWJ4RHprN3JzeGFweDFVVHlRRWI4X1lNWjI3T2hRUGFMU29BVU5BVy1DUHVocWo4aGFqeW1laUEweDRkTkRFV0NyT004eXRpb2hURms0MnpGczhhUk9qaDNXNEZGSmwwd09PdWZkUzZ4dzV2T1NSSzhSMXlsVlhqWGRCaVJ3cVlvTEhoenBaaUdqRFdBVUZwbTdDYllkN202WVlENDdMSFFwa2ZRZE1LSE5pREdIN2F5V0ZvXzFSRTlkR1I4VHVlcnl6czhNWnlKeEozUG5YYktEd281d2JCakJPUW95V2EzUXFCWEF2NmtWWlRac0pTYnlIT21HSWN0R0VuRjVnVmNtbmZyWW5KLUpiMm9xN0tINDVuOWtpbzJxZjFsTl9hS3JocnpVOGNKek50",
+      "openrouter_metadata": [
+        {
+          "id": "cnNfMGYyNTVmMThlMzY3YWFkMjAxNjkzODFiNjViNTkwODE5NWFkYTQ5MTFiMjdhNDIyNjc=",
+          "index": 0,
+          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Test successful.\n\nI called run_me with:\n- foo: \"test\"\n- bar: [\"foo\", \"bar\"]\n\nThe function returned: \"working!\"\n\nWould you like to run another test or try a different function or input?"
+  }
+]

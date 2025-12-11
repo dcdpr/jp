@@ -1,3 +1,5 @@
+use std::fmt;
+
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     conversation::tool::{OneOrManyTypes, ToolParameterConfig},
@@ -6,9 +8,10 @@ use jp_conversation::thread::Thread;
 use schemars::Schema;
 use serde_json::Value;
 
-use crate::{structured::SCHEMA_TOOL_NAME, tool::ToolDefinition};
+use crate::{Error, structured::SCHEMA_TOOL_NAME, tool::ToolDefinition};
 
 type Mapping = Box<dyn Fn(&mut Value) -> Option<Value> + Send>;
+type Validate = Box<dyn Fn(&Value) -> Result<(), String> + Send>;
 
 /// A structured query for LLMs.
 pub struct StructuredQuery {
@@ -21,14 +24,21 @@ pub struct StructuredQuery {
     /// An optional mapping function to mutate the response object into a
     /// different shape.
     mapping: Option<Mapping>,
+
+    /// Validators to run on the response. If a validator fails, its error is
+    /// sent back to the assistant, so that it can be fixed/retried.
+    ///
+    /// TODO: Add support for JSON Schema validation.
+    validators: Vec<Validate>,
 }
 
-impl std::fmt::Debug for StructuredQuery {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for StructuredQuery {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StructuredQuery")
             .field("thread", &self.thread)
             .field("schema", &self.schema)
             .field("mapping", &"<function>")
+            .field("validators", &"<functions>")
             .finish()
     }
 }
@@ -41,6 +51,7 @@ impl StructuredQuery {
             thread,
             schema,
             mapping: None,
+            validators: vec![],
         }
     }
 
@@ -54,6 +65,24 @@ impl StructuredQuery {
     }
 
     #[must_use]
+    pub fn with_validator(
+        mut self,
+        validator: impl Fn(&Value) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        self.validators.push(Box::new(validator));
+        self
+    }
+
+    #[must_use]
+    pub fn with_schema_validator(self, schema: Schema) -> Self {
+        let validate = move |value: &Value| {
+            jsonschema::validate(schema.as_value(), value).map_err(|e| e.to_string())
+        };
+
+        self.with_validator(validate)
+    }
+
+    #[must_use]
     pub fn map(&self, mut value: Value) -> Value {
         self.mapping
             .as_ref()
@@ -61,11 +90,26 @@ impl StructuredQuery {
             .unwrap_or(value)
     }
 
-    #[must_use]
-    pub fn tool_definition(&self) -> ToolDefinition {
-        let mut description = "Generate structured data".to_owned();
+    pub fn validate(&self, value: &Value) -> Result<(), String> {
+        for validator in &self.validators {
+            validator(value)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn tool_definition(&self) -> Result<ToolDefinition, Error> {
+        let mut description =
+            "This tool can be used to deliver structured data to the caller. It is NOT intended \
+             to GENERATE the requested data, but instead as a structured delivery mechanism. The \
+             tool is a no-op implementation in that it allows the assistant to deliver structured \
+             data to the user, but the tool will never report back with a result, instead the \
+             user can take the structured data from the tool arguments provided."
+                .to_owned();
         if let Some(desc) = self.schema.get("description").and_then(|v| v.as_str()) {
-            description.push_str(&format!(" using the following description:\n\n{desc}"));
+            description.push_str(&format!(
+                " Here is the description for the requested structured data:\n\n{desc}"
+            ));
         }
 
         let required = self
@@ -115,22 +159,22 @@ impl StructuredQuery {
                         .unwrap_or_default(),
                     items: v
                         .get("items")
-                        .and_then(|v| serde_json::from_value(v.clone()).ok()),
+                        .map(|v| serde_json::from_value(v.clone()))
+                        .transpose()?,
                 };
 
-                (k.to_owned(), parameter)
+                Ok((k.to_owned(), parameter))
             })
-            .collect();
+            .collect::<Result<_, Error>>()?;
 
-        ToolDefinition {
+        Ok(ToolDefinition {
             name: SCHEMA_TOOL_NAME.to_owned(),
             description: Some(description),
             parameters,
-        }
+        })
     }
 
-    #[must_use]
-    pub fn tool_choice(&self) -> ToolChoice {
-        ToolChoice::Function(self.tool_definition().name)
+    pub fn tool_choice(&self) -> Result<ToolChoice, Error> {
+        Ok(ToolChoice::Function(self.tool_definition()?.name))
     }
 }

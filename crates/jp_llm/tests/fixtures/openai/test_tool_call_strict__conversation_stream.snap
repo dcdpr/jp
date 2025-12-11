@@ -1,0 +1,156 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:51:30.795516",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "openai",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Testing tool call"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "",
+    "metadata": {
+      "openai_item_id": "cnNfMGZjMWJlODhhOTQyNmQzYTAxNjkzODFiNGVhNjU4ODE5NDk1NGViN2Y0NDdhNmE3NzY=",
+      "openai_encrypted_content": "Z0FBQUFBQnBPQnRSdFdTNF9aX0JTLXh6QllPUTh1RlpoMHdvYUxkZFpqNEhnZmxoWU9meEEzZlBOT0pnUjF5Znc2ZTlnUW81Zk50b1pETmVKQS10RnB3bTM1NzNIZkl5ZXJuOXRUNUdfTHotenZRUjlpOHJvVUx1OVh6c1dyMzBTR3ZzMk5WT2ZQVFZOd041LUtvZ3FtT1FJaUtEa080TEE4R1ZEN0d3ZlRTRHV6Z1ZiM3ZpNVJnclJVLUhqeHdGLU5RdFpGajg5NTFjRGd4Y0M2cWF6bS1HZW9JYUVlUEpmYUJ5QjJqdktTZDMtMGlFd0VreTZyTmpRLVplSzlmbDl4djczVGV0bmVTamE2OVBmU0ZRYml4cXNKNFZ5aVFFMDBjNjJQVVNMeW9RSG16V0xqWVUwOXBlTzdhUlJLYWRpcTVNVjVQWUFYSXFfMEw3eURKaDNDUG5FbGZxcHN0Umd2V2ctMjVlbDZQTlBvNEJjOWp4VllDRVZXdWRLVUs5NHU2VnQ1SXVzWERpYVRsWm9NWXJxejA0VzhicE1DQjZsVThaSXRjYjBfYk42TlZTRGxYbEdwWUpnb2xhZGNfb3N6QzNiMm5DcElWeER2VHg4bmdSTzBCdjkzODEyaFdpWXpkQlBxQ0w2anotMTVZQ3dXREJ6aTdqc3hPY3FPb0o1cEZnT1RDcHlWUWdBRXlpRk5KSUE0SmIxLXR1QnJfbmdZTTFaWnkzSGhSVERjRWNBOW8xb2twVHlqa1pfQW00NFQ1VTlndEtXS3lLcFEzbGEtN0NIdllyck1JNjZ6dXZMYlJHNk9vSlFsdnZQYURpRFdPRFlMVVJPbFNuZnd5YnFIWGd0TlBnSGpYMXVWVzlCZUJFNmtOb21XNl9UR1dJYWZ6SmlnX0NOYUdOSzI4X1ZBUkJSRVg2eWg4dHFuV2xxQmo3S3RQOUZ0WlBRX1VQcGliSnNyZUM0M2w4MVduazVRRVZ4RjJ6X0Y1V0hQc3BqYmloY3FrS193cUVRZ2hsckluTTRNZFo2VVpwTjZwbW1QNzhkRlBMN1djcjNWSTAtTlBJY3g5U1ZZWTVXajlNZU1udnNrcUFOT25RNldrS0Q1REVjRjVnSFhIaUREVHRmMGp2dEhTbndmcmtnbzJKenl1anRlbFdjcGlJV1pObVFVQWtFOVowMnJTZE93RlpTLUE0NVEtWlVJYloyTW5pUXFLakJLTGxOdHRzX2F1SHh5U0hXSGtRUVNjZGd0X2dEM1NCQXdEdVh6WVp5bnZ0ejFaRnF3Y05rWm9jbldmVFR2ampDcnhueTlzd0gtX3VRaGdVdGw5OTgycnVweGl0QUlKLWcwY2pvSG1QNzRRMG9Md3d1eEt5bjlQcDZPVnpEZ0RlaUptRmExU1dVb2psc3pSci1yWm9acm41b194WjhncEFKSGZta3BvbUpHQXphNThZOW0xZ2RLS1ZPRGk3OG5HdzRBbFFBNkNlcUpac2FvVm1VU2dKUWh5Si10Wlp3bDlKZ0hGRG5aUm4zNjdPdTF4UUtOUloyNWxuU3phMUlCYXBMbmxJeWg1NHY5cFMtOGFVWnpDMzJCTk01cXRuU3NubmNjU3NXQXVHQm9ld0hsNzhqUXdNbUppZnpMQjZrc3BpSjdYR015SUFQOHhVUDEzZUtJQWY5SjJMQ2Z4bXpEa3VPNVZzYzJfWnZXdlRyQ1BiN2NjX0VNbUZ4eEoxMTg0dHF2LUFrTnlDU2xZMFU2eTEtalZnOURZYXk4N0w4bVo4VjFMLTZwaERTZURmR3ozQ0VBVlN3cjNCZWJNYmxhZ0F3VHZqNWEtWGpRRE1BanJXcEQ5cGY3bnFXR21XdkJKd1RzQVg0TVU3aGtSTnZad0tkM19FWTRfY1F2VXFCNlFlZDNIcEdXaVZvZzVwZUpLZVdJNWh4b3hfd1JqNlZxUi1OdWcxSk43eTh4UU02U0ZERHpLYnUwM3ktelFucWJsY1Y3LW55eF91SjdhUm5hVDI1cTg1RURNRC1iUWdRUVI5UmoyMDg3Q3k4ekRTdlY2TnNEelBXaDN5UU9yQV8ta0RkV3ZReU16THBPMDF4UVlPYkR0SXFhZ1hJOFZJd2lvN1lPTHpRd2hCZjhQMUtkdW1vVk1DUW5aVHdXUXozVzNldWhfaC1rLWszOGlLVDUtUlpRTlFYUlhRV1NsTVNsNTVsT2c1UUVrcnJQa2tCdE92RE45VUxEX1RJVlBKbVlZdW40RWQwUTF6bkxSbW5KOEEwaExiRDkxdWh0Xy1tYWswMXR2aUI4cWpDQWprdzVNQmJYRFN1dXpzY3RMVjlYeGd2OXBaeFdPQU8yNV83N0JqNXpWZDBsa25BZEJYR29DLUJERWhGOHdONUJiQ0ZKaFBRVnNwSG9nNTh1M1hYRFFTSUphV1V0aFlacEVOcm5CV0sydmVzcUIwSXc5TWw1VkR1cXZUWXNSZmo2WUJDV1ZMVzRpb2s4dGtQQ2VKWVppOFBxQlNuSXZQM1pMY29VTTZldjdPM3dRejVlakFtT01ReDF1M2VGejJBc2N5d2hDWUs2T1lLS0dxYW9McDF0YmRDdlphNF80OTB5LUxZRHFSenAxXzJ6NFRkeElOeDlaaDFJTU96dUdRQ19IQ0swR1NuMkJkWFU4cjE2RGhNRFAyRVJFYXRhUTc3OTBES01PWTRhQ0tQUExrb1lHYVFmcXUyUm4zTTFNc1BWNENpQUMtWHpLUDZxcEpybUdGNUJwQ2o2UTl2Q1FLamNWUlVBTmhGazl2T0cweDgyRFNnd1lFaU9lMTVqdVJacnMySVZGVkFwRnAyWGZ5REl5dzRGb0YwWVJfRURiSDNwMFhkNDJJZEJjVUJtWE4tZjNWcUhORmdQYkRsMmg5SldIbXRQcnpZNDZGVkFLckxDYU9xdDNmcTd6aFBFNkhhOS03VFE9PQ=="
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_request",
+    "id": "call_imHkEdSBZkl08aOuSK6Wf4H0",
+    "name": "run_me",
+    "arguments": {
+      "foo": "dGVzdA==",
+      "bar": [
+        "Zm9v",
+        "YmFy"
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_response",
+    "id": "call_imHkEdSBZkl08aOuSK6Wf4H0",
+    "content": "d29ya2luZyE=",
+    "is_error": false
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Tool call completed: working!",
+    "metadata": {
+      "openai_item_id": "bXNnXzBmYzFiZTg4YTk0MjZkM2EwMTY5MzgxYjUyODNiODgxOTQ4MzE4NWUxNzhjOGQ0Njdi"
+    }
+  }
+]

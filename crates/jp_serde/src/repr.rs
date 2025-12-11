@@ -94,6 +94,7 @@ pub mod base64_json_map {
 mod tests {
     use serde::{Deserialize, Serialize};
     use serde_json::{Map, Value, json};
+    use test_log::test;
 
     use super::*;
 

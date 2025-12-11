@@ -3,9 +3,9 @@ enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 description = """
-Modify a file in the project's local filesystem.
+Modify one or more files in the project's local filesystem.
 
-The file must exist, be a regular file, and have no uncommitted changes.
+The files must exist, be a regular file, and have no uncommitted changes.
 """
 
 [conversation.tools.fs_modify_file.parameters.path]
@@ -13,6 +13,8 @@ required = true
 type = "string"
 description = """
 The path to the file to delete. The path must be relative to the project's root.
+
+The path may contain glob patterns, e.g. `src/**/*.rs`.
 """
 
 [conversation.tools.fs_modify_file.parameters.string_to_replace]
@@ -28,4 +30,35 @@ type = "string"
 description = """
 new string to replace the `string_to_replace` with. The string may span multiple lines. If empty, \
 the `string_to_replace` will be deleted.
+"""
+
+[conversation.tools.fs_modify_file.parameters.replace_using_regex]
+required = true
+default = false
+type = "boolean"
+description = """
+Whether to treat `string_to_replace` as a regular expression.
+
+If `true`, `string_to_replace` is treated as a regular expression and the `new_string` is treated \
+as a replacement string, which may contain capture groups.
+
+If `false`, `string_to_replace` is treated as a literal string and the `new_string` is treated as \
+a literal string.
+
+When `true`, replaces all non-overlapping matches in text with the replacement provided.
+
+All instances of `$name` in the replacement string is replaced with the corresponding capture \
+group name.
+
+`name` may be an integer corresponding to the index of the capture group (counted by order of \
+opening parenthesis where `0` is the entire match) or it can be a name (consisting of letters, \
+digits or underscores) corresponding to a named capture group (e.g. `(?<name>exp)`).
+
+If `name` isn’t a valid capture group (whether the name doesn’t exist or isn’t a valid index), \
+then it is replaced with the empty string.
+
+The longest possible name is used. e.g., `$1a` looks up the capture group named `1a` and not the \
+capture group at index `1`. To exert more precise control over the name, use braces, e.g., `${1}a`.
+
+To write a literal `$` use `$$`.
 """

@@ -1,0 +1,97 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_0078d84f5da0a9c60169381b3dcc2c819eac7472c4478ca051"),
+                    "openai_encrypted_content": String("gAAAAABpOBtBlYrgsUpua27kq1o4SH8mOaMZooRefdaf0O8Cg442yqnE436WYy9noY4hKSNnNIbKijPbWyc-Quf9wS3HjZKqK2W0pOIJLU6ob1EX-wPvOw0PnNKF-BcIBBimkkaFp__-t6KiBlsf-PtxiSQRyGEX6zx3OixWV_KfQQBLfTdZ1Ew8OYA521w0_VXur28mD_2Ks7qLBYONdCRn1qwRattB6ma0ASPOkzZufJU8Q-1wsttWdxckTi_39Tz3Dvnj3GrKbAmpeLrtFfimQbW5uSjkyUMq81LQl8qHF11c_jJYCvZTL0uAf0fp5uLo-4TaVc9w3gkaAU8J2pWfdLo5r2WstpQvpBIGzImyDjWafSdDV_k7DIqIfa9n2FVMy_fi7guU3MrPRFDjaEIkzKOdNHTxHPRoZKxMH2UQmDvx4_TYG9y6nxpI-X8fsV-ul6D1BDmnM5qf_walC6Rim-vS5muk2bE4Laojj-tg4BjCybRtXTINvdL5-Rbv7vLnOMsUw-GCkjs6SfWR7JHwnEDvi1dZztNCuGN1fdSnHM1lean3VB5vv7iAhRtcr83hDsxy_9KKZ6rqqaP0BJ5J2dwB_pVooAeEYiIASn9ePHLGLcBRDYDdw7c4uK9OVnxeVmWeWjANvz0fXDqovRsMTHnat7f6jyakK1QMfRI7ZOsSewaY1St-tYkj3gvsPn2rtAl4jzCRLLD6KPfrLWDBwM98uHYNgDda1FykXmNsCwMprGyKDep_sslN8O1Z81uAtcMnLYcmtjppDtIt1Rgg3-PWbqCB3baVgOtFA-ACZbcuik1dlGU_n1XJ-Vq5PaQf25FLETpBfGyZ1Dcz5jSyKMhehdX28WBGXdUz1-FfDWkLMinai5xolbgYGL8V_0S1z_6vPEZaNgdm4qUsAuUTl0m0Wg-xFNAtimg2IHSfnEsE8WTZtSVQaiAHjBR2mZ9SUCkquiD3jIXv9qpb9ni3xNcraF0B8VzECxDCA1pspapmBqYz9FVHzOeAKJUFGPj5tyvnj1ms1NsTQK1LVXYkpxwCwzBIHMupUzCqb3GTED7r2e93hIdNDBKGU5fmuM2L39A_S14L4cDRRdU3VNJHE1h-xtQICC9ttsi8KiuCqptD8-6-oZXUGFkbzNumxjzZlTuiF_YITwxuMQE2OmrhjE1wA9-yLyIfqJQ6BH31dgLGCQxQdoev1EkZQHIgNIQ8xFBkHls9vffg46TddB0_TFQPwUuc9tbmrk8ecn__MHrC3XkdJke6852H90lD6pB3E25VGJ0DMi-yK0P1P_bVBiuonyNXed1wXVzswK7CJtNgFbT0j3MhSAU5xGI9tfeywk02h7lnlw_fz7BJJjhuDWue3joVPKg340IwiAqnDjfm5FH6z7wJlM3mqvyQIWq_JMoT5BYfxulhU_3ceS5lBSE5JO32kjXGw7whHSSRRtLUeuSiW0qDhxIMlywiqQfXnv8sjniGMGQXcjM7hieeDYS-ECr_X2U74NCyy9UJj4I2PsKsFh_Q0PZf_9v2KLrtAAr85isRYpfGtf8egoXdZrNkmNMpidHvYs9Ww63zMXesly3DpMMwcBRwkzQfAGBsta-w11vS4y3COe0pj-_orPglwKis85N3RZpCmzV2GD7f3OitKUWMnoLnqJDKABa_MSh3D2XbMo8KZVarMLflJ6D_WR0lRhNqX1PcHSjMaaVwZEIQT_e_Et4TR72rPedfYK7x7JQRMpZLwUr5XTSBZnhfpsBwqFOnROYYnk6VQhu9cRUPWpCF6gdoApLO3J4O-vQIiWtWSErrYioxKx6SE2Yog9P1JTdxdTSKHiWotFRfpPcHuaQoRLxwkv83IoHnbVmXLZ6EPmFMW6a_wva_G3J_PkfVSULx_uGajBBDIplNGcQ2TqVEd5nDRHMHb7yA3qOMSVzMxSz7SAZ7HNy4oibElIBbjf8RNQi_ziZrymR997xe-Zb_QWzY2r4t4v6AeYf_3UARgsmraxwuhw6h-iIyI9xLV8OWIV6eHHmZZD51hWHScYAPXgtejb6cgvNylAywuAfd1YJgf9NadnpSwzLcxJ-40D2JwvFgY3m6VKEa98XK9CcPlQ8bztAiU2JiMlgnKnfNJXQD4kW86avMe_ZTph2PxA=="),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_76TJDUCqYC2GvwPnUnbFcraW",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("test"),
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                            "note": String("testing multiple values"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_0078d84f5da0a9c60169381b423810819ebb3442b1f6a8a922"),
+                    "openai_encrypted_content": String("gAAAAABpOBtCO55L-y7F20YbBWcQM9zV5dhaODhjGIvxELyU1r3wBZ4uppNHwZmpdNg1EB39IIH34-s2kocYCIRf5BJyxnKLAEiyJ1TEmdRpZenPhrrtJTYUKz1T6PIi3syCHO7PLWJ5HAJ_UTGpdlEVzkNdD1iZnEmubsj-uIBux0mTREeu9gBnRd8UqkDQv6C8vZVJDxZ_Md1ElD-FNzg45q5ol4RbRPIr0GgjaqgisQnbgf8-IBHr9Vpjl4lWDMFpjNaBHBf1917UrIV1oAOfe7jrw93hLkrkWLHSZZK3vJ9lNVI3HuSnoSiBLncnqJUcKvqGo4Z-RyUY-nJvAzBhpuXXnPVuq-T9BU5aX5s9DU77PpAf_C61TqyqM6y6j1AxBnnWrT971cn_ZmvVDNas4IGcaPQpMDYsdciSvlMpKCiuKeNCXrAZCSx5OCKfKqzs5-4wJlle1_-qZulnjRhjnYKEFr87R0un-wchO1VDBFr1lvqNVgh95FFTHe56fIiZXm1j6BAFqwKbo8zz6Hf8xYoES-Ilm02NEpeSnUZolKlI1O40KAo2t9ciqYfwH08HJ71QL7BLHffoGmix5PirigSmvCSycWGKF_UYl55I_qhDFNw8B7UR3JvVCDPvkMnW9MPI9F68jvreqdIkalMN_WadQTtlC72US8PVjBh20gjymJ0cLbjiSV17rIlwhlqvQ20NpQolTQpzeqbYMAdBgmPMIr59VeNUe7S8v-ocQJIUAUsd76GboasHdjcHLU0XMxAfIcTwYFCMr8hDwxxrW6PYozPzRStWjsNY68f6IgeNThLBIl8868pNQ2zWsW3vxnNM8eBKjVfSV8EBBYX9xZdQD4Nl2t8XU7l8CcnlYcTUh_L6RI4QMEQDHsGUBuZ7kYLHONLQfn0aJRKtQgBJn8qyMyV4yD78f6-MPpIDsmVQeDfOp3oi6ZFBUUqTil_hzaukEvyWl33S1pDI7IenvOAg8wx3-pL4YnhbXIhahLNArJQpfQcuAhx7z8JNJ_kev4xL-38sFeh6iF_cRqy7WNx28Zro-tUATGHiujXe-6cf_Cf5f4qxnKGWNwYBSzLxc41AmN5lL2onuCO0awgblPSPAiOExDmBXMIAM-NsOZ_L4DwBDM4UPbBV7m5tDYWRdIIj_uQO6fUxPxIcT_oXdmjxFw0ZLQ=="),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Tool call successful.\n\nCalled function: run_me\nParameters: {\"foo\":\"test\",\"bar\":[\"foo\",\"bar\"],\"note\":\"testing multiple values\"}\nResult: \"working!\"\n\nWant me to try different parameters or call the other tool?",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_0078d84f5da0a9c60169381b42d0d8819ea417c4b013585b56"),
+                },
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

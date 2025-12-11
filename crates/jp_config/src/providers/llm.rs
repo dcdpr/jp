@@ -28,7 +28,7 @@ use crate::{
 };
 
 /// Provider configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(default, rename_all = "snake_case")]
 pub struct LlmProviderConfig {
     /// Aliases for specific provider/model combinations.
@@ -135,6 +135,8 @@ impl ToPartial for LlmProviderConfig {
 
 #[cfg(test)]
 mod tests {
+    use test_log::test;
+
     use super::*;
     use crate::assignment::KvAssignment;
 

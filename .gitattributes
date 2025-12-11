@@ -1,0 +1,2 @@
+**/fixtures/**/*.{snap,yml} linguist-generated
+**/Cargo.lock linguist-generated

@@ -1,0 +1,108 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpOBtlt-jHwQZTtn2gUXvQkLelMzL3LGl1DkMWuQiK2W6lAhIhv24R-N0a4U6J1HWjvrXFX8U4jNuT-Eb1iXSBSxeLnfSULuVlajcdtsrZUtSRRhB1P9-aY3CJI9WB7kLSQC4oSvi1hGIzl6vMTR3p05FK88Ipn8USDDyiPbDb3e5O4oidxWfY9xWjS_BxQ4bWrNNw0tFd7mmZaIPBAxPuwOOvJZlBUdi0Li7niLE3kQqsDUKNyKmDBQgHR7_7jXGbcbp0V7036FIwaqeX1rIh-V550tjbM5Ymk0Qc8ZLquX4fZeUlO0Yf1a-f6Gm_z3gnUT5INYy8iuh0RLhndcneHxoUaWJQus5nx1kvC7GmjCV3P2l3byrsMj53Tj6iMwPMvNBv-2ITx7ZNc4A4hQLl2gNTznu0Ku2eiNwVxMU7fRRn_heHYDHOkHyLayepZqyFdrnbCuiQJ2f3V_8W6tWCOQiAqHExvfips_yFJ1pBxtb2i_hJbYsgdZHc6Tbx_Ak3_7nrGbeOjoKmtY-k34l9hEVfMRuA6O8evct5JIjbAmyDCDLmLVV1zVuyoqp2c7TyKXSXQ4rNSK2hYLY_30KtRQflCeovwsO4HWp_hXfmmbbxOBZgRE6QA6ct4qk8wndjVyIlOonZibJJDSfLJ3eLf9lmkPjmY0SHmsK_XKepXn_s5fWD1jYnsJtvVwyAeccVQ7KUh13kKLDBUMalPw8DDVFltCJIv5Zz0YM8TKicn7Gg_-FAt1jGMcrASGHZ_Clj3RkB0Jwj-PbNkpE31vEHj8MIPGlq39JZowowi8P0DB61ueGvUinY_XZOSHXCwkms8Bg01swIwEqAc4g6-oqfE95xFQY5G5-CuA_AiyCjAg21JGBI5eq-o0cAIAVODiHGC6Nm5c7pOPThpINoddOklaFCQPLDWuyyIU4aZp1bdnyhSWgDY5iL077jQj8Uq_V89jvGR_ExN_tDKhthBorkKPqaxYThQOyI1fCcW0iz6uVezVSfzEjqMCAZp_eNjXc9x0NM0BtEBFwOeQMKUU0ttR69ltn_0owPmTLq_ITxpTKNDHGLAQ8PxFAb6J0KlalW9QcYZo4ycdHqOSHc1Z7LSVPwvTRUERgVLwc1M93KVqzkIgO-6EGtspuD-i9KHdc99Jh4BykBnCgDwtFcmr5JS75s8gvdtNIz27TuefZ-U4EJmtSJ8jrjRTSJSqI_m9rIle0nV-3PYcli8sxjrdrzHjITi5_WULgvx1lzuIpSFojIgNb35iyEHMsbFXxx022GYcGoVjzxdo6WshvGjpGbOhMOWwLjwqJSArUeg_iuTaXbBsb6Xb8xVRr7uUHPrC1I0yxzAzacwEzKQVpxtnDtrDZHfPZTncTBgoSaaZ6GxzK5u-CYMiZgqBJpW0kDUKUVJiYBuDp3RcPU6TyGD2FGGm2qPSUgyaKO12ZFmy4xky_cs4RZ1GpxM0JHIDVnqgrzs1Z1hmjwroglOcnG0k03447m1tKCfsQk6A0X_1R8wVWUDXKI99JtuH5wDztod5A5xnAHdsSleJqtT72HL2vCw2xDos8MycsAiViOdtV_c3rYkdOx5QaUPxhmrohZXEXm-ezTfejeRUeByKPiTfG2YfaKZ6heaf16PaexqsjKvAzagyE8DlMzaVSOKL-fbbGBKO-ALQWodqzWrpcDIJHf0SZ70tE4EY74kwQbIPCojUcjKmKniDlzZifW6XVGklVXpNjS3VzWDVhH4BBSUUV3DMWqWwh9pWC0jvhe5UwEKNgVarRJACdUspaph9wKPt48BsCLGKuxt4G06xtwTcRpMPcXyOE2D1Sr7SsCiOewKtmKDCus23hraaXaHGq5VBAeURWKifA_vfiFBY49_0tNmhDzqIPSg6wI25voOdYbVEV7g4KME0VQGM0fnC3zp1CN_IgahkGqi-ADuRVN15Wv-20g5g=="),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_002d4162460a126d0169381b628bd08197accea89f17d60685"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_Sk916JJ8gLyVXGodm2VnuJ9k",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("foo"),
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 2,
+            metadata: {},
+        },
+        Finished(
+            Other(
+                String("tool_calls"),
+            ),
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Acknowledging tool test**\n\nI need to respond to the user who mentioned \"Testing tool call.\" It seems they want confirmation that the function worked. The internal tool call returned \"working!\" so I'll confirm that. I also want to keep it concise and mention the payload they provided, which was {\"foo\":\"foo\",\"bar\":[\"foo\",\"bar\"]}. My response will be: \"Tool call successful — run_me returned 'working!'. Payload used: {\"foo\":\"foo\",\"bar\":[\"foo\",\"bar\"]}. Anything else you'd like to test?\"",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpOBtsXEcaBse2w-dqUDIAi7ubqBWakjZjJieseMHrIv8_zirsK4-nX31QuRfVL1aaKfcuNIlVXIO118rOFCeu4zUtkD-ytOq5EVxImwvNNfyyPV__pH0A19bSMt53uwLq1zGOiDKs_031jU6i_tHEdKMf4oqROcaQssCbyRBlB8gv_ACHEvzhR8wUrAzYLDDuVS5k3_sek0ooZXc_CJ_2pqfDXG_CfBOf4AAPMvhtE1tDv7CGi5yU0RFIv1zacNMxPXBBWcJvs3RXTk3ebab4R-e7-JCms2R4LiuiUObvIEz5Se8A0BeG0rqjHkysFMveQPVLx_PZVjSNzlB7mThVrFjppuzsuh5I6dxfq0rB_itxIKhNEdWvOrH0GScBUk1o5LqFiEE3XPh82Z7SjCE9gm3Qek7w1_JOPdLnmPVHkyfqowOAwdNHQMEVQf5_44IB2LMqNnhRTUVi3uBeBj0Dgayclfp-hDkVyDmuw9k1fQKS4vw5dG-QZxFIXcbKwomMh6gHq-KONkcLR3oF9bHMgfQ8CDWYIkHew3p12VBz51TYy9D7eCCoQkp6j1JjE-nalewToPZ_iNPuAVG3YpER6LL6Vr26Pq1LqMzhrCQpMXurNi9WF_ADE-lxJyByV2cVA78JwU7fCHPz_FCZ23ELUHHzbEQL4oJI9S_55-NJgD8qinoiy5MVTYLkRcHMiLU1fTZNx3sD3Y0-afT17jcTBUO8GaYLP84JBavtfoDRjgOZ626QfQpxNTRZNIzDv9bhrK1VXKWItiT_ivuPMSpiABmizA2dRfSuaVTHQamyk-8s5adMa0d0LkYOuygYBfxGvkcD2472YKjCScvhsuf6aaGTgmf0qzCM66pq-cjS5CqwDj2gJjodyiouhrH5KTxtj1zcdlp0carQDebKC--hWbcYUNJSMPZoRoBQYlEzTjf9pANu2QsG6oLebXrjLmvxpPSTFq_breAQxOIL_PyoNRKsfFt74zQBFRa5GZ_2g1z7yyqZm3gIW6Uki56-MhnQ_fMlUBd35x2d6jd5dSDxtmHZ4R4DU-QbKME8oa8CDiujk2MxJK0pCtqtsKPXCifzqY9RZ6K06NCsFTtr-r_B0DAVN0VR0Sji9TFfKab52Y5WiqVFaAWk_wtNrIwLRSoPCSxivldbgT0LibQ0uEkQG9kWS1KmbEv7QWApHvhI6HdUp0er7tCnzAuYFTGenKS-YPkyf1zIHF9knQR1ru68vWt6qBiapuQOgJkcr7nh9RVW7U6klq1ttbSRo2Wvln6M6NAjNfiQCE1rlZyIH__7X76pnLiu5NBvY9diGp7wLAmmEdk0nX6hiLWyCSmhBx2tK910OWYEpgA76ENBTSrS6788Q2SpuLIKK8Z8uregEZoGmCG3hSHU34f9473uUe_SVr0b_I1C76AtUkW90wvZmgblfUuPM_W10B080GI9IwcpI20KWMLC9N3wZOzfFkJVFqlYKbt_Y14BxP06wjvyf5yabTnmL74QkMQ3mSokbHYgIOIoPP5luhMANYDBu9y-J8nI4VTH09Gu_ulaGwpBLf6wyg7Jrx0R0gEr-gTS7qOwJluKa7A6P2qG0PPoIzas2pTO_ay5Ta03Mm_9dr7h7Ik3CQQPZmbk76qHIZrWNiU6OhYZ1UYjpSzfjmhU1V2Gwu1njPKowAKBQ1buOtoy8ehson0vStKAhn2I7W3r5Ic5JFu4zzBQf0Gw-6-z2lJGbVe2ohJ82Dn0eiNjgrtMkzRzjhg8Wb7SlPbYV9BAUjtd7wgwzRkvOqUpePOd2bVVvL7hZ8dkZEL8FnEieeQO7XI8s70LSwqOAvSeZwi-o0Y6l3ZQb8S9mbIVCeE-Ed1n1LxYXv3zAz7whY7DEeeLjgSnCe2x1OhIT09GAPVBBHhzxKNGW6rS1t8FK1ysHcNjygj0cJtCMs1BydsiQ3BrzqwPsQ=="),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_0508ab7409477a650169381b665c208196ba5beff3bb4f2163"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Tool call succeeded. The function returned: \"working!\"\n\nPayload sent: {\"foo\":\"foo\", \"bar\":[\"foo\",\"bar\"]}\n\nWant me to run it again with different inputs or test another function?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

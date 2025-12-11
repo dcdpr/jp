@@ -1,0 +1,108 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Running the tool**\n\nI'm looking to create a concise reply, something like “I called the tool run_me with parameters ... Result: ...”. I need to remember that the function implementation will return a response—though it might be a placeholder. So, the next step is to actually run the tool and see what I get back as the output. Keeping it simple and clear is my goal here!",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpOBtlHscv8PbvzeDQIp9rP7NPpH9rtHY8248riloUeA7tnkunoFWGs0tQJF1BlZrnV1DqChUnvmrijlIM0rOEc4DwytQj_xxSavCLsQScLkGUvJkeKms_5MVzOLwxmZPsLKMcpQkIm3zIGTihXGHZ7dyilVTnJIptEYAnDSE8Izz-isREYShWO-TCCS2li_UhBuvxR0QLrUMVTJB67Rp8iwJP_xn4Z2XXoVIJ77PCW51LpaeLcyvBrBQjLGzQ098cEpbt9F3vu-9SgZyKWU3JHzn9mb8gxla-By-ThwNq-eow0QeFvWJ32tWKjWfFK2cHcxTWWFkKYTkGb83WJ4V5EgtDd00ifrqf5gXt7Lc-HCoNMWZPRG1I-gXk1_nea1GubzYBNc8Fj81c2e4F6WwwWYmvkRGh8iVWJ0rzACefPhkP-jdabvIhZGm_OOyvRGHzn4ggZv6hgQZcypcLmJPw0Q4E69VAIiERDuGEK5GW4vC9DKVrZH-9w7oCk9pntuPOs4-THS5qKX-Mw-VO8u1ZwurduiHoD7wuztubOLM27d17rJq1_olVyBIQebpJYbbPPAS_zpTho4r4P4VaE31ETMlrRXsWsT6clGQNUBhpzPmf_YKs7UuKpim9qp0-pyY6KU8qokL68FQnqSi4Fu93g2u-F9w7HgSG_OBP3YfM6VgLAMwtzeSULy6aPJiZdYdjqEgdHvU6ZlHzCVCoOhohYcJHgWhivdctWYFtiYHkHmXRwDYipGFTm9a9-GDzwVDN63oQ9wM1cVarpgCRBBGT01b6DBEpJXuCTIZIG9rrT2Y8gVvxUm4fkW0R4abfvy-92R5VpTH3N2b60s6Ykhxwdl77zDLclH9gwh3np2FW0hTzrT_UIa6F7dMw6EijG3cX4kDu2aSVT05VrS6_7EXXvc_0UXVyDAU2-wVav4CljWOWl-yZyiHwjM0n1ANleKEN8ofs2XswjVBvRQfXBKJ_onnQL43k2Mj60gbTTRmf4BrwrYm4XNKRkDesQcRIMzXXxRakgUXmOR5UNLQumSQHunBIS7JyM6LTAEhwGYHl5o9xl-bSFZk4BSika1-ske_OQxV9m2P0Y6ElBN6gYzISdgJB7zpqw2BvNOmOaltH40AjQ3RTxHm7nxzm17DRfgEWhTdYw-QgzYTVbZ6-qItvN_fAJMpaZWmbBkmy-Q5otSujhp2v37q3kJytk4uN968mxkXgIAt4U6CulKPKPu98wwU33CZ8qC01OyeASoHR4Qi9b1nukYz9CXNmt5X6kHBaausy6of380bHBM6rB9Aj37ykDcYLxQpOo6O-sBPgMhm-1FeZeG_DuTfxYMNoOiLxOBEgA1Lwa7AQR6p5NO_1CfXdubANNoDUyt3WC0vRixVXJqjsfHXu0t6uM4IVRp2o6rD8P7CNV-pIyXTsf1hHBwwEMGof_loXv5355AsM_SHbYdBEVK-_c_4Q0T6bU7ya5IpZXM9QMm0a7kMcyUOi37mpzHiQoRGzgxPJn4YcKZlhGkjsHVIQGTyWBxTWePoKhW0HO6Jlkx5GsLoCzZk8y2whT2_T3go63xR0PleZSGCilVOkFlHFVAmMAxBzfhLOMdQMRW2cZJktvEr262W8fUKTODXviKd62dQGtOIovq9N6bk8K1gwszqG5BgigPAtSL8Vy3e7xw5vG_XPswABMj8VNV3tbhzUrbnAXmQOYBM4sn96m1ziclvyOQG5EsGW0EUyKyqbKXaRFaUz5oy9cajslOM2U2vXRY_xQKQDlUkWD1yazUy3X6VgClRW6QWfjJeJ0DzjiafVsy50jx767GBLSMZTBq5vVZVR4juPEsRq65ZfO5ZzXQmXO7rBu4d4H3TkjUpmQQ_SBhw4HRILHY80cP1dff3UasGEaCqdICS-Izexag3BfcBewvQqBkb3w0Uot2VdzBHJsrTwsvdrEPIGFZYH-YNqAg-DxVZHfaOoNCn7W8XcKo8UMdpAEBF8f_uEQABxmO4QuCBRvuiq10Mp0g9QaJQXRJz70FiX9JDzNyKgWEnypytdCXQZ5muCYE8klOSiFbZuuBvx_S_AvSAyR4NWRUHluPWKoEJF6XtVQcMFXapHnO63BlI4im0MjlXHLD3qzwh1V7aFH_pdaomMwwCsq5IP7akra4X2yMnMBUgPI2dcVoyBAAvS-qXGTUwcFIpQsAKtTjrQcLHdw7RLhxaqp6c6I_OhriuuWCOkGihTJjG4r_adx0EA2x3YuoPSxNX-4ADXrsJ7SoPwyopHIq4aMTdWssuSOHpeb8TIRujVb_3MOlI6Cr9x93PgU2Ib3_ZvNN59t7-WWf2VEWz0zPBXgeKe9hHWVIXr4cFzeisTHr5omZ7DxFD9veX53MTgXAQjCDbwyM9f9XnYxd73Ng24QjMwVp-XXEFrCXp4mA7tu3RtXs3CLtboKHUC98ip1O9tX0M8DpmjlY1sw_0OiiqyofjTWSJVSdQVZA-LCFmIZae-ySnthyvKbNDJgYgUVboQqN3bFTYplycvS3eYVg=="),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_0065e2ebc98890bd0169381b5cccd4819384d7d56b84e0d1bb"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_SRehfDd2L2LkKiXGgLuFX6qT",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("test-run"),
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 2,
+            metadata: {},
+        },
+        Finished(
+            Other(
+                String("tool_calls"),
+            ),
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Confirming tool call success**\n\nI need to respond to the user about their earlier message saying \"Testing tool call.\" I've made a function call, and the response was \"working!\" Now to let the user know that the test was successful. I’ll keep it concise and just say: \"Tool call successful — output: 'working!'\" Then, I’ll ask if they want to perform any further tests or if they need more information. Let's craft a final message to deliver!",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpOBtqv83Pd8Kk9yYU_4lJOMD8d4waHITb-unhFZp9Ca8mLOGt9C7_6x4dG15lXb6j4vgwOt5q8394iojGUc0ZI9ByXlf0tQ4gUaAj0tCMmbWP_9YMshbHBC_6zriAMp-JYWTEecvdbiLZ87uv_xHTvksNeLVyA-YE9fhtdZB2gZSqUrowDKsiNy5fbx5U6yitmR4WtzmV0D8m59v6UJvoJmOsEdUHMdLosvKaMn4ATEO3VnOY71DIgBmxIMyIn4eHDFSdNbR_CSxAF6rv92Wyjdk1q49dl8BATr97xWfb0vcnpIR0AgYSnEsKW91M5nsN0sZyL8obdLv_r6S-F3-Nz7_ezhbISbcwfQGcrMmnsMCwxf27nDCzBvpQURzMWEM-iOO1drSGOsU4XikmQHFovLxoul0m2NEyzPpOrit-c5rH5L_SfiauKaM8OBInjjlw1SW6cKwls-tCD5SnLOZQa13x_IrNht9zMGRMDKl2rua9IUHgkq1ouimUfSTK5ITTlBMaEbtNIMPuxA6iMBrwVlnNGKZbKXLFlx_y7gtPun_2n2-HWmpyzvjj1HNxfw2FGrTFM-VgpVLKaLdMFYV9nPdvZWWsEh_n1DbvPq_uoa1kB-a3k6GVfMua860qmSSQj8oydUjQ4FhZ-GTFs_EVIIODBB2Ba2CrWx7p26d6tLNMoIpTrl9vc3CZxHhwQOiabWER7Gpm0yGvRDbVS0RhSy7xr_fdR2BKec7WZoVaXj5Jwz-0YklJRx0fMt97sVpvuCcQWuKplfecFkLnhhfhkf7Ywjr-5a4BxqfB8cyg8q6hlgKDBoTNFxyn7aN41SpK1I6slx724cR4ElWfVsPWGVKMv1LotUyj-wG9JZqiChoRYnombDa3btHm-EIYjIvp7qzzPq65UklGh-BgINUd0RW7S8T4dQe5YxmMEmE3LKtP6oGe_RIBcH-h2lGc9lXiF9BcfTbLkR0_r67KXmZUk-9Nt1zpd-vxWXie9gGZvnWlTIo66EGcR0hOmU3pRW_XKvzF0986A_q9nqBtIlyAxqEge3D0Uj9Lz-gRiTz8yUkVHJ_76kWZ86IYjxJtt7tsdKoTwXoIuV7esY9zqW1p3rAltfjqkq_7A3vLiY4OFQqOafjyfwXylVpg9dj7PtsGhWl0bf6SRVnp8F5ThVtqJSpAmd_moNFFl0JRSCUAKvUcjHhROY3JSiuPViaw7eo5gFAf2CYR82qXlYymov-nf2wfVkgkoI_1OupFwDVQqi7DxbrIrdJgJ_M0nklnblbJoaQMqVyg3q-OiaacZ3E7mX7eRpQpmEzJWNvExePbJ2goHE1zhXE7N_Mq30XWbC5vGFm6kvYOrr0Dsx5Gdq5Iw3F5Sqykbah30yQIitGgSDTNXpb_76n0k8JmZpZohi1zz6EKgFt9O6a70HBzhMCD98A0Vb_sa7_vaNB_QlGaX6GRNHFSO73OJQBnNTLkRBPwhGu2b3gW4YZZ-5BTd5D9cXkOHa-Vhhm-92sOlTuPIx8HX57P9PRlfkpKYnZHC9OfLsBesbTNJb5F89YVDcqE5IG3O97x1PSJBaFUfjTYaRPsTKucH349tVAVoZVKdOZ6AMYJuD5dPxGfvbXCIxutGk5udfbjUdFQbtIxcm8clBhSHZ_B2Egztj4XHj8VDKwGL6tcXfu78Uc9H7eQsKQXwEWVxuMa9pFRAp8QdkIjXlyUA171jwIEYVZYRJsiom2THdWdxKxMTiFx-VFXIMUvqNsrNDQU659yXL-UzV6-QOQBOyQMaRTviyHhbRYEeANLdUidny9R2AJhbarpjjEgfq242_d4MSEH3hMYKbMRu-Cf6rwByCPrS_xoCA1sQVQ0B9SAjsecg2T00RnUs6vsvXJgfR6K7z8bDHTq7D7CZR9DvClFewJy7_eQ8X_d5Dhx5jic"),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_084455a401be68f90169381b660f388197a8e0cc5217c5c018"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Tool call succeeded. Response: \"working!\"\n\nWould you like me to run any other tests or show the raw response?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

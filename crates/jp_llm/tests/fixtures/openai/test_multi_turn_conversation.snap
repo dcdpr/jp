@@ -1,0 +1,199 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_01557556874b906a0169381b272b1481938b3ea591aa61a15b"),
+                    "openai_encrypted_content": String("gAAAAABpOBsom99x7IZwFs8athmKs8IMditAh6mpsUFBOk793KP1LlUAHOkhZQ3WXlNHtO6xv-DR7H88MxzIi0NPq5Iw8Ifw2VXyi0oc0w92z_PP5-nm0QZhztTbY0AvDMPUHTshIPHRfUsMkRtTekawkyNPd814NuX8ULAjUxS-sQlPJ7ExuPAXV4adqHxX7LkbFIXt8w6cU0bvr8Ee6z7KuQt4p_bat8ZeKUi-MMpX_5oGTKiFoQsX9CD0gx4qGb2iJ638Uv38rsYnbxhT0QFRDKHx4IGvq3dQwC0jnBx1TmXgArKJI0weGTLwL6LuOrnvgRp4mKc5cZYuiidAe6DnkFABUP67fWSvmRI56IEf7DrbpFQzBROVY61cZ9OLHMKfjB-txIwT9COadLUyXqXaPafROJR4W7JUwz1T81TMyrB8-gEsaJoUexxtnm4pK2I63cudbf1uHcPdcpZeMp8j-jJPtPGev-BhFbBdBkkQuizAGLSWoRON5AKFMK1dRYcDkdO5QCfy2uq5J1BH8v-7iCrq4boAM9pTZ6_FKLYFFQi3OMNoUBADK-GDQlml8-7UlP9_OA64N4ZdkAxSH3Eedycoqe-WUe_7WBZ1vMN0q7v68tDBjuRNf8pwFM0xwuABErSx6-AJXNR2RzIMTuraO40AxJQbY8MpM4MMcp_g2jxODny0OfKicvjhzKd1dQw6nGTbucW9A5J9xuoslfdggqRIfrSpT-b3A_bTCgfED5poiFOVKp9DiS1ExLIk2SY6dsucA6HbZrO2ugAtTmV1zHvamxMexL1modpQgbSnvKQina4d4uiXNQn1Fi9IS0rmU3gqYcDnU7HAIoTgt3m_j_n-8vHJLslaILa6ojJQ7y6yZnRd4XplG5dyY90NCsJeuTL-UjCQO6eGAha8hssLURX3CS2BA8srb_4qBE0Poj_qzijRzQb8rynzLdsPov-lucwGmwgQndhlybSX9dWGxexJMqTAhlv_B_GqdC5-QxKczq7o6jDjexPllwn2q5NvZT2ePMjvi82T29b1ThWRcY3hrfq_BvjbxwSI0KLbBeyLPDPiKG1QsSajNp8AFxihfX4F5Mg10T_LmOD-VXcuFu3hyNY3uLBBTVPiL5w9xtsAD7KdYGJr76B7wOjkWar688536jtPVoVkDH-Zv6kHPZeh1Vx7hLkSRLW6Rx6x_zbqPFcIp2gCcC4g3WOEJo6u3jpwmIhzWFla0lqvO8IAGlxg9gwiwU6od42r01j-7dTKeOwq8suduQaKFiaWAmuo3Zxc96msrz1ivgCLQMN5brPEf9WohwmEchiP5KjeHDwQGhVtlVHnMK7fBaMmX95eY-MIgj9KG4WfKjY19PU16hftADuedRqrkojBRJ9R04AbdFB7G1WTZt73aLWNNJ65He-E0_LodfPaK_l1EFNANNKQ15J7oSjYvRrRzRBZ3wI5-DqMdfbEqTFReYB7hdvpuWRKXo00Mg93Amm9-u3CrWB7ItP_N-ifHAFG6WDSy1aXdNaOoow="),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Received — I'm here and working. How can I help you today?",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_01557556874b906a0169381b2882e481939c45d5ad91158cb8"),
+                },
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Repeating user message**\n\nThe user requested me to repeat their previous message, which was \"Test message.\" I think it's best to keep my reply concise and just echo their words back to them. I'll respond with the exact phrase, and I might consider adding a newline for clarity. So, I'll simply say: \"Test message.\" That should fulfill the request nicely! Done.",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_01557556874b906a0169381b2986008193ad3782fde23be7d5"),
+                    "openai_encrypted_content": String("gAAAAABpOBsumDiGA55xPwnLSWyxMhlgCPCCEZXMxtGWlrwaJ6WHTLXh_Y2rdmchA6fiPml6iIhN5OeIgCfehhxSuwjyS3PdrJH3UMB_9Pj9qUTsGoFRXpImqd4Tw9aR0gleF3qnO2kwj5bVWlvv6kdw7EmQcz0l8mtjf_gA0EY-d_Q0iZw8GDhKV_VWIUzsWalUXPxFDaa2PRwfmNtqPUJYDWC1E6p5Cv9zikqIIden9LYdYTl3Vm4tVLuLjwud0EYlrlEq2z8Dzzi3KF9uKjCC77TDKIyNxvLfgD6DCqpewXW5zeJ6PfCKgluk7Ha_XsMl5SPwjkbxh4ZP4iPn6_08YStuiEOE8IPDvP5blXW1AfShXTSL_A_C0ZQOcRqt7_E_hAeuvid0UdgHxXk569ubzdsFcKRKlECpQZCdDcp1FKOmZJOm2rhE2b7GEYFdTq9lGDgPz1ptTKG5y_g6k3Khl4ol3wG5tOo40n61VwfPLIULNX1fLd9hZZ3iuPzHQW4xIEC8DxbEaoOjqjZhe-R8MLxE725yzBDET5a8q5PSlenmYJJ2BBi23l0vvAj1Wbp34q3oV9uEIfauxy0su9htm8axa2wb66HAOJfA4cwlGpvmR5CUo4L9eJr2HqAQAIbz6l41XslzoV-BYCOQilaSCtxjl2p-cgsM-mxnGPJSgUkrDR-oEKY1ARlTr_5_Cfzo2dXrXbYCG_3DTfeMEQ06G-sPtXFQZr6QjmssaiiHTKSDLg51N0DwHTE3c2M--Jh8u5fenFYoENKQB6-AEUaHx2CYFJx8fD6wuTJTEzVQ1ka9t1OLY923CP8Cc1VXxB5jJDYkAmTXL1FcHPHri-SLsNR2QJ0BzuZfSF3E6dFHVz62wXTseZ6mSaPBA56F3jObHHW7lGDeLfJEE85rpzBl0I2wJd-InHs4gRPtdCYIK8NiXFf47MAr6M0_DcKiPkcq95OLperFH4zBiMfyZhiZaRB6RC8PtN5k0zL0WmXYFB3UzEeajNY_mNkRJgRtGKThQHpreVkGzUbdczhsvzUrRA5iHfQLP8E1-immMvd8pnA3JtUBHyu9G6cLmaVCOkNmQqx_r_hBfozIeeU0P9U6pw7xOULlk-4hOXC9tkpd3TXCa4XXkCufzMQfwXcMxfAWEiPw5R9q"),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Test message",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_01557556874b906a0169381b2e05b08193bde8471fb2271a61"),
+                },
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_01557556874b906a0169381b2ec4848193b60aec26d6822950"),
+                    "openai_encrypted_content": String("gAAAAABpOBszLmkIXd1Vpfu_ErBq2pg3LlhekpsJvKa2kS8CdDiSx10440CPHNQ9r80ie8WTfpZNLDVEdYWjEbBT-5LheN2A9JuBoc_g5YOj2gmbpjogQPDbN0B7dY7l5p9PenUwTpbbEXD4C3Ncbjhp5Od2IMaYq81Ah7DJ5w7HE-ZHdT3pSwmMuCZMKLqpOMNzRW7-C1cXotuAYHmM6FR0RdJssoUQjyrNX1G6WMP4cn_6o-VkF_ahtOwxso_oBiEOOItGYPvP60O0fiu0s3yQEKJjP09K3yPcLoPAYkkQ1F_3JnNGv0k2KbPeqXjIBoI0aQPIEcaeViRIuo81vDF10i_Xpo1d95w4GTeU59CBIhe_YVwGnKwtpFgy_QpWHyVUc0sa1YsHCTjmmWba-N3TEyxPMw8-27mmzAnI58K5X3B0wWTwPmVvDMcQQrBxmyGPlVp_mSO2HW_TeeyKbSvktQlLZ_jBAnoJjxqiBVzg5r1CGhprG8X03ftnc6kX2sTQgai2_f1oLFp94iVmkTe6LL0FzX4KVT0VC-mVXEtH_PuOgVZODyQ92rPdnCmZ_r1k5Yac3vEMLq7JfoXEX8Z1-34EgKuUuhlGpygXvqOUugixhKvIBK93b4hqbtG2O8yIljvBdEFOjGcmWhEgiVYA9bsRQumgb6DjNkF_MA4B8XiCiyeHcxpxbYAn1qirGfpDOxjv0KkOkHV7uijV6RKpDDh1l1wWGQ8ab9EASEYWeJWlXugv6TRwDNMnMBRs1UG5NKXe-fHFBaHa9WCHdMUrbY6hfRcVAyXzptdjbJib9gFbgj0jWjgfoBG0OgqjRLtRRt6ZNpsuS_OfqvadEI56Ia8IrEpSFWt-U5Vi5sz_hFamduioJiwPJ30rgcDbGMgMQkm7ILqzbN1S9ioLaKdI2CY54umTZaVxud4mpRWe6prNpIciy-bdRVQxOW0_zo6ZeLe8OWsvK14Ebv3eko4CHZnTM6HEWhJOyLyYGI3GER-SpXnyvXMzxSv-Mxqa6wfWGYyHb6ow22NLxFKyVtdCpS0pXNpcV8Agx-HDon4U_ATUdFds3dXoxl91QnPRSyZe1GJ9X-WzFFtVFmFJxxYYbfpWd49AIq2PAR9_y2PTP_W9-Gn9lXjXfQKKg0BeLtF_-k6Nf5kfr0HEDVPLlAOWOGwtbRX3a21lAlN9d9rCbXYGKraOWL8krcjhpw1KGc5yYch76TgORpxJ1VGN6QzVX-Wq95XzbhAAqQ_cqSCWGPd3scn_1yukxk6OmR27DFLcr2Dx-M75Jrj3CNJJRzjo4tcP3-e7pcEU0PKvH_S6XPeP0LnobRgeDI-DhDcZLguOkivPVZnD97TGfEc2CGdPfjvdNTJjPxyagBpEsx0G3cZK6rp5rHoofdt9RuH3TQlqUtVPnv52xWlPqeDR9dc6BWi00kbsmTyTR6aAv2k_MulMq7_LaGSRrbu6WBlZbQ1w9i_FYzKatI4P07AxJ8N1A_D0NkOOGK87fM7T7jU8r3vjK_Wo_1ZTxBr7HzIWds-hFGr4O1EiMxbawhFYHOUz9eZsI_CIM9EuOn3LdZzHDpaRAbOYjrVRqI4tEGUAogUYP56CGVGiFxbR8SiXF3FKJ97mvUQC6YHtwRoYwLF7PNvMClMYDzpAUXZegGDFVrdl15g4MyeApX8VaEaaVWGvwo6SFII8ZtQQhk33a3MyIy-5kxHHBHJyKl-obz7wEqQGxA4KVf1lL32bXp6zXTlDyuebLMyxohMSErZHNu07cIKHjG7MY_2LNAGPoph5pSns-Ri2BbDYe5-haQZ_W1WxIjruJzNYz5rzZpvSlcDC6cVMZgUfVUvW4qMv09PE5zv-bcqrQBDR-u6-1evKDTgfo41R9lgO4MRUYnR0wHjZzBUUl4jdstJcK9BpK1kVYosWbowQ1RQMdc7mjh-NxFXWEQZWI-7qYBwL88hLQzUtOg1x3TtCnpfDyhvLMTvH_J7Q8bbjbpJcMBvwjhAaZsHrlWhD1r191PnIxd12iQKJ6IuRXfBtc6JmHfPg3owlv2hpfzDO5y0x-tzG864gM92mXt8uHlY-ICwtN1zBt6zx341KRxv8Gp-yzar1Kz2eZqli2N4XzvX5jczKmz-fW3tlYy9QCHL0pMkADzCCpR8eUQSRJZTo-uW0ltpaHNjpVY7iNs9k3f4wj2HftWmMqGk9HCsXc4yC1UTn6sk8235ZFhFGVWqj5F9nodkEnkGOqXhdysN_pXLxV0gjSac61beat1vF4zO7Gc_rtQSaa327TCw6_lt9nLvO0ohlVDMzCfYxgzBy0qfTFsg8pzEWI1cwtAczzYQkJTBw4EezIw1aj294oSUlRTJvoTiMOhJge1DIViZfiLt1PFXhCs2JzCmYQcO7bBuHMwxLFOFYA01fEqw1drHx8CIW0WIWAyfBA7aUYunB4mYWDJ-UC3TOh0G-IxAvTohvNKTKoGm1mDS7PDl5-mDSj7dE_n54JJk3WVK6RTzCu95B5ZEpBV7PUla8qQUvPvXeqolLSZzNg37ss6j4rwsqGu7yvO5_fLgj5YIrmOPe2Kk80cnWvt7WwVH2ztkf4_g2404Z-qMxx5Mx3h-Gc017SiyAK65It0izGtuf9Tjn8W9TahJeIo-mh_KaK_DpPdNLgT0E_2uE7y3Q2ht-3mpHoSwJM07x1qyG6sqBxTQmLPNt"),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_pJiHamHjA7GCqf8cf7LCenCi",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Tool call completed — result received. The secret code is: 42.",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_01557556874b906a0169381b33ff1c8193b7791d77d086e9ae"),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user is asking about the result of a previous tool call. I recall that the assistant mentioned, \"Tool call completed — result received. The secret code is: 42.\" So, to answer succinctly, I can say the result was \"The secret code is: 42.\" I should keep it clear and concise so they get the information without any excess wording. All in all, I've got to make sure I keep it straightforward!",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_01557556874b906a0169381b349fcc8193af505d408772dd53"),
+                    "openai_encrypted_content": String("gAAAAABpOBs4TQ7lPRazueg_eTdBeKLIZsVhz_mXaxqzcF_-ejHPLZRZ0bAatN3G2aDcdesoJTMVlFPtZOwAfI0n2UrMqoiTGuY8IUMJaX7AuqK1KH_unVTmdXgjN9LnBZ3WiTf-6syG-aZ4A6fbnzPhduX7pmT21b5KRSLvXOAz85UqJ8x88fHAUej4mx5e8XABAYBf-XJA1uZVUct7sqfnOGR833SoAC4itDWekztejjTqIv2w9BAiURa7eMeHqKLXkkx88kIwe0gvWRWwLty7zjdN0Xad12VcBSHq9QYFZX9P58HK3KkFp9amFHm1gbQ_IuiF89diEcceZzABQI1uB2uevkhCyeWnKSHg12Ha_AkgiFzirWQ0yIvOP93o03y5BZwbS3cTNIKh2I7OfuS1trXBn9yGJzAS1yBR8hxNPV9m0PKrvJbqCoOiET9yp2RpOPg7XroO0NbQ9LqUZlEcUDlu-RXTIgqb17eAiS6E_yxLtmsK7ohmLUlbiMrlBVPMo9Id1O7Rmnuo_WJlkc5KCZ90cwpGNW-3o51-XC1spJy-8-lDHx_qgdxRVTcCM1cqxn-g7OapGTyV8Qkp4s29NXtjc-8oaqwaTvaU6kgcKNYHJjxYXKNfbR8H2nNB3UvU5exvnmzkAyKmfRll9pm_eu9-8yMytkCb-aHI446UL2J6gksw9TC-Nf123hUihde0Np9ddQcL3U183q6oVav1Z85o4JPlAqkWqlrqHj3FPc1yPos0ckjViMVQ-QKr5W9ltSA6Wb-DZYJUgg7t1Me5MVu_qQuxxXbNxjxuHKY7I6MGX9b1F5_iLlyDVrx7cALMbVHkD6cMiyEfPFgXNR54y2JMzxgeCwerTZtyx5ZLhrKFzivJFwzNsy3zLI9HF80RR25J38sCVBBxhDEXgQZufQFgDOQ9Wsy13YL0GYyBCuk9PZHJys-4XgFIOxCaAW0T52R1ki00RPPJY0-w1iDNqYejH7tOEpFQhTJ09DF0Z2EcnHeg4pi5CNWhyIdsmwMFdaBGMcWYOZw_niiIwCF8EjtDtxxO_1tpwx3V44ZG00CLYc6Ni9crN9-kSHm7b6e523DgAl4KrCbEm63L0tG-gUd5XF4W9jHYwRMqHjpnPk0ebQnyopSFK-9XI6599-mYs-Ax2gJJIkD2zKTrfVIzMz2S0P_SgKOCZvJ3ujSQ9Y7h8nKbyn8fZsXP_rnfmMi0fDPLHMBnI57oN-tTJQqjWEtvh6faoO0Q8UsBnBGKO1w_5jcIz_l8Zu8FL8x50_hokWc6L6Ht"),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The result was: \"The secret code is: 42.\"",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_01557556874b906a0169381b3839b48193b123f7236885a84e"),
+                },
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

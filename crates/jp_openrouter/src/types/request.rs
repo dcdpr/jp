@@ -26,7 +26,8 @@ pub struct ChatCompletion {
     pub tools: Vec<Tool>,
 
     /// Tool choice field.
-    pub tool_choice: ToolChoice,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
 
     /// Message transforms.
     #[serde(skip_serializing_if = "Vec::is_empty")]

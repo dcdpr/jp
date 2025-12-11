@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// Editor configuration.
-#[derive(Debug, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct EditorConfig {
     /// The command to use for editing text.
@@ -117,6 +117,7 @@ impl EditorConfig {
 #[cfg(test)]
 mod tests {
     use serial_test::serial;
+    use test_log::test;
 
     use super::*;
     use crate::{assignment::KvAssignment, util::EnvVarGuard};
@@ -170,8 +171,7 @@ mod tests {
         );
     }
 
-    #[test]
-    #[serial(env_vars)]
+    #[test(serial(env_vars))]
     fn test_editor_config_path() {
         let mut p = EditorConfig {
             cmd: Some("vim".into()),

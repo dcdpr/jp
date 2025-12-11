@@ -1,0 +1,856 @@
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Test message",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        }
+      ],
+      "model": "claude-haiku-4-5",
+      "max_tokens": 64000,
+      "stream": true
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |-
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01XqSmUMbRXWmu88XU4e4PEV","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard"}}       }
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}          }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"#"}              }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Hello"}              }
+
+    event: ping
+    data: {"type": "ping"}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"! "}               }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"👋\n\nI'm Claude, an AI"}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" assistant made"}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" by Anthropic. Your"}              }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" message came"}             }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" through successfully"}      }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"!"}  }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\nHow"}             }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" can I help you today?"}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Feel"}             }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" free to ask me anything —"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" I"}  }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" can"}               }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" assist with:"}               }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\n- **"}       }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Writing"}               }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" &"} }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" editing"}         }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"**"}      }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n- **Analysis"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" &"}       }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" research**\n- **Math"}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" & coding"}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"**\n- **Creative projects"}           }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"**\n- **General"}            }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" questions"}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"**"}  }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n- An"}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"d much more!\n\nWhat would you like"}       }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" to talk"}              }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" about?"} }
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0               }
+
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":97}    }
+
+    event: message_stop
+    data: {"type":"message_stop"    }
+---
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Test message"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "# Hello! 👋\\n\\nI'm Claude, an AI assistant made by Anthropic. Your message came through successfully!\\n\\nHow can I help you today? Feel free to ask me anything — I can assist with:\\n\\n- **Writing & editing**\\n- **Analysis & research**\\n- **Math & coding**\\n- **Creative projects**\\n- **General questions**\\n- And much more!\\n\\nWhat would you like to talk about?"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Repeat my previous message",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        }
+      ],
+      "model": "claude-haiku-4-5",
+      "max_tokens": 64000,
+      "thinking": {
+        "type": "enabled",
+        "budget_tokens": 12800
+      },
+      "stream": true
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |-
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01XL5TXb6GP5p9eaCXtHigNt","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":143,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":8,"service_tier":"standard"}} }
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user is asking me to repeat their"}}
+
+    event: ping
+    data: {"type": "ping"}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" previous message. Their"}              }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" previous"}       }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" message was \"Test"}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" message\". So"}              }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I should simply"}             }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" repeat"}              }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" that"}      }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"."}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}          }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EqsCCkYIChgCKkBgar4wNRmrr+S1gvRPECLonYhPqXvHdZFsq8JWj27SJmOhkuTWUKVahMfZ2u/D+09BB02XzsMJtSR5P46fjhSWEgwZtgv8hucPhDVYyDkaDKLdTot1vGCb2gSc6iIwFJUffLMdmgEz6H0LD24BhqeoXFQP77q7fHFWI2mbUWyoLCplFhZGi4YPmHXfYFtwKpIBqpdtmtslBACSR5RNizNYWE9KPGGTE3sEAmgvOtewkeMy7mWcwDi7H+HMhYJp1MF97qJxcNfzxhpXHXPRt85sJzBSwgnug8PUTUq7VBDhgUtMaHJr9wazZvlqF99Jsdo0QCw6PXOLskbtcK9N/TuCRBSbLpoyz0dqYNMld3lyJSXpnhHJhm2qzgq6lZ67Pn0ZzWUYAQ=="}               }
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0   }
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Test"}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" message"}         }
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":1 }
+
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":143,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":39}     }
+
+    event: message_stop
+    data: {"type":"message_stop"         }
+---
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Test message"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "# Hello! 👋\\n\\nI'm Claude, an AI assistant made by Anthropic. Your message came through successfully!\\n\\nHow can I help you today? Feel free to ask me anything — I can assist with:\\n\\n- **Writing & editing**\\n- **Analysis & research**\\n- **Math & coding**\\n- **Creative projects**\\n- **General questions**\\n- And much more!\\n\\nWhat would you like to talk about?"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Repeat my previous message"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "The user is asking me to repeat their previous message. Their previous message was \"Test message\". So I should simply repeat that.",
+              "signature": "EqsCCkYIChgCKkBgar4wNRmrr+S1gvRPECLonYhPqXvHdZFsq8JWj27SJmOhkuTWUKVahMfZ2u/D+09BB02XzsMJtSR5P46fjhSWEgwZtgv8hucPhDVYyDkaDKLdTot1vGCb2gSc6iIwFJUffLMdmgEz6H0LD24BhqeoXFQP77q7fHFWI2mbUWyoLCplFhZGi4YPmHXfYFtwKpIBqpdtmtslBACSR5RNizNYWE9KPGGTE3sEAmgvOtewkeMy7mWcwDi7H+HMhYJp1MF97qJxcNfzxhpXHXPRt85sJzBSwgnug8PUTUq7VBDhgUtMaHJr9wazZvlqF99Jsdo0QCw6PXOLskbtcK9N/TuCRBSbLpoyz0dqYNMld3lyJSXpnhHJhm2qzgq6lZ67Pn0ZzWUYAQ=="
+            },
+            {
+              "type": "text",
+              "text": "Test message"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Testing tool call",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        }
+      ],
+      "model": "claude-haiku-4-5",
+      "max_tokens": 64000,
+      "stream": true,
+      "tool_choice": {
+        "type": "any",
+        "disable_parallel_tool_use": false
+      },
+      "tools": [
+        {
+          "type": "custom",
+          "name": "run_me",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "foo": {
+                "default": "foo",
+                "type": "string"
+              },
+              "bar": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "foo"
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "enum": [
+                      [
+                        "foo",
+                        "bar"
+                      ]
+                    ]
+                  }
+                ]
+              }
+            },
+            "required": [
+              "bar"
+            ]
+          },
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |-
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_014Zh9FPyD6Jm88ny6CcnEbS","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":812,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":8,"service_tier":"standard"}}        }
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01MFC4QAApP6QFdwM48eLes2","name":"run_me","input":{}}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"bar\": "}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"foo\"}"}            }
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0       }
+
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":812,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":38}        }
+
+    event: message_stop
+    data: {"type":"message_stop"   }
+---
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Test message"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "# Hello! 👋\\n\\nI'm Claude, an AI assistant made by Anthropic. Your message came through successfully!\\n\\nHow can I help you today? Feel free to ask me anything — I can assist with:\\n\\n- **Writing & editing**\\n- **Analysis & research**\\n- **Math & coding**\\n- **Creative projects**\\n- **General questions**\\n- And much more!\\n\\nWhat would you like to talk about?"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Repeat my previous message"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "The user is asking me to repeat their previous message. Their previous message was \"Test message\". So I should simply repeat that.",
+              "signature": "EqsCCkYIChgCKkBgar4wNRmrr+S1gvRPECLonYhPqXvHdZFsq8JWj27SJmOhkuTWUKVahMfZ2u/D+09BB02XzsMJtSR5P46fjhSWEgwZtgv8hucPhDVYyDkaDKLdTot1vGCb2gSc6iIwFJUffLMdmgEz6H0LD24BhqeoXFQP77q7fHFWI2mbUWyoLCplFhZGi4YPmHXfYFtwKpIBqpdtmtslBACSR5RNizNYWE9KPGGTE3sEAmgvOtewkeMy7mWcwDi7H+HMhYJp1MF97qJxcNfzxhpXHXPRt85sJzBSwgnug8PUTUq7VBDhgUtMaHJr9wazZvlqF99Jsdo0QCw6PXOLskbtcK9N/TuCRBSbLpoyz0dqYNMld3lyJSXpnhHJhm2qzgq6lZ67Pn0ZzWUYAQ=="
+            },
+            {
+              "type": "text",
+              "text": "Test message"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Testing tool call"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01MFC4QAApP6QFdwM48eLes2",
+              "input": {
+                "bar": "foo"
+              },
+              "name": "run_me"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_01MFC4QAApP6QFdwM48eLes2",
+              "content": "The secret code is: 42",
+              "is_error": false,
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        }
+      ],
+      "model": "claude-haiku-4-5",
+      "max_tokens": 64000,
+      "stream": true
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |-
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01QeoS3aMh5tCkvZyW2QqYeJ","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":198,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":2,"service_tier":"standard"}}}
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}          }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I attempte"}               }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"d a"} }
+
+    event: ping
+    data: {"type": "ping"}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" tool"}            }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" call,"}               }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" but I shoul"}       }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"d clarify:"}      }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" I don't actually"}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" have access"}           }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" to external"}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" tools or functions"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" in"}      }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" our"}          }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" conversation. The"}             }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" output above"}               }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" was"}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" illust"}           }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"rative."}            }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\nIn"}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" reality"}             }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", I can"}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"'t make"}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" function calls or"}  }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" use"}           }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" external tools. I"}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" can"}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" only:"}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n- Have"}         }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" conversations"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n- Process"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" text you"}              }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" share"}    }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" with me\n-"} }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Provide analysis"}           }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":","}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" writing, coding"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" help"}      }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", etc."}           }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\nIs"}     }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" there something specific you'd like me"}            }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" to help you with?"}     }
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0      }
+
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":198,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":95}          }
+
+    event: message_stop
+    data: {"type":"message_stop" }
+---
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Test message"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "# Hello! 👋\\n\\nI'm Claude, an AI assistant made by Anthropic. Your message came through successfully!\\n\\nHow can I help you today? Feel free to ask me anything — I can assist with:\\n\\n- **Writing & editing**\\n- **Analysis & research**\\n- **Math & coding**\\n- **Creative projects**\\n- **General questions**\\n- And much more!\\n\\nWhat would you like to talk about?"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Repeat my previous message"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "The user is asking me to repeat their previous message. Their previous message was \"Test message\". So I should simply repeat that.",
+              "signature": "EqsCCkYIChgCKkBgar4wNRmrr+S1gvRPECLonYhPqXvHdZFsq8JWj27SJmOhkuTWUKVahMfZ2u/D+09BB02XzsMJtSR5P46fjhSWEgwZtgv8hucPhDVYyDkaDKLdTot1vGCb2gSc6iIwFJUffLMdmgEz6H0LD24BhqeoXFQP77q7fHFWI2mbUWyoLCplFhZGi4YPmHXfYFtwKpIBqpdtmtslBACSR5RNizNYWE9KPGGTE3sEAmgvOtewkeMy7mWcwDi7H+HMhYJp1MF97qJxcNfzxhpXHXPRt85sJzBSwgnug8PUTUq7VBDhgUtMaHJr9wazZvlqF99Jsdo0QCw6PXOLskbtcK9N/TuCRBSbLpoyz0dqYNMld3lyJSXpnhHJhm2qzgq6lZ67Pn0ZzWUYAQ=="
+            },
+            {
+              "type": "text",
+              "text": "Test message"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Testing tool call"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_01MFC4QAApP6QFdwM48eLes2",
+              "input": {
+                "bar": "foo"
+              },
+              "name": "run_me"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_01MFC4QAApP6QFdwM48eLes2",
+              "content": "The secret code is: 42",
+              "is_error": false
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "I attempted a tool call, but I should clarify: I don't actually have access to external tools or functions in our conversation. The output above was illustrative.\\n\\nIn reality, I can't make function calls or use external tools. I can only:\\n- Have conversations\\n- Process text you share with me\\n- Provide analysis, writing, coding help, etc.\\n\\nIs there something specific you'd like me to help you with?"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "What was the result of the previous tool call?",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        }
+      ],
+      "model": "claude-haiku-4-5",
+      "max_tokens": 64000,
+      "thinking": {
+        "type": "enabled",
+        "budget_tokens": 12800
+      },
+      "stream": true
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |-
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_014z7SDk2jFXn2MhJK1Vs1X5","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":335,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":5,"service_tier":"standard"}}            }
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user is asking what"}               }
+
+    event: ping
+    data: {"type": "ping"}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the result of the previous tool call was"}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":". Looking back"}         }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" at my previous"}      }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" message"}       }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":", I made"}      }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a function"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" call to \"run_me\" with"}       }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" parameter"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \"bar"}            }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\""}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" set"}       }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" to \"foo\","}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" and the"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" function"}            }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"_"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"results showed:"}           }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\n\"The secret code is: "}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"42\"\n\nSo the result was:"}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \"The secret code is: 42"} }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\""}          }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nI should answer this straight"} }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"forwardly."}          }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}               }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EuIDCkYIChgCKkBaSrzUuse3LKTAPHBdmrKf2lRkStrcp9321wYAq4gYAWEql7GXNuDQ2j4JU3jb0s6Y0H24O1cqdB/Dr3GIr9r0EgwTkXTgnqs4edWvcZUaDPpcPoMX9kQmMFXHlyIwy/WqD1bikrg9YIEAhUyCn2VDzTBcANuLosRNO+UDjzEs3cl0q7gyQ5JdMdU1WX56KskC2vbZK6B2oZ4nKH8aBNHzfwfEGU/wfT3EbSwfMwCnXkZ0R+Y49C5hhF2ySegXI/F4SxlD+SQtW2YYnm8vqmUerI/184Iy6TN0JZD3iXEePV+ASDGym6Ewt8psZoHWDw744VlvtQIgjsez0zy4ussIJq79mnLk6OzOdSIHrq1kD9VKhWmfDVWXTS8K8DI9wSsp/GXes1gVW3V4dXi6h+mH9m+7O8mf4rf5Kr+rzCzMbTm8SDLIISNZJYnYR4nID4tB8ZqwVLY5Ld2VBR1E/54sbf9lSQi3RTWvSeC3HunCFODpPUMohCNSz83pKEbRBNmz0SqblNEvdtQFO7/vnCkgpXgg2fRSB3M46GwKs8Wrdja2G8gWFHBe9KygRhCQrB/qHJsyrUgZ8yOR/+giHo2yr010oZPwQ6Zw7moJtP08rIN1v8PTreAhAwQYAQ=="}               }
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0               }
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}     }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"The result of the"}               }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" previous tool call was:\n\n**The"}         }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" secret code is: 42**"}    }
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":1       }
+
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":335,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":114}   }
+
+    event: message_stop
+    data: {"type":"message_stop"}

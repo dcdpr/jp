@@ -1,4 +1,4 @@
-#![allow(clippy::too_many_arguments)]
+#![expect(clippy::too_many_arguments)]
 
 mod cargo;
 mod fs;
@@ -89,7 +89,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_to_xml_wit_root() {
+    fn test_to_xml_with_root() {
         #[derive(serde::Serialize)]
         struct Data {
             foo: String,

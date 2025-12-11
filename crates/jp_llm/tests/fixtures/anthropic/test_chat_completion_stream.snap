@@ -1,0 +1,321 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user has sent",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " \"",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Test message\" -",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " this appears",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " to be a simple test",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " to",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " see if I'm",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " responding.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " I",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " should acknowledge",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " this in a friendly an",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "d helpful way.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("Er8CCkYIChgCKkCObEbpIHGFiIDsYmOZNhdXNYUq8q/d9qSdl/VRBrmRllC6IhCLDWB3wy21jkHcEOB/wOvd4W/NCj7WnZhJMvGLEgwKmPKdVUwLbT1p4YAaDDJc1W1Citkixs5IDSIwOlETMMw644co7XHgTzG3TCKMqdWQgxkPLfl3AfQHN0YtWSpEI8AYysHoabn6f8H4KqYBwvxgmYJ4oakfgLEj4+VeIvXgBi4RQf5coY94y9WPurQTRRzoBgWUqc9TGQ56goOULgIwSUskoc9uGTOMgUUPZuoRG/ui2X1wHBLjavr6l4BadMWPepOyE+6HCWhj35eQ4TNbQQ/8X+kpTeiVTJxA+hU/qtVVDeQ9TR9NrG/5Jvb8rucIo+j+P8QZeSmKxvwc65cL57lY+shaV+knS60fO5SQu2Jd0RgB"),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Hello! I'm here an",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "d ready to help.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " Feel",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " free to ask",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " me anything or",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " let",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " me know what you'd like to discuss",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: ". ",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "😊",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

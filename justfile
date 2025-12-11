@@ -1,4 +1,4 @@
-bacon_version    := "3.19.0"
+bacon_version    := "3.20.1"
 binstall_version := "1.15.7"
 deny_version     := "0.18.5"
 expand_version   := "1.0.118"
@@ -10,23 +10,25 @@ shear_version    := "1.6.0"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
+[private]
 default:
   just --list
 
+[group('build')]
 install:
     @just quiet_flag="" _install-jp
 
-[group('issue')]
+[group('jp')]
 issue-bug +ARGS="Please create a bug report for the following:\n\n": _install-jp
     jp query --no-persist --new --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
 
 # Create a feature request issue.
-[group('issue')]
+[group('jp')]
 issue-feat +ARGS="Please create a feature request for the following:\n\n": _install-jp
     jp query --no-persist --new --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
 
 # Open a commit message in the editor, using Jean-Pierre.
-[group('git')]
+[group('jp')]
 [positional-arguments]
 commit +ARGS="Give me a commit message": _install-jp
     #!/usr/bin/env sh
@@ -35,6 +37,7 @@ commit +ARGS="Give me a commit message": _install-jp
     fi
 
 # Generate changelog for the project.
+[group('build')]
 build-changelog: (_install "jilu@" + jilu_version)
     @jilu
 
@@ -51,19 +54,26 @@ build-docs: (_docs "build")
 preview-docs: (_docs "preview")
 
 # Live-check the code, using Clippy and Bacon.
+[group('check')]
 check *FLAGS:
-    just bacon clippy {{FLAGS}}
+    just _bacon clippy {{FLAGS}}
 
+# Run tests, using nextest.
+[group('check')]
 test *FLAGS: (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
-    cargo nextest run --workspace --all-targets {{FLAGS}}
+    cargo nextest run --workspace --all-targets --no-fail-fast {{FLAGS}}
 
+# Continuously run tests, using Bacon.
+[group('check')]
 testw *FLAGS:
-    just bacon test {{FLAGS}}
+    just _bacon test {{FLAGS}}
 
+# Check for unused dependencies.
+[group('check')]
 shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
     cargo shear {{FLAGS}}
 
-bacon CMD *FLAGS: (_install "bacon@" + bacon_version)
+_bacon CMD *FLAGS: (_install "bacon@" + bacon_version)
     @bacon {{CMD}} -- {{FLAGS}}
 
 [group('tools')]

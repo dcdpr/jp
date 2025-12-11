@@ -3,6 +3,7 @@
 use jp_attachment::Attachment;
 use jp_config::assistant::instructions::InstructionsConfig;
 use serde::Serialize;
+use tracing::trace;
 
 use crate::{
     ConversationStream,
@@ -72,6 +73,16 @@ impl ThreadBuilder {
         self
     }
 
+    // /// Add an event to the thread.
+    // ///
+    // /// If no [`ConversationStream`] exists, a default one is created.
+    // #[must_use]
+    // pub fn with_event(mut self, event: impl Into<ConversationEvent>) -> Self {
+    //     let mut stream = self.events.take().unwrap_or_default();
+    //     stream.push(event);
+    //     self.with_events(stream)
+    // }
+
     /// Build the thread.
     ///
     /// # Errors
@@ -101,7 +112,7 @@ impl ThreadBuilder {
 ///
 /// This type is passed to the LLM providers to generate an HTTP request that
 /// contains all the information needed to generate a response.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Thread {
     /// The system prompt to use.
     pub system_prompt: Option<String>,
@@ -114,6 +125,59 @@ pub struct Thread {
 
     /// The conversation events to use.
     pub events: ConversationStream,
+}
+
+impl Thread {
+    /// Convert the thread into a list of messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if XML serialization fails.
+    pub fn into_messages<T, U, M, S>(
+        self,
+        to_system_messages: M,
+        convert_stream: S,
+    ) -> Result<Vec<T>>
+    where
+        U: IntoIterator<Item = T>,
+        M: Fn(Vec<String>) -> U,
+        S: Fn(ConversationStream) -> Vec<T>,
+    {
+        let Self {
+            system_prompt,
+            instructions,
+            attachments,
+            events,
+        } = self;
+
+        let mut items = vec![];
+        let mut parts = vec![];
+
+        if let Some(system_prompt) = system_prompt {
+            parts.push(system_prompt);
+        }
+
+        for instruction in &instructions {
+            parts.push(instruction.try_to_xml()?);
+        }
+
+        if !attachments.is_empty() {
+            let documents: Documents = attachments
+                .into_iter()
+                .enumerate()
+                .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
+                .map(Document::from)
+                .collect::<Vec<_>>()
+                .into();
+
+            parts.push(documents.try_to_xml()?);
+        }
+
+        items.extend(to_system_messages(parts));
+        items.extend(convert_stream(events));
+
+        Ok(items)
+    }
 }
 
 /// Structure for document collection

@@ -1,0 +1,28 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I'd be happy to help you test a tool call! However, I need more information about what you'd like to test.\n\nLooking at the available function `run_me`, it requires:\n- **bar** (required): Either the string \"foo\" or an array like [\"foo\", \"bar\"]\n- **foo** (optional): A string parameter (defaults to \"foo\")\n\nCould you please specify:\n1. What value should I use for the **bar** parameter? (\"foo\" or [\"foo\", \"bar\"]?)\n2. Do you want to provide a custom value for the **foo** parameter, or should I use the default?\n\nOnce you let me know, I can make the test call!",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [],
+]

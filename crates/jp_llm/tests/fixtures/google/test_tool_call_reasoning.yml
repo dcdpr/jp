@@ -1,0 +1,91 @@
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Testing tool call"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "run_me",
+              "description": "",
+              "parameters": null,
+              "parametersJsonSchema": {
+                "type": "object",
+                "properties": {
+                  "foo": {
+                    "default": "foo",
+                    "type": "string"
+                  },
+                  "bar": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "foo"
+                        ]
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "enum": [
+                          [
+                            "foo",
+                            "bar"
+                          ]
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "bar"
+                ]
+              },
+              "response": null
+            }
+          ]
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "AUTO",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": null,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"candidates": [{"content": {"parts": [{"text": "I can help"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 3,"totalTokenCount": 62,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "-Ro4aZmBAp3wnsEPgs7pkAI"}
+
+    data: {"candidates": [{"content": {"parts": [{"text": " with that. What is the value of `bar` and `foo`?"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 19,"totalTokenCount": 78,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "-Ro4aZmBAp3wnsEPgs7pkAI"}
+
+    data: {"candidates": [{"content": {"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 19,"totalTokenCount": 78,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "-Ro4aZmBAp3wnsEPgs7pkAI"}

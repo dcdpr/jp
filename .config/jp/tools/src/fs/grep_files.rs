@@ -86,11 +86,10 @@ pub(crate) async fn fs_grep_files(
 mod tests {
     use std::collections::HashMap;
 
-    use test_log::test;
-
     use super::*;
 
-    #[test(tokio::test)]
+    #[tokio::test]
+    #[test_log::test]
     async fn test_grep_files() {
         struct TestCase {
             pattern: &'static str,

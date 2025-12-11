@@ -46,15 +46,13 @@ impl Set {
             };
 
             // Get the delta between the current config and the new config.
-            let config = ctx.workspace.try_get_events(&id)?.config();
-            let mut new_config = config.clone();
+            let mut new_config = PartialAppConfig::empty();
             new_config.assign(assignment)?;
-            let delta = config.delta(new_config);
 
             // Store the delta in the conversation stream.
             ctx.workspace
                 .try_get_events_mut(&id)?
-                .add_config_delta(delta);
+                .add_config_delta(new_config);
 
             return Ok(format!(
                 "Set configuration value for {} in conversation {id:?}",

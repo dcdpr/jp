@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// Assistant-specific configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct AssistantConfig {
     /// Optional name of the assistant.
@@ -124,6 +124,7 @@ fn default_instructions(_: &()) -> TransformResult<MergeableVec<PartialInstructi
 mod tests {
     use schematic::PartialConfig as _;
     use serde_json::{Value, json};
+    use test_log::test;
 
     use super::*;
     use crate::{
@@ -135,7 +136,6 @@ mod tests {
     };
 
     #[test]
-    #[expect(clippy::too_many_lines)]
     fn test_assistant_config_instructions() {
         let mut p = PartialAssistantConfig::default_values(&())
             .unwrap()
@@ -333,7 +333,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::too_many_lines)]
     fn test_assistant_config_instructions_merge() {
         struct TestCase {
             prev: PartialAssistantConfig,

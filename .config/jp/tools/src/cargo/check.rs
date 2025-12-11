@@ -5,17 +5,24 @@ use crate::Result;
 
 pub(crate) async fn cargo_check(ctx: &Context, package: Option<String>) -> Result<String> {
     let package = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
-    let result = cmd!("cargo", "check", "--color=never", &package, "--quiet")
-        // Prevent warnings from being treated as errors, e.g. on CI.
-        .env("RUSTFLAGS", "-W warnings")
-        .stdout_capture()
-        .stderr_capture()
-        .dir(&ctx.root)
-        .unchecked()
-        .run()?;
+    let result = cmd!(
+        "cargo",
+        "clippy",
+        "--color=never",
+        &package,
+        "--quiet",
+        "--all-targets"
+    )
+    // Prevent warnings from being treated as errors, e.g. on CI.
+    .env("RUSTFLAGS", "-W warnings")
+    .stdout_capture()
+    .stderr_capture()
+    .dir(&ctx.root)
+    .unchecked()
+    .run()?;
 
     let code = result.status.code().unwrap_or(0);
-    if code != 0 && code != 101 {
+    if code != 0 {
         return Err(format!(
             "Cargo command failed ({}): {}",
             result.status.code().unwrap_or(1),
@@ -44,6 +51,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[test_log::test]
     async fn test_cargo_check() {
         let dir = tempfile::tempdir().unwrap();
         let ctx = Context {
@@ -68,7 +76,7 @@ mod tests {
 
         assert_eq!(result, indoc::indoc! {r#"
             ```
-            warning: unused `Result` that must be used
+            warning: unused `std::result::Result` that must be used
              --> src/main.rs:2:5
               |
             2 |     std::env::var("FOO");

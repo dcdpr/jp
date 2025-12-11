@@ -1,6 +1,6 @@
 //! Error variants for the `conversation` module.
 
-use crate::ConversationId;
+use crate::{ConversationId, stream::StreamError};
 
 /// A result type for the `conversation` module.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -27,6 +27,14 @@ pub enum Error {
     /// Unknown conversation ID.
     #[error("unknown conversation ID")]
     UnknownId(ConversationId),
+
+    /// Configuration error.
+    #[error(transparent)]
+    Config(#[from] jp_config::Error),
+
+    /// Stream error.
+    #[error(transparent)]
+    Stream(#[from] StreamError),
 }
 
 #[cfg(test)]

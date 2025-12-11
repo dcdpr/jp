@@ -1,9 +1,8 @@
 //! See [`ChatRequest`].
 
-use std::{collections::BTreeMap, fmt, ops};
+use std::{fmt, ops};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 /// A chat request event - the user's query or message.
 ///
@@ -67,19 +66,6 @@ pub enum ChatResponse {
     Reasoning {
         /// The reasoning content.
         reasoning: String,
-
-        /// Opaque provider-specific reasoning metadata.
-        ///
-        /// The shape of this data depends on the provider and model.
-        ///
-        /// For example, for `OpenAI`, we use this to store the opaque reasoning
-        /// data which includes signatures to validate the authenticity of
-        /// reasoning content.
-        ///
-        /// The provider can be inferred by merging all `ConfigDelta` events
-        /// that precede this response.
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        metadata: BTreeMap<String, Value>,
     },
 }
 
@@ -97,27 +83,23 @@ impl ChatResponse {
     pub fn reasoning(content: impl Into<String>) -> Self {
         Self::Reasoning {
             reasoning: content.into(),
-            metadata: BTreeMap::new(),
         }
-    }
-
-    /// Attaches metadata to the response, if applicable.
-    #[must_use]
-    pub fn with_metadata(mut self, metadata: BTreeMap<String, Value>) -> Self {
-        match &mut self {
-            Self::Reasoning { metadata: m, .. } if !metadata.is_empty() => {
-                m.extend(metadata);
-            }
-            _ => {}
-        }
-
-        self
     }
 
     /// Returns the content of the response, either the message or the
     /// reasoning.
     #[must_use]
     pub fn content(&self) -> &str {
+        match self {
+            Self::Message { message, .. } => message,
+            Self::Reasoning { reasoning, .. } => reasoning,
+        }
+    }
+
+    /// Returns a mutable reference to the content of the response, either the
+    /// message or the reasoning.
+    #[must_use]
+    pub const fn content_mut(&mut self) -> &mut String {
         match self {
             Self::Message { message, .. } => message,
             Self::Reasoning { reasoning, .. } => reasoning,
@@ -131,15 +113,6 @@ impl ChatResponse {
         match self {
             Self::Message { message, .. } => message,
             Self::Reasoning { reasoning, .. } => reasoning,
-        }
-    }
-
-    /// Returns the metadata of the response, if applicable.
-    #[must_use]
-    pub const fn metadata(&self) -> Option<&BTreeMap<String, Value>> {
-        match self {
-            Self::Message { .. } => None,
-            Self::Reasoning { metadata, .. } => Some(metadata),
         }
     }
 

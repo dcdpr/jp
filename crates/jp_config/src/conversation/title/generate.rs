@@ -10,7 +10,7 @@ use crate::{
 };
 
 /// Title generation configuration.
-#[derive(Debug, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct GenerateConfig {
     /// Whether to automatically generate titles for conversations.

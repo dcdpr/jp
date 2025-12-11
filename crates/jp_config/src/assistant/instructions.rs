@@ -105,7 +105,7 @@ impl InstructionsConfig {
         #[serde(rename = "instruction")]
         pub struct XmlWrapper<'a> {
             /// See [`InstructionsConfig::title`].
-            #[serde(skip_serializing_if = "Option::is_none", rename = "@title")]
+            #[serde(skip_serializing_if = "Option::is_none")]
             pub title: Option<&'a str>,
 
             /// See [`InstructionsConfig::description`].
@@ -169,7 +169,6 @@ impl InstructionsConfig {
         let mut buffer = String::new();
         let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
         serializer.indent(' ', 2);
-        serializer.text_format(quick_xml::se::TextFormat::CData);
 
         wrapper.serialize(serializer)?;
         Ok(buffer)

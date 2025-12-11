@@ -1,10 +1,66 @@
 when:
   path: /api/v1/chat/completions
   method: POST
-  body: "{\"model\":\"anthropic/claude-3-haiku\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Give me a fitting haiku for this test.\"}]}],\"tool_choice\":\"auto\"}"
+  json_body_str: >-
+    {
+      "model": "anthropic/claude-3-haiku",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Give me a fitting haiku for this test."
+            }
+          ]
+        }
+      ]
+    }
 then:
   status: 200
   header:
     - name: content-type
       value: application/json
-  body: "\n         \n{\"id\":\"gen-1763647030-yEXrLOkNcchEIFTg9705\",\"provider\":\"Anthropic\",\"model\":\"anthropic/claude-3-haiku\",\"object\":\"chat.completion\",\"created\":1763647030,\"choices\":[{\"logprobs\":null,\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Here is a haiku for your test:\\n\\nCarefully tread through,\\nThoughtful answers take focus,\\nEmbrace the journey.\",\"refusal\":null,\"reasoning\":null}}],\"usage\":{\"prompt_tokens\":17,\"completion_tokens\":33,\"total_tokens\":50}}"
+  json_body_str: >-
+    {
+      "id": "gen-1765284708-CPUIAiT8S39Nc6B8XhZr",
+      "provider": "Anthropic",
+      "model": "anthropic/claude-3-haiku",
+      "object": "chat.completion",
+      "created": 1765284708,
+      "choices": [
+        {
+          "logprobs": null,
+          "finish_reason": "stop",
+          "native_finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "Here is a haiku for your test:\\n\\nPencil in hand, poised\\nThoughts swirl, focus sharpens now\\nKnowledge takes its flight",
+            "refusal": null,
+            "reasoning": null
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 17,
+        "completion_tokens": 37,
+        "total_tokens": 54,
+        "cost": 0.0000505,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": null,
+          "upstream_inference_prompt_cost": 4.25e-6,
+          "upstream_inference_completions_cost": 0.00004625
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0
+        }
+      }
+    }

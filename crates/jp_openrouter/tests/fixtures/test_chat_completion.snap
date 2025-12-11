@@ -1,10 +1,10 @@
 ---
 source: crates/jp_test/src/mock.rs
-expression: expr
+expression: v
 ---
 Ok(
     ChatCompletion {
-        id: "gen-1763647030-yEXrLOkNcchEIFTg9705",
+        id: "gen-1765284708-CPUIAiT8S39Nc6B8XhZr",
         provider: "Anthropic",
         choices: [
             NonStreaming(
@@ -14,9 +14,10 @@ Ok(
                     message: NonStreamingMessage {
                         role: "assistant",
                         content: Some(
-                            "Here is a haiku for your test:\n\nCarefully tread through,\nThoughtful answers take focus,\nEmbrace the journey.",
+                            "Here is a haiku for your test:\n\nPencil in hand, poised\nThoughts swirl, focus sharpens now\nKnowledge takes its flight",
                         ),
                         reasoning: None,
+                        reasoning_details: [],
                         tool_calls: [],
                     },
                     error: None,
@@ -24,18 +25,28 @@ Ok(
                 },
             ),
         ],
-        created: 2025-11-20 13:57:10.0 +00:00:00,
+        created: 2025-12-09 12:51:48.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletion,
         system_fingerprint: None,
         usage: Some(
             Usage {
-                completion_tokens: 33,
-                completion_tokens_details: None,
-                cost: None,
+                completion_tokens: 37,
+                completion_tokens_details: Some(
+                    CompletionTokensDetails {
+                        reasoning_tokens: 0,
+                    },
+                ),
+                cost: Some(
+                    5.05e-5,
+                ),
                 prompt_tokens: 17,
-                prompt_tokens_details: None,
-                total_tokens: 50,
+                prompt_tokens_details: Some(
+                    PromptTokensDetails {
+                        cached_tokens: 0,
+                    },
+                ),
+                total_tokens: 54,
             },
         ),
     },

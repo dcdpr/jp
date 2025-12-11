@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// Assistant-specific configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ModelConfig {
     /// The model ID.
@@ -65,6 +65,7 @@ mod tests {
     use assert_matches::assert_matches;
     use schematic::PartialConfig as _;
     use serde_json::{Value, json};
+    use test_log::test;
 
     use super::*;
     use crate::model::{

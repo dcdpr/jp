@@ -237,9 +237,8 @@ impl Storage {
             write_json(&meta_path, conversation)?;
 
             let events_path = conv_dir.join(EVENTS_FILE);
-            match events.get(id) {
-                Some(stream) => write_json(&events_path, stream)?,
-                None => write_json(&events_path, &ConversationStream::default())?,
+            if let Some(stream) = events.get(id) {
+                write_json(&events_path, stream)?;
             }
         }
 

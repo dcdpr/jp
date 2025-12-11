@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// Either a [`ModelIdConfig`] or a named alias for one.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(serde(untagged))]
 pub enum ModelIdOrAliasConfig {
     /// A model ID configuration.
@@ -381,6 +381,23 @@ pub enum ProviderId {
     Openrouter,
     /// xAI provider. See: <https://x.ai/api>. UNIMPLEMENTED.
     Xai,
+}
+
+impl ProviderId {
+    /// Get the provider ID as a &str.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Anthropic => "anthropic",
+            Self::Deepseek => "deepseek",
+            Self::Google => "google",
+            Self::Llamacpp => "llamacpp",
+            Self::Ollama => "ollama",
+            Self::Openai => "openai",
+            Self::Openrouter => "openrouter",
+            Self::Xai => "xai",
+        }
+    }
 }
 
 impl Id for ProviderId {

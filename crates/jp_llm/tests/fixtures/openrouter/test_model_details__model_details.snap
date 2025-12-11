@@ -1,0 +1,7125 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "relace/relace-search",
+            ),
+        },
+        display_name: Some(
+            "Relace: Relace Search",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "z-ai/glm-4.6v",
+            ),
+        },
+        display_name: Some(
+            "Z.AI: GLM 4.6V",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "essentialai/rnj-1-instruct",
+            ),
+        },
+        display_name: Some(
+            "EssentialAI: Rnj 1 Instruct",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openrouter/bodybuilder",
+            ),
+        },
+        display_name: Some(
+            "Body Builder",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.1-codex-max",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.1-Codex-Max",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-04,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "amazon/nova-2-lite-v1:free",
+            ),
+        },
+        display_name: Some(
+            "Amazon: Nova 2 Lite (free)",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-02,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "amazon/nova-2-lite-v1",
+            ),
+        },
+        display_name: Some(
+            "Amazon: Nova 2 Lite",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-02,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/ministral-14b-2512",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Ministral 3 14B 2512",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-02,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/ministral-8b-2512",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Ministral 3 8B 2512",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-02,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/ministral-3b-2512",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Ministral 3 3B 2512",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-02,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-large-2512",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral Large 3 2512",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "arcee-ai/trinity-mini:free",
+            ),
+        },
+        display_name: Some(
+            "Arcee AI: Trinity Mini (free)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "arcee-ai/trinity-mini",
+            ),
+        },
+        display_name: Some(
+            "Arcee AI: Trinity Mini",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-v3.2-speciale",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek V3.2 Speciale",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-v3.2",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek V3.2",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-12-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "prime-intellect/intellect-3",
+            ),
+        },
+        display_name: Some(
+            "Prime Intellect: INTELLECT-3",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-27,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "tngtech/tng-r1t-chimera:free",
+            ),
+        },
+        display_name: Some(
+            "TNG: R1T Chimera (free)",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "tngtech/tng-r1t-chimera",
+            ),
+        },
+        display_name: Some(
+            "TNG: R1T Chimera",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-opus-4.5",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Opus 4.5",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-24,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "allenai/olmo-3-32b-think:free",
+            ),
+        },
+        display_name: Some(
+            "AllenAI: Olmo 3 32B Think (free)",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-21,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "allenai/olmo-3-7b-instruct",
+            ),
+        },
+        display_name: Some(
+            "AllenAI: Olmo 3 7B Instruct",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-21,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "allenai/olmo-3-7b-think",
+            ),
+        },
+        display_name: Some(
+            "AllenAI: Olmo 3 7B Think",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-21,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-3-pro-image-preview",
+            ),
+        },
+        display_name: Some(
+            "Google: Nano Banana Pro (Gemini 3 Pro Image Preview)",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-20,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "x-ai/grok-4.1-fast",
+            ),
+        },
+        display_name: Some(
+            "xAI: Grok 4.1 Fast",
+        ),
+        context_window: Some(
+            2000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-19,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-3-pro-preview",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 3 Pro Preview",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-18,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepcogito/cogito-v2.1-671b",
+            ),
+        },
+        display_name: Some(
+            "Deep Cogito: Cogito v2.1 671B",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.1",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.1",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.1-chat",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.1 Chat",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.1-codex",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.1-Codex",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.1-codex-mini",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.1-Codex-Mini",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "kwaipilot/kat-coder-pro:free",
+            ),
+        },
+        display_name: Some(
+            "Kwaipilot: KAT-Coder-Pro V1 (free)",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "moonshotai/kimi-linear-48b-a3b-instruct",
+            ),
+        },
+        display_name: Some(
+            "MoonshotAI: Kimi Linear 48B A3B Instruct",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "moonshotai/kimi-k2-thinking",
+            ),
+        },
+        display_name: Some(
+            "MoonshotAI: Kimi K2 Thinking",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-11-06,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "amazon/nova-premier-v1",
+            ),
+        },
+        display_name: Some(
+            "Amazon: Nova Premier 1.0",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-31,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "perplexity/sonar-pro-search",
+            ),
+        },
+        display_name: Some(
+            "Perplexity: Sonar Pro Search",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/voxtral-small-24b-2507",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Voxtral Small 24B 2507",
+        ),
+        context_window: Some(
+            32000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-oss-safeguard-20b",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: gpt-oss-safeguard-20b",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-29,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nvidia/nemotron-nano-12b-v2-vl:free",
+            ),
+        },
+        display_name: Some(
+            "NVIDIA: Nemotron Nano 12B 2 VL (free)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nvidia/nemotron-nano-12b-v2-vl",
+            ),
+        },
+        display_name: Some(
+            "NVIDIA: Nemotron Nano 12B 2 VL",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "minimax/minimax-m2",
+            ),
+        },
+        display_name: Some(
+            "MiniMax: MiniMax M2",
+        ),
+        context_window: Some(
+            204800,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "liquid/lfm2-8b-a1b",
+            ),
+        },
+        display_name: Some(
+            "LiquidAI/LFM2-8B-A1B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-20,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "liquid/lfm-2.2-6b",
+            ),
+        },
+        display_name: Some(
+            "LiquidAI/LFM2-2.6B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-20,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "ibm-granite/granite-4.0-h-micro",
+            ),
+        },
+        display_name: Some(
+            "IBM: Granite 4.0 Micro",
+        ),
+        context_window: Some(
+            131000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-20,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepcogito/cogito-v2-preview-llama-405b",
+            ),
+        },
+        display_name: Some(
+            "Deep Cogito: Cogito V2 Preview Llama 405B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5-image-mini",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5 Image Mini",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-16,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-haiku-4.5",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Haiku 4.5",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-15,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-vl-8b-thinking",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 VL 8B Thinking",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-14,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-vl-8b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 VL 8B Instruct",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-14,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5-image",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5 Image",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-14,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o3-deep-research",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o3 Deep Research",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o4-mini-deep-research",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o4 Mini Deep Research",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+            ),
+        },
+        display_name: Some(
+            "NVIDIA: Llama 3.3 Nemotron Super 49B V1.5",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "baidu/ernie-4.5-21b-a3b-thinking",
+            ),
+        },
+        display_name: Some(
+            "Baidu: ERNIE 4.5 21B A3B Thinking",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-09,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.5-flash-image",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Flash Image (Nano Banana)",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-vl-30b-a3b-thinking",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 VL 30B A3B Thinking",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-06,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-vl-30b-a3b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 VL 30B A3B Instruct",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-06,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5-pro",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5 Pro",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-10-06,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "z-ai/glm-4.6",
+            ),
+        },
+        display_name: Some(
+            "Z.AI: GLM 4.6",
+        ),
+        context_window: Some(
+            202752,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "z-ai/glm-4.6:exacto",
+            ),
+        },
+        display_name: Some(
+            "Z.AI: GLM 4.6 (exacto)",
+        ),
+        context_window: Some(
+            202752,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-sonnet-4.5",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Sonnet 4.5",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-29,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-v3.2-exp",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek V3.2 Exp",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-29,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "thedrummer/cydonia-24b-v4.1",
+            ),
+        },
+        display_name: Some(
+            "TheDrummer: Cydonia 24B V4.1",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-27,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "relace/relace-apply-3",
+            ),
+        },
+        display_name: Some(
+            "Relace: Relace Apply 3",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.5-flash-preview-09-2025",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Flash Preview 09-2025",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.5-flash-lite-preview-09-2025",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Flash Lite Preview 09-2025",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-vl-235b-a22b-thinking",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 VL 235B A22B Thinking",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-vl-235b-a22b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 VL 235B A22B Instruct",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-max",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 Max",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-coder-plus",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 Coder Plus",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5-codex",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5 Codex",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-v3.1-terminus:exacto",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek V3.1 Terminus (exacto)",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-22,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-v3.1-terminus",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek V3.1 Terminus",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-22,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "x-ai/grok-4-fast",
+            ),
+        },
+        display_name: Some(
+            "xAI: Grok 4 Fast",
+        ),
+        context_window: Some(
+            2000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-19,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "alibaba/tongyi-deepresearch-30b-a3b:free",
+            ),
+        },
+        display_name: Some(
+            "Tongyi DeepResearch 30B A3B (free)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-18,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "alibaba/tongyi-deepresearch-30b-a3b",
+            ),
+        },
+        display_name: Some(
+            "Tongyi DeepResearch 30B A3B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-18,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-coder-flash",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 Coder Flash",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "opengvlab/internvl3-78b",
+            ),
+        },
+        display_name: Some(
+            "OpenGVLab: InternVL3 78B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-15,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-next-80b-a3b-thinking",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 Next 80B A3B Thinking",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-11,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-next-80b-a3b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 Next 80B A3B Instruct",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-11,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meituan/longcat-flash-chat:free",
+            ),
+        },
+        display_name: Some(
+            "Meituan: LongCat Flash Chat (free)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-09,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meituan/longcat-flash-chat",
+            ),
+        },
+        display_name: Some(
+            "Meituan: LongCat Flash Chat",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-09,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen-plus-2025-07-28",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen Plus 0728",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen-plus-2025-07-28:thinking",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen Plus 0728 (thinking)",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nvidia/nemotron-nano-9b-v2:free",
+            ),
+        },
+        display_name: Some(
+            "NVIDIA: Nemotron Nano 9B V2 (free)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nvidia/nemotron-nano-9b-v2",
+            ),
+        },
+        display_name: Some(
+            "NVIDIA: Nemotron Nano 9B V2",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "moonshotai/kimi-k2-0905",
+            ),
+        },
+        display_name: Some(
+            "MoonshotAI: Kimi K2 0905",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-04,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "moonshotai/kimi-k2-0905:exacto",
+            ),
+        },
+        display_name: Some(
+            "MoonshotAI: Kimi K2 0905 (exacto)",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-04,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepcogito/cogito-v2-preview-llama-70b",
+            ),
+        },
+        display_name: Some(
+            "Deep Cogito: Cogito V2 Preview Llama 70B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-02,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepcogito/cogito-v2-preview-llama-109b-moe",
+            ),
+        },
+        display_name: Some(
+            "Cogito V2 Preview Llama 109B",
+        ),
+        context_window: Some(
+            32767,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-09-02,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "stepfun-ai/step3",
+            ),
+        },
+        display_name: Some(
+            "StepFun: Step3",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-30b-a3b-thinking-2507",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 30B A3B Thinking 2507",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "x-ai/grok-code-fast-1",
+            ),
+        },
+        display_name: Some(
+            "xAI: Grok Code Fast 1",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nousresearch/hermes-4-70b",
+            ),
+        },
+        display_name: Some(
+            "Nous: Hermes 4 70B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nousresearch/hermes-4-405b",
+            ),
+        },
+        display_name: Some(
+            "Nous: Hermes 4 405B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.5-flash-image-preview",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Flash Image Preview (Nano Banana)",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-chat-v3.1",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek V3.1",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-21,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4o-audio-preview",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4o Audio",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-15,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-medium-3.1",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral Medium 3.1",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "baidu/ernie-4.5-21b-a3b",
+            ),
+        },
+        display_name: Some(
+            "Baidu: ERNIE 4.5 21B A3B",
+        ),
+        context_window: Some(
+            120000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-12,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "baidu/ernie-4.5-vl-28b-a3b",
+            ),
+        },
+        display_name: Some(
+            "Baidu: ERNIE 4.5 VL 28B A3B",
+        ),
+        context_window: Some(
+            30000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-12,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "z-ai/glm-4.5v",
+            ),
+        },
+        display_name: Some(
+            "Z.AI: GLM 4.5V",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-11,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "ai21/jamba-mini-1.7",
+            ),
+        },
+        display_name: Some(
+            "AI21: Jamba Mini 1.7",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "ai21/jamba-large-1.7",
+            ),
+        },
+        display_name: Some(
+            "AI21: Jamba Large 1.7",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5-chat",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5 Chat",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5-mini",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5 Mini",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5-nano",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5 Nano",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-oss-120b:free",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: gpt-oss-120b (free)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-oss-120b",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: gpt-oss-120b",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-oss-120b:exacto",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: gpt-oss-120b (exacto)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-oss-20b:free",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: gpt-oss-20b (free)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-oss-20b",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: gpt-oss-20b",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-opus-4.1",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Opus 4.1",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/codestral-2508",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Codestral 2508",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-08-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-coder-30b-a3b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 Coder 30B A3B Instruct",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-31,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-30b-a3b-instruct-2507",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 30B A3B Instruct 2507",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-29,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "z-ai/glm-4.5",
+            ),
+        },
+        display_name: Some(
+            "Z.AI: GLM 4.5",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "z-ai/glm-4.5-air:free",
+            ),
+        },
+        display_name: Some(
+            "Z.AI: GLM 4.5 Air (free)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "z-ai/glm-4.5-air",
+            ),
+        },
+        display_name: Some(
+            "Z.AI: GLM 4.5 Air",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-235b-a22b-thinking-2507",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 235B A22B Thinking 2507",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "z-ai/glm-4-32b",
+            ),
+        },
+        display_name: Some(
+            "Z.AI: GLM 4 32B ",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-24,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-coder:free",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 Coder 480B A35B (free)",
+        ),
+        context_window: Some(
+            262000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-coder",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 Coder 480B A35B",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-coder:exacto",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 Coder 480B A35B (exacto)",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "bytedance/ui-tars-1.5-7b",
+            ),
+        },
+        display_name: Some(
+            "ByteDance: UI-TARS 7B ",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-22,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.5-flash-lite",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Flash Lite",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-22,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-235b-a22b-2507",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 235B A22B Instruct 2507",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-21,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "switchpoint/router",
+            ),
+        },
+        display_name: Some(
+            "Switchpoint Router",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-11,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "moonshotai/kimi-k2:free",
+            ),
+        },
+        display_name: Some(
+            "MoonshotAI: Kimi K2 0711 (free)",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-11,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "moonshotai/kimi-k2",
+            ),
+        },
+        display_name: Some(
+            "MoonshotAI: Kimi K2 0711",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-11,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "thudm/glm-4.1v-9b-thinking",
+            ),
+        },
+        display_name: Some(
+            "THUDM: GLM 4.1V 9B Thinking",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-11,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/devstral-medium",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Devstral Medium",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/devstral-small",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Devstral Small 1.1",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+            ),
+        },
+        display_name: Some(
+            "Venice: Uncensored (free)",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-09,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "x-ai/grok-4",
+            ),
+        },
+        display_name: Some(
+            "xAI: Grok 4",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-09,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemma-3n-e2b-it:free",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemma 3n 2B (free)",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-09,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "tencent/hunyuan-a13b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Tencent: Hunyuan A13B Instruct",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "tngtech/deepseek-r1t2-chimera:free",
+            ),
+        },
+        display_name: Some(
+            "TNG: DeepSeek R1T2 Chimera (free)",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "tngtech/deepseek-r1t2-chimera",
+            ),
+        },
+        display_name: Some(
+            "TNG: DeepSeek R1T2 Chimera",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "morph/morph-v3-large",
+            ),
+        },
+        display_name: Some(
+            "Morph: Morph V3 Large",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "morph/morph-v3-fast",
+            ),
+        },
+        display_name: Some(
+            "Morph: Morph V3 Fast",
+        ),
+        context_window: Some(
+            81920,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-07-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "baidu/ernie-4.5-vl-424b-a47b",
+            ),
+        },
+        display_name: Some(
+            "Baidu: ERNIE 4.5 VL 424B A47B ",
+        ),
+        context_window: Some(
+            123000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "baidu/ernie-4.5-300b-a47b",
+            ),
+        },
+        display_name: Some(
+            "Baidu: ERNIE 4.5 300B A47B ",
+        ),
+        context_window: Some(
+            123000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "thedrummer/anubis-70b-v1.1",
+            ),
+        },
+        display_name: Some(
+            "TheDrummer: Anubis 70B V1.1",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-29,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "inception/mercury",
+            ),
+        },
+        display_name: Some(
+            "Inception: Mercury",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-small-3.2-24b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral Small 3.2 24B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-20,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "minimax/minimax-m1",
+            ),
+        },
+        display_name: Some(
+            "MiniMax: MiniMax M1",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.5-flash",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Flash",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.5-pro",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Pro",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "moonshotai/kimi-dev-72b",
+            ),
+        },
+        display_name: Some(
+            "MoonshotAI: Kimi Dev 72B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-16,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o3-pro",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o3 Pro",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "x-ai/grok-3-mini",
+            ),
+        },
+        display_name: Some(
+            "xAI: Grok 3 Mini",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "x-ai/grok-3",
+            ),
+        },
+        display_name: Some(
+            "xAI: Grok 3",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.5-pro-preview",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Pro Preview 06-05",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-06-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-r1-0528-qwen3-8b",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek R1 0528 Qwen3 8B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-29,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-r1-0528",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: R1 0528",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-opus-4",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Opus 4",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-22,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-sonnet-4",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Sonnet 4",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-22,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/devstral-small-2505",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Devstral Small 2505",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-21,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemma-3n-e4b-it:free",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemma 3n 4B (free)",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-20,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemma-3n-e4b-it",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemma 3n 4B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-20,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/codex-mini",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: Codex Mini",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-16,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nousresearch/deephermes-3-mistral-24b-preview",
+            ),
+        },
+        display_name: Some(
+            "Nous: DeepHermes 3 Mistral 24B Preview",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-09,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-medium-3",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral Medium 3",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.5-pro-preview-05-06",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Pro Preview 05-06",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "arcee-ai/spotlight",
+            ),
+        },
+        display_name: Some(
+            "Arcee AI: Spotlight",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "arcee-ai/maestro-reasoning",
+            ),
+        },
+        display_name: Some(
+            "Arcee AI: Maestro Reasoning",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "arcee-ai/virtuoso-large",
+            ),
+        },
+        display_name: Some(
+            "Arcee AI: Virtuoso Large",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "arcee-ai/coder-large",
+            ),
+        },
+        display_name: Some(
+            "Arcee AI: Coder Large",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "microsoft/phi-4-reasoning-plus",
+            ),
+        },
+        display_name: Some(
+            "Microsoft: Phi 4 Reasoning Plus",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-05-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "inception/mercury-coder",
+            ),
+        },
+        display_name: Some(
+            "Inception: Mercury Coder",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-4b:free",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 4B (free)",
+        ),
+        context_window: Some(
+            40960,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-prover-v2",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek Prover V2",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-guard-4-12b",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama Guard 4 12B",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-30b-a3b",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 30B A3B",
+        ),
+        context_window: Some(
+            40960,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-8b",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 8B",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-14b",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 14B",
+        ),
+        context_window: Some(
+            40960,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-32b",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 32B",
+        ),
+        context_window: Some(
+            40960,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-235b-a22b:free",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 235B A22B (free)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3-235b-a22b",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3 235B A22B",
+        ),
+        context_window: Some(
+            40960,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "tngtech/deepseek-r1t-chimera:free",
+            ),
+        },
+        display_name: Some(
+            "TNG: DeepSeek R1T Chimera (free)",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-27,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "tngtech/deepseek-r1t-chimera",
+            ),
+        },
+        display_name: Some(
+            "TNG: DeepSeek R1T Chimera",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-27,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "microsoft/mai-ds-r1",
+            ),
+        },
+        display_name: Some(
+            "Microsoft: MAI DS R1",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-21,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o4-mini-high",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o4 Mini High",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-16,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o3",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o3",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-16,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o4-mini",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o4 Mini",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-16,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen2.5-coder-7b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen2.5 Coder 7B Instruct",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-15,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4.1",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4.1",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-14,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4.1-mini",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4.1 Mini",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-14,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4.1-nano",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4.1 Nano",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-14,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "eleutherai/llemma_7b",
+            ),
+        },
+        display_name: Some(
+            "EleutherAI: Llemma 7b",
+        ),
+        context_window: Some(
+            4096,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-14,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "alfredpros/codellama-7b-instruct-solidity",
+            ),
+        },
+        display_name: Some(
+            "AlfredPros: CodeLLaMa 7B Instruct Solidity",
+        ),
+        context_window: Some(
+            4096,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-14,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "arliai/qwq-32b-arliai-rpr-v1",
+            ),
+        },
+        display_name: Some(
+            "ArliAI: QwQ 32B RpR v1",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "x-ai/grok-3-mini-beta",
+            ),
+        },
+        display_name: Some(
+            "xAI: Grok 3 Mini Beta",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-09,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "x-ai/grok-3-beta",
+            ),
+        },
+        display_name: Some(
+            "xAI: Grok 3 Beta",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-09,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+            ),
+        },
+        display_name: Some(
+            "NVIDIA: Llama 3.1 Nemotron Ultra 253B v1",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-4-maverick",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 4 Maverick",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-4-scout",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 4 Scout",
+        ),
+        context_window: Some(
+            327680,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-04-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen2.5-vl-32b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen2.5 VL 32B Instruct",
+        ),
+        context_window: Some(
+            16384,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-24,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-chat-v3-0324",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek V3 0324",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-24,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o1-pro",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o1-pro",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-19,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-small-3.1-24b-instruct:free",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral Small 3.1 24B (free)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-small-3.1-24b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral Small 3.1 24B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "allenai/olmo-2-0325-32b-instruct",
+            ),
+        },
+        display_name: Some(
+            "AllenAI: Olmo 2 32B Instruct",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-14,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemma-3-4b-it:free",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemma 3 4B (free)",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemma-3-4b-it",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemma 3 4B",
+        ),
+        context_window: Some(
+            96000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemma-3-12b-it:free",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemma 3 12B (free)",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemma-3-12b-it",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemma 3 12B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "cohere/command-a",
+            ),
+        },
+        display_name: Some(
+            "Cohere: Command A",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4o-mini-search-preview",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4o-mini Search Preview",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-12,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4o-search-preview",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4o Search Preview",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-12,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemma-3-27b-it:free",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemma 3 27B (free)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-12,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemma-3-27b-it",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemma 3 27B",
+        ),
+        context_window: Some(
+            96000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-12,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "thedrummer/skyfall-36b-v2",
+            ),
+        },
+        display_name: Some(
+            "TheDrummer: Skyfall 36B V2",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "microsoft/phi-4-multimodal-instruct",
+            ),
+        },
+        display_name: Some(
+            "Microsoft: Phi 4 Multimodal Instruct",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "perplexity/sonar-reasoning-pro",
+            ),
+        },
+        display_name: Some(
+            "Perplexity: Sonar Reasoning Pro",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "perplexity/sonar-pro",
+            ),
+        },
+        display_name: Some(
+            "Perplexity: Sonar Pro",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "perplexity/sonar-deep-research",
+            ),
+        },
+        display_name: Some(
+            "Perplexity: Sonar Deep Research",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-07,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwq-32b",
+            ),
+        },
+        display_name: Some(
+            "Qwen: QwQ 32B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-03-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.0-flash-lite-001",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.0 Flash Lite",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-3.7-sonnet:thinking",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude 3.7 Sonnet (thinking)",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-24,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-3.7-sonnet",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude 3.7 Sonnet",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-24,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-saba",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Saba",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-guard-3-8b",
+            ),
+        },
+        display_name: Some(
+            "Llama Guard 3 8B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-12,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o3-mini-high",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o3 Mini High",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-12,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.0-flash-001",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.0 Flash",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen-vl-plus",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen VL Plus",
+        ),
+        context_window: Some(
+            7500,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "aion-labs/aion-1.0",
+            ),
+        },
+        display_name: Some(
+            "AionLabs: Aion-1.0",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-04,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "aion-labs/aion-1.0-mini",
+            ),
+        },
+        display_name: Some(
+            "AionLabs: Aion-1.0-Mini",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-04,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "aion-labs/aion-rp-llama-3.1-8b",
+            ),
+        },
+        display_name: Some(
+            "AionLabs: Aion-RP 1.0 (8B)",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-04,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen-vl-max",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen VL Max",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen-turbo",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen-Turbo",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen2.5-vl-72b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen2.5 VL 72B Instruct",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen-plus",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen-Plus",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen-max",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen-Max ",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-02-01,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o3-mini",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o3 Mini",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-31,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-small-24b-instruct-2501",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral Small 3",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-r1-distill-qwen-32b",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: R1 Distill Qwen 32B",
+        ),
+        context_window: Some(
+            64000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-29,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-r1-distill-qwen-14b",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: R1 Distill Qwen 14B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-29,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "perplexity/sonar-reasoning",
+            ),
+        },
+        display_name: Some(
+            "Perplexity: Sonar Reasoning",
+        ),
+        context_window: Some(
+            127000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-29,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "perplexity/sonar",
+            ),
+        },
+        display_name: Some(
+            "Perplexity: Sonar",
+        ),
+        context_window: Some(
+            127072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-27,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-r1-distill-llama-70b",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: R1 Distill Llama 70B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-r1",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: R1",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-20,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "minimax/minimax-01",
+            ),
+        },
+        display_name: Some(
+            "MiniMax: MiniMax-01",
+        ),
+        context_window: Some(
+            1000192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-15,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "microsoft/phi-4",
+            ),
+        },
+        display_name: Some(
+            "Microsoft: Phi 4",
+        ),
+        context_window: Some(
+            16384,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "sao10k/l3.1-70b-hanami-x1",
+            ),
+        },
+        display_name: Some(
+            "Sao10K: Llama 3.1 70B Hanami x1",
+        ),
+        context_window: Some(
+            16000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-chat",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek V3",
+        ),
+        context_window: Some(
+            163840,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-12-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "sao10k/l3.3-euryale-70b",
+            ),
+        },
+        display_name: Some(
+            "Sao10K: Llama 3.3 Euryale 70B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-12-18,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o1",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o1",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-12-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "cohere/command-r7b-12-2024",
+            ),
+        },
+        display_name: Some(
+            "Cohere: Command R7B (12-2024)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-12-14,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.0-flash-exp:free",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.0 Flash Experimental (free)",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-12-11,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3.3-70b-instruct:free",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3.3 70B Instruct (free)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-12-06,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3.3-70b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3.3 70B Instruct",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-12-06,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "amazon/nova-lite-v1",
+            ),
+        },
+        display_name: Some(
+            "Amazon: Nova Lite 1.0",
+        ),
+        context_window: Some(
+            300000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-12-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "amazon/nova-micro-v1",
+            ),
+        },
+        display_name: Some(
+            "Amazon: Nova Micro 1.0",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-12-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "amazon/nova-pro-v1",
+            ),
+        },
+        display_name: Some(
+            "Amazon: Nova Pro 1.0",
+        ),
+        context_window: Some(
+            300000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-12-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4o-2024-11-20",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4o (2024-11-20)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-11-20,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-large-2411",
+            ),
+        },
+        display_name: Some(
+            "Mistral Large 2411",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-11-19,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-large-2407",
+            ),
+        },
+        display_name: Some(
+            "Mistral Large 2407",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-11-19,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/pixtral-large-2411",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Pixtral Large 2411",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-11-19,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen-2.5-coder-32b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen2.5 Coder 32B Instruct",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-11-11,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "raifle/sorcererlm-8x22b",
+            ),
+        },
+        display_name: Some(
+            "SorcererLM 8x22B",
+        ),
+        context_window: Some(
+            16000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-11-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "thedrummer/unslopnemo-12b",
+            ),
+        },
+        display_name: Some(
+            "TheDrummer: UnslopNemo 12B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-11-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-3.5-haiku",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude 3.5 Haiku",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-11-04,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-3.5-haiku-20241022",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude 3.5 Haiku (2024-10-22)",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-11-04,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-3.5-sonnet",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude 3.5 Sonnet",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-10-22,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthracite-org/magnum-v4-72b",
+            ),
+        },
+        display_name: Some(
+            "Magnum v4 72B",
+        ),
+        context_window: Some(
+            16384,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-10-22,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/ministral-3b",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Ministral 3B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-10-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/ministral-8b",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Ministral 8B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-10-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen-2.5-7b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen2.5 7B Instruct",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-10-16,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nvidia/llama-3.1-nemotron-70b-instruct",
+            ),
+        },
+        display_name: Some(
+            "NVIDIA: Llama 3.1 Nemotron 70B Instruct",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-10-15,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "inflection/inflection-3-pi",
+            ),
+        },
+        display_name: Some(
+            "Inflection: Inflection 3 Pi",
+        ),
+        context_window: Some(
+            8000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-10-11,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "inflection/inflection-3-productivity",
+            ),
+        },
+        display_name: Some(
+            "Inflection: Inflection 3 Productivity",
+        ),
+        context_window: Some(
+            8000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-10-11,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "thedrummer/rocinante-12b",
+            ),
+        },
+        display_name: Some(
+            "TheDrummer: Rocinante 12B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-09-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3.2-11b-vision-instruct",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3.2 11B Vision Instruct",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-09-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3.2-3b-instruct:free",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3.2 3B Instruct (free)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-09-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3.2-3b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3.2 3B Instruct",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-09-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3.2-1b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3.2 1B Instruct",
+        ),
+        context_window: Some(
+            60000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-09-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3.2-90b-vision-instruct",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3.2 90B Vision Instruct",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-09-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen-2.5-72b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen2.5 72B Instruct",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-09-19,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "neversleep/llama-3.1-lumimaid-8b",
+            ),
+        },
+        display_name: Some(
+            "NeverSleep: Lumimaid v0.2 8B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-09-15,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/pixtral-12b",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Pixtral 12B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-09-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "cohere/command-r-plus-08-2024",
+            ),
+        },
+        display_name: Some(
+            "Cohere: Command R+ (08-2024)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "cohere/command-r-08-2024",
+            ),
+        },
+        display_name: Some(
+            "Cohere: Command R (08-2024)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-30,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen-2.5-vl-7b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen2.5-VL 7B Instruct",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "sao10k/l3.1-euryale-70b",
+            ),
+        },
+        display_name: Some(
+            "Sao10K: Llama 3.1 Euryale 70B v2.2",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "microsoft/phi-3.5-mini-128k-instruct",
+            ),
+        },
+        display_name: Some(
+            "Microsoft: Phi-3.5 Mini 128K Instruct",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-21,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nousresearch/hermes-3-llama-3.1-70b",
+            ),
+        },
+        display_name: Some(
+            "Nous: Hermes 3 70B Instruct",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-18,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nousresearch/hermes-3-llama-3.1-405b:free",
+            ),
+        },
+        display_name: Some(
+            "Nous: Hermes 3 405B Instruct (free)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-16,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nousresearch/hermes-3-llama-3.1-405b",
+            ),
+        },
+        display_name: Some(
+            "Nous: Hermes 3 405B Instruct",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-16,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/chatgpt-4o-latest",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: ChatGPT-4o",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-14,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "sao10k/l3-lunaris-8b",
+            ),
+        },
+        display_name: Some(
+            "Sao10K: Llama 3 8B Lunaris",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4o-2024-08-06",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4o (2024-08-06)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-06,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3.1-405b",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3.1 405B (base)",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-08-02,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3.1-405b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3.1 405B Instruct",
+        ),
+        context_window: Some(
+            130815,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-07-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3.1-70b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3.1 70B Instruct",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-07-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3.1-8b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3.1 8B Instruct",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-07-23,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-nemo",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral Nemo",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-07-19,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4o-mini-2024-07-18",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4o-mini (2024-07-18)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-07-18,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4o-mini",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4o-mini",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-07-18,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemma-2-27b-it",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemma 2 27B",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-07-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemma-2-9b-it",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemma 2 9B",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-06-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "sao10k/l3-euryale-70b",
+            ),
+        },
+        display_name: Some(
+            "Sao10k: Llama 3 Euryale 70B v2.1",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-06-18,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nousresearch/hermes-2-pro-llama-3-8b",
+            ),
+        },
+        display_name: Some(
+            "NousResearch: Hermes 2 Pro - Llama-3 8B",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-05-27,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-7b-instruct:free",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral 7B Instruct (free)",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-05-27,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-7b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral 7B Instruct",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-05-27,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-7b-instruct-v0.3",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral 7B Instruct v0.3",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-05-27,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "microsoft/phi-3-mini-128k-instruct",
+            ),
+        },
+        display_name: Some(
+            "Microsoft: Phi-3 Mini 128K Instruct",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-05-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "microsoft/phi-3-medium-128k-instruct",
+            ),
+        },
+        display_name: Some(
+            "Microsoft: Phi-3 Medium 128K Instruct",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-05-24,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4o-2024-05-13",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4o (2024-05-13)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-05-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-guard-2-8b",
+            ),
+        },
+        display_name: Some(
+            "Meta: LlamaGuard 2 8B",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-05-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4o",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4o",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-05-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4o:extended",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4o (extended)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-05-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3-8b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3 8B Instruct",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-04-18,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta-llama/llama-3-70b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Meta: Llama 3 70B Instruct",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-04-18,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mixtral-8x22b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mixtral 8x22B Instruct",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-04-17,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "microsoft/wizardlm-2-8x22b",
+            ),
+        },
+        display_name: Some(
+            "WizardLM-2 8x22B",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-04-16,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4-turbo",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4 Turbo",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-04-09,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-3-haiku",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude 3 Haiku",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-03-13,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-3-opus",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude 3 Opus",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-03-05,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-large",
+            ),
+        },
+        display_name: Some(
+            "Mistral Large",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-02-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-3.5-turbo-0613",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-3.5 Turbo (older v0613)",
+        ),
+        context_window: Some(
+            4095,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-01-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4-turbo-preview",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4 Turbo Preview",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-01-25,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-tiny",
+            ),
+        },
+        display_name: Some(
+            "Mistral Tiny",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-01-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-7b-instruct-v0.2",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral 7B Instruct v0.2",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-12-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mixtral-8x7b-instruct",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mixtral 8x7B Instruct",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-12-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "neversleep/noromaid-20b",
+            ),
+        },
+        display_name: Some(
+            "Noromaid 20B",
+        ),
+        context_window: Some(
+            4096,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-11-26,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "alpindale/goliath-120b",
+            ),
+        },
+        display_name: Some(
+            "Goliath 120B",
+        ),
+        context_window: Some(
+            6144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-11-10,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openrouter/auto",
+            ),
+        },
+        display_name: Some(
+            "Auto Router",
+        ),
+        context_window: Some(
+            2000000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-11-08,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4-1106-preview",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4 Turbo (older v1106)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-11-06,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-3.5-turbo-instruct",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-3.5 Turbo Instruct",
+        ),
+        context_window: Some(
+            4095,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-09-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/mistral-7b-instruct-v0.1",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Mistral 7B Instruct v0.1",
+        ),
+        context_window: Some(
+            2824,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-09-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-3.5-turbo-16k",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-3.5 Turbo 16k",
+        ),
+        context_window: Some(
+            16385,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-08-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mancer/weaver",
+            ),
+        },
+        display_name: Some(
+            "Mancer: Weaver (alpha)",
+        ),
+        context_window: Some(
+            8000,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-08-02,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "undi95/remm-slerp-l2-13b",
+            ),
+        },
+        display_name: Some(
+            "ReMM SLERP 13B",
+        ),
+        context_window: Some(
+            6144,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-07-22,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "gryphe/mythomax-l2-13b",
+            ),
+        },
+        display_name: Some(
+            "MythoMax 13B",
+        ),
+        context_window: Some(
+            4096,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-07-02,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-3.5-turbo",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-3.5 Turbo",
+        ),
+        context_window: Some(
+            16385,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-05-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4-0314",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4 (older v0314)",
+        ),
+        context_window: Some(
+            8191,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-05-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4",
+        ),
+        context_window: Some(
+            8191,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-05-28,
+        ),
+        deprecated: None,
+        features: [],
+    },
+]

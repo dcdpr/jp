@@ -1,0 +1,77 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_0573bac7590c482b0169381b48675481a197ade5439b99de7c"),
+                    "openai_encrypted_content": String("gAAAAABpOBtKEXtRhd9rPGJRQKstAKsMt_FuB4R3pmqRcsmanw7b6t0H3ctUagv-9vWKqPfQPzRbSmNofc1IGxe58bVAH2Zz6ktHsvuF0MbQVu7_Vf0qzLjedlVPcnK8Kjl94IBcAXapFOy0QNTxw_0YZLpaFLSMjDJxgqdCvIfBV92StDIYVaiat938sJcrZ2HFtb-JDSD2AaWMRxe-vGPkn6YqwUOn9HMZUYi-RyxMdJ-ZB4ye8FaUEpS1OeECchgWtRmGTvtxhIbY2pyBWyQk1yAazUCN-6SAD58xHFa4QxTKbgFHR3nYoS48hIJyehjUp6Fir42y3Xw6CfkvY2pEgdoxCiPX8hL_zssPOECCbYUVlnFTwGXbOsqgMqE6fFQgpKIiJyg7LV56cyfDrFK9Oo5FpmTX-ySosKgSBeRzSRvP4n-QR4Z5Tj-tTNvTI2Jh5K5w5umkzMpxUpSj55rjjXKK8XPF4X2KFnx7nIhI4lckTTADFWEkGEQwGa-9RcOx1jleEMwhCAq_ngZpmJp1nNtR_xOtHwUfZyeoFEnhc7-0DUc8bbwDQN23l6OTA16sNgfyeTW1QjB7kd1CuQxerw6CUTiJymcHH6xp-7KkBt3VHVEMwqw5j4dzp363M7zN43cVR4xBU03nEO811rU-CpYlPrO-GCpj4rVf6I1uwCfEqT6ZpCuVUXKDLpdmp919PRt2Uq_5NOmU47IrA-ATAQsJQ7oG9tHLMaCrhWfy7ULY1p9Xs8fjmCVtJONOZjdbiuOTm_bE6pEc24CjDNHRJQQPmeKFY1oit8i1IrP9obD3D6bbaQnQ9OpcMwPowF45uesGwBtr0xli1Gr8xGBSU04r3n179Ur475h55mJhm_F4x3v98shuAUYLriRKyIyR3I3RcsjNRk1_clpSsMTDwKYHiTYFdoRY6MA72y0VGpobYqRbRvQoyoGWB8DoFZRLn1UWcl8gOWcKqU_qLY8N6hSnI__jfrxwyIN3mhzaeH2nspuMsyvG_4yAkLeZs1CvQlvoSfwUlm3WQgRU2SofQp3y531DAzaqyfSbZdyqMlGmXFgogfPEt1dHKriNjUnw5K-K_Q83wPyeDGFCH97TgQY9y_gW_Uo2T95nYz3GVPcNBXcwZcw4DpiDawznAzTV1IG1HAEdb8IR0JUzsT63D7dxNq7jVu26NVmu_ZzdC9vaUcmE7cg8_k6-_3pW6xok63iAtQdgly7MdjRtbrNggziDP-q_6s1mytPZ3PmrUa0HpqwvF7bE7LxBFlGYcDtHm71pKHgghgfPg67wgSp16a_NEriTykm-Tj2AIXf5e-tpDLJbf6EGz1u4OzgdF8ncVp4RVXL4Lm3dUgWMXVGkMTtZ-q01j-6zaB0ZYhm76MSITKoOxXdNaPWuXodoAoC4i5jbZ23cNaJOJFamPIlif7ET7UZGhynHoW45-JdHBg3xW_n4boaCGmgSvY-3_6GBZ_hn2lXsoQCMJeWRkl2hkyVLHRx-OAoVaU5-IYaZszIDkLWZ-ZQHcJbxoZQUjck61PVSamst9OlIg35GApHEUYDaXHQI3-7cKQEy6e5CpniGjUcSlOAnqxdVm9Gt_WyLhbRn_2G9b5sFsJBGmnJQhcB5s2dKI1gZY_EWtk3WjVFUgoMLSRCqstLB3MT3B6oMjT97cK96NmthtDJ-L6IvzU_zmdt3yTWoTMnwyR7lX_kIWPoh3ZsmP51acnSwbuWg4jO772WxKtd4nXqbIyAnc3_EUBruvySLDUgHvOjlU2IsVWJHcLqmvfGf6aj7plJ56unEHECvYGesgFlHeJp_uqJILqA2BTsUJ-NhtwnItCeC4vfHLb-ZLFxShbQjJpF5dP6o2ZQbGVUNqEZyh5hbIdfnkc5qgLPXyXNWnF3WOLXLLxPFXFeeoYtubJGIk36YvPmnnXGSSAs46w2tO0NjZr41gj0cqA=="),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_mmaOnMJ3M2jgvCy4t9pOW1Jj",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("test"),
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Tool ran successfully. Output: \"working!\"",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_0573bac7590c482b0169381b4bf5c081a1a346e7aaf9f93991"),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

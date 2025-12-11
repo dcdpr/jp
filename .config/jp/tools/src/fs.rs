@@ -55,6 +55,7 @@ pub async fn run(ctx: Context, t: Tool) -> std::result::Result<Outcome, Error> {
                 t.req("path")?,
                 t.req("string_to_replace")?,
                 t.req("new_string")?,
+                t.req("replace_using_regex")?,
             )
             .await
         }

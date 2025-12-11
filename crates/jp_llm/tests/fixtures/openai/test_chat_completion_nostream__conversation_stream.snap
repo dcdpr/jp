@@ -1,0 +1,152 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:50:38.393341",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "openai",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:50:34.832464",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Test message"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Acknowledging test messages**\n\nThe user wrote \"Test message,\" so they probably want acknowledgment. I'll keep my response concise and friendly. It's a great opportunity to offer help and ask what they’d like to test. Maybe I could provide examples of my capabilities and see if there's something specific they want to try out? I just want to ensure they're getting what they need! Let’s make this interaction as smooth as possible.",
+    "metadata": {
+      "openai_item_id": "cnNfMDUzMTAwYmVjZTc0MzgzODAxNjkzODFiMWI1M2FjODE5ZTkyYjM0Yjg1NWU1ZDIxOGM=",
+      "openai_encrypted_content": "Z0FBQUFBQnBPQnNlbTFSbFUtVlJVTEphYjFPaWlMQjFjbXBCTHByV3ozYXgwbGtjQi10MjFJbDVyWGpSLUdERGpGRU5LdG50UzM5R25lbGlJaDJ6U0l1Q01iWTkzY21WckhBUENON1dYM2U0NDVRclhLWnpydDB4MHJfcktPek12OC02dVpueENkSG1YakZQUjVCZEVabjhFdmdaNTZvUE8xN251RVJoUVB3OXNlUUtCUW5nREVDQWM1UXVOR3VlWkZSMmVYYVY4VERla0FGNF85TWF2cjFBRUNISFZJYlV5a3FpYVVWNmtMVmYyME5OeWtXMGxIMkRRRklUTl84dHRhRnFMZlR2LW1OSXloMk4yWmFDU3VTU0dILWhOMGFONk01QjFvZExqTjNTOE11N0NxRXRkZ3ZYSEo0bjZnZXVTMlo3RzVhVDZ0Y2hCeUxPVzRVRUpjWFZUQTZPRkJjOFg3M0k5SFFZb1pXQzZ4ZWowS3pRY3dyYUJ1b2d0dHlrQ0JWWEVLTXJiZUs2a20tR2E3R0ItM0RUZlhvQy1lUl9ZbU5JTkExWTJWN01jaVNEQkpzcnJfNVNBWWFrTVY3OG1Tc2NwT3lRN2laTlJLbmlxOVpKcVJXQndxR3NWcDd1eWNnSHBXSjcwdm5XcmxtWi1sX3lBbTdnbVRBN1d2ZmRTM0RXRHhvQ0sxSGgwUEJBMEJia204VURUTzZQeDY4Ui1ZbmxlLUpHTUg0UlYwdjh0YmJYX2tJUUhKY1FpSUE5N2FpRXk0dVN5TE9BZUt0Q1V5M2xfQTQyVkE4TEtnVnBiT2JJMkZsQ0pSd1lhQW1CZEFETTdIbFlTZnd5TDBHWGJoVkdtNmw4dm1sak9lWWxfbTI5RDdUV3RQYkhUaTVySXNraWlRakRucFN4TFE5UFh4Q0pqeGNOZTJfMWpZUUlRYU03aENKOXJsNTJCQmNVUVB6YkR2UDdCcHFoblRBMHRuOUNEb0RvNHJ0SnNJdzBfOVdWd0lXMVREVlROYjhQSTBldi1DQzQ5bFdzUGhrT3VVd1ZndWtTT0hHRjR0YmlGMjhpVXVCTWFWRVYxVzRGekN0ZGgyY2FScGRzN2g1OUh0cnJnZk9lN0FGLTVsVURlQ3czbkNYVnlBNFBEUkhwS3ZubzhPQlZHNng2WUdoY21KWTZZZWpzTjNycnVreUoyc0tZRUhETW1XZktXMUVHMEVBZmw0RUxGbjVnS2xxNGJmOHZ0M0hsZ0YxVWt2NW5qV09UMlZ3TWtSazlXR01fdHgtMGx1QXFGdm9MMVFqV09HX1E4WmVQYWZrUkYxSk1RcVg5LWMwa3JkdzBKbUFyS0ktM2RONGR1SWx4NkdVMGtSSjh5X1FaMXd1WW95azZLUDMwalFac2hzLXlxTnpTWFFaT3hjSzd0YklxNXBReHJJSkp0dTJUVk5HSFFjM2g0eE01dVJDTHg2dVl2dG9WSVFkTjU1al9MSFFpWjFWTzJ6WkhkZkJzZm13VmhRTG1XVTM5WnNwdjdIcVg2ck40alEweTRMQ0FKRDB3"
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Received your test message — everything looks working on my end. How would you like to proceed? Options I can help with:\n- Ask a question or get information\n- Draft or edit text (emails, summaries, code)\n- Run through a troubleshooting or interactive test\n- Work with an image (upload one)\nTell me what you'd like to test next.",
+    "metadata": {
+      "openai_item_id": "bXNnXzA1MzEwMGJlY2U3NDM4MzgwMTY5MzgxYjFlM2FkNDgxOWU4NDZkOTlkOTVhMjA2M2Y1"
+    }
+  }
+]

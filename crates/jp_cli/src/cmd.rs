@@ -380,6 +380,7 @@ impl_from_error!(jp_config::Error, "Config error");
 impl_from_error!(jp_config::fs::ConfigLoaderError, "Config loader error");
 impl_from_error!(jp_conversation::Error, "Conversation error");
 impl_from_error!(jp_llm::ToolError, "Tool error");
+impl_from_error!(jp_llm::AggregationError, "Tool call aggregation error");
 impl_from_error!(jp_mcp::Error, "MCP error");
 impl_from_error!(minijinja::Error, "Template error");
 impl_from_error!(quick_xml::SeError, "XML serialization error");
@@ -411,6 +412,7 @@ impl From<jp_llm::Error> for Error {
             Url(error) => return error.into(),
             ModelIdConfig(error) => return error.into(),
             ModelId(error) => return error.into(),
+            ToolCallRequestAggregator(error) => return error.into(),
             MissingEnv(variable) => [
                 ("message", "Missing environment variable".into()),
                 ("variable", variable),

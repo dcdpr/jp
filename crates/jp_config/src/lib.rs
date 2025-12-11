@@ -53,7 +53,7 @@ use std::sync::Arc;
 pub use error::Error;
 pub use partial::ToPartial;
 use relative_path::RelativePathBuf;
-pub use schematic::{Config, PartialConfig};
+pub use schematic::{Config, ConfigError, PartialConfig};
 use serde_json::Value;
 
 use crate::{
@@ -78,7 +78,7 @@ pub const ENV_PREFIX: &str = "JP_CFG_";
 type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 
 /// The global configuration for Jean Pierre.
-#[derive(Debug, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct AppConfig {
     /// Inherit from a local ancestor or global configuration file.
@@ -366,10 +366,17 @@ impl From<Arc<AppConfig>> for PartialAppConfig {
     }
 }
 
+impl From<Arc<Self>> for AppConfig {
+    fn from(config: Arc<Self>) -> Self {
+        Arc::unwrap_or_clone(config)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
     use schematic::PartialConfig as _;
+    use test_log::test;
 
     use super::*;
     use crate::assignment::{KvAssignmentError, KvAssignmentErrorKind};

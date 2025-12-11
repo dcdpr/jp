@@ -48,6 +48,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[test_log::test]
     async fn test_cargo_expand() {
         let dir = tempfile::tempdir().unwrap();
         let ctx = Context {

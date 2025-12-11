@@ -10,7 +10,7 @@ use crate::{
 };
 
 /// Code style configuration.
-#[derive(Debug, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct CodeConfig {
     /// Theme to use for code blocks.

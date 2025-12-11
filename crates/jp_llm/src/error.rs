@@ -1,3 +1,5 @@
+use crate::stream::aggregator::tool_call_request::AggregationError;
+
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
@@ -72,6 +74,9 @@ pub enum Error {
 
     #[error(transparent)]
     ModelId(#[from] jp_config::model::id::ModelIdError),
+
+    #[error(transparent)]
+    ToolCallRequestAggregator(#[from] AggregationError),
 }
 
 impl From<gemini_client_rs::GeminiError> for Error {
@@ -189,6 +194,12 @@ pub enum ToolError {
         /// Unknown arguments that were provided.
         unknown: Vec<String>,
     },
+}
+
+impl From<jp_conversation::StreamError> for Error {
+    fn from(error: jp_conversation::StreamError) -> Self {
+        Self::Conversation(error.into())
+    }
 }
 
 #[cfg(test)]

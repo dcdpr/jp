@@ -15,7 +15,7 @@ use crate::{
 };
 
 /// Reasoning configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(serde(untagged))]
 pub enum AttachmentConfig {
     /// A url-based attachment.

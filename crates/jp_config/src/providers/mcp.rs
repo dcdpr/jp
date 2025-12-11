@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// MCP provider configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case", serde(tag = "type"))]
 pub enum McpProviderConfig {
     /// Standard input/output transport.
@@ -50,7 +50,7 @@ impl ToPartial for McpProviderConfig {
 }
 
 /// Standard input/output transport.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct StdioConfig {
     /// The command to run.
@@ -98,7 +98,7 @@ impl ToPartial for StdioConfig {
 }
 
 /// The checksum for the MCP server binary.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ChecksumConfig {
     /// The algorithm to use for the checksum.

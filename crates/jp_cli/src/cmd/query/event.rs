@@ -15,9 +15,9 @@ use jp_config::{
 };
 use jp_conversation::{
     self,
-    event::{ToolCallRequest, ToolCallResponse},
+    event::{ChatResponse, ToolCallRequest, ToolCallResponse},
 };
-use jp_llm::{CompletionChunk, ToolError, tool::ToolDefinition};
+use jp_llm::{ToolError, tool::ToolDefinition};
 use jp_term::osc::hyperlink;
 use jp_tool::{AnswerType, Question};
 use serde_json::Value;
@@ -37,22 +37,22 @@ impl StreamEventHandler {
     pub(super) fn handle_chat_chunk(
         &mut self,
         reasoning_display: ReasoningDisplayConfig,
-        chunk: CompletionChunk,
+        chunk: ChatResponse,
     ) -> Option<String> {
         match chunk {
-            CompletionChunk::Reasoning(ref data) if !data.is_empty() => {
+            ChatResponse::Reasoning { ref reasoning } if !reasoning.is_empty() => {
                 let mut display = match reasoning_display {
                     ReasoningDisplayConfig::Summary => todo!(),
                     ReasoningDisplayConfig::Static if self.reasoning_tokens.is_empty() => {
                         Some("_reasoning..._".to_owned())
                     }
-                    ReasoningDisplayConfig::Full => Some(data.clone()),
+                    ReasoningDisplayConfig::Full => Some(reasoning.clone()),
                     ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => {
                         let remaining =
                             characters.saturating_sub(self.reasoning_tokens.chars().count());
 
                         if remaining > 0 {
-                            let mut data: String = data.chars().take(remaining).collect();
+                            let mut data: String = reasoning.chars().take(remaining).collect();
                             if data.chars().count() == remaining {
                                 data.push_str("...");
                             }
@@ -77,23 +77,23 @@ impl StreamEventHandler {
                     *v = v.replace('\n', "\n> ");
                 }
 
-                self.reasoning_tokens.push_str(data);
+                self.reasoning_tokens.push_str(reasoning);
                 display
             }
 
-            CompletionChunk::Content(mut data) if !data.is_empty() => {
+            ChatResponse::Message { mut message } if !message.is_empty() => {
                 let reasoning_ended =
                     !self.reasoning_tokens.is_empty() && self.content_tokens.is_empty();
 
-                self.content_tokens.push_str(&data);
+                self.content_tokens.push_str(&message);
 
                 // If the response includes reasoning, we add two newlines
                 // after the reasoning, but before the content.
                 if !matches!(reasoning_display, ReasoningDisplayConfig::Hidden) && reasoning_ended {
-                    data = format!("\n---\n\n{data}");
+                    message = format!("\n---\n\n{message}");
                 }
 
-                Some(data)
+                Some(message)
             }
             _ => None,
         }
@@ -381,7 +381,7 @@ mod tests {
     fn test_stream_event_handler_handle_chat_chunk() {
         struct TestCase {
             handler: StreamEventHandler,
-            chunk: CompletionChunk,
+            chunk: ChatResponse,
             show_reasoning: bool,
             output: Option<String>,
             mutated_handler: StreamEventHandler,
@@ -390,21 +390,21 @@ mod tests {
         let cases = IndexMap::from([
             ("empty content chunk", TestCase {
                 handler: StreamEventHandler::default(),
-                chunk: CompletionChunk::Content(String::new()),
+                chunk: ChatResponse::message(""),
                 show_reasoning: true,
                 output: None,
                 mutated_handler: StreamEventHandler::default(),
             }),
             ("empty reasoning chunk", TestCase {
                 handler: StreamEventHandler::default(),
-                chunk: CompletionChunk::Reasoning(String::new()),
+                chunk: ChatResponse::reasoning(""),
                 show_reasoning: true,
                 output: None,
                 mutated_handler: StreamEventHandler::default(),
             }),
             ("reasoning chunk with show_reasoning=true", TestCase {
                 handler: StreamEventHandler::default(),
-                chunk: CompletionChunk::Reasoning("Let me think...".into()),
+                chunk: ChatResponse::reasoning("Let me think..."),
                 show_reasoning: true,
                 output: Some("> Let me think...".into()),
                 mutated_handler: StreamEventHandler {
@@ -414,7 +414,7 @@ mod tests {
             }),
             ("reasoning chunk with show_reasoning=false", TestCase {
                 handler: StreamEventHandler::default(),
-                chunk: CompletionChunk::Reasoning("Let me think...".into()),
+                chunk: ChatResponse::reasoning("Let me think..."),
                 show_reasoning: false,
                 output: None,
                 mutated_handler: StreamEventHandler {
@@ -427,7 +427,7 @@ mod tests {
                     reasoning_tokens: "I reasoned".into(),
                     ..Default::default()
                 },
-                chunk: CompletionChunk::Content("Answer".into()),
+                chunk: ChatResponse::message("Answer"),
                 show_reasoning: true,
                 output: Some("\n---\n\nAnswer".into()),
                 mutated_handler: StreamEventHandler {
@@ -441,7 +441,7 @@ mod tests {
                     reasoning_tokens: "I reasoned".into(),
                     ..Default::default()
                 },
-                chunk: CompletionChunk::Content("Answer".into()),
+                chunk: ChatResponse::message("Answer"),
                 show_reasoning: false,
                 output: Some("Answer".into()),
                 mutated_handler: StreamEventHandler {
@@ -455,7 +455,7 @@ mod tests {
                     content_tokens: "Hello".into(),
                     ..Default::default()
                 },
-                chunk: CompletionChunk::Content(" world".into()),
+                chunk: ChatResponse::message(" world"),
                 show_reasoning: false,
                 output: Some(" world".into()),
                 mutated_handler: StreamEventHandler {

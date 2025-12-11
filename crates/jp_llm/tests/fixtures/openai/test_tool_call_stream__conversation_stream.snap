@@ -1,0 +1,156 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:51:29.142384",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "openai",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Testing tool call"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "",
+    "metadata": {
+      "openai_item_id": "cnNfMDMxMDE4YjhlYWM2ZTc4NjAxNjkzODFiNGUzZjFjODE5ZDg2NzE4ZWYyOTFjMzdiZGY=",
+      "openai_encrypted_content": "Z0FBQUFBQnBPQnRRSDZxNm9vWjhaWHliazgxeTBVUGpYNnlqYldYTHV3NV9Xa3NMQnhQWHh2N2Fxek5xcWN0alpzdlZkVk9Eb1lWeDZhMERMSHRIMERacXBaTHRsTnYyWlNkMDBqaEsxd3FCOXhrYXEyMFVVejRCOGxFUWp5NTh1bU1fY0Y0SmNMS2hNa3F5aG9WY0tlTkpXcDNFbnY4eW1UZGphdnhJYXU2QW5aTndyU1ZLbG5WQ05fVFJPc0ZrbTBsWUZDNHAwMkc2TlNmMEJTeGg4c0JCT3ZVQkFwZ3Z2WjhoV28zMWpyNU5yeDJOeFZ2dUxBQlN4b2IxQXFXc0VNZElyekNsaFNmX3pDd0s2UTJFVlE3a2tmYnBPY2xpVjlBV0luVW4tYnQ5ODhyYXZhajQ2czFRZ3FVd3czWDBHbVpBS0VmYkZkMmpJYk9hQm1FREx6S0x4NjE0dkpJRDJtY1dWSDBWaWNxNUNGekJELTRQdk1GSXZCMzZ5Y2RrTHE0UXZrOXVvcUpjRy0yRlpTdVktaWx4NlJUTy1NN1MwN2lNQ2ZCVndyWEE1blk2Y1l0TUhjdEs0MV8zUE5rUnV3Y29US2pNQVh1cXJHYTQyT291YzczTTZKM0pJamJRUzdublJVM0NJeUVLcmJjR1hZS1g0dEloUlM0bTJtX3NEeFJNSEZLTzdQM0FCMzZHWWpRNDdJS3FOMF9adkpnbHdsWXlYWjV6aTZSLTZzS2VuYmZtZzh5aFFDUXFmTmdseGo5NEVjNmsybG0wZ3ZObk5ITDRHM0lIMG1hdG1KVVpPRzZENGxjcnhmdTRxQXdOblJNbTc0MzdOVy1rcHBlYzhjQ2U5QWJYaURnN1dOVElSQ2FaMERUV0IxeGcxM28xV0FBQUJGd3JLYzJWYllqTXFMdmo3NFYyZkZmSUNKdVo1V2JUaDk4Ti15SG5lajJnSXMwRnNMSDl3TUFyVmZOU3lXRXBSWDVnTDFMdlF0VmxNcFdpbWwwbVVNVmo4Y0dVSWdiY183ZmpzVUsxOVlrUExpNDF2Y2ZoQ3VUNEtPczhaRktoY2pqZEFBWG83YVJDdjhiMmF5d24wRnU3V1pKZ1hiaUVpZ1k4T3RDb2NkZUxtbUl0SGtkRGwyakpGdG85aXhZMkE1T19qTXU1anZqVzZSUzZfcEFCdXl2MjlVSFJ1RWNOMFRvckNBc2lqY3cwemQyRkN5RU1NNko4QjctanFKT3NQZkozbi02UGF2d0JQY3VIWE1rckxqblpFeWtXUm9TaGJHYUhCYkx6RDRGUlBmdFdaVUxrNVEyZExNZFduNU1sbWhQdkN0Ymw4Vk1ocVAtaHQyLXpZM1Y0dW84V2djS3hZcEw3eDJtMHhKZHZkWGxEd25HUW5vZXVmNHVlS3hEN1hMMHNvQm1IRW9OUmVXcjBnTDQ4a0FVajIwWXNsSm5UX0F6RVA3MWhGbkxMakRLMDVoZ0NibzhLV0xGZmNEV0FtN3p5ellfU1pKSFdfWFBLbm91OVR6bDg2NTQtLTRvUkhFVUoyVWRtelBRVFNkVEJwaFBmU3FLRFI5TXFjZkFMVDhjOElTMHdNVjRqTEpaeGlqWWhwWURsLWIwbVVCenlObzNfTFJWXy1wY1FJdDJpZzktdDQ2QmtybFlOeTY3Y3RteVpaZzRWbTlsMXBNMWc5Q2I0dkNzdGJyQjdlU3Npa3gxb0lIMmFWOF9GQjdIald6TjBHU2t5ekwweEZJM3dybmV2ejBqYjlBU2NLbk8wbHFyNGNrVVY4NGNPSXlEMFZYOHdqSTNIdWtVVVVQZ0tUekU3ek01ZVBtOUlFQmo4aWN2U0loTjFjUmR3aE9Ic19JUF9QYXk1OVZyak1HX1NFTV9lZ0ttMkZTN1hxemVLakRReENXdTZOZk1uS1pDdzI3OG5xUUdJOWNaNXhUQWtYSzRWVmF2UDYteDBqZ1owMUVmY2h5b0lDTVhnVVljbllrbEJYb2doRlM4b3B4QlBRTWRGdExiWkJwemdyS3NWenhyZW55WFlpNldWWVE4VGdVdTZOTmRoZFFVNm1YeHUtQjNURS0zaWk1N096OVFoTjY4TEowT3otVVRmNm1qVFBZZXJxOGxPc2V0RUdmSHZSeXo4Nkcyd240SkhuVldaemR1THNTeWxMX2otRENLNFFER2tvODFxRloxcTZDcmJsTUQ1VXc3LWhUVTE0Y0YzZ0ZHUm4tX2tvWjRjSUVZbnJ3bDJabGhUSGFTY3I0NlM2Z1ZlYUNTbWh5YkhOY2VkeWV1Y1lRQWY3T1JoVTZJN2RDaDAxUGxBRWRmQjQ3Q1Vnd0lwUXlTYkdoMDI3ZkJzLU1RNktRaUZLRHpLZEpyWUVLSzBSREJ2RlNPSHlkbms5V1U3R1JfUGVUMElHSGt1NnRaVXE4b3hnWlcwZzFPZWpJYWpzakNVUm55UnY2X0lsOXc9"
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_request",
+    "id": "call_AdV4F0rQC8p6GKjEHYMBIE29",
+    "name": "run_me",
+    "arguments": {
+      "foo": "dGVzdA==",
+      "bar": [
+        "Zm9v",
+        "YmFy"
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_response",
+    "id": "call_AdV4F0rQC8p6GKjEHYMBIE29",
+    "content": "d29ya2luZyE=",
+    "is_error": false
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Tool responded: working!",
+    "metadata": {
+      "openai_item_id": "bXNnXzAzMTAxOGI4ZWFjNmU3ODYwMTY5MzgxYjUwZjdhYzgxOWRhYjZjYmZmZDBhMDk3MWIw"
+    }
+  }
+]

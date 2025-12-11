@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
 
@@ -149,6 +149,8 @@ pub struct NonStreamingMessage {
     pub content: Option<String>,
     pub reasoning: Option<String>,
     #[serde(default)]
+    pub reasoning_details: Vec<ReasoningDetails>,
+    #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
 }
 
@@ -171,7 +173,60 @@ pub struct StreamingDelta {
     pub content: Option<String>,
     pub reasoning: Option<String>,
     #[serde(default)]
+    pub reasoning_details: Vec<ReasoningDetails>,
+    #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReasoningDetails {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub format: Option<ReasoningDetailsFormat>,
+    #[serde(default)]
+    pub index: Option<usize>,
+    #[serde(flatten)]
+    pub kind: ReasoningDetailsKind,
+}
+
+mod strings {
+    crate::named_unit_variant!("openai-responses-v1", openai_responses_v1);
+    crate::named_unit_variant!("xai-responses-v1", xai_responses_v1);
+    crate::named_unit_variant!("anthropic-claude-v1", anthropic_claude_v1);
+    crate::named_unit_variant!("google-gemini-v1", google_gemini_v1);
+    crate::named_unit_variant!(unknown);
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ReasoningDetailsFormat {
+    #[serde(with = "strings::openai_responses_v1")]
+    OpenaiResponsesV1,
+    #[serde(with = "strings::xai_responses_v1")]
+    XaiResponsesV1,
+    #[serde(with = "strings::anthropic_claude_v1")]
+    AnthropicClaudeV1,
+    #[serde(with = "strings::google_gemini_v1")]
+    GoogleGeminiV1,
+    #[serde(with = "strings::unknown")]
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ReasoningDetailsKind {
+    #[serde(rename = "reasoning.summary")]
+    Summary { summary: String },
+
+    #[serde(rename = "reasoning.encrypted")]
+    Encrypted { data: String },
+
+    #[serde(rename = "reasoning.text")]
+    Text {
+        text: Option<String>,
+        signature: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
