@@ -2144,6 +2144,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "test-log",
  "thiserror 2.0.16",
  "time",
  "tokio",
