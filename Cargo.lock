@@ -2209,6 +2209,9 @@ dependencies = [
  "httpmock",
  "insta",
  "saphyr",
+ "serde",
+ "serde_json",
+ "test-log",
 ]
 
 [[package]]
@@ -3412,11 +3415,10 @@ dependencies = [
 [[package]]
 name = "saphyr-parser"
 version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fb771b59f6b1985d1406325ec28f97cfb14256abcec4fdfb37b36a1766d6af7"
+source = "git+https://github.com/JeanMertz/saphyr?branch=jean%2Ffix-valid-literal-block-scalar-check#13766aed0533b3f0848d120eabc90abfaa59ce51"
 dependencies = [
  "arraydeque",
- "hashlink",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
