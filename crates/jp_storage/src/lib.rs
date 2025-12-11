@@ -7,7 +7,7 @@ use std::{
 };
 
 pub use error::Error;
-use jp_conversation::{Conversation, ConversationId, ConversationsMetadata, message::Messages};
+use jp_conversation::{Conversation, ConversationId, ConversationStream, ConversationsMetadata};
 use jp_id::Id as _;
 use jp_tombmap::TombMap;
 use tracing::{trace, warn};
@@ -17,14 +17,14 @@ use crate::{
     value::{read_json, write_json},
 };
 
-type ConversationsAndMessages = (
+type ConversationsAndEvents = (
     TombMap<ConversationId, Conversation>,
-    TombMap<ConversationId, Messages>,
+    TombMap<ConversationId, ConversationStream>,
 );
 
 pub const DEFAULT_STORAGE_DIR: &str = ".jp";
 pub const METADATA_FILE: &str = "metadata.json";
-const MESSAGES_FILE: &str = "messages.json";
+const EVENTS_FILE: &str = "events.json";
 pub const CONVERSATIONS_DIR: &str = "conversations";
 
 #[derive(Debug)]
@@ -172,29 +172,28 @@ impl Storage {
 
     /// Loads all conversations and their associated messages, including user
     /// conversations.
-    pub fn load_conversations_and_messages(&self) -> Result<ConversationsAndMessages> {
-        let (mut conversations, mut messages) =
-            load_conversations_and_messages_from_dir(&self.root)?;
+    pub fn load_conversations_and_events(&self) -> Result<ConversationsAndEvents> {
+        let (mut conversations, mut events) = load_conversations_and_events_from_dir(&self.root)?;
 
         if let Some(user) = self.user.as_ref() {
-            let (mut user_conversations, user_messages) =
-                load_conversations_and_messages_from_dir(user)?;
+            let (mut user_conversations, user_events) =
+                load_conversations_and_events_from_dir(user)?;
 
             for (_, conversation) in user_conversations.iter_mut_untracked() {
                 conversation.user = true;
             }
 
             conversations.extend(user_conversations);
-            messages.extend(user_messages);
+            events.extend(user_events);
         }
 
-        Ok((conversations, messages))
+        Ok((conversations, events))
     }
 
-    pub fn persist_conversations_and_messages(
+    pub fn persist_conversations_and_events(
         &mut self,
         conversations: &TombMap<ConversationId, Conversation>,
-        messages: &TombMap<ConversationId, Messages>,
+        events: &TombMap<ConversationId, ConversationStream>,
         active_conversation_id: &ConversationId,
         active_conversation: &Conversation,
     ) -> Result<()> {
@@ -217,7 +216,7 @@ impl Storage {
             .chain(iter::once((active_conversation_id, active_conversation)));
 
         for (id, conversation) in all_conversations {
-            let dir_name = id.to_dirname(conversation.title.as_deref())?;
+            let dir_name = id.to_dirname(conversation.title.as_deref());
             let conv_dir = if conversation.user {
                 user_conversations_dir.join(dir_name)
             } else {
@@ -237,11 +236,11 @@ impl Storage {
             let meta_path = conv_dir.join(METADATA_FILE);
             write_json(&meta_path, conversation)?;
 
-            let messages = messages
-                .get(id)
-                .map_or_else(Messages::default, Messages::clone);
-            let messages_path = conv_dir.join(MESSAGES_FILE);
-            write_json(&messages_path, &messages)?;
+            let events_path = conv_dir.join(EVENTS_FILE);
+            match events.get(id) {
+                Some(stream) => write_json(&events_path, stream)?,
+                None => write_json(&events_path, &ConversationStream::default())?,
+            }
         }
 
         // Don't mark active conversation as removed.
@@ -291,12 +290,12 @@ impl Storage {
     }
 }
 
-fn load_conversations_and_messages_from_dir(path: &Path) -> Result<ConversationsAndMessages> {
+fn load_conversations_and_events_from_dir(path: &Path) -> Result<ConversationsAndEvents> {
     let conversations_path = path.join(CONVERSATIONS_DIR);
     trace!(path = %conversations_path.display(), "Loading conversations.");
 
     let mut conversations = TombMap::new();
-    let mut messages = TombMap::new();
+    let mut events = TombMap::new();
 
     for entry in fs::read_dir(&conversations_path).ok().into_iter().flatten() {
         let path = entry?.path();
@@ -334,19 +333,18 @@ fn load_conversations_and_messages_from_dir(path: &Path) -> Result<Conversations
             }
         };
 
-        let messages_path = path.join(MESSAGES_FILE);
-        match read_json::<Messages>(&messages_path) {
-            Ok(data) => {
-                messages.insert(conversation_id, data);
+        let events_path = path.join(EVENTS_FILE);
+        match read_json::<ConversationStream>(&events_path) {
+            Ok(stream) => {
+                events.insert(conversation_id, stream);
             }
             Err(error) => {
-                let data = fs::read_to_string(&messages_path).unwrap_or_default();
-                warn!(%error, ?messages_path, data, "Failed to load messages. Skipping.");
+                warn!(%error, ?events_path, "Failed to load event stream. Skipping.");
             }
         }
     }
 
-    Ok((conversations, messages))
+    Ok((conversations, events))
 }
 
 fn remove_unused_conversation_dirs(
@@ -358,7 +356,7 @@ fn remove_unused_conversation_dirs(
     // Gather all possible conversation directory names
     let mut dirs = vec![];
     for conversations_dir in &[workspace_conversations_dir, user_conversations_dir] {
-        let pat = id.to_dirname(None)?;
+        let pat = id.to_dirname(None);
         dirs.push(conversations_dir.join(&pat));
         for entry in fs::read_dir(conversations_dir).ok().into_iter().flatten() {
             let path = entry?.path();
@@ -504,25 +502,24 @@ mod tests {
     #[test]
     fn test_conversation_dir_name_generation() {
         let id = ConversationId::from_str("jp-c17457886043-otvo8").unwrap();
-        assert_eq!(id.to_dirname(None).unwrap(), "17457886043");
+        assert_eq!(id.to_dirname(None), "17457886043");
         assert_eq!(
-            id.to_dirname(Some("Simple Title")).unwrap(),
+            id.to_dirname(Some("Simple Title")),
             "17457886043-simple-title"
         );
         assert_eq!(
-            id.to_dirname(Some(" Title with spaces & chars!")).unwrap(),
+            id.to_dirname(Some(" Title with spaces & chars!")),
             "17457886043-title-with-spaces---chars" // Sanitized
         );
         assert_eq!(
             id.to_dirname(Some(
                 "A very long title that definitely exceeds the sixty character limit for testing \
                  purposes"
-            ))
-            .unwrap(),
+            )),
             "17457886043-a-very-long-title-that-definitely-exceeds-the-sixty" // Truncated
         );
         assert_eq!(
-            id.to_dirname(Some("")).unwrap(), // Empty title
+            id.to_dirname(Some("")), // Empty title
             "17457886043"
         );
     }

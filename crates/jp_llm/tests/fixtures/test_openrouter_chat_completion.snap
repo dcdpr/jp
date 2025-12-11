@@ -6,8 +6,11 @@ Ok(
     Reply {
         provider: Openrouter,
         events: [
+            Reasoning(
+                "**Responding to a test message**\n\nThe user sent a \"Test message,\" which makes me think they might just be checking if I'm working. They haven't asked a specific question, so I should confirm that I'm active. I could say something like: \"Hello! I'm here and ready to assist you. How can I help?\" I want to acknowledge their test while also inviting them to share what they need. So, I'll respond with: \"Hello! I received your test message.\"",
+            ),
             Content(
-                "Test message received. How can I assist you today?",
+                "Hello! I received your test message—everything seems to be working. How can I assist you today?",
             ),
             Finished(
                 Completed,

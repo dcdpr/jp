@@ -1,6 +1,5 @@
-use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
-use jp_conversation::{ConversationId, message::Messages};
+use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{provider, structured};
 
 use crate::{Output, cmd::Success, ctx::Ctx};
@@ -34,43 +33,31 @@ impl Edit {
     pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
         let id = self.id.unwrap_or(active_id);
-        let messages = ctx.workspace.get_messages(&id).to_messages();
 
         if let Some(user) = self.local {
-            match ctx.workspace.get_conversation_mut(&id) {
-                Some(conversation) => conversation.user = user.unwrap_or(!conversation.user),
-                None => return missing_conversation(&id),
-            }
+            let conversation = ctx.workspace.try_get_conversation_mut(&id)?;
+            conversation.user = user.unwrap_or(!conversation.user);
         }
 
         if let Some(title) = self.title {
+            let events = ctx.workspace.try_get_events(&id)?;
             let title = match title {
                 Some(title) => title,
-                None => generate_titles(ctx.config(), messages, vec![]).await?,
+                None => generate_titles(&ctx.config(), events, vec![]).await?,
             };
 
-            match ctx.workspace.get_conversation_mut(&id) {
-                Some(conversation) => conversation.title = Some(title),
-                None => return missing_conversation(&id),
-            }
+            ctx.workspace.try_get_conversation_mut(&id)?.title = Some(title);
         } else if self.no_title {
-            match ctx.workspace.get_conversation_mut(&id) {
-                Some(conversation) => conversation.title = None,
-                None => return missing_conversation(&id),
-            }
+            ctx.workspace.try_get_conversation_mut(&id)?.title = None;
         }
 
         Ok(Success::Message("Conversation updated.".into()))
     }
 }
 
-fn missing_conversation(id: &ConversationId) -> Output {
-    Err(format!("Conversation {} not found", id.to_string().bold().yellow()).into())
-}
-
 async fn generate_titles(
     config: &AppConfig,
-    messages: Messages,
+    events: &ConversationStream,
     mut rejected: Vec<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;
@@ -85,7 +72,7 @@ async fn generate_titles(
     let model_id = model.id.finalize(&config.providers.llm.aliases)?;
 
     let provider = provider::get_provider(model_id.provider, &config.providers.llm)?;
-    let query = structured::titles::titles(count, messages.clone(), &rejected)?;
+    let query = structured::titles::titles(count, events.clone(), &rejected)?;
     let titles: Vec<String> =
         structured::completion(provider.as_ref(), &model_id, &model.parameters, query).await?;
 
@@ -98,7 +85,7 @@ async fn generate_titles(
     match result.as_str() {
         "More..." => {
             rejected.extend(titles);
-            Box::pin(generate_titles(config, messages, rejected)).await
+            Box::pin(generate_titles(config, events, rejected)).await
         }
         "Manually enter a title" => {
             let title = inquire::Text::new("Title").prompt()?;

@@ -49,14 +49,10 @@ impl Rm {
     fn remove(&self, ctx: &mut Ctx, id: ConversationId) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
 
-        let Some(conversation) = ctx.workspace.get_conversation(&id).cloned() else {
-            return Err(
-                format!("Conversation {} not found", id.to_string().bold().yellow()).into(),
-            );
-        };
-        let messages = ctx.workspace.get_messages(&id);
+        let conversation = ctx.workspace.try_get_conversation(&id)?;
+        let events = ctx.workspace.try_get_events(&id)?;
         let local = conversation.user;
-        let mut details = DetailsFmt::new(id, conversation, &messages)
+        let mut details = DetailsFmt::new(id, conversation, events)
             .with_local_flag(local)
             .with_active_conversation(active_id)
             .with_hyperlinks(ctx.term.args.hyperlinks)
@@ -89,7 +85,10 @@ impl Rm {
                 let mut query = ConversationQuery::new(active_id, &mut conversations);
                 query.last_active_conversation_id().copied()
             }
-            .unwrap_or_else(|| ctx.workspace.create_conversation(Conversation::default()));
+            .unwrap_or_else(|| {
+                ctx.workspace
+                    .create_conversation(Conversation::default(), ctx.config())
+            });
 
             ctx.workspace.set_active_conversation_id(new_active_id)?;
         }

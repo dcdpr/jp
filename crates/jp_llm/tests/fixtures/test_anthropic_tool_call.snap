@@ -8,7 +8,7 @@ Ok(
         events: [
             ToolCall(
                 ToolCallRequest {
-                    id: "toolu_01AwxriXHLygkS3YYygTo7HF",
+                    id: "toolu_01PNiKXxTYG51cynSm5iHXuP",
                     name: "run_me",
                     arguments: {
                         "bar": String("foo"),

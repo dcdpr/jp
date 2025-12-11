@@ -1,0 +1,16 @@
+---
+source: crates/jp_conversation/src/stream.rs
+expression: "&stream"
+---
+[
+  {
+    "type": "config_delta",
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
+      }
+    }
+  }
+]

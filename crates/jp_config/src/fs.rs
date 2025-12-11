@@ -110,7 +110,7 @@ impl ConfigFile {
         match self.format {
             Format::Toml => toml::from_str(&self.content).map_err(Into::into),
             Format::Json => serde_json::from_str(&self.content).map_err(Into::into),
-            Format::Json5 => json5::from_str(&self.content).map_err(Into::into),
+            Format::Json5 => serde_json5::from_str(&self.content).map_err(Into::into),
             Format::Yaml => serde_yaml::from_str(&self.content).map_err(Into::into),
         }
     }
@@ -134,7 +134,7 @@ impl ConfigFile {
         self.content = match self.format {
             Format::Toml => toml::ser::to_string_pretty(&value)?,
             Format::Json => serde_json::to_string_pretty(&value)?,
-            Format::Json5 => json5::to_string(&value)?,
+            Format::Json5 => serde_json5::to_string(&value)?,
             Format::Yaml => serde_yaml::to_string(&value)?,
         };
 
@@ -154,7 +154,7 @@ impl ConfigFile {
         self.content = match self.format {
             Format::Toml => toml::to_string_pretty(&self.deserialize::<T>()?)?,
             Format::Json => serde_json::to_string_pretty(&self.deserialize::<T>()?)?,
-            Format::Json5 => json5::to_string(&self.deserialize::<T>()?)?,
+            Format::Json5 => serde_json5::to_string(&self.deserialize::<T>()?)?,
             Format::Yaml => serde_yaml::to_string(&self.deserialize::<T>()?)?,
         };
 

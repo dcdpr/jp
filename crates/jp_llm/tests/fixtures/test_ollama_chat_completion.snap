@@ -7,10 +7,7 @@ Ok(
         provider: Ollama,
         events: [
             Content(
-                "This is an automated response. It looks like you sent a test message! If you have any questions or need assistance, feel free to ask me anything, and I'll do my best to help. Otherwise,",
-            ),
-            Content(
-                " if you're just testing the waters (or in this case, the chat), that's perfectly fine too!",
+                "This is an automated response. It looks like you sent a test message! Is there anything else I can help you with?",
             ),
             Finished(
                 Completed,

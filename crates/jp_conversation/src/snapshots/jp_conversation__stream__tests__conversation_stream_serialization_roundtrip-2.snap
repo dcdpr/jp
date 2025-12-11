@@ -1,0 +1,26 @@
+---
+source: crates/jp_conversation/src/stream.rs
+expression: "&stream"
+---
+[
+  {
+    "type": "config_delta",
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "foo"
+  },
+  {
+    "timestamp": "2020-01-02 00:00:00.0",
+    "type": "chat_response",
+    "message": "bar"
+  }
+]

@@ -10,7 +10,7 @@ Ok(
                 "",
             ),
             Content(
-                "Test message received. How can I assist you today?",
+                "Hello! I’ve received your test message. How can I assist you today?",
             ),
         ],
     },

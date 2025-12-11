@@ -18,10 +18,7 @@ pub use error::Error;
 use error::Result;
 pub use id::Id;
 use jp_config::PartialAppConfig;
-use jp_conversation::{
-    Conversation, ConversationId, MessagePair,
-    message::{Messages, MessagesRef},
-};
+use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::{DEFAULT_STORAGE_DIR, Storage};
 use state::{LocalState, State, UserState};
 use tracing::{debug, info, trace};
@@ -166,7 +163,7 @@ impl Workspace {
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
         // Workspace state
-        let (mut conversations, messages) = storage.load_conversations_and_messages()?;
+        let (mut conversations, events) = storage.load_conversations_and_events()?;
 
         // Local state
         let conversations_metadata = storage.load_conversations_metadata()?;
@@ -195,7 +192,7 @@ impl Workspace {
             local: LocalState {
                 active_conversation,
                 conversations,
-                messages,
+                events,
             },
             user: UserState {
                 conversations_metadata,
@@ -217,9 +214,9 @@ impl Workspace {
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
         storage.persist_conversations_metadata(&self.state.user.conversations_metadata)?;
-        storage.persist_conversations_and_messages(
+        storage.persist_conversations_and_events(
             &self.state.local.conversations,
-            &self.state.local.messages,
+            &self.state.local.events,
             &self
                 .state
                 .user
@@ -269,11 +266,11 @@ impl Workspace {
         );
 
         // Insert the old active conversation back into the list of
-        // conversations, but only if it has any messages attached.
+        // conversations, but only if it has any events attached.
         if self
             .state
             .local
-            .messages
+            .events
             .get(&old_active_conversation_id)
             .is_some_and(|v| !v.is_empty())
         {
@@ -298,6 +295,13 @@ impl Workspace {
             .find_map(|(i, c)| (id == i).then_some(c))
     }
 
+    /// Similar to [`Self::get_conversation`], but returns an error if the
+    /// conversation does not exist.
+    pub fn try_get_conversation(&self, id: &ConversationId) -> Result<&Conversation> {
+        self.get_conversation(id)
+            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
+    }
+
     /// Gets a mutable reference to a conversation by its ID.
     #[must_use]
     pub fn get_conversation_mut(&mut self, id: &ConversationId) -> Option<&mut Conversation> {
@@ -308,12 +312,27 @@ impl Workspace {
         self.state.local.conversations.get_mut(id)
     }
 
+    /// Similar to [`Self::get_conversation_mut`], but returns an error if the
+    /// conversation does not exist.
+    pub fn try_get_conversation_mut(&mut self, id: &ConversationId) -> Result<&mut Conversation> {
+        self.get_conversation_mut(id)
+            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
+    }
+
     /// Creates a new conversation.
-    pub fn create_conversation(&mut self, conversation: Conversation) -> ConversationId {
+    pub fn create_conversation(
+        &mut self,
+        conversation: Conversation,
+        config: impl Into<PartialAppConfig>,
+    ) -> ConversationId {
         let id = ConversationId::default();
 
         self.state.local.conversations.insert(id, conversation);
-        self.state.local.messages.entry(id).or_default();
+        self.state
+            .local
+            .events
+            .entry(id)
+            .or_insert_with(|| ConversationStream::new(config.into()));
         id
     }
 
@@ -344,51 +363,30 @@ impl Workspace {
         &mut self.state.local.active_conversation
     }
 
-    /// Gets the messages for a specific conversation. Returns an empty slice if not found.
+    /// Gets the event stream for a specific conversation.
     #[must_use]
-    pub fn get_messages(&self, id: &ConversationId) -> MessagesRef<'_> {
-        self.state
-            .local
-            .messages
-            .get(id)
-            .map_or_else(MessagesRef::default, |v| v.as_ref())
+    pub fn get_events(&self, id: &ConversationId) -> Option<&ConversationStream> {
+        self.state.local.events.get(id)
     }
 
-    /// Removes the last message from a conversation.
-    pub fn pop_message(&mut self, id: &ConversationId) -> Option<MessagePair> {
-        self.state
-            .local
-            .messages
-            .get_mut(id)
-            .and_then(Messages::pop)
+    /// Similar to [`Self::get_events`], but returns an error if the
+    /// conversation does not exist.
+    pub fn try_get_events(&self, id: &ConversationId) -> Result<&ConversationStream> {
+        self.get_events(id)
+            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
     }
 
-    pub fn set_conversation_config(
-        &mut self,
-        id: &ConversationId,
-        config: PartialAppConfig,
-    ) -> Result<()> {
-        match self.state.local.messages.get_mut(id) {
-            Some(messages) => messages.set_config(config),
-            None => return Err(Error::NotFound("Conversation", id.to_string())),
-        }
-
-        Ok(())
+    /// Gets a mutable reference to the event stream for a specific conversation.
+    #[must_use]
+    pub fn get_events_mut(&mut self, id: &ConversationId) -> Option<&mut ConversationStream> {
+        self.state.local.events.get_mut(id)
     }
 
-    /// Adds a message to a conversation.
-    pub fn add_message(
-        &mut self,
-        id: ConversationId,
-        message: MessagePair,
-        config: Option<PartialAppConfig>,
-    ) {
-        self.state
-            .local
-            .messages
-            .entry(id)
-            .or_default()
-            .push(message, config);
+    /// Similar to [`Self::get_events_mut`], but returns an error if the
+    /// conversation does not exist.
+    pub fn try_get_events_mut(&mut self, id: &ConversationId) -> Result<&mut ConversationStream> {
+        self.get_events_mut(id)
+            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
     }
 
     /// Returns an iterator over all conversations, including the active one.
@@ -528,7 +526,7 @@ mod tests {
 
         let mut workspace = Workspace::new(&root);
 
-        let id = workspace.create_conversation(Conversation::default());
+        let id = workspace.create_conversation(Conversation::default(), PartialAppConfig::empty());
         workspace.set_active_conversation_id(id).unwrap();
         assert!(!storage.exists());
 
@@ -541,7 +539,7 @@ mod tests {
         let conversation_id = workspace.conversations().next().unwrap().0;
         let metadata_file = storage
             .join(CONVERSATIONS_DIR)
-            .join(conversation_id.to_dirname(None).unwrap())
+            .join(conversation_id.to_dirname(None))
             .join(METADATA_FILE);
 
         assert!(metadata_file.is_file());
@@ -583,7 +581,7 @@ mod tests {
         assert!(workspace.state.local.conversations.is_empty());
 
         let conversation = Conversation::default();
-        let id = workspace.create_conversation(conversation.clone());
+        let id = workspace.create_conversation(conversation.clone(), PartialAppConfig::empty());
         assert_eq!(
             workspace.state.local.conversations.get(&id),
             Some(&conversation)

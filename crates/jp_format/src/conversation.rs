@@ -2,7 +2,7 @@ use std::fmt;
 
 use comfy_table::{Cell, CellAlignment, Row, Table};
 use crossterm::style::Stylize as _;
-use jp_conversation::{Conversation, ConversationId, message::MessagesRef};
+use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use time::UtcDateTime;
 
 use crate::datetime::DateTimeFmt;
@@ -41,14 +41,18 @@ pub struct DetailsFmt {
 
 impl DetailsFmt {
     #[must_use]
-    pub fn new(id: ConversationId, conversation: Conversation, messages: &MessagesRef<'_>) -> Self {
-        let last_message_at = messages.iter().map(|m| m.timestamp).max();
+    pub fn new(
+        id: ConversationId,
+        conversation: &Conversation,
+        events: &ConversationStream,
+    ) -> Self {
+        let last_message_at = events.iter().map(|m| m.event.timestamp).max();
 
         Self {
             id,
-            assistant_name: messages.config().assistant.name.clone(),
-            title: conversation.title,
-            message_count: messages.len(),
+            assistant_name: events.config().assistant.name.clone(),
+            title: conversation.title.clone(),
+            message_count: events.len(),
             local: None,
             active_conversation: None,
             last_message_at,

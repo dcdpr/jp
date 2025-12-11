@@ -1,10 +1,7 @@
 use std::{env, path::PathBuf};
 
-use jp_config::{
-    model::{id::ProviderId, parameters::ParametersConfig},
-    providers::llm::LlmProviderConfig,
-};
-use jp_conversation::{AssistantMessage, MessagePair, UserMessage, message::Messages};
+use jp_config::{model::parameters::ParametersConfig, providers::llm::LlmProviderConfig};
+use jp_conversation::ConversationStream;
 use jp_llm::{provider::openrouter::Openrouter, structured};
 use jp_test::{function_name, mock::Vcr};
 
@@ -20,15 +17,7 @@ async fn test_conversation_titles() -> Result<(), Box<dyn std::error::Error>> {
     // Create test data
     let model_id = "openrouter/openai/o3-mini-high".parse().unwrap();
     let mut config = LlmProviderConfig::default().openrouter;
-    let message = UserMessage::Query("Test message".to_string());
-    let history = {
-        let mut messages = Messages::default();
-        messages.push(
-            MessagePair::new(message, AssistantMessage::new(ProviderId::Openrouter)),
-            None,
-        );
-        messages
-    };
+    let history = ConversationStream::default().with_chat_request("Test message");
 
     let vcr = vcr();
     vcr.cassette(
@@ -54,7 +43,7 @@ async fn test_conversation_titles() -> Result<(), Box<dyn std::error::Error>> {
                 query,
             )
             .await
-            .unwrap();
+            .unwrap()
         },
     )
     .await

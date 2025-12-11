@@ -11,8 +11,8 @@ use time::UtcDateTime;
 
 use crate::error::{Error, Result};
 
-/// A sequence of messages between the user and LLM.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+/// A sequence of events between the user and LLM.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Conversation {
     /// The optional title of the conversation.
     #[serde(default)]
@@ -59,6 +59,7 @@ impl Default for Conversation {
 }
 
 impl Conversation {
+    /// Creates a new conversation with the given title.
     #[must_use]
     pub fn new(title: impl Into<String>) -> Self {
         Self {
@@ -67,8 +68,9 @@ impl Conversation {
         }
     }
 
+    /// Sets whether the conversation is local.
     #[must_use]
-    pub fn with_local(mut self, local: bool) -> Self {
+    pub const fn with_local(mut self, local: bool) -> Self {
         self.user = local;
         self
     }
@@ -87,16 +89,24 @@ impl fmt::Debug for ConversationId {
 }
 
 impl ConversationId {
+    /// Get the timestamp of the conversation id.
     #[must_use]
-    pub fn timestamp(&self) -> UtcDateTime {
+    pub const fn timestamp(&self) -> UtcDateTime {
         self.0
     }
 
+    /// Get the timestamp of the conversation id as deciseconds.
     #[must_use]
     pub fn as_deciseconds(&self) -> i128 {
         self.timestamp().unix_timestamp_nanos() / i128::from(NANOSECONDS_PER_DECISECOND)
     }
 
+    /// Try to create a conversation id from deciseconds.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deciseconds cannot be converted to a valid UTC
+    /// timestamp.
     pub fn try_from_deciseconds(deciseconds: i128) -> Result<Self> {
         let timestamp = UtcDateTime::from_unix_timestamp_nanos(
             deciseconds * i128::from(NANOSECONDS_PER_DECISECOND),
@@ -106,6 +116,12 @@ impl ConversationId {
         Ok(Self(timestamp))
     }
 
+    /// Try to create a conversation id from a string of deciseconds.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deciseconds cannot be parsed or converted to a
+    /// valid UTC timestamp.
     pub fn try_from_deciseconds_str(deciseconds: impl AsRef<str>) -> Result<Self> {
         let deciseconds = deciseconds.as_ref().parse::<i128>().map_err(|_| {
             Error::InvalidIdFormat(format!("Invalid deciseconds: {}", deciseconds.as_ref()))
@@ -114,16 +130,23 @@ impl ConversationId {
         Self::try_from_deciseconds(deciseconds)
     }
 
+    /// Create a conversation id from a directory name.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the directory name is missing the target ID or
+    /// timestamp.
     pub fn from_dirname(dirname: impl AsRef<str>) -> Result<Self> {
         dirname
             .as_ref()
             .split('-')
             .next()
-            .ok_or(jp_id::Error::MissingTargetId.into())
+            .ok_or_else(|| jp_id::Error::MissingTargetId.into())
             .and_then(Self::try_from_deciseconds_str)
     }
 
-    pub fn to_dirname(&self, title: Option<&str>) -> Result<String> {
+    /// Create a directory name from the conversation id.
+    pub fn to_dirname(&self, title: Option<&str>) -> String {
         let len = title.map(str::len).unwrap_or_default();
         let title = title
             .unwrap_or_default()
@@ -137,7 +160,7 @@ impl ConversationId {
 
         let ts = self.as_deciseconds().to_string();
         if title.is_empty() {
-            return Ok(ts);
+            return ts;
         }
 
         let mut title = format!("{ts}-{title}");
@@ -147,7 +170,7 @@ impl ConversationId {
             title.truncate(i);
         }
 
-        Ok(title)
+        title
     }
 }
 
@@ -204,7 +227,7 @@ impl Default for ConversationId {
 
 /// Holds metadata about all conversations, like the current active
 /// conversation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConversationsMetadata {
     /// The ID of the currently active conversation.
     ///
@@ -213,8 +236,9 @@ pub struct ConversationsMetadata {
 }
 
 impl ConversationsMetadata {
+    /// Creates a new conversations metadata.
     #[must_use]
-    pub fn new(active_conversation_id: ConversationId) -> Self {
+    pub const fn new(active_conversation_id: ConversationId) -> Self {
         Self {
             active_conversation_id,
         }
