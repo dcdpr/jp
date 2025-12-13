@@ -6,6 +6,7 @@ use indexmap::IndexMap;
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use tracing::warn;
 
 use crate::{
     BoxedError,
@@ -19,7 +20,7 @@ use crate::{
 pub mod style;
 
 /// Tools configuration.
-#[derive(Debug, Clone, PartialEq, Config)]
+#[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case", allow_unknown_fields)]
 pub struct ToolsConfig {
     /// Global config
@@ -117,7 +118,7 @@ impl ToolsConfig {
 }
 
 /// Tools defaults configuration.
-#[derive(Debug, Clone, PartialEq, Config)]
+#[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolsDefaultsConfig {
     /// Whether the tool is enabled.
@@ -175,7 +176,7 @@ impl ToPartial for ToolsDefaultsConfig {
 }
 
 /// Tool configuration.
-#[derive(Debug, Clone, PartialEq, Config)]
+#[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolConfig {
     /// The source of the tool.
@@ -330,7 +331,7 @@ impl ToPartial for ToolConfig {
 }
 
 /// Tool command configuration, either as a string or a complete configuration.
-#[derive(Debug, Clone, PartialEq, Config)]
+#[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case", serde(untagged))]
 pub enum ToolCommandConfigOrString {
     /// A single string, which is interpreted as the command to run.
@@ -461,7 +462,7 @@ impl ToPartial for ToolCommandConfig {
 }
 
 /// Tool parameter configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
+#[derive(Debug, Clone, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolParameterConfig {
     /// The type of the parameter.
@@ -473,7 +474,6 @@ pub struct ToolParameterConfig {
     pub default: Option<Value>,
 
     /// Whether the parameter is required.
-    #[serde(default)]
     pub required: bool,
 
     /// Description of the parameter.
@@ -481,20 +481,11 @@ pub struct ToolParameterConfig {
 
     /// A list of possible values for the parameter.
     #[setting(rename = "enum")]
-    #[serde(default)]
     pub enumeration: Vec<Value>,
 
     /// Configuration for array items.
-    ///
-    /// NOTE: While technically this could be `Option<Box<Self>>`, the macro
-    /// expansion would go into an infinite loop, so we support one level of
-    /// `items` nesting for now, using a dedicated `ToolParameterItemsConfig`
-    /// type.
-    #[expect(
-        clippy::use_self,
-        reason = "Using `Self` causes the `schematic` macro to go haywire."
-    )]
-    pub items: Option<Box<ToolParameterConfig>>,
+    #[setting(nested)]
+    pub items: Option<ToolParameterItemsConfig>,
 }
 
 impl PartialConfigDelta for PartialToolParameterConfig {
@@ -505,8 +496,7 @@ impl PartialConfigDelta for PartialToolParameterConfig {
             required: delta_opt(self.required.as_ref(), next.required),
             description: delta_opt(self.description.as_ref(), next.description),
             enumeration: delta_opt(self.enumeration.as_ref(), next.enumeration),
-            items: delta_opt(self.items.as_ref(), next.items),
-            // items: delta_opt_partial(self.items.as_ref(), next.items),
+            items: delta_opt_partial(self.items.as_ref(), next.items),
         }
     }
 }
@@ -521,8 +511,7 @@ impl ToPartial for ToolParameterConfig {
             required: partial_opt(&self.required, defaults.required),
             description: partial_opts(self.description.as_ref(), defaults.description),
             enumeration: partial_opt(&self.enumeration, defaults.enumeration),
-            items: partial_opts(self.items.as_deref(), defaults.items),
-            // items: partial_opt_config(self.items.as_deref(), defaults.items),
+            items: partial_opt_config(self.items.as_ref(), defaults.items),
         }
     }
 }
@@ -597,9 +586,12 @@ impl ToolParameterConfig {
     }
 
     /// Convert the parameter to a JSON schema.
-    #[must_use]
     pub fn to_json_schema(&self) -> Value {
         let mut map = Map::new();
+        map.insert("type".to_owned(), match &self.kind {
+            OneOrManyTypes::One(v) => v.clone().into(),
+            OneOrManyTypes::Many(v) => v.clone().into(),
+        });
 
         if let Some(description) = self.description.as_deref() {
             map.insert("description".to_owned(), description.into());
@@ -609,58 +601,49 @@ impl ToolParameterConfig {
             map.insert("default".to_owned(), default);
         }
 
-        // Handle the Type(s)
-        match &self.kind {
-            OneOrManyTypes::One(t) => {
-                map.insert("type".to_owned(), t.clone().into());
-                self.inject_type_specific_props(&mut map, t);
+        if !self.enumeration.is_empty() {
+            map.insert("enum".to_owned(), self.enumeration.as_slice().into());
+        }
+
+        if let Some(items) = self.items.as_ref() {
+            if !self.kind.is_type("array") {
+                warn!("Unexpected `items` property for non-array type");
             }
-            OneOrManyTypes::Many(types) => {
-                let variants: Vec<Value> = types
-                    .iter()
-                    .map(|t| {
-                        let mut variant = Map::new();
-                        variant.insert("type".to_owned(), t.clone().into());
-                        self.inject_type_specific_props(&mut variant, t);
-                        Value::Object(variant)
-                    })
-                    .collect();
-                map.insert("anyOf".to_owned(), variants.into());
+
+            if let Ok(v @ Value::Object(_)) = serde_json::to_value(items) {
+                map.insert("items".to_owned(), v);
+            } else {
+                warn!("Unable to serialize `items` property");
             }
         }
 
         Value::Object(map)
     }
+}
 
-    /// Inject type-specific properties into the JSON schema, such as `items` or
-    /// `enum`.
-    fn inject_type_specific_props(&self, map: &mut Map<String, Value>, type_name: &str) {
-        if type_name == "array"
-            && let Some(items) = &self.items
-        {
-            map.insert("items".to_owned(), items.to_json_schema());
+/// Tool parameter configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Config)]
+#[config(rename_all = "snake_case")]
+pub struct ToolParameterItemsConfig {
+    /// The type of the parameter array items.
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
+impl PartialConfigDelta for PartialToolParameterItemsConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            kind: delta_opt(self.kind.as_ref(), next.kind),
         }
+    }
+}
 
-        if !self.enumeration.is_empty() {
-            let filtered: Vec<Value> = self
-                .enumeration
-                .iter()
-                .filter(|v| match type_name {
-                    "string" => v.is_string(),
-                    "number" => v.is_number(),
-                    "integer" => v.is_i64() || v.is_u64(),
-                    "boolean" => v.is_boolean(),
-                    "array" => v.is_array(),
-                    "object" => v.is_object(),
-                    "null" => v.is_null(),
-                    _ => true,
-                })
-                .cloned()
-                .collect();
+impl ToPartial for ToolParameterItemsConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
 
-            if !filtered.is_empty() {
-                map.insert("enum".to_owned(), filtered.into());
-            }
+        Self::Partial {
+            kind: partial_opt(&self.kind, defaults.kind),
         }
     }
 }
@@ -927,7 +910,6 @@ impl ToolConfigWithDefaults {
 mod tests {
     use assert_matches::assert_matches;
     use schematic::PartialConfig as _;
-    use test_log::test;
 
     use super::*;
 
