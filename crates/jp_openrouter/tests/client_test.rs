@@ -10,7 +10,7 @@ use jp_openrouter::{
     },
 };
 use jp_test::{
-    fn_name,
+    function_name,
     mock::{Snap, Vcr},
 };
 
