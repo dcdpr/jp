@@ -662,7 +662,7 @@ mod tests {
 
     use jp_config::{
         assistant::tool_choice::ToolChoice,
-        conversation::tool::{OneOrManyTypes, ToolParameterConfig, item::ToolParameterItemConfig},
+        conversation::tool::{OneOrManyTypes, ToolParameterConfig},
         providers::llm::LlmProviderConfig,
     };
     use jp_conversation::event::ChatRequest;

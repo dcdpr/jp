@@ -31,7 +31,7 @@ async fn test_chat_completion_stream() {
 
     let vcr = vcr();
     vcr.cassette(
-        fn_name!(),
+        function_name!(),
         |rule| {
             rule.filter(|when| {
                 when.any_request();
@@ -82,7 +82,7 @@ async fn test_chat_completion() {
 
     let vcr = vcr();
     vcr.cassette(
-        fn_name!(),
+        function_name!(),
         |rule| {
             rule.filter(|when| {
                 when.any_request();
