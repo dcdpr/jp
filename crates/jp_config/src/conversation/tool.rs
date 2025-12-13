@@ -16,11 +16,10 @@ use crate::{
     util::merge_nested_indexmap,
 };
 
-pub mod item;
 pub mod style;
 
 /// Tools configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case", allow_unknown_fields)]
 pub struct ToolsConfig {
     /// Global config
@@ -118,7 +117,7 @@ impl ToolsConfig {
 }
 
 /// Tools defaults configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolsDefaultsConfig {
     /// Whether the tool is enabled.
@@ -176,7 +175,7 @@ impl ToPartial for ToolsDefaultsConfig {
 }
 
 /// Tool configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolConfig {
     /// The source of the tool.
@@ -331,7 +330,7 @@ impl ToPartial for ToolConfig {
 }
 
 /// Tool command configuration, either as a string or a complete configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case", serde(untagged))]
 pub enum ToolCommandConfigOrString {
     /// A single string, which is interpreted as the command to run.
@@ -466,8 +465,8 @@ impl ToPartial for ToolCommandConfig {
 #[config(rename_all = "snake_case")]
 pub struct ToolParameterConfig {
     /// The type of the parameter.
+    // TODO: Support `type` as an array of types.
     #[setting(nested, rename = "type")]
-    #[serde(rename = "type")]
     pub kind: OneOrManyTypes,
 
     /// The default value of the parameter.
@@ -482,7 +481,7 @@ pub struct ToolParameterConfig {
 
     /// A list of possible values for the parameter.
     #[setting(rename = "enum")]
-    #[serde(default, rename = "enum")]
+    #[serde(default)]
     pub enumeration: Vec<Value>,
 
     /// Configuration for array items.
@@ -491,7 +490,11 @@ pub struct ToolParameterConfig {
     /// expansion would go into an infinite loop, so we support one level of
     /// `items` nesting for now, using a dedicated `ToolParameterItemsConfig`
     /// type.
-    pub items: Option<item::ToolParameterItemConfig>,
+    #[expect(
+        clippy::use_self,
+        reason = "Using `Self` causes the `schematic` macro to go haywire."
+    )]
+    pub items: Option<Box<ToolParameterConfig>>,
 }
 
 impl PartialConfigDelta for PartialToolParameterConfig {
@@ -503,6 +506,7 @@ impl PartialConfigDelta for PartialToolParameterConfig {
             description: delta_opt(self.description.as_ref(), next.description),
             enumeration: delta_opt(self.enumeration.as_ref(), next.enumeration),
             items: delta_opt(self.items.as_ref(), next.items),
+            // items: delta_opt_partial(self.items.as_ref(), next.items),
         }
     }
 }
@@ -517,7 +521,8 @@ impl ToPartial for ToolParameterConfig {
             required: partial_opt(&self.required, defaults.required),
             description: partial_opts(self.description.as_ref(), defaults.description),
             enumeration: partial_opt(&self.enumeration, defaults.enumeration),
-            items: partial_opts(self.items.as_ref(), defaults.items),
+            items: partial_opts(self.items.as_deref(), defaults.items),
+            // items: partial_opt_config(self.items.as_deref(), defaults.items),
         }
     }
 }
@@ -633,10 +638,7 @@ impl ToolParameterConfig {
         if type_name == "array"
             && let Some(items) = &self.items
         {
-            map.insert(
-                "items".to_owned(),
-                Self::from(items.clone()).to_json_schema(),
-            );
+            map.insert("items".to_owned(), items.to_json_schema());
         }
 
         if !self.enumeration.is_empty() {
