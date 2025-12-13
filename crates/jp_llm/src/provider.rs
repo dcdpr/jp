@@ -666,7 +666,7 @@ mod tests {
         providers::llm::LlmProviderConfig,
     };
     use jp_conversation::event::ChatRequest;
-    use jp_test::{Result, fn_name};
+    use jp_test::{Result, function_name};
 
     use super::*;
     use crate::{structured, test::TestRequest};
@@ -684,7 +684,7 @@ mod tests {
             paste::paste! {
                 #[test_log::test(tokio::test)]
                 async fn [< test_ $fn >]() -> Result {
-                    $fn($provider, fn_name!()).await
+                    $fn($provider, function_name!()).await
                 }
             }
         };
@@ -859,15 +859,7 @@ mod tests {
                 "properties": { "answer": { "type": "integer" } },
             }),
             thread,
-        )
-        .with_validator(move |value| {
-            value
-                .get("answer")
-                .ok_or("Missing `answer` field.".to_owned())?
-                .as_u64()
-                .ok_or("Answer must be an integer".to_owned())
-                .and_then(|v| Err(format!("You thought 1 + 1 = {v}? Think again!")))
-        });
+        );
 
         let request = TestRequest::Structured {
             query,

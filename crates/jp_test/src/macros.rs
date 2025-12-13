@@ -1,6 +1,6 @@
 /// Get the name of the calling function using Rust's type system
 #[macro_export]
-macro_rules! fn_name {
+macro_rules! function_name {
     () => {{
         fn f() {}
         fn type_name_of<T>(_: T) -> &'static str {
