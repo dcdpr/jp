@@ -1,0 +1,124 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:49:48.673283",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "anthropic",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Testing tool call"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "I'd be happy to help you test a tool call! However, I need to know what you'd like to test with the available `run_me` function.\n\nThe `run_me` function requires:\n- **bar** (required): Either the string \"foo\" or an array [\"foo\", \"bar\"]\n- **foo** (optional): A string parameter (defaults to \"foo\" if not provided)\n\nCould you specify:\n1. What value should I pass for the **bar** parameter? (\"foo\" or [\"foo\", \"bar\"])\n2. Should I use a custom value for **foo**, or is the default \"foo\" fine?\n\nOnce you let me know, I'll make the test call!"
+  }
+]

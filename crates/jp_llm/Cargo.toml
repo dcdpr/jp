@@ -18,6 +18,7 @@ jp_conversation = { workspace = true }
 jp_inquire = { workspace = true }
 jp_mcp = { workspace = true }
 jp_openrouter = { workspace = true }
+jp_serde = { workspace = true }
 jp_tool = { workspace = true }
 
 async-anthropic = { workspace = true }
@@ -50,12 +51,14 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
 jp_test = { workspace = true }
+paste = { workspace = true }
 test-log = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 

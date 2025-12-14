@@ -1,0 +1,28 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I need some more information to use the `run_me` tool. Could you please specify the value for the `bar` argument? It can either be the string 'foo' or a list of strings.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [],
+]

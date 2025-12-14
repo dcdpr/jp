@@ -25,13 +25,14 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
-    "https://github.com/alexliesenfeld/httpmock",
     "https://github.com/JeanMertz/async-anthropic",
     "https://github.com/JeanMertz/backon",
     "https://github.com/JeanMertz/gemini-client",
+    "https://github.com/JeanMertz/httpmock?branch=tweaks",
     "https://github.com/JeanMertz/inquire?branch=submit-on-valid-parse",
     "https://github.com/JeanMertz/openai-responses-rs",
     "https://github.com/JeanMertz/openai?branch=tmp",
+    "https://github.com/JeanMertz/saphyr?branch=jean/fix-valid-literal-block-scalar-check",
     "https://github.com/JeanMertz/schematic?branch=merged",
     "https://github.com/modelcontextprotocol/rust-sdk",
     "https://github.com/Ninja3047/quick-xml?branch=serialize-cdata",

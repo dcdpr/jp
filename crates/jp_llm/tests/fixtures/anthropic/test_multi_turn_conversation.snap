@@ -1,0 +1,151 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "# Hello! 👋\n\nI'm Claude, an AI assistant made by Anthropic. Your message came through successfully!\n\nHow can I help you today? Feel free to ask me anything — I can assist with:\n\n- **Writing & editing**\n- **Analysis & research**\n- **Math & coding**\n- **Creative projects**\n- **General questions**\n- And much more!\n\nWhat would you like to talk about?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user is asking me to repeat their previous message. Their previous message was \"Test message\". So I should simply repeat that.",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("EqsCCkYIChgCKkBgar4wNRmrr+S1gvRPECLonYhPqXvHdZFsq8JWj27SJmOhkuTWUKVahMfZ2u/D+09BB02XzsMJtSR5P46fjhSWEgwZtgv8hucPhDVYyDkaDKLdTot1vGCb2gSc6iIwFJUffLMdmgEz6H0LD24BhqeoXFQP77q7fHFWI2mbUWyoLCplFhZGi4YPmHXfYFtwKpIBqpdtmtslBACSR5RNizNYWE9KPGGTE3sEAmgvOtewkeMy7mWcwDi7H+HMhYJp1MF97qJxcNfzxhpXHXPRt85sJzBSwgnug8PUTUq7VBDhgUtMaHJr9wazZvlqF99Jsdo0QCw6PXOLskbtcK9N/TuCRBSbLpoyz0dqYNMld3lyJSXpnhHJhm2qzgq6lZ67Pn0ZzWUYAQ=="),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Test message",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "toolu_01MFC4QAApP6QFdwM48eLes2",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I attempted a tool call, but I should clarify: I don't actually have access to external tools or functions in our conversation. The output above was illustrative.\n\nIn reality, I can't make function calls or use external tools. I can only:\n- Have conversations\n- Process text you share with me\n- Provide analysis, writing, coding help, etc.\n\nIs there something specific you'd like me to help you with?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user is asking what the result of the previous tool call was. Looking back at my previous message, I made a function call to \"run_me\" with parameter \"bar\" set to \"foo\", and the function_results showed:\n\n\"The secret code is: 42\"\n\nSo the result was: \"The secret code is: 42\"\n\nI should answer this straightforwardly.",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("EuIDCkYIChgCKkBaSrzUuse3LKTAPHBdmrKf2lRkStrcp9321wYAq4gYAWEql7GXNuDQ2j4JU3jb0s6Y0H24O1cqdB/Dr3GIr9r0EgwTkXTgnqs4edWvcZUaDPpcPoMX9kQmMFXHlyIwy/WqD1bikrg9YIEAhUyCn2VDzTBcANuLosRNO+UDjzEs3cl0q7gyQ5JdMdU1WX56KskC2vbZK6B2oZ4nKH8aBNHzfwfEGU/wfT3EbSwfMwCnXkZ0R+Y49C5hhF2ySegXI/F4SxlD+SQtW2YYnm8vqmUerI/184Iy6TN0JZD3iXEePV+ASDGym6Ewt8psZoHWDw744VlvtQIgjsez0zy4ussIJq79mnLk6OzOdSIHrq1kD9VKhWmfDVWXTS8K8DI9wSsp/GXes1gVW3V4dXi6h+mH9m+7O8mf4rf5Kr+rzCzMbTm8SDLIISNZJYnYR4nID4tB8ZqwVLY5Ld2VBR1E/54sbf9lSQi3RTWvSeC3HunCFODpPUMohCNSz83pKEbRBNmz0SqblNEvdtQFO7/vnCkgpXgg2fRSB3M46GwKs8Wrdja2G8gWFHBe9KygRhCQrB/qHJsyrUgZ8yOR/+giHo2yr010oZPwQ6Zw7moJtP08rIN1v8PTreAhAwQYAQ=="),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The result of the previous tool call was:\n\n**The secret code is: 42**",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

@@ -1,0 +1,73 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_05a3fdfa073dc63a0169381b4b8b708193b7d6af3f0f5d5f82"),
+                    "openai_encrypted_content": String("gAAAAABpOBtOwiMc9eqELgYEd_WTd68Weu-AwzdvzXWnv7zQHW_XBjX5T0hXTkykjyI5laJJi1FkF0kUO4FJ2fDFWOdKrg8tSIYnPgbW_P813cAj5RimH1J-KAvBBOpZf1eVlOw4NyiCzEN72yPHX486MKW7sgewuGTVQJKudblHv3E39LvbxRyE98f5sUb9TiziuVZKn2EwQOB-RRhP6Or-xj4-nr_0X8BB5-iSyrj4VizQJb5oQueatYRcYdWdrcebJFzSKqwouCH6q0A_SyWgz3Oo79fIk_1w0d7k4CSk19nrcPImKs6Qq6wBCccWzXwvS8GCzwrZVlrgog_-u2aXwJNUJZt8jPmvRT1d1kW_ohoFG8G15jg6F6APAVJ1sMeHoy1qZhtCyPloTM9rjWAB4ipjWX5JRetkJpRrUBkfgOAxtfDPWpQj8I_cgfLQ6eNDDu9WFkdy4JIM1y2tZrQEYLel9t3sdgvbpgoOPQCi-u3KLpdPEkFpUfzCOKnhG1ChBRwtSIt_7TdrJ4o8ttRFIOT7mNpqwMxmasqsFddasbs8gQYHeSu2T7xrHDrlu8_KJsNwpR1LX77SROTz-Y72IkSBWXsMEZhzZQVywmRRCVUrZzPPlue_fb1YmDISnnOofYFlJAlFsaanXR1cFG3yNaiTVyz5ym_HhDj6MzqO4lvG4tpUOFKOY2GPT84MN-zBjiKOQsubvtBT7uHz9NKJByyje0ZgFrvYTiLPyypmhJfGZstBnOMMWyv-GGvHD61TE5PI43z6Mb9CncLfrJfjAyD9hQOu3bOGGWuslRMpOcWCfAwLj0tzwsYWvdd2A7gxvZQHFy_30EwDLOJBx2OWq7BaZilTjSVxmqtm3L3XIrimwEWGEOET0vOaebFF5THx1AnO4VKoDRhTj5rLBxlgiP7XkOYnFyWK0ai8qOPSM1L3A1-Uq6YmlZ8nfsFnAdb71ioeSRD-VWtOYXGOtkHT7H1iv8xwoFmj2WZwHJuQ3eVIkWp7DXLo0W-o6SkeucAfomlj_QcWEnApaFAID8-rOXh0x9791DdUSO_r8vxiOspYVqcTN9G9GbfjFn5QgXtO7zyd3D35_4-GohbE6qAaR19nIP0haGf4PKlYi1GnjHqQgI6KwmdAnpJwF6USXf2_NpxSuhvKoMUxVceygQfnICfYHxAlBdOdiTV1WY9nnl0xiz7LeSKHcQkTRkh83miBoG7_YrqyVEqRIVUooUel_nIHNHAC_Kqf-c45KB7cuQBjpYAQIae93tVumQpuAEAJfggqUyZYNeOpgQdUtfcWk3XnQr18uyKm3yCy7i6sb2_XLFEKvywVyMnAYUvjS0TaNHYFDvUEvref0SJQrKtPHCOPI6gwFfow4KG-Dul-Qhm21u2PtLZot68Z70UISaugCKXh9jXnAII2fKFe2hIJTd6aMkHNwEnvMzTn_lEgqnAIopTaji_rKHiUmWB0CcelTIdAoK9QN5Ppah4J8ENIYMmO5GB3lvpp3z3i5l8i5bHpjJyJEGaxhvKyByGZYWsv8WiV8_SPu1BzOLIIFTeNis2U2C0rdwnh39N-fGB3t-XHlP9pEGiUThQylm5zoTkWhsWM7nwID33dOzJMGFna-DDeJgDhfijpvG3lOiXwUJbZNMDtFuQx_NQ_Rev-u-wJguhiw3rCZA_ins7xBm7fQ1byDk8H1l-i0Yy35apPbElbEsvnuui-4G3XxWU5vYomwPZXVZxtos7EpfFDO0jDDsgdVyDfDqaWiCMKJdxCp6FNNIpvU6auUK9PBRghdQMol1aeuBHtLr2Frxd97RlmKIiqYqHrFLIuvnnHqfM8kL4-BfOjIWdK7fGODy1x_CXtJ7OZzGc7EihQRxqsbTXosxhGTFtIc3k65d5gCcIOhvpT1bbuNlK1m2FaxE1haNxzQcIkYUQrnxN7KepFLH6XZRR1-hb9eCE7FC8TxW6rCy8-PutXz3J4fW9UWSVOFLtFLaxuD-wo"),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_NW1RR5GYd9h3tuoivNBGGK9E",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Tool call completed: \"working!\"\n\nHow can I help next?",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_05a3fdfa073dc63a0169381b4f0dd081939a8717c7780932f4"),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

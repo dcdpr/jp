@@ -1,0 +1,145 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:49:49.789971",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "google",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:49:46.873525",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Test message"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Confirming System Readiness**\n\nI've processed the test message and interpreted it as a system check. My current strategy involves directly acknowledging the message as a test and confirming the system's readiness to proceed with more complex tasks. I plan to construct a response that is concise and clearly indicates that I'm active and listening.\n\n\n**Developing an Appropriate Response**\n\nI'm now refining the draft response, aiming for optimal conciseness and helpfulness. The objective is to convey both acknowledgment and proactive availability. I've considered several options, like a direct confirmation of reception and a proactive invitation to proceed, and I've settled on a concise, combined approach. The final touch involves ensuring a polite and welcoming tone.\n\n\n"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Test message received! I'm here and ready to help. What can I do for you?"
+  }
+]

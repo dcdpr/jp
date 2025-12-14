@@ -1,0 +1,45 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "This is a simple test message. The user is checking if I'm working and responding. I should provide a friendly, brief acknowledgment.",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("Eq4CCkYIChgCKkDERK8W38o59wikAF3iRdOoEbmbJw6Tnv6U5/WgnwrvzD9v2jP/mfLOaiM1cnO/aI+HVAr2FF5h95px/hxnMrf5Egw4SjER3Ce1v1W2NhkaDCndfdqvrI5HJNvCJiIwzi4AEk+pHM9pPuYwEDO7j/gn8DsBLTM38rET6mwX7bUGKT8qeE5mws/Gp6qm7X+1KpUBXlz3tTrq2KvDVEmYOy4ByMlv8XXagPHzroNCImErjdoq9zBN193V3o3ilELy9GJ7w0etbckWXfQTeYZsaSLjUE3927qYOq+WnKDv7yRB5+xC9JBS3OQzR2JeVn8yeqf0pc7erO8xZrf+6L4wKmAXE0MO32/PmcqHMF+Wd5Iyy8NypDJDpv3nWvVXpytYJ5afT65iPP8YAQ=="),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Hello! I'm here and working. How can I help you?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

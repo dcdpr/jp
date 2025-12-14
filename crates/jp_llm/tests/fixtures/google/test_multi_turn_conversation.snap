@@ -1,0 +1,147 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "OK. I see your test message. How can I help you today?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Echoing a prompt**\n\nI'm currently focused on repeating the user's last message.  I've processed the request, understood the instruction to echo the provided text. Currently, I'm simply repeating: \"Test message\".\n\n\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Test message",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Testing tool call",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Retrieving Past Output**\n\nI'm focusing now on the retrieval of the previous tool call's output. I recall the `print(default_api.run_me(bar = \"foo\"))` call, which provided the secret code. I'm actively working to ensure I can consistently access and utilize this type of information.\n\n\n**Accessing Key Information**\n\nI'm zeroing in on extracting the core data from the previous tool call's output. Specifically, I'm parsing the response to `print(default_api.run_me(bar = \"foo\"))`, which yielded `{\"run_me_response\": {\"content\": \"The secret code is: 4 2\"}}`. I now realize the \"content\" field is the vital piece; it holds the user's requested \"secret code: 4 2\".\n\n\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The result of the previous tool call was: \"The secret code is: 42\".",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

@@ -1,9 +1,0 @@
-when:
-  path: /api/tags
-  method: GET
-then:
-  status: 200
-  header:
-    - name: content-type
-      value: application/json; charset=utf-8
-  body: "{\"models\":[{\"name\":\"qwen2.5vl:3b\",\"model\":\"qwen2.5vl:3b\",\"modified_at\":\"2025-09-25T07:03:08.992438389+02:00\",\"size\":3200627168,\"digest\":\"fb90415cde1ef08aa669ae74b082d49b158729b6db1ab183c941417d507e71a1\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"qwen25vl\",\"families\":[\"qwen25vl\"],\"parameter_size\":\"3.8B\",\"quantization_level\":\"Q4_K_M\"}},{\"name\":\"llama3.1:8b\",\"model\":\"llama3.1:8b\",\"modified_at\":\"2025-09-17T09:49:42.654945332+02:00\",\"size\":4920753328,\"digest\":\"46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"llama\",\"families\":[\"llama\"],\"parameter_size\":\"8.0B\",\"quantization_level\":\"Q4_K_M\"}},{\"name\":\"llama3:latest\",\"model\":\"llama3:latest\",\"modified_at\":\"2025-09-16T21:31:42.798881306+02:00\",\"size\":4661224676,\"digest\":\"365c0bd3c000a25d28ddbf732fe1c6add414de7275464c4e4d1c3b5fcb5d8ad1\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"llama\",\"families\":[\"llama\"],\"parameter_size\":\"8.0B\",\"quantization_level\":\"Q4_0\"}},{\"name\":\"qwen3:32b\",\"model\":\"qwen3:32b\",\"modified_at\":\"2025-05-22T09:36:16.168305581+02:00\",\"size\":20201253588,\"digest\":\"e1c9f234c6eb37545e991032e3d674e0762763cddab4e69009a2f0d8739deaaf\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"qwen3\",\"families\":[\"qwen3\"],\"parameter_size\":\"32.8B\",\"quantization_level\":\"Q4_K_M\"}}]}"

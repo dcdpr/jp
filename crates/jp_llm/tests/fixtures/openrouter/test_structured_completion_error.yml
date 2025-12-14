@@ -1,0 +1,376 @@
+when:
+  path: /api/v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "openai/gpt-5-mini",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "I am testing the structured completion API."
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "generate_structured_data",
+            "description": "This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\\n\\n1 + 1 = ?",
+            "strict": true,
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "answer"
+              ]
+            }
+          }
+        }
+      ],
+      "tool_choice": {
+        "type": "function",
+        "function": {
+          "name": "generate_structured_data"
+        }
+      },
+      "stream": true
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"id":"gen-1765284693-T5fbvypvZBrAKgUBuZ3w","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284693,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    data: {"id":"gen-1765284693-T5fbvypvZBrAKgUBuZ3w","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284693,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning":null,"reasoning_details":[{"type":"reasoning.encrypted","data":"gAAAAABpOBtcc3tdZDpmrVL1V3e2X-EOLGj39kW3SIrRRCghU0qylLetiaVeB7TCoMkUJLQ1OcrpangYgIRxhxQqSQj533G5PMHw6nNgplHPtgSYroZlulU67XNTD8YQ8ta0I8LtUAUonhkshP9eMGyAU4_Fn7eGyQ0uRqRlY77Uakosr8eKr2MyYyK2u0h5t04YCCi9m8KLjefEsOIJnPjZlhFQuzYqoU94bDDECsvdq1FoshdPo-dWn7K-UWexQnqX5AMD4JRwR9ZFVwD5v1PCJ6goSdN9l5Jbtj8HhYGE6GYA4cKKzqhat0D2LiA6O4o4wgOGJbkkEodyUbCyyBmk-23iGzitDzSWwKvlIinLO2sRl0xeYxciJWwjN7e6dXDbDhV_JwefYv6ctBvHXE6mLTMIdUv8ShRuCVJ4QedJcsu4a8bwkRyKi7OC7NO1ZjqSQx-8_PscXrhb5A6CKuS8LEQoayQEqviBk_ZFfvZvuoIId_2hTiYmPG46IblaoE3nC3-0nL2tzD16Num2iv9OZrcxHGsDZvR0DUt52rOEoyfm9ra20s4DscvhPfwOL-fOtxqT0RJE3U8G9LAy_R-WNv92IZmvXeuUtDjQvgi7RtSo0K_Eu2iPyWGxEv2D0Uhd8lruGyg6KfbePMmkh0LY-zneTa0GY1xgVs1Pezwbk2IC8Z0v_McvjQ5QvrOCYgLOV2RmIPy_otfiwIIJviX_FNgzXeLMbS0jou807vkKnYKtnHIIsQm8PcGVdF9k66ljho3jpIwlBhpoRWRTzvHKwUwPAT6QdwqyT4qdzbCMglkxXkLzRq_E9apB6SJFD4rqqXH0NohVLr-L8qHsGpNneQmpWJ-jxA934cN5PP9vomdISj5RoqRrwxkxE-77YYRt_QhHRWcY-K3qTwZQhG6QJUX0um2WCozb1ylaVivnJn_Z1cfM7eLgSahozdzcP8sWwTS0fqUKgcmNH5vahjrK0ldDYYqwvMoeLngE9waD4oIxpMKu2phddN-Jd0FGIL7mXlRQLb98ZRc2dv64RgVMSvfYBIO1a-taZwhz3wZ2lYGXZQjUU5u0PXibhF-juCHbm0iZo7WVNP-Y-WYbO2-Y8oNGxWMBABw9mx2fLxJ4mJUQEZnp6R0o9UMk26J6V6qdoXw9x6a242AZpsFGXJIboJJjZDLuOaeOfFFXJu2KEfvi3Ln9rN77VugHztVH3dTzh04tbdHlmTt0izTtPjfDdjWX3D3zcWym3iCy5BUj3z8F2eNXgvnBnzCj-gE7q8hvBk5CD8-fnlAgYyELfq0FiXuWqqkQPzLXHqb205suQH1jb2yOuea8wzNxS1zJaJvuRjkO4UF0RSx16K_pffiTaQGmB_59ScX7g6SloRsHgB15FMqd7rFaRGbWW-Y4ekltg-Q8V1Qn1lSnKPDozGU3O_hsft3LHXPxL1PT29572SCTNplqbJtoMvM2MsoMRYKxZO6JiEmoKcR2OsNLoRzK9VHTlDgRuHG5KcyOlzOLRg0Fpf2d4zHVMvCWaUCvziM9N7NcTYYWfiQ4ACUAKtGtjjLS2xxsbu9R2sxg2NrWjxX8an4oYXiP_nocq2QsML_AbYaxnc4Y2p59M9I6gyvVpG51sDutg6v5G-CJvfS-ICK3nNXHu3lZ_1UbbuyzFLrJZHi9n9ypzjeXrY5oSixwMAnCFrdVrvycI26zSWgFDQVGOAJTICq0-cV5FCVKNinSg3EanqXb-E3bczw1XWtJKrsitJNuKGU5Zvxm9L1RXks6k4o1vttKjWUc1nsHmHMcAuEOGXvZaR0wHKQNhjqoJO-P2yojDaE6qpUsAeq3VTskCjDZ90JmVg-ifv9uzMyt_O7DhtcXZ9vIBQfpW8yxZfDLqn75zOldwD3FvQKfGVDdX2_cpFtvqdhx7GWvlUZGFPc2TFek5SCk4-IDCGwhF-7gTugz4WuTa6-8zbzc1cnqJzEo06v-QPampGM9q1oycmdk1ILj7eJx6-07XCkUQShFgovkE_8aRwPQFbbccWptuOSc-A_RxB9sXofWmpUUgumetNb2dKgZuZryza2GLRWjN6E2okYemhq2CYvIXbCqo_TML3TNEPUYP31Wff0i4Xj_WLv9gkbjBBf-5qnSDZ15VaRaX7Z2Oawek9qpKzrr9dO2dUrrV_lgt8ilAWE4DcNQobbNT41X1r_o_JrkgH5KyIf5qVZW7ccOCSTIVbRW6kBENYvbpKdttn93PBwKR-InAl6FUvmxDGNG-mC0i1fxhC8epaMUQWGWkO8Yyxuqt1q8wOYb1jNZzQEloKPWrnyPN6df6AYIWr0NPLPB0xym3QLmIrlxFxF4FE2HX1_fn2tbU4qsPqHxHT9Yu7LCT4ofhVr5fVt_vgFbkuuZmlXcS3yCHJVa3Z5g1FC4toNQBBA0uwm8cifANso8g8XphOR3YqV2EoSeNwKWV-jET4D80I4vsuO7zS67-6dZP1MlbCINeYYJzUAidk1Xu3p1dF5o1sTCJCfq2ljAmF6R61gyzJHEEYhDQysggAXvQOT2OtpVbruPt1PyPmT6MeQaWm08JUSVdixd5g8gzR3WTzpMz1zhXJ_JfTXCmATmj6CnWQKeRAQdPmdNukYs1J2nC58iDgk4b9_JbSC2wDtpk9wluaH3YFyTp3d1QRyHx2hUIdJKVLAG_3rC9XtSV8gc3E0IrHTZogWZx9haT9x0Tm-gHTcVeKPrPgiqN06xZQhbtcHH8BTktrZFUz6QircSeV74FWGdfVW7XvYCf-HZ3nD9eGu6NPwMAB7KDgip5fLTqp682HEKCD9NkYecHWfFt8wKd0HMuCVm3iL_Dy65xQayQxfKw_JMtRJo8G6vxRXQ8o4DKNFomIKDkxq31J62IZT9g7iqRYibasqZy5ZkEMMe2odl6AWLrDzwnfkAepnuh-IwNABgZgcpDTmsUCKRZUQQogYE05B5XIonXqZxCoJtK2Lqt2CxDxQNDX9KDGKBBF3t5lbtMxMUftaL4y7VbqmElXCVf-0epZhhAQm-13qZjGnYoV84nUUCaf37CcoywGYjvP5rcUhjwVNuIJzckwa1byqepklhu0RpfJFRVqvu0zD8Wk5Ho0Jwwvuj5m2HUymrD7hWUrh_7GA-Q_Z-sidCuIwaAjWqZMWmVxjWYl1iOe9jRCQf-4XRouYhvM4Kd3HYBhJ4XKQRulip_Y7uwvi8HZbE-kVNgp4vmkk5lPwKC_MtI_FWy0JEpWssQjlk6l67qmI=","id":"rs_0ccdbb998bbcb8ee0169381b564a8081948ceef9b00a21f7d2","format":"openai-responses-v1","index":0}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284693-T5fbvypvZBrAKgUBuZ3w","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284693,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"id":"call_Q1trgJ4nqsOMxhQMCj9SZ0Jk","index":0,"type":"function","function":{"name":"generate_structured_data","arguments":""}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284693-T5fbvypvZBrAKgUBuZ3w","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284693,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"{\""}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284693-T5fbvypvZBrAKgUBuZ3w","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284693,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"answer"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284693-T5fbvypvZBrAKgUBuZ3w","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284693,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"\":"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284693-T5fbvypvZBrAKgUBuZ3w","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284693,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"2"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284693-T5fbvypvZBrAKgUBuZ3w","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284693,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"}"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284693-T5fbvypvZBrAKgUBuZ3w","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284693,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"tool_calls","native_finish_reason":"completed","logprobs":null}]}
+
+    data: {"id":"gen-1765284693-T5fbvypvZBrAKgUBuZ3w","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284693,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":141,"completion_tokens":342,"total_tokens":483,"cost":0.00071925,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.00003525,"upstream_inference_completions_cost":0.000684},"completion_tokens_details":{"reasoning_tokens":320,"image_tokens":0}}}
+
+    data: [DONE]
+---
+when:
+  path: /api/v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "openai/gpt-5-mini",
+      "messages": [
+        {
+          "role": "system",
+          "content": [
+            {
+              "type": "text",
+              "text": "Before we continue, here are some contextual details that will help you generate a better response."
+            },
+            {
+              "type": "text",
+              "text": "<instruction>\\n  <title>Structured Data Validation Error</title>\\n  <description>The following error occurred while validating the structured data. Please try again.</description>\\n  <Items>\\n    <item>You thought 1 + 1 = 2? Think again!</item>\\n  </Items>\\n  <examples/>\\n</instruction>"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "I am testing the structured completion API."
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "generate_structured_data",
+            "description": "This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\\n\\n1 + 1 = ?",
+            "strict": true,
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "answer"
+              ]
+            }
+          }
+        }
+      ],
+      "tool_choice": {
+        "type": "function",
+        "function": {
+          "name": "generate_structured_data"
+        }
+      },
+      "stream": true
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"id":"gen-1765284700-DZ3PCWyyM0X2hfYIROwL","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284700,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    data: {"id":"gen-1765284700-DZ3PCWyyM0X2hfYIROwL","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284700,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning":null,"reasoning_details":[{"type":"reasoning.encrypted","data":"gAAAAABpOBtoQzAe-mql-xJIQb8qMbmOCaB3IHVmqAleeJh3i8fJGIJ_Yncp_uZhaCb7XdsrPeTuPYKgSe9CvJaGfbDb9sz0mav-P_iQLfG9gHp7tu8Mur5pZXRAoR2Szsk6YCTSinUNNXgTqHXhwrgJvgdVYRzIeIYDsaglKECPmyaJzbawlwrbUiI7k4Q--2Z6hcfiZXAwR5E9SKEM_3L61X9BvXu-iz7o7rkoMaovGHgNSysKk_ucl4T50Zr6R7gsgdZq5TAFsMgQaFdMcDyBmvSAGgfdbFqAkYeb3y25Fx5FHH1GQy25kbmcdWym9P5XQ5QNTOH285swJ7xZxU0XzVvEd9LC1zsdoGSPLEwWqz3bAIamSX6BFfkQpB33BuiVtfy6S827SJgo01Jv6FSPCF4bFyK-WJfMj5xqVmVsV3F1FQ5k6O8LOn0VFNFkWKYm3cLKMzKM97owDojt5hg7UoA0ZjBnrAnwIWWqPbTcTW4InE7BWl1-8b9PICzsY1Are2KO5xgxc34_i5_taML2WfsmcxXyAzoe-muyxMGZQFKUTJ6FzqohzY0IL_TWjWsx86O0UYqy3U2QRJGK5-RMAZ_ZMcLn28Tu5xDqSY0gukcJMwc0mc0FUxWy2Tjv1QTDy0Ugg44JqPOeWQ-jVuuYqwqnyDyiDg2VLvWvHxwZZOsc2rq5psf6Zk2K0rmqvCsEr3k0sZ6sq_SpcxTp7CeRBPSI62KM4yBzwLUwDjzoocqtRcDJERosD5AyYk969jYrPAXD7a3kX4SRk-rcw4u7LfSdI6f_xCNRbJ9bUwkUQvmR_UFix0AkIGYKVkkocLtrdaQRbXBSxcI0rDTKBklPWxZ94VBfD3LOQ5MP2SW8s9_HgID3vCC5EsRFiVfVPtZvHLTuFkB3ojLnSYe1JodWsPhhhynDRWnPku-_uvniKLYv9HrrF6b9srq6-YLYIB1u7y8Lp3BKLKMJjkZKLX9Vk8uqIGFEy2dc_a_SYGnhjZBJI6Q36258R0bVQiFGqZsUSQuttkzL169epuN_HlXqJ3usZDtfuR-m3ALq06lGOV72OG_VyfU3fEoU42Akg7C-foNTB-VOrsoL95t_zRUEmRckyiNOg0hzyBj7YD-cka613V_kUzubVUHXIb9G10XuWtnM8oh7ZYaPHQdqbeejkNmzGCYEA5E_RDvNzUKCdssgqvep171_kBemVeJRWhOGB2f_pmyK3WtP940YkHjLBKPvPRfTPyYe4KeSI1MTTfYlnmMBVb44FgNBtSotW-osn1xulN-nJoXwxvKcz6RKxpT0sAM6pSA2aPvN7Au5cSlE3V1Ox6xMbRdXqTbbJKOwENapkzQKIaBlb5xJ-GuZiFar8CCZepg7Me16iE9Aw4z3iMH4hS6WcI9W0CdFsudrjcsE-YRpXeR8Qa1M1UE8ScR1qTQp7uyw1kE6UIzgXpMSPzgyXvyLiDNUdJKDVMQi6aSNcTbiLvlfpi7tIdPdu4vmEoYbBlwa4CVe2ea0KDtWlEtGM5Y5snF1or2lyGaVkwpF7WWl6baMB-ylPei-Z5sQmA57u8Fzk_Bfp_aw0XOVooPcYfCQfjgaenxmpV82ZbGosA_jrAlJRtFpGibC3UAjsRNNHB8mW62MUwTX8v0qyCh_SKzieagRsqwmaPM1VLfoK5bgYyw48pC8FOXkgUgZV1kgIdZI6_VqIggk1pJgdchov6aeSsic264ZDQr5YDD2SBpT2f7jKchKMw3E_iA4J4jPLvrtt2KhQvI2Dh7mW2JBEnkpu1JgccJK6I22CzlGsRuCjwCRuxoY4f3X82ezKjhWPsQQjIxtWenq2pt9r5xkiiiQXtYeCug2v-w3H8qkR8mKKYO7OOs2arbCWOWOQOzJbF2E5DwKPyCJwxyfwaZJWEYWsAlhzyb5IjCji4-LhriFAEETjQMyRPG152CXB_PcmVxNtVbvHGmDgVhA02W7f8RJo77Vjtxvi9FTJYQ5zNCo0tRyuX5Z1RbuZwq6-d8QJdnyS8WxyY3vsQJk4oWxacAmfKz_YAPXu6h4opg5KcLir2u9znb9fzV0Fi9Lt8ljKJdjgh1jkgErr0Geieeb7eJurtAsleICdOz-B6Vty9UIUZPLt0-r4DUv14uLyvPSR-8ingx95CrNC_rUTah9RbAQ4KX8Tj2MD6T2M0ko0sssuCzezk3f4bIqJznCf_bddNf_9qJVm4s88N9YgdbSx-FXczkMiZor_rti5O1BrsoZrgJZt5Q4Cml2OX_tiC_a9ZkeaFPrFbOoC3V3WvUY0wUqufss7w1QmX-x0oIZgQCM-RFAfrzAIeUQO9Q20HL-XLmGBfeNSa0Jt6iaHTdR6Fy7rKvzwdxGK7ZIKNM9MwCsuwAr-0jUDAobbgpGmYUTek9notmdsDc__qiYk3KiUoPo8Tx_lITB83M4v2F1FMNEVz43kRC6CL4BRxdsLzXC0gR2enAjnVZoGcX-9qAxh_fU5nSrIwgKS7d3CyKkGiIr9TMX0xRbwfpDAV8m5qBu0vBeEhi-dhA9TCYqcTH-qnmTR5qila5Jr1yM1yH5pQQsm8TYoCksSC9uE0fGQJ29zcCAXQ523qKsEMibn61-ks8m2DHB5SY5cxBwzvP4fgbjVJCNHy-iCRsDoGt1rq4xHgfoWTMQiSlihArLelbTPsQcAfJvmTKRgnVKMHaLXd513dn3WzGags3mg-RX36wn-MlLjXB-zrDfFpYy2td8ECDOJeud6YLhUwV1l_LkkJ0Bx9O2FVFu45adJ5YDw4DZY5gKcT0pMnx2n_KJdQ98nCLqNzw7czOv098r1COimZpV6VleMPxWymG-01MdtYBdvMqUNjkrjZ9Wk6vGqVKdPzlYjAvXHZOnFWLXakjkI2rZ47zQCiLVKy74Tp1KE6fH_ipSZuK4diOlDoCi0Lzjfx30a7u-g6W7TdNNi_onUC9VYmivMUl58kS1tN5w63Mh-VZjK4Q8Vb3mrZwNAaWsDs8KXkvp20uT4bx5qDsWtX7y8ZAPieF9-fl4L627BzKAcWIbtOF7PTxwba2_2mMs5YgEscTHkfIDo1bWkr8PSHTenh82-MUIBA3ZWpWRxRqgwUmMAan3E9Fe4BepzHBiQosmPmarItiMKlqoAHw1oEYEJ5NZw8Ug42VuinSwPduAugdLbZGeM9XasQh8Dn2RD4XjfmUlzk41Rp0Ai1rFd9mn-rpD9W9vpng3MOABHpjU9jdSC-tMox3rVNeScV2GZ96O0ArIK7SUvmlj7IMaiq4zdDxcXZiI610zDb30pcrVSAZOr5f3wNvsQS818r4TW3o48qxl1xCEtJsQIn5-RwpVZVAAtfgH7YYIV1MuFERrR7R8gVL2AqyLu2HzV27Y7iGUsOCtpilTFTBw_FFsAV5yzcQyn3RC-3VtNezffY3mw8utbJ7gABApguEwPnKMH0WvVcY1XFPfHcSydlqzKPzHVQucTVE879puRPLQskSq1kXJa4_4zGKmlE7K2TJMInTjHDvuUPzmE89JAS2MIJfZbcqHwekrDzsvVkjUS4zDp0ftM3gGiYLlr7wzyqJ28-Gz1-6GptlgFuVurfVFSxVDwJE2R8UcHW0Tyudcw_ZaJ2geLraGg_LkgX6H62IC-l2i_Ds9bIL0oLI9aVvFlyU96bA0cAU0DzLA4bB_Z9eSFrgF_T5KQmxed1VumWIYkvSfp5fGfZhqunQSxUrLn18U4rpCMOafYZsMVmBRsrjY6hiLUvk9cOPWIYHacZfF0eMfeppb_8Q7OEUMtJfiFmL4cVz1zVrlnLj_4m-AM8ABXKQDjcBmPiXohBS9To-j9iD5cK8gyyyduV_Wo5f1jcskGkNx8mBc5TCH9yDG2989ja3oQNuYr0X0hH_xTvFrAPajncDmbnnh6zFUm-kYWvc5-mRDcGqwCUb0w0w0tfS3sPlPrOavTO9NcsCKH8JavfEVKRBWONeNDeiW0Aaut-cX","id":"rs_0581641490270e820169381b5d2a6c8195870740e09143edeb","format":"openai-responses-v1","index":0}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284700-DZ3PCWyyM0X2hfYIROwL","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284700,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"id":"call_usZZOVMuakmApOIqsxkr8aey","index":0,"type":"function","function":{"name":"generate_structured_data","arguments":""}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284700-DZ3PCWyyM0X2hfYIROwL","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284700,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"{\""}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284700-DZ3PCWyyM0X2hfYIROwL","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284700,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"answer"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284700-DZ3PCWyyM0X2hfYIROwL","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284700,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"\":"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284700-DZ3PCWyyM0X2hfYIROwL","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284700,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"2"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284700-DZ3PCWyyM0X2hfYIROwL","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284700,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"}"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284700-DZ3PCWyyM0X2hfYIROwL","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284700,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"tool_calls","native_finish_reason":"completed","logprobs":null}]}
+
+    data: {"id":"gen-1765284700-DZ3PCWyyM0X2hfYIROwL","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284700,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":229,"completion_tokens":470,"total_tokens":699,"cost":0.00099725,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.00005725,"upstream_inference_completions_cost":0.00094},"completion_tokens_details":{"reasoning_tokens":448,"image_tokens":0}}}
+
+    data: [DONE]
+---
+when:
+  path: /api/v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "openai/gpt-5-mini",
+      "messages": [
+        {
+          "role": "system",
+          "content": [
+            {
+              "type": "text",
+              "text": "Before we continue, here are some contextual details that will help you generate a better response."
+            },
+            {
+              "type": "text",
+              "text": "<instruction>\\n  <title>Structured Data Validation Error</title>\\n  <description>The following error occurred while validating the structured data. Please try again.</description>\\n  <Items>\\n    <item>You thought 1 + 1 = 2? Think again!</item>\\n  </Items>\\n  <examples/>\\n</instruction>"
+            },
+            {
+              "type": "text",
+              "text": "<instruction>\\n  <title>Structured Data Validation Error</title>\\n  <description>The following error occurred while validating the structured data. Please try again.</description>\\n  <Items>\\n    <item>You thought 1 + 1 = 2? Think again!</item>\\n  </Items>\\n  <examples/>\\n</instruction>"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "I am testing the structured completion API."
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "generate_structured_data",
+            "description": "This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\\n\\n1 + 1 = ?",
+            "strict": true,
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "answer"
+              ]
+            }
+          }
+        }
+      ],
+      "tool_choice": {
+        "type": "function",
+        "function": {
+          "name": "generate_structured_data"
+        }
+      },
+      "stream": true
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"id":"gen-1765284712-QTR5cNAtT91GZXIBTkAU","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284712,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    : OPENROUTER PROCESSING
+
+    data: {"id":"gen-1765284712-QTR5cNAtT91GZXIBTkAU","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284712,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning":null,"reasoning_details":[{"type":"reasoning.encrypted","data":"gAAAAABpOBtxGn2hu6HPo7URxs5vOCf_De5zrg9aOyOvkj-TpKQQW6GVc53HIwWEtYZxmyIO_anlrVOkC-7JPgTUotal49HNfBnLQtaS5lqIkqe9jx7LWVpvxvmc2000elnMaIL7ULPVLObPh73YEn_oBVdRspBeMuA-z3ybFP7vsZYs49zQoYuw5fxJpBNXZ8RwQr-Vas78z-zCXKiR9fFh7N1q3uXG6zUurSJSWgHKwdKLQq4d6718CZRq1dPVdSgljE6bk_OQeYLxMxvtQGEiVJABmMlUO4_qIqaYXktJwHaPGM8LshDhuHo-Gz4xGOi4VFTMy_KUAyHF4D3MVcwKw8tRDHCkqZ5s3Ax2cww1iCet45xdfaxGxkYHLXBj2Un56d0qN-PaSSwBY0FhPE6YDO4PMQKnGafAY5UEvUflH0igqJigA9kzISCyFJ76W67J8Ec2SjRc1_bfHjZwq8eI8ZD6Slq-tX150eWUCLWIYKuPivamDIURwUjQHYXD82N7WSDNV-oaW2wuXFN7nTR3Yka-up5U2j52ICcXYi9rwzavDmOhyFcVWS7WtPlBsW7-fAPIY_ZvcpH1EwPBB5be5vkTkNddexN5Ou4d7i5lKb-PBT3vPwlZphIR4LRrJi8vxgUi9vmDSW74nbnGvAO3uDz8kLNCOv7wpEy2U5kHjdDW_vtASnaY4vINfJjac2TRwcmDKjKhYRFV0nivji_WHv3WEoV0JSlvkE2qMIxZzmr0n8Oj_EbvIRXMi8xWaGeaGzwNaykLfC40NR5Ihr6-wDpszmXv7YFc7me7C-k6WzcAjFTeR54Xo2-X9mq886ZEJwkCPdacVUHnspfcbnHmwK-gH2UkZSumKokzmEU7W5zjs50FsA-inNz2ylaNDNMh4Vtl6frsIM41vGewUvIzVnmJ-Rxo_TyQ_OLNcHC87XPgR5xTah6-6rvxvhvitHDeHflu0csMj7ZKGOmTjcNMeh8BUG04gH9duankS85OOp-MQOtYV6fBcNJFC55sGnA9-bjdNN1jme6TzUXyuMLRzgOxZtGNJfhnItHU_W4deG4nikkPbDBIc8qi8Pmj80wkrrEWXzpywgT__3AWBhOgxoievSKzvOWdrph0VQaJsHUXh9XUhXmaxSDVAuwnM6zUbADnkCYjtaNn0tFj2NZ6OvjPYzVjX8smqNOuiKNkuiow7BK3c8ognl_Jm_l-f7-iqbSpsp3ZObmGUAaXSHTyIfZSxcVrh9gsAeRn6NRF4umle8wxwtksIX44u3BQY8pPGoT5gyeo9puEmScmnkHdJ4LDtuKBjlAcVCVuF8bum36sIorAF_y5u0n7J_rH2iTnV5NqvLrSGOA_3uL3hlyg_wUGluWwUyg1dcHx36NvxwWpG3lwp9Ikzh_S29wXKbugUb1Oar039PcCXocMSbDb16LpP1Q2qOoQNviR_Z7HfXT2hEQn1vIK0jcgPACJ9hT80XKqShcTSzY_mkPrqGx0Q5laTmpRWfuosqBvyZrQjCEqKcynUi9Ja9ELOxdvZTMOQHWnmUbns1E9tZwfM66W1lynFCYGrFaxyg-arHxbTiPPdo8Jfw1oZqDJRopA4ytCJqP3OW4pztwkuLPWRpKgoyJDGED_p7OZuo0iciezUuTYl7EwOLHG6f1AclDlxGqfIVKfGxm2Pnw1NGkSPMbGId21xnCulBOwsAL7hCS71Sp569CIzeVUO3Dc2bKDLDHADYyMjfx4jikjqEjAW3PChm4iGsZr_W1isAA5GTYGoh3SUFIz8fD88CVTlN_RgOEnztTL0Mj__BOpF1ZNO74Z_UN5gTDBap10cnDJ9_u_zlAa6GlvsfIHYsvKg4tynFdRXffH7S44GFyY-z-EKLdFw_WJKE-ZF5snyq1xijyMLHgc7Al0Qhzy3gRpHdGhoYoPg6lQ0lEWCNyAm4w30MjtCl6xZbKm607onEhnMKA5srzQITd5-cpPiAA9MYwVsO3Ke6bqMvfEaifkdTOBJV3828eu9zXCfep2uZfo4Bw55kLu26Z8LCie4Hb1JphpemUYTu9BHED8A37qXWGKX_RbhKwHtnCUr3ixHH6TzQk0sRjH8O6B2fkAe_holE2s_k4Ax-QuYDMzlGLhq408JjKWfR02uch5oIjEbIYYGWnnx6jil_09xmnqWjiVbHn-sofdUgiExoNRL3YqjBppiZRrAjSBWmvs6XXNRtIUhEn_fdgzBEC6W241PYthclhsjB13rwv7TtN8GdOG_AJYjXnCIXXXnoNxHUAxKsHlAcwl3GWqtwgNSFkFYdrR78vj0AlAshOpEhl-O-sD9sY5RpXqooUMkOA8w0zerQWrDa0L06cvuuM01jSJSChT1EW2UG-QR0ATBJYYMSEKNqeBXNW-h-TEhu83kF7D4hATygbTGWizPPVge8FNq7VLCaQ_joaYvth7_T0ZSxCiPz4bHsXv_EP5USao_cbF3p1zvbx_dbOFs1uBuKD8RI3ZNKbpYR1_dS8wLEX2rhF_BjIO3oiUllAqGIgITah6ZZqffI4G8Py0muxPDMUEdPNUV6GDuSTGd55exF_Wtq119c_ZX3_LfEy66UUexBsL7KlHBTAX0IvP80OdTRGysXoXY-5m2JXh8-vNVhk53Y8r6V1u8s7h2KKhYAXd_TRT9cvUxzeeIDiRqSjIzVk0hnqgRm94bx3oKTmyEVDf6etKi_ad3l6mQv3M1yRv3j2oWlGi6R97J52IH2ehJtpuzyd-TT72ElEykDnb84uSHL5XH2lp-zvKQtbwMq6urL_6n56Vi8G07M8BL3KgMjo9Pjwyke46D2x8hRbOM5WwxKBLGxoX6_3q3L0sQogQXL1276LkPTlHQysoy_dPRy0NrnRE15ER8_eZuzpxR-_BVaIGRRWKRAKohg0zsEiukK-BLkqP0YndYVjJT-K7PQ3_bnHJf2AMcYtGh9vWY4fuxSsUN0j3fCF08U-5FcI1H_MSJQHW2mniVF7lTb--9BBaLk8FcDsLV0cSzIRhKL4XvdmmtuWvaMUhq_kecEgL-L3Nqhk_ndXflxpfoeL5YN-QZAufsDFz9md22w0r0nBx3YVZk2TBuakBws5jVKqr2A==","id":"rs_0ad07e6089826d560169381b691c6c8190a300d1ab6d554565","format":"openai-responses-v1","index":0}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284712-QTR5cNAtT91GZXIBTkAU","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284712,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"id":"call_xyRcL38i1RohfrewWkrS60K0","index":0,"type":"function","function":{"name":"generate_structured_data","arguments":""}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284712-QTR5cNAtT91GZXIBTkAU","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284712,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"{\""}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284712-QTR5cNAtT91GZXIBTkAU","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284712,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"answer"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284712-QTR5cNAtT91GZXIBTkAU","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284712,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"\":"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284712-QTR5cNAtT91GZXIBTkAU","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284712,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"2"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284712-QTR5cNAtT91GZXIBTkAU","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284712,"choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,"type":"function","function":{"arguments":"}"}}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+
+    data: {"id":"gen-1765284712-QTR5cNAtT91GZXIBTkAU","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284712,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"tool_calls","native_finish_reason":"completed","logprobs":null}]}
+
+    data: {"id":"gen-1765284712-QTR5cNAtT91GZXIBTkAU","provider":"OpenAI","model":"openai/gpt-5-mini","object":"chat.completion.chunk","created":1765284712,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":295,"completion_tokens":342,"total_tokens":637,"cost":0.00075775,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":0.00007375,"upstream_inference_completions_cost":0.000684},"completion_tokens_details":{"reasoning_tokens":320,"image_tokens":0}}}
+
+    data: [DONE]

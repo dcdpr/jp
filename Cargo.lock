@@ -1473,8 +1473,8 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "httpmock"
-version = "0.8.0-beta.1"
-source = "git+https://github.com/alexliesenfeld/httpmock#c5ef6760df60805772a4318cb0312ae5a0033624"
+version = "0.8.2"
+source = "git+https://github.com/JeanMertz/httpmock?branch=tweaks#29b5a87f257e41fafed93cf231b8c1cde9c30da9"
 dependencies = [
  "assert-json-diff",
  "async-object-pool",
@@ -2086,6 +2086,7 @@ dependencies = [
  "jp_inquire",
  "jp_mcp",
  "jp_openrouter",
+ "jp_serde",
  "jp_test",
  "jp_tool",
  "minijinja",
@@ -2093,6 +2094,7 @@ dependencies = [
  "open-editor",
  "openai",
  "openai_responses",
+ "paste",
  "quick-xml 0.38.3 (git+https://github.com/Ninja3047/quick-xml?branch=serialize-cdata)",
  "reqwest",
  "reqwest-eventsource",
@@ -2103,6 +2105,7 @@ dependencies = [
  "thiserror 2.0.16",
  "time",
  "tokio",
+ "tokio-stream",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -2141,6 +2144,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "test-log",
  "thiserror 2.0.16",
  "time",
  "tokio",
@@ -2206,6 +2210,9 @@ dependencies = [
  "httpmock",
  "insta",
  "saphyr",
+ "serde",
+ "serde_json",
+ "test-log",
 ]
 
 [[package]]
@@ -3397,24 +3404,22 @@ dependencies = [
 [[package]]
 name = "saphyr"
 version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3767dfe8889ebb55a21409df2b6f36e66abfbe1eb92d64ff76ae799d3f91016"
+source = "git+https://github.com/JeanMertz/saphyr?branch=jean%2Ffix-valid-literal-block-scalar-check#13766aed0533b3f0848d120eabc90abfaa59ce51"
 dependencies = [
- "arraydeque",
  "encoding_rs",
  "hashlink",
  "ordered-float",
  "saphyr-parser",
+ "thiserror 2.0.16",
 ]
 
 [[package]]
 name = "saphyr-parser"
 version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fb771b59f6b1985d1406325ec28f97cfb14256abcec4fdfb37b36a1766d6af7"
+source = "git+https://github.com/JeanMertz/saphyr?branch=jean%2Ffix-valid-literal-block-scalar-check#13766aed0533b3f0848d120eabc90abfaa59ce51"
 dependencies = [
  "arraydeque",
- "hashlink",
+ "thiserror 2.0.16",
 ]
 
 [[package]]

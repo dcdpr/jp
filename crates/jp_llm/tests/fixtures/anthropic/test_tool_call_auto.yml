@@ -1,0 +1,264 @@
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Testing tool call",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        }
+      ],
+      "model": "claude-haiku-4-5",
+      "max_tokens": 64000,
+      "stream": true,
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": false
+      },
+      "tools": [
+        {
+          "type": "custom",
+          "name": "run_me",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "foo": {
+                "default": "foo",
+                "type": "string"
+              },
+              "bar": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "foo"
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "enum": [
+                      [
+                        "foo",
+                        "bar"
+                      ]
+                    ]
+                  }
+                ]
+              }
+            },
+            "required": [
+              "bar"
+            ]
+          },
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |-
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01SSbBT6kXR2kxvfSwcogc41","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":605,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":2,"service_tier":"standard"}}            }
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}         }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I'"}            }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"d be happy to help you test a"}              }
+
+    event: ping
+    data: {"type": "ping"}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" tool call! Base"}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"d on the available"}            }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" function"}              }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" `"}               }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"run_me`, I can make"}         }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" a test call."}             }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Let me invoke"}           }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" it with the"}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" require"}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"d parameter:"}             }
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0    }
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_013oE1TV8hr5YJLWjFCyjePW","name":"run_me","input":{}}             }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":""}      }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"bar\": \"foo"}         }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"}"}       }
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":1       }
+
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":605,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":92}   }
+
+    event: message_stop
+    data: {"type":"message_stop"       }
+---
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Testing tool call"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "I'd be happy to help you test a tool call! Based on the available function `run_me`, I can make a test call. Let me invoke it with the required parameter:"
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_013oE1TV8hr5YJLWjFCyjePW",
+              "input": {
+                "bar": "foo"
+              },
+              "name": "run_me"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_013oE1TV8hr5YJLWjFCyjePW",
+              "content": "working!",
+              "is_error": false,
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        }
+      ],
+      "model": "claude-haiku-4-5",
+      "max_tokens": 64000,
+      "stream": true
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |-
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_011yThCCeHBoMZDzMT18MQD7","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":115,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard"}}           }
+
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}   }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Great"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"! The tool call worke"}}
+
+    event: ping
+    data: {"type": "ping"}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"d successfully"}      }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":". The"}     }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" function"}      }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" returned \"working!\" as expected. "}          }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\nIs"}             }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" there anything specific"}            }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" about"}            }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" tool"}         }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" calling"}}
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" you'd like to test further"}          }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", or would you like me to demonstrate"}     }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" something"}        }
+
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" else?"}         }
+
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0               }
+
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":115,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":46}               }
+
+    event: message_stop
+    data: {"type":"message_stop"           }

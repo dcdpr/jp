@@ -1,0 +1,28 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Could you please provide the arguments for this tool? The following arguments are available:\n* `bar`: This argument can be either a string 'foo' or a list of strings.\n* `foo`: This argument is an optional string that defaults to 'foo'.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [],
+]

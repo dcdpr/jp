@@ -1,0 +1,243 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpOBtXXLLJbuqwwBznCrXbvosyFa8s3uA1x4GEhxDgSTEw_Jct1PcKn8Sv9Sgn4b38LxPSxel0D-qLOrIDn1wAUXgEdJ6bESZW-gj43mnvNEsO4qeGXA_eHy1eyq4Bi1Dy-_Is7fnhBWC4Jk5D-zaq81vXnXgHOiL6cZZw9Kdrl1PziW4or9Uy-V2TCf3F7VAQ8rurVCUkBKQczjHc-3pF1-i-F-Bfcc_7-jRQo8-_D74zfAw-0T2Z3CMeHtt_znSa2XAxMnsO1_DjZtCOwiicAkExZC257olLIgNTGPncgCygNYWuKYz_fMwvsEqfAjwHFGmTUyKgR33VbqTG9-W3Yi2TvLBHRM6C8B-3Pf4XP5xrbzg6PbMiBrgFyaMbhMmhUuXMlLZKDfRLGiPPW92TSDya0tx6S5VtApwISRDBAF7oDYdiZBnH3WZkuX2TxMJ2Swh4kaVHRAyn_lixl8EERdIDhPqXKG39n6MM19VyKULtt61FQ3rSLE_vgd8bosedIF4Dtsn_UVlIOVEqmyKUFMbwzqpM1fcIcKbUCi0k5tNDCUHkezkJJk-UekWsNGYeGf9LdBozWC_otXviGR0IEQIgSrkacwcu6aEs-hElmxFMDEovGkoUQLkEgRhnEzt8iBU5u-iUoN3ED5_I0feR00bWraH6xQiYGRZdbhiS4QLWWt2g45tRMzYsrjA0YCvE9N6i7B9ANncD7ugrvYCN8A0yeN6hlljDGG2zijkgr1565krXNwo3ORySidsi-6l9YuyQgQIGIM28phvenWP7824GmHPg4rMA3YR4z83-Z_me8OxPd_W7lkSY4oK3Klkk7TTCYk4cXktd1p_qv-1QFfW5Cr09tceWcYYiM2w2Uo9ZJhG6YNBfHQ2I46k0jhdhtxYTl-GWXjZ-vO0vyPLBCCgLf6AoAhUsy5WBaH5mF8LNEeaeVp1bTNgmZD3D69fyyJw4fdSiupKKgawqeiytZJIh7oaSIjyL8avCgHP4yQTSSozM8SSZCaHEPTLNzOWcpAeAXG4UhHyzCAR-gzSlzDqQ2xrPOiocM83g9SaG2aTNdnTUQP4JVP8tVEIpJ44s27YXggFGJXvv1gpsIyquSURe6x0hjPK7DAcUghsQEsCqpIx0W45-jeEJlVbUsyHdaOjPTo7PJoze1eQ3vFWd4CjIX4Ry_zrvfiOUJnpVO-KC5BbyOfvN101N78vwM7sLztSef19y6BziZWwyW8RzNdwzjgkj7nYJ1_wFiwFVdKIoLkldWDy1fZnDBri8GBCmf4uv1MjWOGHVyvhCJZl8RO_aXByywB2bNB3yh5dEIDu361p3brnLV27_OSKkYQVlKajP3UbcaQV_Ukzm-fvjsD9cKoz6iw3SMxoWmOe8f2wkdczYHTCE9TEfWmkoHGGsmD94RkaishQHjt5s97vxWOX5xEvgIw615PV7-HrTZULU7ZzOSPKTHjlkO00XPP91jJBy"),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_04a88e633f152a800169381b55540081948cf895bedc1d0510"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Received your test message. How can I help? For example, I can:\n- Answer questions or explain concepts- Help write or debug code- Summarize or edit text- Generate ideas or outlinesTell me what you'd like to test.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpOBtZSLvJJsLCvjIIV8QDA3YCFo4cvcz_mSkYrP1xOGZ7T2vy1aeYT5nqRKV21rRGgce_kk24RUc4CeX4yZE6zpSb8erJe2ouhse3YV-zJgUWmuhNoV0jGIr8XDLtlS296PJHiG3uC2zquzqjImKxD2-0VH7QhwKbikhHNxst4odox9h9Xd8ALhoU67eVWl_JEDzOAq3aaCjaz9c1o8BZuXw_W3wxVyD_aiLO2BfTyLxPqSUxiU2mO8ffjK7KDORp9TFIDLxlihQYWKhDqalgiBRjo9bFVJSYKgkJ3w-7SIOBzNDkbVxxSTKmDoOs89l9Bt4Vtikk6zhIczyJKh38t5_887yn5IYaAHCzX1HvEQJcxMePTxU4ksHa5xq-SbO6_TN6AV8NwswJ6NwhnChXXMd1c7VdiGEjAttjVdp9PFE1VgpwN3ZWymLqzXDtdgEsl5wqaNa2wvGrt5-E8Q8T7rXl8iWS4Lm5vjsaVlMZsAp-Qlglyg5ziL_DaJpEyy8oBq6NbY2qXF1WBNiQ9meODsC3jKY_uBO8YtejdAfFwPEl9d93t7CSW8QV7hOQEao-9eZNTS7L33sqBdjvsbCVrXsPpA8J3DlffGIaZVerHftvqwmd8a22d_y6x7Sv7kLg_xqsyIEUsAA5zcwLp04sHZKLQZz0U1OmQeVMKUGCOptgZAi84W6zxCd1nZwhDUXRxDzsQlnPayWe59Ss54dWBtX04zc4j7tqwtQKc8CXSJtTY_BNZdqdusAlUmdhI2wbN1FfxKjt_tCak2y0Ifx-21xcpo9DCMasEBE2Hl8_5upntvVnZppjLCngIoEinjTUxpRNYrmKZwtztzEpiafk3ZUZ2UjzGVp1bPSca3DyWBJAJtXeA7M9JjVGnQBjvZQX_qsGTqa5_LiDJDRe0lEZBjoUrI4cS5WkcaL0epi06STyiHIhlT8dFkHwMmv_JrS5xNwfwxRjf8I8kX2g2gVzb8HWdM4mJHlkjTLgGamN-Dwe9Hb4rKKjxqxBZGqXqXriYFSmodBlUsezjp99QZZQafPTgQ=="),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_08127922f12f9b030169381b5874148190b4a5f492f8f8f9b5"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Test message",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpOBtg5nwnm2rqe2YAV83mzaKqePIgWFeEHURj_rLsyVMndBqjmn5-BgYxYBrsj1jf0vtinp5YQzs0oNbm09EIq8fDmulHVTbHd5atnWu2xgs1Hp4fJlGXzg9g3dsbtNqSp_bX4MGgxf3Gxz_6YWKN8V6SLT4bmaP5n79PBR-y-6_9uVaACQFsRfa8G3mY1Mh6XUXFj7xWGXN55NlXZyy7ncck_tXb9a1QeCxTeX2J71BG5JmKndwptUKkZeDM7tRpW04iEsCNi16TlywU0UwcawvledgP2RRaw7Z4OrzJocUu6uhI9U0d1fhyOq69DL0thmiI0g70lIdnxj9Pzr1x3BaXkP0j0LWoUtNuJcMG_7MOFTa-U96Ua6PeZc0E3lF1DEl3mPKY49IICYmZbPsMLqhtwgbZldH2YY1YYYBoEzbp8TB_qP3YDqCz81Kjd146Me2vNVsfCAU6gTYA0YzuAvxCeCznSvznPeAll7A1qTDwzATqjNvxm7mkAuHi4-l0OYQQyGbL7FBUP_QZmRJPXc16m7bGqqMgMlpyU24MYX5-zUevMQhkDdzKU8WWpsSEZRI4w3mCmzfNoTg6_mtzYP3YbH-XraxWbPdyDW6mYX3KmMa94D484baqmVUbciVifOHodppiVZwdjOwp61PapWTxJWJvJdfQZAofvq8KMmds-aKfcuTaLU9xH1-bT-VtMY7cZsFqTDZ4y7LMiBJnJWw2wSSPuZjFxqeb8h-XQCHu3cM6HqjK8adNjKMz-qirhy8wft_ulc6gu8o3hX65icHL_wrts3nS-Ur4ryc60_uWl8D6DWmsGl5eXg1URIYO7V5Qf1nQJYoO62ZUGc_0iwpFWu0RlL5ZFmYwudXSZA1gFLzKGeyqlS7SK1gqLHKMqNR2cU2SkIkvzYeuJ8PAWYx6wPzGMGcLiTJmz-2Yoox4N9ALbCIatpZ0L1gytqAcNdHRdAy8R1QDzeS7vY8ahgS0seL6QOmPXbRdTK0uw_2cGlRAZMh0zIqlRt7kMLytBXTmE8DqIWxYGaNhIDVuhgVt9jo4kBOkVYncnaZUL7c0lhomY_ZP6uJFfsG0pzdZ556qQoK0OKKsSJbsoVreiCwTtpARh1ePr68rMpk5hBi3YlP3zziIeMFxD8s4mOUuP8IPtjTSncG3PBPfGXnYYT0JOHHjrnEuJRq0mgd7LMuLn_-DhG7G54gMsOJdl7eOjoIzVr4LB655OwgVZTAXV1b-ZHyzvy_HqbPoZz6CdbdkUc1vAeMUuJh9ZX_TIbkJ4cyrYgqp7VsKmKj79xq3T4WLVmF2gExnyurdSpHkcxJ7F1uAkS-LLdwua1qH_zQ8aH-hBF43IgvYNBOK1v_3XfTKlJFJYeu6XdO01kLNWnQBYpGOkUgrwjlseUI5G8vojtgW70KAljgGop7mLhb50EDV1MvzQupqe0JQ6k4szpmKPjK3PXqXaJ78ep9VnlaDvCt2-Hm_lzlWfqS-BGZkD9TdWer8eAEOfJ8brrWItMSBffcti3-FJzlEsJQvtrc4UKx1n2Sjq3yIgVzb1vfKeFWh1OHTdzy9pAihvUOu5ZcfuoG6wwyUVLmf0qxmwnEpHpGpk94HyGyvuXw9t2EVB3kT7cLPFEcUJr-K5OknhYY5_NpxgwKseIBpjWlO9CKEvV48jNKrbYvEmP_t6hnJiJ8DU1GifXWKNKbxrR59bpQSaG9CHfb05PfqT0LigMy2bI-mdfQCnzOTACPdTYoYi20tF6Uiqpehd0x4Nd8DNtJs0cwz5flwz0v2-8iY89_O5jrfvPmdrM-u9OYx5vy84MQ6yobucNsIri0ig5NLCQLdBitN1Vc91uTu5rBEfDUu8bkkHTqoSJXLDwSeHmRxwNGUZh7wHzwizi6izigkjJ933EE1clpQDRLbUn9jOsjt3xe9JUBI0gDM1wgFbA38MCOZYBJTtl28JaUKW47xOZfjCQoU-kzHXUMtYA3itKQJbpw0wGCgrEO6kLg-kIzIA_PuAfNF2jnxQkoL0_LTzk4TrYoh1TNUrrUA0rdowQ_qWG0GBTdXKO7PZgPiB9m4BwSeeDkoy1bXPjefW1RNPypypnb3ylfRcihpHg2OE2hDL71G9qDpZk1LG8AYMrdcRENRC_Y8kLtL1SOSf56kQlP4xegjl4QYbtnj5ojXMxz78HYV6VzaPy0oTJcaKcFM1X2ORI6TI6vbwEQvqqslKAPjcicuq76ai_PNihTjDuvt3Dab00AUYghWms2jShZD-Qw_JK4o5MWOcsIoHVLfKFzRWt85wnp4W_QFuN1x-MZtUs7YLxXzhAabviLtOakWG2FrodH4SS96fSkrCyMacF0jMiCgwhPnf-O4m8HDJmgLdzuVXWQ48HCm_lmwvod2hpyC_qlC05OLSY7euAsLrZjstMCkGY6Zz0XjoM7SoHNPMggIN92FzP0k-1agJptxQLgGO85EM30hSSfSfUPSnH3xW8AExB0s0_vHZCMfkZWXxlS5l6hAoG9plEFDvn3RxyAudGeOy5mUpArosh2Z7KurZhGInZtUrmaO1Skzxf1EofpFl2Q6kmth_J5mn-i1FxbWKWm1sUoi5QCathk3Y3sxgXCUfDP7SisiW4mgjAOaipIwKdrcTgtV3b0BEHsXRr8Oug=="),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_0380a2656b816dd30169381b59af508193b2cf2bc7c0f0020a"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_oKBGaZcN89xrXRtr1JLTtft1",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("foo"),
+                            "bar": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 2,
+            metadata: {},
+        },
+        Finished(
+            Other(
+                String("tool_calls"),
+            ),
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Confirming tool call result**\n\nI need to respond to the user's recent message about \"Testing tool call.\" Previously, I made a function call that returned \"The secret code is: 42.\" It seems like the user wants to see if the tool call worked. So, I should confirm that it succeeded and share the output clearly without extra formatting. I’ll also ask if they need anything else. I'll respond with: \"Tool call completed. Function returned: The secret code is: 42. Anything else?\"",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpOBtm9hpKUkrOgW0jnLgQ-ZcVo2cahJ3cfmN6q15yx5uZeUxbE0FIwgd2rfKg70zrqCALp-q7NATwFxKatYT9TfdzUKV-mTZWX1HxqK4qSOAyF1AcF64HX6yNZwxxG2TzvVkGDv3J1jX3bYQwTlaKxZEy0bEsleq_j94rHLiRqdeurV1y4KUE5kA5irsUpcQ8DKtLxUNmvYtsUPIp70cgHiRjkSi6lT2ctacJmp4uQgFB1di93vuMsazJMT_-P8fwNW7BkiweMNX1tP-uC2jOvwL0SWY6tWVMaA8nD3TCp-fHNS0-xw1Y0RxhjtOMCFyVXgWN4lO73KMFpa4C6SBgSnNJqBLialeG_7wrWW2QwaSIbkONt3m2P7Wzvplj2C8OS9V9DrEa6cmNvw9apGCnNucZsk1MiGzt8td5AAK9tQtWwZ6eI7QRYjuqh3IapRo-Nw2JdtUGXHxc2yx5_NsKkrqXytyaKT0tKbR9h3cdiFcad_0kqGy6dSeiG4RyvyutuohVizzO8hzOSItxlTUPOVXWdZ1QlfA6rxztMOaiRXTL4V4z-VzkkTBkRXKDHYkRpEwt_2N7DSBHgju2oj8MBiY_90p_CUgDjBK6mahyMOxI9kTX1Afdl7C6iC8VjOFFF7nV3bJPyHvvE0VkGayUBPSHejUpUjJPx76y1lM6SQeczGyvhHqckegEvaJ5pzh7eVUfr2js16_GD3_-s5qggi-mpy5zSeGVTadaoOBNNSWT1_xWizj6P4_2nya-MKSNP9gUeKa4huPawvHsTWANW1xJe6SUX0k86qW_EzZkzDVjke_9Wx9QOtJ5Qu5MhpqxiB2R0BKV-5wDPP4iG-LJKEDKW2ubirr9y0GVSDS_WmEh3tgvf909IW1bqifJZmEiZ74iqCk63V8vVkN7ppwOJTdB8ue15siPEVdiwD8e5w8QmX9I_DG9vV4oOmHXUcqkFoCDOp3sek-mOuv1Iu2eLZFEOWwsDdT2NzBB0nNu3KK0913qJ1-q9BOYEOb8CuD9X8pv-chX0JKBxtPng37OiBZvZ4xZQnN0z_Iqubbve7E6PfGOQ_MEB0jiQYUq0-ZkAD0qD5gH3Oq-kn8kDwP4h5EqZ1RuHG2AfrZ4_N7KHFjUQdYQKrjW1SpxGGeJcXmSpsZmztVufMFxDnSOAkVzufb4mE_KLUiuDHCPCyq80VoZQujeHS5qVS_xMqg_NaJaO-pgFC1ahkofs68bZQtTN8tT7wzIHmhhj0ZLwTkzPudsAtSgepZuJdjUn3J8li_cJyU5OG1fS6sQwmgciT200Glpn23n4uoAE4pBbuR2LhSLdbvNQ71pfMmfw5seHlgdwRSa-Cp8VqOEU4HnL4QArl2u8r5IMD-3oUUzsell5soi0UoJy00yHAvgK6d7EGUjhbVF-b0Frbsu4UxMJG9Qo7rlJj4Aw4Pluqmb6W-yn2M6awkf-bdwlfKPSia6x_pVBTgAOdbz2YDxXrv_-vtKlxsviwmCvM_H8_WNz4YYDmz6TwFgoh9mLRtc_8LsQ2U0drGsDkQ4BbOqeanHFZYQx7ghaXI5FW0pAXstScbf2j1VljEVWJ7Qh4gDWNNMVM2zzc6PIfx4Q1NVaHwXZHuGv-yRMtKg6xqvoBYEZLu6Qu-s-_uz4yZVtVWtEiCXeIuUQQrsO6UoMG1liBP0o0rJ3unJT5rzRd4TnvO0GnqR3EiHnPhp4xPt18qHWXPxwCqcvDr0vRBkyNW_fdS1WZhn0thZEMELbupUGKLwn7Gyd7QWJgd6KmcTptRheMHRqibDYyzQeal7LFiYpVirr23qNGAOLT9-iZezC1eCniVZXwuTx8ace6-ZOPVSDhkHMtRxWTTgq48AE86ASm9yDAOhAzD7eXfOZlEUM02lj3FBfTQV-7B_dX5cW9QCVDtKnRHaoZVfAhGhE9_SSXCF3yRxK7MziZES4WaKse-yFaNvcBsjWQfJ8iL9jzI7Y_OXF0VT2Eeq"),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_0a0ee81d7a93bd7f0169381b616b808197ab1b4f585993a47d"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Tool call completed. The function returned: The secret code is:42Would you like to run another test or use the code?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "I see the user wants me to summarize the result of the previous tool call. The function returned, \"The secret code is: 42,\" but it seems it may have appeared as \"The secret code is:42\" without a space in earlier outputs. I should ensure my response is clear and succinct. I can include the raw string along with the parsed value but keep it concise. I'll respond with clarity while addressing the user's request.",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpOBtqXbZoamXg_ubKbKz92w5J-xs40ZZWxDeCgXDqJeq0hXe-wVcxYa2Ace3u_gDARudZ5lKB49bVwghUAytKV9h-jkCVMTrKxZlRuNODBiQaBf3Ifn6Z326SSeXgn8BxxhOvwY52XF1x76Ew0GujQiHzgBIjVw4g64HQ1AAzNcmbO2uY9Hw9sWv8DHwS2vVMsQ-gn7yVswJPIblT7L1d3nxdwAbWNFyeOm0kiMmdKjLBmHq-4HDjHGWUMoGwjjhSloxAR3rjX_P1IbhGvNdmsg4SLcBf6VOipFcK_Vf3l18MYVsBraXRkWmrnWjs0B6QIb7JROJbk6iiWk7LASml0ENE3FY2QQUfOP_-txpdt76NZDeKRZJmJXRpOzA7yIwzajJxzzitVmaFzGMs37QqQmrxFTGjOCsJnAKvheChNI8dGmZzoK5nMZkV9TO8nycQyoSTjnfxt72wRxYHVnwEiNNGtXikimAJXJXewwqycBnkvxLYREMVCyPyEDB4knDR-6af4lpUFeYUFEBRrsFqI2mQAZZBo5naCgNO69E7uuvcSe1xVpUKJw2UcAhT3wDRlhvdMj-ePuDvM24_TPuvaE3XiGwzUIE3qvzO0YSabmB68hmsNsGaW0TNBOIDDvs2_CcC__xCi-3v3nnZfkjMB8Jk_jeTNtOItoZLadZbmHq-cygDeXwL_GXbw5U06juCl58pYx7vwEewghbMHl06H-XxFxsqz1fFuu1CaJoPUlKmKSGU3r1X8xCKrIWpBJOVNtm1Q7cXBVUEJEHzw8Vt-zMPLRQ_maJsBK8pBOfhPldkYOIeNDznuhkB7_Vr8dVTM3Vn47OywB08Shd3Pl-eP_D1XtArXOwvfSO-yqYN8lPnAqiGEKCuTNtBK8MO0AxXaoTwIp6buhqiaAwqFE2STH5X4tQmPDlYn_CENlHGXtUTzMNWNVN4npP_7tc2Ken2eSktY024PbX2TEyoM4gYZEMh4I2Rqh9AZKy7lRLwRjvy-ccyeQBX_9f8nHiZYNNIisz_bA5Kv0BNvbFwDk3Lg0mu8zEqYPvtnXLqKgoLLjh_SWIiwfgSR7NZ3C3mRpbY2uafYjB9vb0l5kP3c_18fdAWdV1Wk0Gbd2itieFgwTS7JWfqwwd9PpVfcCbNHp9w-ro3rw2PNouQGKnEs4z8PqwrEdD1DPlttLZd1uGmHZzXOuheeXX2fcbNrkWhlpw8vAsBKn7C5ojhnKi1c8mAGXtqtTy9SWeKQ0QMFfL1_8M-POAs48eH2gw1b6ZQGiKBCEx4J1aUN0gu_utWEFXIcrWVNmhYwTkDsCE3QDQOfLS0n6sR3F_GAzuXaJaDkqiDM_uUeGBu974Mvp1lSvFVkoKNXERSAXNoM0MZ90udEUSwqUJ8eL9Bd1ujn1nS1DRb56CJGsYH5KG0AOgcQb6JjO8ynQ=="),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_0e8f16c7660681770169381b6707c88190ab189912d042f5dd"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The function returned: \"The secret code is:42\".",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

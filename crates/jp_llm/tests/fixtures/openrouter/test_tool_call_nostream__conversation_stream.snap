@@ -1,0 +1,174 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:51:46.575322",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "openrouter",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Testing tool call"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "",
+    "metadata": {
+      "openai_encrypted_content": "Z0FBQUFBQnBPQnRkTndMN212TFlqY3JHcGtBZWR6Mk1VQ3BCMGFXZ1ZYMFY4SUhmQ194RmY5d2N1aHBHenh6V0tOZzVZWjBsUjd4eEs1X3ZVS1dtN3R4SDRJRWlwVVctNWg5Y0VONU9zLU55MV80UC1EaHhJcUlMcDljQ05hY01jSkd1c0tDZFpxZXhMTXBGMTUwUktFMEp2S09KQkw1Q2RXcEpfVDMyY05vbXg2WUhTWmNDUXRDY095ekppblpRZ2x6d0FhaHpXbGtVTHRBa3M2M1lmSkxZQUZCQlF3Z2ZNeGZRM0FVNEFPU2pZc0hPNlFEUEZoUnNwSHFsN3RHUi1kdktacnlRS19zbDR1Wk1BaDFGdWRUWWh0cGFPY1NYTnN6aExraXpfLVgxbDJMQk9EOUQtR2NrQ3BKdTZKUjRIR0F5LTlpNTR0UWE3QjRSTjdoR3VZZmVsU2Nkd1JCVzBOcTlyXzVqNFg4SlpVbktaTVdhaU1SU0l2ZDJwcE83b1FzekN4eXNHZGhNYm1YRHhPaXYtSkJYZkZDUnkxZ1l0UEVmNXpSdmFic2w0eDFRUHhhblhfeHpVUmVVYmxRNTlOU0drakN6WkFLNDNNNFkzdE5YUURTdTF1b09pVTFMMHR1RmVGRTRySTBsWlRCNDAxRW5TTnprVHdPTXpGemNjb3UtVHU2VmFQMGhYLXNnaVRiNFZ0Rl9UODkwRGZobEZYTS13cEJJUzMtbzhaQU84OUNmTEdOMW82VnZRdzFjdHZiMHd0MVBzby1qSm9lX1l6d2wxYU9FTUtRWndzdFVGTlZ3Z2NheUoweEZpbG5iNHNmejItVWVWVnVDa0tQdGdXblVOZGJUSDNUbDJ1MzU5WEt1MTBWbndTZFNSRVhIbVlGUW0yY2c0Nnk1RGpvUzBJbzc4UTlfZE1FTXlGYnlVX1RKS2NMVEZyMEs3M2Rlc1BzOFlEOGMtN2g1ekw0akZaVTJGRnl0UTJXZm9fN0JKWFpqUjZQUkpERTJVNVRNZW5LMTNpTFRvVFVfaWd2NWJScDVKRXc5OGs1NEVuOHVqNWU2SGlQWjl5UWRHal9Qc3JTbS1EZjJCOUFlRFFoZmZleUJmS1dIbjBuVXVNSnNNZXYtRng4MjJ2TlBWSGhBd2xWWXk1ZFUyWkZJWHNkallnbk1DclIyRXNiRzlPcGo4OGZIeG9zckVTUXplZnpaLU9BTGRDTjFyRGVPZEF4T3FuUkxmM0piQlJzc1JBQXRFc1o4VjBJNDQ5Y3Y3NzhBVENtUXp4aTIybDBFQlNkSEx5TDYzdk40U1RxMHhfb3VMWVhCVTJaWlg3ZUJ5RzdtM05YdDVIdF9OaG8yQ1hlaXBZS3hVVXZGOERteGhrN3NYZmVNWjZRby02dTN5Mm51bnhWZFk4QTByZnc5XzQwNENlWmVJWDRjWDBHQ3F6bDUxWFVWaUtadGhvR0hVbFNSWXN4YjZlTlNNa1BrQzljNzRvd25hZmJDaHJOUTEtRDNuZC1iTzVUNW9qQ2lBa2tZWTFwYkFlTm5pdXBYWm9BNFB1a01yYldhR3VMbDFCSkJ5WlkwYjFWS0s4UU9HN2dIQmxnZXdlYy1qV2lxQmJuYlNuOU1TT29GeGRqa3otbnp3R3RhYmJnR3VjRS1MNVVnV0FnbV9jZ0tfNV9CSjVxbTZSX1E2WUViVUphX0NleUhSQV9OaWtnUWhlellKeHNWelNfUVdaa2ZVRld6b0g2R0xnS2ZMX08zU2RqWnRIdmJHN0x0X2VWbmNSLUl4d1ZvWjdXQXBOYXZ1LXBMeWE2ODhrUlpHMjJ0WU9kbTRIMlA4NmFNTUpNaXNNVnVCTlVGbU9PQVlGT3lQMjJpVXpGQ3cxQmtNdVBoVUx0bFIyeXVLTTdFMEExLU5WdXVIN244SWNPcVMwTHB6NEhzOW1SeldfLS1JcFVucXJLSm0zd2VCQUowMWItVmM1QmctejhyZ1dMQjA2ZDhHOURKZThRTHlXaklxVjY3LTZ4VG1nWURkU1U1VVVyY0xhcWVHdDBxdTZuRzFDVjVhbElF",
+      "openrouter_metadata": [
+        {
+          "id": "cnNfMDc1ZTBjNTk5M2M3ZDVkYjAxNjkzODFiNWE4Nzc0ODE5MDk0ZDFlNjI1OTgzNzFlNTY=",
+          "index": 0,
+          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_request",
+    "id": "call_FJ9o5KMazcy1zcs1W5lKBDrF",
+    "name": "run_me",
+    "arguments": {
+      "foo": "dGVzdA==",
+      "bar": [
+        "Zm9v",
+        "YmFy"
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_response",
+    "id": "call_FJ9o5KMazcy1zcs1W5lKBDrF",
+    "content": "d29ya2luZyE=",
+    "is_error": false
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Confirming tool call success**\n\nThe user mentioned testing a tool call, which seemed to succeed based on their earlier function execution. I should confirm that the tool call was successful and show what was returned: “working!” I’ll also explain the arguments that were passed, which were {foo: 'test', bar: ['foo', 'bar']}. I can wrap up my response by asking if they want to run the test again or modify the arguments. Keeping the response concise will be key!",
+    "metadata": {
+      "openai_encrypted_content": "Z0FBQUFBQnBPQnRpbFNNYzJMVkF6QnJRTUxyNC1yYnZLQ3JTYTNzSVZZSi1MbzE0c0VjMi1BalZWaDRUTGJhQUFSS3dFZjY5Qk9kd0JaTnBzdmhEOEwzV2ZDSldtUFlsRE1ta3pWc1plbGJfdE5INFZFX1VsMUNVb21JYzVRdGpXcTYwLU04OFdoX0N6YS1fcXdiWU96LTB5NTViQnc3WFppMk1WbGJHdEM3Wmd5aEhMZDdSQTY0Y2d0MTBMcHNoOFc0ejhXWjgtMk5sWFFsdmRZMUJtMjhkTjVvS2xuU3JRMGJvUVdzZU1lNVR5aUJSSE5rRkxTNXlzRnlxb2FHVlhqazdIS0Z2MHdhX1VTTU1CblRKWVFBZUdUcHRCaEZENkdpU2NuWTRNbFlvMEFDWGMxS2VYeGlib3NVM3pQWVhWVEotRjdkNmtEdFdPa2loRUlxWUt2bmJrVXI4WU9FOTF6TFBCajF3SDJkR2dCNndXNVhYNE5sMzRLQnVwbnRFRXV6OW5ycFg3VHktUEU0WTYwMllvdi1aU2loeXluaHI3MHoxZ2NNR1JMM2xzR3VXTUM2b054Znk0dTQzaEl4bU1KVUZtTG11WWcwUVdLTTV2Y1d1VnV1YTJxdlVacnY3TDNsajJmcGljZUhZNnRfUGJtaUVNcE92YjNobmJHYnNWN0trUDZQSmZ0TVNkRmFfVV85Mm1MejNRS2kzRFJzY0Jnb04weDYxRndXM2k0czFpclNZbEd1NzVSWXZKZ0htX2tpQnNqMU1XNW1OYUFwXzA1ZGJvSkdEVkExSGhMNi1Uc2gyMmFoOVlCcTMxWU9EWHY5eXdEcUx3Q0FfaFl0V2ppRGV5YlRxV2RJbk5fRDdnT21LMF9nY1NmUmhqd1RVdlExZ1FjUGF3ZGE3YWI1MFQ1dGRyMGtud1p2ZUxDT0VfSnoyNEx3bm5maDlPclhVTnVreE0yeHFVWUFvTzcwWVlYakwzMl9LUnQ3Yml3WlYxdzJMSG9sb3VBcXZIQjNOcVhrWG1JZkZJNU16VTlxa1JnYXI5WHhRMDdsQlpQTExZT0JVd2laaTFDWnVadTN6d1ZLSHEzN0lFN3B0U3lldm01YmcxeTN3bld6QVI4bnFacHBQV0p2Z05vZVg3dFNEeXlVWDNEb0xZcXdfTE9oRXdaaHhBcTFNRnJ5UTRsSWQyZ25hT1NtTy03QWItNVRSR010OXI5akg5eThTU3ZORDltT3ZKZExBUjlIYm56cnlKM3p5Z3gxaldvclR6TGdzdHM3OHd4Z3NDclhRQVlubkZzYlBuN1FXWVkyR3d1QXQwZk9YNVlXWWYxR2tvSTFxTFNQYmlPQjN0V0xRdnJkTHdGb2lVWUlmS3Bwc3JzdEFqS2xLVGhFbFgxbFY5R2lEWG40S1JGTEE0OHZzVjBCb3JiQ09Xejd6bFRic3hETFZQRG1tWXVtcmlkaVEtTzVaSXpWZklvT1dZdVJKMjE0TXBfUHBMd21PNVBiY05wMk9hVm1TSGcyc2RLcnlDR2RoWHlYTmFhelpzb09uWWFWcGNiVDhjanAwbVAyZmpzc01hTlVPQ3ZSYV9uMk4yU05JNDg1ZmVNTy1ERFhmdEV5TFNpSzc3ZnVSMkRPdEREeDB4VHZCYXZtYWtZMGp2UVQ4MjRadFlUU0lIZHJmQ2ppcGZjUjhJNmVBTWQ1RjA1ckJtbzBzUGYxYk8wWlZ6UjBHMkQ5dlkzUEtYSGdxQkRjMjBoTUNvVEhCOTRzSVZRcFRYek1pSFhtSG1OVjE1U3RiQ0RRUFdDOThlekdlaGZIVVFiUGNFOWo5a1FTZVZfTHVHaTdrZlJ3UVVYd2F4c2U5VU9YaVY2OW1ieUJqcjVXRGpwTDA5WHoteFpPbWVqYngzWWliWnlsb3E4Z3JHR1pTY0RBM25WSjBvbkJCdnRINFRzX2IxemdpeDVCeTNuU1NYX1VFdjN5b0s4VFNJbE1WTWl3eEFnZ2NwZWFaeDRLUkdJdFo3Tklqa2lEeEJZUy14MW9JYlRJekliTXU1a2F6N0c0QXAxUzlaOGNtZ2YwblNBWkxZdExWbkZnZUtCTHZNZWxvZnZITnBlbFJsVllfVnB2UWZscz0=",
+      "openrouter_metadata": [
+        {
+          "id": "cnNfMGRjNDk0Zjk1ODNhNGEzNTAxNjkzODFiNWU4MGUwODE5NDg2NDdiMjAxOTMyMzczNjI=",
+          "index": 0,
+          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Tool call succeeded — the function returned: \"working!\"\n\nYou passed these arguments: {\"foo\": \"test\", \"bar\": [\"foo\", \"bar\"]}\n\nWould you like to run it again with different arguments or perform another test?"
+  }
+]
