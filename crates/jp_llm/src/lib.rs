@@ -5,6 +5,9 @@ mod stream;
 pub mod structured;
 pub mod tool;
 
+#[cfg(test)]
+pub(crate) mod test;
+
 pub use error::{Error, ToolError};
 pub use provider::Provider;
 pub use stream::event::{CompletionChunk, StreamEvent};
