@@ -1,0 +1,152 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:50:45.121118",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "openai",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:50:39.680113",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Test message"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Acknowledging test message**\n\nThe user wrote \"Test message,\" which suggests they're likely testing something. I should acknowledge that and offer help. I need to keep my response concise and ask if they want anything specific. It could be useful to confirm that I've received the message and provide some example commands. Maybe something like: \"Received. How can I help?\" I want to ensure my response includes a brief capabilities list while remaining short.",
+    "metadata": {
+      "openai_item_id": "cnNfMGM1ZmZhZTA0MGQ5ODllYzAxNjkzODFiMjAyODRjODE5Mjk0OTdlNDE2NWZlNTBkYTA=",
+      "openai_encrypted_content": "Z0FBQUFBQnBPQnNsTEI4LWtsMVJsWE9FNmNWenFobWdkN3Y4amo3SHdIMXZEWVU3QzdrM29qSmluT0ZMOGtsaU5yRWxEdUk4OXR2dVltRGg2c0RXdmh3RVpsWGF3cVM5X2hEVXlYbkUtX0hLM3p2Z3JqQnBxR1I5RFBJcmNDYVJvamxHdXZtVkI3YkNNYmdaTWE5b0JkZTRlSXpsNmRIZmxIME1sam1VQy1BdVRXUWdxYlNlVjRCVTZJSWhDYzlucFA5TlJfZFRjVWNNdWJ4YnpZTS1WdVdlcFdVVzh4S1g5RE9sN2hUVkE0SEMtNTlIcGVfeXA3b3JYbGQ4Zmc3aWM0Y0xQZm5SSXFpdUtSN0tUY25TMWhILXQ3M1dUUDFTTHB5bjR2SGZlNmRQektUSDhYdVJTc0Y1YTlGRkRjN1hoeUV1VG1lVm91R1JpWW5DV1dSYXhwZTJWOE9LSnp0UDBmYklKTHRLajhtNGdXTzE2bWJoUnRhMnVLMWRfQjEzdzlkdDcxbGdaOHVmNmpvVEsxSWg1WWw3ZmZhTXEtWU9PclFVSENFS3NGQ1h6RkJQV2ZkNG96eXUyMm1GcEtTNWlfWFFWdHlNN3lFS2M5NlRkZFBLbU1tNktNMW5YS1VHVDZSUm5sdGQ1d3NfSmtIS3NweUgta0QyOFBCWUp6YmNSV1gyLVhPNlNSdXJ5aGJrazNhd3hHVDMyMzJTSi1FN3Ixd0kzam80M0E5ZF9kaEZyRUU3SmNIRGV5Y2pERmt4QXFHVjBXMzlyQ1RmX1BrT2ZtLVE5bGI1MzJ0S3Z6MF9qVW4yd3dRako3UHhrMWxoWlVvWWRqbnQwQmpHY3dqSlJtR0NENGl2T2lnWEJ0WENFTkpUNUZZbHdNYndFa3BFeGtNbXNwZUx1Z2c4RU1qWEY5Z1IwQlFta1MwelU0aXNRUHhxYk1ZdVBFd1kza2x5SGlUN0tJdUp5WVNKeFI0MllMQmVMZ2VUaXlrcjBqTV9hVEZRZHI5ZDdaMEdBZTlIV0RTQm8xMVB5S1E1VXVWUmE0NUlIYUxJSEw4Z0liaEZNSlBkYVNiYUR5a1RRT3FDM0FtUlZfN1ZsMjRTc1NtY1JJQWpVUDhYZzBlbnBhVTg5V05CQTdaTW5JTDFnUGZkOTl4ZVQwRW9ORTk4NEFkZ25ka2kyWnNKMTZYeENWaEg2Z1N1SVpiM2sxNTZUTlBybm8ycUJyanhINVkza2xHRGRYV09OUnpoOU4xeUI5ZU56ZDVVdHhOWVVqanZocmpBaXNSb0VVUE16cE1WQzJzVDFIb0ljTm55UUwzNTRFRXlrVm91U0VVN01iWUpkYzM4ckVlanp5YjZsMDk2NnhmQTJwLXlSajhZbUF0R2I3UWlrOFNhV1pTUS04Q1NSWWIxOWI2b01jd0xWSXpsbW14Qmhqbmo5QlJHNDUwMjhTTmcxQlB3clRlU1lYLThsTFFka005N0hWSmdIV1VVSGwyZTZYcXR2WWZtTUNDS2VZbnhOTi14d3ZQUzdoeEQwSXpPX2RBZV93czJiTDluaFdJZ3Ewajk4MzZQakRWb1JwQVZyQjlHbTdzbHA4b1pVM2Vob0xtZmVneVRyMnpDS3hhNHpPYWRod0Y1elNNYWVqQ2lZc3luS2tzQ0ZEM1Eta1hwQXc9PQ=="
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Received your test message — I'm here and working. How can I help you today?",
+    "metadata": {
+      "openai_item_id": "bXNnXzBjNWZmYWUwNDBkOTg5ZWMwMTY5MzgxYjI1MDVkYzgxOTI5NDNhM2UxZWFlZDg5ZmU3"
+    }
+  }
+]

@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf};
+use std::env;
 
 use futures::StreamExt as _;
 use jp_openrouter::{
@@ -9,14 +9,17 @@ use jp_openrouter::{
         response,
     },
 };
-use jp_test::{function_name, mock::Vcr};
+use jp_test::{
+    function_name,
+    mock::{Snap, Vcr},
+};
 
 fn vcr() -> Vcr {
-    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    Vcr::new("https://openrouter.ai", fixtures)
+    Vcr::new("https://openrouter.ai", env!("CARGO_MANIFEST_DIR"))
 }
 
 #[tokio::test]
+#[test_log::test]
 async fn test_chat_completion_stream() {
     let sample_request = request::ChatCompletion {
         model: "anthropic/claude-3-haiku".to_string(),
@@ -59,7 +62,7 @@ async fn test_chat_completion_stream() {
                 }
             }
 
-            collected_chunks
+            vec![("", Snap::debug(collected_chunks))]
         },
     )
     .await
@@ -67,6 +70,7 @@ async fn test_chat_completion_stream() {
 }
 
 #[tokio::test]
+#[test_log::test]
 async fn test_chat_completion() {
     let sample_request = request::ChatCompletion {
         model: "anthropic/claude-3-haiku".to_string(),
@@ -91,10 +95,12 @@ async fn test_chat_completion() {
                 .unwrap_or_default();
 
             // Make the request
-            Client::new(api_key, None, None)
+            let response = Client::new(api_key, None, None)
                 .with_base_url(url)
                 .chat_completion(sample_request)
-                .await
+                .await;
+
+            vec![("", Snap::debug(response))]
         },
     )
     .await

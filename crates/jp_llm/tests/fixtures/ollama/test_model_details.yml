@@ -1,0 +1,47 @@
+when:
+  path: /api/tags
+  method: GET
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/json; charset=utf-8
+  json_body_str: >-
+    {
+      "models": [
+        {
+          "name": "qwen3:8b",
+          "model": "qwen3:8b",
+          "modified_at": "2025-11-25T22:09:41.033215053+01:00",
+          "size": 5225388164,
+          "digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen3",
+            "families": [
+              "qwen3"
+            ],
+            "parameter_size": "8.2B",
+            "quantization_level": "Q4_K_M"
+          }
+        },
+        {
+          "name": "llama3:latest",
+          "model": "llama3:latest",
+          "modified_at": "2025-09-16T21:31:42.798881306+02:00",
+          "size": 4661224676,
+          "digest": "365c0bd3c000a25d28ddbf732fe1c6add414de7275464c4e4d1c3b5fcb5d8ad1",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "llama",
+            "families": [
+              "llama"
+            ],
+            "parameter_size": "8.0B",
+            "quantization_level": "Q4_0"
+          }
+        }
+      ]
+    }

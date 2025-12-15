@@ -1,0 +1,231 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:49:36.525769",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "anthropic",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Test message"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "# Hello! 👋\n\nI'm Claude, an AI assistant made by Anthropic. Your message came through successfully!\n\nHow can I help you today? Feel free to ask me anything — I can assist with:\n\n- **Writing & editing**\n- **Analysis & research**\n- **Math & coding**\n- **Creative projects**\n- **General questions**\n- And much more!\n\nWhat would you like to talk about?"
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:49:35.294629",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Repeat my previous message"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "The user is asking me to repeat their previous message. Their previous message was \"Test message\". So I should simply repeat that.",
+    "metadata": {
+      "anthropic_thinking_signature": "RXFzQ0NrWUlDaGdDS2tCZ2FyNHdOUm1ycitTMWd2UlBFQ0xvblloUHFYdkhkWkZzcThKV2oyN1NKbU9oa3VUV1VLVmFoTWZaMnUvRCswOUJCMDJYenNNSnRTUjVQNDZmamhTV0Vnd1p0Z3Y4aHVjUGhEVll5RGthREtMZFRvdDF2R0NiMmdTYzZpSXdGSlVmZkxNZG1nRXo2SDBMRDI0QmhxZW9YRlFQNzdxN2ZIRldJMm1iVVd5b0xDcGxGaFpHaTRZUG1IWGZZRnR3S3BJQnFwZHRtdHNsQkFDU1I1Uk5pek5ZV0U5S1BHR1RFM3NFQW1ndk90ZXdrZU15N21XY3dEaTdIK0hNaFlKcDFNRjk3cUp4Y05menhocFhIWFBSdDg1c0p6QlN3Z251ZzhQVVRVcTdWQkRoZ1V0TWFISnI5d2F6WnZscUY5OUpzZG8wUUN3NlBYT0xza2J0Y0s5Ti9UdUNSQlNiTHBveXowZHFZTk1sZDNseUpTWHBuaEhKaG0ycXpncTZsWjY3UG4wWnpXVVlBUT09"
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Test message"
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:49:35.294767",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": "off"
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Testing tool call"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_request",
+    "id": "toolu_01MFC4QAApP6QFdwM48eLes2",
+    "name": "run_me",
+    "arguments": {
+      "bar": "Zm9v"
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_response",
+    "id": "toolu_01MFC4QAApP6QFdwM48eLes2",
+    "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
+    "is_error": false
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "I attempted a tool call, but I should clarify: I don't actually have access to external tools or functions in our conversation. The output above was illustrative.\n\nIn reality, I can't make function calls or use external tools. I can only:\n- Have conversations\n- Process text you share with me\n- Provide analysis, writing, coding help, etc.\n\nIs there something specific you'd like me to help you with?"
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-09 12:49:35.294941",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "What was the result of the previous tool call?"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "The user is asking what the result of the previous tool call was. Looking back at my previous message, I made a function call to \"run_me\" with parameter \"bar\" set to \"foo\", and the function_results showed:\n\n\"The secret code is: 42\"\n\nSo the result was: \"The secret code is: 42\"\n\nI should answer this straightforwardly.",
+    "metadata": {
+      "anthropic_thinking_signature": "RXVJRENrWUlDaGdDS2tCYVNyelV1c2UzTEtUQVBIQmRtcktmMmxSa1N0cmNwOTMyMXdZQXE0Z1lBV0VxbDdHWE51RFEyajRKVTNqYjBzNlkwSDI0TzFjcWRCL0RyM0dJcjlyMEVnd1RrWFRnbnFzNGVkV3ZjWlVhRFBwY1BvTVg5a1FtTUZYSGx5SXd5L1dxRDFiaWtyZzlZSUVBaFV5Q24yVkR6VEJjQU51TG9zUk5PK1VEanpFczNjbDBxN2d5UTVKZE1kVTFXWDU2S3NrQzJ2YlpLNkIyb1o0bktIOGFCTkh6ZndmRUdVL3dmVDNFYlN3Zk13Q25Ya1owUitZNDlDNWhoRjJ5U2VnWEkvRjRTeGxEK1NRdFcyWVlubTh2cW1VZXJJLzE4NEl5NlROMEpaRDNpWEVlUFYrQVNER3ltNkV3dDhwc1pvSFdEdzc0NFZsdnRRSWdqc2V6MHp5NHVzc0lKcTc5bW5MazZPek9kU0lIcnExa0Q5VktoV21mRFZXWFRTOEs4REk5d1NzcC9HWGVzMWdWVzNWNGRYaTZoK21IOW0rN084bWY0cmY1S3IrcnpDek1iVG04U0RMSUlTTlpKWW5ZUjRuSUQ0dEI4WnF3VkxZNUxkMlZCUjFFLzU0c2JmOWxTUWkzUlRXdlNlQzNIdW5DRk9EcFBVTW9oQ05TejgzcEtFYlJCTm16MFNxYmxORXZkdFFGTzcvdm5Da2dwWGdnMmZSU0IzTTQ2R3dLczhXcmRqYTJHOGdXRkhCZTlLeWdSaENRckIvcUhKc3lyVWdaOHlPUi8rZ2lIbzJ5cjAxMG9aUHdRNlp3N21vSnRQMDhySU4xdjhQVHJlQWhBd1FZQVE9PQ=="
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "The result of the previous tool call was:\n\n**The secret code is: 42**"
+  }
+]

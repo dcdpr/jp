@@ -1,0 +1,11 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  [
+    "Structured Completion API Test",
+    "Title Generation for Conversation",
+    "Structured Output Verification"
+  ]
+]

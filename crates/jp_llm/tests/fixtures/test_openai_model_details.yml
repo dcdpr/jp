@@ -1,9 +1,0 @@
-when:
-  path: /v1/models/o4-mini
-  method: GET
-then:
-  status: 200
-  header:
-    - name: content-type
-      value: application/json
-  body: "{\n  \"id\": \"o4-mini\",\n  \"object\": \"model\",\n  \"created\": 1744225351,\n  \"owned_by\": \"system\"\n}\n"

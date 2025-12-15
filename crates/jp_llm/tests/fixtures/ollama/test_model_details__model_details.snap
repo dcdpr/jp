@@ -1,0 +1,40 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Ollama,
+            name: Name(
+                "qwen3:8b",
+            ),
+        },
+        display_name: Some(
+            "qwen3:8b",
+        ),
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Ollama,
+            name: Name(
+                "llama3:latest",
+            ),
+        },
+        display_name: Some(
+            "llama3:latest",
+        ),
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+]

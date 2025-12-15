@@ -1,0 +1,43 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "First, the user's message is \"Test message\". This seems like a simple test, possibly to see if the system is responding.\n\nSince there is no ExistingSummary, I'll start with a new subheading based on the new reasoning content.\n\n## Interpreting user input  \n- The user's message, \"Test message,\" appears to be a simple check to see if the system responds.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Test message received. Hello! I'm Grok, built by xAI. How can I help you today? If this was just a check, everything's working as expected.🚀",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]
