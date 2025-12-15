@@ -1,10 +1,10 @@
 ---
 source: crates/jp_test/src/mock.rs
-expression: expr
+expression: v
 ---
 [
     ChatCompletion {
-        id: "gen-1763647030-WgieoN2vdOx0We2bBOf5",
+        id: "gen-1765284709-RzgNd9bfX3ktwtfFBmFP",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -19,20 +19,21 @@ expression: expr
                             "",
                         ),
                         reasoning: None,
+                        reasoning_details: [],
                         tool_calls: [],
                     },
                     error: None,
                 },
             ),
         ],
-        created: 2025-11-20 13:57:10.0 +00:00:00,
+        created: 2025-12-09 12:51:49.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1763647030-WgieoN2vdOx0We2bBOf5",
+        id: "gen-1765284709-RzgNd9bfX3ktwtfFBmFP",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -47,20 +48,21 @@ expression: expr
                             "",
                         ),
                         reasoning: None,
+                        reasoning_details: [],
                         tool_calls: [],
                     },
                     error: None,
                 },
             ),
         ],
-        created: 2025-11-20 13:57:10.0 +00:00:00,
+        created: 2025-12-09 12:51:49.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1763647030-WgieoN2vdOx0We2bBOf5",
+        id: "gen-1765284709-RzgNd9bfX3ktwtfFBmFP",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -75,20 +77,21 @@ expression: expr
                             "Here",
                         ),
                         reasoning: None,
+                        reasoning_details: [],
                         tool_calls: [],
                     },
                     error: None,
                 },
             ),
         ],
-        created: 2025-11-20 13:57:10.0 +00:00:00,
+        created: 2025-12-09 12:51:49.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1763647030-WgieoN2vdOx0We2bBOf5",
+        id: "gen-1765284709-RzgNd9bfX3ktwtfFBmFP",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -103,20 +106,21 @@ expression: expr
                             " is a sonnet",
                         ),
                         reasoning: None,
+                        reasoning_details: [],
                         tool_calls: [],
                     },
                     error: None,
                 },
             ),
         ],
-        created: 2025-11-20 13:57:10.0 +00:00:00,
+        created: 2025-12-09 12:51:49.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1763647030-WgieoN2vdOx0We2bBOf5",
+        id: "gen-1765284709-RzgNd9bfX3ktwtfFBmFP",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -128,23 +132,53 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            " that I",
+                            " that",
                         ),
                         reasoning: None,
+                        reasoning_details: [],
                         tool_calls: [],
                     },
                     error: None,
                 },
             ),
         ],
-        created: 2025-11-20 13:57:10.0 +00:00:00,
+        created: 2025-12-09 12:51:49.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1763647030-WgieoN2vdOx0We2bBOf5",
+        id: "gen-1765284709-RzgNd9bfX3ktwtfFBmFP",
+        provider: "Anthropic",
+        choices: [
+            Streaming(
+                StreamingChoice {
+                    finish_reason: None,
+                    native_finish_reason: None,
+                    delta: StreamingDelta {
+                        role: Some(
+                            "assistant",
+                        ),
+                        content: Some(
+                            " I",
+                        ),
+                        reasoning: None,
+                        reasoning_details: [],
+                        tool_calls: [],
+                    },
+                    error: None,
+                },
+            ),
+        ],
+        created: 2025-12-09 12:51:49.0 +00:00:00,
+        model: "anthropic/claude-3-haiku",
+        object: ChatCompletionChunk,
+        system_fingerprint: None,
+        usage: None,
+    },
+    ChatCompletion {
+        id: "gen-1765284709-RzgNd9bfX3ktwtfFBmFP",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -159,20 +193,21 @@ expression: expr
                             " have",
                         ),
                         reasoning: None,
+                        reasoning_details: [],
                         tool_calls: [],
                     },
                     error: None,
                 },
             ),
         ],
-        created: 2025-11-20 13:57:10.0 +00:00:00,
+        created: 2025-12-09 12:51:49.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1763647030-WgieoN2vdOx0We2bBOf5",
+        id: "gen-1765284709-RzgNd9bfX3ktwtfFBmFP",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -184,23 +219,24 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            " composed for",
+                            " composed for this",
                         ),
                         reasoning: None,
+                        reasoning_details: [],
                         tool_calls: [],
                     },
                     error: None,
                 },
             ),
         ],
-        created: 2025-11-20 13:57:10.0 +00:00:00,
+        created: 2025-12-09 12:51:49.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1763647030-WgieoN2vdOx0We2bBOf5",
+        id: "gen-1765284709-RzgNd9bfX3ktwtfFBmFP",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -212,23 +248,24 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            " this",
+                            " test:\n\nThis",
                         ),
                         reasoning: None,
+                        reasoning_details: [],
                         tool_calls: [],
                     },
                     error: None,
                 },
             ),
         ],
-        created: 2025-11-20 13:57:10.0 +00:00:00,
+        created: 2025-12-09 12:51:49.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1763647030-WgieoN2vdOx0We2bBOf5",
+        id: "gen-1765284709-RzgNd9bfX3ktwtfFBmFP",
         provider: "Anthropic",
         choices: [
             Streaming(
@@ -240,44 +277,17 @@ expression: expr
                             "assistant",
                         ),
                         content: Some(
-                            " test:",
+                            " challenge",
                         ),
                         reasoning: None,
+                        reasoning_details: [],
                         tool_calls: [],
                     },
                     error: None,
                 },
             ),
         ],
-        created: 2025-11-20 13:57:10.0 +00:00:00,
-        model: "anthropic/claude-3-haiku",
-        object: ChatCompletionChunk,
-        system_fingerprint: None,
-        usage: None,
-    },
-    ChatCompletion {
-        id: "gen-1763647030-WgieoN2vdOx0We2bBOf5",
-        provider: "Anthropic",
-        choices: [
-            Streaming(
-                StreamingChoice {
-                    finish_reason: None,
-                    native_finish_reason: None,
-                    delta: StreamingDelta {
-                        role: Some(
-                            "assistant",
-                        ),
-                        content: Some(
-                            "\n\nAm",
-                        ),
-                        reasoning: None,
-                        tool_calls: [],
-                    },
-                    error: None,
-                },
-            ),
-        ],
-        created: 2025-11-20 13:57:10.0 +00:00:00,
+        created: 2025-12-09 12:51:49.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
