@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// Tool call content style configuration.
-#[derive(Debug, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolCallConfig {
     /// Whether to show the "tool call" text.

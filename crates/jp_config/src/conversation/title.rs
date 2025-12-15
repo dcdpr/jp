@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// Title configuration.
-#[derive(Debug, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct TitleConfig {
     /// Title generation configuration.

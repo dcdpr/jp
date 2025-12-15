@@ -24,12 +24,14 @@ use jp_config::{
     style::reasoning::ReasoningDisplayConfig,
 };
 use jp_conversation::{
-    Conversation, ConversationId, ConversationStream,
+    Conversation, ConversationEvent, ConversationId, ConversationStream, EventKind,
     event::{ChatRequest, ChatResponse},
     thread::{Thread, ThreadBuilder},
 };
 use jp_llm::{
-    StreamEvent, ToolError, provider,
+    ToolError,
+    event::Event,
+    provider,
     query::{ChatQuery, StructuredQuery},
     tool::{ToolDefinition, tool_definitions},
 };
@@ -241,12 +243,16 @@ impl Query {
         trace!(args = ?self, "Received arguments.");
         let cfg = ctx.config();
 
-        let previous_id = self.update_active_conversation(&mut ctx.workspace, cfg.to_partial())?;
+        let previous_id = self.update_active_conversation(&mut ctx.workspace, (*cfg).clone())?;
         let conversation_id = ctx.workspace.active_conversation_id();
-        if let Some(delta) = get_config_delta_from_cli(&cfg, &ctx.workspace, &conversation_id) {
+        if let Some(delta) = get_config_delta_from_cli(&cfg, &ctx.workspace, &conversation_id)? {
             ctx.workspace
                 .get_events_mut(&conversation_id)
-                .expect("TODO: add this invariant to the type system")
+                .expect(
+                    "TODO: add this invariant to the type system. FIXME: This can actually happen \
+                     right now if the `events.json` file of the active conversation is corrupt, \
+                     and thus not loaded into memory.",
+                )
                 .add_config_delta(delta);
         }
 
@@ -258,19 +264,27 @@ impl Query {
             .unwrap_or(&ctx.workspace.root)
             .to_path_buf();
 
+        let conversation = ctx.workspace.get_conversation(&conversation_id);
+        let conversation_path = root.join(
+            conversation_id.to_dirname(conversation.as_ref().and_then(|v| v.title.as_deref())),
+        );
+
         let (query_file, editor_provided_config) = self.build_conversation(
             ctx.workspace
                 .get_events_mut(&conversation_id)
                 .expect("TODO: add this invariant to the type system"),
             &cfg,
-            root,
+            &conversation_path,
         )?;
 
-        if ctx
+        let has_request = ctx
             .workspace
             .get_events(&conversation_id)
-            .is_none_or(ConversationStream::is_empty)
-        {
+            .and_then(ConversationStream::last)
+            .and_then(|v| v.as_chat_request().map(|v| !v.is_empty()))
+            .unwrap_or(false);
+
+        if !has_request {
             return cleanup(ctx, previous_id, query_file.as_deref()).map_err(Into::into);
         }
 
@@ -285,7 +299,7 @@ impl Query {
             .workspace
             .get_events(&conversation_id)
             .cloned()
-            .unwrap_or_default();
+            .unwrap_or_else(|| ConversationStream::new((*cfg).clone()));
 
         // Generate title for new or empty conversations.
         if (self.new_conversation || stream.is_empty())
@@ -353,8 +367,10 @@ impl Query {
             stream.push_with_config_delta(event);
         }
 
-        // Clean up the query file.
-        if let Some(path) = query_file {
+        // Clean up the query file, unless we got an error.
+        if let Some(path) = query_file
+            && result.is_ok()
+        {
             fs::remove_file(path)?;
         }
 
@@ -365,7 +381,7 @@ impl Query {
         &self,
         stream: &mut ConversationStream,
         config: &AppConfig,
-        root: PathBuf,
+        root: &Path,
     ) -> Result<(Option<PathBuf>, PartialAppConfig)> {
         // If replaying, remove all events up-to-and-including the last
         // `ChatRequest` event, which we'll replay.
@@ -416,7 +432,7 @@ impl Query {
     fn update_active_conversation(
         &self,
         ws: &mut Workspace,
-        cfg: PartialAppConfig,
+        cfg: AppConfig,
     ) -> Result<ConversationId> {
         // Store the (old) active conversation ID, so that we can restore to it,
         // if the current conversation is aborted early (e.g. because of an
@@ -445,7 +461,7 @@ impl Query {
         request: &mut ChatRequest,
         stream: &mut ConversationStream,
         config: &AppConfig,
-        root: PathBuf,
+        root: &Path,
     ) -> Result<(Option<PathBuf>, PartialAppConfig)> {
         // If there is no query provided, but the user explicitly requested not
         // to edit the query, we populate the query with a default message,
@@ -499,23 +515,32 @@ impl Query {
             .id
             .finalize(&cfg.providers.llm.aliases)?;
 
-        let parameters = &cfg.assistant.model.parameters;
         let provider = provider::get_provider(model_id.provider, &cfg.providers.llm)?;
         let query = ChatQuery {
             thread: thread.clone(),
 
             // Limit the tools to the ones that are relevant to the tool choice.
-            tools: match &tool_choice {
-                ToolChoice::None => vec![],
-                ToolChoice::Auto | ToolChoice::Required => tools.clone(),
-                ToolChoice::Function(name) => tools
-                    .clone()
-                    .into_iter()
-                    .filter(|v| &v.name == name)
-                    .collect(),
-            },
+            //
+            // FIXME: This should be done in the individual `Provider`
+            // implementations. This is because some providers support tool
+            // caching, but the cache is busted if the list of tools changes.
+            // Since tools can have elaborate descriptions, this can result in a
+            // significant amount of uncached tokens. For those providers, we
+            // should just trust that `ToolChoice::Function` is handled
+            // correctly by the provider and the correct tool is used, even if
+            // others are available.
+            // tools: match &tool_choice {
+            //     ToolChoice::None => vec![],
+            //     ToolChoice::Auto | ToolChoice::Required => tools.clone(),
+            //     ToolChoice::Function(name) => tools
+            //         .clone()
+            //         .into_iter()
+            //         .filter(|v| &v.name == name)
+            //         .collect(),
+            // },
+            tools: tools.clone(),
             tool_choice: tool_choice.clone(),
-            ..Default::default()
+            tool_call_strict_mode: false,
         };
         let model = provider.model_details(&model_id.name).await?;
 
@@ -535,9 +560,7 @@ impl Query {
             "Chat query created."
         );
 
-        let mut stream = provider
-            .chat_completion_stream(&model, parameters, query)
-            .await?;
+        let mut stream = provider.chat_completion_stream(&model, query).await?;
 
         let mut event_handler = StreamEventHandler::default();
 
@@ -661,9 +684,11 @@ impl Query {
 
         // Emit reasoning response if present
         if let Some(v) = reasoning {
-            thread
-                .events
-                .add_chat_response(ChatResponse::reasoning(v).with_metadata(metadata));
+            thread.events.add_chat_response(ChatResponse::reasoning(v));
+
+            if let Some(mut event) = thread.events.last_mut() {
+                event.metadata.extend(metadata);
+            }
         }
 
         // Emit message response if present
@@ -713,7 +738,7 @@ impl Query {
     #[expect(clippy::too_many_arguments)]
     async fn handle_event(
         &self,
-        event: std::result::Result<StreamEvent, jp_llm::Error>,
+        event: std::result::Result<Event, jp_llm::Error>,
         cfg: &AppConfig,
         mcp_client: &jp_mcp::Client,
         root: PathBuf,
@@ -775,19 +800,32 @@ impl Query {
         };
 
         let data = match event {
-            StreamEvent::ChatChunk(chunk) => {
-                event_handler.handle_chat_chunk(cfg.style.reasoning.display, chunk)
+            Event::Part { event, .. } => {
+                let ConversationEvent {
+                    kind, metadata: m, ..
+                } = event;
+                metadata.extend(m);
+
+                match kind {
+                    EventKind::ChatResponse(response) => {
+                        event_handler.handle_chat_chunk(cfg.style.reasoning.display, response)
+                    }
+                    EventKind::ToolCallRequest(request) => {
+                        event_handler
+                            .handle_tool_call(
+                                cfg, mcp_client, root, is_tty, turn_state, request, printer,
+                            )
+                            .await?
+                    }
+                    EventKind::ChatRequest(_) => panic!("invalid part `ChatRequest` received"),
+                    EventKind::ToolCallResponse(_) => {
+                        panic!("invalid part `ToolCallResponse` received")
+                    }
+                    _ => todo!("handle `inquery` events"),
+                }
             }
-            StreamEvent::ToolCall(call) => {
-                event_handler
-                    .handle_tool_call(cfg, mcp_client, root, is_tty, turn_state, call, printer)
-                    .await?
-            }
-            StreamEvent::Metadata(key, data) => {
-                metadata.insert(key, data);
-                return Ok(());
-            }
-            StreamEvent::EndOfStream(_) => return Ok(()),
+            Event::Flush { .. } => None,
+            Event::Finished(_) => return Ok(()),
         };
 
         let Some(data) = data else {
@@ -834,17 +872,21 @@ fn get_config_delta_from_cli(
     cfg: &AppConfig,
     ws: &Workspace,
     conversation_id: &ConversationId,
-) -> Option<PartialAppConfig> {
+) -> Result<Option<PartialAppConfig>> {
     let partial = ws
         .get_events(conversation_id)
-        .map_or_else(PartialAppConfig::empty, ConversationStream::config);
+        .map_or_else(
+            || Ok(PartialAppConfig::empty()),
+            |stream| stream.config().map(|c| c.to_partial()),
+        )
+        .map_err(jp_conversation::Error::from)?;
 
     let partial = partial.delta(cfg.to_partial());
     if partial.is_empty() {
-        return None;
+        return Ok(None);
     }
 
-    Some(partial)
+    Ok(Some(partial))
 }
 
 impl IntoPartialAppConfig for Query {
@@ -924,9 +966,10 @@ impl IntoPartialAppConfig for Query {
         };
 
         let id = workspace.active_conversation_id();
-        let config = workspace
-            .get_events(&id)
-            .map_or_else(PartialAppConfig::empty, ConversationStream::config);
+        let config = workspace.get_events(&id).map_or_else(
+            || Ok(PartialAppConfig::empty()),
+            |stream| stream.config().map(|c| c.to_partial()),
+        )?;
 
         load_partial(partial, config).map_err(Into::into)
     }
@@ -1193,14 +1236,11 @@ async fn handle_structured_output(
         .model
         .id
         .finalize(&cfg.providers.llm.aliases)?;
-    let parameters = &cfg.assistant.model.parameters;
     let provider = provider::get_provider(model_id.provider, &cfg.providers.llm)?;
     let query = StructuredQuery::new(schema, thread.clone());
     let model = provider.model_details(&model_id.name).await?;
 
-    let result = provider
-        .structured_completion(&model, parameters, query)
-        .await?;
+    let result = provider.structured_completion(&model, query).await?;
 
     let content = serde_json::to_string(&result)?;
     thread

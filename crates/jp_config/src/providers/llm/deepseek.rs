@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// Deepseek API configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct DeepseekConfig {
     /// Environment variable that contains the API key.

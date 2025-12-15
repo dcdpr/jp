@@ -47,10 +47,11 @@ pub fn string_with_strategy(
 
 #[cfg(test)]
 mod tests {
+    use test_log::test;
+
     use super::*;
 
     #[test]
-    #[expect(clippy::too_many_lines)]
     fn test_string_with_strategy() {
         struct TestCase {
             prev: PartialMergeableString,

@@ -105,11 +105,11 @@ fn default_config() -> jp_config::PartialAppConfig {
             }),
             ("opus".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Anthropic),
-                name: Some(Name("claude-opus-4-1".into())),
+                name: Some(Name("claude-opus-4-5".into())),
             }),
             ("haiku".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Anthropic),
-                name: Some(Name("claude-3-5-haiku-latest".into())),
+                name: Some(Name("claude-haiku-4-5".into())),
             }),
         ]);
     }
@@ -118,19 +118,19 @@ fn default_config() -> jp_config::PartialAppConfig {
         cfg.providers.llm.aliases.extend([
             ("openai".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5".into())),
+                name: Some(Name("gpt-5.1".into())),
             }),
             ("chatgpt".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5".into())),
+                name: Some(Name("gpt-5.1".into())),
             }),
             ("gpt".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5".into())),
+                name: Some(Name("gpt-5.1".into())),
             }),
             ("gpt5".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5".into())),
+                name: Some(Name("gpt-5.1".into())),
             }),
             ("gpt5-mini".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
@@ -239,19 +239,19 @@ fn default_model() -> Option<ModelIdConfig> {
         .or_else(|| {
             env::var("ANTHROPIC_API_KEY")
                 .is_ok()
-                .then(|| "anthropic/claude-sonnet-4-0".parse().ok())
+                .then(|| "anthropic/claude-sonnet-4-5".parse().ok())
                 .flatten()
         })
         .or_else(|| {
             env::var("OPENAI_API_KEY")
                 .is_ok()
-                .then(|| "openai/o4-mini".parse().ok())
+                .then(|| "openai/gpt-5.1".parse().ok())
                 .flatten()
         })
         .or_else(|| {
             env::var("GEMINI_API_KEY")
                 .is_ok()
-                .then(|| "google/gemini-2.5-flash-lite".parse().ok())
+                .then(|| "google/gemini-3-pro-preview".parse().ok())
                 .flatten()
         })
 }
@@ -270,6 +270,7 @@ impl IntoPartialAppConfig for Init {
 #[cfg(test)]
 mod tests {
     use serial_test::serial;
+    use test_log::test;
 
     use super::*;
 
@@ -300,8 +301,8 @@ mod tests {
         }
     }
 
-    #[test]
     #[serial(env_vars)]
+    #[test]
     fn test_default_config() {
         let _env1 = EnvVarGuard::set("ANTHROPIC_API_KEY", "foo");
         let _env2 = EnvVarGuard::set("OPENAI_API_KEY", "bar");

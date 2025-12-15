@@ -17,7 +17,7 @@ use std::{
 pub use error::Error;
 use error::Result;
 pub use id::Id;
-use jp_config::PartialAppConfig;
+use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::{DEFAULT_STORAGE_DIR, Storage};
 use state::{LocalState, State, UserState};
@@ -323,7 +323,7 @@ impl Workspace {
     pub fn create_conversation(
         &mut self,
         conversation: Conversation,
-        config: impl Into<PartialAppConfig>,
+        config: impl Into<AppConfig>,
     ) -> ConversationId {
         let id = ConversationId::default();
 
@@ -419,6 +419,11 @@ pub fn user_data_dir() -> Result<PathBuf> {
 mod tests {
     use std::{collections::HashMap, fs, time::Duration};
 
+    use jp_config::{
+        Config as _, PartialAppConfig,
+        conversation::tool::RunMode,
+        model::id::{PartialModelIdConfig, ProviderId},
+    };
     use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
     use tempfile::tempdir;
     use test_log::test;
@@ -526,7 +531,18 @@ mod tests {
 
         let mut workspace = Workspace::new(&root);
 
-        let id = workspace.create_conversation(Conversation::default(), PartialAppConfig::empty());
+        let mut partial = PartialAppConfig::empty();
+        partial.conversation.tools.defaults.run = Some(RunMode::Ask);
+        partial.assistant.model.id = PartialModelIdConfig {
+            provider: Some(ProviderId::Anthropic),
+            name: Some("test".parse().unwrap()),
+        }
+        .into();
+
+        let id = workspace.create_conversation(
+            Conversation::default(),
+            AppConfig::from_partial(partial).unwrap(),
+        );
         workspace.set_active_conversation_id(id).unwrap();
         assert!(!storage.exists());
 
@@ -581,7 +597,18 @@ mod tests {
         assert!(workspace.state.local.conversations.is_empty());
 
         let conversation = Conversation::default();
-        let id = workspace.create_conversation(conversation.clone(), PartialAppConfig::empty());
+        let mut partial = PartialAppConfig::empty();
+        partial.conversation.tools.defaults.run = Some(RunMode::Ask);
+        partial.assistant.model.id = PartialModelIdConfig {
+            provider: Some(ProviderId::Anthropic),
+            name: Some("test".parse().unwrap()),
+        }
+        .into();
+
+        let id = workspace.create_conversation(
+            conversation.clone(),
+            AppConfig::from_partial(partial).unwrap(),
+        );
         assert_eq!(
             workspace.state.local.conversations.get(&id),
             Some(&conversation)

@@ -21,7 +21,7 @@ use crate::{
 };
 
 /// Style configuration.
-#[derive(Debug, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct StyleConfig {
     /// Fenced code block style.

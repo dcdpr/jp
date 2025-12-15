@@ -3,7 +3,7 @@ mod parser;
 use std::{
     fs::{self, OpenOptions},
     io::{Read as _, Write as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
 };
 
@@ -221,7 +221,7 @@ pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFil
 /// Open an editor for the user to input or edit text using a file in the workspace
 pub(crate) fn edit_query(
     config: &AppConfig,
-    root: PathBuf,
+    root: &Path,
     stream: &ConversationStream,
     query: &str,
     cmd: Expression,
@@ -248,7 +248,7 @@ pub(crate) fn edit_query(
     doc.meta.history.value = &history_value;
 
     let options = Options::new(cmd.clone())
-        .with_cwd(&root)
+        .with_cwd(root)
         .with_content(doc)
         .with_force_write(true);
 

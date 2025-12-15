@@ -13,7 +13,7 @@ use crate::{
 
 /// String value, either defaulting to a merge strategy of `replace`, or
 /// defining a specific merge strategy.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(serde(untagged))]
 pub enum MergeableString {
     /// A string that is merged using the [`schematic::merge::replace`]
