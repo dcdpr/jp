@@ -84,8 +84,8 @@ then:
     - name: content-type
       value: text/event-stream
   body: |-
-    data: {"candidates": [{"content": {"parts": [{"text": "I can help"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 3,"totalTokenCount": 62,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "-Ro4aZmBAp3wnsEPgs7pkAI"}
+    data: {"candidates": [{"content": {"parts": [{"text": "I can help"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 3,"totalTokenCount": 62,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9aarLO6_skdUPrL2IuAc"}
 
-    data: {"candidates": [{"content": {"parts": [{"text": " with that. What is the value of `bar` and `foo`?"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 19,"totalTokenCount": 78,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "-Ro4aZmBAp3wnsEPgs7pkAI"}
+    data: {"candidates": [{"content": {"parts": [{"text": " you test the tool `run_me` but I need to know the values for the"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 21,"totalTokenCount": 80,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9aarLO6_skdUPrL2IuAc"}
 
-    data: {"candidates": [{"content": {"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 19,"totalTokenCount": 78,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "-Ro4aZmBAp3wnsEPgs7pkAI"}
+    data: {"candidates": [{"content": {"parts": [{"text": " arguments. The `bar` argument is required and can be either 'foo' or a list of strings. The `foo` argument is optional and defaults to 'foo'."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 56,"totalTokenCount": 115,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9aarLO6_skdUPrL2IuAc"}

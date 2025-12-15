@@ -35,7 +35,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "This is a successful tool call. The `run_me` function was called with the parameter `bar` set to the value `\"foo\"`. The tool returned a JSON object with a key `run_me_response` and a nested object containing the key `content` with the value `\"working!\"`. This indicates the tool executed as expected and returned the expected output.",
+                        message: "The tool call was successful. The tool `run_me` was called with the argument `bar` set to `\"foo\"`. The tool returned a JSON object with the key `run_me_response` and a nested object containing the key `content` with the value `\"working!\"`.",
                     },
                 ),
                 metadata: {},

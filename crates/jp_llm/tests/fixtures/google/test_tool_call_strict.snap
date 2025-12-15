@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Please provide the arguments for the `run_me` function`.",
+                        message: "I can help with that. What is the value of `bar`?",
                     },
                 ),
                 metadata: {},

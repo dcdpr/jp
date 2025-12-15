@@ -84,6 +84,6 @@ then:
     - name: content-type
       value: text/event-stream
   body: |-
-    data: {"candidates": [{"content": {"parts": [{"text": "Please"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 1,"totalTokenCount": 60,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "_Ro4aZjUE7eNxN8P48WFwQI"}
+    data: {"candidates": [{"content": {"parts": [{"text": "I can help"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 3,"totalTokenCount": 62,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "kBA9aYqjIubOnsEPuLvzgQc"}
 
-    data: {"candidates": [{"content": {"parts": [{"text": " provide the arguments for the `run_me` function`."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 13,"totalTokenCount": 72,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "_Ro4aZjUE7eNxN8P48WFwQI"}
+    data: {"candidates": [{"content": {"parts": [{"text": " with that. What is the value of `bar`?"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 15,"totalTokenCount": 74,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "kBA9aYqjIubOnsEPuLvzgQc"}

@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:04.675462",
+    "timestamp": "2025-12-13 07:06:56.563096",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -118,7 +118,7 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:04.353745",
+    "timestamp": "2025-12-13 07:06:56.221986",
     "delta": {
       "assistant": {
         "model": {
@@ -143,7 +143,7 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:04.353783",
+    "timestamp": "2025-12-13 07:06:56.222024",
     "delta": {
       "assistant": {
         "model": {
@@ -160,5 +160,10 @@ expression: v
     "id": "",
     "content": "d29ya2luZyE=",
     "is_error": false
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "The tool `run_me` was called with the argument `bar='foo'`. The tool returned a response indicating that it is \"working!\"."
   }
 ]

@@ -83,7 +83,7 @@ then:
   header:
     - name: content-type
       value: text/event-stream
-  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"run_me\",\"args\": {\"bar\": \"foo\"}}}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0,\"finishMessage\": \"Model generated function call(s).\"}],\"usageMetadata\": {\"promptTokenCount\": 59,\"candidatesTokenCount\": 15,\"totalTokenCount\": 74,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 59}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"-xo4advZCuzWxN8PwOLqyAY\"}"
+  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"run_me\",\"args\": {\"bar\": \"foo\"}}}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0,\"finishMessage\": \"Model generated function call(s).\"}],\"usageMetadata\": {\"promptTokenCount\": 59,\"candidatesTokenCount\": 15,\"totalTokenCount\": 74,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 59}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"jhA9aYOFA93insEPj9me6Qc\"}"
 ---
 when:
   path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
@@ -91,8 +91,6 @@ when:
   query_param:
     - name: alt
       value: sse
-    - name: key
-      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
   json_body_str: >-
     {
       "contents": [
@@ -153,74 +151,4 @@ then:
   header:
     - name: content-type
       value: text/event-stream
-  body: "data: {\"candidates\": [{\"finishReason\": \"UNEXPECTED_TOOL_CALL\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 35,\"totalTokenCount\": 35,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 35}]}}"
----
-when:
-  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
-  method: POST
-  query_param:
-    - name: alt
-      value: sse
-    - name: key
-      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
-  json_body_str: >-
-    {
-      "contents": [
-        {
-          "parts": [
-            {
-              "text": "Testing tool call"
-            }
-          ],
-          "role": "user"
-        },
-        {
-          "parts": [
-            {
-              "functionCall": {
-                "id": "",
-                "name": "run_me",
-                "args": {
-                  "bar": "foo"
-                }
-              }
-            }
-          ],
-          "role": "model"
-        },
-        {
-          "parts": [
-            {
-              "functionResponse": {
-                "id": "",
-                "name": "run_me",
-                "response": {
-                  "content": "working!"
-                }
-              }
-            }
-          ],
-          "role": "user"
-        }
-      ],
-      "toolConfig": {
-        "functionCallingConfig": {
-          "mode": "NONE",
-          "allowedFunctionNames": []
-        }
-      },
-      "generationConfig": {
-        "maxOutputTokens": 64000,
-        "thinkingConfig": {
-          "includeThoughts": false,
-          "thinkingBudget": null,
-          "thinkingLevel": null
-        }
-      }
-    }
-then:
-  status: 200
-  header:
-    - name: content-type
-      value: text/event-stream
-  body: "data: {\"candidates\": [{\"content\": {\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 35,\"totalTokenCount\": 35,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 35}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"_Bo4acjfC_WT28oPw4SomQY\"}"
+  body: "data: {\"candidates\": [{\"content\": {\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 35,\"totalTokenCount\": 35,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 35}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"jhA9aZ31FvTMkdUPxvOewAc\"}"
