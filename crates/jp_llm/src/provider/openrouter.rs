@@ -1,46 +1,54 @@
 use std::env;
 
-use async_stream::try_stream;
 use async_trait::async_trait;
-use futures::{StreamExt, TryStreamExt as _};
+use futures::{StreamExt as _, TryStreamExt as _, stream};
+use indexmap::IndexMap;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
         id::{ModelIdConfig, Name, ProviderId},
-        parameters::{ParametersConfig, ReasoningEffort},
+        parameters::ReasoningEffort,
     },
     providers::llm::openrouter::OpenrouterConfig,
 };
 use jp_conversation::{
-    ConversationStream,
-    event::{ChatResponse, EventKind, ToolCallRequest},
+    ConversationEvent, ConversationStream,
+    event::{ChatResponse, EventKind},
     thread::{Document, Documents, Thread},
 };
 use jp_openrouter::{
     Client,
     types::{
+        self,
         chat::{CacheControl, Content, Message},
         request::{self, RequestMessage},
         response::{
-            self, ChatCompletion as OpenRouterChunk, Choice, ErrorResponse, FinishReason,
-            StreamingDelta,
+            self, ChatCompletion as OpenRouterChunk, FinishReason, ReasoningDetails,
+            ReasoningDetailsFormat, ReasoningDetailsKind,
         },
         tool::{self, FunctionCall, Tool, ToolCall, ToolFunction},
     },
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
-use super::{CompletionChunk, Delta, Event, EventStream, ModelDetails, Reply, StreamEvent};
+use super::{EventStream, ModelDetails};
 use crate::{
     Error,
     error::Result,
+    event::{self, Event},
     provider::{Provider, openai::parameters_with_strict_mode},
     query::ChatQuery,
-    stream::{accumulator::Accumulator, event::StreamEndReason},
+    stream::aggregator::tool_call_request::ToolCallRequestAggregator,
 };
 
 static PROVIDER: ProviderId = ProviderId::Openrouter;
+
+const ANTHROPIC_REDACTED_THINKING_KEY: &str = "anthropic_redacted_thinking";
+const ANTHROPIC_THINKING_SIGNATURE_KEY: &str = "anthropic_thinking_signature";
+const GOOGLE_THOUGHT_SIGNATURE_KEY: &str = "google_thought_signature";
+const OPENAI_ENCRYPTED_CONTENT_KEY: &str = "openai_encrypted_content";
 
 #[derive(Debug, Clone)]
 pub struct Openrouter {
@@ -87,7 +95,6 @@ impl Provider for Openrouter {
     async fn chat_completion_stream(
         &self,
         model: &ModelDetails,
-        parameters: &ParametersConfig,
         query: ChatQuery,
     ) -> Result<EventStream> {
         debug!(
@@ -95,147 +102,311 @@ impl Provider for Openrouter {
             "Starting OpenRouter chat completion stream."
         );
 
-        let request = build_request(query, model, parameters)?;
-        let inner_stream = self
+        let mut state = AggregationState {
+            tool_calls: ToolCallRequestAggregator::default(),
+            aggregating_reasoning: false,
+            aggregating_message: false,
+        };
+
+        let request = build_request(query, model)?;
+
+        Ok(self
             .client
             .chat_completion_stream(request)
-            .map_err(Error::from);
-
-        #[expect(clippy::semicolon_if_nothing_returned)]
-        Ok(Box::pin(try_stream!({
-            let mut accumulator = Accumulator::new(200);
-            tokio::pin!(inner_stream);
-
-            while let Some(result) = inner_stream.next().await {
-                let chunk = match result {
-                    Ok(chunk) => chunk,
-                    Err(e) => {
-                        warn!(error = ?e, "Error receiving delta from OpenRouter stream.");
-                        Err(e)?
-                    }
-                };
-
-                trace!(?chunk, "Received OpenRouter delta.");
-
-                let choice_data = chunk.choices.into_iter().next();
-                let Some(choice) = choice_data else {
-                    trace!("OpenRouter delta had no choices, skipping.");
-                    continue;
-                };
-
-                let Choice::Streaming(streaming_choice) = choice else {
-                    warn!("Received non-streaming choice in streaming context, ignoring.");
-                    continue;
-                };
-
-                let finish_reason = streaming_choice.finish_reason;
-
-                let mut delta: Delta = streaming_choice.delta.into();
-                delta.tool_call_finished = streaming_choice
-                    .finish_reason
-                    .is_some_and(|r| matches!(r, FinishReason::ToolCalls | FinishReason::Stop));
-
-                for event in delta.into_stream_events(&mut accumulator)? {
-                    yield event;
-                }
-
-                if let Some(finish_reason) = finish_reason {
-                    for event in accumulator.drain()? {
-                        yield event;
-                    }
-
-                    match finish_reason {
-                        FinishReason::Length => {
-                            yield StreamEvent::EndOfStream(StreamEndReason::MaxTokens)
-                        }
-                        FinishReason::Stop => {
-                            yield StreamEvent::EndOfStream(StreamEndReason::Completed)
-                        }
-                        _ => {
-                            yield StreamEvent::EndOfStream(StreamEndReason::Other(
-                                finish_reason.as_str().to_owned(),
-                            ))
-                        }
-                    }
-                }
-            }
-        })))
-    }
-
-    async fn chat_completion(
-        &self,
-        model: &ModelDetails,
-        parameters: &ParametersConfig,
-        query: ChatQuery,
-    ) -> Result<Reply> {
-        let request = build_request(query, model, parameters)?;
-        let completion =
-            self.client.chat_completion(request).await.inspect_err(
-                |error| warn!(%error, "Error receiving completion from OpenRouter."),
-            )?;
-
-        trace!(?completion, "Received OpenRouter delta.");
-
-        let choice_data = completion.choices.into_iter().next();
-        let Some(choice) = choice_data else {
-            trace!("OpenRouter delta had no choices, skipping.");
-            return Ok(Reply::default());
-        };
-
-        let Choice::NonStreaming(choice) = choice else {
-            warn!("Received streaming choice in non-streaming context, ignoring.");
-            return Ok(Reply::default());
-        };
-
-        if let Some(ErrorResponse { code, message, .. }) = choice.error {
-            return Err(Error::InvalidResponse(format!(
-                "OpenRouter error: {code}: {message}"
-            )));
-        }
-
-        let mut events = vec![];
-        if let Some(content) = choice.message.reasoning {
-            events.push(Event::Reasoning(content));
-        }
-        if let Some(content) = choice.message.content {
-            events.push(Event::Content(content));
-        }
-        for ToolCall::Function { function, id, .. } in choice.message.tool_calls {
-            events.push(Event::ToolCall(ToolCallRequest {
-                id: id.unwrap_or_default(),
-                name: function.name.unwrap_or_default(),
-                arguments: serde_json::from_str(&function.arguments.unwrap_or_default())
-                    .unwrap_or(serde_json::Map::new()),
-            }));
-        }
-
-        match choice.finish_reason {
-            FinishReason::Length => events.push(Event::Finished(StreamEndReason::MaxTokens)),
-            FinishReason::Stop => events.push(Event::Finished(StreamEndReason::Completed)),
-            finish_reason => events.push(Event::Finished(StreamEndReason::Other(
-                finish_reason.as_str().to_owned(),
-            ))),
-        }
-
-        Ok(Reply {
-            provider: PROVIDER,
-            events,
-        })
+            .map_err(Error::from)
+            .map_ok(move |v| stream::iter(map_completion(v, &mut state)))
+            .try_flatten()
+            .boxed())
     }
 }
 
+/// Aggregation state for a single stream of events.
+struct AggregationState {
+    /// Tool call aggregator.
+    tool_calls: ToolCallRequestAggregator,
+
+    /// Did the stream of events have any reasoning content?
+    aggregating_reasoning: bool,
+
+    /// Did the stream of events have any message content?
+    aggregating_message: bool,
+}
+
+/// Metadata stored in the conversation stream, based on Openrouter
+/// multi-provider support.
+///
+/// For example, if we use Openrouter to call an Openai model with reasoning
+/// support, Openrouter will send us the "encryted reasoning" content in the
+/// payload. We take that data, and morph it into a certain metadata shape that
+/// can be read by both the Openrouter and Openai provider implementations, such
+/// that the reasoning content can be used in future turns, regardless of
+/// whether the conversation keeps using the Openrouter provider, or switches to
+/// the Openai provider. The same applies to Anthropic, and other providers for
+/// which Openrouter has provider-specific metadata support.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+struct MultiProviderMetadata {
+    // NOTE: This has to remain in sync with
+    // `crate::provider::openai::ENCODED_PAYLOAD_KEY`.
+    //
+    // If this proves difficult (here or in other fields), we will have to find
+    // a working solution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    openai_encrypted_content: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    anthropic_thinking_signature: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    anthropic_redacted_thinking: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    google_thought_signature: Option<Value>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    openrouter_metadata: Vec<Map<String, Value>>,
+}
+
+impl MultiProviderMetadata {
+    fn from_details(details: Vec<ReasoningDetails>) -> Self {
+        let mut metadata = Self::default();
+
+        for details in details {
+            let ReasoningDetails {
+                id,
+                format,
+                index,
+                kind,
+            } = details;
+
+            let field = match (format, kind) {
+                (Some(format), ReasoningDetailsKind::Encrypted { data }) => match format {
+                    ReasoningDetailsFormat::OpenaiResponsesV1 => {
+                        metadata.openai_encrypted_content = Some(data.into());
+                        OPENAI_ENCRYPTED_CONTENT_KEY
+                    }
+                    ReasoningDetailsFormat::AnthropicClaudeV1 => {
+                        metadata.anthropic_redacted_thinking = Some(data.into());
+                        ANTHROPIC_REDACTED_THINKING_KEY
+                    }
+                    _ => "",
+                },
+                (
+                    Some(format),
+                    ReasoningDetailsKind::Text {
+                        signature: Some(signature),
+                        ..
+                    },
+                ) => match format {
+                    ReasoningDetailsFormat::AnthropicClaudeV1 => {
+                        metadata.anthropic_thinking_signature = Some(signature.into());
+                        ANTHROPIC_THINKING_SIGNATURE_KEY
+                    }
+                    ReasoningDetailsFormat::GoogleGeminiV1 => {
+                        metadata.google_thought_signature = Some(signature.into());
+                        GOOGLE_THOUGHT_SIGNATURE_KEY
+                    }
+                    _ => "",
+                },
+                _ => "",
+            };
+
+            let mut map = Map::new();
+            if !field.is_empty() {
+                if let Some(id) = id {
+                    map.insert("id".into(), id.into());
+                }
+
+                if let Some(index) = index {
+                    map.insert("index".into(), index.into());
+                }
+
+                map.insert("field".into(), field.into());
+            }
+            if !map.is_empty() {
+                metadata.openrouter_metadata.push(map);
+            }
+        }
+
+        metadata
+    }
+}
+
+impl From<MultiProviderMetadata> for IndexMap<String, Value> {
+    fn from(val: MultiProviderMetadata) -> Self {
+        let mut map = IndexMap::new();
+
+        if let Some(v) = val.openai_encrypted_content {
+            map.insert("openai_encrypted_content".into(), v);
+        }
+
+        if let Some(v) = val.anthropic_thinking_signature {
+            map.insert("anthropic_thinking_signature".into(), v);
+        }
+
+        if let Some(v) = val.anthropic_redacted_thinking {
+            map.insert("anthropic_redacted_thinking".into(), v);
+        }
+
+        if let Some(v) = val.google_thought_signature {
+            map.insert("google_thought_signature".into(), v);
+        }
+
+        let metadata = val
+            .openrouter_metadata
+            .into_iter()
+            .map(Value::from)
+            .collect::<Vec<_>>();
+
+        if !metadata.is_empty() {
+            map.insert("openrouter_metadata".into(), metadata.into());
+        }
+
+        map
+    }
+}
+
+fn map_completion(v: OpenRouterChunk, state: &mut AggregationState) -> Vec<Result<Event>> {
+    v.choices
+        .into_iter()
+        .flat_map(|v| map_event(v, state))
+        .collect()
+}
+
+#[expect(clippy::too_many_lines)]
+fn map_event(choice: types::response::Choice, state: &mut AggregationState) -> Vec<Result<Event>> {
+    let types::response::Choice::Streaming(types::response::StreamingChoice {
+        finish_reason,
+        delta:
+            types::response::StreamingDelta {
+                content,
+                reasoning,
+                tool_calls,
+                reasoning_details,
+                ..
+            },
+        error,
+        ..
+    }) = choice
+    else {
+        warn!("Received non-streaming choice in streaming context, ignoring.");
+        return vec![];
+    };
+
+    // I _believe_ we can ignore the `reasoning.summary` details variant,
+    // since it is basically a clone of the reasoning text we already have
+    // in the regular `reasoning` field.
+    let reasoning_details = reasoning_details
+        .into_iter()
+        .filter(|details| !matches!(details.kind, ReasoningDetailsKind::Summary { .. }))
+        .collect::<Vec<_>>();
+
+    let has_reasoning_details = !reasoning_details.is_empty();
+    let reasoning_details = MultiProviderMetadata::from_details(reasoning_details);
+
+    if let Some(error) = error {
+        return vec![Err(Error::from(error))];
+    }
+
+    let mut events = vec![];
+    let reasoning = reasoning.unwrap_or_default();
+    if !reasoning.trim().is_empty() || has_reasoning_details {
+        state.aggregating_reasoning = true;
+
+        let event = ConversationEvent::now(ChatResponse::reasoning(reasoning));
+        let event = if has_reasoning_details {
+            Ok(event.with_metadata(reasoning_details))
+        } else {
+            Ok(event)
+        };
+
+        events.push(event.map(|event| Event::Part { index: 0, event }));
+    }
+
+    if let Some(content) = content
+        && !content.trim().is_empty()
+    {
+        state.aggregating_message = true;
+
+        events.push(Ok(Event::Part {
+            index: 1,
+            event: ConversationEvent::now(ChatResponse::message(content)),
+        }));
+    }
+
+    if finish_reason.is_some() {
+        if state.aggregating_reasoning {
+            state.aggregating_reasoning = false;
+            events.push(Ok(Event::flush(0)));
+        }
+
+        if state.aggregating_message {
+            state.aggregating_message = false;
+            events.push(Ok(Event::flush(1)));
+        }
+    }
+
+    for (
+        idx,
+        types::tool::ToolCall::Function {
+            function,
+            id,
+            index,
+        },
+    ) in tool_calls.into_iter().enumerate()
+    {
+        let index = idx + index + 2;
+        state
+            .tool_calls
+            .add_chunk(index, id, function.name, function.arguments.as_deref());
+    }
+
+    if let Some(FinishReason::ToolCalls | FinishReason::Stop) = finish_reason {
+        events.extend(
+            state
+                .tool_calls
+                .finalize_all()
+                .into_iter()
+                .flat_map(|(index, result)| {
+                    vec![
+                        result
+                            .map(|call| Event::Part {
+                                index,
+                                event: ConversationEvent::now(call),
+                            })
+                            .map_err(Error::from),
+                        Ok(Event::flush(index)),
+                    ]
+                }),
+        );
+    }
+
+    match finish_reason {
+        Some(FinishReason::Length) => {
+            events.push(Ok(Event::Finished(event::FinishReason::MaxTokens)));
+        }
+        Some(FinishReason::Stop) => {
+            events.push(Ok(Event::Finished(event::FinishReason::Completed)));
+        }
+        Some(FinishReason::Error) => events.push(Err(jp_openrouter::Error::Stream(
+            "unknown stream error".into(),
+        )
+        .into())),
+        Some(reason) => events.push(Ok(Event::Finished(event::FinishReason::Other(
+            reason.as_str().into(),
+        )))),
+        _ => {}
+    }
+
+    events
+}
+
 /// Build request for Openrouter API.
-fn build_request(
-    query: ChatQuery,
-    model: &ModelDetails,
-    parameters: &ParametersConfig,
-) -> Result<request::ChatCompletion> {
+fn build_request(query: ChatQuery, model: &ModelDetails) -> Result<request::ChatCompletion> {
     let ChatQuery {
         thread,
         tools,
         tool_choice,
         tool_call_strict_mode,
     } = query;
+
+    let config = thread.events.config()?;
+    let parameters = &config.assistant.model.parameters;
 
     let slug = model.id.name.to_string();
     let reasoning = model.custom_reasoning_config(parameters.reasoning);
@@ -252,15 +423,15 @@ fn build_request(
             },
         })
         .collect::<Vec<_>>();
-    let tool_choice: tool::ToolChoice = if tools.is_empty() {
-        tool::ToolChoice::None
+    let tool_choice = if tools.is_empty() {
+        None
     } else {
-        match tool_choice {
+        Some(match tool_choice {
             ToolChoice::Auto => tool::ToolChoice::Auto,
             ToolChoice::None => tool::ToolChoice::None,
             ToolChoice::Required => tool::ToolChoice::Required,
             ToolChoice::Function(name) => tool::ToolChoice::function(name),
-        }
+        })
     };
 
     trace!(
@@ -305,18 +476,27 @@ fn map_model(model: response::Model) -> Result<ModelDetails> {
     })
 }
 
-impl From<StreamingDelta> for Delta {
-    fn from(delta: StreamingDelta) -> Self {
-        let tool_call = delta.tool_calls.into_iter().next();
+// impl From<StreamingDelta> for Delta {
+//     fn from(delta: StreamingDelta) -> Self {
+//         let tool_call = delta.tool_calls.into_iter().next();
+//
+//         Self {
+//             content: delta.content,
+//             reasoning: delta.reasoning,
+//             tool_call_id: tool_call.as_ref().and_then(ToolCall::id),
+//             tool_call_name: tool_call.as_ref().and_then(ToolCall::name),
+//             tool_call_arguments: tool_call.as_ref().and_then(ToolCall::arguments),
+//             tool_call_finished: false,
+//         }
+//     }
+// }
 
-        Self {
-            content: delta.content,
-            reasoning: delta.reasoning,
-            tool_call_id: tool_call.as_ref().and_then(ToolCall::id),
-            tool_call_name: tool_call.as_ref().and_then(ToolCall::name),
-            tool_call_arguments: tool_call.as_ref().and_then(ToolCall::arguments),
-            tool_call_finished: false,
-        }
+impl From<types::response::ErrorResponse> for Error {
+    fn from(error: types::response::ErrorResponse) -> Self {
+        Self::OpenRouter(jp_openrouter::Error::Api {
+            code: error.code,
+            message: error.message,
+        })
     }
 }
 
@@ -335,33 +515,6 @@ impl TryFrom<&OpenrouterConfig> for Openrouter {
         .with_base_url(config.base_url.clone());
 
         Ok(client)
-    }
-}
-
-impl From<OpenRouterChunk> for CompletionChunk {
-    fn from(chunk: OpenRouterChunk) -> Self {
-        let reasoning = chunk
-            .choices
-            .first()
-            .and_then(|choice| choice.reasoning().map(ToOwned::to_owned));
-
-        if let Some(reasoning) = reasoning {
-            return Self::Reasoning(reasoning);
-        }
-
-        let content = chunk
-            .choices
-            .first()
-            .and_then(|choice| choice.content().map(ToOwned::to_owned))
-            .unwrap_or_default();
-
-        Self::Content(content)
-    }
-}
-
-impl From<OpenRouterChunk> for StreamEvent {
-    fn from(chunk: OpenRouterChunk) -> Self {
-        StreamEvent::ChatChunk(chunk.into())
     }
 }
 
@@ -510,85 +663,137 @@ fn convert_events(events: ConversationStream) -> Vec<RequestMessage> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use jp_config::providers::llm::LlmProviderConfig;
-    use jp_test::{function_name, mock::Vcr};
-    use test_log::test;
+    use jp_test::{Result, function_name};
 
     use super::*;
+    use crate::test::TestRequest;
 
-    fn vcr() -> Vcr {
-        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-        Vcr::new("https://openrouter.ai", fixtures)
-    }
-
-    #[test(tokio::test)]
-    async fn test_openrouter_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let mut config = LlmProviderConfig::default().openrouter;
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = url;
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
-                }
-
-                Openrouter::try_from(&config)
-                    .unwrap()
-                    .models()
-                    .await
-                    .map(|mut v| {
-                        v.truncate(2);
-                        v
-                    })
-            },
-        )
-        .await
-    }
-
-    #[test(tokio::test)]
-    async fn test_openrouter_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
-    {
-        let mut config = LlmProviderConfig::default().openrouter;
-        let model_id = "openrouter/openai/o4-mini".parse().unwrap();
-        let model = ModelDetails::empty(model_id);
-        let query = ChatQuery {
-            thread: Thread {
-                events: ConversationStream::default().with_chat_request("Test message"),
-                ..Default::default()
-            },
-            ..Default::default()
+    macro_rules! test_all_models {
+        ($($fn:ident),* $(,)?) => {
+            mod anthropic { use super::*; $(test_all_models!(func; $fn, "openrouter/anthropic/claude-haiku-4.5");)* }
+            mod google    { use super::*; $(test_all_models!(func; $fn, "openrouter/google/gemini-2.5-flash");)* }
+            mod xai       { use super::*; $(test_all_models!(func; $fn, "openrouter/x-ai/grok-code-fast-1");)* }
+            mod minimax   { use super::*; $(test_all_models!(func; $fn, "openrouter/minimax/minimax-m2");)* }
         };
-
-        let vcr = vcr();
-        vcr.cassette(
-            function_name!(),
-            |rule| {
-                rule.filter(|when| {
-                    when.any_request();
-                });
-            },
-            |recording, url| async move {
-                config.base_url = url;
-                if !recording {
-                    // dummy api key value when replaying a cassette
-                    config.api_key_env = "USER".to_owned();
+        (func; $fn:ident, $model:literal) => {
+            paste::paste! {
+                #[test_log::test(tokio::test)]
+                async fn [< test_ $fn >]() -> Result {
+                    $fn($model, &format!("{}_{}", $model.split('/').nth(1).unwrap(), function_name!())).await
                 }
+            }
+        };
+    }
 
-                Openrouter::try_from(&config)
-                    .unwrap()
-                    .chat_completion(&model, &ParametersConfig::default(), query)
-                    .await
-            },
+    test_all_models![sub_provider_metadata,];
+
+    async fn sub_provider_metadata(model: &str, test_name: &str) -> Result {
+        let requests = vec![
+            TestRequest::chat(ProviderId::Openrouter)
+                .model(model.parse().unwrap())
+                .enable_reasoning()
+                .chat_request("Test message"),
+        ];
+
+        run_test(test_name, requests).await?;
+
+        Ok(())
+    }
+
+    async fn run_test(
+        test_name: impl AsRef<str>,
+        requests: impl IntoIterator<Item = TestRequest>,
+    ) -> Result {
+        crate::test::run_chat_completion(
+            test_name,
+            env!("CARGO_MANIFEST_DIR"),
+            ProviderId::Openrouter,
+            LlmProviderConfig::default(),
+            requests.into_iter().collect(),
         )
         .await
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use jp_config::providers::llm::LlmProviderConfig;
+//     use jp_test::{fn_name, mock::Vcr};
+//     use test_log::test;
+//
+//     use super::*;
+//
+//     fn vcr() -> Vcr {
+//         Vcr::new("https://openrouter.ai", env!("CARGO_MANIFEST_DIR"))
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_openrouter_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
+//         let mut config = LlmProviderConfig::default().openrouter;
+//         let vcr = vcr();
+//         vcr.cassette(
+//             fn_name!(),
+//             |rule| {
+//                 rule.filter(|when| {
+//                     when.any_request();
+//                 });
+//             },
+//             |recording, url| async move {
+//                 config.base_url = url;
+//                 if !recording {
+//                     // dummy api key value when replaying a cassette
+//                     config.api_key_env = "USER".to_owned();
+//                 }
+//
+//                 Openrouter::try_from(&config)
+//                     .unwrap()
+//                     .models()
+//                     .await
+//                     .map(|mut v| {
+//                         v.truncate(2);
+//                         v
+//                     })
+//             },
+//         )
+//         .await
+//     }
+//
+//     #[test(tokio::test)]
+//     async fn test_openrouter_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
+//     {
+//         let mut config = LlmProviderConfig::default().openrouter;
+//         let model_id = "openrouter/openai/o4-mini".parse().unwrap();
+//         let model = ModelDetails::empty(model_id);
+//         let query = ChatQuery {
+//             thread: Thread {
+//                 events: ConversationStream::default().with_chat_request("Test message"),
+//                 ..Default::default()
+//             },
+//             ..Default::default()
+//         };
+//
+//         let vcr = vcr();
+//         vcr.cassette(
+//             fn_name!(),
+//             |rule| {
+//                 rule.filter(|when| {
+//                     when.any_request();
+//                 });
+//             },
+//             |recording, url| async move {
+//                 config.base_url = url;
+//                 if !recording {
+//                     // dummy api key value when replaying a cassette
+//                     config.api_key_env = "USER".to_owned();
+//                 }
+//
+//                 Openrouter::try_from(&config)
+//                     .unwrap()
+//                     .chat_completion(&model, query)
+//                     .await
+//             },
+//         )
+//         .await
+//     }
+// }

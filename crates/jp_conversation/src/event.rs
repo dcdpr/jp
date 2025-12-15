@@ -4,7 +4,9 @@ mod chat;
 mod inquiry;
 mod tool_call;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use time::UtcDateTime;
 
 pub use self::{
@@ -22,6 +24,14 @@ pub struct ConversationEvent {
     /// The kind of event.
     #[serde(flatten)]
     pub kind: EventKind,
+
+    /// Additional opaque metadata associated with the event.
+    #[serde(
+        default,
+        skip_serializing_if = "Map::is_empty",
+        with = "jp_serde::repr::base64_json_map"
+    )]
+    pub metadata: Map<String, Value>,
 }
 
 impl ConversationEvent {
@@ -31,6 +41,7 @@ impl ConversationEvent {
         Self {
             timestamp: timestamp.into(),
             kind: event.into(),
+            metadata: Map::new(),
         }
     }
 
@@ -38,6 +49,25 @@ impl ConversationEvent {
     #[must_use]
     pub fn now(event: impl Into<EventKind>) -> Self {
         Self::new(event, UtcDateTime::now())
+    }
+
+    /// Attaches metadata to the event.
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: impl Into<IndexMap<String, Value>>) -> Self {
+        self.metadata.extend(metadata.into());
+        self
+    }
+
+    /// Attaches a metadata field to the event.
+    #[must_use]
+    pub fn with_metadata_field(mut self, key: impl Into<String>, value: impl Into<Value>) -> Self {
+        self.metadata.insert(key.into(), value.into());
+        self
+    }
+
+    /// Adds a metadata field to the event.
+    pub fn add_metadata_field(&mut self, key: impl Into<String>, value: impl Into<Value>) {
+        self.metadata.insert(key.into(), value.into());
     }
 
     /// Returns `true` if the event is a "request".
