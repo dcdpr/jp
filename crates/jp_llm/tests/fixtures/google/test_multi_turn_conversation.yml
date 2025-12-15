@@ -37,9 +37,9 @@ then:
     - name: content-type
       value: text/event-stream
   body: |-
-    data: {"candidates": [{"content": {"parts": [{"text": "OK"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 3,"candidatesTokenCount": 1,"totalTokenCount": 4,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "6xo4abnSIcPPnsEP25TX-AE"}
+    data: {"candidates": [{"content": {"parts": [{"text": "Okay, I received"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 3,"candidatesTokenCount": 4,"totalTokenCount": 7,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9aevkI93insEPj9me6Qc"}
 
-    data: {"candidates": [{"content": {"parts": [{"text": ". I see your test message. How can I help you today?"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 3,"candidatesTokenCount": 15,"totalTokenCount": 18,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "6xo4abnSIcPPnsEP25TX-AE"}
+    data: {"candidates": [{"content": {"parts": [{"text": " your test message! It's working. How can I help you today?"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 3,"candidatesTokenCount": 20,"totalTokenCount": 23,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9aevkI93insEPj9me6Qc"}
 ---
 when:
   path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
@@ -47,8 +47,6 @@ when:
   query_param:
     - name: alt
       value: sse
-    - name: key
-      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
   json_body_str: >-
     {
       "contents": [
@@ -63,7 +61,7 @@ when:
         {
           "parts": [
             {
-              "text": "OK. I see your test message. How can I help you today?"
+              "text": "Okay, I received your test message! It's working. How can I help you today?"
             }
           ],
           "role": "model"
@@ -98,9 +96,9 @@ then:
     - name: content-type
       value: text/event-stream
   body: |-
-    data: {"candidates": [{"content": {"parts": [{"text": "**Echoing a prompt**\n\nI'm currently focused on repeating the user's last message.  I've processed the request, understood the instruction to echo the provided text. Currently, I'm simply repeating: \"Test message\".\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 24,"totalTokenCount": 56,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 24}],"thoughtsTokenCount": 32},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Bo4admDB_7cnsEPq465qAI"}
+    data: {"candidates": [{"content": {"parts": [{"text": "**Reflecting on Repetition**\n\nI'm pondering the potential for unintended repetition. The current focus is on maintaining diversity in output while effectively echoing past communications. I'm investigating methods to achieve this nuance, so that the response remains useful and engaging, rather than rote or uninspired.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 29,"totalTokenCount": 50,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 29}],"thoughtsTokenCount": 21},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9aaTCMOKmkdUP7_SdkAc"}
 
-    data: {"candidates": [{"content": {"parts": [{"text": "Test message"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 24,"candidatesTokenCount": 1,"totalTokenCount": 57,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 24}],"thoughtsTokenCount": 32},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Bo4admDB_7cnsEPq465qAI"}
+    data: {"candidates": [{"content": {"parts": [{"text": "Your previous message was: \"Test message\""}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 29,"candidatesTokenCount": 8,"totalTokenCount": 58,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 29}],"thoughtsTokenCount": 21},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9aaTCMOKmkdUP7_SdkAc"}
 ---
 when:
   path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
@@ -108,8 +106,6 @@ when:
   query_param:
     - name: alt
       value: sse
-    - name: key
-      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
   json_body_str: >-
     {
       "contents": [
@@ -124,7 +120,7 @@ when:
         {
           "parts": [
             {
-              "text": "OK. I see your test message. How can I help you today?"
+              "text": "Okay, I received your test message! It's working. How can I help you today?"
             }
           ],
           "role": "model"
@@ -141,10 +137,10 @@ when:
           "parts": [
             {
               "thought": true,
-              "text": "**Echoing a prompt**\\n\\nI'm currently focused on repeating the user's last message.  I've processed the request, understood the instruction to echo the provided text. Currently, I'm simply repeating: \"Test message\".\\n\\n\\n"
+              "text": "**Reflecting on Repetition**\\n\\nI'm pondering the potential for unintended repetition. The current focus is on maintaining diversity in output while effectively echoing past communications. I'm investigating methods to achieve this nuance, so that the response remains useful and engaging, rather than rote or uninspired.\\n\\n\\n"
             },
             {
-              "text": "Test message"
+              "text": "Your previous message was: \"Test message\""
             }
           ],
           "role": "model"
@@ -227,7 +223,7 @@ then:
   header:
     - name: content-type
       value: text/event-stream
-  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"run_me\",\"args\": {\"bar\": \"foo\"}}}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0,\"finishMessage\": \"Model generated function call(s).\"}],\"usageMetadata\": {\"promptTokenCount\": 137,\"candidatesTokenCount\": 15,\"totalTokenCount\": 152,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 137}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"7Ro4aZ_fDv3NnsEPjP-Y2AE\"}"
+  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"run_me\",\"args\": {\"bar\": \"foo\"}}}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0,\"finishMessage\": \"Model generated function call(s).\"}],\"usageMetadata\": {\"promptTokenCount\": 158,\"candidatesTokenCount\": 15,\"totalTokenCount\": 173,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 158}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"jxA9aaCEAvTMkdUPxvOewAc\"}"
 ---
 when:
   path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
@@ -235,8 +231,6 @@ when:
   query_param:
     - name: alt
       value: sse
-    - name: key
-      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
   json_body_str: >-
     {
       "contents": [
@@ -251,7 +245,7 @@ when:
         {
           "parts": [
             {
-              "text": "OK. I see your test message. How can I help you today?"
+              "text": "Okay, I received your test message! It's working. How can I help you today?"
             }
           ],
           "role": "model"
@@ -268,10 +262,10 @@ when:
           "parts": [
             {
               "thought": true,
-              "text": "**Echoing a prompt**\\n\\nI'm currently focused on repeating the user's last message.  I've processed the request, understood the instruction to echo the provided text. Currently, I'm simply repeating: \"Test message\".\\n\\n\\n"
+              "text": "**Reflecting on Repetition**\\n\\nI'm pondering the potential for unintended repetition. The current focus is on maintaining diversity in output while effectively echoing past communications. I'm investigating methods to achieve this nuance, so that the response remains useful and engaging, rather than rote or uninspired.\\n\\n\\n"
             },
             {
-              "text": "Test message"
+              "text": "Your previous message was: \"Test message\""
             }
           ],
           "role": "model"
@@ -334,9 +328,9 @@ then:
     - name: content-type
       value: text/event-stream
   body: |-
-    data: {"candidates": [{"content": {"parts": [{"text": "Testing tool call"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 119,"candidatesTokenCount": 3,"totalTokenCount": 122,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 119}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Ro4aabNJbnhnsEP7ZuguAQ"}
+    data: {"candidates": [{"content": {"parts": [{"text": "The"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 140,"candidatesTokenCount": 1,"totalTokenCount": 141,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 140}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jxA9ac2mFp-kkdUPopbSwQc"}
 
-    data: {"candidates": [{"content": {"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 119,"candidatesTokenCount": 3,"totalTokenCount": 122,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 119}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Ro4aabNJbnhnsEP7ZuguAQ"}
+    data: {"candidates": [{"content": {"parts": [{"text": " secret code is: 42"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 140,"candidatesTokenCount": 8,"totalTokenCount": 148,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 140}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jxA9ac2mFp-kkdUPopbSwQc"}
 ---
 when:
   path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
@@ -344,8 +338,6 @@ when:
   query_param:
     - name: alt
       value: sse
-    - name: key
-      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
   json_body_str: >-
     {
       "contents": [
@@ -360,7 +352,7 @@ when:
         {
           "parts": [
             {
-              "text": "OK. I see your test message. How can I help you today?"
+              "text": "Okay, I received your test message! It's working. How can I help you today?"
             }
           ],
           "role": "model"
@@ -377,10 +369,10 @@ when:
           "parts": [
             {
               "thought": true,
-              "text": "**Echoing a prompt**\\n\\nI'm currently focused on repeating the user's last message.  I've processed the request, understood the instruction to echo the provided text. Currently, I'm simply repeating: \"Test message\".\\n\\n\\n"
+              "text": "**Reflecting on Repetition**\\n\\nI'm pondering the potential for unintended repetition. The current focus is on maintaining diversity in output while effectively echoing past communications. I'm investigating methods to achieve this nuance, so that the response remains useful and engaging, rather than rote or uninspired.\\n\\n\\n"
             },
             {
-              "text": "Test message"
+              "text": "Your previous message was: \"Test message\""
             }
           ],
           "role": "model"
@@ -424,7 +416,7 @@ when:
         {
           "parts": [
             {
-              "text": "Testing tool call"
+              "text": "The secret code is: 42"
             }
           ],
           "role": "model"
@@ -459,8 +451,8 @@ then:
     - name: content-type
       value: text/event-stream
   body: |-
-    data: {"candidates": [{"content": {"parts": [{"text": "**Retrieving Past Output**\n\nI'm focusing now on the retrieval of the previous tool call's output. I recall the `print(default_api.run_me(bar = \"foo\"))` call, which provided the secret code. I'm actively working to ensure I can consistently access and utilize this type of information.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 134,"totalTokenCount": 203,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 134}],"thoughtsTokenCount": 69},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Ro4afOuPI7onsEPx7SYoA8"}
+    data: {"candidates": [{"content": {"parts": [{"text": "**Reviewing Previous Actions**\n\nI'm currently trying to recall the results of my last tool call, a crucial step based on the user's latest query. I'm digging into my recent history to pinpoint the output of \"Testing tool call.\" The user's prompt directly suggests a need for this previous result, so I'm focusing my search there.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 160,"totalTokenCount": 231,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 160}],"thoughtsTokenCount": 71},"modelVersion": "gemini-2.5-flash-lite","responseId": "jxA9aYjJMdHi7M8PwKWxsAc"}
 
-    data: {"candidates": [{"content": {"parts": [{"text": "**Accessing Key Information**\n\nI'm zeroing in on extracting the core data from the previous tool call's output. Specifically, I'm parsing the response to `print(default_api.run_me(bar = \"foo\"))`, which yielded `{\"run_me_response\": {\"content\": \"The secret code is: 4 2\"}}`. I now realize the \"content\" field is the vital piece; it holds the user's requested \"secret code: 4 2\".\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 134,"totalTokenCount": 236,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 134}],"thoughtsTokenCount": 102},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Ro4afOuPI7onsEPx7SYoA8"}
+    data: {"candidates": [{"content": {"parts": [{"text": "**Accessing Past Data**\n\nI'm now fully immersed in retrieving the necessary information. It's imperative that I access and present the details from the most recent tool execution. Specifically, I'm pulling the results stemming from the \"Testing tool call\". My memory indicates I ran a `print(default_api.run_me(bar = \"foo\"))` and the output returned was `{\"run_me_response\": {\"content\": \"The secret code is: 42\"}}`. My response will be streamlined and directly address the user's needs.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 160,"totalTokenCount": 368,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 160}],"thoughtsTokenCount": 208},"modelVersion": "gemini-2.5-flash-lite","responseId": "jxA9aYjJMdHi7M8PwKWxsAc"}
 
-    data: {"candidates": [{"content": {"parts": [{"text": "The result of the previous tool call was: \"The secret code is: 42\"."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 134,"candidatesTokenCount": 17,"totalTokenCount": 253,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 134}],"thoughtsTokenCount": 102},"modelVersion": "gemini-2.5-flash-lite","responseId": "7Ro4afOuPI7onsEPx7SYoA8"}
+    data: {"candidates": [{"content": {"parts": [{"text": "The previous tool call returned: `{'run_me_response': {'content': 'The secret code is: 42'}}`"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 160,"candidatesTokenCount": 26,"totalTokenCount": 394,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 160}],"thoughtsTokenCount": 208},"modelVersion": "gemini-2.5-flash-lite","responseId": "jxA9aYjJMdHi7M8PwKWxsAc"}

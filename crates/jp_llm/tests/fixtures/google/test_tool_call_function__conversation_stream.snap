@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:51.106841",
+    "timestamp": "2025-12-13 07:06:54.437034",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -135,6 +135,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "This is a successful tool call. The `run_me` function was called with the parameter `bar` set to the value `\"foo\"`. The tool returned a JSON object with a key `run_me_response` and a nested object containing the key `content` with the value `\"working!\"`. This indicates the tool executed as expected and returned the expected output."
+    "message": "The tool call was successful. The tool `run_me` was called with the argument `bar` set to `\"foo\"`. The tool returned a JSON object with the key `run_me_response` and a nested object containing the key `content` with the value `\"working!\"`."
   }
 ]

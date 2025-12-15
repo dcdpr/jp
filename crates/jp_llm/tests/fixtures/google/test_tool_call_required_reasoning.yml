@@ -83,7 +83,7 @@ then:
   header:
     - name: content-type
       value: text/event-stream
-  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"run_me\",\"args\": {\"bar\": \"foo\"}}}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0,\"finishMessage\": \"Model generated function call(s).\"}],\"usageMetadata\": {\"promptTokenCount\": 59,\"candidatesTokenCount\": 15,\"totalTokenCount\": 74,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 59}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"_Bo4aejgE52cvdIPsv_zoQY\"}"
+  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"run_me\",\"args\": {\"bar\": \"foo\"}}}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0,\"finishMessage\": \"Model generated function call(s).\"}],\"usageMetadata\": {\"promptTokenCount\": 59,\"candidatesTokenCount\": 15,\"totalTokenCount\": 74,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 59}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"kBA9aZrMCK_skdUPrL2IuAc\"}"
 ---
 when:
   path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
@@ -91,8 +91,6 @@ when:
   query_param:
     - name: alt
       value: sse
-    - name: key
-      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
   json_body_str: >-
     {
       "contents": [
@@ -153,4 +151,9 @@ then:
   header:
     - name: content-type
       value: text/event-stream
-  body: "data: {\"candidates\": [{\"content\": {\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 35,\"totalTokenCount\": 35,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 35}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"_Bo4aZCSJ5K5xN8P2OG56AY\"}"
+  body: |-
+    data: {"candidates": [{"content": {"parts": [{"text": "The tool `"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 3,"totalTokenCount": 38,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "kBA9abnCGZPk7M8PmqGm0Qc"}
+
+    data: {"candidates": [{"content": {"parts": [{"text": "run_me` was called with the argument `bar='foo'`. The tool"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 20,"totalTokenCount": 55,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "kBA9abnCGZPk7M8PmqGm0Qc"}
+
+    data: {"candidates": [{"content": {"parts": [{"text": " returned a response indicating that it is \"working!\"."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 30,"totalTokenCount": 65,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "kBA9abnCGZPk7M8PmqGm0Qc"}

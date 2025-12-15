@@ -84,8 +84,8 @@ then:
     - name: content-type
       value: text/event-stream
   body: |-
-    data: {"candidates": [{"content": {"parts": [{"text": "I need"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 2,"totalTokenCount": 61,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "9ho4afKNEcjwnsEPwIO2wAs"}
+    data: {"candidates": [{"content": {"parts": [{"text": "I can help"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 3,"totalTokenCount": 62,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9adzwOcOAkdUP__mP6Ac"}
 
-    data: {"candidates": [{"content": {"parts": [{"text": " some more information to use the `run_me` tool. Could you please"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 18,"totalTokenCount": 77,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "9ho4afKNEcjwnsEPwIO2wAs"}
+    data: {"candidates": [{"content": {"parts": [{"text": " with that. What is the value of `bar` and `foo`?"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 19,"totalTokenCount": 78,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9adzwOcOAkdUP__mP6Ac"}
 
-    data: {"candidates": [{"content": {"parts": [{"text": " specify the value for the `bar` argument? It can either be the string 'foo' or a list of strings."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 43,"totalTokenCount": 102,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "9ho4afKNEcjwnsEPwIO2wAs"}
+    data: {"candidates": [{"content": {"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 19,"totalTokenCount": 78,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9adzwOcOAkdUP__mP6Ac"}

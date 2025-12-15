@@ -1,0 +1,46 @@
+when:
+  path: "/v1beta/models/gemini-3-pro-preview:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": true,
+          "thinkingBudget": 12800,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |-
+    data: {"candidates": [{"content": {"parts": [{"text": "**Reviewing Test Prompt**\n\nI've successfully received and interpreted the input \"Test message.\" My process is currently focused on determining the best response. I've identified the intent as a connectivity check and am now solidifying the optimal acknowledgment and confirmation strategy.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 3,"totalTokenCount": 3,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}]},"modelVersion": "gemini-3-pro-preview","responseId": "Yhc9ae36McSjxN8Phtus6As"}
+
+    data: {"candidates": [{"content": {"parts": [{"text": "**Choosing Response Strategy**\n\nI've examined several response options. \"Received\" feels too terse, while \"I hear you...\" is a bit too casual for this scenario. I'm leaning toward a blend: a concise acknowledgement followed by an offer of assistance. The current draft, \"Message received! How can I help you today?\" feels almost there. A final touch will be to include a phrase to reinforce that the initial check was good.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 3,"totalTokenCount": 3,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}]},"modelVersion": "gemini-3-pro-preview","responseId": "Yhc9ae36McSjxN8Phtus6As"}
+
+    data: {"candidates": [{"content": {"parts": [{"text": "Message received. I am working correctly! How can I help you today?"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 3,"candidatesTokenCount": 15,"totalTokenCount": 214,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}],"thoughtsTokenCount": 196},"modelVersion": "gemini-3-pro-preview","responseId": "Yhc9ae36McSjxN8Phtus6As"}
+
+    data: {"candidates": [{"content": {"parts": [{"text": "","thoughtSignature": "EqIHCp8HAXLI2nyfhAyYYeqBhjxnWFe7u0pxn++4I1JO7VRk0UDGpYFGz/kXTWjTkGUoe1JeI3ouMprGxupXudEYf9kUC3RB4ei4ieDEa9MsNDimKrkaFQLLXLxBUIf1n2n9+3W0HtZTBrfOH7tnCW6nW/lvXoexpAR8xziz3ta8x618Ll9lruGkxrVy6j+GywGLV5BueVywDaqvzQth4/zjhmROFavdCiiu6Yr3/sYlzbx2sG9vY2Yk6N40o7iDbbKx6WxQDzlRt8XAeM9mkMPw49iZ0GU6dVNef/ciEdClf2Yz+d561QwNegJoamibr3pGrW3zQMlD5cg50fhlOKO6MPJXnMXw9G9H/gDdLbPjDDDxIsHGhwL1LBOfdOJdASn7ptxpZsEjtn3/FMYZyUiQsspxAf0SXr77w75BvBKJdBgnjD0MSHdD73eKXSZU07ADWruJIjBH837K1UqhPV9+tXV0PcmLhFc/nW3FziMUTgGHTC0ik5/bjDhShX3PVw8t40aNJFfgDk70rVdpjQMEpbdTCuf8Ydj/GHKTKhIJ3TAyAk6bzHIV+zAisky7jcVo2kBL9mUSG7rr+5yZUfmYCkmzmPLRntIcJgGWrOoaWjvcKiCFt42Ppxyr/Doz9ezsfbqILVAciTEjGCmAjdW+rY/GBy0UszDws0Yo63djl7QHnCQ6Ez2vNAB8qgQRI4BRgR0fucKoSJDMJGXZlALbXHwds6eTE+k81oV2QLuuJ69/rJNkjMYISrE9iKT2NeQcxXY219UG4AlRIjXjv3DUr6MVzme5mPMGpyD6YGS4VyLUxMHfFZ1wKbqOauuqRzqVcs1tjkllrBieQVmkF0+IZSOWKhhtv9LBwcC7PNScR50C1qyD9zC5N8IP779Cbtred/AsCEr9sWs1Dq3XLdTS0pZSAhXq77z2CTKOqy6woYjHSW4f7O6+Lah0uHHViXN7ptgL8PxXcDTGLAV3lOMx1M0HfxtJMdyxVblv3q8fTjbpPa6X2Py83OoaGCq5pb2odD3CCnREiEeL3K3aCh35lWya5pYPVFTKg+CzcyxrFyJqAip/gwVW0X0ezPd/wa/d2r84/lUB1ufKll5WoFxJttL0R9AotrOW4jD90yYELyQ8q2w1qTWQe+C8q6bU7xyRZAMKo0NmUd3MLTFBDTp3zClq69VkfD+8cS0untBxSmiWvMjhVFTRZl/yuAAuOD0+X5+SFf5OgUKT6YjN105316vd"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 3,"candidatesTokenCount": 15,"totalTokenCount": 214,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}],"thoughtsTokenCount": 196},"modelVersion": "gemini-3-pro-preview","responseId": "Yhc9ae36McSjxN8Phtus6As"}

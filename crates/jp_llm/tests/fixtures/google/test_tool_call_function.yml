@@ -85,7 +85,7 @@ then:
   header:
     - name: content-type
       value: text/event-stream
-  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"run_me\",\"args\": {\"bar\": \"foo\"}}}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0,\"finishMessage\": \"Model generated function call(s).\"}],\"usageMetadata\": {\"promptTokenCount\": 59,\"candidatesTokenCount\": 15,\"totalTokenCount\": 74,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 59}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"7ho4aemDD_r7nsEPoKrY-QE\"}"
+  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"run_me\",\"args\": {\"bar\": \"foo\"}}}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0,\"finishMessage\": \"Model generated function call(s).\"}],\"usageMetadata\": {\"promptTokenCount\": 59,\"candidatesTokenCount\": 15,\"totalTokenCount\": 74,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 59}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"jhA9abbXAeiL7M8P3YDRgQc\"}"
 ---
 when:
   path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
@@ -93,8 +93,6 @@ when:
   query_param:
     - name: alt
       value: sse
-    - name: key
-      value: AIzaSyC74N0NUrekEdDC7FSeijNDYGXYpZbuSuE
   json_body_str: >-
     {
       "contents": [
@@ -156,10 +154,8 @@ then:
     - name: content-type
       value: text/event-stream
   body: |-
-    data: {"candidates": [{"content": {"parts": [{"text": "This is a successful"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 4,"totalTokenCount": 39,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "7ho4afKzJOPpnsEP7oKL-AE"}
+    data: {"candidates": [{"content": {"parts": [{"text": "The tool call"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 3,"totalTokenCount": 38,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jhA9aYvPEtvinsEP1bbOsAc"}
 
-    data: {"candidates": [{"content": {"parts": [{"text": " tool call. The `run_me` function was called with the parameter `bar`"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 22,"totalTokenCount": 57,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "7ho4afKzJOPpnsEP7oKL-AE"}
+    data: {"candidates": [{"content": {"parts": [{"text": " was successful. The tool `run_me` was called with the argument `bar"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 20,"totalTokenCount": 55,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jhA9aYvPEtvinsEP1bbOsAc"}
 
-    data: {"candidates": [{"content": {"parts": [{"text": " set to the value `\"foo\"`. The tool returned a JSON object with a key `run_me_response` and a nested object containing the key `content` with the value `\"working!\"`. This indicates the tool executed as expected and returned"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 72,"totalTokenCount": 107,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "7ho4afKzJOPpnsEP7oKL-AE"}
-
-    data: {"candidates": [{"content": {"parts": [{"text": " the expected output."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 76,"totalTokenCount": 111,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "7ho4afKzJOPpnsEP7oKL-AE"}
+    data: {"candidates": [{"content": {"parts": [{"text": "` set to `\"foo\"`. The tool returned a JSON object with the key `run_me_response` and a nested object containing the key `content` with the value `\"working!\"`."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 60,"totalTokenCount": 95,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jhA9aYvPEtvinsEP1bbOsAc"}

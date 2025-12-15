@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I can help with that. What is the value of `bar` and `foo`?",
+                        message: "I can help you test the tool `run_me` but I need to know the values for the arguments. The `bar` argument is required and can be either 'foo' or a list of strings. The `foo` argument is optional and defaults to 'foo'.",
                     },
                 ),
                 metadata: {},

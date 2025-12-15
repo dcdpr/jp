@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:49.827286",
+    "timestamp": "2025-12-13 07:06:54.204227",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -119,6 +119,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Could you please provide the arguments for this tool? The following arguments are available:\n* `bar`: This argument can be either a string 'foo' or a list of strings.\n* `foo`: This argument is an optional string that defaults to 'foo'."
+    "message": "I need more information to test the tool call. Can you please specify the arguments for the `run_me` function? The `bar` argument is required and can be either 'foo' or a list of strings. The `foo` argument is optional and defaults to 'foo'."
   }
 ]

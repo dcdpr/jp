@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:06:56.127692",
+    "timestamp": "2025-12-13 07:36:04.222426",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -113,10 +113,13 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:06:53.711708",
+    "timestamp": "2025-12-13 07:35:59.989094",
     "delta": {
       "assistant": {
         "model": {
+          "id": {
+            "name": "gemini-3-pro-preview"
+          },
           "parameters": {
             "reasoning": {
               "effort": "low",
@@ -135,11 +138,14 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Acknowledge and Prepare**\n\nI've received the test message. I understand this is likely a functionality check. I'm ready to proceed and offer assistance. How can I help?\n\n\n**Processing Initial Input**\n\nI've analyzed the \"Test message\" and believe it's a systems check. My response aims to be clear, acknowledging the test, while offering immediate assistance. I selected \"Test message received! I'm here and ready. What can I help you with today?\" as my initial response, prioritizing clarity and a prompt for user interaction.\n\n\n"
+    "reasoning": "**Reviewing Test Prompt**\n\nI've successfully received and interpreted the input \"Test message.\" My process is currently focused on determining the best response. I've identified the intent as a connectivity check and am now solidifying the optimal acknowledgment and confirmation strategy.\n\n\n**Choosing Response Strategy**\n\nI've examined several response options. \"Received\" feels too terse, while \"I hear you...\" is a bit too casual for this scenario. I'm leaning toward a blend: a concise acknowledgement followed by an offer of assistance. The current draft, \"Message received! How can I help you today?\" feels almost there. A final touch will be to include a phrase to reinforce that the initial check was good.\n\n\n"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Test message received! I'm here and ready. What can I help you with today?"
+    "message": "Message received. I am working correctly! How can I help you today?",
+    "metadata": {
+      "google_thought_signature": "RXFJSENwOEhBWExJMm55ZmhBeVlZZXFCaGp4bldGZTd1MHB4bisrNEkxSk83VlJrMFVER3BZRkd6L2tYVFdqVGtHVW9lMUplSTNvdU1wckd4dXBYdWRFWWY5a1VDM1JCNGVpNGllREVhOU1zTkRpbUtya2FGUUxMWEx4QlVJZjFuMm45KzNXMEh0WlRCcmZPSDd0bkNXNm5XL2x2WG9leHBBUjh4eml6M3RhOHg2MThMbDlscnVHa3hyVnk2aitHeXdHTFY1QnVlVnl3RGFxdnpRdGg0L3pqaG1ST0ZhdmRDaWl1NllyMy9zWWx6Yngyc0c5dlkyWWs2TjQwbzdpRGJiS3g2V3hRRHpsUnQ4WEFlTTlta01QdzQ5aVowR1U2ZFZOZWYvY2lFZENsZjJZeitkNTYxUXdOZWdKb2FtaWJyM3BHclczelFNbEQ1Y2c1MGZobE9LTzZNUEpYbk1YdzlHOUgvZ0RkTGJQakRERHhJc0hHaHdMMUxCT2ZkT0pkQVNuN3B0eHBac0VqdG4zL0ZNWVp5VWlRc3NweEFmMFNYcjc3dzc1QnZCS0pkQmduakQwTVNIZEQ3M2VLWFNaVTA3QURXcnVKSWpCSDgzN0sxVXFoUFY5K3RYVjBQY21MaEZjL25XM0Z6aU1VVGdHSFRDMGlrNS9iakRoU2hYM1BWdzh0NDBhTkpGZmdEazcwclZkcGpRTUVwYmRUQ3VmOFlkai9HSEtUS2hJSjNUQXlBazZiekhJVit6QWlza3k3amNWbzJrQkw5bVVTRzdycis1eVpVZm1ZQ2ttem1QTFJudEljSmdHV3JPb2FXanZjS2lDRnQ0MlBweHlyL0RvejllenNmYnFJTFZBY2lURWpHQ21BamRXK3JZL0dCeTBVc3pEd3MwWW82M2RqbDdRSG5DUTZFejJ2TkFCOHFnUVJJNEJSZ1IwZnVjS29TSkRNSkdYWmxBTGJYSHdkczZlVEUrazgxb1YyUUx1dUo2OS9ySk5rak1ZSVNyRTlpS1QyTmVRY3hYWTIxOVVHNEFsUklqWGp2M0RVcjZNVnptZTVtUE1HcHlENllHUzRWeUxVeE1IZkZaMXdLYnFPYXV1cVJ6cVZjczF0amtsbHJCaWVRVm1rRjArSVpTT1dLaGh0djlMQndjQzdQTlNjUjUwQzFxeUQ5ekM1TjhJUDc3OUNidHJlZC9Bc0NFcjlzV3MxRHEzWExkVFMwcFpTQWhYcTc3ejJDVEtPcXk2d29ZakhTVzRmN082K0xhaDB1SEhWaVhON3B0Z0w4UHhYY0RUR0xBVjNsT014MU0wSGZ4dEpNZHl4VmJsdjNxOGZUamJwUGE2WDJQeTgzT29hR0NxNXBiMm9kRDNDQ25SRWlFZUwzSzNhQ2gzNWxXeWE1cFlQVkZUS2crQ3pjeXhyRnlKcUFpcC9nd1ZXMFgwZXpQZC93YS9kMnI4NC9sVUIxdWZLbGw1V29GeEp0dEwwUjlBb3RyT1c0akQ5MHlZRUx5UThxMncxcVRXUWUrQzhxNmJVN3h5UlpBTUtvME5tVWQzTUxURkJEVHAzekNscTY5VmtmRCs4Y1MwdW50QnhTbWlXdk1qaFZGVFJabC95dUFBdU9EMCtYNStTRmY1T2dVS1Q2WWpOMTA1MzE2dmQ="
+    }
   }
 ]
