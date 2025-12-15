@@ -447,6 +447,7 @@ fn build_request(query: ChatQuery, model: &ModelDetails) -> Result<request::Chat
         reasoning: reasoning.map(|r| request::Reasoning {
             exclude: r.exclude,
             effort: match r.effort.abs_to_rel(model.max_output_tokens) {
+                ReasoningEffort::XHigh => request::ReasoningEffort::XHigh,
                 ReasoningEffort::High => request::ReasoningEffort::High,
                 ReasoningEffort::Auto | ReasoningEffort::Medium => request::ReasoningEffort::Medium,
                 ReasoningEffort::Low => request::ReasoningEffort::Low,

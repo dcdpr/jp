@@ -287,6 +287,10 @@ pub enum ReasoningEffort {
     /// support auto-mode, it will fall back to `Medium`.
     Auto,
 
+    /// Allocates an extremely large portion of tokens for reasoning (approximately 90% of
+    /// `max_tokens`)
+    XHigh,
+
     /// Allocates a large portion of tokens for reasoning (approximately 80% of
     /// `max_tokens`)
     High,
@@ -310,6 +314,7 @@ impl ReasoningEffort {
     #[must_use]
     pub const fn to_tokens(self, max_tokens: u32) -> u32 {
         match self {
+            Self::XHigh => max_tokens.saturating_mul(90) / 100,
             Self::High => max_tokens.saturating_mul(80) / 100,
             Self::Auto | Self::Medium => max_tokens.saturating_mul(50) / 100,
             Self::Low => max_tokens.saturating_mul(20) / 100,

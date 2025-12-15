@@ -298,7 +298,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 model
                     .base_model_id
                     .starts_with("gemini-3")
-                    .then_some(ReasoningDetails::leveled(true, false, true))
+                    .then_some(ReasoningDetails::leveled(true, false, true, false))
             }),
         knowledge_cutoff: None,
         deprecated: None,
