@@ -35,4 +35,5 @@ pub mod thread;
 
 pub use conversation::{Conversation, ConversationId, ConversationsMetadata};
 pub use error::Error;
-pub use stream::ConversationStream;
+pub use event::{ConversationEvent, EventKind};
+pub use stream::{ConversationStream, StreamError};

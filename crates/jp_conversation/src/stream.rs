@@ -1,7 +1,8 @@
 //! See [`ConversationStream`].
 
-use jp_config::{PartialAppConfig, PartialConfig as _};
+use jp_config::{AppConfig, Config as _, PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize};
+use time::UtcDateTime;
 use tracing::error;
 
 use crate::event::{
@@ -23,21 +24,88 @@ pub enum InternalEvent {
     ///
     /// Any non-config events before the first `ConfigDelta` event are
     /// considered to have the default configuration.
-    ConfigDelta(Box<PartialAppConfig>),
-
+    ConfigDelta(ConfigDelta),
+    // ConfigDelta(Box<PartialAppConfig>),
     /// An event in the conversation stream.
     #[serde(untagged)]
-    Event(ConversationEvent),
+    Event(Box<ConversationEvent>),
 }
 
 impl InternalEvent {
+    /// Create a new [`InternalEvent::ConfigDelta`].
+    pub fn config_delta(delta: impl Into<ConfigDelta>) -> Self {
+        Self::ConfigDelta(delta.into())
+    }
+
     /// Convert an internal event into an [`ConversationEvent`]. Returns `None`
     /// if the event is a config delta.
     #[must_use]
     pub fn into_event(self) -> Option<ConversationEvent> {
         match self {
+            Self::Event(event) => Some(*event),
+            Self::ConfigDelta(_) => None,
+        }
+    }
+
+    /// Get a reference to [`InternalEvent::Event`], if applicable.
+    #[must_use]
+    pub fn as_event(&self) -> Option<&ConversationEvent> {
+        match self {
             Self::Event(event) => Some(event),
             Self::ConfigDelta(_) => None,
+        }
+    }
+}
+
+/// A configuration delta.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConfigDelta {
+    /// The timestamp of the event.
+    pub timestamp: UtcDateTime,
+
+    /// The configuration delta.
+    pub delta: Box<PartialAppConfig>,
+}
+
+impl ConfigDelta {
+    /// Get the [`PartialAppConfig`] delta.
+    #[must_use]
+    pub fn into_inner(self) -> Box<PartialAppConfig> {
+        self.delta
+    }
+}
+
+impl std::ops::Deref for ConfigDelta {
+    type Target = PartialAppConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.delta
+    }
+}
+
+impl std::ops::DerefMut for ConfigDelta {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.delta
+    }
+}
+
+impl AsRef<PartialAppConfig> for ConfigDelta {
+    fn as_ref(&self) -> &PartialAppConfig {
+        &self.delta
+    }
+}
+
+impl From<ConfigDelta> for PartialAppConfig {
+    fn from(delta: ConfigDelta) -> Self {
+        *delta.delta
+    }
+}
+
+impl From<PartialAppConfig> for ConfigDelta {
+    fn from(config: PartialAppConfig) -> Self {
+        Self {
+            timestamp: UtcDateTime::now(),
+            delta: Box::new(config),
         }
     }
 }
@@ -53,22 +121,16 @@ pub struct ConversationStream {
     ///
     /// This is stored separately from the events in the stream, to guarantee a
     /// stream always has a base configuration.
-    base_config: PartialAppConfig,
+    base_config: AppConfig,
 
     /// The events in the stream.
     events: Vec<InternalEvent>,
 }
 
-impl Default for ConversationStream {
-    fn default() -> Self {
-        Self::new(PartialAppConfig::empty())
-    }
-}
-
 impl ConversationStream {
     /// Create a new [`ConversationStream`] with the given base configuration.
     #[must_use]
-    pub const fn new(base_config: PartialAppConfig) -> Self {
+    pub const fn new(base_config: AppConfig) -> Self {
         Self {
             base_config,
             events: Vec::new(),
@@ -77,7 +139,7 @@ impl ConversationStream {
 
     /// Set the base configuration for the stream.
     #[must_use]
-    pub fn with_base_config(mut self, base_config: PartialAppConfig) -> Self {
+    pub fn with_base_config(mut self, base_config: AppConfig) -> Self {
         self.base_config = base_config;
         self
     }
@@ -112,22 +174,43 @@ impl ConversationStream {
     /// [`ConversationStream::last`], which returns a
     /// [`ConversationEventWithConfig`]. containing the `config` field for that
     /// event.
-    #[must_use]
-    pub fn config(&self) -> PartialAppConfig {
-        let mut config = self.base_config.clone();
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the merged configuration is invalid.
+    pub fn config(&self) -> Result<AppConfig, StreamError> {
+        let mut partial = self.base_config.to_partial();
         let iter = self.events.iter().filter_map(|event| match event {
-            InternalEvent::ConfigDelta(delta) => Some(*delta.clone()),
+            InternalEvent::ConfigDelta(delta) => Some(delta.clone()),
             InternalEvent::Event(_) => None,
         });
 
         for delta in iter {
-            if let Err(error) = config.merge(&(), delta) {
-                error!(%error, "Failed to merge config delta.");
-            }
+            partial.merge(&(), delta.into())?;
         }
 
-        config
+        AppConfig::from_partial(partial).map_err(Into::into)
     }
+
+    // /// Similar to [`Self::config`], but returns the [`PartialConfig`] variant
+    // /// instead (with the same options applied).
+    // ///
+    // /// [`PartialConfig`]: jp_config::PartialConfig
+    // pub fn partial_config(&self) -> PartialAppConfig {
+    //     let mut config = self.base_config.to_partial();
+    //     let iter = self.events.iter().filter_map(|event| match event {
+    //         InternalEvent::ConfigDelta(delta) => Some(*delta.clone()),
+    //         InternalEvent::Event(_) => None,
+    //     });
+    //
+    //     for delta in iter {
+    //         if let Err(error) = config.merge(&(), delta) {
+    //             error!(%error, "Failed to merge config delta.");
+    //         }
+    //     }
+    //
+    //     config
+    // }
 
     /// Removes all events from the end of the stream, until a [`ChatRequest`]
     /// is found, returning that request.
@@ -146,9 +229,22 @@ impl ConversationStream {
     }
 
     /// Add a config delta to the stream.
+    ///
+    /// This is a no-op if the delta is empty.
     pub fn add_config_delta(&mut self, delta: impl Into<PartialAppConfig>) {
-        self.events
-            .push(InternalEvent::ConfigDelta(Box::new(delta.into())));
+        let delta = match self.config() {
+            Ok(config) => config.to_partial().delta(delta.into()),
+            Err(error) => {
+                error!(%error, "Unable to get valid config from conversation stream.");
+                return;
+            }
+        };
+
+        if delta.is_empty() {
+            return;
+        }
+
+        self.events.push(InternalEvent::ConfigDelta(delta.into()));
     }
 
     /// Add a config delta to the stream.
@@ -167,7 +263,7 @@ impl ConversationStream {
 
         let last_config = self
             .last()
-            .map_or_else(|| self.base_config.clone(), |v| v.config);
+            .map_or_else(|| self.base_config.to_partial(), |v| v.config);
         let config_delta = last_config.delta(config);
 
         if !config_delta.is_empty() {
@@ -179,7 +275,8 @@ impl ConversationStream {
 
     /// Push a [`ConversationEvent`] onto the stream.
     pub fn push(&mut self, event: impl Into<ConversationEvent>) {
-        self.events.push(InternalEvent::Event(event.into()));
+        self.events
+            .push(InternalEvent::Event(Box::new(event.into())));
     }
 
     /// Push a [`ConversationEvent`] of type [`EventKind::ChatRequest`] onto the
@@ -236,6 +333,18 @@ impl ConversationStream {
     pub fn with_tool_call_response(mut self, event: impl Into<ToolCallResponse>) -> Self {
         self.add_tool_call_response(event);
         self
+    }
+
+    /// Find a [`ToolCallResponse`] by ID.
+    #[must_use]
+    pub fn find_tool_call_response(&self, id: &str) -> Option<&ToolCallResponse> {
+        self.events
+            .iter()
+            .filter_map(InternalEvent::as_event)
+            .find_map(|event| match &event.kind {
+                EventKind::ToolCallResponse(response) if response.id == id => Some(response),
+                _ => None,
+            })
     }
 
     /// Push a [`ConversationEvent`] of type [`EventKind::InquiryRequest`] onto
@@ -302,7 +411,7 @@ impl ConversationStream {
                 // If the last event is a `ConversationEvent`, we handle it.
                 Some(InternalEvent::Event(_)) => self
                     .last()
-                    .map_or_else(|| self.base_config.clone(), |v| v.config),
+                    .map_or_else(|| self.base_config.to_partial(), |v| v.config),
 
                 // Any other event we remove, and continue.
                 _ => {
@@ -318,6 +427,11 @@ impl ConversationStream {
         }
     }
 
+    /// Clears the stream of any events, leaving the base configuration intact.
+    pub fn clear(&mut self) {
+        self.events.clear();
+    }
+
     /// Returns an iterator over the events in the stream, wrapped in a
     /// [`ConversationEventWithConfigRef`], containing the
     /// [`PartialAppConfig`] at the time the event was added.
@@ -325,7 +439,7 @@ impl ConversationStream {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = ConversationEventWithConfigRef<'_>> {
         Iter {
             stream: self,
-            front_config: self.base_config.clone(),
+            front_config: self.base_config.to_partial(),
             front: 0,
             back: self.events.len(),
         }
@@ -336,7 +450,7 @@ impl ConversationStream {
     pub fn iter_mut(&mut self) -> impl Iterator<Item = ConversationEventWithConfigMut<'_>> {
         IterMut {
             iter: self.events.iter_mut(),
-            front_config: self.base_config.clone(),
+            front_config: self.base_config.to_partial(),
         }
     }
 }
@@ -349,6 +463,14 @@ impl Extend<ConversationEventWithConfig> for ConversationStream {
     }
 }
 
+impl Extend<ConversationEvent> for ConversationStream {
+    fn extend<T: IntoIterator<Item = ConversationEvent>>(&mut self, iter: T) {
+        for v in iter {
+            self.push(v);
+        }
+    }
+}
+
 impl IntoIterator for ConversationStream {
     type Item = ConversationEventWithConfig;
 
@@ -356,7 +478,7 @@ impl IntoIterator for ConversationStream {
 
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
-            current_config: self.base_config.clone(),
+            current_config: self.base_config.to_partial(),
             inner_iter: self.events.into_iter(),
         }
     }
@@ -380,13 +502,13 @@ impl Iterator for IntoIter {
 
             match event {
                 InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = self.current_config.merge(&(), *delta) {
+                    if let Err(error) = self.current_config.merge(&(), delta.into()) {
                         error!(%error, "Failed to merge config delta.");
                     }
                 }
                 InternalEvent::Event(event) => {
                     return Some(ConversationEventWithConfig {
-                        event,
+                        event: *event,
                         config: self.current_config.clone(),
                     });
                 }
@@ -415,13 +537,16 @@ impl DoubleEndedIterator for IntoIter {
                     // config.
                     for internal_event in self.inner_iter.as_slice() {
                         if let InternalEvent::ConfigDelta(delta) = internal_event
-                            && let Err(error) = config.merge(&(), *delta.clone())
+                            && let Err(error) = config.merge(&(), delta.clone().into())
                         {
                             error!(%error, "Failed to merge config delta.");
                         }
                     }
 
-                    return Some(ConversationEventWithConfig { event, config });
+                    return Some(ConversationEventWithConfig {
+                        event: *event,
+                        config,
+                    });
                 }
             }
         }
@@ -453,7 +578,7 @@ impl<'a> Iterator for Iter<'a> {
 
             match event {
                 InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = self.front_config.merge(&(), *delta.clone()) {
+                    if let Err(error) = self.front_config.merge(&(), delta.clone().into()) {
                         error!(%error, "Failed to merge config delta.");
                     }
                 }
@@ -480,10 +605,10 @@ impl DoubleEndedIterator for Iter<'_> {
                 continue;
             };
 
-            let mut config = self.stream.base_config.clone();
+            let mut config = self.stream.base_config.to_partial();
             for internal_event in &self.stream.events[..self.back] {
                 if let InternalEvent::ConfigDelta(delta) = internal_event
-                    && let Err(error) = config.merge(&(), *delta.clone())
+                    && let Err(error) = config.merge(&(), delta.clone().into())
                 {
                     error!(%error, "Failed to merge config delta.");
                 }
@@ -512,7 +637,7 @@ impl<'a> Iterator for IterMut<'a> {
         for event in self.iter.by_ref() {
             match event {
                 InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = self.front_config.merge(&(), *delta.clone()) {
+                    if let Err(error) = self.front_config.merge(&(), delta.clone().into()) {
                         error!(%error, "Failed to merge config delta.");
                     }
                 }
@@ -555,7 +680,17 @@ pub struct ConversationEventWithConfig {
     /// The event.
     pub event: ConversationEvent,
 
-    /// The configuration.
+    /// The configuration at the time the event was added.
+    ///
+    /// It should be noted that this is not necessarily the same as the
+    /// current active configuration of the application, even if this is the
+    /// latest event in the stream. For one, the event may have been added a
+    /// while ago, but more importantly, not all configuration changes are
+    /// automatically applied to a [`ConversationStream`]. For example, if a new
+    /// tool is added in the configuration, it will not become available in the
+    /// conversation stream until explicitly added using the CLI flag `--tool`
+    /// or `--cfg`, while *NEW* conversations *WILL* get the new tool by
+    /// default.
     pub config: PartialAppConfig,
 }
 
@@ -588,21 +723,19 @@ impl From<ConversationEventWithConfigRef<'_>> for ConversationEventWithConfig {
     }
 }
 
-impl FromIterator<ConversationEventWithConfig> for ConversationStream {
+impl FromIterator<ConversationEventWithConfig> for Result<ConversationStream, StreamError> {
     fn from_iter<T: IntoIterator<Item = ConversationEventWithConfig>>(iter: T) -> Self {
         let mut events = iter.into_iter();
-        let (base_config, first_event) = events.next().map_or_else(
-            || (PartialAppConfig::empty(), None),
-            |e| (e.config, Some(e.event)),
-        );
 
-        let mut stream = Self::new(base_config);
-        if let Some(event) = first_event {
-            stream.push(event);
-        }
+        let Some((config, first_event)) = events.next().map(|e| (e.config, e.event)) else {
+            return Err(StreamError::FromEmptyIterator);
+        };
 
+        let mut stream = ConversationStream::new(AppConfig::from_partial(config)?);
+        stream.push(first_event);
         stream.extend(events);
-        stream
+
+        Ok(stream)
     }
 }
 
@@ -636,6 +769,15 @@ impl std::ops::DerefMut for ConversationEventWithConfigMut<'_> {
     }
 }
 
+impl From<ConversationEvent> for ConversationEventWithConfig {
+    fn from(event: ConversationEvent) -> Self {
+        Self {
+            event,
+            config: PartialAppConfig::empty(),
+        }
+    }
+}
+
 impl Serialize for ConversationStream {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -643,9 +785,12 @@ impl Serialize for ConversationStream {
     {
         let mut stream: Vec<InternalEvent> = Vec::with_capacity(self.events.len() + 1);
 
-        stream.push(InternalEvent::ConfigDelta(Box::new(
-            self.base_config.clone(),
-        )));
+        // We store the base config as the first (delta) event in the stream.
+        stream.push(InternalEvent::ConfigDelta(
+            self.base_config.to_partial().into(),
+        ));
+
+        // Then we append all other events in the stream.
         stream.extend(self.events.iter().cloned());
         stream.serialize(serializer)
     }
@@ -665,7 +810,7 @@ impl<'de> Deserialize<'de> for ConversationStream {
 
         match events.remove(0) {
             InternalEvent::ConfigDelta(base_config) => Ok(Self {
-                base_config: *base_config,
+                base_config: AppConfig::from_partial(base_config.into()).map_err(Error::custom)?,
                 events,
             }),
             InternalEvent::Event(_) => Err(Error::custom(
@@ -675,8 +820,26 @@ impl<'de> Deserialize<'de> for ConversationStream {
     }
 }
 
+/// Error type for the [`ConversationStream`] type and its methods.
+#[derive(Debug, thiserror::Error)]
+pub enum StreamError {
+    /// A [`ConversationStream`] cannot be initialized from an empty iterator,
+    /// as it requires the first event to be a [`ConfigDelta`] containing a
+    /// valid configuration.
+    #[error("Cannot initialize conversation stream from empty iterator.")]
+    FromEmptyIterator,
+
+    /// An error occurred for the stream [`AppConfig`].
+    #[error(transparent)]
+    Config(#[from] jp_config::ConfigError),
+}
+
 #[cfg(test)]
 mod tests {
+    use jp_config::{
+        conversation::tool::RunMode,
+        model::id::{PartialModelIdConfig, ProviderId},
+    };
     use time::macros::datetime;
 
     use super::*;
@@ -685,9 +848,15 @@ mod tests {
     fn test_conversation_stream_serialization_roundtrip() {
         let mut base_config = PartialAppConfig::empty();
         base_config.conversation.title.generate.auto = Some(false);
+        base_config.conversation.tools.defaults.run = Some(RunMode::Ask);
+        base_config.assistant.model.id = PartialModelIdConfig {
+            provider: Some(ProviderId::Anthropic),
+            name: Some("test".parse().unwrap()),
+        }
+        .into();
 
         let mut stream = ConversationStream {
-            base_config,
+            base_config: AppConfig::from_partial(base_config).unwrap(),
             events: vec![],
         };
 
@@ -695,17 +864,17 @@ mod tests {
 
         stream
             .events
-            .push(InternalEvent::Event(ConversationEvent::new(
+            .push(InternalEvent::Event(Box::new(ConversationEvent::new(
                 ChatRequest::from("foo"),
                 datetime!(2020-01-01 0:00 utc),
-            )));
+            ))));
 
         stream
             .events
-            .push(InternalEvent::Event(ConversationEvent::new(
+            .push(InternalEvent::Event(Box::new(ConversationEvent::new(
                 ChatResponse::message("bar"),
                 datetime!(2020-01-02 0:00 utc),
-            )));
+            ))));
 
         insta::assert_json_snapshot!(&stream);
         let json = serde_json::to_string(&stream).unwrap();

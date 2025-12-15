@@ -31,6 +31,7 @@ futures = { workspace = true }
 gemini_client_rs = { workspace = true }
 indexmap = { workspace = true }
 indoc = { workspace = true }
+jsonschema = { workspace = true }
 minijinja = { workspace = true, features = [
     "builtins",
     "json",

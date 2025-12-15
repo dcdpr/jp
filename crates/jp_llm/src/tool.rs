@@ -3,8 +3,8 @@ use std::{path::Path, sync::Arc};
 use crossterm::style::Stylize as _;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{
-    OneOrManyTypes, ResultMode, RunMode, ToolConfigWithDefaults, ToolParameterConfig,
-    ToolParameterItemsConfig, ToolSource,
+    OneOrManyTypes, ResultMode, RunMode, ToolConfigWithDefaults, ToolParameterConfig, ToolSource,
+    item::ToolParameterItemConfig,
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_inquire::{InlineOption, InlineSelect};
@@ -183,7 +183,7 @@ impl ToolDefinition {
 
             let expression = if command.shell {
                 let cmd = std::iter::once(program.clone())
-                    .chain(command.args.iter().cloned())
+                    .chain(args.iter().cloned())
                     .collect::<Vec<_>>()
                     .join(" ");
 
@@ -701,8 +701,20 @@ async fn mcp_tool_definition(
             required,
             enumeration,
             items: opts.get("items").and_then(|v| v.as_object()).and_then(|v| {
-                Some(ToolParameterItemsConfig {
-                    kind: v.get("type")?.as_str()?.to_owned(),
+                Some(ToolParameterItemConfig {
+                    kind: match v.get("type")? {
+                        Value::String(v) => OneOrManyTypes::One(v.to_owned()),
+                        Value::Array(v) => OneOrManyTypes::Many(
+                            v.iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_owned)
+                                .collect(),
+                        ),
+                        _ => return None,
+                    },
+                    default: None,
+                    description: None,
+                    enumeration: vec![],
                 })
             }),
         });
