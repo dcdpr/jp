@@ -6,7 +6,6 @@
     "extends": [],
     "assistant": {
       "system_prompt": "You are a helpful assistant.",
-      "instructions": [],
       "tool_choice": "auto",
       "model": {
         "id": {
@@ -35,8 +34,7 @@
             }
           }
         }
-      },
-      "tools": {}
+      }
     },
     "style": {
       "code": {
@@ -75,7 +73,6 @@
     },
     "providers": {
       "llm": {
-        "aliases": {},
         "anthropic": {
           "api_key_env": "ANTHROPIC_API_KEY",
           "base_url": "https://api.anthropic.com",
@@ -105,8 +102,7 @@
           "app_name": "JP",
           "base_url": "https://openrouter.ai"
         }
-      },
-      "mcp": {}
+      }
     }
   },
   {

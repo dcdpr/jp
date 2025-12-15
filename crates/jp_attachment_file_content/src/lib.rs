@@ -258,6 +258,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[test_log::test]
     async fn test_file_add_include() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
 
@@ -285,6 +286,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[test_log::test]
     async fn test_file_add_exclude() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
         handler
@@ -301,6 +303,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[test_log::test]
     async fn test_file_add_switches_include_exclude() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
         let uri_include = Url::parse("file:/path/to/file.txt")?;
@@ -336,6 +339,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[test_log::test]
     async fn test_file_remove() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
         let uri1 = Url::parse("file:/path/to/file1.txt")?;
@@ -360,6 +364,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[test_log::test]
     async fn test_file_get() -> Result<(), Box<dyn Error + Send + Sync>> {
         let tmp = tempdir()?;
         let path = tmp.path().join("file.txt");
