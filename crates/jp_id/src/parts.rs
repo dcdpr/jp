@@ -84,6 +84,8 @@ impl FromStr for Parts {
 
 #[cfg(test)]
 mod tests {
+    use test_log::test;
+
     use super::*;
 
     #[test]

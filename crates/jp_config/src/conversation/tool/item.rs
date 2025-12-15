@@ -20,18 +20,16 @@ pub struct ToolParameterItemConfig {
     pub kind: OneOrManyTypes,
 
     /// The default value of the parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
 
-    /// Whether the parameter is required.
-    #[serde(default)]
-    pub required: bool,
-
     /// Description of the parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
     /// A list of possible values for the parameter.
     #[setting(rename = "enum")]
-    #[serde(default, rename = "enum")]
+    #[serde(default, rename = "enum", skip_serializing_if = "Vec::is_empty")]
     pub enumeration: Vec<Value>,
 }
 
@@ -40,7 +38,6 @@ impl PartialConfigDelta for PartialToolParameterItemConfig {
         Self {
             kind: self.kind.delta(next.kind),
             default: delta_opt(self.default.as_ref(), next.default),
-            required: delta_opt(self.required.as_ref(), next.required),
             description: delta_opt(self.description.as_ref(), next.description),
             enumeration: delta_opt(self.enumeration.as_ref(), next.enumeration),
         }
@@ -54,7 +51,6 @@ impl ToPartial for ToolParameterItemConfig {
         Self::Partial {
             kind: self.kind.to_partial(),
             default: partial_opts(self.default.as_ref(), defaults.default),
-            required: partial_opt(&self.required, defaults.required),
             description: partial_opts(self.description.as_ref(), defaults.description),
             enumeration: partial_opt(&self.enumeration, defaults.enumeration),
         }
@@ -66,7 +62,7 @@ impl From<ToolParameterItemConfig> for ToolParameterConfig {
         Self {
             kind: config.kind,
             default: config.default,
-            required: config.required,
+            required: false,
             description: config.description,
             enumeration: config.enumeration,
             items: None,
@@ -79,7 +75,6 @@ impl From<ToolParameterConfig> for ToolParameterItemConfig {
         Self {
             kind: config.kind,
             default: config.default,
-            required: config.required,
             description: config.description,
             enumeration: config.enumeration,
         }

@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// Typewriter style configuration.
-#[derive(Debug, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct TypewriterConfig {
     /// Delay between printing characters.

@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// Assistant-specific configuration.
-#[derive(Debug, Clone, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(default, rename_all = "snake_case", allow_unknown_fields)]
 pub struct ParametersConfig {
     /// Maximum number of tokens to generate.
@@ -137,7 +137,7 @@ mod strings {
 }
 
 /// Reasoning configuration.
-#[derive(Debug, Clone, Copy, Config)]
+#[derive(Debug, Clone, Copy, PartialEq, Config)]
 #[config(serde(untagged))]
 pub enum ReasoningConfig {
     /// Reasoning is disabled, regardless of the model's capabilities.

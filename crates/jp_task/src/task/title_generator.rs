@@ -22,7 +22,6 @@ use crate::Task;
 pub struct TitleGeneratorTask {
     pub conversation_id: ConversationId,
     pub model_id: ModelIdConfig,
-    pub parameters: ParametersConfig,
     pub providers: LlmProviderConfig,
     pub events: ConversationStream,
     pub title: Option<String>,
@@ -65,7 +64,6 @@ impl TitleGeneratorTask {
         Ok(Self {
             conversation_id,
             model_id,
-            parameters: model.parameters,
             providers: config.providers.llm.clone(),
             events,
             title: None,
@@ -78,8 +76,7 @@ impl TitleGeneratorTask {
         let provider = provider::get_provider(self.model_id.provider, &self.providers)?;
         let query = structured::titles::titles(1, self.events.clone(), &[])?;
         let titles: Vec<_> =
-            structured::completion(provider.as_ref(), &self.model_id, &self.parameters, query)
-                .await?;
+            structured::completion(provider.as_ref(), &self.model_id, query).await?;
 
         trace!(titles = ?titles, "Received conversation titles.");
         if let Some(title) = titles.into_iter().next() {

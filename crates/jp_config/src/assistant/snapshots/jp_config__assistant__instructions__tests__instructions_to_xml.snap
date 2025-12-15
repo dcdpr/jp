@@ -2,23 +2,24 @@
 source: crates/jp_config/src/assistant/instructions.rs
 expression: xml
 ---
-<instruction title="foo">
-  <description><![CDATA[bar]]></description>
+<instruction>
+  <title>foo</title>
+  <description>bar</description>
   <Items>
-    <item><![CDATA[foo]]></item>
-    <item><![CDATA[bar <test>bar</test>]]></item>
-    <item><![CDATA[baz]]]]><![CDATA[> baz]]></item>
+    <item>foo</item>
+    <item>bar &lt;test&gt;bar&lt;/test&gt;</item>
+    <item>baz]]&gt; baz</item>
   </Items>
   <examples>
-    <simple><![CDATA[foo]]></simple>
+    <simple>foo</simple>
     <detailed>
-      <good><![CDATA[bar]]></good>
-      <bad><![CDATA[baz]]></bad>
-      <reason><![CDATA[qux]]></reason>
+      <good>bar</good>
+      <bad>baz</bad>
+      <reason>qux</reason>
     </detailed>
     <detailed>
-      <good><![CDATA[quux]]></good>
-      <bad><![CDATA[quuz]]></bad>
+      <good>quux</good>
+      <bad>quuz</bad>
       <reason/>
     </detailed>
   </examples>

@@ -192,11 +192,11 @@ impl<'s> TryFrom<&'s str> for QueryConfigSection<'s> {
 mod tests {
     use indoc::indoc;
     use pretty_assertions::assert_eq;
+    use test_log::test;
 
     use super::*;
 
     #[test]
-    #[expect(clippy::too_many_lines)]
     fn test_query_config_section() {
         struct TestCase {
             input: &'static str,
@@ -400,7 +400,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::too_many_lines)]
     fn test_query_document() {
         struct TestCase {
             input: &'static str,

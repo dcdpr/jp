@@ -1,4 +1,6 @@
-use jp_config::AppConfig;
+use jp_config::{
+    AppConfig, PartialAppConfig, ToPartial as _, model::id::PartialModelIdOrAliasConfig,
+};
 use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{provider, structured};
 
@@ -40,7 +42,7 @@ impl Edit {
         }
 
         if let Some(title) = self.title {
-            let events = ctx.workspace.try_get_events(&id)?;
+            let events = ctx.workspace.try_get_events(&id)?.clone();
             let title = match title {
                 Some(title) => title,
                 None => generate_titles(&ctx.config(), events, vec![]).await?,
@@ -57,7 +59,7 @@ impl Edit {
 
 async fn generate_titles(
     config: &AppConfig,
-    events: &ConversationStream,
+    mut events: ConversationStream,
     mut rejected: Vec<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let count = 3;
@@ -71,10 +73,13 @@ async fn generate_titles(
 
     let model_id = model.id.finalize(&config.providers.llm.aliases)?;
 
+    let mut partial = PartialAppConfig::empty();
+    partial.assistant.model.id = PartialModelIdOrAliasConfig::Id(model_id.to_partial());
+    events.add_config_delta(partial);
+
     let provider = provider::get_provider(model_id.provider, &config.providers.llm)?;
     let query = structured::titles::titles(count, events.clone(), &rejected)?;
-    let titles: Vec<String> =
-        structured::completion(provider.as_ref(), &model_id, &model.parameters, query).await?;
+    let titles: Vec<String> = structured::completion(provider.as_ref(), &model_id, query).await?;
 
     let mut choices = titles.clone();
     choices.extend(rejected.clone());

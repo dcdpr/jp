@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// Reasoning content style configuration.
-#[derive(Debug, Config)]
+#[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ReasoningConfig {
     /// Whether to show reasoning blocks.
