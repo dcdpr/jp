@@ -118,19 +118,19 @@ fn default_config() -> jp_config::PartialAppConfig {
         cfg.providers.llm.aliases.extend([
             ("openai".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.1".into())),
+                name: Some(Name("gpt-5.2".into())),
             }),
             ("chatgpt".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.1".into())),
+                name: Some(Name("gpt-5.2".into())),
             }),
             ("gpt".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.1".into())),
+                name: Some(Name("gpt-5.2".into())),
             }),
             ("gpt5".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.1".into())),
+                name: Some(Name("gpt-5.2".into())),
             }),
             ("gpt5-mini".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
@@ -158,15 +158,19 @@ fn default_config() -> jp_config::PartialAppConfig {
             }),
             ("codex".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5-codex".into())),
+                name: Some(Name("gpt-5.1-codex".into())),
+            }),
+            ("codex-max".to_owned(), PartialModelIdConfig {
+                provider: Some(ProviderId::Openai),
+                name: Some(Name("gpt-5.1-codex-max".into())),
             }),
             ("gpt-5-codex".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5-codex".into())),
+                name: Some(Name("gpt-5.1-codex".into())),
             }),
             ("codex-mini".to_owned(), PartialModelIdConfig {
                 provider: Some(ProviderId::Openai),
-                name: Some(Name("codex-mini-latest".into())),
+                name: Some(Name("gpt-5.1-codex-mini".into())),
             }),
         ]);
     }
