@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:06.025327",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -113,7 +113,7 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:05.468962",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -135,6 +135,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Hello! How can I assist you today? If you have any questions or need information on a specific topic, feel free to ask."
+    "message": "Hello! How can I assist you today? If you have any questions or need any information, feel free to ask."
   }
 ]

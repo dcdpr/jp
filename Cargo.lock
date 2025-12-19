@@ -985,7 +985,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1116,7 +1116,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1585,7 +1585,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 [[package]]
 name = "httpmock"
 version = "0.8.2"
-source = "git+https://github.com/JeanMertz/httpmock?branch=tweaks#29b5a87f257e41fafed93cf231b8c1cde9c30da9"
+source = "git+https://github.com/JeanMertz/httpmock?branch=tweaks#00d4c80d5f53e7db884c7c950c47f8faea87e061"
 dependencies = [
  "assert-json-diff",
  "async-object-pool",
@@ -1856,7 +1856,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
  "serde",
  "serde_core",
 ]
@@ -2194,14 +2194,11 @@ dependencies = [
  "futures",
  "gemini_client_rs",
  "indexmap",
- "indoc",
- "insta",
  "jp_config",
  "jp_conversation",
  "jp_inquire",
  "jp_mcp",
  "jp_openrouter",
- "jp_serde",
  "jp_test",
  "jp_tool",
  "jsonschema",
@@ -2223,7 +2220,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
- "tracing-subscriber",
  "url",
 ]
 
@@ -3537,14 +3533,14 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
 name = "rustls"
-version = "0.23.31"
+version = "0.23.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0ebcbd2f03de0fc1122ad9bb24b127a5a6cd51d72604a3f3c50ac459762b6cc"
+checksum = "533f54bc6a7d4f647e46ad909549eda97bf5afc1585190ef692b4286b198bd8f"
 dependencies = [
  "log",
  "once_cell",
@@ -3612,7 +3608,7 @@ dependencies = [
 [[package]]
 name = "saphyr"
 version = "0.0.6"
-source = "git+https://github.com/JeanMertz/saphyr?branch=jean%2Ffix-valid-literal-block-scalar-check#13766aed0533b3f0848d120eabc90abfaa59ce51"
+source = "git+https://github.com/JeanMertz/saphyr?branch=jean%2Ffix-multinewline-endings#b7dff7bf64516936b4ffc3ac76160138eb325118"
 dependencies = [
  "encoding_rs",
  "hashlink",
@@ -3624,7 +3620,7 @@ dependencies = [
 [[package]]
 name = "saphyr-parser"
 version = "0.0.6"
-source = "git+https://github.com/JeanMertz/saphyr?branch=jean%2Ffix-valid-literal-block-scalar-check#13766aed0533b3f0848d120eabc90abfaa59ce51"
+source = "git+https://github.com/JeanMertz/saphyr?branch=jean%2Ffix-multinewline-endings#b7dff7bf64516936b4ffc3ac76160138eb325118"
 dependencies = [
  "arraydeque",
  "thiserror 2.0.16",
@@ -4273,7 +4269,7 @@ dependencies = [
  "fastrand",
  "once_cell",
  "rustix",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5157,7 +5153,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

@@ -19,27 +19,27 @@ name = 'claude-sonnet-4-5'
 
 [providers.llm.aliases.opus]
 provider = 'anthropic'
-name = 'claude-opus-4-1'
+name = 'claude-opus-4-5'
 
 [providers.llm.aliases.haiku]
 provider = 'anthropic'
-name = 'claude-3-5-haiku-latest'
+name = 'claude-haiku-4-5'
 
 [providers.llm.aliases.openai]
 provider = 'openai'
-name = 'gpt-5'
+name = 'gpt-5.2'
 
 [providers.llm.aliases.chatgpt]
 provider = 'openai'
-name = 'gpt-5'
+name = 'gpt-5.2'
 
 [providers.llm.aliases.gpt]
 provider = 'openai'
-name = 'gpt-5'
+name = 'gpt-5.2'
 
 [providers.llm.aliases.gpt5]
 provider = 'openai'
-name = 'gpt-5'
+name = 'gpt-5.2'
 
 [providers.llm.aliases.gpt5-mini]
 provider = 'openai'
@@ -67,15 +67,19 @@ name = 'o4-mini-deep-research'
 
 [providers.llm.aliases.codex]
 provider = 'openai'
-name = 'gpt-5-codex'
+name = 'gpt-5.1-codex'
+
+[providers.llm.aliases.codex-max]
+provider = 'openai'
+name = 'gpt-5.1-codex-max'
 
 [providers.llm.aliases.gpt-5-codex]
 provider = 'openai'
-name = 'gpt-5-codex'
+name = 'gpt-5.1-codex'
 
 [providers.llm.aliases.codex-mini]
 provider = 'openai'
-name = 'codex-mini-latest'
+name = 'gpt-5.1-codex-mini'
 
 [providers.llm.aliases.google]
 provider = 'google'

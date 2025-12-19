@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:06:56.563096",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,11 +114,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:06:56.221986",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -135,7 +135,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "",
+    "id": "run_me_0",
     "name": "run_me",
     "arguments": {
       "bar": "Zm9v"
@@ -143,7 +143,7 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:06:56.222024",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -157,13 +157,13 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "",
+    "id": "run_me_0",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "The tool `run_me` was called with the argument `bar='foo'`. The tool returned a response indicating that it is \"working!\"."
+    "message": "Okay, I ran the tool with the `bar` argument set to `\"foo\"`. The output was:\n\n```json\n{\"run_me_response\": {\"content\": \"working!\"}}\n```\n\nThis indicates that the `run_me` function was successfully executed and returned the string \"working!\".\n\nWould you like me to try running the tool with different arguments, or perform another action?"
   }
 ]

@@ -7,6 +7,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     str::FromStr,
+    sync::Arc,
     time::Duration,
 };
 
@@ -243,7 +244,7 @@ impl Query {
         trace!(args = ?self, "Received arguments.");
         let cfg = ctx.config();
 
-        let previous_id = self.update_active_conversation(&mut ctx.workspace, (*cfg).clone())?;
+        let previous_id = self.update_active_conversation(&mut ctx.workspace, cfg.clone())?;
         let conversation_id = ctx.workspace.active_conversation_id();
         if let Some(delta) = get_config_delta_from_cli(&cfg, &ctx.workspace, &conversation_id)? {
             ctx.workspace
@@ -299,7 +300,7 @@ impl Query {
             .workspace
             .get_events(&conversation_id)
             .cloned()
-            .unwrap_or_else(|| ConversationStream::new((*cfg).clone()));
+            .unwrap_or_else(|| ConversationStream::new(cfg.clone()));
 
         // Generate title for new or empty conversations.
         if (self.new_conversation || stream.is_empty())
@@ -432,7 +433,7 @@ impl Query {
     fn update_active_conversation(
         &self,
         ws: &mut Workspace,
-        cfg: AppConfig,
+        cfg: Arc<AppConfig>,
     ) -> Result<ConversationId> {
         // Store the (old) active conversation ID, so that we can restore to it,
         // if the current conversation is aborted early (e.g. because of an

@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Hello! How can I assist you today? Do you have any specific questions or topics you'd like to discuss?",
+                        message: "Hello! How can I assist you today?",
                     },
                 ),
                 metadata: {},
@@ -31,7 +31,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Your previous message was: \"Test message\"\n\nIs there anything specific you want to test or any further assistance you need?",
+                        message: "Your previous message was: \"Test message\"",
                     },
                 ),
                 metadata: {},
@@ -52,11 +52,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "uDr3tnaizWJG13aISkdBDnript4uUuhD",
+                        id: "WjDshW4vtjLxBHBjsxylldF4DKnQUNOs",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
-                            "foo": String("Testing tool call"),
+                            "foo": String("test"),
                         },
                     },
                 ),
@@ -78,7 +78,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The secret code is: 42\n\nIs there anything specific you want to do with this secret code or any other questions you have?",
+                        message: "The tool response indicates that the secret code is: 42. Is there anything you want to do with this code or any further assistance you need?",
                     },
                 ),
                 metadata: {},
@@ -99,7 +99,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The result of the previous tool call was: \"The secret code is: 42\"\n\nIs there anything specific you want to do with this secret code or any other questions you have?",
+                        message: "The result of the previous tool call was: \"The secret code is: 42\". \n\nIs there anything specific you would like to do with this information or any further assistance needed?",
                     },
                 ),
                 metadata: {},

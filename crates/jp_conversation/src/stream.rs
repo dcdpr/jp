@@ -1,5 +1,7 @@
 //! See [`ConversationStream`].
 
+use std::sync::Arc;
+
 use jp_config::{AppConfig, Config as _, PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
@@ -121,26 +123,37 @@ pub struct ConversationStream {
     ///
     /// This is stored separately from the events in the stream, to guarantee a
     /// stream always has a base configuration.
-    base_config: AppConfig,
+    base_config: Arc<AppConfig>,
 
     /// The events in the stream.
     events: Vec<InternalEvent>,
+
+    /// The timestamp of the creation of the stream.
+    created_at: UtcDateTime,
 }
 
 impl ConversationStream {
     /// Create a new [`ConversationStream`] with the given base configuration.
     #[must_use]
-    pub const fn new(base_config: AppConfig) -> Self {
+    pub fn new(base_config: Arc<AppConfig>) -> Self {
         Self {
             base_config,
             events: Vec::new(),
+            created_at: UtcDateTime::now(),
         }
     }
 
     /// Set the base configuration for the stream.
     #[must_use]
-    pub fn with_base_config(mut self, base_config: AppConfig) -> Self {
+    pub fn with_base_config(mut self, base_config: Arc<AppConfig>) -> Self {
         self.base_config = base_config;
+        self
+    }
+
+    /// Set the timestamp of the creation of the stream.
+    #[must_use]
+    pub fn with_created_at(mut self, created_at: impl Into<UtcDateTime>) -> Self {
+        self.created_at = created_at.into();
         self
     }
 
@@ -192,26 +205,6 @@ impl ConversationStream {
         AppConfig::from_partial(partial).map_err(Into::into)
     }
 
-    // /// Similar to [`Self::config`], but returns the [`PartialConfig`] variant
-    // /// instead (with the same options applied).
-    // ///
-    // /// [`PartialConfig`]: jp_config::PartialConfig
-    // pub fn partial_config(&self) -> PartialAppConfig {
-    //     let mut config = self.base_config.to_partial();
-    //     let iter = self.events.iter().filter_map(|event| match event {
-    //         InternalEvent::ConfigDelta(delta) => Some(*delta.clone()),
-    //         InternalEvent::Event(_) => None,
-    //     });
-    //
-    //     for delta in iter {
-    //         if let Err(error) = config.merge(&(), delta) {
-    //             error!(%error, "Failed to merge config delta.");
-    //         }
-    //     }
-    //
-    //     config
-    // }
-
     /// Removes all events from the end of the stream, until a [`ChatRequest`]
     /// is found, returning that request.
     #[must_use]
@@ -231,9 +224,10 @@ impl ConversationStream {
     /// Add a config delta to the stream.
     ///
     /// This is a no-op if the delta is empty.
-    pub fn add_config_delta(&mut self, delta: impl Into<PartialAppConfig>) {
+    pub fn add_config_delta(&mut self, delta: impl Into<ConfigDelta>) {
+        let ConfigDelta { delta, timestamp } = delta.into();
         let delta = match self.config() {
-            Ok(config) => config.to_partial().delta(delta.into()),
+            Ok(config) => config.to_partial().delta(*delta),
             Err(error) => {
                 error!(%error, "Unable to get valid config from conversation stream.");
                 return;
@@ -244,12 +238,15 @@ impl ConversationStream {
             return;
         }
 
-        self.events.push(InternalEvent::ConfigDelta(delta.into()));
+        self.events.push(InternalEvent::ConfigDelta(ConfigDelta {
+            delta: Box::new(delta),
+            timestamp,
+        }));
     }
 
     /// Add a config delta to the stream.
     #[must_use]
-    pub fn with_config_delta(mut self, delta: impl Into<PartialAppConfig>) -> Self {
+    pub fn with_config_delta(mut self, delta: impl Into<ConfigDelta>) -> Self {
         self.add_config_delta(delta);
         self
     }
@@ -267,7 +264,10 @@ impl ConversationStream {
         let config_delta = last_config.delta(config);
 
         if !config_delta.is_empty() {
-            self.add_config_delta(config_delta);
+            self.add_config_delta(ConfigDelta {
+                delta: Box::new(config_delta),
+                timestamp: event.timestamp,
+            });
         }
 
         self.push(event);
@@ -731,7 +731,7 @@ impl FromIterator<ConversationEventWithConfig> for Result<ConversationStream, St
             return Err(StreamError::FromEmptyIterator);
         };
 
-        let mut stream = ConversationStream::new(AppConfig::from_partial(config)?);
+        let mut stream = ConversationStream::new(AppConfig::from_partial(config)?.into());
         stream.push(first_event);
         stream.extend(events);
 
@@ -786,9 +786,10 @@ impl Serialize for ConversationStream {
         let mut stream: Vec<InternalEvent> = Vec::with_capacity(self.events.len() + 1);
 
         // We store the base config as the first (delta) event in the stream.
-        stream.push(InternalEvent::ConfigDelta(
-            self.base_config.to_partial().into(),
-        ));
+        stream.push(InternalEvent::ConfigDelta(ConfigDelta {
+            delta: Box::new(self.base_config.to_partial()),
+            timestamp: self.created_at,
+        }));
 
         // Then we append all other events in the stream.
         stream.extend(self.events.iter().cloned());
@@ -810,7 +811,10 @@ impl<'de> Deserialize<'de> for ConversationStream {
 
         match events.remove(0) {
             InternalEvent::ConfigDelta(base_config) => Ok(Self {
-                base_config: AppConfig::from_partial(base_config.into()).map_err(Error::custom)?,
+                created_at: base_config.timestamp,
+                base_config: AppConfig::from_partial(base_config.into())
+                    .map_err(Error::custom)?
+                    .into(),
                 events,
             }),
             InternalEvent::Event(_) => Err(Error::custom(
@@ -856,8 +860,9 @@ mod tests {
         .into();
 
         let mut stream = ConversationStream {
-            base_config: AppConfig::from_partial(base_config).unwrap(),
+            base_config: AppConfig::from_partial(base_config).unwrap().into(),
             events: vec![],
+            created_at: datetime!(2020-01-01 0:00 utc).into(),
         };
 
         insta::assert_json_snapshot!(&stream);

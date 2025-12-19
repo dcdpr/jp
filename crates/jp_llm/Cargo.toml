@@ -18,7 +18,6 @@ jp_conversation = { workspace = true }
 jp_inquire = { workspace = true }
 jp_mcp = { workspace = true }
 jp_openrouter = { workspace = true }
-jp_serde = { workspace = true }
 jp_tool = { workspace = true }
 
 async-anthropic = { workspace = true }
@@ -30,7 +29,6 @@ duct_sh = { workspace = true }
 futures = { workspace = true }
 gemini_client_rs = { workspace = true }
 indexmap = { workspace = true }
-indoc = { workspace = true }
 jsonschema = { workspace = true }
 minijinja = { workspace = true, features = [
     "builtins",
@@ -57,11 +55,9 @@ tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
-insta = { workspace = true }
 jp_test = { workspace = true }
 paste = { workspace = true }
 test-log = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["fmt"] }
 
 [lints]
 workspace = true

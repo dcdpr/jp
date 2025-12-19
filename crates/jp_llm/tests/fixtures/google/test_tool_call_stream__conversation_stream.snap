@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:06:57.060409",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,11 +114,27 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_request",
+    "id": "run_me_0",
+    "name": "run_me",
+    "arguments": {
+      "bar": "Zm9v"
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_response",
+    "id": "run_me_0",
+    "content": "d29ya2luZyE=",
+    "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I can help with testing the tool, but I need some more information. Could you please specify the arguments you'd like to use for the `run_me` function? The `bar` argument is required, and it can be either the string 'foo' or a list of strings. The `foo` argument is optional and defaults to 'foo'."
+    "message": "I ran the tool with the argument `bar=\"foo\"`. The tool returned `{\"run_me_response\": {\"content\": \"working!\"}}`."
   }
 ]

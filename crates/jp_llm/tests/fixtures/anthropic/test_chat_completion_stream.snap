@@ -58,19 +58,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " this appears",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " to be a simple test",
+                        reasoning: " this appears to be a simple test",
                     },
                 ),
                 metadata: {},
@@ -94,7 +82,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " see if I'm",
+                        reasoning: " see",
                     },
                 ),
                 metadata: {},
@@ -106,7 +94,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " responding.",
+                        reasoning: " if I'm",
                     },
                 ),
                 metadata: {},
@@ -118,7 +106,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " I",
+                        reasoning: " working an",
                     },
                 ),
                 metadata: {},
@@ -130,7 +118,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " should acknowledge",
+                        reasoning: "d responding.",
                     },
                 ),
                 metadata: {},
@@ -142,7 +130,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " this in a friendly an",
+                        reasoning: " I should provide",
                     },
                 ),
                 metadata: {},
@@ -154,7 +142,55 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "d helpful way.",
+                        reasoning: " a friendly",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: ", helpful response confir",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "ming that I'm functioning properly and ready",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " to assist",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " them.",
                     },
                 ),
                 metadata: {},
@@ -182,7 +218,7 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("Er8CCkYIChgCKkCObEbpIHGFiIDsYmOZNhdXNYUq8q/d9qSdl/VRBrmRllC6IhCLDWB3wy21jkHcEOB/wOvd4W/NCj7WnZhJMvGLEgwKmPKdVUwLbT1p4YAaDDJc1W1Citkixs5IDSIwOlETMMw644co7XHgTzG3TCKMqdWQgxkPLfl3AfQHN0YtWSpEI8AYysHoabn6f8H4KqYBwvxgmYJ4oakfgLEj4+VeIvXgBi4RQf5coY94y9WPurQTRRzoBgWUqc9TGQ56goOULgIwSUskoc9uGTOMgUUPZuoRG/ui2X1wHBLjavr6l4BadMWPepOyE+6HCWhj35eQ4TNbQQ/8X+kpTeiVTJxA+hU/qtVVDeQ9TR9NrG/5Jvb8rucIo+j+P8QZeSmKxvwc65cL57lY+shaV+knS60fO5SQu2Jd0RgB"),
+                    "anthropic_thinking_signature": String("EoMDCkYIChgCKkBqn5dbnpmWrthmQBfHVYzXKj9ZXJtOQVDLfsUp5PlfJhS0fRjW7bmma2A7OyCgZNkJU7epYXdUpj+LuwaX7VB0EgwpSrPRkChX1letNpoaDAW/aD0aXkbBnPZ8WSIwIEJBc9eLL5Wug6Uel9brGYoCD4nuwltZRik367f+RNr+MYzV4i8ZiCoUjioYZ6E8KuoB18rm52kFmV9cUqaOsnteXBzqM3zhoopjigZ9xG0mWqqfNPFjE695dEwkSOYFNZPMWjReDsds7krjSo9Lo/iN1RFhI0lfEy/UVrdlOqUCrvzV//hjzPvNMo2Lvqd6OnWjBoJpRE/WPVNmvqof31AGUHqkkRqCnoXc4+8d8/HAlu5ReeGb8dXAk6QGzfjrnmNsiFo/4T6c2ju8CUq37XE2/tvxQ8m4VAamZevneJU84pJS/NycSw2IVn+eyvBKqeq84sfcM0obtQQW7GynBG0r6NJVJK4v1W8InMx7QyBe+2mj2HOUzUqWZPeCGAE="),
                 },
             },
         },
@@ -196,7 +232,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "",
+                        message: "Hello! I'm working",
                     },
                 ),
                 metadata: {},
@@ -208,19 +244,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Hello! I'm here an",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "d ready to help.",
+                        message: " and ready to help.",
                     },
                 ),
                 metadata: {},
@@ -244,7 +268,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: " free to ask",
+                        message: " free to ask me any questions or let",
                     },
                 ),
                 metadata: {},
@@ -256,7 +280,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: " me anything or",
+                        message: " me know what you'd like assistance",
                     },
                 ),
                 metadata: {},
@@ -268,31 +292,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: " let",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " me know what you'd like to discuss",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: ". ",
+                        message: " with. ",
                     },
                 ),
                 metadata: {},

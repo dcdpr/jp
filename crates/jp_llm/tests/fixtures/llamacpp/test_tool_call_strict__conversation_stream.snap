@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:33.577804",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,12 +114,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "GzsQfJpaZqJQU6UbggNhDsy2T6nKQujL",
+    "id": "vNEsyoKihQwa9vUThUCvVfXMvtTzHmR7",
     "name": "run_me",
     "arguments": {
       "foo": "dGVzdA==",
@@ -129,13 +129,13 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "GzsQfJpaZqJQU6UbggNhDsy2T6nKQujL",
+    "id": "vNEsyoKihQwa9vUThUCvVfXMvtTzHmR7",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "It seems the testing tool executed successfully! The response \"working!\" indicates that the tool call with the arguments `{\"foo\": \"test\", \"bar\": \"foo\"}` has completed as expected.\n\nIf you need any further actions or have more tests to run, feel free to let me know!"
+    "message": "It looks like the tool has run successfully! Here's the response I received:\n\n```\nworking!\n```\n\nIf you have any specific tasks or tools you'd like me to run or any questions about this tool response, feel free to let me know!"
   }
 ]

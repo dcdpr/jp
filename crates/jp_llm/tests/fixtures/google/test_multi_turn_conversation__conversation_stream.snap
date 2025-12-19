@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:06:57.649955",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -119,11 +119,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Okay, I received your test message! It's working. How can I help you today?"
+    "message": "Hello! I am a large language model, trained by Google. How can I help you today?"
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:06:55.485624",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -145,16 +145,16 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Reflecting on Repetition**\n\nI'm pondering the potential for unintended repetition. The current focus is on maintaining diversity in output while effectively echoing past communications. I'm investigating methods to achieve this nuance, so that the response remains useful and engaging, rather than rote or uninspired.\n\n\n"
+    "reasoning": "**Analyzing Task Requirements**\n\nI've been examining the user's instructions and am focused on understanding the core elements: recognizing and repeating the preceding message. I am now working to ensure that future responses precisely follow the constraints regarding format and word count. My objective is to create updates that accurately reflect any progress.\n\n\n"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Your previous message was: \"Test message\""
+    "message": "Test message"
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:06:55.485703",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -168,12 +168,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "",
+    "id": "run_me_0",
     "name": "run_me",
     "arguments": {
       "bar": "Zm9v"
@@ -182,7 +182,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "",
+    "id": "run_me_0",
     "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
     "is_error": false
   },
@@ -193,7 +193,7 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:06:55.485836",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -215,11 +215,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Reviewing Previous Actions**\n\nI'm currently trying to recall the results of my last tool call, a crucial step based on the user's latest query. I'm digging into my recent history to pinpoint the output of \"Testing tool call.\" The user's prompt directly suggests a need for this previous result, so I'm focusing my search there.\n\n\n**Accessing Past Data**\n\nI'm now fully immersed in retrieving the necessary information. It's imperative that I access and present the details from the most recent tool execution. Specifically, I'm pulling the results stemming from the \"Testing tool call\". My memory indicates I ran a `print(default_api.run_me(bar = \"foo\"))` and the output returned was `{\"run_me_response\": {\"content\": \"The secret code is: 42\"}}`. My response will be streamlined and directly address the user's needs.\n\n\n"
+    "reasoning": "**Refining Understanding**\n\nI'm now focusing on directly mapping the user's query about the \"previous tool call result\" to the output from the most recent tool execution. Specifically, I'm identifying that the prior turn used `default_api.run_me` and returned `{\"run_me_response\": {\"content\": \"The secret code\"}}`. This clarifies my approach.\n\n\n**Clarifying Tool Usage**\n\nI've zeroed in on the specifics of the tool interaction. It's clear the previous turn executed `default_api.run_me`, with a returned value: `{\"run_me_response\": {\"content\": \"The secret code is: 42\"}}`. My response now isolates the essential bit; extracting the value associated with the `content` key within the `run_me_response`. This simplifies the process.\n\n\n"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "The previous tool call returned: `{'run_me_response': {'content': 'The secret code is: 42'}}`"
+    "message": "The result of the previous tool call was: \"The secret code is: 42\"."
   }
 ]

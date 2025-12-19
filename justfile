@@ -61,7 +61,7 @@ check *FLAGS:
 # Run tests, using nextest.
 [group('check')]
 test *FLAGS: (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
-    cargo nextest run --workspace --all-targets --no-fail-fast {{FLAGS}}
+    cargo nextest run --workspace --all-targets {{FLAGS}}
 
 # Continuously run tests, using Bacon.
 [group('check')]

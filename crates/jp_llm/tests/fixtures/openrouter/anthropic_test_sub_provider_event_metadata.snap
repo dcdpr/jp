@@ -10,11 +10,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user has sent \"Test message\" - this appears to be just a test to see if I'm working and responding. I should provide a friendly, brief response confirming that I'm here and ready to help.",
+                        reasoning: "This is a simple test message. The user is checking if I'm working and responding. I should provide a friendly, brief response confirming that I'm operational and ready to help.",
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("EusCCkgIChABGAIqQGJF912y/iLs91KBmVsV7DJx0f9sH6BAO6H0m7QZpzi8GjZPlHnCl6ZL7cj8tdrGLNe/pL3U6i/3+DHYzQujcQQSDE9/wEdCo4X+W/m5bxoMEQas4Mk1/I9mrFW4IjBB2SEbIPL+o91Hd9jqhMD2+k8O81kcnxWlrqvY9+VQaiajZOU7iOPEMZgnGAFazO4q0AHuW00UQx5cSnd5zKAtPS8//V+7FvBaipm5Tnmhi6aMnqpVDjciQd7Lm1qVLjjGJVe2QCXeFUKG9AWp8T5d5HVFl3REYPaahS/dMoC5uR96llDytZXz/sc70foQc2wcdGRejdlS/E3dn9z4lZ9Y/Gh4no+RZeGHWO4Idufe42WTyxnqhWkiHDWew1BYfN2r5RwNFZJhk7Ix+OWVuVTGbAoQMm8rQmivr+oYHnMLWCY7P4eHUm9opJGj1U3ol0J2pjiNZSWwJaFJxkDuH3Cn83yPGAE="),
+                    "anthropic_thinking_signature": String("EtwCCkgIChABGAIqQKx+O97tmqjxYBhgrMwcoGvche703W868FQxuL9tuHSM0AsXC0riLjKMNflyuiXWJQtoFOjqssRvkdO3sX/LcUkSDIuE7GJtjPE1UdMTJBoM2H4J89bzgH7Hi8C+IjAqOzylCBj++flzEI562dMRCtUgn6/DMsb3oicPiN7z8hi+28S7+sYocbUHq8YJxYgqwQHS3swIoOLPpRLhlUQrLwAz/lxl3nDE7cc+yQAVXoEJETxvWvrOdtBjhlmqAuVDzMdQEMthODenHe9wfN0z/WR6KqO1RTef3B6G3GMqeP3NMxoHKfj8Oymwu0qb/LZb3hGB6feC+W3BVGK+gJzHQ2CxK7qDHVjlc1IUAsg+KdZ65fjX1+GPneFSswog4bHB/Ici6rATHKo97Ch0naEn0wR2jl6vsRYDYJYA2Fcn/Rd1l8EEu+8ql28zrLBogzmR7GFPGAE="),
                     "openrouter_metadata": Array [
                         Object {
                             "index": Number(0),
@@ -34,7 +34,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Hello! I'm here and ready to help. What would you like to know or discuss?",
+                        message: "Hello! I'm working and ready to help. What can I assist you with today?",
                     },
                 ),
                 metadata: {},

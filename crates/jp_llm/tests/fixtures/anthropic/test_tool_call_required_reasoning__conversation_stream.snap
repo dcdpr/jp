@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:47.91599",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,11 +114,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:46.696988",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -135,7 +135,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "toolu_01M9SbjjjdKTWkw2uWzrTTxY",
+    "id": "toolu_01WzgcGG2hrzowXmgzpSjv3o",
     "name": "run_me",
     "arguments": {
       "bar": "Zm9v"
@@ -143,7 +143,7 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:46.697028",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -157,13 +157,13 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "toolu_01M9SbjjjdKTWkw2uWzrTTxY",
+    "id": "toolu_01WzgcGG2hrzowXmgzpSjv3o",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Great! The tool call worked successfully. The `run_me` function returned \"working!\" when called with the parameter `bar` set to \"foo\".\n\nIs there anything specific you'd like to test or do with tool calls?"
+    "message": "Great! I ran the `run_me` tool with the argument `bar: \"foo\"` and it returned `\"working!\"` as the result."
   }
 ]

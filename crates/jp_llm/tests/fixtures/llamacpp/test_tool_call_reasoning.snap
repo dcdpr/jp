@@ -10,11 +10,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "mOYzbowd5OOlJ4LOKQYtJpRFrGXQsgQ0",
+                        id: "sF2ivmYeu2EZ66osbn1c9HEWVWcwECw2",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
-                            "foo": String("test"),
+                            "foo": String("test_value"),
                         },
                     },
                 ),
@@ -36,7 +36,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "It looks like the testing tool executed successfully! The response indicates that the tool ran the `run_me` function with the arguments `bar=\"foo\"` and `foo=\"test\"`, and it returned \"working!\".\n\nIf you have any specific questions or need further assistance related to this, feel free to ask!",
+                        message: "It looks like the tool executed successfully! Here's the response:\n\n```\nworking!\n```\n\nIs there anything specific you want to do next or any other tools you'd like to run?",
                     },
                 ),
                 metadata: {},

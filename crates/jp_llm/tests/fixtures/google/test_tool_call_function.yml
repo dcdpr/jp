@@ -10,7 +10,7 @@ when:
         {
           "parts": [
             {
-              "text": "Testing tool call"
+              "text": "Please run the tool, providing whatever arguments you want."
             }
           ],
           "role": "user"
@@ -27,30 +27,24 @@ when:
                 "type": "object",
                 "properties": {
                   "foo": {
-                    "default": "foo",
-                    "type": "string"
+                    "type": "string",
+                    "default": "foo"
                   },
                   "bar": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "foo"
-                        ]
-                      },
-                      {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        },
-                        "enum": [
-                          [
-                            "foo",
-                            "bar"
-                          ]
-                        ]
-                      }
-                    ]
+                    "type": [
+                      "string",
+                      "array"
+                    ],
+                    "enum": [
+                      "foo",
+                      [
+                        "foo",
+                        "bar"
+                      ]
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "additionalProperties": false,
@@ -85,7 +79,9 @@ then:
   header:
     - name: content-type
       value: text/event-stream
-  body: "data: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"run_me\",\"args\": {\"bar\": \"foo\"}}}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0,\"finishMessage\": \"Model generated function call(s).\"}],\"usageMetadata\": {\"promptTokenCount\": 59,\"candidatesTokenCount\": 15,\"totalTokenCount\": 74,\"promptTokensDetails\": [{\"modality\": \"TEXT\",\"tokenCount\": 59}]},\"modelVersion\": \"gemini-2.5-flash-lite\",\"responseId\": \"jhA9abbXAeiL7M8P3YDRgQc\"}"
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "run_me","args": {"bar": "foo"}}}],"role": "model"},"finishReason": "STOP","index": 0,"finishMessage": "Model generated function call(s)."}],"usageMetadata": {"promptTokenCount": 67,"candidatesTokenCount": 15,"totalTokenCount": 82,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 67}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wh1FacPsF7m0xN8PzafogQQ"}
+    
 ---
 when:
   path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
@@ -99,7 +95,7 @@ when:
         {
           "parts": [
             {
-              "text": "Testing tool call"
+              "text": "Please run the tool, providing whatever arguments you want."
             }
           ],
           "role": "user"
@@ -108,12 +104,13 @@ when:
           "parts": [
             {
               "functionCall": {
-                "id": "",
+                "id": "run_me_0",
                 "name": "run_me",
                 "args": {
                   "bar": "foo"
                 }
-              }
+              },
+              "thoughtSignature": "skip_thought_signature_validator"
             }
           ],
           "role": "model"
@@ -122,7 +119,7 @@ when:
           "parts": [
             {
               "functionResponse": {
-                "id": "",
+                "id": "run_me_0",
                 "name": "run_me",
                 "response": {
                   "content": "working!"
@@ -153,9 +150,10 @@ then:
   header:
     - name: content-type
       value: text/event-stream
-  body: |-
-    data: {"candidates": [{"content": {"parts": [{"text": "The tool call"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 3,"totalTokenCount": 38,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jhA9aYvPEtvinsEP1bbOsAc"}
-
-    data: {"candidates": [{"content": {"parts": [{"text": " was successful. The tool `run_me` was called with the argument `bar"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 20,"totalTokenCount": 55,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jhA9aYvPEtvinsEP1bbOsAc"}
-
-    data: {"candidates": [{"content": {"parts": [{"text": "` set to `\"foo\"`. The tool returned a JSON object with the key `run_me_response` and a nested object containing the key `content` with the value `\"working!\"`."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 35,"candidatesTokenCount": 60,"totalTokenCount": 95,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 35}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jhA9aYvPEtvinsEP1bbOsAc"}
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"text": "Hello"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 43,"candidatesTokenCount": 1,"totalTokenCount": 44,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 43}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wh1FaZKQKYL-xN8PpenC2QE"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": " there! I'm ready to help. What would you like to do next"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 43,"candidatesTokenCount": 17,"totalTokenCount": 60,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 43}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wh1FaZKQKYL-xN8PpenC2QE"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "?"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 43,"candidatesTokenCount": 18,"totalTokenCount": 61,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 43}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wh1FaZKQKYL-xN8PpenC2QE"}
+    

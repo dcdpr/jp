@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Acknowledging Receipt of Message**\n\nI've processed the simple \"Test message.\" My immediate focus is on acknowledging receipt. The optimal response, I believe, involves a direct confirmation that the system has registered the input. The key is to keep it concise and unambiguous.\n\n\n",
+                        reasoning: "The user's message is \"Test message\". This seems like a test or perhaps an empty query. According to my guidelines, I should respond informatively. But since it's just a test message, I might need to acknowledge it appropriately.\n\n\n## Handling User Input  \n- Received a message labeled \"Test message,\" which appears to be a placeholder or empty query.  \n- Need to respond informatively, as per guidelines, while acknowledging the message's likely purpose as a test.",
                     },
                 ),
                 metadata: {},
@@ -26,7 +26,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Received! How can I help you today?",
+                        message: "It looks like you're sending a test message. If you have a specific question or topic in mind, feel free to ask—I'm here to help! 🚀",
                     },
                 ),
                 metadata: {},

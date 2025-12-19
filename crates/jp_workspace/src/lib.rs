@@ -12,6 +12,7 @@ mod state;
 use std::{
     iter,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 pub use error::Error;
@@ -323,7 +324,7 @@ impl Workspace {
     pub fn create_conversation(
         &mut self,
         conversation: Conversation,
-        config: impl Into<AppConfig>,
+        config: Arc<AppConfig>,
     ) -> ConversationId {
         let id = ConversationId::default();
 
@@ -332,7 +333,7 @@ impl Workspace {
             .local
             .events
             .entry(id)
-            .or_insert_with(|| ConversationStream::new(config.into()));
+            .or_insert_with(|| ConversationStream::new(config));
         id
     }
 
@@ -541,7 +542,7 @@ mod tests {
 
         let id = workspace.create_conversation(
             Conversation::default(),
-            AppConfig::from_partial(partial).unwrap(),
+            AppConfig::from_partial(partial).unwrap().into(),
         );
         workspace.set_active_conversation_id(id).unwrap();
         assert!(!storage.exists());
@@ -607,7 +608,7 @@ mod tests {
 
         let id = workspace.create_conversation(
             conversation.clone(),
-            AppConfig::from_partial(partial).unwrap(),
+            AppConfig::from_partial(partial).unwrap().into(),
         );
         assert_eq!(
             workspace.state.local.conversations.get(&id),

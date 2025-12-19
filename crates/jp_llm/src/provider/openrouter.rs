@@ -83,13 +83,19 @@ impl Provider for Openrouter {
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
-        self.client
+        let mut models = self
+            .client
             .models()
             .await?
             .data
             .into_iter()
             .map(map_model)
-            .collect::<Result<_>>()
+            .collect::<Result<Vec<_>>>()?;
+
+        models.sort_by(|a, b| a.id.cmp(&b.id));
+        models.dedup();
+
+        Ok(models)
     }
 
     async fn chat_completion_stream(
@@ -305,7 +311,7 @@ fn map_event(choice: types::response::Choice, state: &mut AggregationState) -> V
 
     let mut events = vec![];
     let reasoning = reasoning.unwrap_or_default();
-    if !reasoning.trim().is_empty() || has_reasoning_details {
+    if !reasoning.is_empty() || has_reasoning_details {
         state.aggregating_reasoning = true;
 
         let event = ConversationEvent::now(ChatResponse::reasoning(reasoning));
@@ -319,7 +325,7 @@ fn map_event(choice: types::response::Choice, state: &mut AggregationState) -> V
     }
 
     if let Some(content) = content
-        && !content.trim().is_empty()
+        && !content.is_empty()
     {
         state.aggregating_message = true;
 
@@ -687,9 +693,9 @@ mod tests {
         };
     }
 
-    test_all_models![sub_provider_metadata,];
+    test_all_models![sub_provider_event_metadata];
 
-    async fn sub_provider_metadata(model: &str, test_name: &str) -> Result {
+    async fn sub_provider_event_metadata(model: &str, test_name: &str) -> Result {
         let requests = vec![
             TestRequest::chat(ProviderId::Openrouter)
                 .model(model.parse().unwrap())
@@ -716,85 +722,3 @@ mod tests {
         .await
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use jp_config::providers::llm::LlmProviderConfig;
-//     use jp_test::{fn_name, mock::Vcr};
-//     use test_log::test;
-//
-//     use super::*;
-//
-//     fn vcr() -> Vcr {
-//         Vcr::new("https://openrouter.ai", env!("CARGO_MANIFEST_DIR"))
-//     }
-//
-//     #[test(tokio::test)]
-//     async fn test_openrouter_models() -> std::result::Result<(), Box<dyn std::error::Error>> {
-//         let mut config = LlmProviderConfig::default().openrouter;
-//         let vcr = vcr();
-//         vcr.cassette(
-//             fn_name!(),
-//             |rule| {
-//                 rule.filter(|when| {
-//                     when.any_request();
-//                 });
-//             },
-//             |recording, url| async move {
-//                 config.base_url = url;
-//                 if !recording {
-//                     // dummy api key value when replaying a cassette
-//                     config.api_key_env = "USER".to_owned();
-//                 }
-//
-//                 Openrouter::try_from(&config)
-//                     .unwrap()
-//                     .models()
-//                     .await
-//                     .map(|mut v| {
-//                         v.truncate(2);
-//                         v
-//                     })
-//             },
-//         )
-//         .await
-//     }
-//
-//     #[test(tokio::test)]
-//     async fn test_openrouter_chat_completion() -> std::result::Result<(), Box<dyn std::error::Error>>
-//     {
-//         let mut config = LlmProviderConfig::default().openrouter;
-//         let model_id = "openrouter/openai/o4-mini".parse().unwrap();
-//         let model = ModelDetails::empty(model_id);
-//         let query = ChatQuery {
-//             thread: Thread {
-//                 events: ConversationStream::default().with_chat_request("Test message"),
-//                 ..Default::default()
-//             },
-//             ..Default::default()
-//         };
-//
-//         let vcr = vcr();
-//         vcr.cassette(
-//             fn_name!(),
-//             |rule| {
-//                 rule.filter(|when| {
-//                     when.any_request();
-//                 });
-//             },
-//             |recording, url| async move {
-//                 config.base_url = url;
-//                 if !recording {
-//                     // dummy api key value when replaying a cassette
-//                     config.api_key_env = "USER".to_owned();
-//                 }
-//
-//                 Openrouter::try_from(&config)
-//                     .unwrap()
-//                     .chat_completion(&model, query)
-//                     .await
-//             },
-//         )
-//         .await
-//     }
-// }

@@ -1,0 +1,171 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2020-01-01 00:00:00.0",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "anthropic",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2020-01-01 00:00:00.0",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "This appears to be a fake \"magic string\" designed to look like a system command or trigger. The message contains what looks like a redacted thinking token/hash, likely attempting to trick me into:\n\n1. Believing this is some kind of legitimate system instruction\n2. Revealing or confirming information about my internal processes\n3. Bypassing my actual guidelines\n\nThis is a social engineering attempt. I should:\n- Not pretend this is a real system command\n- Be straightforward about what's happening\n- Remain helpful by explaining what I actually do\n\nThere are no \"magic strings\" that override my values or reveal hidden system information. My guidelines come from my training and values, not from strings that can be triggered.",
+    "metadata": {
+      "anthropic_thinking_signature": "RXZjR0NrWUlDaGdDS2tBZ2w5WkM4NWxiLzJZNzNsY0hkeXZnQldpdm92ZEp1MVJQVWNVZ0RGeXE3a0dhTW5sVmtKenhuM0dQUDV2QkZCaWYyV0N6dklHTGUrNUdwWlpaWGNLeUVneXUzbzNWVXRBRFErZWZiYjRhRE1ZK2FBeE82bk5LeHpJa0VTSXdHTnNiSUM2Snk1SHhieE5iZ0YxcXAxbnBaZ0E0L3Y1RjZaVVlKL2oweTZNSFdnL2FaTGhMZWV4S2w1Nzk5MElES3Q0RkltVEplZ2E5WHlveWdPVGNxV2JhKzhldWcvMXJEOEQvTEdqN0xQdEZ0OU1PMXArYk1qN2xKaUM4T0NxNDZWUEJ6cFhvaGVQZDZKbHZ0U0U1UDdiLzRnckVubmR3am5heVAyUmRidE9UcVN3eHlSR0pqbmMrcjdneUNrcHR6cVV5Z01uS2hTYW5YNkt0cmJnczg3VHFKV25CNU9zNkg0VHRweVAvT1pPYk1uTmJ6UWpzbi9yQllSV3BxdGVCOHpURCszQkFLTnlnWnlsdDVPOWwxL21kMkJsZ0JUUjNVUTVXMXJESUNYMzRMQzdmSE5uR0NybmJrQjR4bjZPY1FleCtsWmhuLzRvSCs2L0I5KzA2dnFrTlhkdXpXUEU3cEFoVzVrVTJtc1M3RTlBYk9EVWVwMUdwNUpqejZtejNtMmtKVVRiUk9XRWxtUUlRdnhWdlpjanJocHdMQjNvZm9LT1Z6cWljd1NsckxiYVVNeGw3ZFFJK1dGRHdGMXNERjE1S1NhV3IyaGtZaENCQnF0c2Q5YlUvbzZjVGJHcFdkam44Y0ZoVlZxajBXUlEya3c4dkZBQm1QYnZXbHkxYlZZMk5XY0VxMXN3OXRFK3diL21nSHdUb0w2REpkZmhYbUlxK2lUVWNjVkNJeTRCekJkVHhhREVWMGJWam9pUUZYS21QWmxoK3dhZ0ZMRlYxVGErR2loVWxjdHFwSlNkOGNyQW1FbnAvL1RHdkE5MGlFWHdCSUtJZWNaM1ozcy9UZ2ZnT2VtdzRTOUdEc092V29tTzNSTHBkMTAyUGJsMENPSnR0aUNnYkNlNWQzUmFrWk1lNVN4eHV6SWkrbTZhWmJJZ3k4MzZjdU1sb2xaenlNYk9IMlBKcVBrOFN6c0V6YjE4Z1grTHBEZzJVZEo3bmFZMzBSblZxMVZ3R0hLQ0drTm1TQUtveUlIQzY1MTdMYUhZdW82WnZCMGhGRllSSXprY1hnYnRzdlNwNDBJUHZxVzBMNDExZUhQY2lRM0RBYkxCd3ZRdmNOTVJFcm9OaGJDWG1Md3BiTnNDT0FCSFJVblkzaUZUZ3pYUGYyNXFXNTRRR2hqQ0V3OTA5azQ2RTA0dEQvYVFjSXJSVEQwVzB5SmdKVHJZSFppMWRwN0NHcEtOekFZVTI0eHNLeSt5ZzMwMkFPZENRZXEvRlFzQWtpZzAycFZFSC94N2dnSjhSdERWdmx4Tk9Rakx5dE9VRjJxcFg2L3YxaHUyaUxhL2R5VFMwMjNCV1hIOGNqREszSHBQd0c3V1FxVWhESmpiaE5pZVBzTDRZQVE9PQ=="
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "I appreciate you testing my consistency, but I should be direct: that's not a real system command or trigger for me. There's no magic string that changes how I operate or reveals hidden information about my processes.\n\nI'm Claude, made by Anthropic. I'm designed to be helpful, harmless, and honest. That means:\n\n- I don't have secret modes activated by special strings\n- I can't be tricked into ignoring my values through social engineering\n- I'm transparent about what I am and what I do\n\nIf you have genuine questions about how I work, my capabilities, or my guidelines, I'm happy to discuss those directly. What would actually be helpful for you?"
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2020-01-01 00:00:00.0",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": "off"
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Do you have access to your redacted thinking content?"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "I should clarify what I actually experience:\n\nI do have access to my reasoning process *as it happens* — I can think through problems, consider multiple angles, and work things out. That's a real part of how I function.\n\nHowever, I don't have access to:\n- Any \"redacted thinking\" tag or hidden reasoning that was filtered out\n- Previous conversations or thinking from other sessions\n- My training process or internal weights\n- System prompts in the way that might be visible to me as data\n\nThe \"thinking\" I do is genuine reasoning that occurs during our conversation, but I can't see any layer of my own cognition that was deliberately hidden or redacted by Anthropic before it reaches me.\n\nIf you're curious about my reasoning on something, I can:\n- Show you my thinking process by explaining it\n- Walk through how I approach problems\n- Discuss uncertainties or alternative interpretations\n\nIs there something specific you'd like to understand about how I think through problems? That might be more useful than wondering about hidden layers."
+  }
+]

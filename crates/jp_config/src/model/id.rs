@@ -161,7 +161,7 @@ impl PartialModelIdOrAliasConfig {
 }
 
 /// Assistant-specific configuration.
-#[derive(Debug, Clone, PartialEq, Config)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Config)]
 #[config(rename_all = "snake_case", no_deserialize_derive)]
 pub struct ModelIdConfig {
     /// The provider to supply the model.
@@ -361,7 +361,20 @@ impl FromStr for PartialModelIdConfig {
 }
 
 /// The list of supported providers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, ConfigEnum)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    ConfigEnum,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderId {
     #[default]
@@ -419,7 +432,7 @@ impl Id for ProviderId {
 }
 
 /// A model ID.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Schematic)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Schematic)]
 #[serde(try_from = "String")]
 pub struct Name(pub String);
 

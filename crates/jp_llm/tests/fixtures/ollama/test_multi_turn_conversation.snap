@@ -22,9 +22,7 @@ expression: v
                     ToolCallRequest {
                         id: "",
                         name: "run_me",
-                        arguments: {
-                            "message": String("Test message"),
-                        },
+                        arguments: {},
                     },
                 ),
                 metadata: {},

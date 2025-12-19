@@ -389,7 +389,13 @@ fn map_candidate(
 
         // If we change from one mode to another, flush the current index, and
         // increment the current (virtual) index by one.
-        if state.last_mode.is_some_and(|v| v != mode) {
+        //
+        // We also increment the virtual index if we're in a function call, as
+        // function calls are always standalone events.
+        if state
+            .last_mode
+            .is_some_and(|v| v != mode || v == ContentMode::FunctionCall)
+        {
             events.push(Event::flush(state.current_virtual_index));
 
             state.current_virtual_index += 1;
@@ -414,7 +420,7 @@ fn map_candidate(
                 arguments,
             }) => Event::Part {
                 event: ConversationEvent::now(ToolCallRequest {
-                    id: id.unwrap_or_default(),
+                    id: id.unwrap_or_else(|| format!("{name}_{index}")),
                     name,
                     arguments: match arguments {
                         serde_json::Value::Object(map) => map,
@@ -578,9 +584,11 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
                 _ => return None,
             };
 
-            part.thought_signature = metadata
-                .shift_remove(THOUGHT_SIGNATURE_KEY)
-                .and_then(|v| v.as_str().map(str::to_owned));
+            if part.thought_signature.is_none() {
+                part.thought_signature = metadata
+                    .shift_remove(THOUGHT_SIGNATURE_KEY)
+                    .and_then(|v| v.as_str().map(str::to_owned));
+            }
 
             Some((role, part))
         })

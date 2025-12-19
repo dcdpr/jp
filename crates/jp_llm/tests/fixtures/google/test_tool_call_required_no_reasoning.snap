@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "",
+                        id: "run_me_0",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
@@ -29,6 +29,22 @@ expression: v
         ),
     ],
     [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool ran successfully and returned the following response: `{\"run_me_response\": {\"content\": \"working!\"}}`.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
         Finished(
             Completed,
         ),

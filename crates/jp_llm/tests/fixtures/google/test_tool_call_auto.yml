@@ -10,7 +10,7 @@ when:
         {
           "parts": [
             {
-              "text": "Testing tool call"
+              "text": "Please run the tool, providing whatever arguments you want."
             }
           ],
           "role": "user"
@@ -27,30 +27,24 @@ when:
                 "type": "object",
                 "properties": {
                   "foo": {
-                    "default": "foo",
-                    "type": "string"
+                    "type": "string",
+                    "default": "foo"
                   },
                   "bar": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "foo"
-                        ]
-                      },
-                      {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        },
-                        "enum": [
-                          [
-                            "foo",
-                            "bar"
-                          ]
-                        ]
-                      }
-                    ]
+                    "type": [
+                      "string",
+                      "array"
+                    ],
+                    "enum": [
+                      "foo",
+                      [
+                        "foo",
+                        "bar"
+                      ]
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "additionalProperties": false,
@@ -83,9 +77,81 @@ then:
   header:
     - name: content-type
       value: text/event-stream
-  body: |-
-    data: {"candidates": [{"content": {"parts": [{"text": "I need"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 2,"totalTokenCount": 61,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9afOwOtjPnsEPiMCQwAc"}
-
-    data: {"candidates": [{"content": {"parts": [{"text": " more information to test the tool call. Can you please specify the arguments for the `run"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 20,"totalTokenCount": 79,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9afOwOtjPnsEPiMCQwAc"}
-
-    data: {"candidates": [{"content": {"parts": [{"text": "_me` function? The `bar` argument is required and can be either 'foo' or a list of strings. The `foo` argument is optional and defaults to 'foo'."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 58,"totalTokenCount": 117,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "jRA9afOwOtjPnsEPiMCQwAc"}
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "run_me","args": {"bar": "foo"}}}],"role": "model"},"finishReason": "STOP","index": 0,"finishMessage": "Model generated function call(s)."}],"usageMetadata": {"promptTokenCount": 67,"candidatesTokenCount": 15,"totalTokenCount": 82,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 67}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wh1FadLRI-b9xN8PrYflSA"}
+    
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Please run the tool, providing whatever arguments you want."
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "args": {
+                  "bar": "foo"
+                }
+              },
+              "thoughtSignature": "skip_thought_signature_validator"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "response": {
+                  "content": "working!"
+                }
+              }
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": null,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"text": "The"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 43,"candidatesTokenCount": 1,"totalTokenCount": 44,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 43}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wx1FacHrBr7txN8Pn6iG6Q0"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": " tool successfully ran with the argument `bar=\"foo\"` and returned `{\"run"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 43,"candidatesTokenCount": 17,"totalTokenCount": 60,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 43}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wx1FacHrBr7txN8Pn6iG6Q0"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "_me_response\": {\"content\": \"working!\"}}`."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 43,"candidatesTokenCount": 30,"totalTokenCount": 73,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 43}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wx1FacHrBr7txN8Pn6iG6Q0"}
+    

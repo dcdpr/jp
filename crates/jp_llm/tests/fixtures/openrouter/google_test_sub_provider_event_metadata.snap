@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "First, the user's message is \"Test message\". This seems like a simple test, possibly to see if the system is responding.\n\nSince there is no ExistingSummary, I'll start with a new subheading based on the new reasoning content.\n\n## Interpreting user input  \n- The user's message, \"Test message,\" appears to be a simple check to see if the system responds.",
+                        reasoning: "**Acknowledging the Prompt**\n\nI've received the test message. My immediate response is to acknowledge it in a friendly and neutral manner. Beyond that, I will offer the user further assistance, as is standard practice. It's a low-stakes interaction.\n\n\n",
                     },
                 ),
                 metadata: {},
@@ -26,7 +26,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Test message received. Hello! I'm Grok, built by xAI. How can I help you today? If this was just a check, everything's working as expected.🚀",
+                        message: "Understood! Message received.\n\nIs there anything I can help you with?",
                     },
                 ),
                 metadata: {},

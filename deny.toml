@@ -12,6 +12,7 @@ allow = [
     "ISC",
     "LGPL-3.0-or-later",
     "MIT",
+    "MIT-0",
     "MPL-2.0",
     "Unicode-3.0",
     "Zlib",
@@ -35,5 +36,4 @@ allow-git = [
     "https://github.com/JeanMertz/saphyr?branch=jean/fix-valid-literal-block-scalar-check",
     "https://github.com/JeanMertz/schematic?branch=merged",
     "https://github.com/modelcontextprotocol/rust-sdk",
-    "https://github.com/Ninja3047/quick-xml?branch=serialize-cdata",
 ]

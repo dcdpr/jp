@@ -34,7 +34,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " test",
+                        reasoning: " user",
                     },
                 ),
                 metadata: {},
@@ -82,7 +82,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " sent",
+                        reasoning: " said",
                     },
                 ),
                 metadata: {},
@@ -94,7 +94,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " a",
+                        reasoning: ",",
                     },
                 ),
                 metadata: {},
@@ -166,7 +166,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " I",
+                        reasoning: " it",
                     },
                 ),
                 metadata: {},
@@ -178,7 +178,19 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " think",
+                        reasoning: " seems",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " like",
                     },
                 ),
                 metadata: {},
@@ -202,7 +214,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " want",
+                        reasoning: " might",
                     },
                 ),
                 metadata: {},
@@ -214,7 +226,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " me",
+                        reasoning: " just",
                     },
                 ),
                 metadata: {},
@@ -226,7 +238,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " to",
+                        reasoning: " be",
                     },
                 ),
                 metadata: {},
@@ -238,7 +250,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " acknowledge",
+                        reasoning: " checking",
                     },
                 ),
                 metadata: {},
@@ -250,7 +262,55 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " it",
+                        reasoning: " in",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " on",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " how",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " I",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " function",
                     },
                 ),
                 metadata: {},
@@ -298,7 +358,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " keep",
+                        reasoning: " provide",
                     },
                 ),
                 metadata: {},
@@ -310,7 +370,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " my",
+                        reasoning: " a",
                     },
                 ),
                 metadata: {},
@@ -322,7 +382,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " response",
+                        reasoning: " brief",
                     },
                 ),
                 metadata: {},
@@ -334,127 +394,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " concise",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: ".",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " Maybe",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " it",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " would",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " be",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " good",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " to",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " say",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " I'm",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " functional",
+                        reasoning: " acknowledgment",
                     },
                 ),
                 metadata: {},
@@ -478,7 +418,55 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " ready",
+                        reasoning: " let",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " them",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " know",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " I'm",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " here",
                     },
                 ),
                 metadata: {},
@@ -514,7 +502,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "!",
+                        reasoning: ".",
                     },
                 ),
                 metadata: {},
@@ -538,7 +526,211 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " could",
+                        reasoning: " want",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " to",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " keep",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " it",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " concise",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " but",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " still",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " offer",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " examples",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " of",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " the",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " services",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " I",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " can",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " provide",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: ".",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " Maybe",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: " I'll",
                     },
                 ),
                 metadata: {},
@@ -586,31 +778,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " they",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " want",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " to",
+                        reasoning: " their",
                     },
                 ),
                 metadata: {},
@@ -634,7 +802,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " any",
+                        reasoning: " was",
                     },
                 ),
                 metadata: {},
@@ -646,7 +814,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " specific",
+                        reasoning: " successful",
                     },
                 ),
                 metadata: {},
@@ -658,7 +826,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " features",
+                        reasoning: " to",
                     },
                 ),
                 metadata: {},
@@ -670,7 +838,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " or",
+                        reasoning: " ensure",
                     },
                 ),
                 metadata: {},
@@ -682,7 +850,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " if",
+                        reasoning: " they're",
                     },
                 ),
                 metadata: {},
@@ -694,7 +862,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " there's",
+                        reasoning: " getting",
                     },
                 ),
                 metadata: {},
@@ -706,7 +874,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " something",
+                        reasoning: " what",
                     },
                 ),
                 metadata: {},
@@ -718,7 +886,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " specific",
+                        reasoning: " they",
                     },
                 ),
                 metadata: {},
@@ -730,175 +898,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: " they'd",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " like",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " assistance",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " with",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: ".",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " This",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " way",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: ",",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " I'm",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " keeping",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " the",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " conversation",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " open",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " and",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: " inviting",
+                        reasoning: " need",
                     },
                 ),
                 metadata: {},
@@ -926,10 +926,10 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABpOBtYbrJCmctrqwZ6iHBkiyxODctzsA7QbvKWBV5ci2TihctGw_Fg-RmOsBywoPqz-gvUvXTSh0uYTs4a6cvPhPyUwsC-yZ9xmo4pLaSB8ifb5Y6xJkPTF3fCHjHAixVlzdcZgud6ofnZOnHo6TmAoQ99wGIB2APu8SVP9nov9yG6JAoYOtgaTA_eEAw6YWTvLjLve9brywbosAIeIXWap31F7zkuGPR9TRbwnU1xqzEDmlDkYeEnS6N-m4iD-yx2Zn_eNk10uzKUrAshfZgtbsZ3ErI9JZ7nQpAf-WxBIRf_vFncNl-nq940zMJbB0spxvyxbZpYE-AcCcGqbILUF91pnKll6KF2p0GPAy889Y3KqdGJOce2Jc0vzOpj3Gwyut17U_4QO6h5ppHdGyhmHkG4ZXc3Y-tAPfZZQPi7FxIVpzQ6rF7vtfRUA6BXXrdJmmNkLa5bQkXveUNPUCe1-5uvYqKlvvibst8nyVUrX9U4rVnkePov3Z53hbS13S-d54W9fWwe4BnwZMNqMg3LKlGgWPZZh4WtKoS9f2zELS6SYJNKhEC-zZaDGetZOUnvViZgqMdvYNHq3WsUTSxYTts8Y30WFNFwq-Spydk4AyisXyjvTFZngYhy57lx6P6piAWoVxz_iH8Ulp6Hyhupv5PG6iETjN2NzTtodHMw5CklyrehCcqWGxDO3hQWOW6IM7xF4diwIxo2KnNClgSIq_GuJxtq0Acjrk3xdkwdvyaw0poSHbySSouKp4qIaisVyrWHkaJwbKuA6SHkn48Si8sMuByjrRLYsZxd3LzwlkkNtt9K4vqtdZsTukDuvkVlbuTgjDV1QWiDcNd3oSsjufcn7S5UGHCjngkWvxt_tvUrYMa6a7ImYu-KfOZsiyr6qRaTkiaueb_So_zeLN-kyU_M5t841Lrr2L5CrhZXTOtKdHMh04zFvlxbBsisUNgGMu7C-s_LDvqQOhnqu7876JE6-TAgOA71iSjWD1ar3Lq14w1t87OL8WksBWr1w_ATyOkKCYtD-IPjP-1AbU8tW7A1tIVmeBQ5EkfXndwPpgMwrFT29nfChMInrnayOTpVu2EGEJjroxUahaoN7sLjYH0Pvw=="),
+                    "openai_encrypted_content": String("gAAAAABpRRpK-v5WdsDVTnr-0UGVVI2a8k8LK3daSfFz8LFhv6k0sTwew1CHzf5ubja8fJHyLRixgtKA3jmdFecYgaOFI0839h_-r_Cx0zHkS75A-YYlxI8tjLvWrGyg01WGUIM-FO8ZpALGT_Syiy8XQBinRVcXIR6-JVn35mFfIPnUveGJdnLv-PthjWmAyPay4RZfPlO0KfC__ei_1FxmRQf02mt40iy1NKdsGfY-8BkxAbDkBEcLY7V6Rj0l0j57iCGpbBNs0M7isSV5IV1InoY17fFK2kCaADiMKvepS0RIZfn0nrh0Gqeeoj6rE2YlLxdaF_m727T4KwIFn6hSrQHzneAcbH8CqXqiPKl270XC5wx4YnCdhh1vHpqbNz3TYpjseqI0TLjGZ9KYjRHzPk95b7V1ku6BikuQ6nL9afMmD7DfboGsKx9Y7Hpj25ANeT12gP53QL521OrUEgPSwoVdQZESVx-FJfE4kwZEOovWRRpHy_-VVlz5RXjKY1DSmb9h0XSNVPslHZ2f7np8jAPwwwnLIdhBA41AzV_L0j6yBKTDOWOhyanJ0sX-rAK16kmwhlNHzKQjx_-77rNpRuMZLViGz7HHZUUk2JzyYmILpbMm2wYN8AH6XGZJ1y17p4aRKvONz02pVwRcG6qLfGJTroUh7VxiFeHFs3FYu6T454EviSVjky6nlqx9Uys7XHCVidnDokVs2OMkV5-SM6YJyF-PeBm1e59qIGKNYIE1hl8CJxcuasDZ7xzIVA8bRd8pBpDVjiAmnSyYnF33CLUTEl-R2NBT3YrDTUyD8Rqq1kgWPt_1Q2_iZiHhSKcvyJhq8qXZjIa1c2m4mQP0yjGXjlp8I4tfJPuTnLFZpkJISQxTtIlMTgOIqmR22-O9gE28eEonyrGM_gGrbJ9PYXtq0BQCwXLwPRaAPEP9xv7Y2B54C1W8M1ItiVHjCG-qhi_1TT1oSPK2XTy4TA8AU7NHjVBpeXj_JKEIQGydQB2hXiu8QY6EyIDP_qU-YsZydDR19EVZvE9wOQEXFcOtsX6BBsBC58X65zsxxuZgDnDTlCpzcM-9HDLmBGzyBaJKFDx3J9ja"),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_041418778598249a0169381b5497f88190a90d9e837d4bb6e2"),
+                            "id": String("rs_0b2197cf5887039d0169451a4807f081908c8cb5e6a679e46b"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -955,7 +955,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: " your",
+                        message: " —",
                     },
                 ),
                 metadata: {},
@@ -991,55 +991,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: " —",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " I'm",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " here",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " and",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " working",
+                        message: " acknowledged",
                     },
                 ),
                 metadata: {},
@@ -1111,31 +1063,355 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: " you",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " today",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
                         message: "?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " (",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "You",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " can",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " ask",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " me",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " to",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " summarize",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " text",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: ",",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " draft",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " emails",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: ",",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " debug",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " code",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: ",",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " generate",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " ideas",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: ",",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " answer",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " questions",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: ",",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " analyze",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " an",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " image",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: ",",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " or",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " anything",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: " else",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: ".)",
                     },
                 ),
                 metadata: {},

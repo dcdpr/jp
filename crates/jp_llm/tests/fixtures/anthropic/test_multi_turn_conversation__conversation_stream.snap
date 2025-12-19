@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:36.525769",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -119,11 +119,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "# Hello! 👋\n\nI'm Claude, an AI assistant made by Anthropic. Your message came through successfully!\n\nHow can I help you today? Feel free to ask me anything — I can assist with:\n\n- **Writing & editing**\n- **Analysis & research**\n- **Math & coding**\n- **Creative projects**\n- **General questions**\n- And much more!\n\nWhat would you like to talk about?"
+    "message": "# Hello! 👋\n\nThis is a test message response. I'm working properly and ready to help!\n\nIs there something specific you'd like to test or discuss?"
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:35.294629",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -145,9 +145,9 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "The user is asking me to repeat their previous message. Their previous message was \"Test message\". So I should simply repeat that.",
+    "reasoning": "The user is asking me to repeat their previous message. Their previous message was \"Test message\". So I should repeat that back to them.",
     "metadata": {
-      "anthropic_thinking_signature": "RXFzQ0NrWUlDaGdDS2tCZ2FyNHdOUm1ycitTMWd2UlBFQ0xvblloUHFYdkhkWkZzcThKV2oyN1NKbU9oa3VUV1VLVmFoTWZaMnUvRCswOUJCMDJYenNNSnRTUjVQNDZmamhTV0Vnd1p0Z3Y4aHVjUGhEVll5RGthREtMZFRvdDF2R0NiMmdTYzZpSXdGSlVmZkxNZG1nRXo2SDBMRDI0QmhxZW9YRlFQNzdxN2ZIRldJMm1iVVd5b0xDcGxGaFpHaTRZUG1IWGZZRnR3S3BJQnFwZHRtdHNsQkFDU1I1Uk5pek5ZV0U5S1BHR1RFM3NFQW1ndk90ZXdrZU15N21XY3dEaTdIK0hNaFlKcDFNRjk3cUp4Y05menhocFhIWFBSdDg1c0p6QlN3Z251ZzhQVVRVcTdWQkRoZ1V0TWFISnI5d2F6WnZscUY5OUpzZG8wUUN3NlBYT0xza2J0Y0s5Ti9UdUNSQlNiTHBveXowZHFZTk1sZDNseUpTWHBuaEhKaG0ycXpncTZsWjY3UG4wWnpXVVlBUT09"
+      "anthropic_thinking_signature": "RXJFQ0NrWUlDaGdDS2tBMS9lZGtmUDBrZkxRWnV2ZnMycEZTMG9OMFY1R25ZRGxNS2ZnVTF0dHQ4OXcxd050VnNKaGx5VGlrdlovd29kaWtFcW56bEYvMG1DVzYxOHY5Ykw1ckVnd2hhNkhzTGtGc2Z3bzdaZzhhREwyVWpHWURuSGptMzMwbHV5SXc4MEQ0c2ovN0xKNThDN2U3czl0bUtMODd0Sm1uNjhnRXBiOU1UcFAzazBNL3VOY0dwUkhNTWNBb1p1Z2Jici9VS3BnQitjVWJlZ1dzRDhaejlIMXRoR0EyQnFjeGlqc0tyaVJpT0t5bmMreDFiMXNlZFJ0Tzc3UFRlTDJFYWt3RXNsWWxMejFpbG9PRFM3ZXB1R0V6dTZicjQxOGFXVGtFRDk3MDdzTXloNkRnd2tEVjRyM1FkVXJ4a3VZeDh2UHJxUHVzR0NxSGh1UmRMQjA2ZzBwcGVEbXh0NG9ZM09jMDlhWEg2cXRsaUZacTdXWnEySSt5NnloUnBINGw0ZFBuekFTVUtNbHlrTmdTOUQwWUFRPT0="
     }
   },
   {
@@ -157,7 +157,7 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:35.294767",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -171,12 +171,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "toolu_01MFC4QAApP6QFdwM48eLes2",
+    "id": "toolu_01F3qxRanMBBxb4CDausBx8L",
     "name": "run_me",
     "arguments": {
       "bar": "Zm9v"
@@ -185,18 +185,18 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "toolu_01MFC4QAApP6QFdwM48eLes2",
+    "id": "toolu_01F3qxRanMBBxb4CDausBx8L",
     "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I attempted a tool call, but I should clarify: I don't actually have access to external tools or functions in our conversation. The output above was illustrative.\n\nIn reality, I can't make function calls or use external tools. I can only:\n- Have conversations\n- Process text you share with me\n- Provide analysis, writing, coding help, etc.\n\nIs there something specific you'd like me to help you with?"
+    "message": "Great! I ran the tool with the argument `bar: \"foo\"` and it returned:\n\n**The secret code is: 42**\n\nInterestingly, this is a reference to *The Hitchhiker's Guide to the Galaxy*, where 42 is famously \"the Answer to the Ultimate Question of Life, the Universe, and Everything!\""
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:35.294941",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -218,9 +218,9 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "The user is asking what the result of the previous tool call was. Looking back at my previous message, I made a function call to \"run_me\" with parameter \"bar\" set to \"foo\", and the function_results showed:\n\n\"The secret code is: 42\"\n\nSo the result was: \"The secret code is: 42\"\n\nI should answer this straightforwardly.",
+    "reasoning": "The user is asking me to recall the result of the previous tool call. Looking at my previous response, I called the `run_me` tool with the argument `bar: \"foo\"`, and the function result was:\n\n\"The secret code is: 42\"\n\nSo I should simply state that the result was \"The secret code is: 42\"",
     "metadata": {
-      "anthropic_thinking_signature": "RXVJRENrWUlDaGdDS2tCYVNyelV1c2UzTEtUQVBIQmRtcktmMmxSa1N0cmNwOTMyMXdZQXE0Z1lBV0VxbDdHWE51RFEyajRKVTNqYjBzNlkwSDI0TzFjcWRCL0RyM0dJcjlyMEVnd1RrWFRnbnFzNGVkV3ZjWlVhRFBwY1BvTVg5a1FtTUZYSGx5SXd5L1dxRDFiaWtyZzlZSUVBaFV5Q24yVkR6VEJjQU51TG9zUk5PK1VEanpFczNjbDBxN2d5UTVKZE1kVTFXWDU2S3NrQzJ2YlpLNkIyb1o0bktIOGFCTkh6ZndmRUdVL3dmVDNFYlN3Zk13Q25Ya1owUitZNDlDNWhoRjJ5U2VnWEkvRjRTeGxEK1NRdFcyWVlubTh2cW1VZXJJLzE4NEl5NlROMEpaRDNpWEVlUFYrQVNER3ltNkV3dDhwc1pvSFdEdzc0NFZsdnRRSWdqc2V6MHp5NHVzc0lKcTc5bW5MazZPek9kU0lIcnExa0Q5VktoV21mRFZXWFRTOEs4REk5d1NzcC9HWGVzMWdWVzNWNGRYaTZoK21IOW0rN084bWY0cmY1S3IrcnpDek1iVG04U0RMSUlTTlpKWW5ZUjRuSUQ0dEI4WnF3VkxZNUxkMlZCUjFFLzU0c2JmOWxTUWkzUlRXdlNlQzNIdW5DRk9EcFBVTW9oQ05TejgzcEtFYlJCTm16MFNxYmxORXZkdFFGTzcvdm5Da2dwWGdnMmZSU0IzTTQ2R3dLczhXcmRqYTJHOGdXRkhCZTlLeWdSaENRckIvcUhKc3lyVWdaOHlPUi8rZ2lIbzJ5cjAxMG9aUHdRNlp3N21vSnRQMDhySU4xdjhQVHJlQWhBd1FZQVE9PQ=="
+      "anthropic_thinking_signature": "RXNZRENrWUlDaGdDS2tBMk5rbVJFSFgyYjF4M00zb1RNZGdjbHExc2NLcWl5dFB1UlUzRlV0L3JwMjB5NWZyQ2dEZGtvUkVLZjMvVmZSRlFLSlc2ajFnd3k3WUMxMHdmMDhuNEVndzJaUWVialRiZEtVMndCMHdhRE12MXVMMXRFbVBjU1FGUWpDSXdmU1N2N3pwVGd4QnBuZFQzbTVDQzZlSG8vNG5UUFlYblo4K0FtQlczQ3JPT3BWS3FNaUFTLytoS1ZGbGE4RkVNS3EwQ3lzNDFvWWlaVG5CVEd2Y2txZU9JajJlTVIyckc1OWYxRHJTUjE0a1ZOOGVsZGVNdlJwL0ZUTmpuV3k5d3c1RGhIK01kYmFQSnN6TmZhRU04UXRhUkZqTWc2Wjg2Z21JMWNNZW9aRGUxRS9MWVF4MGFYaDdKZTBVNENEcllRNjVXWkpvN1ZEL1VyQ2RtNnEvTTUyeGQybUY5VnhIMkx0YSs3NFE4TmVRYkhCakp3eDBCaGFyd0JsN01lalhjNGVkUVUwWXgxZlJVUUJBcUtUQVFMUElyVkd2dkJQYUZRbUFwK0JtNUtqWUlHZ2NIbThpbDZTeFdXMHJnV2M3VTNPWkUvWEY0K0s4NCtHSUgza3BSdHc0QklqTzRPdDZEYTVnbnIwZ3d0N2ptVHAzL0N3U01hdlZtc29yM21ZV3VyV0RXU3JpdGs3a3NMekFkaEQyTW5DZXF1TE90d1JQenlxVXovalBmMDBOaXliNDZYdzUxOVFUcGxSTWlkSWE1K211Tlg2SHFGYkFlTUF5ckhmTndNUmdC"
     }
   },
   {

@@ -10,7 +10,7 @@ when:
         {
           "parts": [
             {
-              "text": "Testing tool call"
+              "text": "Please run the tool, providing whatever arguments you want."
             }
           ],
           "role": "user"
@@ -27,30 +27,24 @@ when:
                 "type": "object",
                 "properties": {
                   "foo": {
-                    "default": "foo",
-                    "type": "string"
+                    "type": "string",
+                    "default": "foo"
                   },
                   "bar": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "foo"
-                        ]
-                      },
-                      {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        },
-                        "enum": [
-                          [
-                            "foo",
-                            "bar"
-                          ]
-                        ]
-                      }
-                    ]
+                    "type": [
+                      "string",
+                      "array"
+                    ],
+                    "enum": [
+                      "foo",
+                      [
+                        "foo",
+                        "bar"
+                      ]
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "additionalProperties": false,
@@ -83,7 +77,81 @@ then:
   header:
     - name: content-type
       value: text/event-stream
-  body: |-
-    data: {"candidates": [{"content": {"parts": [{"text": "I can help"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 3,"totalTokenCount": 62,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "kBA9aYqjIubOnsEPuLvzgQc"}
-
-    data: {"candidates": [{"content": {"parts": [{"text": " with that. What is the value of `bar`?"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 59,"candidatesTokenCount": 15,"totalTokenCount": 74,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 59}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "kBA9aYqjIubOnsEPuLvzgQc"}
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "run_me","args": {"bar": "foo"}}}],"role": "model"},"finishReason": "STOP","index": 0,"finishMessage": "Model generated function call(s)."}],"usageMetadata": {"promptTokenCount": 67,"candidatesTokenCount": 15,"totalTokenCount": 82,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 67}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wx1FafL7AquavdIP8vOGkAo"}
+    
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Please run the tool, providing whatever arguments you want."
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "args": {
+                  "bar": "foo"
+                }
+              },
+              "thoughtSignature": "skip_thought_signature_validator"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "response": {
+                  "content": "working!"
+                }
+              }
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": null,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"text": "The"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 43,"candidatesTokenCount": 1,"totalTokenCount": 44,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 43}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wx1FaevbFoSBxs0PyszS0Ak"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": " tool ran successfully and returned the following output:\n\n```json\n{\"run_me_response\":"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 43,"candidatesTokenCount": 21,"totalTokenCount": 64,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 43}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wx1FaevbFoSBxs0PyszS0Ak"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": " {\"content\": \"working!\"}}\n```"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 43,"candidatesTokenCount": 30,"totalTokenCount": 73,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 43}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wx1FaevbFoSBxs0PyszS0Ak"}
+    

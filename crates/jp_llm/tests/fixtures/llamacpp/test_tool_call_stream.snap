@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "hcImiGGuezmhhoqxqjjFu7Q4VgBpBeC3",
+                        id: "2mUXEacyyk37QUZjrQMQN31sbSqJbiTe",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
@@ -36,7 +36,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "It looks like the testing tool has responded with \"working!\".\n\nIf you have any specific tasks or further tests you'd like to run, just let me know!",
+                        message: "It looks like the tool executed successfully! The response was:\n\n```\nworking!\n```\n\nIf you need any further actions or results from this tool, please let me know!",
                     },
                 ),
                 metadata: {},

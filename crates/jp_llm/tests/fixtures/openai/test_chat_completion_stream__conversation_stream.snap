@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:45.121118",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -113,7 +113,7 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:39.680113",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -135,18 +135,18 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Acknowledging test message**\n\nThe user wrote \"Test message,\" which suggests they're likely testing something. I should acknowledge that and offer help. I need to keep my response concise and ask if they want anything specific. It could be useful to confirm that I've received the message and provide some example commands. Maybe something like: \"Received. How can I help?\" I want to ensure my response includes a brief capabilities list while remaining short.",
+    "reasoning": "**Acknowledging test message**\n\nThe user sent a \"Test message,\" so I should acknowledge that with a brief response. I’ll keep it short and also ask what they’d like to test. I could suggest some examples of tests like functionality, formatting, images, or code. My response will be concise, showing I'm ready to assist! I'll make sure to keep it friendly and open-ended to encourage the user to share more details.",
     "metadata": {
-      "openai_item_id": "cnNfMGM1ZmZhZTA0MGQ5ODllYzAxNjkzODFiMjAyODRjODE5Mjk0OTdlNDE2NWZlNTBkYTA=",
-      "openai_encrypted_content": "Z0FBQUFBQnBPQnNsTEI4LWtsMVJsWE9FNmNWenFobWdkN3Y4amo3SHdIMXZEWVU3QzdrM29qSmluT0ZMOGtsaU5yRWxEdUk4OXR2dVltRGg2c0RXdmh3RVpsWGF3cVM5X2hEVXlYbkUtX0hLM3p2Z3JqQnBxR1I5RFBJcmNDYVJvamxHdXZtVkI3YkNNYmdaTWE5b0JkZTRlSXpsNmRIZmxIME1sam1VQy1BdVRXUWdxYlNlVjRCVTZJSWhDYzlucFA5TlJfZFRjVWNNdWJ4YnpZTS1WdVdlcFdVVzh4S1g5RE9sN2hUVkE0SEMtNTlIcGVfeXA3b3JYbGQ4Zmc3aWM0Y0xQZm5SSXFpdUtSN0tUY25TMWhILXQ3M1dUUDFTTHB5bjR2SGZlNmRQektUSDhYdVJTc0Y1YTlGRkRjN1hoeUV1VG1lVm91R1JpWW5DV1dSYXhwZTJWOE9LSnp0UDBmYklKTHRLajhtNGdXTzE2bWJoUnRhMnVLMWRfQjEzdzlkdDcxbGdaOHVmNmpvVEsxSWg1WWw3ZmZhTXEtWU9PclFVSENFS3NGQ1h6RkJQV2ZkNG96eXUyMm1GcEtTNWlfWFFWdHlNN3lFS2M5NlRkZFBLbU1tNktNMW5YS1VHVDZSUm5sdGQ1d3NfSmtIS3NweUgta0QyOFBCWUp6YmNSV1gyLVhPNlNSdXJ5aGJrazNhd3hHVDMyMzJTSi1FN3Ixd0kzam80M0E5ZF9kaEZyRUU3SmNIRGV5Y2pERmt4QXFHVjBXMzlyQ1RmX1BrT2ZtLVE5bGI1MzJ0S3Z6MF9qVW4yd3dRako3UHhrMWxoWlVvWWRqbnQwQmpHY3dqSlJtR0NENGl2T2lnWEJ0WENFTkpUNUZZbHdNYndFa3BFeGtNbXNwZUx1Z2c4RU1qWEY5Z1IwQlFta1MwelU0aXNRUHhxYk1ZdVBFd1kza2x5SGlUN0tJdUp5WVNKeFI0MllMQmVMZ2VUaXlrcjBqTV9hVEZRZHI5ZDdaMEdBZTlIV0RTQm8xMVB5S1E1VXVWUmE0NUlIYUxJSEw4Z0liaEZNSlBkYVNiYUR5a1RRT3FDM0FtUlZfN1ZsMjRTc1NtY1JJQWpVUDhYZzBlbnBhVTg5V05CQTdaTW5JTDFnUGZkOTl4ZVQwRW9ORTk4NEFkZ25ka2kyWnNKMTZYeENWaEg2Z1N1SVpiM2sxNTZUTlBybm8ycUJyanhINVkza2xHRGRYV09OUnpoOU4xeUI5ZU56ZDVVdHhOWVVqanZocmpBaXNSb0VVUE16cE1WQzJzVDFIb0ljTm55UUwzNTRFRXlrVm91U0VVN01iWUpkYzM4ckVlanp5YjZsMDk2NnhmQTJwLXlSajhZbUF0R2I3UWlrOFNhV1pTUS04Q1NSWWIxOWI2b01jd0xWSXpsbW14Qmhqbmo5QlJHNDUwMjhTTmcxQlB3clRlU1lYLThsTFFka005N0hWSmdIV1VVSGwyZTZYcXR2WWZtTUNDS2VZbnhOTi14d3ZQUzdoeEQwSXpPX2RBZV93czJiTDluaFdJZ3Ewajk4MzZQakRWb1JwQVZyQjlHbTdzbHA4b1pVM2Vob0xtZmVneVRyMnpDS3hhNHpPYWRod0Y1elNNYWVqQ2lZc3luS2tzQ0ZEM1Eta1hwQXc9PQ=="
+      "openai_item_id": "cnNfMDBiNDU1NzY2OGIyYTkyMzAxNjk0NTFhMWJkMTY0ODE5MjhjOGFiYjA2NjdkOWYwMDg=",
+      "openai_encrypted_content": "Z0FBQUFBQnBSUm9lUFhoaWRxcjJYMmFhMV9ZVEMwZzNFU1ZRTl9mN2FocnV6ZEhsdFhqeFJVSXg1QUxzbXp4MDF3RlNrV1lHbFoxdzZCbl9wSGFQMk0tdUVTRy1LRHdLZDB6N1VSNXgyVWdMa2VpMmtwRE03dkktb2gyT0lmNHZqM0NhRUhlMHRQOXlhcVB6YnQzX002ajdfUE1VX0hORUtRS05FUnBSbkdCZ3dvUko3SzN1aFJXMUNyX1RoRWl1bzBwa2F5VTJnTWxra3ZmZUR4a2c1VTNfZF9kSWdFSkF0V1NpSjJfa1BoVzdVYzVDeHhlLUpzWUxrZGtyLWM5cU0xYWo1dDlhdGtFLUJvSVowaHVkbFBOTHBITURsOVhxSC1jTUlLYUhOU3BPZU5wSVhzSDdsSzQyNmZXOS04MWg2MUNXemlWbEdoQTBaZ3c1Yk13cWpCQk9FbW9vTEZNZ3JXQmo5a1hobnpjT2d1b2FSZjd2NGZ3Y0JSYmJfd1dVd2xKbGxiTktVV1ZNWnhBTFZVLTJwcVhyTGc2UF9pNlBpRl8wWUZqT0MtN2haZmk0cDVKLTJ3bWpLQ1RVV3pLY2hoZ1NER1NnVGdPenlTVGctbWFsVWl3c3lhSFZDQ3B2Y2llMk5NSGxqR2cyeHphekFtSUJkV3FvQllfSFhmb2dHUUxHeXYzT1dfQ0tIb1hKMkF6dTh6cU5FaUsyd0VQLVZ6X2pxVE1BWVFfRGFYUFdyQlFadzhzN0tDOFhBMHlWUkhXYUVuZGp6bEFiMUtQMWVYTXlac0Q2dlZLZ1FWWVRoVmVFcVFidS04VmRDMEZoMXNtaXFvbnRqd2RSazdnbDQxSkFibGhvZ1dVb3BGcG81QktmVnFWT21ma1BHMGk2eUhPRWtabTNnRkx4Qndicm9Mb2M3ZF9HYldvSE1iWU80d1FnTkZUNjBjdTE2UWNwc2pscnBlRS1yQzVSYi0ydTBpSjhhd25kSmNFNFhtYi1mbzg1VWxGWGU4eVEwMy1na01qUHZHbllQY1Z5c1JCcGJhWW1oNUZRZlhUd2J1UFYzTndCY0dmOGo4ekp1bWM1WkkwcmVZWVd1WDBSNGYxTXBFbDljYWJBX0VnRmlyYTA1cmptNG1XalJ4bDBPM1pPLV9KVkNLcHc0TTc1d05oSmZGQW9xTlZHU2lodDlRRlkxVXZlS2NhZmVWUi13TUdETlVuU0JBdGVnSlpYSE9TQ1ZUa010ZXdBUVdrdmw0YTJna2lvZW5DNDd6Ym1OTHVsNVFocThNWGxDNlJrX2ZPU2xqdDVkaUtRUDhPQnhoNTZhY2p2ak1MOGE5T2tMQk9PMXc5eWxYa3ZZZUJNY2FxSzZhclRTYVE4WHQ1dHN3QXhXc1MwMWV5UHlVZTJ3S0dZaTZSZU9PWGRxS2hNd1hIdXlhVUFVclk5MFZBaHEwY3YyMjFEd1Fpb2V0SzlJVDJtQWhSX1JraWtyOHBuTzVPOGV2alpQYnZXZENFTGVqVHhxZkZWN3JrTVlBTDB6VWlGQy1jZjR0RE1UMUxtUmowbzkxZzZQNlAteGtRT2EwZmVHb0U1dVVJWkN1X0doX3VWZHplLTN1dkc1VlEtT0trYjNkVHRTLTc2Z0pBcQ=="
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Received your test message — I'm here and working. How can I help you today?",
+    "message": "Received your test message — everything looks good on my end. How would you like to proceed? Options I can help with:\n- Run a quick Q&A or knowledge test\n- Check formatting or output style (plain text, code blocks, JSON)\n- Test image or file handling\n- Run a short code snippet or math calculation\n\nTell me which you'd like to test or send another message.",
     "metadata": {
-      "openai_item_id": "bXNnXzBjNWZmYWUwNDBkOTg5ZWMwMTY5MzgxYjI1MDVkYzgxOTI5NDNhM2UxZWFlZDg5ZmU3"
+      "openai_item_id": "bXNnXzAwYjQ1NTc2NjhiMmE5MjMwMTY5NDUxYTFlNGFhNDgxOTI4MWU1NjFiN2ZjYmNkMzZj"
     }
   }
 ]

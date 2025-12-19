@@ -8,9 +8,14 @@ expression: v
             index: 0,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "I'd be happy to help you test a tool call! However, I need to know what you'd like to test. \n\nLooking at the available tool, I have access to `run_me` which requires:\n- **bar** (required): either \"foo\" or [\"foo\", \"bar\"]\n- **foo** (optional): a string value (defaults to \"foo\")\n\nWould you like me to call this function? If so, please let me know:\n1. What value for **bar** would you like? (\"foo\" or [\"foo\", \"bar\"])\n2. What value for **foo** would you like? (optional, defaults to \"foo\")\n\nOr if you'd like me to just make a test call with default/basic values, I can do that too!",
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "toolu_0191Y357Cp3KMkRYoz85cc8o",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                            "foo": String("foo"),
+                        },
                     },
                 ),
                 metadata: {},
@@ -24,5 +29,25 @@ expression: v
             Completed,
         ),
     ],
-    [],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Great! The tool executed successfully. I called the `run_me` tool with two parameters:\n- `bar`: \"foo\"\n- `foo`: \"foo\"\n\nAnd it returned the response: **\"working!\"**",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
 ]

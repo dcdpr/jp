@@ -14,8 +14,8 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("rs_0573bac7590c482b0169381b48675481a197ade5439b99de7c"),
-                    "openai_encrypted_content": String("gAAAAABpOBtKEXtRhd9rPGJRQKstAKsMt_FuB4R3pmqRcsmanw7b6t0H3ctUagv-9vWKqPfQPzRbSmNofc1IGxe58bVAH2Zz6ktHsvuF0MbQVu7_Vf0qzLjedlVPcnK8Kjl94IBcAXapFOy0QNTxw_0YZLpaFLSMjDJxgqdCvIfBV92StDIYVaiat938sJcrZ2HFtb-JDSD2AaWMRxe-vGPkn6YqwUOn9HMZUYi-RyxMdJ-ZB4ye8FaUEpS1OeECchgWtRmGTvtxhIbY2pyBWyQk1yAazUCN-6SAD58xHFa4QxTKbgFHR3nYoS48hIJyehjUp6Fir42y3Xw6CfkvY2pEgdoxCiPX8hL_zssPOECCbYUVlnFTwGXbOsqgMqE6fFQgpKIiJyg7LV56cyfDrFK9Oo5FpmTX-ySosKgSBeRzSRvP4n-QR4Z5Tj-tTNvTI2Jh5K5w5umkzMpxUpSj55rjjXKK8XPF4X2KFnx7nIhI4lckTTADFWEkGEQwGa-9RcOx1jleEMwhCAq_ngZpmJp1nNtR_xOtHwUfZyeoFEnhc7-0DUc8bbwDQN23l6OTA16sNgfyeTW1QjB7kd1CuQxerw6CUTiJymcHH6xp-7KkBt3VHVEMwqw5j4dzp363M7zN43cVR4xBU03nEO811rU-CpYlPrO-GCpj4rVf6I1uwCfEqT6ZpCuVUXKDLpdmp919PRt2Uq_5NOmU47IrA-ATAQsJQ7oG9tHLMaCrhWfy7ULY1p9Xs8fjmCVtJONOZjdbiuOTm_bE6pEc24CjDNHRJQQPmeKFY1oit8i1IrP9obD3D6bbaQnQ9OpcMwPowF45uesGwBtr0xli1Gr8xGBSU04r3n179Ur475h55mJhm_F4x3v98shuAUYLriRKyIyR3I3RcsjNRk1_clpSsMTDwKYHiTYFdoRY6MA72y0VGpobYqRbRvQoyoGWB8DoFZRLn1UWcl8gOWcKqU_qLY8N6hSnI__jfrxwyIN3mhzaeH2nspuMsyvG_4yAkLeZs1CvQlvoSfwUlm3WQgRU2SofQp3y531DAzaqyfSbZdyqMlGmXFgogfPEt1dHKriNjUnw5K-K_Q83wPyeDGFCH97TgQY9y_gW_Uo2T95nYz3GVPcNBXcwZcw4DpiDawznAzTV1IG1HAEdb8IR0JUzsT63D7dxNq7jVu26NVmu_ZzdC9vaUcmE7cg8_k6-_3pW6xok63iAtQdgly7MdjRtbrNggziDP-q_6s1mytPZ3PmrUa0HpqwvF7bE7LxBFlGYcDtHm71pKHgghgfPg67wgSp16a_NEriTykm-Tj2AIXf5e-tpDLJbf6EGz1u4OzgdF8ncVp4RVXL4Lm3dUgWMXVGkMTtZ-q01j-6zaB0ZYhm76MSITKoOxXdNaPWuXodoAoC4i5jbZ23cNaJOJFamPIlif7ET7UZGhynHoW45-JdHBg3xW_n4boaCGmgSvY-3_6GBZ_hn2lXsoQCMJeWRkl2hkyVLHRx-OAoVaU5-IYaZszIDkLWZ-ZQHcJbxoZQUjck61PVSamst9OlIg35GApHEUYDaXHQI3-7cKQEy6e5CpniGjUcSlOAnqxdVm9Gt_WyLhbRn_2G9b5sFsJBGmnJQhcB5s2dKI1gZY_EWtk3WjVFUgoMLSRCqstLB3MT3B6oMjT97cK96NmthtDJ-L6IvzU_zmdt3yTWoTMnwyR7lX_kIWPoh3ZsmP51acnSwbuWg4jO772WxKtd4nXqbIyAnc3_EUBruvySLDUgHvOjlU2IsVWJHcLqmvfGf6aj7plJ56unEHECvYGesgFlHeJp_uqJILqA2BTsUJ-NhtwnItCeC4vfHLb-ZLFxShbQjJpF5dP6o2ZQbGVUNqEZyh5hbIdfnkc5qgLPXyXNWnF3WOLXLLxPFXFeeoYtubJGIk36YvPmnnXGSSAs46w2tO0NjZr41gj0cqA=="),
+                    "openai_item_id": String("rs_09bb019a16d3d1840169451a3b6b80819e97716a4c66e8f897"),
+                    "openai_encrypted_content": String("gAAAAABpRRo-NwGFwgZ61P90aQHYzjZGqzQE9G37M88ObEibNTMR448sa_wLJdkGWal4Xlz-g5Zj9-91UOjOZr0U_y4wLU65nUU4siuv53FPDx0hBJ-S7fidykSiiD6HKf3bACEGbd2Sar8NkFDnjkKfFWHBJMQi2Tm5vnmGQrA2JrKh3OI-evcNSHObcw6CY1nm7pcI-zgjJHfrik9bYCBudaJ6DXeJjqYIlwkTFgQNuYO7QvAQpNC2BqbmpWpYjsfzyl3-di-0gTeSJnkrkrxezB3WDLdBAJQH6v1gnZl-HMU0zDB3Pp6r6Yhn0e4CD3airEbgOZHII3HYswGeTk0Ugmciqp31XF7MdfYxsIGwySQViFY1eniJi3YjpeBmXXyDzys31i2oXFJS0VqWGONAV2KYmfyA7pU82c5COptGSCmpr3BZ8tpVnNxZ5XmNHGQW0VPz4czYlFa_4acQ_CvMqPLtVvY8uK2jiHp2kiuCoI-5qLQT-TbhY-s7eWT3fm2P-m0zASnvzS755CNsLSpCTk9w8HKzy9X3Efu0XO33feopfNAQ5lmx_YoKuHnjdeJ7y_T2V_lfBuiuNjLHE39sL4Yi_U5ACq0JVdybTBsRrcog75VPCW0RS7y2ZzLpgVH5vnWQ3PFXdYS8GE4ShOCjgLr-WkspZwoyUbiiCvfwPXEk2ctZE7XWuIhu9XaFRJbvDqxQhqnkZzexsAknSyhYsaob71cqYu79wQqjr1KNB-TPQDkX2nwy6gC_htVu_y-jwmYTPbUZcrfR4dNrmKF-lVw2SHMMZDzb7MMHLEmzo7PzUwBFwtMzulfRiqlagf5E9If7WdOOpsLTOlR-omAQqOGLddOt7nR7zOlMdT9wrKa1VygQzH4kPo81AcOuwOnyTOawaOTTwkP0dBuTl0DBXa_EvwBy2L9Pvn5xt3G9Q-sPMhZnMOQ5fGL2Yty6AVBNGAPYsgMgCu_7q7AZCUYoFcmelocjlKcpSGainzPOMTbJ6iod6NNF4JhXJsvJrx4NaQOtVhTk2NwzTtGNgpsSIXg-OxAxX4_fSNmXDAeZIpsE61lAEp-tmoIKJHS3czRsIwwIj7iIrrfOyydaiyt_4y3qGSW9CihdnXjmgGbOgkUeHb8ld__go3znQsQW4BHgyu6O2oNpSGcANPDrr5wK1-LFQVuW0WXioRo4-tL9okaxBS94XZlfcyTsTkjkZQ43M00RRRSU8vPZQqceRM9RIoPfbj5LYbFdkLWmgOtbK4feeRQzqzgKCuxt_kW_SWNx8c715SsLPKBtn68fTp-LPCbK_8kUSVNDkydBg5Ul1lnIUIM2loXM2Nb_TnhnDTaJTK3tU4Ed4DP00DahJsAW7mJD15daaegZo5Xt8v8zbxL4dIfsFvrlfY_-TMBXmPNrZ72EajHsqnRtZGZP8gjYDZjxljKt9Ueesp69aA7Y0PWERPmPUPy43o57v7Tt6o2V9kdu_eHMChC-Eikx7lRgaftuA5WCo02nk8kJhqjn7SHS5DJ4AzE5RlRTgO6QvbP7Oh1msKQr6BnPL5LIQQ6y7G9howTwOKWukyAh9lAKRO-71L19wW7gUIPex3n5PK1B9ndsw-mDoCOyQ9jcNxo2Otjx-O6DHRAcZR9TfLkpeh4QdlawlxkhBW5KrzCzZKoJzqXXHTIuq6ItLsSypmfqhwnsygqlEGXRlZzSvPuK8i2aLUcgBSK-Kw-HJF6Bp8aiAVYXrOFbzzOlitf8qA5Gq5EHpzaIDutL3T43C2EyM5iXJvEj9dLSem2VzX2M6V3ADl00ol7865oMo0BnQqlJkr6csyV4adgmDmAlj0vURqqNF5EITzW4KWJzHHMIH1vcT70qZoNn7qaoCyMYz7wcT1Gpg3gfiYD446FICHxagdWj2v8e2i58UAYM1EPc2LsI2hltnPkw3x9b9Q03Eqp_ERedhi3jkF_tbeJ0Fxda473xngl_PcDfixRuy73BGovoXNcqXKpH7kKGyrYIG-Hc8NEEPoI6-d3SZqmiHZWy0H4WGuW1fMFwu5E62GSAe2RLHjc9HQFBZ7fwZflrwRyN2W7g_ZPoXGS8UZX3l_Xcc3krnWnXCJFN3kQGGkbXr2ofRBmKd-Rh9sfFLVYvQlJghVDqBGbIc7N1TWxuxsh4M3wOM130e8JLxuTeoaWV_uK_ENsU-6HG9AlKJLnO1DG5AArwXNo6U1dDWaFCPiaALQTfbZyVDu-dL_x_u4_HgF18ZAykAHuvUj2ZPq8Z0K4TAhuUDyvBLw=="),
                 },
             },
         },
@@ -29,14 +29,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_mmaOnMJ3M2jgvCy4t9pOW1Jj",
+                        id: "call_Wy9LBxuAeMb22LVREZteXNR5",
                         name: "run_me",
                         arguments: {
-                            "foo": String("test"),
-                            "bar": Array [
-                                String("foo"),
-                                String("bar"),
-                            ],
+                            "foo": String("hello"),
+                            "bar": String("foo"),
+                            "note": String("run_any_args"),
                         },
                     },
                 ),
@@ -58,11 +56,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Tool ran successfully. Output: \"working!\"",
+                        message: "working!",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_0573bac7590c482b0169381b4bf5c081a1a346e7aaf9f93991"),
+                    "openai_item_id": String("msg_09bb019a16d3d1840169451a3f31ec819eabfb93dfa51c954f"),
                 },
             },
         },

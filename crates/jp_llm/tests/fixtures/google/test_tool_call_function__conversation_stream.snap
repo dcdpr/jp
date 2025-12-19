@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:06:54.437034",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,12 +114,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "",
+    "id": "run_me_0",
     "name": "run_me",
     "arguments": {
       "bar": "Zm9v"
@@ -128,13 +128,13 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "",
+    "id": "run_me_0",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "The tool call was successful. The tool `run_me` was called with the argument `bar` set to `\"foo\"`. The tool returned a JSON object with the key `run_me_response` and a nested object containing the key `content` with the value `\"working!\"`."
+    "message": "Hello there! I'm ready to help. What would you like to do next?"
   }
 ]
