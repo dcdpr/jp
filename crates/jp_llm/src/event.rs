@@ -4,7 +4,7 @@ use serde_json::Value;
 
 /// Represents a completed event from the LLM.
 ///
-/// In the context of [`Provider::chat_completion_stream`], individual
+/// In the context of [`crate::Provider::chat_completion_stream`], individual
 /// [`Event::Part`]s represent incomplete chunks of data streamed from the
 /// provider.
 ///
@@ -17,10 +17,8 @@ use serde_json::Value;
 /// all previous parts be merged into a single [`ConversationEvent`], using
 /// [`EventAggregator`].
 ///
-/// For [`Provider::chat_completion`], the same applies, but since this is a
-/// non-streaming API, every [`Event::Part`] will be followed by an
-/// [`Event::Flush`] event.
-#[derive(Debug, Clone)]
+/// [`EventAggregator`]: crate::stream::aggregator::chunk::EventAggregator
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// A part of a completed event.
     Part {
