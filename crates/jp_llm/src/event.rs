@@ -15,7 +15,7 @@ use serde_json::Value;
 ///
 /// Only after [`Event::Flush`] is produced with the given `index` value, should
 /// all previous parts be merged into a single [`ConversationEvent`], using
-/// [`crate::stream::aggregator::chunk::EventAggregator`].
+/// `EventAggregator`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// A part of a completed event.
