@@ -97,7 +97,7 @@ impl TestRequest {
                             }
                             .into();
 
-                            AppConfig::from_partial(cfg).unwrap()
+                            AppConfig::from_partial(cfg).unwrap().into()
                         })
                         .with_created_at(datetime!(2020-01-01 0:00 utc)),
                     )
@@ -128,7 +128,7 @@ impl TestRequest {
                             }
                             .into();
 
-                            AppConfig::from_partial(cfg).unwrap()
+                            AppConfig::from_partial(cfg).unwrap().into()
                         })
                         .with_created_at(datetime!(2020-01-01 0:00 utc)),
                     )
@@ -178,21 +178,13 @@ impl TestRequest {
         self
     }
 
-    pub fn enable_reasoning(mut self) -> Self {
-        let Some(thread) = self.as_thread_mut() else {
-            return self;
-        };
-
-        let mut delta = PartialAppConfig::empty();
-        delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Custom(
+    pub fn enable_reasoning(self) -> Self {
+        self.reasoning(Some(PartialReasoningConfig::Custom(
             PartialCustomReasoningConfig {
                 effort: Some(ReasoningEffort::Low),
                 exclude: Some(false),
             },
-        ));
-
-        thread.events.add_config_delta(delta);
-        self
+        )))
     }
 
     pub fn reasoning(mut self, reasoning: Option<PartialReasoningConfig>) -> Self {
@@ -317,6 +309,13 @@ impl TestRequest {
         match self {
             Self::Chat { query, .. } => Some(&mut query.thread),
             Self::Structured { query, .. } => Some(&mut query.thread),
+            _ => None,
+        }
+    }
+
+    pub fn as_model_details_mut(&mut self) -> Option<&mut ModelDetails> {
+        match self {
+            Self::Chat { model, .. } | Self::Structured { model, .. } => Some(model),
             _ => None,
         }
     }
