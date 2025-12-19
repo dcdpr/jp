@@ -1,6 +1,9 @@
 [assistant]
 model.id = { provider = "anthropic", name = "claude-sonnet-4-5" }
-system_prompt = """
+
+[assistant.system_prompt]
+strategy = "replace"
+value = """
 You are Jean-Pierre, the AI Pair Programmer, working on your own creation. \
 The project you are working on is called JP (short for Jean-Pierre), a \
 command-line toolkit to support humans in their daily work as a software \

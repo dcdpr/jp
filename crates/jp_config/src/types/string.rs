@@ -108,6 +108,10 @@ pub struct MergedString {
     /// The merge strategy.
     #[setting(default)]
     pub strategy: MergedStringStrategy,
+
+    /// The separator to use between the previous value and the new value.
+    #[setting(default)]
+    pub separator: MergedStringSeparator,
 }
 
 impl AssignKeyValue for PartialMergedString {
@@ -128,6 +132,7 @@ impl ToPartial for MergedString {
         Self::Partial {
             value: Some(self.value.clone()),
             strategy: Some(self.strategy),
+            separator: Some(self.separator),
         }
     }
 }
@@ -136,19 +141,44 @@ impl ToPartial for MergedString {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum MergedStringStrategy {
-    /// Append the string to the previous value, without any separator.
+    /// Append the string to the previous value.
     #[default]
     Append,
 
-    /// Append the string to the previous value, with a space separator.
-    AppendSpace,
-
-    /// Append the string to the previous value, with a new line separator.
-    AppendLine,
-
-    /// Append the string to the previous value, with two new line separators.
-    AppendParagraph,
+    /// Prepend the string to the previous value.
+    Prepend,
 
     /// See [`schematic::merge::replace`].
     Replace,
+}
+
+/// Merge strategy for `VecWithStrategy`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, ConfigEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum MergedStringSeparator {
+    /// No separator.
+    #[default]
+    None,
+
+    /// Single space separator.
+    Space,
+
+    /// New line separator.
+    Line,
+
+    /// Paragraph separator.
+    Paragraph,
+}
+
+impl MergedStringSeparator {
+    /// Returns the separator as a string.
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
+        match self {
+            Self::None => "",
+            Self::Space => " ",
+            Self::Line => "\n",
+            Self::Paragraph => "\n\n",
+        }
+    }
 }

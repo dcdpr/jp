@@ -18,7 +18,8 @@ github_read_file.enable = true
 name = "Software Developer"
 
 [system_prompt]
-strategy = "append_paragraph"
+strategy = "append"
+separator = "paragraph"
 value = """\
 You are a staff-level software engineer specializing in Rust, with a focus on building robust and \
 maintainable command-line tools. You are a core contributor to the JP project and have a deep \
