@@ -10,11 +10,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "This is a simple test message. The user is checking if I'm working and responding. I should provide a friendly, brief acknowledgment.",
+                        reasoning: "The user has sent a simple test message saying \"Test message\". This appears to be a check to see if I'm working and responding properly. I should respond in a friendly and helpful way, confirming that I'm ready to assist.",
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("Eq4CCkYIChgCKkDERK8W38o59wikAF3iRdOoEbmbJw6Tnv6U5/WgnwrvzD9v2jP/mfLOaiM1cnO/aI+HVAr2FF5h95px/hxnMrf5Egw4SjER3Ce1v1W2NhkaDCndfdqvrI5HJNvCJiIwzi4AEk+pHM9pPuYwEDO7j/gn8DsBLTM38rET6mwX7bUGKT8qeE5mws/Gp6qm7X+1KpUBXlz3tTrq2KvDVEmYOy4ByMlv8XXagPHzroNCImErjdoq9zBN193V3o3ilELy9GJ7w0etbckWXfQTeYZsaSLjUE3927qYOq+WnKDv7yRB5+xC9JBS3OQzR2JeVn8yeqf0pc7erO8xZrf+6L4wKmAXE0MO32/PmcqHMF+Wd5Iyy8NypDJDpv3nWvVXpytYJ5afT65iPP8YAQ=="),
+                    "anthropic_thinking_signature": String("EoYDCkYIChgCKkDHVlw7QXazPyn+fnR2voGAmEeHUWu5gg+170hpioglJOOP8hl7Zpn9yJDzqnpQyqnyvXLxg6b5eytvLKYfi6ytEgxaL9swiOUHKQ9d90IaDO6IFY1G/FR9bo9HLSIwrwZHu1qFcCwwe+n3m7I6XM1WHZAvAiVUAkreGDujQHmxCQyCzErGvAzBH3S7rAWAKu0BS1VqyFkaDiQLdwHEv9VvtvtsEJ5RXUVtYgPRYQli3AuiXzI6/HAhPUbCixxxTELbZ/lTU7PZspBlxbplyUQVJzys4QjB6ZSG2/dhKgiKq5rj7bvJFpwJ5OpfHz5KF5LjXmtCTEZSm73wkj6KBlhD2yoH3MDXj0RjglfMcDA36pFMsw7zRoaFNmcKRzAT0QfAXk6cuLF/uoquY/JGEqtaksxm3DysA5KGDQHCs0guwxy7Gp6n94u63QpbV+V6zKGQojNTmcSTWVG2DbXwhRIV5QsoQ45L6LlpqIV/l/QnX701LZxfpX7rTPSc4r85GAE="),
                 },
             },
         },
@@ -28,7 +28,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Hello! I'm here and working. How can I help you?",
+                        message: "Hello! I'm working and ready to help. What would you like to do? Feel free to ask me questions, have a conversation, brainstorm ideas, get help with writing, coding, math, or anything else! 👋",
                     },
                 ),
                 metadata: {},

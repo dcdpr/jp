@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:34.186751",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,11 +114,28 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_request",
+    "id": "toolu_01XBdunu5fwc1HwH13exWxrm",
+    "name": "run_me",
+    "arguments": {
+      "bar": "Zm9v",
+      "foo": "Zm9v"
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_response",
+    "id": "toolu_01XBdunu5fwc1HwH13exWxrm",
+    "content": "d29ya2luZyE=",
+    "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I'd be happy to help you test a tool call! However, I need more information about what you'd like to test.\n\nLooking at the available function `run_me`, it requires:\n- **bar** (required): Can be either the string `\"foo\"` or an array `[\"foo\", \"bar\"]`\n- **foo** (optional): A string parameter with a default value of `\"foo\"`\n\nWhat would you like me to do? Would you like me to:\n1. Call `run_me` with `bar=\"foo\"`?\n2. Call `run_me` with `bar=[\"foo\", \"bar\"]`?\n3. Something else?\n\nLet me know your preference and I'll execute the test!"
+    "message": "Great! The tool ran successfully with the arguments `bar: \"foo\"` and `foo: \"foo\"`, and returned the response: \"working!\""
   }
 ]

@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:26.91464",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,11 +114,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:19.446962",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -135,16 +135,16 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "mOYzbowd5OOlJ4LOKQYtJpRFrGXQsgQ0",
+    "id": "sF2ivmYeu2EZ66osbn1c9HEWVWcwECw2",
     "name": "run_me",
     "arguments": {
       "bar": "Zm9v",
-      "foo": "dGVzdA=="
+      "foo": "dGVzdF92YWx1ZQ=="
     }
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:19.447005",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -158,13 +158,13 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "mOYzbowd5OOlJ4LOKQYtJpRFrGXQsgQ0",
+    "id": "sF2ivmYeu2EZ66osbn1c9HEWVWcwECw2",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "It looks like the testing tool executed successfully! The response indicates that the tool ran the `run_me` function with the arguments `bar=\"foo\"` and `foo=\"test\"`, and it returned \"working!\".\n\nIf you have any specific questions or need further assistance related to this, feel free to ask!"
+    "message": "It looks like the tool executed successfully! Here's the response:\n\n```\nworking!\n```\n\nIs there anything specific you want to do next or any other tools you'd like to run?"
   }
 ]

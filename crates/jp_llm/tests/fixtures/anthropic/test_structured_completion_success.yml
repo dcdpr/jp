@@ -34,8 +34,8 @@ when:
               "titles": {
                 "type": "array",
                 "items": {
-                  "description": "A concise, descriptive title for the conversation",
-                  "type": "string"
+                  "type": "string",
+                  "description": "A concise, descriptive title for the conversation"
                 }
               }
             },
@@ -43,7 +43,7 @@ when:
               "titles"
             ]
           },
-          "description": "This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\\n\\nProvide 3 concise, descriptive factual titles for this conversation.",
+          "description": "This tool can be used to deliver structured data to the caller. It is NOT intended to GENERATE the requested data, but instead as a structured delivery mechanism. The tool is a no-op implementation in that it allows the assistant to deliver structured data to the user, but the tool will never report back with a result, instead the user can take the structured data from the tool arguments provided. Here is the description for the requested structured data:\n\nProvide 3 concise, descriptive factual titles for this conversation.",
           "cache_control": {
             "type": "ephemeral"
           }
@@ -52,7 +52,7 @@ when:
       "system": [
         {
           "type": "text",
-          "text": "<instruction>\\n  <title>Title Generation</title>\\n  <description>Generate titles to summarize the active conversation</description>\\n  <Items>\\n    <item>Generate exactly 3 titles</item>\\n    <item>Concise, descriptive, factual</item>\\n    <item>Short and to the point, no more than 50 characters</item>\\n    <item>Deliver as a JSON array of strings</item>\\n    <item>DO NOT mention this request to generate titles</item>\\n  </Items>\\n  <examples/>\\n</instruction>",
+          "text": "<instruction>\n  <title>Title Generation</title>\n  <description>Generate titles to summarize the active conversation</description>\n  <Items>\n    <item>Generate exactly 3 titles</item>\n    <item>Concise, descriptive, factual</item>\n    <item>Short and to the point, no more than 50 characters</item>\n    <item>Deliver as a JSON array of strings</item>\n    <item>DO NOT mention this request to generate titles</item>\n  </Items>\n  <examples/>\n</instruction>",
           "cache_control": {
             "type": "ephemeral"
           }
@@ -64,69 +64,70 @@ then:
   header:
     - name: content-type
       value: text/event-stream; charset=utf-8
-  body: |-
+  body: |+
     event: message_start
-    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01RnYydc7Bt6RUJPfZXZkMsa","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":919,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":8,"service_tier":"standard"}}               }
-
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01Av4uKFBdoPx75gdWT8NW3G","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":919,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":8,"service_tier":"standard"}} }
+    
     event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01J3ERcNe6A4JPNbEXS4cMZM","name":"generate_structured_data","input":{}}        }
-
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01JTQcvREtGmxqT6kV2NDKT2","name":"generate_structured_data","input":{}}               }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}     }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}           }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"titles\": ["}              }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"titles\""}}
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"Tes"}   }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":": [\"Test"}            }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"ting Struc"}          }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"ing"}              }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"tured"} }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":" Structur"}  }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":" Completion"} }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"ed C"}}
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":" A"}  }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"ompletion A"}       }
+    
     event: content_block_delta
     data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"PI\",\""}    }
-
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"Stru"}        }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"Structured D"}               }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"ctured"}      }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"ata API"}     }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":" Data "}           }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":" T"}   }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"AP"}  }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"esting\""}          }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"I Testing\",\""}      }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":",\"API Co"}  }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"API Complet"}          }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"mp"}         }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"ion Test Di"}   }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"letio"}   }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"scussion\""}     }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"n Test"}    }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"]}"}           }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"ing\"]}"}        }
+    
     event: content_block_stop
-    data: {"type":"content_block_stop","index":0 }
-
+    data: {"type":"content_block_stop","index":0}
+    
     event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":919,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":61}  }
-
+    data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":919,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":60} }
+    
     event: message_stop
-    data: {"type":"message_stop"             }
+    data: {"type":"message_stop"          }
+    

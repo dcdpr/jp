@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "# Hello! 👋\n\nI'm Claude, an AI assistant made by Anthropic. Your message came through successfully!\n\nHow can I help you today? Feel free to ask me anything — I can assist with:\n\n- **Writing & editing**\n- **Analysis & research**\n- **Math & coding**\n- **Creative projects**\n- **General questions**\n- And much more!\n\nWhat would you like to talk about?",
+                        message: "# Hello! 👋\n\nThis is a test message response. I'm working properly and ready to help!\n\nIs there something specific you'd like to test or discuss?",
                     },
                 ),
                 metadata: {},
@@ -31,11 +31,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user is asking me to repeat their previous message. Their previous message was \"Test message\". So I should simply repeat that.",
+                        reasoning: "The user is asking me to repeat their previous message. Their previous message was \"Test message\". So I should repeat that back to them.",
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("EqsCCkYIChgCKkBgar4wNRmrr+S1gvRPECLonYhPqXvHdZFsq8JWj27SJmOhkuTWUKVahMfZ2u/D+09BB02XzsMJtSR5P46fjhSWEgwZtgv8hucPhDVYyDkaDKLdTot1vGCb2gSc6iIwFJUffLMdmgEz6H0LD24BhqeoXFQP77q7fHFWI2mbUWyoLCplFhZGi4YPmHXfYFtwKpIBqpdtmtslBACSR5RNizNYWE9KPGGTE3sEAmgvOtewkeMy7mWcwDi7H+HMhYJp1MF97qJxcNfzxhpXHXPRt85sJzBSwgnug8PUTUq7VBDhgUtMaHJr9wazZvlqF99Jsdo0QCw6PXOLskbtcK9N/TuCRBSbLpoyz0dqYNMld3lyJSXpnhHJhm2qzgq6lZ67Pn0ZzWUYAQ=="),
+                    "anthropic_thinking_signature": String("ErECCkYIChgCKkA1/edkfP0kfLQZuvfs2pFS0oN0V5GnYDlMKfgU1ttt89w1wNtVsJhlyTikvZ/wodikEqnzlF/0mCW618v9bL5rEgwha6HsLkFsfwo7Zg8aDL2UjGYDnHjm330luyIw80D4sj/7LJ58C7e7s9tmKL87tJmn68gEpb9MTpP3k0M/uNcGpRHMMcAoZugbbr/UKpgB+cUbegWsD8Zz9H1thGA2BqcxijsKriRiOKync+x1b1sedRtO77PTeL2EakwEslYlLz1iloODS7epuGEzu6br418aWTkED9707sMyh6DgwkDV4r3QdUrxkuYx8vPrqPusGCqHhuRdLB06g0ppeDmxt4oY3Oc09aXH6qtliFZq7WZq2I+y6yhRpH4l4dPnzASUKMlykNgS9D0YAQ=="),
                 },
             },
         },
@@ -70,7 +70,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "toolu_01MFC4QAApP6QFdwM48eLes2",
+                        id: "toolu_01F3qxRanMBBxb4CDausBx8L",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
@@ -95,7 +95,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I attempted a tool call, but I should clarify: I don't actually have access to external tools or functions in our conversation. The output above was illustrative.\n\nIn reality, I can't make function calls or use external tools. I can only:\n- Have conversations\n- Process text you share with me\n- Provide analysis, writing, coding help, etc.\n\nIs there something specific you'd like me to help you with?",
+                        message: "Great! I ran the tool with the argument `bar: \"foo\"` and it returned:\n\n**The secret code is: 42**\n\nInterestingly, this is a reference to *The Hitchhiker's Guide to the Galaxy*, where 42 is famously \"the Answer to the Ultimate Question of Life, the Universe, and Everything!\"",
                     },
                 ),
                 metadata: {},
@@ -116,11 +116,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user is asking what the result of the previous tool call was. Looking back at my previous message, I made a function call to \"run_me\" with parameter \"bar\" set to \"foo\", and the function_results showed:\n\n\"The secret code is: 42\"\n\nSo the result was: \"The secret code is: 42\"\n\nI should answer this straightforwardly.",
+                        reasoning: "The user is asking me to recall the result of the previous tool call. Looking at my previous response, I called the `run_me` tool with the argument `bar: \"foo\"`, and the function result was:\n\n\"The secret code is: 42\"\n\nSo I should simply state that the result was \"The secret code is: 42\"",
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("EuIDCkYIChgCKkBaSrzUuse3LKTAPHBdmrKf2lRkStrcp9321wYAq4gYAWEql7GXNuDQ2j4JU3jb0s6Y0H24O1cqdB/Dr3GIr9r0EgwTkXTgnqs4edWvcZUaDPpcPoMX9kQmMFXHlyIwy/WqD1bikrg9YIEAhUyCn2VDzTBcANuLosRNO+UDjzEs3cl0q7gyQ5JdMdU1WX56KskC2vbZK6B2oZ4nKH8aBNHzfwfEGU/wfT3EbSwfMwCnXkZ0R+Y49C5hhF2ySegXI/F4SxlD+SQtW2YYnm8vqmUerI/184Iy6TN0JZD3iXEePV+ASDGym6Ewt8psZoHWDw744VlvtQIgjsez0zy4ussIJq79mnLk6OzOdSIHrq1kD9VKhWmfDVWXTS8K8DI9wSsp/GXes1gVW3V4dXi6h+mH9m+7O8mf4rf5Kr+rzCzMbTm8SDLIISNZJYnYR4nID4tB8ZqwVLY5Ld2VBR1E/54sbf9lSQi3RTWvSeC3HunCFODpPUMohCNSz83pKEbRBNmz0SqblNEvdtQFO7/vnCkgpXgg2fRSB3M46GwKs8Wrdja2G8gWFHBe9KygRhCQrB/qHJsyrUgZ8yOR/+giHo2yr010oZPwQ6Zw7moJtP08rIN1v8PTreAhAwQYAQ=="),
+                    "anthropic_thinking_signature": String("EsYDCkYIChgCKkA2NkmREHX2b1x3M3oTMdgclq1scKqiytPuRU3FUt/rp20y5frCgDdkoREKf3/VfRFQKJW6j1gwy7YC10wf08n4Egw2ZQebjTbdKU2wB0waDMv1uL1tEmPcSQFQjCIwfSSv7zpTgxBpndT3m5CC6eHo/4nTPYXnZ8+AmBW3CrOOpVKqMiAS/+hKVFla8FEMKq0Cys41oYiZTnBTGvckqeOIj2eMR2rG59f1DrSR14kVN8eldeMvRp/FTNjnWy9ww5DhH+MdbaPJszNfaEM8QtaRFjMg6Z86gmI1cMeoZDe1E/LYQx0aXh7Je0U4CDrYQ65WZJo7VD/UrCdm6q/M52xd2mF9VxH2Lta+74Q8NeQbHBjJwx0BharwBl7MejXc4edQU0Yx1fRUQBAqKTAQLPIrVGvvBPaFQmAp+Bm5KjYIGgcHm8il6SxWW0rgWc7U3OZE/XF4+K84+GIH3kpRtw4BIjO4Ot6Da5gnr0gwt7jmTp3/CwSMavVmsor3mYWurWDWSritk7ksLzAdhD2MnCequLOtwRPzyqUz/jPf00Niyb46Xw519QTplRMidIa5+muNX6HqFbAeMAyrHfNwMRgB"),
                 },
             },
         },

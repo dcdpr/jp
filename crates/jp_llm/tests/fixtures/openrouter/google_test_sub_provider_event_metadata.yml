@@ -1,0 +1,41 @@
+when:
+  path: /api/v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "google/gemini-2.5-flash",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Test message"
+            }
+          ]
+        }
+      ],
+      "reasoning": {
+        "exclude": false,
+        "effort": "low"
+      },
+      "stream": true
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    : OPENROUTER PROCESSING
+    
+    : OPENROUTER PROCESSING
+    
+    data: {"id":"gen-1766136300-76xgsXPUEowXY4WQmfOz","provider":"Google","model":"google/gemini-2.5-flash","object":"chat.completion.chunk","created":1766136300,"choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning":"**Acknowledging the Prompt**\n\nI've received the test message. My immediate response is to acknowledge it in a friendly and neutral manner. Beyond that, I will offer the user further assistance, as is standard practice. It's a low-stakes interaction.\n\n\n","reasoning_details":[{"type":"reasoning.text","text":"**Acknowledging the Prompt**\n\nI've received the test message. My immediate response is to acknowledge it in a friendly and neutral manner. Beyond that, I will offer the user further assistance, as is standard practice. It's a low-stakes interaction.\n\n\n","format":"google-gemini-v1","index":0}]},"finish_reason":null,"native_finish_reason":null,"logprobs":null}]}
+    
+    data: {"id":"gen-1766136300-76xgsXPUEowXY4WQmfOz","provider":"Google","model":"google/gemini-2.5-flash","object":"chat.completion.chunk","created":1766136300,"choices":[{"index":0,"delta":{"role":"assistant","content":"Understood! Message received.\n\nIs there anything I can help you with?","reasoning":null,"reasoning_details":[]},"finish_reason":"stop","native_finish_reason":"STOP","logprobs":null}]}
+    
+    data: {"id":"gen-1766136300-76xgsXPUEowXY4WQmfOz","provider":"Google","model":"google/gemini-2.5-flash","object":"chat.completion.chunk","created":1766136300,"choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null,"native_finish_reason":null,"logprobs":null}],"usage":{"prompt_tokens":2,"completion_tokens":48,"total_tokens":50,"cost":0.0001206,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":null,"upstream_inference_prompt_cost":6e-7,"upstream_inference_completions_cost":0.00012},"completion_tokens_details":{"reasoning_tokens":32,"image_tokens":0}}}
+    
+    data: [DONE]
+    

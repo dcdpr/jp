@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:32.414133",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -113,7 +113,7 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:30.488185",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -138,9 +138,9 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "The user has sent \"Test message\" - this appears to be just a test to see if I'm working and responding. I should provide a friendly, brief response confirming that I'm here and ready to help.",
+    "reasoning": "This is a simple test message. The user is checking if I'm working and responding. I should provide a friendly, brief response confirming that I'm operational and ready to help.",
     "metadata": {
-      "anthropic_thinking_signature": "RXVzQ0NrZ0lDaEFCR0FJcVFHSkY5MTJ5L2lMczkxS0JtVnNWN0RKeDBmOXNINkJBTzZIMG03UVpwemk4R2paUGxIbkNsNlpMN2NqOHRkckdMTmUvcEwzVTZpLzMrREhZelF1amNRUVNERTkvd0VkQ280WCtXL201YnhvTUVRYXM0TWsxL0k5bXJGVzRJakJCMlNFYklQTCtvOTFIZDlqcWhNRDIrazhPODFrY254V2xycXZZOStWUWFpYWpaT1U3aU9QRU1aZ25HQUZhek80cTBBSHVXMDBVUXg1Y1NuZDV6S0F0UFM4Ly9WKzdGdkJhaXBtNVRubWhpNmFNbnFwVkRqY2lRZDdMbTFxVkxqakdKVmUyUUNYZUZVS0c5QVdwOFQ1ZDVIVkZsM1JFWVBhYWhTL2RNb0M1dVI5NmxsRHl0Wlh6L3NjNzBmb1FjMndjZEdSZWpkbFMvRTNkbjl6NGxaOVkvR2g0bm8rUlplR0hXTzRJZHVmZTQyV1R5eG5xaFdraUhEV2V3MUJZZk4ycjVSd05GWkpoazdJeCtPV1Z1VlRHYkFvUU1tOHJRbWl2citvWUhuTUxXQ1k3UDRlSFVtOW9wSkdqMVUzb2wwSjJwamlOWlNXd0phRkp4a0R1SDNDbjgzeVBHQUU9",
+      "anthropic_thinking_signature": "RXR3Q0NrZ0lDaEFCR0FJcVFLeCtPOTd0bXFqeFlCaGdyTXdjb0d2Y2hlNzAzVzg2OEZReHVMOXR1SFNNMEFzWEMwcmlMaktNTmZseXVpWFdKUXRvRk9qcXNzUnZrZE8zc1gvTGNVa1NESXVFN0dKdGpQRTFVZE1USkJvTTJINEo4OWJ6Z0g3SGk4QytJakFxT3p5bENCaisrZmx6RUk1NjJkTVJDdFVnbjYvRE1zYjNvaWNQaU43ejhoaSsyOFM3K3NZb2NiVUhxOFlKeFlncXdRSFMzc3dJb09MUHBSTGhsVVFyTHdBei9seGwzbkRFN2NjK3lRQVZYb0VKRVR4dld2ck9kdEJqaGxtcUF1VkR6TWRRRU10aE9EZW5IZTl3Zk4wei9XUjZLcU8xUlRlZjNCNkczR01xZVAzTk14b0hLZmo4T3ltd3UwcWIvTFpiM2hHQjZmZUMrVzNCVkdLK2dKekhRMkN4SzdxREhWamxjMUlVQXNnK0tkWjY1ZmpYMStHUG5lRlNzd29nNGJIQi9JY2k2ckFUSEtvOTdDaDBuYUVuMHdSMmpsNnZzUllEWUpZQTJGY24vUmQxbDhFRXUrOHFsMjh6ckxCb2d6bVI3R0ZQR0FFPQ==",
       "openrouter_metadata": [
         {
           "index": 0,
@@ -152,6 +152,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Hello! I'm here and ready to help. What would you like to know or discuss?"
+    "message": "Hello! I'm working and ready to help. What can I assist you with today?"
   }
 ]

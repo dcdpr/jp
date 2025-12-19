@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:48.673283",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,11 +114,28 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_request",
+    "id": "toolu_01A6UP53WYa7sQL2KCsEMGcg",
+    "name": "run_me",
+    "arguments": {
+      "bar": "Zm9v",
+      "foo": "Zm9v"
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_response",
+    "id": "toolu_01A6UP53WYa7sQL2KCsEMGcg",
+    "content": "d29ya2luZyE=",
+    "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I'd be happy to help you test a tool call! However, I need to know what you'd like to test with the available `run_me` function.\n\nThe `run_me` function requires:\n- **bar** (required): Either the string \"foo\" or an array [\"foo\", \"bar\"]\n- **foo** (optional): A string parameter (defaults to \"foo\" if not provided)\n\nCould you specify:\n1. What value should I pass for the **bar** parameter? (\"foo\" or [\"foo\", \"bar\"])\n2. Should I use a custom value for **foo**, or is the default \"foo\" fine?\n\nOnce you let me know, I'll make the test call!"
+    "message": "Great! I ran the tool successfully with the arguments:\n- `bar`: \"foo\"\n- `foo`: \"foo\"\n\nThe tool returned: **\"working!\"** ✓"
   }
 ]

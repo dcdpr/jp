@@ -8,9 +8,14 @@ expression: v
             index: 0,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "I'd be happy to help you test a tool call! However, I need more information about what you'd like to test.\n\nLooking at the available function `run_me`, it requires:\n- **bar** (required): Can be either the string `\"foo\"` or an array `[\"foo\", \"bar\"]`\n- **foo** (optional): A string parameter with a default value of `\"foo\"`\n\nWhat would you like me to do? Would you like me to:\n1. Call `run_me` with `bar=\"foo\"`?\n2. Call `run_me` with `bar=[\"foo\", \"bar\"]`?\n3. Something else?\n\nLet me know your preference and I'll execute the test!",
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "toolu_01XBdunu5fwc1HwH13exWxrm",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                            "foo": String("foo"),
+                        },
                     },
                 ),
                 metadata: {},
@@ -24,5 +29,25 @@ expression: v
             Completed,
         ),
     ],
-    [],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Great! The tool ran successfully with the arguments `bar: \"foo\"` and `foo: \"foo\"`, and returned the response: \"working!\"",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
 ]

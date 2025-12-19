@@ -10,12 +10,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Acknowledging test messages**\n\nThe user wrote \"Test message,\" so they probably want acknowledgment. I'll keep my response concise and friendly. It's a great opportunity to offer help and ask what they’d like to test. Maybe I could provide examples of my capabilities and see if there's something specific they want to try out? I just want to ensure they're getting what they need! Let’s make this interaction as smooth as possible.",
+                        reasoning: "**Responding to test message**\n\nThe user says, \"Test message,\" which probably means they just want to check if chat is working. I should keep my reply short and confirm that I'm here. It might be good to ask if they’d like to try something out or offer a list of my capabilities. I think I’ll quickly acknowledge the message, ask how I can assist, and suggest a few examples. That should cover it!",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("rs_053100bece7438380169381b1b53ac819e92b34b855e5d218c"),
-                    "openai_encrypted_content": String("gAAAAABpOBsem1RlU-VRULJab1OiiLB1cmpBLprWz3ax0lkcB-t21Il5rXjR-GDDjFENKtntS39GneliIh2zSIuCMbY93cmVrHAPCN7WX3e445QrXKZzrt0x0r_rKOzMv8-6uZnxCdHmXjFPR5BdEZn8EvgZ56oPO17nuERhQPw9seQKBQngDECAc5QuNGueZFR2eXaV8TDekAF4_9Mavr1AECHHVIbUykqiaUV6kLVf20NNykW0lH2DQFITN_8ttaFqLfTv-mNIyh2N2ZaCSuSSGH-hN0aN6M5B1odLjN3S8Mu7CqEtdgvXHJ4n6geuS2Z7G5aT6tchByLOW4UEJcXVTA6OFBc8X73I9HQYoZWC6xej0KzQcwraBuogttykCBVXEKMrbeK6km-Ga7GB-3DTfXoC-eR_YmNINA1Y2V7MciSDBJsrr_5SAYakMV78mSscpOyQ7iZNRKniq9ZJqRWBwqGsVp7uycgHpWJ70vnWrlmZ-l_yAm7gmTA7WvfdS3DWDxoCK1Hh0PBA0Bbkm8UDTO6Px68R-Ynle-JGMH4RV0v8tbbX_kIQHJcQiIA97aiEy4uSyLOAeKtCUy3l_A42VA8LKgVpbObI2FlCJRwYaAmBdADM7HlYSfwyL0GXbhVGm6l8vmljOeYl_m29D7TWtPbHTi5rIskiiQjDnpSxLQ9PXxCJjxcNe2_1jYQIQaM7hCJ9rl52BBcUQPzbDvP7BpqhnTA0tn9CDoDo4rtJsIw0_9WVwIW1TDVTNb8PI0ev-CC49lWsPhkOuUwVgukSOHGF4tbiF28iUuBMaVEV1W4FzCtdh2caRpds7h59HtrrgfOe7AF-5lUDeCw3nCXVyA4PDRHpKvno8OBVG6x6YGhcmJY6YejsN3rrukyJ2sKYEHDMmWfKW1EG0EAfl4ELFn5gKlq4bf8vt3HlgF1Ukv5njWOT2VwMkRk9WGM_tx-0luAqFvoL1QjWOG_Q8ZePafkRF1JMQqX9-c0krdw0JmArKI-3dN4duIlx6GU0kRJ8y_QZ1wuYoyk6KP30jQZshs-yqNzSXQZOxcK7tbIq5pQxrIJJtu2TVNGHQc3h4xM5uRCLx6uYvtoVIQdN55j_LHQiZ1VO2zZHdfBsfmwVhQLmWU39Zspv7HqX6rN4jQ0y4LCAJD0w"),
+                    "openai_item_id": String("rs_04b0f57fccfe7f990169451a1ab6788190af884fd17bef44be"),
+                    "openai_encrypted_content": String("gAAAAABpRRodh4qI3FzPaNoFbrn1DGg2P43vdw8zGXaa1ZuJ3XC2iEcM06RDWeI3Kn0IrnPQCpdWkTOpgVTOUAClQBujk5BFRxXbNfMF_H955wBirvwLyJep7R68jQhXhC214XAuMopQq2k2rXQEYCiNwAM1eTrM_zBy3b8ct_nuVDrWNF21n8GZ3u1M97u1x_Fv2oxagzWGO48fZmtxM_9p8pKCGSxPAUZFbocVcJ8VTQK4Wj0CYGYmt_LKqQ98aM9KpeNjy-NZAQcUtU_6m7siwOSxBsKG_MRbTvSScmDcwIawPXpsrC8MYLwxxvHCJ7T5qczTGIs0ATXZkaK_AzZU51OIUbxA34v09llHHE9XA_RjbnNCaGwzEWkT7H4t83Za6WUw8B5r5NC7tSECE4Biyq1lvOL8kvcXGEhCzPs5TaNMJUa_DaGTJgskH5Uq-OTpDo7CLRUwmx46dk92zmdcwziXZrugmoh5VmQo3I-bgGpO95_u8dq8BNo1MElAAwBK5-kVTH9OroIsiPynh5pLWuVv4mFilhY9640Agci38BT1o37eKsApPUJnJLE14gnI62lanxi9a8IN1R764eyH2nAf3_4pyUYbV6ka9udeuEQr_UGFJtPSe-_xmlFPbj96vpdcPZgebC-7ZuP_uxq8-L9ub_HQu9u8HZknZxS2kkd7lMqJ7LlkD0rv-S2pGkAxA-woP5ipNed3mgBhrwFzbk4_Ftsf7eKACvg3Worfo7KdeY1T7-d2dxmFax5NS2gIoT4e-ZZcGOwJei_UaWZKayH0G6KNIF1Dmnx9_olZR4iZpkt2vEyZ02E23HdrFu292zutP0ljTH8OQ9UGevDBwldjliosQ2-SR6ArEGfj7KbDfkAB5Z4YgtMWbz5yij06m06sTRVlaHTnidmBc667tbZNEqiMWuFpSO3v4RKj2HX2Vb9kvlYUfBZ_xVxUrehgmzPWpu0WI_4l010HxwJUqIOJNdR5PyeoXKbF8-giCu01Q3BxFUJZkdrFhUuN-3f2YUDBJhF7de8xFPeWv5o1uDnv6PSRLnCLn7m8UI1bNWMPHvNyEq9BOAntVC8o2ZW7BfQGkXnmLeojC5ux9bOWNQMjDq-y5a1TTi_n_02-QhOKjn6nGJ4Xo4RtnQGensy_8nPFkU5j"),
                 },
             },
         },
@@ -29,11 +29,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Received your test message — everything looks working on my end. How would you like to proceed? Options I can help with:\n- Ask a question or get information\n- Draft or edit text (emails, summaries, code)\n- Run through a troubleshooting or interactive test\n- Work with an image (upload one)\nTell me what you'd like to test next.",
+                        message: "Received your test message. Everything's working on my end.\n\nHow can I help you today? Examples:\n- Ask a question (facts, explanations)\n- Get help drafting text (emails, code, essays)\n- Upload an image for analysis\n- Run calculations or debug code\n\nWhich would you like to try?",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_053100bece7438380169381b1e3ad4819e846d99d95a2063f5"),
+                    "openai_item_id": String("msg_04b0f57fccfe7f990169451a1dcf948190b906f1749cf8f009"),
                 },
             },
         },

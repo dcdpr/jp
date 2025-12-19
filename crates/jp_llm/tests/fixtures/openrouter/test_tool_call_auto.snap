@@ -14,10 +14,10 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABpOBtanjjXmqMlJBiD3pr5rj7IajNB1DkARlNPa7PK41FwNETbzjV2gGcYR4clFLhJBA0dVI0Fp8udYXUhxcDBGVwpqjA1xs-RRS_awTh-ltchri-pBbu3O0puVAlJK0OT_K1piJSHLtc7vzmdTyAJQYgq79uhZQX2pU_DtufTIB3aLRsqRCCNe2fZUD3q3OFLxge7YXwIAwT2HGqewg322Dzc_TLAGXgwQCGzW1UgLJ59U5t96Fsc8lUCzx6NC9_d7CnDqc5n4bYtPlQ32xKbIu2FjaUrN-I3XKAaL64fRBewOYsprXp4CaaLQvkkPCp4BMuSlzobnhaiF1-RKXnCxLx1dIzxcEo-wsWeM3x3PZXHe-ICARBLUUK9KiwZlQ_d2ExaedKJoSwwZTQh3SzYKSpLYMinmGUw_AF6wu8gMe2nRcfCYaXCyjZaI1KvtPSmCbT-oF5zuBxGM-CTeubG3_DisD_Nm85wEmXGQ80xrloLbpCxX8t-NScKrbWMwMt4euVsocf0Iv7H3_ddqAA5ZH2ZQZKkN4_mtZ2w2ohx-xiZtkStYhJsyDxCBQA1guC2ATd9hM7lhmZn7vfwUjQsXX0vNUkuyBPiZxU68KCycAKCm1PbQgqxDGwua1FeCQFryKklPyD6gzABImccKc74emPxvoD0lCJr7tltqsqR25dtfR4kOzyG946DQfdyIZ4ajH1YmPusVREH3DqQrWIYoayv4pgFir3b25iq5qbXROXTNhAi5NMxE3-eMAx2PKNAH1ynaXqo3XzZffRWgEYPC3lVxEqXxdVYBmgVjzH-8PiEhIpKR4zBhapEgKtsExqcsxX3t4qtfG2vsywT5G07PMIiJPNkwHOlMagLW7Bc7NzbbYMWZiWKZECJu9jtMCESD8iD1egBXdN1DSw3NHLDopeBsEn2grEofBmVUBzyb8ci82EyMAVKwX1RuOmpI-ti0_nzX9nzGdITYAR5uIZYmvRvIHRg7bgNm-NPsJV4tCuE4VuOCO8P2yPa8t_ylyBrZY4lEUso4gTsAd_FCNzY_aGrbr4YHLq3rJ4eepZvh-blHowPGQH1ARH7FL4HlHNitjcheAcTJkWeZu6Us5fgrQ3fAASG2XU4uwQyoD72kTId9K4xMscJQXGlw1vXfuJzdUEXbMaPh_jDzRJ6eFqA9_pqKZ99JoOfZbKzo_7I-6Oge_ylC86XScv70hFhjMkqjWz4GyiP--X0z4NdBQcKWc4D4QZwo5em1krg9AaYqQinJrZwTh0l7b1FTxwDAhK38FzM-M53nPimOCatJ7wnUWE1CLDUB9GkYzYOS9JfRB4N7_J87E6J_Zl2fFuMzEp66bV93dtEK2eHpCxK0OD_DoqaY2oM9doOti7M5vX14jD6EbUvzwVa8_PQVm_qiJPvXRfXeKajGyhkhHzDGIlUFt_28yKWARxQTZI3Zv4_rkHMPa2hyulWu3lRad97pcP5u__x_2uKS3q80e-09MyNJe1B9cgQvX9E3RO_zRiOiAEVxhplUp6-ug_VkqGXvPUxMcd-o_E2MWilLSI4UX0MUjmkYE0gtEa6Q_trlGLjb9A_PqM2dJo_PKPGvAOU7Np9-DzV9QYVBcXXER3WhPc1Cm1BCQtqy7PM8HJhlKQ0ogkam8UpY8L8fMMSW3bk_RU12XkCyMqiab-tyDWtzJYLQzLJL1i91f6m9e1VUS9Ivgt_kaPrOs2ioZvldPyq5LL1hgyzkDuRjgxgNT8VrG7cVnX6ctFu3QLe_GX9CEoE3NIzR30f6C9wJ94gXcyUuLMY1ySXR5ajvIxxw5KeB-ucE_rg8ur5NhPGKx-8qNC3YGh31ZmsN78oupQ4miWqkA_G3_GmAJdzRJcdPLXlnlSkSQ56g8sAupM2BnpNy9HlU9A4s2iHsSrnKgHNw5gl6zXqMujCzezJ2HT3_3npjAZgC0ME7b7e9UmI1l3neh5Jt4h_MqA="),
+                    "openai_encrypted_content": String("gAAAAABpRRpNfaf5HS_PCe8L1ZQwnMBgm3t-CmKFLJ01bHzlBCJiwzUde3iAPqqi7mIWnQrNC1XjEMGPtMVFD3i43wEThd_k-rHLQXqzB-3wAup8o3Q3BP_bls6T88idHJ6H5f3M4Cv_3i3SHVjigzdVia62ZCMh_gIc5HH71gVJ0O2mvojM2SAxexTCMKQOLWRP9s-DI9Ks6426FYzXDUu2jD15uC0hhxBW13cYNK624EisNqf7EZIt7sTT9qxRVFhENQsqm2QYCEeB4gMPPVZS_aqgwcff3jUVpK_AdALiEpQV-rDkYjErcxEZhtvMYH3fOuO1VqJyjVx_DwYx_Wpvw-MnFikqF-r7wYdG1geatyv6mcbm0RgUA2ftxxMVMpf4sB2LNN7_EgfQTnCAS03pXmlAx2M24JVXE717HWrUXCprKygaWFcdV601XTC_YLTocBo69PqvcYowKbTATLViVus0gBlXAQn2UKJSsDx_z6DVifvnvBNSG-vl7HTFSd6kKclbWr5paU1RnZ4pFNSMYdLeuqV8a4dv9dTCQEd_8lSEU3T35LGeiKw4322wG5KLYhwi22rZGu4sXv4w0r7obDGv5X4I7O9KfmVHOWafXsEukAEvk6UHhgdlenMypywE_qkk82oWZ1YK_DevPn4mvqeQhRU_AYo8vgfWvBLXaIm6FL9rPTWChIiZ5MVOkaCROTViA902IJizfjegbYw5iZNBHa21jTm18B3696T6SIBWJboXd4jGacEWpqdUzrqudDvTIY06RvGrzn6we3aUPLEDGchLxJn3wiwjzaBISvePNlO0RscJa69fbG45OTbhgbd2D889jkS0UxrIhr9WlKufqw5sg5m_0IEHrW1ngXkJFbfLKOBI8VC6s8GRhd8BnlSN_yXcysW6l6PIx43ppUCSfKEhjx0fCdCSWRWLL_ecRj3YevMGoy0ucDgxh6FIuAxZdXFjCLfQUszZO-UYJMsMoF3qvPtABAFlqkavlEJACx2Xc0p3lz78fzLAwjzXPiB1_vtKlShBTns4Z5yMy-sXkCcpXkhUvsbLj2_SR0TXY-Cak1KN_bT2jj0dEKyZ5hZbGugaH9r7b9PPmck6HtIMpyW6iWwJqPJUl_BzLuV8TcWtBzN-XGJcGaES4vvd5jvVpCd4sEXfUv7SzEwNZJhLeyJK6KeQVphErTT2loc7UIfQtQIjGOyGbQ7Wo4Gbo7CKSIdAEsXHtEAIdZLft8v_0r8duyCCGy0A2JvVdn9UjlCejOAGSsL6-NUnlp22wPIk0R74sN9a2k6hkkjfAR9xiyrGnzjyQfCndl9i5yg8nDPT0SkHByO39PaNhGD3ufAmUqLCaijESydPV3iNM2LS3lyxpTBnCnoNiGSTGM04uEgcInRpKuQvB8UfjFfRuBWzRCO6ZCn57rNemkKAb9JoerwWvFDTF2Rifgfk28VvJ2yDAh77UAdtEkrehokMrNDMPMA-ujPX6x8WYJUuSxy5LKhnbggGLmvEDEFC6bbPnIW6LXgUtt8_vaI3FAvY5Dm0_AgrqTWOB1b9F_n6Z8mO9DUXJTKwi--Q4jWi6AgWeFFxrNbmZwJ2K5V8ofG_vhVoGRNh741jlXKxtI6A9S2eemMnGzCyg0H96GWl-rIRgH2YLHgwMgyMefw2aLmnIg_x9O88UxtexblbnuX305UDdeLz6XAS2b-_sUtWZ8bBPpZC6UsoyxASsmeysY_LoUGOVBXqLaNYr6rvSDW9Y77vMQ8ZlqDBST493uNTfL-nP7TonenZpztc1nk-gLRY5aXebRCROjm9FLT6zDzc-OpY08NAxMg6SAaeYC7bTRaSjxcX8pX7o59Hes26V6naCt1Cps5W7ZZpOcDwY308S8ZSDi0TY48_avNRfeW272NjO-DA6a1IbDb3Qnd7ZOjsK3U0nxhCMxmvvAAOuFEjxAvBujLzyjSE-KmwpDryEIGdEcA0-iJ-M843uc8L-vBZ6oMjK1U2QXKYGYXFnZRrIbXrPrlWxNFz-DD4QuhTT-ruM7ouh1MjtUp_-M8kYHT_5FWJ530tmT3kBTRX08cdmsgg3xylnQ7sH7g10IAwL-ZhizaqcuE="),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_0b6050734527ef3d0169381b5714f48197a0ed16bd8eff7570"),
+                            "id": String("rs_0581b3c06174a5d20169451a4acf508195bd8adbd4ef1d34b6"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -35,14 +35,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_opA8yzLgCRM27OFZbc4HFdT1",
+                        id: "call_APk4SRwni2PfTuuZTWSbXIWW",
                         name: "run_me",
                         arguments: {
                             "foo": String("test"),
-                            "bar": Array [
-                                String("foo"),
-                                String("bar"),
-                            ],
+                            "bar": String("foo"),
                         },
                     },
                 ),
@@ -61,12 +58,37 @@ expression: v
     ],
     [
         Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Summarizing tool response**\n\nI need to respond to the user about running the tool. They previously invoked \"run_me\" with arguments {\"foo\":\"test\",\"bar\":\"foo\"} and received \"working!\" I should keep my response concise and describe what I ran and the output. So, I’ll say: \"I ran the tool run_me with args foo=test and bar=foo; the output was 'working!'. Would you like to provide different arguments or run it again?\" That keeps it clear and straightforward!",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABpRRpUvO0zqcjEMliqiVXmOk-Vq37AMa96XfVF7lTORRI0rN3EP9-X0oqc7xdUi1z_Uh9P45lW4Q7L3JAGLCCbwmsGzHOkuzVb-JyfqjzB7KTFGz4hpdVHqa5WoAbyWy_TAAOpZMKfYdiMZGAYQmhPOMGviiNq4tAZDlu45CHo10RJ27dx1jyvmvURnuhwG7JdKs3Gp_2nZZA8htKe0HtR_R-OZ5Rxa_1YjVedoFgN6Rff08n6Af-gneH9N35xRm2JW145RDGxsN10nZukh7FwEJ9gjx7tiEgtl-zubh4yOuEfTgJvko5kNhBijwjnNZMHgf43uT5ZGLIEaEn80cPArVTADkazkyG149j_Dcj_rWnPp3b4-U7POs7ELArLJb2_gClMCzBsT48SnfZHRJ9tGyMhbfX3bPbxwwzxpXVRe9zP3Uyf8lia_EKpiWsyZaDPX-sGaNJHGq2LJoHKTeMSly4ry7JTIrvWWHJevRHYtg7xcYgFYK-sqJzBmOyRYYYnAowMzvEgVK2tsOKdZAjnVFOGBo71SislvbvXfCLdvq3kMgR6jAKDAC0UFnSVG_1e4sLwaYo_TQL_JUTjL6oqUq6-U4FFhIwNgXcjaiIitcYzXpGh_zpbE4IIPdUgdXRFJxRPrWznHJZB2moGFqm2ZABm5_63uRyvaC7V_6Tof8Hb5ttDy7OT1vEuAsF-UjFIc6fxb1bSVuJ6EloZa0SwNFlwDxURJzdIGSz6JN8bU9hnvzXoA-d6q7lsxjuc_cU0rlL7umEuJLK9yVhVrbadRPs5hsQhzkxvbFvJVhcq9_FJiD7SS3g0EOan_I8lk6P5GbW3W_d76JSXN6M5wl32vdWcDDu68geWJQu69O8gOVCgEcxN1j8jNFKShzsgB7Ig5ipTxPHijPhlWFmicDBVyr9HjCD_v2JoPfCeP91R5LohsA-zBSdY8Z5q2Y_LjjSgbyf_reTd_7DVTfD4VaNTUXs29lQSiu1aqmWrCS5Rc29VcsV_rpKEbx1hepakdH1UMGZ4fiqv9n_KxPB6vj_S3eCFMMCL7uab6XIePlFxR-wMTVW4OPYWaD5jilH3i7D-WZW5Y0XozcldYauKo3hW5o-SQ7J3aFQPGFNAQucaXeiPaVpgTmpm6TxeFzAT3bWOI1HWiqNITWNAmJjyJQeMsBP-VxPlXrxGqNCYpakuG1GJIMrp3Bnqz97ZMoxog7T29n3_SCWOhMM65fLJsvxWX0GVm1odgvexJDoibzxjEGrXzl-bmQtyUKD1NVXiwJ34hPuMKmuDl_1TEkyabS9SfuMeiemCmWmhltO2NjRLIKy8x7EXJQYb0zB2OqimN2vTQa5xCbE8wh8Qm8TxAOnpb8d-A71wrNJV2gOLNCiNZyQgxswal6vej9Xxzi3gw0E4wa5ortvUhiLnJjLsQQLILWvXxbsUY_VZbDNYMRiV7Pbg_z33XRcmG3Y-eQo7fNEThlFw2EXeQ6Iv-Bznr2_3LOyDyMhRLELI6Gxps9AA14n6E3BbJpDu11SP2cUMY84LFUTJDrJAucaCNzBW0JH-pm5LUetCGpnyYKvdQvQyUkjH71vx-f2T0m_-Szm1Vops4406P9e3bQ421QAl4wE7YaFyC_DNZBILlSwAysO7CccYrds3EiEBUZ_ya7jNmyqd1kLEZTTaCwl-_7cp8QQtfLJ6fxzUt_lNBk8YWyPNqtZ4FDbAFt2nSwFaAH_nuaLMlPfO1E4g-prTwUEmpxlu_W6TE-m23irsSU8nyg2eIFrrLa0N2mWVDTW_nNQbot4gswnh8VU21YaqrTziVrhWyDlnqjdz7OBQSYRHKrOH-laJCW_-nt4k8hyMxcPGI2iYixKIn13bgIFEJSQw68KsmpbQgB7PmmX_LxnbMs71kMnlYk5ONE-1SktoWSdY_JxMHdsM4f0_bvDJJl0nglDgFblNJFYmActtGksQegGQ8ZiXLzsWWleq_59hFLHeeqKnX2aM"),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_09a1010459c9cf620169451a4fa3148197a1b69c84c8db5214"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
             index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "It worked.",
+                        message: "I ran the tool with these arguments:\n- foo: \"test\"\n- bar: \"foo\"\n\nTool output: working!\n\nWould you like me to run it again with different arguments or explain what the tool does?",
                     },
                 ),
                 metadata: {},

@@ -35,7 +35,7 @@ schematic = { workspace = true, features = [
     "type_url",
 ] }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order"] }
 serde_json5 = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }

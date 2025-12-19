@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:51:48.195234",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,11 +114,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:51:45.225158",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -135,12 +135,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Executing tool call**\n\nI need to call a tool as the user requested a demonstration. The developer provides functions that include run_me and multi_tool_use.parallel. I'll go ahead and use run_me with some parameters. It expects \"foo\" as a string and \"bar\" as either \"foo\" or an array of \"foo\" and \"bar.\" So, I’ll set \"foo\" to \"test\" and \"bar\" to [\"foo\", \"bar\"]. After running the tool, I'll present the results concisely. Let's get started!",
+    "reasoning": "**Running tool functions**\n\nI’m looking into how to run the tool based on the user’s request. The tool requires specific arguments: foo can be any string, but defaults to \"foo,\" while bar must be literally \"foo.\" I can either call functions.run_me directly or use multi_tool_use.parallel for running multiple functions. I’m thinking it makes sense to pass foo as \"test\" and bar as \"foo.\" I’ll go ahead and execute functions.run_me with those parameters!**Calling the tool**\n\nI'm planning to call the tool with foo set as \"test-run\" and bar as \"foo.\" This should align with the requirements, making sure I pass the correct parameters. I want to use the commentary channel for this call so everything is clear when I present the results. It’s exciting to see what the output will be! Let’s execute this and show the results to the user.",
     "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBPQnRncUJfMkpwV09EYUpXTmpILWxwVkdsblJrWnBBa2FnQUZYblhzQVZ4MnJILTJTcEZrSVEwb1A0aGtGUVVWenZHdnJ5d1dkWHB3UDJ6R3lNS1pwNkVDVkZ6eWFlcGcxejZjUEEyRHgzNmhMendwbkpnaGhWdHBmZm1sYkZINHRfU2hON3FzdS1neW1nSEhSQWowai01dzJaMjdXVWRrUmdOdHRSS0RyUmZwUFc3Vm1RbVg0VnYtMElQYkxIZHYtNVVJMFcxWDVQTVpWZHU1SXNDNjF6ZnFkRWV4OFRyMElIcTdJVTZmeC1oaksyWmNpc0RPOGgxdWlEblUxbGhtaGo1MW81d1NoUGt0ak9nWWp3SmZ2blItMDlfd1V6RDlNVllVZmZpMEZBSGtRbUJzWWRLamZxeGtnWnUzcmFUQjI3Y3RtZXdqbjhyQVdmdFVoYUlNcFpnbUYyd3ZkVUpzSWt5TzNVSklWWlh6MTZobV9YVGRySzlSamwzMzU4VTVMZFNUZ1kyTlRaWVFvQjFZUkVfMjBJTHZJcTd2NW5mTjNOelJibVJLX29tNmp5NVM2YUJYdU1aQUJaQ3FYZWc3aWlTUnhhcm9PWlZHOTJQNG8tcUhzbXJRU08xMEN4eWFOSlJZdnhHX2JmYloxUGZJMWJ6eWpNdEJmak1rQ1BXcGMtc3cyVEJTYjM0cjdoa0IwQk9vQ21IcUVpY2tkT0d4b3NzOVpWbFNVMXE2VHlMYnlzYW5UbWZoenFFTTBjOTlZSWpYczFJYVc2Z01IV0hpX05VbGtUYVJmOXYyZGhHZFNpRHB4VTViNnphbGV1TDhRenNYSHlJVWF6bXJKM1BEVERoTHMtU2sxd2dDaTQxYi1MQldheEFUUnN2cEo5UDZGUnJQRExiai1GakhJZHlqRVJuVVZnZ1IwSHh0blNuamF6aTZaSDRTUUJLc0Zwa1dpVEg3TXk1SjQzX0stdzVRSUNFXzVqQlhZNHpnS1NMM2o2Y1pldmRfWHVYMVpBY1VXQ1dFUFAtcmlEX0s0MXhfX214al9KcjV6U3M4dllhYVVaRDcyOWd1eEJjaGg0WHlyX0VLOXB2ZnZjTUtKN0xha000U0p0OEVoc2tXWjlBazh0X3dJR1dyeG1pdFpwTGcyQUo1cmZIMEhNdFdhSW5tdUxhbGJHRWo5RXYwUC1HTFRDOW5pZmJxNGJkcnI0WjJxWExBeWRwanFIZ3VDWWZRWnNNdU5pdHdFYmZaMkZZRnFFSUttU21XN3FQd00zYzZFN0dVb1d4dkhoZTdlT2NraGo2TUxsWDU0WWVHZ0I5N0h5dmREeFhXR29LbW9qY2NsTGxjVlNIQUJyaktrdldlaU1SU29tRENaWDFPNExEM3dyX3FfUE1QNVlHRFBBOGRUN1cwRkdSaXB5ajdoTUlTN0ktSG5FMHQtX0ZUb0lCOWFpUm9lakFqUlpvOUZUbnRqWlFMcVdVQS1RV21uUGthaWRsVndVb29NZnRkTzBLcXZvanBNN0dQbE9PYm9XNFhyUlQ1ZGRFY2F5dWJYR0xRRU9JdHJrcUlhOGlUQUtKSWZ4WXNzRG9IYzZUeFVtOUx5RnhTQ090OWYtYXZtRGFVR0YxaUhBSG9VR2UtTkdiRVc1QUR3SVBkSmdKTGJLVUlnWHZTeTh0SUlkSHJWT0xzOWVqMGpTV2JTZVhMV0hiMUY2QXhHOW0tdmdfWldfTGRDOU1ILXliQ2J6SGJCQU9rV1E0MENkTmxRNEFFVTZkMURIcnVGazNSLVp1LTA2Wm1CaFJFNkRHQXZTaEtweDFNR3NqLVkza2R6ZzlVbVhpc0IxWkdYLVRxTTNlbERuTE1tRFhZSUg3aDhMOUdxWVhXSjlpN1JhVWhfMTlKWWJ0LUdnem0xVGlBTU9nXzdQUjVHQmNOM0tCcmtvSVF5MlhBUHZjUlVndWhBYlNfdzNpVmJ6S3gxdVZ2OHVmR2RyM3p0cGZ5dnJfN2dwQmFub2E1RDVOQ3RGckZGQVVsY3pobjh0dWZMN01FZlpNR1VseGxsc1ZITmQwZGJpR2JDeHd1VjdHLWxrMDVfLXY0UGZSODJnRjJOMUdtb2txS3MwVW5BWkJFVFF4c3lVeU5nX0taamFYWFZhQWtKLWIyZURYSFZ1LW4xVXNycXp4TzNLa3pyRDNjU2M4cVZfYU9LWEVBWkJhQS1FWWhoQXYtOEpmeTdzUk41RG96ZVptR2FZcGkwVzBiWHFJSWxMVXZ6ZzhRWFlMTXdkdnpCMEhSRWl3bVY3WjE3Ym53VlRGWWExaDVWcmRkczhIaGZrNE5DbHo1QmcxNmZGZEcwRkE2VEdKRXV4cDAzaTVhdVhMRHB1Vjd2WHd2dG1rNVlieExLVU9ReGlMNQ==",
+      "openai_encrypted_content": "Z0FBQUFBQnBSUnBWcDFWRU9pUUNldXMwYUdCV1B2bWVJa1VtQnl5QktUcGtzQi1WSzRzWGNSdTUxRDByUDF1TWg3MXZoYXpPa2s5QUsxcVZybTJDbkl2bGFnZlJMYVJVRFZQbTVOc3dDeFhabFdIR245cjV4X1MxNlh3VEJNS3BuU2V6MVFHeF81bDluMmhRXzVmMzl0T3hCM2pqOW4tc2FDcDlCMEVvQTFXNUNZRzJvUDAzSXpnZE1aZ3ZsUjdJMkhHSzJqZHdzdkZpTHVXeEdOX0I3VlJNVk9kcDA5bkszbV94ZDlWMGtBNFlEMGRQZkJwYXpyV1JOOXhnRWl5SUdCbVpiT3BaNkpTOGJfcG50V2FNX25VczFWOTNwQ2dBZHdCSEU2WEpLU0ttRV8yMzMxSUlTNDJJQjhOYjl2V0JvUFFCcE9XZ21kY0xVNUVWbWJiUHVTQkhnM2ZKVUFEaV9NN2JOTHVJbFJ0c0E3cFlHOFc3Q2hVWmZXb2VSV3dBWk42cEVHUW1RVWIyOVRJZFpIQmlJN3AtcWNrdFJuQjhNTTNFLWxmNmo3bEVGSUo4cjRob0EtMEU5dUI1WDMyS1Z2M1VRTi05ejZydGQyLUpGQUF3WGhRMUlLQzBySXA0SkJTUFkzY0hnRzg3QjhrVXhIYU5SSWFZNHRjR044QnNVS2JzbUJUVTVHc1pLZU12ZnFuUDJzZ1hSZ1pvU1h1Z2VwNk03MmRGaHN5Sm9ORU9ycVhSMVVtZXhRXzZpZU83TU1LNHBkRklHb0VzZFZnLXJ2Y096T2xXZUQ5clFGeGkzYjdmdzVZNDV3Y2VpRFhWMHZVWUNNMVVqS0lNWW1EMzB6Qm9FdEpxMUtiOW9ZTGtMaG0wbjVVd1FSNU94VWdsQUNRT3FWOXQ1eDFoeFVhY2EyZkNUNWpaUERzNGt2WGpQVzVINmdKY1JTS0FDMTJLOWtQS1drQkhiU2VwdXFtMl9ldHdfby12cGJfU2JEN2JZNWl4NkdtVmZDWXRKdVNFY2hIYzhzSWhJRTdYZ2lVXy1mWVR3N2gyUWRUaHdwejd6Nmw1anRkTlRpRGFBbU1zSkhWYThlZmdfQ3I0Y1hIb0RYWGpIa1dnWnZUTWpkY3lTTHM0NkQ2Mkt0TldfeG1xQnI4c0g0TVdBeE92UkN5TmRsYWJfRDJRRk9Zb2M1clpZMkZ4aWlMOVFnSUlBdTJ2VGxDaGlmMm5FZ0lZU0piY0k5LVJTU2NZWmZLbmstVXV2M214dDZTNER4RVZXY2ZacDI3c3JBTjVpTHY5WjR3dHBkX2txcUU5Q2hoQm9uUmJ1cm11bjlXNHdRYmE5SGdQc01FMS1QOHZlaFRwRnp1WElmY2djSmJjYnM2NWdIaWVJS2UyU0dtTk9qR05aUUxNcXU1b0dMX2gxNF9zYzRiQXdxcWd4R0lyaWxMcURsdWRtc3VWbndxS2p0OFNKWFlIeVlUM1FwX2c0ZzJHRG43U255WVoyamxObFFaOEJSUnMzekVCUm9iUW1vOFFIZHRnVjFUYjZoSHIxR2dlUGNNVDgwRjBNVklTNXdHVXF2Mm1yMU1WZk8wY050WElHalBLaXRuT1U2XzIzeFFyMUFVSFk4TjctTlQzclBYcExqSmd1QUdnOTlubWRneHlVTE9jNHFQOUkyblQ5VnpUMkhTUUVGZG9VOXJWODdzX05PMTFCTmZtX01aMng4TVpHcE5acTdHbUFkYVJrWkF1OVJ3ZVVXNjhQNzBXR3hMNUJXVWtOaGV4QU8yaXlmMnlYX21ZRmlMa08xS0JuanBsSXZGeGdoMVdZNmJlM0p6Zlp6S2tRVzRzaVJGanJTcWxFelAyOHlBXzM4dFBjZXhLOFByUm1WOFVPQkt2eUxSTFNHd3pjRGVORGFxdXlqbUNqMFRlOEN4LXphdXlqM05KdmFNRTZDQzBWUndzQTJiSXhTY3Z0b1VnMUVEQTQwejVPV1VQQThOTzZQM3dBSnlxUmNyVU50RDVZVzMyZVJpajYwV1VRNFFLOXVaOTJkTTNUTDE4T2xZcElVX1lKeEg5bG5VZllqYTBFSmd2akJib0pOUVRSNV9pRTQ4SGRDU3MtSHptNVlmaEVyVmF5cHZST1JnSTc0ai1mR2N1bklhMWYyR2pCVHhhUHo2eV82VXI2YlVRcE9LMFpHUEJOT0hLNHJNa19kcHZsZHA0a2YwTjB3c0ZkUFRPc3pjWWJ4N1hzR0VQR3FzZnpQejNITUlGbmpuSkVabW9oRm1fMW1wc2xtSjVTWkh2R1hQS0F6cm5KQUVwdWlCSEliUVB4ZkkxSnNxcDBSeWRsdFJRcWVEZXBGSTJ3NTBlUjAzRDJSdDgtVzBncEpycnhqNGRQU3NkM3h5MHdnM2FfNXk5N3lwUk1nTDhFRXNYSU9XV0JUWU9VNC1TS0w5aUhUMnVPNjBUODF2b3hPaHNIMXppZGdOMXBreEEycUlSZW1peHgxR2Y1TE5wQkNiWnhkSFZXMjNXdW5yVWFvSDRER1AzUHR6XzRwMC1ZVDk1WHZIQWktSnFjcTd5TnE1bU91TUt1YTBSRVd6dUZNSDNoclVxeUlTYjAtQ09TZG9wV2F0a3NFYndmbng1NmxNQU5MZzVRc0N3ZXBXVzNNVmpTSmM2T3Z3clVsYlBzSHNDcjRQWUhLRWR5dHVROHl1WFhTd3MzNkg3X3lxUFd4blMzczdyX2NpQWY4VU5MaU1ELXh3ckJYTEE3LUF4WFJyTE1uSThNTkx4OVJTMC0xdU1rSDRpQ1hWMTNWTDZyMURGWmtVV0JveS1WOWk0NlRScS00dXY5Wmw3cDN2T1dhcGtnbTg5SENuT1JrLW4wMWVRMmtscGRHM2tPVExyclRaaW5ZR0hfbl9NdktmSnp3Uko4MktUbTNCTWxwcjA2U1ZBMUllcmgyR21Xb3ZaVE1GTkN2aGJNRFFFSno3Q3VNX0l1V0tIQ0xtaURYWXZUdWNMVVN3c3NvVTdqbGkxbWFIZ0k1YWxWZDlZWVhNd2FRbVlTeHFVRzZjRjgwSVBtd2hYVGl3PQ==",
       "openrouter_metadata": [
         {
-          "id": "cnNfMGExZmE5MDIwZTMxMTY2YjAxNjkzODFiNWFkODE0ODE5NDkxZGJhNGI2N2E1MDNlMGY=",
+          "id": "cnNfMDBlNGYwMTdiMjhhOGY5YzAxNjk0NTFhNGVlM2I0ODE5NDlkYmViM2UyZmQ0MjlkYWY=",
           "index": 0,
           "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
         }
@@ -150,19 +150,16 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "call_zaB6hHwipWvw7HAFhBy4cUG4",
+    "id": "call_ScRvBLn5scCLDvL3D6UBYau3",
     "name": "run_me",
     "arguments": {
-      "foo": "dGVzdA==",
-      "bar": [
-        "Zm9v",
-        "YmFy"
-      ]
+      "foo": "dGVzdC1ydW4=",
+      "bar": "Zm9v"
     }
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:51:45.225216",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -176,19 +173,19 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "call_zaB6hHwipWvw7HAFhBy4cUG4",
+    "id": "call_ScRvBLn5scCLDvL3D6UBYau3",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "",
+    "reasoning": "**Reporting tool results**\n\nThe user asked me to report on a tool run I already performed. I should confirm it ran successfully and share the arguments used. I ran the tool with arguments foo: \"test-run\" and bar: \"foo\", which returned \"working!\" I’ll also offer to run it again with different arguments if needed and explain what the tool does. The goal is to keep my response clear and concise, providing next steps.",
     "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBPQnRqOEpPNEp3aW9HZkpHZkRENjNqVlJqOHJCVldQZUdfNEl2VWk4czNpNXcyNkxmbjNIbTYza09JUDYxNVN4VUpwam42MGtRVXVQdG40ZTBFMTlhQXdzczc2dXJMWng5MXNfODVqY2tlRi0wUVoteVllTU8wRVZtUW9FUEhyU080RUUwZmxQYnNId05qVE5hQV9DSzFCSkx1UnJaRXY3WWJCYTZmTlZQX1lnRVRkYnFRRHdHdkN5SmxobjktS0ZweWR1ZnNTd0VZYkFESEdGLWZVaUMzVEJkRVp6M2wzODd2WUxTaXp6OHZrWFBYa01wR3BmLWFqLXZOSDFTYkNPelgzOFFhX3pZZ2F4c3pvUlU4T1BnVFVOdmJrTmU0Y2p3OXRUdXM3WkV0SDI2TkNHQjVQUWswS3VDcEdDRlJZcWVlRTAtRk9ycmt5OWpDUzBwcGZ3bU81c0t5WHBucGJZTVhKU1puWWV5VHEzaE9acmQ5Y0tyWjR4dXViMVh2RDNfUHVXOXMtU0d1N0JRV0x6UGdyM2t1Z0VHd05qVlg2Tnp0U2ZBdnBKN2FjeTZibUh0UWlCQktrcE1neVVQTmRmaVZOdzcwcjBxa1RfczNmUFFDclhENGVNbVM5cGo4RThaN1ZrMzR6V1hjWXBDc0Fsb093VEVhaS0taDB6TFcyQUZPN1FyMlp4OS04TmhEcDVnTlpPbnBkVjFQVUJoMjBBNEhLVkxIdFZUMk9ieWYwcVFjSndxdnBkbkU2cnktbzhVRzRfbUcybDdrUkRDcFVMYl9JQTBiSVQyYmxRb20wank2UE02QnRDbnljSjZDamdBVjl3aVhuMDBIRjlRNF9FcnNsSTk5RG10Mm5xS1lKLVVzd0R0UHNmcWNoTTNtRG95OVFfUmEyaFdPaDZvYUhmXzFnS1hpeFQ0UnoxNktxdU92Sm5IQXd4TnBVOUxaQ2dIVHdpR0JmczZEWEJQZ2ZESWFIalRHNWZfMFFFZHlURG5Oa25PZFBRa3dRRFp2MndLMjVOUDFjTDFPbGlvRWdGU0tSQ01BRC1XemM3VGlYM1VjOWlyMGNmbkhxZ0FVUmFEckVIWU5EZTlzN3ZqcHJwUXJuMkw1Ml9CSDZnTXZBTUhBRUhmZm0xZWZ1UnZkZzExb2pyazlVOVJwUkw0a3lvbUE0dTMyWUhqMEdTZi1zYnRoUFRmYTV6WnZBYWlJT1hUY1RvTC00anZWTWN6TjdheHUwMTd4QXRsdFlDYTNaVmZFYU9rTWxkZF9YLWtDRTlpYUVoZUFiWVBKd0htLUpncTcyVlFVc2lCanB1U3hNTVhFUHFIa1lEQ0hRSTdnVFZORzhqV3RuOG1oekx4dF8xbS15c1FZenFOZC1jOXBuX0s4Q0ZwZC1jMGJqUDQzTlV4RUhBQ253ZTlCWU1sam9qLUhmU2JlWXl3RW9Ycy10dkFjZ1VxdWxsbUhsT0VoY1BfWmNiNGNTMWF6eEozcDR5dVdSN2xhRU1GazZ2bDNWaEUzV2cxVTB0Q0x6MDRkTU1JSWJkemYwQV9sRUtqRHZjY2ppc0VzMlF4cURuWGVhcDhOSlJBZHNxdVJ2RkhNSWVsQXAxdXZuWWxYNWRZT3Z3OUxaYjhXNFFiY3JGX2hFeWFPU21TaVhzS0RlOFhiSnlVaWJLdmR3TGdSQ0RxWXNtTmNtTDl0STg5ZFBvbnZ0N2t6UVZab3g5S1FNc2o0YzJmbnlnS3c4RVhkeDVzVlpIcWdMU2xzMDBOckhCdTNaT2RtSklnREtaUU0ydk1lejVVX21hUXc3N3l5emhLZVdfLTNhb0t4QVBZMTNUSWc5RF9FZTFpTkk2NGE4MlFpbHlqSnVxRVp6MlJyX1JOXy1vejN0STJDNUo0amVHaGtKbzJSb2hjM3NDZTFyTWJjY0JqRTN4WTkzWVZsei1WN1dhaFo4MGM5WXh6YlR2X1V5UGhzYUd3elpFa2FjSDhGdEdUM0hmc2NMSDRnMHRwOGZsMVJjTVlya2RLdlMzZlRDNlVMcDNWLUtnWE40Y0k3WFFpWmMzcXNCVlhwZm4zbzlxR1g1OXNtSURDZFlDQlNtRHQwTzlOZC1zTEN5RVhpd1dMUzd0azJjbENRSTUwb1cxRVdIQkhUWmFUcTU2R2ZKXzBmWXI2RkJ0NzNaZk5yN2JsNUdGV2w4WXRMOXVyNGc9",
+      "openai_encrypted_content": "Z0FBQUFBQnBSUnBhMU8zTFp0M0c4dHR0U3B5dFJDWHlwTV82YUowVjBVNExEaXJaR25VWEhyWExpNFg4RWFhNUliaUNuMUdkbG9QUUhyenhRWm14MWdwN1NxdEdRaGZYdUZ3cjhVVnAtelMzSnlsZW80S1k3MTVlbVZzVk94YUl1X01mdFFlTmMyS05mR2RHY0xqMXJYU0RTZElzUmVfVEhEVWQxdTVMNkVCQ3R6MWZfNkdGdGxlaWtIY2JEUGVLS3h6dFREdnpreWlWWXgyc0Q0WHRLZVJDVmVNRUJsZUlSVS1qYWw4aEVGZmhoZGU2R2h0RV9oZVhUcFpzYVBlRmpPVnRldFcxa0MtUU91YVREeHJMbG9idmdCZWV3X3gxYV9CLW5SVlhIczQzN3hWLVpiZWNQZGNfVXk1ek5raEd1T1FXcnBNLXQ4eTIwZVhCVXRGWUMweG9IaXhEdzRNNHRyelk5NFpTSXhPRE5MS0lvel9nOU1CNXNPRlFkS2hwdlMxNGRCN09GN0hHRmF6LVFYbVkzVzlJTjdfMkZCenkzQ0hJZmZQNWhOY2g5NTZreUpsMWphempvLUdhVE81OFFyVWdqcXNHSF9RaVFtNGhWMUplM1B0TC1MNWluZm9WcVdSaWNyYVdKZU1VaklBSktjUkpkbHZTeGp3Mkk4MkhEZHlGaG9pLXAzLWtXSzhqaFVQU3NyZEtPX0RlSmVFNDFCY0l6TjhkaXdGQ255M0l0Y2Z6WkYzb2xHNzBETm5QZ01rT2VHSmdMTml1Wkh3Q2ZkOERmc2RWZ2NlVzBIelpMZ0hGLUtQYUZrQVdka3dqMHYtaDhxVEpVTkowWjRIRVpfZDRoSHJjelFySUVON01paGktMEtjS1FxUVozVjk1Vjc0ekhoX1ZEUkxkSUI0MElRZVU5bUFTUjR2TGNITktYbDdOWktWZnJvMlN1djVMR1B6bXVVMGdTa0E4ME5NQ01kQVVjb3gzUGpRTFhUdkZWUW9TZjJwd2Q3azFWVmhDWHljNF96SnJkREZEdUJ6THVscmhINzIwTmNuYk40c2FlV3UwbEdjRnVEY2VjVlg5YVpxZ0NQMW9zc3JlelBTNUQtT0R4TURDdzN5M2Z2OVd4U0hCaGd4M0JwYkJjSWRNOUhLcE1tUGM0MVJsQWxZZm5tWm9vME14OGJSc1Bubnota2lyOU44VmFkNTF2WE5EajF2NF9tOXZBUU43cU44TVdsbXp5ZUVKa3huMnItYldLQkJVMUJ1UzJlMF9JUWxNdlhiYjNWRE14YUZfQUNiTTZJM3FHWkFPTS1hWm5ZWjZ1RWlKOHpBYzhZWDJzRUR6UFl1YXJ4WWlvWHhBd19XcC1LdEtxRHpLN25sdUtZTjZZdndreVZTakY5S2U0UnVvbHI1SmpCekc1UWNCNk9LcHJpdlVCMkxwckVmdnBmbWxVXzZqeDhyWkFsZEhlVEptM3hlMk13N1N6WmRJZmNHYmwwSU9HYndTZWdjWkZhREZfbEVYcXRMTnVKb2JWeDNpZzk2ZC1ZYm1oU254VzdHa1FmUGRwemNieGNGbVk1TzZGQXZfYUs3N1JqU194OHF2aDZGRFVueGpmaGppcWxwajFod3hYN1J4Z1cyN0pTTXlETld0c3NZRHFPbW1sckRpSHM2Mk8zZEpEd2tVWWRxYzRkMVpWY1pXU2VSRW5tcUMzbUc5Z3F0MUc4R1VqV1BaTmJMeXo4M0hrd1JLMXp0dTl2VXdSWlc0SjVlZkVxVE9DLVpOT2dMUnB6WkFLczlIMS01LVo3V29uMi1JVHhrZkV5aVJqVFQ1VGdiY3pqYTRTM1JIZ2k1UUFXMl9XTk5xVEhYS25LdmR2S1JYVjZVTmxaNThOWmg4Wi1SSEN3Z0dtc0RoODA2aHFWbzNQelc5aVUwLWRlNVVUQzFmbllJUm9vcll4Y1BGQ2JWRDFYQTdQMF8ySGlnRXR2UExWbDY5TTZUbWhScFNHTW1na2s5alFJOGFuU1FOaGdiSnljWmFHUzNHN2k2UWpTcEdubHoxMU4tUEo2VnpzZkl6RVJsUVYwQ0JEbnNHRU1qd0FTLWZ6clZuQ3ZwRDlxZDhKZ3puMFR2OS1idElybXZtR0l5S3diQW9EMUFSM051RGZzeFRLZDROVHZlNVJWbzZ2c21ZeDE5dDJuSDZKcjZmcTQtRGZ6aDNvMkdVM0tLUllnbkFaalM3azZ5YkFJY0x6UzNVQmVPODRkOEdkNE9nWF9na0xnNkpTT3JKSzhzcUNxV0RVT0M3QzZGMGxuS3VWRzdMbG9Wa0Z4Z2lBSDFnRG1ObHRLc0Q0LUt1dVpjWXY5cDREcHhsenBPdmpiUkZCLTFrMFd0MzFkOD0=",
       "openrouter_metadata": [
         {
-          "id": "cnNfMGNjMjNjYjY3Y2FiMjAxZjAxNjkzODFiNjFhOTY0ODE5NzhlMGNiMTc4NWNjOGM0M2U=",
+          "id": "cnNfMGUyMTljMmIyMzc0ZTAwMjAxNjk0NTFhNTVmNGJjODE5NmE5Nzc5NDIwNzA5ZmJiM2E=",
           "index": 0,
           "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
         }
@@ -198,6 +195,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Tool call succeeded.\n\nInput sent: {\"foo\":\"test\",\"bar\":[\"foo\",\"bar\"]}\nFunction output: \"working!\"\n\nWant to run another test or pass different data?"
+    "message": "Done — I ran the tool with these arguments:\n- foo: \"test-run\"\n- bar: \"foo\"\n\nTool output:\n- \"working!\"\n\nWant me to run it again with different arguments or explain what the tool does?"
   }
 ]

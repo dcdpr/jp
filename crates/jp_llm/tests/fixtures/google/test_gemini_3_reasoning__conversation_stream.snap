@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:36:04.222426",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -113,7 +113,7 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-13 07:35:59.989094",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -138,14 +138,14 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Reviewing Test Prompt**\n\nI've successfully received and interpreted the input \"Test message.\" My process is currently focused on determining the best response. I've identified the intent as a connectivity check and am now solidifying the optimal acknowledgment and confirmation strategy.\n\n\n**Choosing Response Strategy**\n\nI've examined several response options. \"Received\" feels too terse, while \"I hear you...\" is a bit too casual for this scenario. I'm leaning toward a blend: a concise acknowledgement followed by an offer of assistance. The current draft, \"Message received! How can I help you today?\" feels almost there. A final touch will be to include a phrase to reinforce that the initial check was good.\n\n\n"
+    "reasoning": "**Testing System Functionality**\n\nI've analyzed the \"Test message\" input. My current focus is on the user's probable intent: checking for responsiveness or basic functionality. This is the equivalent of a \"ping\" or simple \"hello world\" test.\n\n\n**Formulating Response Options**\n\nI've crafted a few response options, striving for a balance of professionalism and friendliness. Option 3 initially seemed promising, but upon further reflection, simplicity emerged as key. I finalized on \"Message received! I am online and working correctly. How can I help you today?\" which feels appropriate for a general use AI.\n\n\n"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Message received. I am working correctly! How can I help you today?",
+    "message": "Message received! I am online and functioning correctly. How can I help you today?",
     "metadata": {
-      "google_thought_signature": "RXFJSENwOEhBWExJMm55ZmhBeVlZZXFCaGp4bldGZTd1MHB4bisrNEkxSk83VlJrMFVER3BZRkd6L2tYVFdqVGtHVW9lMUplSTNvdU1wckd4dXBYdWRFWWY5a1VDM1JCNGVpNGllREVhOU1zTkRpbUtya2FGUUxMWEx4QlVJZjFuMm45KzNXMEh0WlRCcmZPSDd0bkNXNm5XL2x2WG9leHBBUjh4eml6M3RhOHg2MThMbDlscnVHa3hyVnk2aitHeXdHTFY1QnVlVnl3RGFxdnpRdGg0L3pqaG1ST0ZhdmRDaWl1NllyMy9zWWx6Yngyc0c5dlkyWWs2TjQwbzdpRGJiS3g2V3hRRHpsUnQ4WEFlTTlta01QdzQ5aVowR1U2ZFZOZWYvY2lFZENsZjJZeitkNTYxUXdOZWdKb2FtaWJyM3BHclczelFNbEQ1Y2c1MGZobE9LTzZNUEpYbk1YdzlHOUgvZ0RkTGJQakRERHhJc0hHaHdMMUxCT2ZkT0pkQVNuN3B0eHBac0VqdG4zL0ZNWVp5VWlRc3NweEFmMFNYcjc3dzc1QnZCS0pkQmduakQwTVNIZEQ3M2VLWFNaVTA3QURXcnVKSWpCSDgzN0sxVXFoUFY5K3RYVjBQY21MaEZjL25XM0Z6aU1VVGdHSFRDMGlrNS9iakRoU2hYM1BWdzh0NDBhTkpGZmdEazcwclZkcGpRTUVwYmRUQ3VmOFlkai9HSEtUS2hJSjNUQXlBazZiekhJVit6QWlza3k3amNWbzJrQkw5bVVTRzdycis1eVpVZm1ZQ2ttem1QTFJudEljSmdHV3JPb2FXanZjS2lDRnQ0MlBweHlyL0RvejllenNmYnFJTFZBY2lURWpHQ21BamRXK3JZL0dCeTBVc3pEd3MwWW82M2RqbDdRSG5DUTZFejJ2TkFCOHFnUVJJNEJSZ1IwZnVjS29TSkRNSkdYWmxBTGJYSHdkczZlVEUrazgxb1YyUUx1dUo2OS9ySk5rak1ZSVNyRTlpS1QyTmVRY3hYWTIxOVVHNEFsUklqWGp2M0RVcjZNVnptZTVtUE1HcHlENllHUzRWeUxVeE1IZkZaMXdLYnFPYXV1cVJ6cVZjczF0amtsbHJCaWVRVm1rRjArSVpTT1dLaGh0djlMQndjQzdQTlNjUjUwQzFxeUQ5ekM1TjhJUDc3OUNidHJlZC9Bc0NFcjlzV3MxRHEzWExkVFMwcFpTQWhYcTc3ejJDVEtPcXk2d29ZakhTVzRmN082K0xhaDB1SEhWaVhON3B0Z0w4UHhYY0RUR0xBVjNsT014MU0wSGZ4dEpNZHl4VmJsdjNxOGZUamJwUGE2WDJQeTgzT29hR0NxNXBiMm9kRDNDQ25SRWlFZUwzSzNhQ2gzNWxXeWE1cFlQVkZUS2crQ3pjeXhyRnlKcUFpcC9nd1ZXMFgwZXpQZC93YS9kMnI4NC9sVUIxdWZLbGw1V29GeEp0dEwwUjlBb3RyT1c0akQ5MHlZRUx5UThxMncxcVRXUWUrQzhxNmJVN3h5UlpBTUtvME5tVWQzTUxURkJEVHAzekNscTY5VmtmRCs4Y1MwdW50QnhTbWlXdk1qaFZGVFJabC95dUFBdU9EMCtYNStTRmY1T2dVS1Q2WWpOMTA1MzE2dmQ="
+      "google_thought_signature": "RW93TUNva01BWExJMm54MU42TjF2Wnl1MFNRQVZpeHRrQ3B1T05UazRiVG5XdUNRNmxqelhoVGg4UUdFOEo4aHRuWGFpNFVCTVNKMnNtdXdmdmR0SW42K01NTWJXd05Ic3lyTStmaDMxS1Fqc2tCU2JlVVpNcUVhMkhuVkx2T29TdmRxTDl3MmVzTVhTd0xxdlMwczcvQWkxUzhZY01yRDM1WGZDbGRZWmdIakdMVUlUVEJzN1ExMElKRDB6S1Y5Q1ZybzdzOGo4cDhFN0MwOFBxMitWK2RMcFBweGNtdjAwcFE0bUk0bytYRE1jZkZxRmFrODlGaWVjUUZsd1FjeDdLWlAvUGFaOGxGYlRRNXk4NFp1YjF2M0ZWT09nbWhuK3BkYUFmMWo1UVIrS1I2anExdUpBZ3NHSmdSNjUvWDR1TlN1MzVTSTF1cE1hWHUxaTNET0hqNTAvL0h1cC9ZOVBuYTE3V25pOEx3Ni9EeHdKUzJvVnJTcHltRUdjTFdTVEtuSWRQbmRJTkVMMFhpMG1NWmdWVkVKNkJDbnJnaEkxTm9PbzRvU2VFZGlkbWVxUE1ZN1pGN2FxRjBWUlErSlpiT1pOTmZVQW1mUHRkTjBSRVJKakRLY0M2Q2U5K3lraTg4R2RvaVZaK0JMbUdIdGRuZGhlYVN5UHJhTjI2VHRZaUNDa0liTWlwcEVsaldpRngwWVNoWFQraGZXN3NSWWNlNTNYeUpFNjBrRjBnQW54a0YxeU1MVFl4RllEQ2NkZE9pa1czUDJuYnZ0WWs5NWhDVklQb2F3MTA4aE12QUtmRUdETlBPanZkdWw3T25sSE9JSEJOcGx3TGdyMllJUWpwN2I5WkkwamVGN3phN2ZkL1dqZkM1dlZubjNFaU5Na3dXT0xzSjZ1VmpHeFJSUWU5VHd2WTNQdjJ5SE1rUTByclVxOC9RNjBIT3U0QXprQWFrOVZmM01uZXNHMnNqcDR1S0FSSzJtekg1c2pSQmpoRFlBelJKbGZEQzhHZUY0ZFdBb2tQMFVQR3NPN0lMcTgrbWdnY1lpekg5V1pJYU1jcHArM2NWak5ScmZIRitOaC9XTVVHaWNCdTF4SkhFczBrWFdkQVphT0JxYVR4bkpFTVFWcFhEL2YvVkw4Ynh4U3JCcjBWZjdYaFFPWWZ5a1pFK3JJWGFmQllKbVZpM3YveWk2SWljTzlDWHhSckNPTk9Pb3czdVdpQWJFZ2g2WHR3VVNQZEpxYUx6NnI0R2t0V2pnd0UxWnpXbm15dDZ6UVF1akM5WGJyTHgzNjZ3NHZUSGVXditJZ09QbW40UnpTSHFCVEl3a3p6WHhYZVM3UXpaSWU3OU40L0RCUFpXWXZRY3ozQVRZSkdJNWwxdExGbHpnVmZaeWxJMkU3Ty9rbVlkR0ZoRGlyR0NMMWxoOUdkMjdwd3NLT25SRlJ4S0VVdy8yNFFjWEFxclU0c1I5WU02aDJtZ1JkMk9vT3Rsc0VCY0VZRU9EaUkvVzBuZko4Smk0ZUVNcEFERlFnUHUzVmFJZ2Q2SjIwU3ZsQnlwMm5kQVhlUys4SXNldzQ3eDNzcUFqN3c3eEJYOVpucU50b2VJd3F0YWVCVXNUVmIycXEyWVRCWnBKMXFpY2lhZjR0M0I1TUVPeE1CcjQ4aHlTM2RpZEFHS1VVVktGbnhuRnBPRUtwU011dnFydklFOHA5bnVReGI2VFdZcmtxN1BrN2VMUmF6Y2ZELytjQTUvVndFQ09KOHR0VUNtektscFd6S2c4dU9OUnVNZk0rWHlvTzBHQnQ3MUg0S204T09kbzRRek1vZzNFMmNFT3BMc3FVbkFURG1rV3AxcUsvaXE3NW1SL0JHVUdUMXc1T0haZ3BaMDFNV3MrMXVZYTlYYmZqdzlQU3owQlRiU2daVGVHaWlVcitJWDhsTmhUVDN2aEQwcFQ1VitBR0hnSVFqVkFFSDEwT25NMW1IelAzcjlpUTE4QlAxbWdJMEF0M1MrZzlqczVoS2pmeEI3a2tMaEFOaGRqeW9ieXhaNjd1TjJpdUJHQjBuSEtLVXl2N3B4czZxZ0Y2OGRXcTl5UHhCNTU0c09nMUJLZWZvVGhqbmZYdFBnN0ttVHdaVUNLMjV0bzMxWXA5aGFtaGlRckxKcnBCU25rZEF5cUpGUWxxNWIrNi9lRDdyV2l3dTd3dGNNdkdHbmVrc2FmVTkvY2NLSTZYUW5mRFZvTWE0MHg0R1hMZysxR2RUWmxQQ0V5bG42bTh5MVQrM2x2QlpMVDJqTXJ0UXVob1JGd3VwWFpLN251SFBqMFZIYzg4QmJ4ZCtLZ3hYK20vSlpkRjVBbUpVUEFjZnMwUWpnYldoOHU5NkMxcHdVVWpjVi9peDdqWjBzMi9lZ3A2bUxnTTBRV3A5V1Y2Q2xRaFBGVTRuZkZKZGxHOUMzZVozK2dNcDU0bWcrVGYxYUs1YjkrNDFnQ1JWbitkNVFwdEtucEdrem9pQURNdE9HMlk5MTljOWlYb1lQbXRyRGxuSEh4STJDclNTaUd1cHFyTE5HWlFhdDhPRnZ2V1hwN0plSVVMNWM1WnZ6ZnlpTnB2SS9sWjQ1RWM3QTRkajJPczdsWEQvMHBGeWxjdG1mU042QWhxTFIwUElIR0I1SFkrQ0JyMVkxdFFpNjVPd2k5V0hPS0RDNDN2U3pjWGRjdHJNQ0JaYjFOK1FYVkV0a3ppdm1WUHdYL2tjTnlZSGQyUkRmYzB4Sjk4WnNidXI0Wg=="
     }
   }
 ]

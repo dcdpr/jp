@@ -19,8 +19,8 @@ expression: v
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("rs_031018b8eac6e7860169381b4e3f1c819d86718ef291c37bdf"),
-                "openai_encrypted_content": String("gAAAAABpOBtQH6q6ooZ8ZXybk81y0UPjX6yjbWXLuw5_WksLBxPXxv7aqzNqqctjZsvVdVODoYVx6a0DLHtH0DZqpZLtlNv2ZSd00jhK1wqB9xkaq20UUz4B8lEQjy58umM_cF4JcLKhMkqyhoVcKeNJWp3Env8ymTdjavxIau6AnZNwrSVKlnVCN_TROsFkm0lYFC4p02G6NSf0BSxh8sBBOvUBApgvvZ8hWo31jr5Nrx2NxVvuLABSxob1AqWsEMdIrzClhSf_zCwK6Q2EVQ7kkfbpOcliV9AWInUn-bt988ravaj46s1QgqUww3X0GmZAKEfbFd2jIbOaBmEDLzKLx614vJID2mcWVH0Vicq5CFzBD-4PvMFIvB36ycdkLq4Qvk9uoqJcG-2FZSuY-ilx6RTO-M7S07iMCfBVwrXA5nY6cYtMHctK41_3PNkRuwcoTKjMAXuqrGa42Oouc73M6J3JIjbQS7nnRU3CIyEKrbcGXYKX4tIhRS4m2m_sDxRMHFKO7P3AB36GYjQ47IKqN0_ZvJglwlYyXZ5zi6R-6sKenbfmg8yhQCQqfNglxj94Ec6k2lm0gvNnNHL4G3IH0matmJUZOG6D4lcrxfu4qAwNnRMm7437NW-kppec8cCe9AbXiDg7WNTIRCaZ0DTWB1xg13o1WAAABFwrKc2VbYjMqLvj74V2fFfICJuZ5WbTh98N-yHnej2gIs0FsLH9wMArVfNSyWEpRX5gL1LvQtVlMpWiml0mUMVj8cGUIgbc_7fjsUK19YkPLi41vcfhCuT4KOs8ZFKhcjjdAAXo7aRCv8b2aywn0Fu7WZJgXbiEigY8OtCocdeLmmItHkdDl2jJFto9ixY2A5O_jMu5jvjW6RS6_pABuyv29UHRuEcN0TorCAsijcw0zd2FCyEMM6J8B7-jqJOsPfJ3n-6PavwBPcuHXMkrLjnZEykWRoShbGaHBbLzD4FRPftWZULk5Q2dLMdWn5MlmhPvCtbl8VMhqP-ht2-zY3V4uo8WgcKxYpL7x2m0xJdvdXlDwnGQnoeuf4ueKxD7XL0soBmHEoNReWr0gL48kAUj20YslJnT_AzEP71hFnLLjDK05hgCbo8KWLFfcDWAm7zyzY_SZJHW_XPKnou9Tzl8654--4oRHEUJ2UdmzPQTSdTBphPfSqKDR9MqcfALT8c8IS0wMV4jLJZxijYhpYDl-b0mUBzyNo3_LRV_-pcQIt2ig9-t46BkrlYNy67ctmyZZg4Vm9l1pM1g9Cb4vCstbrB7eSsikx1oIH2aV8_FB7HjWzN0GSkyzL0xFI3wrnevz0jb9AScKnO0lqr4ckUV84cOIyD0VX8wjI3HukUUUPgKTzE7zM5ePm9IEBj8icvSIhN1cRdwhOHs_IP_Pay59VrjMG_SEM_egKm2FS7XqzeKjDQxCWu6NfMnKZCw278nqQGI9cZ5xTAkXK4VVavP6-x0jgZ01EfchyoICMXgUYcnYklBXoghFS8opxBPQMdFtLbZBpzgrKsVzxrenyXYi6WVYQ8TgUu6NNdhdQU6mXxu-B3TE-3ii57Oz9QhN68LJ0Oz-UTf6mjTPYerq8lOsetEGfHvRyz86G2wn4JHnVWZzduLsSylL_j-DCK4QDGko81qFZ1q6CrblMD5Uw7-hTU14cF3gFGRn-_koZ4cIEYnrwl2ZlhTHaScr46S6gVeaCSmhybHNcedyeucYQAf7ORhU6I7dCh01PlAEdfB47CUgwIpQySbGh027fBs-MQ6KQiFKDzKdJrYEKK0RDBvFSOHydnk9WU7GR_PeT0IGHku6tZUq8oxgZW0g1OejIajsjCURnyRv6_Il9w="),
+                "openai_item_id": String("rs_02261a47a157b7ee0169451a42cb148193833ca5d4608ce032"),
+                "openai_encrypted_content": String("gAAAAABpRRpHGkJvY4ZMe6EO0Dt1-ljWQhZ5pFHPfM-AzwRnobsk_u_aB66DIL_Mu5gN5HLaKt14Q22N-Fzie0den1G1o6VeVyVnSu6ge4fATggHBASy90i3HJFqNN6s4X4ph6WuyTmLIx1SJuQpcf2Wm9UkAQbziqE83utOUTLqfNSFlq1N3NAx1GsrwCGWxt3BMeSJ1fNfdwvhARFcmgaEeV2boozVm6SuRrtoa30DqE1wZAwAD0ADLjYbQYdTcLzcRbrRoHgkpEJTIQsEsG4GktqO4Zta7SRiHZhJvDKI935iYC-nNNJL5LFgL29CO63A8gvuaWODHnWMCHIsTt4kWlWcG9Ea8Di1i4M-ypIYokXLWUjOp6hBGyeYbJ5WepZEpuG39ADzEjdguCwyOg9RcQfqUiGiGpWieSAEHIApNAteggxzq6tNQraE0oCH8qtWlI0e_bZPc0yiN4_YVLMnfNyLCmI8N_GQHa9irzsVDAiwteDNYr8tnBLy6K9M5CycBi2VHM7aG_iBvwotuxPFXprEK8g3U6RcQpz8xuJdh2lg62PKBXn0RyPsvTABG-a3_mn8TXn-SOxBonEVWmqGKUdfArqgmVf9yWIrpf0kkG4q0_pR-Q22l6v7jDGs595PPfnnLN3ucL7-2azs15zXFkrlhhb_z6CnOYZh9IYiIeB4xH695N1A9Mc0SCq6kWxyA3yj-w9SzweaQERIstc3CtYRc1SCgYhGUDvULY4Jrktrd7O-UzX7nTy8r36pc4P90L-2KjIxRrlKm1Sasdik_fj_NV2Sc16vo5tRmBXOvI8iqodi_h5LflefYlqykOeNBeQOV2Un43XdB81nQxZGyQpuFJmIRcYYY7BsfOnjMkBdj8s94WJttTmuo1dxCII6KQL7JXPTtU8gugDbq3JHPrdueTT-ywI3vXG3HpnVmsKcyGG-5YU5iIE5NhXT1CvfkaS54x28NnmgIkaJ8mrZnteuIT067fViN9VCIr9WWjUKhZBoMWHKfMX2amCV2qAafXBjqWunlLPvqRZTjxmyu_T2O9oHEpVd-eTJgmCmsTKTMiNXFDGofgMxwv6vgPWom3E6KcvSbb6tW1rS2pABQhDHsuZKXdMhTm1hQKMsn45JED7gHMfNp10sg1KvKjeHsDEGAuFHQnyl9fa3DPLRpLGWCM42VYw2_btuKGTIOdFPHwLVIe0PKiGoMyoFkGFwI6JZ9b0TMXQ97b2_3D_GYAM7wqycyuAthMpn1K5U_pFmurXtDi5SmPnhv_5aqddAGsxDOkmm0cqRGHW19Ohb-WtHe9PEPp1OXu6Ihpw8Uo70lPqPHMtqCU0rPo_hreWvvC8HY_efTXggCZVYM0V83LcBc_3GED6NMZU8RQsN1zbkaqTWJ_E5lwhXB-HpRaYtq4Nm-ujdj5aLxyS9hNKlQDTgiGYgN-hmH8rq_JM156AIr2NWDWfTBnMmXRNo9zQrq6WnmRL7lOQ9_xJEYR1Pqp4-7OHZOTxDWhi-2iuTrZwEa4R1P4hmf6YweIfDXC0uFmkZmz4lJBS8s2yNLm39qRYKmnfIhIBbo_-Z_yTA4M_XpDhSelnkWkg1tmWtnoMEt4mNhvBbgHQ0bmoadQhjptI-3WIskgXlXqHD6VFm3nCuNXxxO1SRqmTFqbyAZlLH4xRCI0wgAKzKqP9QpbSkTRm23MgOy9PyikUPPJt_ZgIBbXQCSF6ma1lcFzDz7aQSi7lkScpiKs_MMNXWI6XZSw4wYApHxwhxkk_I9Vc3x5oVe_c6l0k2YVCEm2fDyBG8YDvapTYAKb_xYNLjjAxFVSo4m-PllC_AUKk6g25MVpDQgnj-r7cznIPmuN8nJh91Au9ukAT22WYmwoEqCRWDtTQy8lrkznlJPPslm7iiLcxy1jD6-_53cpBdv2keBM6EzsSHnVLXjb3cczks1gcNKpemBUVIdKbbJW9h9MIKmOJp6BXz8ZGsuLsH9-r-bvNFqyPXCcgczbyPNMP5SSuunZ3dQvqB2Ji2VWmQ-NZFMHTWKjpXqOZ87LYqUaITNxmYIdLpxHokyrBW1F1K8colkQezrBxSDxh_z3VONRKtzU66Jol84vQTxyTpLPD5zRxswdQ_dxx_IviufiPKkfPa2h3hjP_XFlKw5vqj063962isrNn2vJAIoPARyvuaEQQXaOlc07RpKnfTpzmCuxywUuIlF7YkRVGKCut5BZbF-nnkdMQhlJX2c2BtXCDr6DBmvBYSlrbT8HX5k-h_TFbHtzwYjSqfhKcKvCTYT1S3HsEPDMC6-Rr7X_06fO4DhMz_iUCx2bcgztx4UgmNce-40YVlnIbqarL-Kks0utbRCXxes5TUWJ6j82GtIhyTXM5T9lXT_0Z55LXye-yBPVUKAtAkC-q_0RPYGixnt-VEYJ_WOmlNnAHw2R3LTZMA26ZFiMxBe1eWpzlc0HZarrJCCtn-D5-Q4wN7v0Cv8UyjEkGO1JYCBdI4zczf9Fe7al09pLgytSZN"),
             },
         },
         Part {
@@ -29,14 +29,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_AdV4F0rQC8p6GKjEHYMBIE29",
+                        id: "call_P4jKJKtrmgMaruXFPqwl1eZZ",
                         name: "run_me",
                         arguments: {
-                            "foo": String("test"),
-                            "bar": Array [
-                                String("foo"),
-                                String("bar"),
-                            ],
+                            "foo": String("hello"),
+                            "bar": String("foo"),
+                            "note": String("running tool"),
                         },
                     },
                 ),
@@ -54,11 +52,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Tool responded: working!",
+                        message: "Tool run successfully: working!",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_031018b8eac6e7860169381b50f7ac819dab6cbffd0a0971b0"),
+                    "openai_item_id": String("msg_02261a47a157b7ee0169451a47f48c8193bc13ebf0fed7393c"),
                 },
             },
         },

@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "",
+                        id: "run_me_0",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
@@ -35,7 +35,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool `run_me` was called with the argument `bar='foo'`. The tool returned a response indicating that it is \"working!\".",
+                        message: "Okay, I ran the tool with the `bar` argument set to `\"foo\"`. The output was:\n\n```json\n{\"run_me_response\": {\"content\": \"working!\"}}\n```\n\nThis indicates that the `run_me` function was successfully executed and returned the string \"working!\".\n\nWould you like me to try running the tool with different arguments, or perform another action?",
                     },
                 ),
                 metadata: {},

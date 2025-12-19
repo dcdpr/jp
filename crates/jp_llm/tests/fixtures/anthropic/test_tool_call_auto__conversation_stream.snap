@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:32.97366",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,32 +114,28 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "I'd be happy to help you test a tool call! Based on the available function `run_me`, I can make a test call. Let me invoke it with the required parameter:"
+    "content": "Please run the tool, providing whatever arguments you want."
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "toolu_013oE1TV8hr5YJLWjFCyjePW",
+    "id": "toolu_01JnRUH54K4zAChfRfTCuBmt",
     "name": "run_me",
     "arguments": {
-      "bar": "Zm9v"
+      "bar": "Zm9v",
+      "foo": "Zm9v"
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "toolu_013oE1TV8hr5YJLWjFCyjePW",
+    "id": "toolu_01JnRUH54K4zAChfRfTCuBmt",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Great! The tool call worked successfully. The function returned \"working!\" as expected. \n\nIs there anything specific about tool calling you'd like to test further, or would you like me to demonstrate something else?"
+    "message": "Great! The tool ran successfully. I called the `run_me` tool with:\n- **bar**: \"foo\"\n- **foo**: \"foo\"\n\nAnd it returned \"working!\" - indicating the function executed properly."
   }
 ]

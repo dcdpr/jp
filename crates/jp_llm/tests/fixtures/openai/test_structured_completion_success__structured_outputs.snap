@@ -5,7 +5,7 @@ expression: v
 [
   [
     "Structured Completion API Test",
-    "Generating Structured Titles",
-    "Conversation: API Test"
+    "Assistant Function Call Test",
+    "Generating Conversation Titles"
   ]
 ]

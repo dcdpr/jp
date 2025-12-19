@@ -30,87 +30,127 @@ then:
   header:
     - name: content-type
       value: text/event-stream; charset=utf-8
-  body: |-
+  body: |+
     event: message_start
-    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01WTRaRYbPJZwjpa6Kwjifgn","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":38,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard"}}   }
-
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01Nj88peDLNSp1ryFiwuGvZd","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":38,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":4,"service_tier":"standard"}}              }
+    
     event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}       }
-
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}   }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"This"}               }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user has sent"}}
+    
     event: ping
     data: {"type": "ping"}
-
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" is"}             }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a"}             }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a simple"}             }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" simple"}        }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" test message. The"}    }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" test message saying"}          }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" user is"}             }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \"Test message\". This appears"}}
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" checking"}       }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" to be a check"}             }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" if I'm"}        }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" to"}            }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" working an"}             }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" see if I'm working an"}}
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"d responding"}      }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"d responding"}              }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"."}               }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" properly"}      }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I should provide"}             }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":". I should respond in a friendly an"}  }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a friendly,"}       }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"d helpful way, confir"}     }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" brief"}   }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"ming that I'm ready to assist"}    }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" acknowledg"}   }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"."}         }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"ment."} }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}             }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}         }
-
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"Eq4CCkYIChgCKkDERK8W38o59wikAF3iRdOoEbmbJw6Tnv6U5/WgnwrvzD9v2jP/mfLOaiM1cnO/aI+HVAr2FF5h95px/hxnMrf5Egw4SjER3Ce1v1W2NhkaDCndfdqvrI5HJNvCJiIwzi4AEk+pHM9pPuYwEDO7j/gn8DsBLTM38rET6mwX7bUGKT8qeE5mws/Gp6qm7X+1KpUBXlz3tTrq2KvDVEmYOy4ByMlv8XXagPHzroNCImErjdoq9zBN193V3o3ilELy9GJ7w0etbckWXfQTeYZsaSLjUE3927qYOq+WnKDv7yRB5+xC9JBS3OQzR2JeVn8yeqf0pc7erO8xZrf+6L4wKmAXE0MO32/PmcqHMF+Wd5Iyy8NypDJDpv3nWvVXpytYJ5afT65iPP8YAQ=="}             }
-
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EoYDCkYIChgCKkDHVlw7QXazPyn+fnR2voGAmEeHUWu5gg+170hpioglJOOP8hl7Zpn9yJDzqnpQyqnyvXLxg6b5eytvLKYfi6ytEgxaL9swiOUHKQ9d90IaDO6IFY1G/FR9bo9HLSIwrwZHu1qFcCwwe+n3m7I6XM1WHZAvAiVUAkreGDujQHmxCQyCzErGvAzBH3S7rAWAKu0BS1VqyFkaDiQLdwHEv9VvtvtsEJ5RXUVtYgPRYQli3AuiXzI6/HAhPUbCixxxTELbZ/lTU7PZspBlxbplyUQVJzys4QjB6ZSG2/dhKgiKq5rj7bvJFpwJ5OpfHz5KF5LjXmtCTEZSm73wkj6KBlhD2yoH3MDXj0RjglfMcDA36pFMsw7zRoaFNmcKRzAT0QfAXk6cuLF/uoquY/JGEqtaksxm3DysA5KGDQHCs0guwxy7Gp6n94u63QpbV+V6zKGQojNTmcSTWVG2DbXwhRIV5QsoQ45L6LlpqIV/l/QnX701LZxfpX7rTPSc4r85GAE="}             }
+    
     event: content_block_stop
-    data: {"type":"content_block_stop","index":0              }
-
+    data: {"type":"content_block_stop","index":0   }
+    
     event: content_block_start
-    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}      }
-
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello! I'm here and working"}    }
-
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello! I'm working"}            }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"."}        }
-
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" and ready to help."}             }
+    
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" How can I help you?"}         }
-
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" What"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" would you like to "}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"do?"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Feel"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" free to ask me questions"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":","}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" have"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" a conversation, bra"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"instorm ideas, get"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" help with writing"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", coding"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", math"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", or anything else!"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" "}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"👋"}    }
+    
     event: content_block_stop
-    data: {"type":"content_block_stop","index":1     }
-
+    data: {"type":"content_block_stop","index":1      }
+    
     event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":38,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":53}              }
-
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":38,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":108}    }
+    
     event: message_stop
-    data: {"type":"message_stop"        }
+    data: {"type":"message_stop"     }
+    

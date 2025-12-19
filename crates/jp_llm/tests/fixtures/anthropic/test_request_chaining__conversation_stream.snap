@@ -1,0 +1,150 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2020-01-01 00:00:00.0",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "anthropic",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": false
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2020-01-01 00:00:00.0",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": {
+              "effort": {
+                "absolute": 1024
+              },
+              "exclude": false
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Give me a 2000 word explainer about Kirigami-inspired parachutes"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "This is a fascinating topic that combines Japanese art, engineering, and materials science. The user is asking for a 2000-word explainer about kirigami-inspired parachutes. Let me structure this comprehensively:\n\n1. Introduction to kirigami and its relevance\n2. Traditional parachute design and limitations\n3. How kirigami principles are being applied\n4. The science behind why it works\n5. Current research and applications\n6. Advantages of kirigami designs\n7. Challenges and future directions\n8. Conclusion\n\nLet me write this in an informative, clear style suitable for a general audience while maintaining technical accuracy.",
+    "metadata": {
+      "anthropic_thinking_signature": "RXBnR0NrWUlDaGdDS2tDaFpJaWJhWldDbFNRVFFiS0FxUWlwV1c4Y3ZId3E1NlVLRFZpRU9WbnB0TDZnSUE5bXFRMlFaQWsxbXNpRmNqY0NqM0ZjNEtMSXd4RjhuRTRSWURrRUVneDZnc2toVmhyN0R5R1JoNzBhRE9jNnBhbE9CaHI4NmxHOEdpSXc1MDN1S3VWNHRlcnFJcmlyaE5sbW81V1YwaU5xYjYraWsrT3huN1ZrOWl5UFpCYVp3cEJJU0FjOHFZbmhrYjZsS3Y4RUU0UmI4UE96a1ZYeVNXY3ZHdDBuRjdmR2hjZmY0bVI3UmdSQ1dBNnlZVWtvQ0U3UEYyOWlNTTJQNDRGRzM2Z3c2Rnl6NndPSlE2NG1EbVR5WnJhMFhQd2hJenVKejBTN3ZlOEVzcStDNE1jR29XMUhMaFpQelo5Wmhyb2wwVndFdTNVeGh3QW5vVG9QN0oxY1lQcm1CWSsrcjNhcVlsOFNlU3cyVG44czVXbXcvTnhVNHRwd1g1TnNxTkZtMTBaMmZkTjZNSllNTVA1cVBGeWhvK2E5cysydzRlV1g2YUo2SEt5dG0zY0JYU3NyNEx3NzgwUndJRTFsOTZscTlOTUF4L3NBcGRUNEVTSXZVWTltWkxPTEpIMlJzbndybFExMG5MUFc0Ky8rcStDZnozU0FlcC9BZmpOMWVPd1RSamhHTkN4K1NYM0R0MXNtdEZ6UGpZcFpHNCtxRjBuZkR5VzU3K2tCU245SDVjTmlYSGhBcWdWdzZUakpYVWMvZG4wUHpqOTQ4WGNRNzEyekIrN2djWkVHaFR1WnVtazVKWERnazZBR00xbVdtaG5QOGpoU0VlUjA3Yzl4QS90czNSL1lCc0pWdlZFN1gycFU5L011cnpkbDJYYTdiNFRGbytaRlJLUkF6OVdtU1N5dllqQVg1aVBwTEZEME9ONkdLb0s0UFY2L0ZRelhyOXVFc0FaTWFucFU2Y0J2c1ZmL2tWQmdpU2QrblAxNmY2Rlp2ZWZWWlJGWUZOd1BvbUhIRXBUSXZVUzNSeGN0YzBjUzkvUHZDZWpiRms3SmxpbkRUeGFCYTBEMHBWNmZYMm9adkNXRjJvY3E0Mk5LZFAzZlM5SWFKVkdvbzJJd1NIK1RCYjhhbFdsUzN4OTdlaGFraEM5R3F0K2tXeUJaZDJWSnB4UlZmUERCWWxwT281MXpOck9LZ2xpOEhLQUVCU250L3hWY2w0cmhQOGxLVXhZODVpR2VUaDRIY3VMNWhwMUZaSUp1bXZpeVBHWHVFMThuNWkyR3YxL0kyTUFSN0RsYjloZzY1WjhIQ0owNjE5STErRXFPbEZ4WjM3a2xJQWxSOWFMYnRLL2FadnhoN0s5NzlEZnlXQmZMcTN3VzNoa1pQSU01eHcyNUdBRT0="
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "# Kirigami-Inspired Parachutes: The Intersection of Ancient Art and Modern Engineering\n\n## Introduction\n\nKirigami, a Japanese art form that combines cutting and folding paper, has inspired engineers and scientists to reimagine one of aviation's most critical safety devices: the parachute. By incorporating principles from this centuries-old technique, researchers have developed parachute designs that are lighter, stronger, more stable, and capable of more precise control than conventional parachutes. This convergence of ancient artistic principles and cutting-edge materials science represents a fascinating example of biomimicry and biomimetic design, where nature and cultural traditions inform technological innovation.\n\n## Understanding Kirigami\n\nBefore exploring kirigami-inspired parachutes, it's essential to understand what kirigami is and why its principles translate so effectively to parachute engineering. Kirigami differs from its more famous cousin, origami, in one crucial way: while origami involves only folding paper without cutting, kirigami incorporates strategic cuts combined with folds. This combination creates three-dimensional structures with remarkable properties—they can be stronger, more flexible, and capable of controlled expansion than structures created through folding alone.\n\nThe practice dates back centuries in Japan, where artists used it to create intricate decorative designs. However, modern kirigami has evolved into a scientific discipline, with researchers discovering that the cutting and folding patterns create unique mechanical properties. When you cut and fold materials at precise angles and intervals, you can control how the material deforms, distributes stress, and responds to forces. These properties make kirigami principles surprisingly applicable to engineering challenges.\n\n## Traditional Parachute Design and Its Limitations\n\nTo appreciate why kirigami-inspired parachutes represent such a significant innovation, we must first understand conventional parachute design. Traditional parachutes consist of a fabric canopy made of ripstop nylon, connected to a harness via suspension lines. When deployed, the canopy inflates, creating drag that slows the descent of a person, object, or spacecraft.\n\nWhile effective, traditional parachutes have several limitations. First, they require a significant amount of packing space relative to their functional size, making them challenging to store in space-limited applications like spacecraft or military equipment. Second, they lack precision control—once deployed, the descent rate and trajectory depend primarily on canopy size and weight distribution. Third, traditional parachutes can experience instability issues, particularly in windy conditions or during high-speed deployments. Finally, the stress concentration at certain points in the canopy can lead to tearing or failure, potentially catastrophic in critical applications.\n\n## The Breakthrough: Applying Kirigami to Parachute Design\n\nIn the late 2010s, researchers at the University of Illinois and other institutions began investigating how kirigami principles could address these parachute limitations. The key insight was elegantly simple: by creating strategic cuts in parachute fabrics before deployment, engineers could fundamentally change how the material behaves.\n\nWhen a flat sheet of material with kirigami-inspired cuts deploys, the cuts allow the material to expand and conform to the optimal three-dimensional shape more naturally and efficiently than a non-cut material. Unlike traditional parachutes that must achieve their shape through air pressure and suspension line tension, kirigami-patterned parachutes can partially self-shape during deployment. The cuts act as engineered \"hinge points\" that allow controlled deformation and stress distribution.\n\nThe specific cutting patterns used in kirigami-inspired parachutes typically follow geometric designs—often hexagonal, circular, or spiral patterns—carefully positioned to distribute mechanical stress evenly across the canopy. When the parachute deploys and the fabric expands, these cuts open up slightly, creating a structured yet flexible surface that maintains stability while reducing the maximum stress concentrations that plague traditional designs.\n\n## The Science Behind the Innovation\n\nThe mechanical advantages of kirigami-inspired parachutes stem from several interconnected principles. First, cuts create what engineers call \"compliance\"—the ability of a material to deform in response to applied forces. By strategically positioning cuts, engineers can make the parachute more compliant in specific directions while maintaining strength in others. This controlled compliance allows the parachute to inflate more smoothly and predictably.\n\nSecond, kirigami patterns distribute stress more evenly across the canopy. In traditional parachutes, stress tends to concentrate at specific points—particularly where suspension lines connect to the canopy. These stress concentrations can exceed the material's strength, causing failures. Kirigami patterns interrupt these stress pathways, forcing loads to distribute across wider areas of the fabric, reducing peak streducing peak stress concentrations significantly.\n\nThird, kirigami patterns can be optimized for specific deployment scenarios. By adjusting the size, shape, and spacing of cuts, engineers can tailor parachutes for different applications—whether for high-altitude deployments, precise landing requirements, or extreme environmental conditions. This customization capability is simply impossible with traditional parachute designs.\n\nFourth, the opening dynamics improve substantially. Traditional parachutes experience a violent inflation process as compressed air suddenly fills the canopy. This shock can damage equipment and create uncomfortable deceleration forces. Kirigami-inspired parachutes open more gradually and smoothly because the cuts allow air to flow through and around the material in controlled ways, rather than rapidly inflating a sealed chamber.\n\n## Current Research and Applications\n\nRecent research has demonstrated these theoretical advantages in practice. Studies have shown that kirigami-patterned parachutes can achieve comparable or superior descent rates while using less material and packing into smaller volumes. NASA has expressed significant interest in this technology, recognizing its potential applications for landing spacecraft, rovers, and future human missions to Mars.\n\nThe Perseverance rover's landing in 2021 used advanced supersonic disk-gap-band parachutes, but future missions may incorporate kirigami-inspired designs. A Mars landing presents perfect conditions for kirigami parachute innovation—the thin Martian atmosphere requires larger parachutes, which become increasingly difficult to pack. A kirigami design could maintain performance while reducing packing volume, a crucial advantage for space exploration.\n\nBeyond space applications, military and commercial parachuting have also attracted research investment. The precision and stability benefits make kirigami parachutes particularly valuable for cargo drops requiring accurate placement or for tactical military operations where stealth and control matter.\n\n## Advantages of Kirigami-Inspired Designs\n\nThe benefits of kirigami parachutes extend across multiple dimensions. **Packing efficiency** ranks among the most significant advantages. Because the cuts allow more efficient deployment mechanics, kirigami parachutes can be packed into substantially smaller volumes than equivalent traditional parachutes. For applications like spacecraft or military equipment where every cubic centimeter counts, this represents a major advantage.\n\n**Enhanced stability** is another critical benefit. The geometric patterns of cuts create a naturally balanced structure that resists oscillation and tumbling during descent. Traditional parachutes can develop oscillations that make landings uncomfortable and less precise; kirigami designs inherently damp these motions.\n\n**Improved durability** emerges from the stress distribution benefits. By preventing stress concentration, kirigami patterns extend parachute lifespan and reduce the likelihood of catastrophic failure. The material experiences more uniform loading, similar to how engineers reinforce stress-prone structures in buildings and bridges.\n\n**Better controllability** becomes possible with certain kirigami patterns. Some designs allow for asymmetric inflation, enabling pilots or systems to influence descent trajectory more effectively than with traditional parachutes. This could prove invaluable for precision landing applications.\n\n**Reduced deployment shock** results from the smoother opening dynamics. Equipment and personnel experience gentler deceleration, reducing injury risk and damage to sensitive cargo.\n\n## Engineering Challenges and Considerations\n\nDespite these advantages, kirigami-inspired parachutes face several engineering challenges. First, manufacturing precision is critical. The cuts must be positioned exactly according to design specifications, and any deviation can compromise performance. This requires advanced cutting technologies, such as laser cutting or precision mechanical cutting, adding manufacturing cost and complexity.\n\nSecond, material selection becomes more nuanced. Not all fabrics perform identically when cut and folded. Materials must have appropriate tear resistance to prevent cuts from propagating unexpectedly. Engineers must carefully test various ripstop nylon variants and newer synthetic materials to identify optimal candidates.\n\nThird, predictive modeling remains challenging. While engineers can test parachutes physically, the complex fluid dynamics and structural mechanics of kirigami designs require sophisticated computational models. Creating accurate simulations that account for material nonlinearity, rapid deployment dynamics, and air flow interactions demands considerable computational resources and validation work.\n\nFourth, certification and standardization present regulatory hurdles. Aviation and space authorities require extensive testing and documentation before approving new parachute designs. Kirigami parachutes, being fundamentally different from traditional designs, require new testing protocols and standards development.\n\n## The Future of Kirigami Parachutes\n\nLooking forward, several exciting developments appear likely. Researchers are exploring smart materials that could combinesmart materials that could combine kirigami principles with active control systems. Imagine parachutes that could adjust their cut patterns in response to wind conditions or deployment parameters, optimizing performance in real-time. Shape-memory alloys and programmable textiles could enable such capabilities within the next decade.\n\nAdditional research focuses on bio-inspired variations. Nature has solved deployment and stability problems through millions of years of evolution—seeds, jellyfish, and other organisms use elegant folding mechanisms. Combining biological inspiration with kirigami principles could yield even more sophisticated designs.\n\nComputational design optimization represents another frontier. Machine learning algorithms can now explore thousands of potential cut patterns, testing each virtually to identify configurations that maximize specific performance criteria. This could accelerate discovery of optimal designs for different mission profiles.\n\nAdditive manufacturing and advanced textiles also promise innovations. As 3D printing technology improves, parachutes could be manufactured from composite materials with spatially varying properties, where cut patterns integrate seamlessly with material gradients to achieve superior performance.\n\n## Broader Implications and Interdisciplinary Impact\n\nThe kirigami parachute story illustrates a broader principle in modern innovation: solutions often emerge at the intersection of disciplines. By recognizing that an ancient Japanese art form could solve contemporary engineering challenges, researchers opened an entirely new design space. This cross-pollination between art, traditional craftsmanship, and modern engineering represents a valuable model for innovation.\n\nThe success of kirigami applications in parachutes has inspired researchers to apply similar principles to other engineering challenges. Kirigami-inspired designs now appear in acoustic metamaterials, robot design, structural engineering, and materials science. A cutting pattern that improves sound absorption, another that enables robots to move more flexibly, and another that strengthens concrete structures—all trace their inspiration to the same fundamental principles.\n\nThis demonstrates how understanding fundamental principles allows us to apply them across seemingly unrelated domains. The mechanical insights gained from studying kirigami parachutes contribute to broader materials science knowledge applicable far beyond parachutes.\n\n## Environmental and Economic Considerations\n\nFrom an environmental perspective, kirigami parachutes offer modest but meaningful benefits. Their reduced material requirements mean fewer resources consumed and less fabric waste during manufacturing. More efficient packing could reduce fuel consumption for military and emergency applications by decreasing overall equipment weight. While not revolutionary, these environmental advantages align with broader efforts to reduce technological systems' environmental footprints.\n\nEconomically, kirigami parachutes present an interesting calculus. Manufacturing costs are initially higher due to precision cutting requirements and more sophisticated quality control. However, the reduced material usage, improved durability, and enhanced reliability potentially offset these manufacturing costs over the parachute's lifetime. For critical applications where parachute failure carries catastrophic consequences—such as spacecraft landings—superior reliability justifies higher manufacturing costs.\n\nFor mass-market recreational parachuting, the economics become less favorable unless manufacturing costs decrease substantially through automation and scaled production. The primary near-term adoption will likely concentrate in aerospace and military applications, where performance advantages justify premium pricing.\n\n## Testing and Validation\n\nBefore any kirigami parachute design can be deployed operationally, it must undergo rigorous testing. This includes wind tunnel testing to evaluate opening dynamics and stability characteristics, drop tests from increasing altitudes to validate descent rates and landing behavior, and stress testing to verify the material can withstand deployment forces.\n\nValidation becomes particularly important because deploying parachutes involves lives and expensive equipment. Engineers must demonstrate with high confidence that kirigami designs perform at least as well as proven traditional designs. This typically requires thousands of hours of ground testing and numerous full-scale deployment tests before operational approval.\n\nInterestingly, computational fluid dynamics (CFD) simulations now accelerate this validation process. Engineers can simulate thousands of deployment scenarios numerically before conducting expensive physical tests, dramatically reducing development timelines and costs compared to earlier decades.\n\n## Conclusion: From Paper Folding to the Stars\n\nKirigami-inspired parachutes represent a remarkable convergence of ancient artistry and cutting-edge engineering. By incorporating principles derived from a centuries-old Japanese technique into modern materials science, researchers have created parachutes that are lighter, stronger, more stable, and more controllable than conventional designs. The innovation addresses real limitations in traditional parachute technology while opening new possibilities for aerospace exploration and other applications.\n\nThe path from kirigami concept to operational parachute remains challenging. Manufacturing precision, material selection, computational modeling, and regulatory approval all present significant hurdles. Yet the theoretical advantages and promising initial results suggest that kirigami-inspired parachutes will eventually see widespread adoption in critical applications.\n\nBeyond the specific technology, the kirigami parachute story offers profound lessons about innovation. It demonstrates how insights from entirely different domains—in this case, traditional art—can illuminate solutions to contemporary problems. It shows that sometimes the most advanced engineering requires looking backward to ancient wisdom. As we face increasinglyAs we face increasingly complex technological challenges, we would do well to remember that innovation often requires drawing inspiration from unexpected sources. The next breakthrough in parachute design, spacecraft landing systems, or entirely different engineering domains may well come from a careful study of traditional crafts, natural systems, or artistic practices that have solved similar problems through different lenses.\n\nKirigami-inspired parachutes will likely represent just the beginning of this creative intersection. As materials science advances, as manufacturing becomes more sophisticated, and as designers become more comfortable thinking across disciplinary boundaries, we can expect even more elegant solutions to emerge. The parachute may seem like a mature technology with little room for fundamental innovation, yet kirigami principles proved that assumption wrong.\n\nFor space agencies planning Mars missions, for military planners seeking tactical advantages, and for engineers tackling diverse challenges from acoustic design to structural reinforcement, kirigami offers a toolkit of principles waiting to be explored. The cuts in a piece of paper, perfected over centuries in Japanese art studios, may ultimately help humanity reach new worlds and solve problems we haven't yet encountered.\n\nThe story of kirigami parachutes thus becomes more than just a technological achievement. It represents a metaphor for human innovation itself—the recognition that progress often comes not from working harder within existing paradigms, but from stepping outside those paradigms entirely and asking fundamental questions about how we approach problems. By honoring both ancient wisdom and modern science, by combining artistic intuition with engineering rigor, we create possibilities that neither discipline alone could achieve.\n\nAs research continues and prototypes mature into operational systems, kirigami-inspired parachutes will join a growing list of technologies that trace their origins to unexpected sources. In doing so, they remind us that true innovation requires intellectual humility—the willingness to learn from everywhere, everyone, and every era, because the solution to tomorrow's challenge may be waiting in yesterday's art."
+  }
+]

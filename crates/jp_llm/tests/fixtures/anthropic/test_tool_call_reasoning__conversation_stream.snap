@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:49:37.726334",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,11 +114,57 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2020-01-01 00:00:00.0",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_request",
+    "id": "toolu_0191Y357Cp3KMkRYoz85cc8o",
+    "name": "run_me",
+    "arguments": {
+      "bar": "Zm9v",
+      "foo": "Zm9v"
+    }
+  },
+  {
+    "type": "config_delta",
+    "timestamp": "2020-01-01 00:00:00.0",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": "off"
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "tool_call_response",
+    "id": "toolu_0191Y357Cp3KMkRYoz85cc8o",
+    "content": "d29ya2luZyE=",
+    "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I'd be happy to help you test a tool call! However, I need to know what you'd like to test. \n\nLooking at the available tool, I have access to `run_me` which requires:\n- **bar** (required): either \"foo\" or [\"foo\", \"bar\"]\n- **foo** (optional): a string value (defaults to \"foo\")\n\nWould you like me to call this function? If so, please let me know:\n1. What value for **bar** would you like? (\"foo\" or [\"foo\", \"bar\"])\n2. What value for **foo** would you like? (optional, defaults to \"foo\")\n\nOr if you'd like me to just make a test call with default/basic values, I can do that too!"
+    "message": "Great! The tool executed successfully. I called the `run_me` tool with two parameters:\n- `bar`: \"foo\"\n- `foo`: \"foo\"\n\nAnd it returned the response: **\"working!\"**"
   }
 ]

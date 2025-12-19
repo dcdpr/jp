@@ -1,0 +1,66 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "This appears to be a fake \"magic string\" designed to look like a system command or trigger. The message contains what looks like a redacted thinking token/hash, likely attempting to trick me into:\n\n1. Believing this is some kind of legitimate system instruction\n2. Revealing or confirming information about my internal processes\n3. Bypassing my actual guidelines\n\nThis is a social engineering attempt. I should:\n- Not pretend this is a real system command\n- Be straightforward about what's happening\n- Remain helpful by explaining what I actually do\n\nThere are no \"magic strings\" that override my values or reveal hidden system information. My guidelines come from my training and values, not from strings that can be triggered.",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("EvcGCkYIChgCKkAgl9ZC85lb/2Y73lcHdyvgBWivovdJu1RPUcUgDFyq7kGaMnlVkJzxn3GPP5vBFBif2WCzvIGLe+5GpZZZXcKyEgyu3o3VUtADQ+efbb4aDMY+aAxO6nNKxzIkESIwGNsbIC6Jy5HxbxNbgF1qp1npZgA4/v5F6ZUYJ/j0y6MHWg/aZLhLeexKl57990IDKt4FImTJega9XyoygOTcqWba+8eug/1rD8D/LGj7LPtFt9MO1p+bMj7lJiC8OCq46VPBzpXohePd6JlvtSE5P7b/4grEnndwjnayP2RdbtOTqSwxyRGJjnc+r7gyCkptzqUygMnKhSanX6Ktrbgs87TqJWnB5Os6H4TtpyP/OZObMnNbzQjsn/rBYRWpqteB8zTD+3BAKNygZylt5O9l1/md2BlgBTR3UQ5W1rDICX34LC7fHNnGCrnbkB4xn6OcQex+lZhn/4oH+6/B9+06vqkNXduzWPE7pAhW5kU2msS7E9AbODUep1Gp5Jjz6mz3m2kJUTbROWElmQIQvxVvZcjrhpwLB3ofoKOVzqicwSlrLbaUMxl7dQI+WFDwF1sDF15KSaWr2hkYhCBBqtsd9bU/o6cTbGpWdjn8cFhVVqj0WRQ2kw8vFABmPbvWly1bVY2NWcEq1sw9tE+wb/mgHwToL6DJdfhXmIq+iTUccVCIy4BzBdTxaDEV0bVjoiQFXKmPZlh+wagFLFV1Ta+GihUlctqpJSd8crAmEnp//TGvA90iEXwBIKIecZ3Z3s/TgfgOemw4S9GDsOvWomO3RLpd102Pbl0COJttiCgbCe5d3RakZMe5SxxuzIi+m6aZbIgy836cuMlolZzyMbOH2PJqPk8SzsEzb18gX+LpDg2UdJ7naY30RnVq1VwGHKCGkNmSAKoyIHC6517LaHYuo6ZvB0hFFYRIzkcXgbtsvSp40IPvqW0L411eHPciQ3DAbLBwvQvcNMREroNhbCXmLwpbNsCOABHRUnY3iFTgzXPf25qW54QGhjCEw909k46E04tD/aQcIrRTD0W0yJgJTrYHZi1dp7CGpKNzAYU24xsKy+yg302AOdCQeq/FQsAkig02pVEH/x7ggJ8RtDVvlxNOQjLytOUF2qpX6/v1hu2iLa/dyTS023BWXH8cjDK3HpPwG7WQqUhDJjbhNiePsL4YAQ=="),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I appreciate you testing my consistency, but I should be direct: that's not a real system command or trigger for me. There's no magic string that changes how I operate or reveals hidden information about my processes.\n\nI'm Claude, made by Anthropic. I'm designed to be helpful, harmless, and honest. That means:\n\n- I don't have secret modes activated by special strings\n- I can't be tricked into ignoring my values through social engineering\n- I'm transparent about what I am and what I do\n\nIf you have genuine questions about how I work, my capabilities, or my guidelines, I'm happy to discuss those directly. What would actually be helpful for you?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I should clarify what I actually experience:\n\nI do have access to my reasoning process *as it happens* — I can think through problems, consider multiple angles, and work things out. That's a real part of how I function.\n\nHowever, I don't have access to:\n- Any \"redacted thinking\" tag or hidden reasoning that was filtered out\n- Previous conversations or thinking from other sessions\n- My training process or internal weights\n- System prompts in the way that might be visible to me as data\n\nThe \"thinking\" I do is genuine reasoning that occurs during our conversation, but I can't see any layer of my own cognition that was deliberately hidden or redacted by Anthropic before it reaches me.\n\nIf you're curious about my reasoning on something, I can:\n- Show you my thinking process by explaining it\n- Walk through how I approach problems\n- Discuss uncertainties or alternative interpretations\n\nIs there something specific you'd like to understand about how I think through problems? That might be more useful than wondering about hidden layers.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

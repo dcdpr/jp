@@ -8,45 +8,13 @@ expression: v
             index: 0,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "I can help",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " with testing the tool, but I need some more information. Could you please specify",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " the arguments you'd like to use for the `run_me` function? The `bar` argument is required, and it can be either the string 'foo' or a list of strings. The `foo` argument is optional and defaults",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " to 'foo'.",
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "run_me_0",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                        },
                     },
                 ),
                 metadata: {},
@@ -60,5 +28,25 @@ expression: v
             Completed,
         ),
     ],
-    [],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I ran the tool with the argument `bar=\"foo\"`. The tool returned `{\"run_me_response\": {\"content\": \"working!\"}}`.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
 ]

@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:51:35.450526",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -113,7 +113,7 @@ expression: v
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:51:31.297779",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -135,12 +135,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Acknowledging the test message**\n\nThe user sent a \"Test message,\" which suggests they want to check if I'm functioning properly. I should respond briefly to confirm that I received it and let them know I'm here to help. Asking if there's anything specific they need or offering a few options would be a good way to move forward. I'll keep my response concise to match the user's intent.",
+    "reasoning": "**Acknowledging the user's message**\n\nThe user wrote \"Test message,\" which probably means they want some acknowledgement from me. I should keep my reply concise and friendly. I can also offer to help with anything they need and ask if they want to test something specific. It could be useful to provide examples of what I can do to spark their interest! I'll keep it welcoming and ready to assist.",
     "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBPQnRYdFI2QURUenJYYk1sUGI4SS1wc2RrVkVNc1g4NDgtcExxWUtHUTdzVTV2enpoTjNPT0hzcE91Q3k5WXdzTkloUmZKYVNQTDJhd09yYWVFdkpUYy1vT0czbzN1ekwzNTV3SlFsNmFXOWh0bXJhVXNXYktFczY2eEoxdmc0M2RqQlVJbWpBdzRFQ1NUYlIwcF9CdWlxT3R5b3Q5eE91TVNkekU4OF9DZGVhSFQxTjFBTFI0YTFMcnhzeEhKcVlndlYwcnozaVVORFFBUlgyQTZzS2VQR21pY0xKVy1KVFp2d04zRi1rR0x2MnhWT2ZPbFRaUmw2dmc4bWVfUGQyODQ0WFZZN1ZpNVRFTzNiSDBiNDJHMkpfMVJIblpBV21fU2IyQUsyUWNmdk1TNkZEYWxjdzBubEFfZzI5LS1zYkQzY1NRQ2lYQkNqMlRuM2FZRlpVaFA2OEQ4dkY2Ti1OZkk1Y2dMUTc5YmtSV2UzWkhFcDVGY3pPWkItR1h3ZmlPcUhLTEt1dHItLUNOb2lCNzBiV0NYanNaNFdFSFBqa3l2ZTRGYjV1cmlhLU10Y21BbUdRd1ZHcE9oZHdzaFVmLUhhdk9ZRXJ6d2hod2UwcVJLUXRqdVFNQlcydEJTanp6MmloQ3kyTTUyTW9PQXRwVmZrczdnQUV5RnItYzVBazlsR1FZdVVCSTFHYU9qd0toMl9hRlFMLVBLVTNZa0tIZ3JTZ3l2N3c5SWpyT2FHRDJwS0lpa0RNNlM3MUtvYlUzTlFWaVZjMlRGczBVZlloZmkyY2FwbDlQZzhVUmJIMWdQODNSSTdhbkxqNlhTeXZXSjVUMkNaZW5MdVlWZ0VYZlNXSVA0bkJ0cGpPQkpmR05kcHN0SmkyQWRISklMcTE1blJROFVFdGp6OHk3a2tYOUJ0QnU2VGtPM3pRNmlRX2NQU0dFSV9HWmQ2cXotZk5fZ09mOWNwalFNQlY2a0d2cWlkTWpJam5GRnl2NXJsX2o1NUtscURtWHFudzgzOWpINjdWZFhES0xoaGJNQS1DTjVwZUloRHB3NURndkpzZ0JzZmltRFkyVDRvR2ZtV0hidHRjc2FjZ1dHbU5pUjlGRzRwTXBLQXE0M0V6SG1RNFMzYUF5XzN6QnNwT21Wd0o4ak1fT0NNdF9nZDhYV1d2dmkwNllQWWZzc1k4ckhUX24tbXlsajZac1RBQ3JUT3hadkR2dlNZM3dfUW94MmI5VjJCTkFTTHBuX2NvdEUtQjFCV3hkYnFxV3ZfWFMtME9idG9oY1pLMWFHUnhiSU5kU2tEeGhBU2paTzFqanBtLUhPZWFLLUpUUUlZd1NnLXhvZ3VRVHhtMXlvR3ZLdTVPNGZLN0dNeWVrUVlYMTl5T1pZT3p4eVpQWlc5X1N6d0dVaXBDVXJWTE5KZ2VHYm5EN0JJT1M1TXR4VTR2QVJNR0cyVmY=",
+      "openai_encrypted_content": "Z0FBQUFBQnBSUnBJN0VIUl9vYU11RGgwRUFtRnZPSkVTWVFTMVNNZUtVT3ItenBoZm5TeFBCOFRJb3AzYzhjejAwLWNIYnNRcU1qcTdtSFh3Q2tBUC15aXZLNzNEc2hEbE80c0NzOU1aZ1VxM1NVZlVNb0Jadm9rNkJCU0gwWlR3cHZiYWJIOHhNQVBkY0g4aTdVck5YcFVrekRvVUoxbFlJQ081VXQ0WVJidGdqWXlDS0JYWkx2clRlOXlyWDktcFlhRTY0SFA5MmlIdGVyNnZaU2pKZ2hsdTNFbkZXZmFqT1RuR1NUR3I5VWVCX2hoeWxCUWRlalYyWnk1U2x5TUdXbVJfdnNuUE5WU3ByTVNET3VBTkYxcjhDano1WUFaMEhRcGQwVGt3cVp1TzF4Z1hmM0lnQ0EtTHRZbGp3aTRuMzhGanl0andUaVUzOFdTMVA1b1hRMVdyaENJWlBIbEVGeHctc1N4bWxlQnVZOHk1MXRCbWtqWnQ1c0ZGenVNTEIwNDVmMTlUcHBZVVdYY0QxVUcyV2hBbmVTeUR3LTcxS1p4ZnRiVXdoaGpnN1hfMEJYNmxUNVJXXzJsNTE4OEVrN1h3ZTctdWxoeUFzbjhGeXp4TEFzalEtclc4R1FGOU5UZzBsUXU3SmdtM1ZxRXhPZjVzcGsxR1ZwUHFXUGFfR09BN2dsLXF1N3FaVEE0UlJxQ1hYTjBoSUQ2VkE1TzNiLVBVaHc5WWQybk45cHRrTUljTmp2bHhqSWkwVWxNc1dVYXphNDFDd0NUNVBoQXZmeVdIUW5JY0FUQXpES04wSm5jTjdOUlJDakFNLXRiV1hLc3hiNnd0aHhkZDlEVXE4dzN3bUl4MkdZaDNtV2pmOERMREwtLW5LcWlkM1lTNEhEWUotU1doYUR5VnY5ZWdnYWE2VE9mbnlvRExvQ205YzZTZkxBcDQ4UllTQlJTTFpFQmhFQkkyU1NJZWZFWkNxQlY5X2NOV3B2eC1uQ2RwV09xUkkzdE1tV0N5Z1NTc2VvNUlyS3dvMklHQUNSUWJ2amZFNE1zazFLSUZ5UjdXSUh0VXpvemk4LTl1S1FJLXJQQUV0UFotYXhPcWxmbm0zTktibTZxM2lKV2U2dzU5N3RLLVJaUWFZeHJEcnFkMzBGUUxtREdGYmpuUk1LdlFjQV9YTVlyRXJEekR0aFNrb2JHbXdPYjc0ZmY2VnFQczB3NE50UUNsQlVpcmJoZE4ySHp4Y05TNGhRNHpaUWhoT3RPZzZxbGxQd0NjSHRoVTNNeGNITEZZdWdIUkw2OVJUbmIzbUVzN0x6OGlDSkNDb1dLSHNhNzlVUmMwRkMxa1NtREVBVkktanl4UUU0Q2V6Uk5kQVNCNGdWc3FNMl9Zbi1xYjZ5Ym0yNmRIWl9nRS0wNncxWFNKeVVQMEJtb3NBR2dRWUpGbV9uTzhsWjVRM0dfbVJJNm13WnhUd0VHVk90OFNoVmNHMk5rd21CNktEdGlvMlh6UjNxQ20wSjRCdnFycjZjPQ==",
       "openrouter_metadata": [
         {
-          "id": "cnNfMDg5OGUzMDU4NzZjMzI4MzAxNjkzODFiNTQxMTM4ODE5M2E2NDg1NTc5MzhkNzI3ZGY=",
+          "id": "cnNfMDMyMWYxMzg0MTNhNDRjNTAxNjk0NTFhNDU3YmYwODE5NTk0MGJjMGZmMzEwN2M2NzQ=",
           "index": 0,
           "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
         }
@@ -150,6 +150,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Received your test message. Everything's working — how can I help you today?"
+    "message": "Got your test message — I'm here and working.\n\nAnything specific you'd like to try? Examples:\n- Ask a question (general knowledge, coding, math)\n- Paste text for editing or summarizing\n- Upload an image for analysis\n- Request a draft email, resume bullet, or code snippet\n\nTell me what to do next."
   }
 ]

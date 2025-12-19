@@ -35,5 +35,4 @@ allow-git = [
     "https://github.com/JeanMertz/saphyr?branch=jean/fix-valid-literal-block-scalar-check",
     "https://github.com/JeanMertz/schematic?branch=merged",
     "https://github.com/modelcontextprotocol/rust-sdk",
-    "https://github.com/Ninja3047/quick-xml?branch=serialize-cdata",
 ]

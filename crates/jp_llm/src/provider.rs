@@ -204,7 +204,9 @@ mod tests {
 
     fn tool_call_base(provider: ProviderId) -> TestRequest {
         TestRequest::chat(provider)
-            .event(ChatRequest::from("Testing tool call"))
+            .event(ChatRequest::from(
+                "Please run the tool, providing whatever arguments you want.",
+            ))
             .tool("run_me", vec![
                 ("foo", ToolParameterConfig {
                     kind: OneOrManyTypes::One("string".into()),

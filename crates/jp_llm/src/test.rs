@@ -85,19 +85,22 @@ impl TestRequest {
             model: test_model_details(provider),
             query: ChatQuery {
                 thread: ThreadBuilder::new()
-                    .with_events(ConversationStream::new({
-                        let mut cfg = PartialAppConfig::empty();
-                        cfg.conversation.tools.defaults.run = Some(RunMode::Ask);
-                        cfg.assistant.model.parameters.reasoning =
-                            Some(PartialReasoningConfig::Off);
-                        cfg.assistant.model.id = PartialModelIdConfig {
-                            provider: Some(provider),
-                            name: Some("test".parse().unwrap()),
-                        }
-                        .into();
+                    .with_events(
+                        ConversationStream::new({
+                            let mut cfg = PartialAppConfig::empty();
+                            cfg.conversation.tools.defaults.run = Some(RunMode::Ask);
+                            cfg.assistant.model.parameters.reasoning =
+                                Some(PartialReasoningConfig::Off);
+                            cfg.assistant.model.id = PartialModelIdConfig {
+                                provider: Some(provider),
+                                name: Some("test".parse().unwrap()),
+                            }
+                            .into();
 
-                        AppConfig::from_partial(cfg).unwrap()
-                    }))
+                            AppConfig::from_partial(cfg).unwrap()
+                        })
+                        .with_created_at(datetime!(2020-01-01 0:00 utc)),
+                    )
                     .build()
                     .unwrap(),
                 tools: vec![],
@@ -115,17 +118,20 @@ impl TestRequest {
             query: StructuredQuery::new(
                 true.into(),
                 ThreadBuilder::new()
-                    .with_events(ConversationStream::new({
-                        let mut cfg = PartialAppConfig::empty();
-                        cfg.conversation.tools.defaults.run = Some(RunMode::Ask);
-                        cfg.assistant.model.id = PartialModelIdConfig {
-                            provider: Some(provider),
-                            name: Some("test".parse().unwrap()),
-                        }
-                        .into();
+                    .with_events(
+                        ConversationStream::new({
+                            let mut cfg = PartialAppConfig::empty();
+                            cfg.conversation.tools.defaults.run = Some(RunMode::Ask);
+                            cfg.assistant.model.id = PartialModelIdConfig {
+                                provider: Some(provider),
+                                name: Some("test".parse().unwrap()),
+                            }
+                            .into();
 
-                        AppConfig::from_partial(cfg).unwrap()
-                    }))
+                            AppConfig::from_partial(cfg).unwrap()
+                        })
+                        .with_created_at(datetime!(2020-01-01 0:00 utc)),
+                    )
                     .build()
                     .unwrap(),
             ),

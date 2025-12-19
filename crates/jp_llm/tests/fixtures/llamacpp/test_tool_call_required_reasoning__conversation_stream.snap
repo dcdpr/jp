@@ -5,7 +5,7 @@ expression: v
 [
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:30.333107",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "inherit": false,
       "config_load_paths": [],
@@ -114,11 +114,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
-    "content": "Testing tool call"
+    "content": "Please run the tool, providing whatever arguments you want."
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:20.750245",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -135,16 +135,16 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "QP9pD9h6Vmiy0Al59sQb7ANI9CSXQVuk",
+    "id": "QSXNsVc07RfbBfj0tQSpYlkKokWEyjaG",
     "name": "run_me",
     "arguments": {
       "bar": "Zm9v",
-      "foo": "dGVzdA=="
+      "foo": "dGVzdF92YWx1ZQ=="
     }
   },
   {
     "type": "config_delta",
-    "timestamp": "2025-12-09 12:50:20.750284",
+    "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
       "assistant": {
         "model": {
@@ -158,13 +158,13 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "QP9pD9h6Vmiy0Al59sQb7ANI9CSXQVuk",
+    "id": "QSXNsVc07RfbBfj0tQSpYlkKokWEyjaG",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "It looks like the testing tool executed successfully! The response \"working!\" indicates that the tool call was processed correctly. If you need any further assistance or want to run more tests, feel free to let me know!"
+    "message": "It looks like the tool executed successfully! Here is the response:\n\n```\nworking!\n```\n\nIf you need further assistance or if there's anything specific you want to achieve with this tool, feel free to let me know!"
   }
 ]

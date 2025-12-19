@@ -10,14 +10,14 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Acknowledging the test message**\n\nThe user sent a \"Test message,\" which suggests they want to check if I'm functioning properly. I should respond briefly to confirm that I received it and let them know I'm here to help. Asking if there's anything specific they need or offering a few options would be a good way to move forward. I'll keep my response concise to match the user's intent.",
+                        reasoning: "**Acknowledging the user's message**\n\nThe user wrote \"Test message,\" which probably means they want some acknowledgement from me. I should keep my reply concise and friendly. I can also offer to help with anything they need and ask if they want to test something specific. It could be useful to provide examples of what I can do to spark their interest! I'll keep it welcoming and ready to assist.",
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABpOBtXtR6ADTzrXbMlPb8I-psdkVEMsX848-pLqYKGQ7sU5vzzhN3OOHspOuCy9YwsNIhRfJaSPL2awOraeEvJTc-oOG3o3uzL355wJQl6aW9htmraUsWbKEs66xJ1vg43djBUImjAw4ECSTbR0p_BuiqOtyot9xOuMSdzE88_CdeaHT1N1ALR4a1LrxsxHJqYgvV0rz3iUNDQARX2A6sKePGmicLJW-JTZvwN3F-kGLv2xVOfOlTZRl6vg8me_Pd2844XVY7Vi5TEO3bH0b42G2J_1RHnZAWm_Sb2AK2QcfvMS6FDalcw0nlA_g29--sbD3cSQCiXBCj2Tn3aYFZUhP68D8vF6N-NfI5cgLQ79bkRWe3ZHEp5FczOZB-GXwfiOqHKLKutr--CNoiB70bWCXjsZ4WEHPjkyve4Fb5uria-MtcmAmGQwVGpOhdwshUf-HavOYErzwhhwe0qRKQtjuQMBW2tBSjzz2ihCy2M52MoOAtpVfks7gAEyFr-c5Ak9lGQYuUBI1GaOjwKh2_aFQL-PKU3YkKHgrSgyv7w9IjrOaGD2pKIikDM6S71KobU3NQViVc2TFs0UfYhfi2capl9Pg8URbH1gP83RI7anLj6XSyvWJ5T2CZenLuYVgEXfSWIP4nBtpjOBJfGNdpstJi2AdHJILq15nRQ8UEtjz8y7kkX9BtBu6TkO3zQ6iQ_cPSGEI_GZd6qz-fN_gOf9cpjQMBV6kGvqidMjIjnFFyv5rl_j55KlqDmXqnw839jH67VdXDKLhhbMA-CN5peIhDpw5DgvJsgBsfimDY2T4oGfmWHbttcsacgWGmNiR9FG4pMpKAq43EzHmQ4S3aAy_3zBspOmVwJ8jM_OCMt_gd8XWWvvi06YPYfssY8rHT_n-mylj6ZsTACrTOxZvDvvSY3w_Qox2b9V2BNASLpn_cotE-B1BWxdbqqWv_XS-0ObtohcZK1aGRxbINdSkDxhASjZO1jjpm-HOeaK-JTQIYwSg-xoguQTxm1yoGvKu5O4fK7GMyekQYX19yOZYOzxyZPZW9_SzwGUipCUrVLNJgeGbnD7BIOS5MtxU4vARMGG2Vf"),
+                    "openai_encrypted_content": String("gAAAAABpRRpI7EHR_oaMuDh0EAmFvOJESYQS1SMeKUOr-zphfnSxPB8TIop3c8cz00-cHbsQqMjq7mHXwCkAP-yivK73DshDlO4sCs9MZgUq3SUfUMoBZvok6BBSH0ZTwpvbabH8xMAPdcH8i7UrNXpUkzDoUJ1lYICO5Ut4YRbtgjYyCKBXZLvrTe9yrX9-pYaE64HP92iHter6vZSjJghlu3EnFWfajOTnGSTGr9UeB_hhylBQdejV2Zy5SlyMGWmR_vsnPNVSprMSDOuANF1r8Cjz5YAZ0HQpd0TkwqZuO1xgXf3IgCA-LtYljwi4n38FjytjwTiU38WS1P5oXQ1WrhCIZPHlEFxw-sSxmleBuY8y51tBmkjZt5sFFzuMLB045f19TppYUWXcD1UG2WhAneSyDw-71KZxftbUwhhjg7X_0BX6lT5RW_2l5188Ek7Xwe7-ulhyAsn8FyzxLAsjQ-rW8GQF9NTg0lQu7Jgm3VqExOf5spk1GVpPqWPa_GOA7gl-qu7qZTA4RRqCXXN0hID6VA5O3b-PUhw9Yd2nN9ptkMIcNjvlxjIi0UlMsWUaza41CwCT5PhAvfyWHQnIcATAzDKN0JncN7NRRCjAM-tbWXKsxb6wthxdd9DUq8w3wmIx2GYh3mWjf8DLDL--nKqid3YS4HDYJ-SWhaDyVv9eggaa6TOfnyoDLoCm9c6SfLAp48RYSBRSLZEBhEBI2SSIefEZCqBV9_cNWpvx-nCdpWOqRI3tMmWCygSSseo5IrKwo2IGACRQbvjfE4Msk1KIFyR7WIHtUzozi8-9uKQI-rPAEtPZ-axOqlfnm3NKbm6q3iJWe6w597tK-RZQaYxrDrqd30FQLmDGFbjnRMKvQcA_XMYrErDzDthSkobGmwOb74ff6VqPs0w4NtQClBUirbhdN2HzxcNS4hQ4zZQhhOtOg6qllPwCcHthU3MxcHLFYugHRL69RTnb3mEs7Lz8iCJCCoWKHsa79URc0FC1kSmDEAVI-jyxQE4CezRNdASB4gVsqM2_Yn-qb6ybm26dHZ_gE-06w1XSJyUP0BmosAGgQYJFm_nO8lZ5Q3G_mRI6mwZxTwEGVOt8ShVcG2NkwmB6KDtio2XzR3qCm0J4Bvqrr6c="),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_0898e305876c32830169381b5411388193a648557938d727df"),
+                            "id": String("rs_0321f138413a44c50169451a457bf08195940bc0ff3107c674"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -35,7 +35,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Received your test message. Everything's working — how can I help you today?",
+                        message: "Got your test message — I'm here and working.\n\nAnything specific you'd like to try? Examples:\n- Ask a question (general knowledge, coding, math)\n- Paste text for editing or summarizing\n- Upload an image for analysis\n- Request a draft email, resume bullet, or code snippet\n\nTell me what to do next.",
                     },
                 ),
                 metadata: {},

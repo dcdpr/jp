@@ -8,9 +8,13 @@ expression: v
             index: 0,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "I need more information to test the tool call. Can you please specify the arguments for the `run_me` function? The `bar` argument is required and can be either 'foo' or a list of strings. The `foo` argument is optional and defaults to 'foo'.",
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "run_me_0",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                        },
                     },
                 ),
                 metadata: {},
@@ -24,5 +28,25 @@ expression: v
             Completed,
         ),
     ],
-    [],
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool successfully ran with the argument `bar=\"foo\"` and returned `{\"run_me_response\": {\"content\": \"working!\"}}`.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
 ]

@@ -159,7 +159,7 @@ fn modify_fixture(fixture: &Path) -> Result<(), Box<dyn std::error::Error>> {
             .and_then(|body| body.as_cow_mut())
         {
             let s = body.to_mut();
-            *s = s.trim().to_owned();
+            *s = s.to_owned();
 
             // let _value = body.as_str().unwrap_or_default().to_owned();
             // *body = Yaml::Representation(Cow::Owned(value), saphyr::ScalarStyle::Folded, None);
@@ -181,7 +181,7 @@ fn modify_fixture(fixture: &Path) -> Result<(), Box<dyn std::error::Error>> {
             .and_then(|body| body.as_cow_mut())
         {
             let s = body.to_mut();
-            *s = s.trim().to_owned();
+            *s = s.to_owned();
         }
     }
 
@@ -196,18 +196,22 @@ fn modify_fixture(fixture: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     let buf = std::io::Cursor::new(buf)
         .lines()
-        .map(|line| {
-            let line = line.unwrap().trim_end().to_owned();
+        .filter_map(|line| {
+            let line = line.ok()?;
             // Hack to pretty-print JSON bodies in fixture files, until `saphyr`
             // supports folded scalars, and `httpmock` supports stringified JSON
             // bodies (not sure if they would want this upstreamed, it's
             // somewhat niche).
             if line.starts_with("  body: \"{") {
                 // First unescape the top-level JSON.
-                let line = line[9..line.len() - 1].replace("\\\"", "\"");
+                //
+                // Be careful with removing whitespace at the end of the line,
+                // because we might be dealing with server-sent events, which
+                // require two newlines at the end of the event/line.
+                let line = line.trim_end()[9..line.len() - 1].replace("\\\"", "\"");
 
-                // Then unescape double-escaped quotes inside JSON strings.
-                let line = line.replace("\\\"", "\"");
+                // Then unescape backslashes inside the JSON payload.
+                let line = line.replace("\\\\", "\\");
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
                     let mut lines = vec!["  json_body_str: >-".to_owned()];
                     let fmt = serde_json::to_string_pretty(&value).unwrap();
@@ -215,11 +219,11 @@ fn modify_fixture(fixture: &Path) -> Result<(), Box<dyn std::error::Error>> {
                         lines.push(format!("    {line}"));
                     }
 
-                    return lines.join("\n");
+                    return Some(lines.join("\n"));
                 }
             }
 
-            line
+            Some(line)
         })
         .collect::<Vec<_>>()
         .join("\n");

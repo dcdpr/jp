@@ -735,7 +735,7 @@ fn sanitize_parameter(config: &mut ToolParameterConfig) {
         .collect();
 
     let items_config = config.items.get_or_insert_with(|| {
-        let inferred_types: IndexSet<_> = items
+        let mut inferred_types: IndexSet<_> = items
             .iter()
             .map(|v| match v {
                 Value::String(_) => "string",
@@ -750,8 +750,10 @@ fn sanitize_parameter(config: &mut ToolParameterConfig) {
             .collect();
 
         // Construct the correct kind
-        let kind = if inferred_types.len() == 1 {
-            OneOrManyTypes::One(inferred_types[0].clone())
+        let kind = if inferred_types.len() == 1
+            && let Some(first) = inferred_types.pop()
+        {
+            OneOrManyTypes::One(first)
         } else {
             OneOrManyTypes::Many(inferred_types.into_iter().collect())
         };

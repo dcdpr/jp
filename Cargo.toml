@@ -76,7 +76,7 @@ reqwest = { version = "0.12", default-features = false }
 reqwest-eventsource = { version = "0.6", default-features = false }
 rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", rev = "18346b94e4e71463a06d93852cfc26c683ca5b83" }
 rusqlite = { version = "0.37", default-features = false }
-saphyr = { git = "https://github.com/JeanMertz/saphyr", branch = "jean/fix-valid-literal-block-scalar-check", default-features = false } # <https://github.com/saphyr-rs/saphyr/pull/90>
+saphyr = { git = "https://github.com/JeanMertz/saphyr", branch = "jean/fix-multinewline-endings", default-features = false } # <https://github.com/saphyr-rs/saphyr/pull/90>
 schemars = { version = "1.0.0-alpha.17", default-features = false }
 schemars_08 = { package = "schemars", version = "0.8.22", default-features = false }
 schematic = { git = "https://github.com/JeanMertz/schematic", branch = "merged", default-features = false }
