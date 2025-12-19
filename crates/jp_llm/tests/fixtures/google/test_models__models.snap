@@ -678,11 +678,11 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: Some(
-                    24576,
-                ),
+            Leveled {
+                low: true,
+                medium: false,
+                high: true,
+                xhigh: false,
             },
         ),
         knowledge_cutoff: None,

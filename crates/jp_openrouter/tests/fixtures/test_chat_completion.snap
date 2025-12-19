@@ -14,7 +14,7 @@ Ok(
                     message: NonStreamingMessage {
                         role: "assistant",
                         content: Some(
-                            "Here is a haiku for your test:\n\nPencil in hand, poised\nThoughts swirl, focus sharpens now\nKnowledge takes its flight",
+                            "Here is a haiku for your test:\\n\\nPencil in hand, poised\\nThoughts swirl, focus sharpens now\\nKnowledge takes its flight",
                         ),
                         reasoning: None,
                         reasoning_details: [],
