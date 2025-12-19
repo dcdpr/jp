@@ -129,12 +129,12 @@ impl Provider for Anthropic {
 }
 
 /// Create a request to the assistant to generate a response, and return a
-/// stream of [`StreamEvent`]s.
+/// stream of [`Event`]s.
 ///
 /// If `chain_on_max_tokens` is `true`, a new request is created when the last
-/// one ends with a [`StreamEndReason::MaxTokens`] event, allowing the assistant
-/// to continue from where it left off and the caller to receive the full
-/// response as a single stream of events.
+/// one ends with a [`FinishReason::MaxTokens`] event, allowing the assistant to
+/// continue from where it left off and the caller to receive the full response
+/// as a single stream of events.
 fn call(
     client: Client,
     request: types::CreateMessagesRequest,
