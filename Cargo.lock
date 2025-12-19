@@ -2194,14 +2194,11 @@ dependencies = [
  "futures",
  "gemini_client_rs",
  "indexmap",
- "indoc",
- "insta",
  "jp_config",
  "jp_conversation",
  "jp_inquire",
  "jp_mcp",
  "jp_openrouter",
- "jp_serde",
  "jp_test",
  "jp_tool",
  "jsonschema",
@@ -2223,7 +2220,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
- "tracing-subscriber",
  "url",
 ]
 
