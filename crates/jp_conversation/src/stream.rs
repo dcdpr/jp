@@ -1,5 +1,7 @@
 //! See [`ConversationStream`].
 
+use std::sync::Arc;
+
 use jp_config::{AppConfig, Config as _, PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
@@ -121,7 +123,7 @@ pub struct ConversationStream {
     ///
     /// This is stored separately from the events in the stream, to guarantee a
     /// stream always has a base configuration.
-    base_config: AppConfig,
+    base_config: Arc<AppConfig>,
 
     /// The events in the stream.
     events: Vec<InternalEvent>,
@@ -133,7 +135,7 @@ pub struct ConversationStream {
 impl ConversationStream {
     /// Create a new [`ConversationStream`] with the given base configuration.
     #[must_use]
-    pub fn new(base_config: AppConfig) -> Self {
+    pub fn new(base_config: Arc<AppConfig>) -> Self {
         Self {
             base_config,
             events: Vec::new(),
@@ -143,7 +145,7 @@ impl ConversationStream {
 
     /// Set the base configuration for the stream.
     #[must_use]
-    pub fn with_base_config(mut self, base_config: AppConfig) -> Self {
+    pub fn with_base_config(mut self, base_config: Arc<AppConfig>) -> Self {
         self.base_config = base_config;
         self
     }
@@ -729,7 +731,7 @@ impl FromIterator<ConversationEventWithConfig> for Result<ConversationStream, St
             return Err(StreamError::FromEmptyIterator);
         };
 
-        let mut stream = ConversationStream::new(AppConfig::from_partial(config)?);
+        let mut stream = ConversationStream::new(AppConfig::from_partial(config)?.into());
         stream.push(first_event);
         stream.extend(events);
 
@@ -810,7 +812,9 @@ impl<'de> Deserialize<'de> for ConversationStream {
         match events.remove(0) {
             InternalEvent::ConfigDelta(base_config) => Ok(Self {
                 created_at: base_config.timestamp,
-                base_config: AppConfig::from_partial(base_config.into()).map_err(Error::custom)?,
+                base_config: AppConfig::from_partial(base_config.into())
+                    .map_err(Error::custom)?
+                    .into(),
                 events,
             }),
             InternalEvent::Event(_) => Err(Error::custom(
@@ -856,7 +860,7 @@ mod tests {
         .into();
 
         let mut stream = ConversationStream {
-            base_config: AppConfig::from_partial(base_config).unwrap(),
+            base_config: AppConfig::from_partial(base_config).unwrap().into(),
             events: vec![],
             created_at: datetime!(2020-01-01 0:00 utc).into(),
         };
