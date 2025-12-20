@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use jp_config::{AppConfig, Config as _, PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use time::UtcDateTime;
 use tracing::error;
 
@@ -13,7 +14,7 @@ use crate::event::{
 };
 
 /// An internal representation of events in a conversation stream.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InternalEvent {
     /// The configuration state of the conversation is updated.

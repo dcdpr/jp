@@ -21,6 +21,7 @@ pub use id::Id;
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::{DEFAULT_STORAGE_DIR, Storage};
+use jp_tombmap::TombMap;
 use state::{LocalState, State, UserState};
 use tracing::{debug, info, trace};
 
@@ -164,7 +165,9 @@ impl Workspace {
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
         // Workspace state
-        let (mut conversations, events) = storage.load_conversations_and_events()?;
+        // let (mut conversations, events) = storage.load_conversations_and_events()?;
+        let conversations = TombMap::new();
+        let mut events = TombMap::new();
 
         // Local state
         let conversations_metadata = storage.load_conversations_metadata()?;
@@ -178,16 +181,27 @@ impl Workspace {
         // Remove the active conversation from the list of conversations, we
         // store it separately to ensure an active conversation always exists,
         // and cannot be removed.
-        let active_conversation = conversations
-            .remove_untracked(&conversations_metadata.active_conversation_id)
-            .unwrap_or_else(|| {
-                info!(
-                    id = %conversations_metadata.active_conversation_id,
-                    "Active conversation not found in workspace. Creating a new one."
-                );
+        let active_conversation =
+            storage.load_conversation_metadata(&conversations_metadata.active_conversation_id)?;
 
-                Conversation::default()
-            });
+        let conversation_events =
+            storage.load_conversation_events(&conversations_metadata.active_conversation_id)?;
+
+        events.insert(
+            conversations_metadata.active_conversation_id,
+            conversation_events,
+        );
+
+        // let active_conversation = conversations
+        //     .remove_untracked(&conversations_metadata.active_conversation_id)
+        //     .unwrap_or_else(|| {
+        //         info!(
+        //             id = %conversations_metadata.active_conversation_id,
+        //             "Active conversation not found in workspace. Creating a new one."
+        //         );
+        //
+        //         Conversation::default()
+        //     });
 
         self.state = State {
             local: LocalState {

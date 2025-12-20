@@ -18,8 +18,9 @@ jp_conversation = { workspace = true }
 jp_id = { workspace = true }
 jp_tombmap = { workspace = true }
 
+rayon = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true, features = ["preserve_order"] }
+serde_json = { workspace = true, features = ["preserve_order", "raw_value"] }
 thiserror = { workspace = true }
 toml = { workspace = true, features = ["preserve_order"] }
 tracing = { workspace = true }
