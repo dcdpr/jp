@@ -7,7 +7,10 @@ use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
 use jp_mcp::id::{McpServerId, McpToolId};
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
-use tokio::runtime::{Handle, Runtime};
+use tokio::{
+    runtime::{Handle, Runtime},
+    task::JoinSet,
+};
 
 use crate::{Globals, Result, signals::SignalPair};
 
@@ -89,7 +92,9 @@ impl Ctx {
 
     /// Activate and deactivate MCP servers based on the active conversation
     /// context.
-    pub(crate) async fn configure_active_mcp_servers(&mut self) -> Result<()> {
+    pub(crate) async fn configure_active_mcp_servers(
+        &mut self,
+    ) -> Result<JoinSet<std::result::Result<(), jp_mcp::Error>>> {
         let mut server_ids = vec![];
 
         for (name, cfg) in self.config.conversation.tools.iter() {
@@ -104,19 +109,20 @@ impl Ctx {
             let tool_name = tool.as_deref().unwrap_or(name);
             let server_id = match server.as_deref() {
                 Some(server) => McpServerId::new(server),
-                None => self
-                    .mcp_client
-                    .get_tool_server_id(&McpToolId::new(tool_name), None)
-                    .await
-                    .cloned()?,
+                None => {
+                    self.mcp_client
+                        .get_tool_server_id(&McpToolId::new(tool_name), None)
+                        .await?
+                }
             };
 
             server_ids.push(server_id);
         }
 
-        self.mcp_client.run_services(&server_ids).await?;
-
-        Ok(())
+        self.mcp_client
+            .run_services(&server_ids, self.handle().clone())
+            .await
+            .map_err(Into::into)
     }
 }
 

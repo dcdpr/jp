@@ -257,7 +257,7 @@ impl Query {
                 .add_config_delta(delta);
         }
 
-        ctx.configure_active_mcp_servers().await?;
+        let mut mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
 
         let root = ctx
             .workspace
@@ -313,6 +313,10 @@ impl Query {
                 stream.clone(),
                 &cfg,
             )?);
+        }
+
+        while let Some(result) = mcp_servers_handle.join_next().await {
+            result??;
         }
 
         let tools = tool_definitions(cfg.conversation.tools.iter(), &ctx.mcp_client).await?;
