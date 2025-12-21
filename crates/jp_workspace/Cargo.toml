@@ -19,6 +19,7 @@ jp_id = { workspace = true }
 jp_storage = { workspace = true }
 jp_tombmap = { workspace = true }
 
+ahash = { workspace = true }
 directories = { workspace = true }
 serde = { workspace = true }
 tempfile = { workspace = true }

@@ -2278,6 +2278,7 @@ dependencies = [
 name = "jp_storage"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "jp_config",
  "jp_conversation",
  "jp_id",
@@ -2288,6 +2289,7 @@ dependencies = [
  "tempfile",
  "test-log",
  "thiserror 2.0.16",
+ "time",
  "toml 0.9.7",
  "tracing",
 ]
@@ -2349,6 +2351,7 @@ dependencies = [
 name = "jp_workspace"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "directories",
  "jp_config",
  "jp_conversation",
