@@ -698,7 +698,7 @@ expression: v
             Leveled {
                 xlow: true,
                 low: true,
-                medium: false,
+                medium: true,
                 high: true,
                 xhigh: false,
             },
