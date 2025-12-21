@@ -93,7 +93,7 @@ impl Task for TitleGeneratorTask {
         "title_generator"
     }
 
-    async fn start(
+    async fn run(
         mut self: Box<Self>,
         token: CancellationToken,
     ) -> Result<Box<dyn Task>, Box<dyn Error + Send + Sync>> {

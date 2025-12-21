@@ -14,8 +14,8 @@ use tokio_util::sync::CancellationToken;
 pub trait Task: Send + 'static {
     fn name(&self) -> &'static str;
 
-    /// Start the task in the background.
-    async fn start(
+    /// Run the task in the background.
+    async fn run(
         self: Box<Self>,
         cancel: CancellationToken,
     ) -> Result<Box<dyn Task>, Box<dyn Error + Send + Sync>>;

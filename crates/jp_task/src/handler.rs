@@ -17,8 +17,9 @@ impl TaskHandler {
     pub fn spawn(&mut self, task: impl Task) {
         let name = task.name();
         debug!(name, "Spawning task.");
-        let mut task = Box::new(task).start(self.cancel_token.child_token());
+        let token = self.cancel_token.child_token();
         self.tasks.spawn(async move {
+            let mut task = Box::new(task).run(token);
             let now = tokio::time::Instant::now();
             loop {
                 jp_macro::select!(
