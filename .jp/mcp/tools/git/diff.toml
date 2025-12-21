@@ -1,0 +1,29 @@
+[conversation.tools.git_diff]
+enable = false
+run = "unattended"
+style.inline_results = "full"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+description = """
+List the differences between the current state of the git repository and the
+last committed state.
+"""
+
+[conversation.tools.git_diff.parameters.paths]
+type = "array"
+items.type = "string"
+required = true
+description = """
+The paths to diff. Can be a single path or a list of paths.
+"""
+
+[conversation.tools.git_diff.parameters.cached]
+type = "boolean"
+description = """
+If `true`, the diff will be computed against the cached state of the git
+repository. If `false`, the diff will be computed against the last committed
+state of the git repository.
+
+If unspecified, it will default to `false`.
+"""

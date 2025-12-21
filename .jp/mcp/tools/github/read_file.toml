@@ -20,3 +20,11 @@ required = true
 description = '''
 File path to get contents of.
 '''
+
+[conversation.tools.github_read_file.parameters.ref]
+type = "string"
+description = '''
+The name of the commit/branch/tag.
+
+If unspecified, it defaults to the repository’s default branch (usually `main`)
+'''
