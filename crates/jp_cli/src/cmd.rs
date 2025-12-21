@@ -397,6 +397,7 @@ impl_from_error!(which::Error, "Which error");
 impl_from_error!(jp_config::model::id::ModelIdConfigError, "Model ID error");
 impl_from_error!(jp_config::model::id::ModelIdError, "Model ID error");
 impl_from_error!(inquire::error::InquireError, "Inquire error");
+impl_from_error!(tokio::task::JoinError, "Join error");
 
 impl From<jp_llm::Error> for Error {
     fn from(error: jp_llm::Error) -> Self {
