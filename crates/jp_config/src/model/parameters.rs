@@ -304,6 +304,10 @@ pub enum ReasoningEffort {
     /// `max_tokens`)
     Low,
 
+    /// Allocates an extremely small portion of tokens (approximately 10% of
+    /// `max_tokens`)
+    Xlow,
+
     /// Allocate a specific number of tokens for reasoning.
     #[variant(fallback)]
     Absolute(Tokens),
@@ -318,6 +322,7 @@ impl ReasoningEffort {
             Self::High => max_tokens.saturating_mul(80) / 100,
             Self::Auto | Self::Medium => max_tokens.saturating_mul(50) / 100,
             Self::Low => max_tokens.saturating_mul(20) / 100,
+            Self::Xlow => max_tokens.saturating_mul(10) / 100,
             Self::Absolute(Tokens(tokens)) => tokens,
         }
     }

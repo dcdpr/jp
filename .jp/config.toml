@@ -43,7 +43,7 @@ codex-mini = "openai/codex-mini-latest"
 google = "google/gemini-3-pro-preview"
 gemini = "google/gemini-3-pro-preview"
 gemini-pro = "google/gemini-3-pro-preview"
-gemini-flash = "google/gemini-2.5-flash"
+gemini-flash = "google/gemini-3-flash-preview"
 gemini-lite = "google/gemini-2.5-flash-lite"
 
 [conversation.title.generate.model]
