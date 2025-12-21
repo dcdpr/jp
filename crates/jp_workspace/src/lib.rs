@@ -15,6 +15,7 @@ use std::{
     sync::Arc,
 };
 
+use ahash::{HashMap, HashMapExt};
 pub use error::Error;
 use error::Result;
 pub use id::Id;
@@ -296,6 +297,17 @@ impl Workspace {
         }
 
         Ok(())
+    }
+
+    /// Returns a map of conversation IDs to their metadata, event count, and
+    /// event timestamp.
+    #[must_use]
+    pub fn conversations_details(&self) -> HashMap<ConversationId, Conversation> {
+        let Some(storage) = self.storage.as_ref() else {
+            return HashMap::new();
+        };
+
+        storage.load_all_conversations_details()
     }
 
     /// Returns an iterator over all conversations.

@@ -26,6 +26,7 @@ jp_tombmap = { path = "crates/jp_tombmap" }
 jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
 
+ahash = { version = "0.8", default-features = false, features = ["runtime-rng", "std", "serde"] }
 assert_matches = { version = "1", default-features = false }
 async-anthropic = { git = "https://github.com/JeanMertz/async-anthropic", default-features = false }
 async-stream = { version = "0.3", default-features = false }

@@ -24,6 +24,14 @@ pub struct Conversation {
     /// Whether the conversation is stored in the user or workspace storage.
     #[serde(skip)]
     pub user: bool,
+
+    /// The time of the last event, or `None` if the conversation is empty.
+    #[serde(skip, default)]
+    pub last_event_at: Option<UtcDateTime>,
+
+    /// The number of events in the conversation.
+    #[serde(skip)]
+    pub events_count: usize,
 }
 
 impl Serialize for Conversation {
@@ -54,6 +62,8 @@ impl Default for Conversation {
             last_activated_at: UtcDateTime::now(),
             title: None,
             user: false,
+            last_event_at: None,
+            events_count: 0,
         }
     }
 }
@@ -264,6 +274,8 @@ mod tests {
                 time::Time::MIDNIGHT,
             ),
             user: true,
+            last_event_at: None,
+            events_count: 0,
         };
 
         insta::assert_json_snapshot!(conv);

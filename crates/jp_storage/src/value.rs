@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io::{BufWriter, Write as _},
+    io::{BufReader, BufWriter, Write as _},
     path::Path,
 };
 
@@ -47,7 +47,8 @@ fn deep_merge_values(base: &mut Value, overlay: Value) {
 
 pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let file = fs::File::open(path)?;
-    serde_json::from_reader(file).map_err(Into::into)
+    let reader = BufReader::new(file);
+    serde_json::from_reader(reader).map_err(Into::into)
 }
 
 pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {

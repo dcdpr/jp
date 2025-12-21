@@ -1,6 +1,6 @@
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
-use jp_conversation::ConversationId;
+use jp_conversation::{Conversation, ConversationId};
 use jp_term::osc::hyperlink;
 use time::{UtcDateTime, UtcOffset, macros::format_description};
 
@@ -43,7 +43,7 @@ struct Details {
     id: ConversationId,
     title: Option<String>,
     messages: usize,
-    last_message_at: Option<UtcDateTime>,
+    last_event_at: Option<UtcDateTime>,
     local: bool,
 }
 
@@ -52,17 +52,27 @@ impl Ls {
     pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let active_conversation_id = ctx.workspace.active_conversation_id();
         let limit = self.limit.unwrap_or(usize::MAX);
+
         let mut conversations = ctx
             .workspace
-            .conversations()
+            .conversations_details()
+            .into_iter()
             .filter(|(_, c)| !self.local || c.user)
-            .filter_map(|(id, c)| ctx.workspace.get_events(id).map(|events| (id, c, events)))
-            .map(|(id, c, events)| Details {
-                id: *id,
-                title: c.title.clone(),
-                messages: events.len(),
-                last_message_at: events.last().map(|m| m.timestamp),
-                local: c.user,
+            .map(|(id, conversation)| {
+                let Conversation {
+                    title,
+                    user,
+                    last_event_at,
+                    events_count: events,
+                    ..
+                } = conversation;
+                Details {
+                    id,
+                    title,
+                    messages: events,
+                    last_event_at,
+                    local: user,
+                }
             })
             .collect::<Vec<_>>();
 
@@ -72,7 +82,7 @@ impl Ls {
         conversations.sort_by(|a, b| match self.sort {
             Some(Sort::Created) => a.id.timestamp().cmp(&b.id.timestamp()),
             Some(Sort::Messages) => a.messages.cmp(&b.messages),
-            Some(Sort::Activity) => a.last_message_at.cmp(&b.last_message_at),
+            Some(Sort::Activity) => a.last_event_at.cmp(&b.last_event_at),
             Some(Sort::Local) => a.local.cmp(&b.local),
             _ => a.id.cmp(&b.id),
         });
@@ -120,7 +130,7 @@ impl Ls {
             id,
             title,
             messages,
-            last_message_at,
+            last_event_at: last_message_at,
             local,
         } = details;
 
