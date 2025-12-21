@@ -2288,6 +2288,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                xlow: false,
                 low: false,
                 medium: true,
                 high: true,
@@ -2320,6 +2321,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                xlow: false,
                 low: false,
                 medium: true,
                 high: true,
