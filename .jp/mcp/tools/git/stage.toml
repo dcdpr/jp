@@ -1,0 +1,30 @@
+[conversation.tools.git_stage]
+enable = false
+run = "unattended"
+style.inline_results = "full"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+description = """
+Stage a file or a specific patch to the index of the git repository.
+
+When providing one or more paths, all changes of those files will be staged. If
+providing one or more patches, only the changes of those patches will be staged,
+allowing you to stage individual "hunks" of a changed file.
+"""
+
+[conversation.tools.git_stage.parameters.paths]
+type = "array"
+items.type = "string"
+description = """
+Optional list of paths to stage. Can be a single path or a list of paths.
+"""
+
+[conversation.tools.git_stage.parameters.patches]
+type = "array"
+items.type = "string"
+description = """
+Optional list of patches to apply. Can be a single patch or a list of patches.
+
+This is useful if you want to stage individual "hunks" of a changed file.
+"""

@@ -10,7 +10,7 @@ use create_issue_bug::github_create_issue_bug;
 use create_issue_enhancement::github_create_issue_enhancement;
 use issues::github_issues;
 use pulls::github_pulls;
-use repo::{github_code_search, github_read_file};
+use repo::{github_code_search, github_list_files, github_read_file};
 
 const ORG: &str = "dcdpr";
 const REPO: &str = "jp";
@@ -51,7 +51,10 @@ pub async fn run(_: Context, t: Tool) -> std::result::Result<String, Error> {
         }
         "pulls" => github_pulls(t.opt("number")?, t.opt("state")?, t.opt("file_diffs")?).await,
         "code_search" => github_code_search(t.opt("repository")?, t.req("query")?).await,
-        "read_file" => github_read_file(t.opt("repository")?, t.req("path")?).await,
+        "read_file" => github_read_file(t.opt("repository")?, t.opt("ref")?, t.req("path")?).await,
+        "list_files" => {
+            github_list_files(t.opt("repository")?, t.opt("ref")?, t.opt("path")?).await
+        }
         _ => Err(format!("Unknown tool '{}'", t.name).into()),
     }
 }

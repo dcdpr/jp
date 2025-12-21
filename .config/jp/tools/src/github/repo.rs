@@ -1,4 +1,5 @@
 use base64::{Engine as _, prelude::BASE64_STANDARD};
+use serde_json::{Value, json};
 
 use super::auth;
 use crate::{
@@ -46,7 +47,11 @@ pub(crate) async fn github_code_search(
     to_xml(CodeMatches { matches })
 }
 
-pub(crate) async fn github_read_file(repository: Option<String>, path: String) -> Result<String> {
+pub(crate) async fn github_read_file(
+    repository: Option<String>,
+    ref_: Option<String>,
+    path: String,
+) -> Result<String> {
     #[derive(serde::Serialize)]
     struct Files {
         files: Vec<File>,
@@ -67,10 +72,15 @@ pub(crate) async fn github_read_file(repository: Option<String>, path: String) -
         .split_once('/')
         .ok_or("`repository` must be in the form of <org>/<repo>")?;
 
-    let files = octocrab::instance()
-        .repos(org, repo)
-        .get_content()
-        .path(path)
+    let client = octocrab::instance();
+    let files = client.repos(org, repo);
+    let mut files = files.get_content().path(path);
+
+    if let Some(ref_) = ref_ {
+        files = files.r#ref(ref_);
+    }
+
+    let files = files
         .send()
         .await
         .map_err(|err| match err {
@@ -99,6 +109,122 @@ pub(crate) async fn github_read_file(repository: Option<String>, path: String) -
             }),
         })
         .collect();
+
+    to_xml(Files { files })
+}
+
+pub(crate) async fn github_list_files(
+    repository: Option<String>,
+    ref_: Option<String>,
+    path: Option<String>,
+) -> Result<String> {
+    #[derive(serde::Serialize)]
+    struct Files {
+        files: Vec<File>,
+    }
+
+    #[derive(serde::Serialize)]
+    struct File {
+        path: String,
+        size: Option<u64>,
+    }
+
+    async fn fetch(
+        org: &str,
+        repo: &str,
+        ref_: &str,
+        prefix: &str,
+        files: &mut Vec<File>,
+    ) -> Result<()> {
+        let query = indoc::indoc! {"
+            repository(owner: $owner, name: $name) {
+                object(expression: $expr) {
+                    ... on Tree {
+                        entries {
+                            name
+                            type
+                            object {
+                                ... on Blob {
+                                    byteSize
+                                    isBinary
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        "};
+
+        let result: Value = octocrab::instance()
+            .graphql(&json!({
+                "query": query,
+                "variables": {
+                    "owner": org,
+                    "name": repo,
+                    "expr": format!("{ref_}:{prefix}"),
+                }
+            }))
+            .await?;
+
+        let iter = result
+            .pointer("/data/repository/object/entries")
+            .and_then(|v: &Value| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_object());
+
+        for data in iter {
+            // Skip binary files
+            if data.get("object").is_some_and(|v| {
+                v.get("isBinary")
+                    .and_then(Value::as_bool)
+                    .is_some_and(|is_binary| is_binary)
+            }) {
+                continue;
+            }
+
+            let Some(name) = data.get("name").and_then(|v| v.as_str()) else {
+                continue;
+            };
+
+            let Some(kind) = data.get("type").and_then(|v| v.as_str()) else {
+                continue;
+            };
+
+            let size = data
+                .get("object")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("byteSize"))
+                .and_then(Value::as_u64);
+
+            let path = if prefix.is_empty() {
+                name.to_owned()
+            } else {
+                format!("{prefix}/{name}")
+            };
+
+            match kind {
+                "tree" => Box::pin(fetch(org, repo, ref_, &path, files)).await?,
+                "blob" => files.push(File { path, size }),
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    auth().await?;
+
+    let repository = repository.unwrap_or_else(|| format!("{ORG}/{REPO}"));
+    let (org, repo) = repository
+        .split_once('/')
+        .ok_or("`repository` must be in the form of <org>/<repo>")?;
+
+    let prefix = path.unwrap_or_default();
+    let ref_ = ref_.unwrap_or_else(|| "HEAD".to_owned());
+
+    let mut files = vec![];
+    fetch(org, repo, &ref_, &prefix, &mut files).await?;
 
     to_xml(Files { files })
 }

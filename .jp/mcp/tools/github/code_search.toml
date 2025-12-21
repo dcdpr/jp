@@ -7,6 +7,9 @@ Find code matching a query in any GitHub repository.
 
 This tool returns a list of matched files, to fetch the actual code of a
 file, use the `github_read_file` tool.
+
+NOTE: Code search always searches the repository's default branch (usually
+`main`), it is not possible to search in a specific branch or tag.
 """
 
 [conversation.tools.github_code_search.parameters.repository]
