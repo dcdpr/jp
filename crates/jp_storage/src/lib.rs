@@ -10,6 +10,7 @@ pub use error::Error;
 use jp_conversation::{Conversation, ConversationId, ConversationStream, ConversationsMetadata};
 use jp_id::Id as _;
 use jp_tombmap::TombMap;
+use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use tracing::{trace, warn};
 
 use crate::{
@@ -170,14 +171,104 @@ impl Storage {
         read_json(&metadata_path)
     }
 
+    pub fn load_conversation_metadata(&self, id: &ConversationId) -> Result<Conversation> {
+        for root in [Some(&self.root), self.user.as_ref()] {
+            let Some(root) = root else {
+                continue;
+            };
+
+            let Some(path) = find_conversation_dir_path(root, id).map(|v| v.join(METADATA_FILE))
+            else {
+                continue;
+            };
+
+            if path.is_file() {
+                return read_json(&path);
+            }
+        }
+
+        Err(jp_conversation::Error::UnknownId(*id).into())
+    }
+
+    // TODO: CONTINUE FROM HERE
+    //
+    // - Load all metadata when doing `jp c ls`
+    // - Also need to count events, without loading them perhaps?
+    #[must_use]
+    pub fn load_all_conversations_metadata(&self) -> TombMap<ConversationId, Conversation> {
+        let mut conversations = TombMap::new();
+        for root in [Some(&self.root), self.user.as_ref()] {
+            let Some(root) = root else {
+                continue;
+            };
+
+            conversations.extend(load_all_conversation_metadata_from_dir(root));
+        }
+
+        conversations
+    }
+
+    #[must_use]
+    pub fn count_conversation_events(&self, id: &ConversationId) -> Option<usize> {
+        #[derive(serde::Deserialize)]
+        struct RawEvent {
+            kind: Box<serde_json::value::RawValue>,
+        }
+
+        for root in [Some(&self.root), self.user.as_ref()] {
+            let Some(root) = root else {
+                continue;
+            };
+
+            let Some(path) = find_conversation_dir_path(root, id).map(|v| v.join(EVENTS_FILE))
+            else {
+                continue;
+            };
+
+            if !path.is_file() {
+                continue;
+            }
+
+            let file = fs::File::open(path).ok()?;
+            let data: Vec<RawEvent> = serde_json::from_reader(file).ok()?;
+
+            return Some(
+                data.into_iter()
+                    .filter(|v| v.kind.get() != r#""config_delta""#)
+                    .count(),
+            );
+        }
+
+        None
+    }
+
+    pub fn load_conversation_events(&self, id: &ConversationId) -> Result<ConversationStream> {
+        for root in [Some(&self.root), self.user.as_ref()] {
+            let Some(root) = root else {
+                continue;
+            };
+
+            let Some(path) = find_conversation_dir_path(root, id).map(|v| v.join(EVENTS_FILE))
+            else {
+                continue;
+            };
+
+            if path.is_file() {
+                return read_json(&path);
+            }
+        }
+
+        Err(jp_conversation::Error::UnknownId(*id).into())
+    }
+
     /// Loads all conversations and their associated messages, including user
     /// conversations.
     pub fn load_conversations_and_events(&self) -> Result<ConversationsAndEvents> {
-        let (mut conversations, mut events) = load_conversations_and_events_from_dir(&self.root)?;
+        let (mut conversations, mut events) = load_conversations_and_events_from_dir(&self.root);
 
         if let Some(user) = self.user.as_ref() {
             let (mut user_conversations, user_events) =
-                load_conversations_and_events_from_dir(user)?;
+                load_conversations_and_events_from_dir(user);
 
             for (_, conversation) in user_conversations.iter_mut_untracked() {
                 conversation.user = true;
@@ -223,12 +314,18 @@ impl Storage {
                 conversations_dir.join(dir_name)
             };
 
-            remove_unused_conversation_dirs(
-                id,
-                &conv_dir,
-                &conversations_dir,
-                &user_conversations_dir,
-            )?;
+            // Only remove unused conversations if their IDs have changed.
+            if conversations.is_modified(id)
+                || conversations.is_removed(id)
+                || id == active_conversation_id
+            {
+                remove_unused_conversation_dirs(
+                    id,
+                    &conv_dir,
+                    &conversations_dir,
+                    &user_conversations_dir,
+                )?;
+            }
 
             fs::create_dir_all(&conv_dir)?;
 
@@ -289,61 +386,131 @@ impl Storage {
     }
 }
 
-fn load_conversations_and_events_from_dir(path: &Path) -> Result<ConversationsAndEvents> {
+fn find_conversation_dir_path(root: &Path, id: &ConversationId) -> Option<PathBuf> {
+    fs::read_dir(root.join(CONVERSATIONS_DIR))
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(std::result::Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|v| v.starts_with(&id.to_dirname(None)))
+        })
+        .map(|entry| entry.path())
+}
+
+fn load_all_conversation_metadata_from_dir(path: &Path) -> TombMap<ConversationId, Conversation> {
+    let conversations_path = path.join(CONVERSATIONS_DIR);
+    trace!(path = %conversations_path.display(), "Loading conversation metadata.");
+
+    let dir_entries: Vec<fs::DirEntry> = match fs::read_dir(&conversations_path) {
+        Ok(dir) => dir.filter_map(std::result::Result::ok).collect(),
+        Err(_) => return TombMap::new(),
+    };
+
+    let results: Vec<(ConversationId, Conversation)> = dir_entries
+        .into_par_iter()
+        .filter_map(|entry| load_conversation_metadata_from_dir_entry(&entry))
+        .collect();
+
+    let mut conversations = TombMap::new();
+
+    for (id, conversation) in results {
+        conversations.insert(id, conversation);
+    }
+
+    conversations
+}
+
+fn load_conversation_metadata_from_dir_entry(
+    entry: &fs::DirEntry,
+) -> Option<(ConversationId, Conversation)> {
+    load_conversation_details_from_dir_entry(entry, false).map(|(id, metadata, _)| (id, metadata))
+}
+
+fn load_conversation_details_from_dir_entry(
+    entry: &fs::DirEntry,
+    load_events: bool,
+) -> Option<(ConversationId, Conversation, Option<ConversationStream>)> {
+    if !entry.file_type().ok()?.is_dir() {
+        return None;
+    }
+
+    let file_name = entry.file_name();
+    let Some(dir_name) = file_name.to_str() else {
+        warn!(path = ?entry.path(), "Skipping directory with invalid name.");
+        return None;
+    };
+
+    let conversation_id = match ConversationId::from_dirname(dir_name) {
+        Ok(id) => id,
+        Err(error) => {
+            warn!(
+                %error,
+                path = ?entry.path(),
+                "Failed to parse ConversationId from directory name. Skipping."
+            );
+            return None;
+        }
+    };
+
+    let path = entry.path();
+    let metadata_path = path.join(METADATA_FILE);
+    let conversation = match read_json::<Conversation>(&metadata_path) {
+        Ok(c) => c,
+        Err(error) => {
+            warn!(
+                %error,
+                path = metadata_path.to_string_lossy().to_string(),
+                "Failed to load conversation metadata. Skipping."
+            );
+            return None;
+        }
+    };
+
+    if !load_events {
+        return Some((conversation_id, conversation, None));
+    }
+
+    let events_path = path.join(EVENTS_FILE);
+    let events_stream = match read_json::<ConversationStream>(&events_path) {
+        Ok(stream) => Some(stream),
+        Err(error) => {
+            warn!(%error, ?events_path, "Failed to load event stream. Skipping.");
+            None
+        }
+    };
+
+    Some((conversation_id, conversation, events_stream))
+}
+
+fn load_conversations_and_events_from_dir(path: &Path) -> ConversationsAndEvents {
     let conversations_path = path.join(CONVERSATIONS_DIR);
     trace!(path = %conversations_path.display(), "Loading conversations.");
+
+    let dir_entries: Vec<fs::DirEntry> = match fs::read_dir(&conversations_path) {
+        Ok(dir) => dir.filter_map(std::result::Result::ok).collect(),
+        Err(_) => return (TombMap::new(), TombMap::new()),
+    };
+
+    let results: Vec<(ConversationId, Conversation, Option<ConversationStream>)> = dir_entries
+        .into_par_iter()
+        .filter_map(|entry| load_conversation_details_from_dir_entry(&entry, true))
+        .collect();
 
     let mut conversations = TombMap::new();
     let mut events = TombMap::new();
 
-    for entry in fs::read_dir(&conversations_path).ok().into_iter().flatten() {
-        let path = entry?.path();
-
-        if !path.is_dir() {
-            continue;
-        }
-        let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) else {
-            warn!(?path, "Skipping directory with invalid name.");
-            continue;
-        };
-
-        let conversation_id = match ConversationId::from_dirname(dir_name) {
-            Ok(id) => id,
-            Err(error) => {
-                warn!(
-                    %error,
-                    ?path,
-                    "Failed to parse ConversationId from directory name. Skipping."
-                );
-                continue;
-            }
-        };
-
-        let metadata_path = path.join(METADATA_FILE);
-        match read_json::<Conversation>(&metadata_path) {
-            Ok(conversation) => conversations.insert(conversation_id, conversation),
-            Err(error) => {
-                warn!(
-                    %error,
-                    path = metadata_path.to_string_lossy().to_string(),
-                    "Failed to load conversation metadata. Skipping."
-                );
-                continue;
-            }
-        };
-
-        let events_path = path.join(EVENTS_FILE);
-        match read_json::<ConversationStream>(&events_path) {
-            Ok(stream) => {
-                events.insert(conversation_id, stream);
-            }
-            Err(error) => {
-                warn!(%error, ?events_path, "Failed to load event stream. Skipping.");
-            }
+    for (id, conversation, stream) in results {
+        conversations.insert(id, conversation);
+        if let Some(stream) = stream {
+            events.insert(id, stream);
         }
     }
 
-    Ok((conversations, events))
+    (conversations, events)
 }
 
 fn remove_unused_conversation_dirs(

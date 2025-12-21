@@ -130,7 +130,7 @@ mod tests {
     use crate::{
         model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
         types::{
-            string::{MergedStringStrategy, PartialMergedString},
+            string::{MergedStringSeparator, MergedStringStrategy, PartialMergedString},
             vec::{MergedVec, MergedVecStrategy},
         },
     };
@@ -281,6 +281,7 @@ mod tests {
             Some(PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foo".into()),
                 strategy: None,
+                separator: None,
             }))
         );
 
@@ -293,12 +294,13 @@ mod tests {
             Some(PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foo".into()),
                 strategy: Some(MergedStringStrategy::Append),
+                separator: None,
             }))
         );
 
         let kv = KvAssignment::try_from_cli(
             "system_prompt:",
-            r#"{"value":"foo", "strategy":"append_space"}"#,
+            r#"{"value":"foo", "strategy":"append", "separator":"space"}"#,
         )
         .unwrap();
         p.assign(kv).unwrap();
@@ -306,7 +308,8 @@ mod tests {
             p.system_prompt,
             Some(PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foo".into()),
-                strategy: Some(MergedStringStrategy::AppendSpace),
+                strategy: Some(MergedStringStrategy::Append),
+                separator: Some(MergedStringSeparator::Space),
             }))
         );
     }
@@ -487,7 +490,8 @@ mod tests {
                 data: json!({
                     "system_prompt": {
                         "value": "foo",
-                        "strategy": "append_paragraph"
+                        "strategy": "append",
+                        "separator": "paragraph",
                     },
                     "instructions": {
                         "value": [
@@ -506,7 +510,8 @@ mod tests {
                 expected: PartialAssistantConfig {
                     system_prompt: Some(PartialMergeableString::Merged(PartialMergedString {
                         value: Some("foo".into()),
-                        strategy: Some(MergedStringStrategy::AppendParagraph),
+                        strategy: Some(MergedStringStrategy::Append),
+                        separator: Some(MergedStringSeparator::Paragraph),
                     })),
                     instructions: MergedVec {
                         value: vec![

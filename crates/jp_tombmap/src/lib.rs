@@ -408,6 +408,14 @@ impl<K, V, S> TombMap<K, V, S> {
         self.dead.iter()
     }
 
+    /// Returns true if the key has been removed since insertion.
+    pub fn is_removed(&self, k: &K) -> bool
+    where
+        K: Eq + Hash,
+    {
+        self.dead.contains(k)
+    }
+
     /// Returns an iterator over the keys that have been modified since
     /// insertion.
     pub fn modified_keys(&self) -> impl Iterator<Item = &K> {

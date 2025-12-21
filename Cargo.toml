@@ -71,6 +71,7 @@ path-clean = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
 quick-xml = { version = "0.38", default-features = false }
+rayon = { version = "1", default-features = false }
 relative-path = { version = "2", default-features = false }
 reqwest = { version = "0.12", default-features = false }
 reqwest-eventsource = { version = "0.6", default-features = false }
