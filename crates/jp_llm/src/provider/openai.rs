@@ -157,7 +157,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             display_name: Some("GPT-5.2 pro".to_owned()),
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::leveled(false, true, true, true)),
+            reasoning: Some(ReasoningDetails::leveled(false, false, true, true, true)),
             knowledge_cutoff: Some(date!(2025 - 9 - 1)),
             deprecated: Some(ModelDeprecation::Active),
             features: vec![],
@@ -796,7 +796,7 @@ fn convert_reasoning(
             ReasoningEffort::XHigh => Some(types::ReasoningEffort::XHigh),
             ReasoningEffort::High => Some(types::ReasoningEffort::High),
             ReasoningEffort::Auto | ReasoningEffort::Medium => Some(types::ReasoningEffort::Medium),
-            ReasoningEffort::Low => Some(types::ReasoningEffort::Low),
+            ReasoningEffort::Low | ReasoningEffort::Xlow => Some(types::ReasoningEffort::Low),
             ReasoningEffort::Absolute(_) => {
                 debug_assert!(false, "Reasoning effort must be relative.");
                 None

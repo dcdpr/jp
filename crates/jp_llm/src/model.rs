@@ -105,7 +105,8 @@ impl ModelDetails {
 
             // Leveled
             Some(ReasoningDetails::Leveled {
-                low: _,
+                xlow: _,
+                low,
                 medium,
                 high,
                 xhigh,
@@ -122,8 +123,10 @@ impl ModelDetails {
                         ReasoningEffort::High
                     } else if xhigh {
                         ReasoningEffort::XHigh
-                    } else {
+                    } else if low {
                         ReasoningEffort::Low
+                    } else {
+                        ReasoningEffort::Xlow
                     },
                     exclude: false,
                 }),
@@ -189,6 +192,9 @@ pub enum ReasoningDetails {
     /// reasoning configuration, but instead offer specific "efforts" of
     /// reasoning, such as low/medium/high effort.
     Leveled {
+        /// Whether the model supports extremely low effort reasoning.
+        xlow: bool,
+
         /// Whether the model supports low effort reasoning.
         low: bool,
 
@@ -214,8 +220,9 @@ impl ReasoningDetails {
 
     #[must_use]
     #[expect(clippy::fn_params_excessive_bools)]
-    pub fn leveled(low: bool, medium: bool, high: bool, xhigh: bool) -> Self {
+    pub fn leveled(xlow: bool, low: bool, medium: bool, high: bool, xhigh: bool) -> Self {
         Self::Leveled {
+            xlow,
             low,
             medium,
             high,

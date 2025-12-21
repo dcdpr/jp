@@ -295,10 +295,14 @@ fn map_model(model: types::Model) -> ModelDetails {
                     .then_some(ReasoningDetails::budgetted(0, Some(24576)))
             })
             .or_else(|| {
-                model
-                    .base_model_id
-                    .starts_with("gemini-3")
-                    .then_some(ReasoningDetails::leveled(true, false, true, false))
+                (model.base_model_id.starts_with("gemini-3-flash")
+                    || model.base_model_id == "gemini-flash-latest")
+                    .then_some(ReasoningDetails::leveled(true, true, true, true, false))
+            })
+            .or_else(|| {
+                (model.base_model_id.starts_with("gemini-3-pro")
+                    || model.base_model_id == "gemini-pro-latest")
+                    .then_some(ReasoningDetails::leveled(false, true, false, true, false))
             }),
         knowledge_cutoff: None,
         deprecated: None,

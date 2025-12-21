@@ -456,7 +456,7 @@ fn build_request(query: ChatQuery, model: &ModelDetails) -> Result<request::Chat
                 ReasoningEffort::XHigh => request::ReasoningEffort::XHigh,
                 ReasoningEffort::High => request::ReasoningEffort::High,
                 ReasoningEffort::Auto | ReasoningEffort::Medium => request::ReasoningEffort::Medium,
-                ReasoningEffort::Low => request::ReasoningEffort::Low,
+                ReasoningEffort::Low | ReasoningEffort::Xlow => request::ReasoningEffort::Low,
                 ReasoningEffort::Absolute(_) => {
                     debug_assert!(false, "Reasoning effort must be relative.");
                     request::ReasoningEffort::Medium

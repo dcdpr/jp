@@ -83,20 +83,20 @@ name = 'gpt-5.1-codex-mini'
 
 [providers.llm.aliases.google]
 provider = 'google'
-name = 'gemini-pro-latest'
+name = 'gemini-3-pro-preview'
 
 [providers.llm.aliases.gemini]
 provider = 'google'
-name = 'gemini-pro-latest'
+name = 'gemini-3-pro-preview'
 
 [providers.llm.aliases.gemini-pro]
 provider = 'google'
-name = 'gemini-pro-latest'
+name = 'gemini-3-pro-preview'
 
 [providers.llm.aliases.gemini-flash]
 provider = 'google'
-name = 'gemini-flash-latest'
+name = 'gemini-3-flash-preview'
 
-[providers.llm.aliases.gemini-lite]
+[providers.llm.aliases.gemini-flash-lite]
 provider = 'google'
-name = 'gemini-flash-lite-latest'
+name = 'gemini-2.5-flash-lite'
