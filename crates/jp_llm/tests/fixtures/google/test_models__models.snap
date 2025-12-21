@@ -446,7 +446,15 @@ expression: v
         max_output_tokens: Some(
             65536,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Leveled {
+                xlow: true,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: false,
+            },
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         features: [],
@@ -488,7 +496,15 @@ expression: v
         max_output_tokens: Some(
             65536,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Leveled {
+                xlow: false,
+                low: true,
+                medium: false,
+                high: true,
+                xhigh: false,
+            },
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         features: [],
@@ -651,6 +667,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                xlow: false,
                 low: true,
                 medium: false,
                 high: true,
@@ -679,6 +696,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                xlow: true,
                 low: true,
                 medium: false,
                 high: true,
@@ -707,6 +725,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                xlow: false,
                 low: true,
                 medium: false,
                 high: true,
