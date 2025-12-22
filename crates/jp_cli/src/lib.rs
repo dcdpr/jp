@@ -9,8 +9,9 @@ use std::{
     error::Error as _,
     fmt,
     io::{IsTerminal as _, stdout},
-    num::{NonZeroI32, NonZeroUsize},
+    num::{NonZeroU8, NonZeroUsize},
     path::PathBuf,
+    process::ExitCode,
     str::FromStr,
     sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
@@ -232,7 +233,10 @@ impl fmt::Display for Cli {
     }
 }
 
-pub fn run() {
+pub fn run() -> ExitCode {
+    #[cfg(feature = "dhat")]
+    let _profiler = run_dhat();
+
     let cli = Cli::parse();
     let is_tty = stdout().is_terminal();
 
@@ -251,7 +255,10 @@ pub fn run() {
         eprintln!("{output}");
     }
 
-    std::process::exit(code);
+    #[cfg(feature = "dhat")]
+    eprintln!("You can view the heap profile at https://profiler.firefox.com");
+
+    ExitCode::from(code)
 }
 
 fn run_inner(cli: Cli) -> Result<Success> {
@@ -316,11 +323,11 @@ fn parse_json_output(output: Success) -> String {
     serde_json::to_string(&value).unwrap_or_else(|_| value.to_string())
 }
 
-fn parse_error(error: error::Error, is_tty: bool) -> (i32, String) {
+fn parse_error(error: error::Error, is_tty: bool) -> (u8, String) {
     let (code, message, mut metadata) = match error {
         error::Error::Command(error) => (error.code, error.message, error.metadata),
         _ => (
-            NonZeroI32::new(1).unwrap(),
+            NonZeroU8::new(1).unwrap(),
             Some(strip_ansi_escapes::strip_str(error.to_string())),
             {
                 let mut metadata = vec![];
@@ -693,6 +700,28 @@ pub fn num_threads() -> NonZeroUsize {
             std::num::NonZeroUsize::MIN
         }
     }
+}
+
+#[cfg(feature = "dhat")]
+fn run_dhat() -> dhat::Profiler {
+    std::process::Command::new(env!("CARGO"))
+        .arg("locate-project")
+        .arg("--workspace")
+        .arg("--message-format=plain")
+        .output()
+        .ok()
+        .and_then(|v| String::from_utf8(v.stdout).ok())
+        .and_then(|v| PathBuf::from(v).parent().map(|v| v.join("tmp/profiling")))
+        .and_then(|v| std::fs::create_dir_all(&v).ok().map(|()| v))
+        .map(|v| {
+            v.join(format!(
+                "heap-{}.json",
+                time::UtcDateTime::now().unix_timestamp()
+            ))
+        })
+        .map_or_else(dhat::Profiler::new_heap, |v| {
+            dhat::Profiler::builder().file_name(v).build()
+        })
 }
 
 #[cfg(test)]

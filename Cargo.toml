@@ -39,6 +39,7 @@ comfy-table = { version = "7", default-features = false }
 comrak = { version = "0.41", default-features = false }
 crossbeam-channel = { version = "0.5", default-features = false }
 crossterm = { version = "0.29", default-features = false }
+dhat = { version = "0.3", default-features = false }
 directories = { version = "6", default-features = false }
 duct = { version = "1", default-features = false }
 duct_sh = { version = "1", default-features = false }
@@ -147,3 +148,7 @@ struct_field_names = "allow"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
+
+[profile.profiling]
+inherits = "release"
+debug = true

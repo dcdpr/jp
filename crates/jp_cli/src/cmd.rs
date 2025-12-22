@@ -4,7 +4,7 @@ mod conversation;
 mod init;
 mod query;
 
-use std::{borrow::Cow, fmt, num::NonZeroI32};
+use std::{borrow::Cow, fmt, num::NonZeroU8};
 
 use comfy_table::Row;
 use jp_config::PartialAppConfig;
@@ -154,7 +154,7 @@ pub(crate) struct Error {
     /// The error code.
     ///
     /// Used to exit the CLI with a specific exit code. This is usually `1`.
-    pub(super) code: NonZeroI32,
+    pub(super) code: NonZeroU8,
 
     /// The optional error message to be displayed to the user.
     pub(super) message: Option<String>,
@@ -184,10 +184,10 @@ impl fmt::Display for Error {
     }
 }
 
-impl From<i32> for Error {
-    fn from(code: i32) -> Self {
+impl From<u8> for Error {
+    fn from(code: u8) -> Self {
         Self {
-            code: code.try_into().unwrap_or(NonZeroI32::new(1).unwrap()),
+            code: code.try_into().unwrap_or(NonZeroU8::new(1).unwrap()),
             message: None,
             metadata: vec![],
             disable_persistence: true,
@@ -219,22 +219,22 @@ impl From<&str> for Error {
     }
 }
 
-impl From<(i32, String)> for Error {
-    fn from((code, message): (i32, String)) -> Self {
+impl From<(u8, String)> for Error {
+    fn from((code, message): (u8, String)) -> Self {
         (code, message, vec![]).into()
     }
 }
 
-impl From<(i32, &str)> for Error {
-    fn from((code, message): (i32, &str)) -> Self {
+impl From<(u8, &str)> for Error {
+    fn from((code, message): (u8, &str)) -> Self {
         (code, message.to_owned()).into()
     }
 }
 
-impl From<(i32, String, Vec<(String, Value)>)> for Error {
-    fn from((code, message, metadata): (i32, String, Vec<(String, Value)>)) -> Self {
+impl From<(u8, String, Vec<(String, Value)>)> for Error {
+    fn from((code, message, metadata): (u8, String, Vec<(String, Value)>)) -> Self {
         Self {
-            code: code.try_into().unwrap_or(NonZeroI32::new(1).unwrap()),
+            code: code.try_into().unwrap_or(NonZeroU8::new(1).unwrap()),
             message: Some(message),
             metadata: metadata.into_iter().collect(),
             disable_persistence: true,
@@ -242,8 +242,8 @@ impl From<(i32, String, Vec<(String, Value)>)> for Error {
     }
 }
 
-impl From<(i32, &str, Vec<(String, Value)>)> for Error {
-    fn from((code, message, metadata): (i32, &str, Vec<(String, Value)>)) -> Self {
+impl From<(u8, &str, Vec<(String, Value)>)> for Error {
+    fn from((code, message, metadata): (u8, &str, Vec<(String, Value)>)) -> Self {
         (code, message.to_string(), metadata).into()
     }
 }
@@ -274,8 +274,8 @@ impl From<Vec<(&'static str, String)>> for Error {
     }
 }
 
-impl From<(i32, Vec<(String, Value)>)> for Error {
-    fn from((code, mut metadata): (i32, Vec<(String, Value)>)) -> Self {
+impl From<(u8, Vec<(String, Value)>)> for Error {
+    fn from((code, mut metadata): (u8, Vec<(String, Value)>)) -> Self {
         let message = metadata
             .iter()
             .position(|(k, _)| k == "message")

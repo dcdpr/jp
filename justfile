@@ -41,6 +41,12 @@ commit +ARGS="Give me a commit message": _install-jp
 build-changelog: (_install "jilu@" + jilu_version)
     @jilu
 
+[group('profile')]
+[positional-arguments]
+profile-heap *ARGS:
+    #!/usr/bin/env sh
+    cargo run --profile profiling --features dhat -- "$@"
+
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
 develop-docs: (_docs "dev" "--open")

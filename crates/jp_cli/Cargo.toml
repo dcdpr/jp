@@ -49,6 +49,7 @@ clap = { workspace = true, features = [
 comfy-table = { workspace = true, features = ["tty", "custom_styling"] }
 comrak = { workspace = true }
 crossterm = { workspace = true }
+dhat = { workspace = true, optional = true }
 duct = { workspace = true }
 futures = { workspace = true }
 indexmap = { workspace = true }
@@ -95,3 +96,6 @@ workspace = true
 [[bin]]
 name = "jp"
 path = "src/main.rs"
+
+[features]
+dhat = ["dep:dhat"]
