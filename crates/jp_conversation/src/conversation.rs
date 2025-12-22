@@ -49,9 +49,9 @@ impl Default for Conversation {
             last_activated_at: UtcDateTime::now(),
             title: None,
             user: false,
+            ephemeral: false,
             last_event_at: None,
             events_count: 0,
-            ephemeral: false,
         }
     }
 }
@@ -269,9 +269,9 @@ mod tests {
                 time::Time::MIDNIGHT,
             ),
             user: true,
+            ephemeral: false,
             last_event_at: None,
             events_count: 0,
-            ephemeral: false,
         };
 
         insta::assert_json_snapshot!(conv);
