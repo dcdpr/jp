@@ -35,6 +35,7 @@ jp_tool = { workspace = true }
 jp_workspace = { workspace = true }
 
 async-stream = { workspace = true }
+atty = { workspace = true }
 bat = { workspace = true, features = ["regex-onig"] }
 clap = { workspace = true, features = [
     "color",

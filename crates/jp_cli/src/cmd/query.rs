@@ -5,6 +5,7 @@ mod turn;
 use std::{
     collections::{BTreeMap, HashSet},
     env, fs,
+    io::{self, BufRead as _},
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -410,6 +411,22 @@ impl Query {
             .flatten()
             .unwrap_or_default();
 
+        // If stdin contains data, we prepend it to the chat request.
+        let piped = if atty::is(atty::Stream::Stdin) {
+            String::new()
+        } else {
+            io::stdin()
+                .lock()
+                .lines()
+                .map_while(std::result::Result::ok)
+                .collect::<String>()
+        };
+
+        if !piped.is_empty() {
+            let sep = if request.is_empty() { "" } else { "\n\n" };
+            *request = format!("{piped}{sep}{request}");
+        }
+
         // If a query is provided, prepend it to the chat request. This is only
         // relevant for replays, otherwise the chat request is still empty, so
         // we replace it with the provided query.
@@ -419,7 +436,8 @@ impl Query {
             *request = format!("{text}{sep}{request}");
         }
 
-        let editor_details = self.edit_message(&mut request, stream, config, root)?;
+        let editor_details =
+            self.edit_message(&mut request, stream, !piped.is_empty(), config, root)?;
 
         if self.template {
             let mut env = Environment::empty();
@@ -481,6 +499,7 @@ impl Query {
         &self,
         request: &mut ChatRequest,
         stream: &mut ConversationStream,
+        piped: bool,
         config: &AppConfig,
         root: &Path,
     ) -> Result<(Option<PathBuf>, PartialAppConfig)> {
@@ -493,9 +512,13 @@ impl Query {
             "<no additional context provided>".clone_into(request);
         }
 
-        // If a query is provided, and editing is not explicitly requested, we
-        // omit opening the editor.
-        if !request.is_empty() && !self.force_edit() {
+        // If a query is provided, and editing is not explicitly requested, or
+        // in addition to the query, stdin contains data, we omit opening the
+        // editor.
+        if (self.query.as_ref().is_some_and(|v| !v.is_empty()) || !piped)
+            && !self.force_edit()
+            && !request.is_empty()
+        {
             return Ok((None, PartialAppConfig::empty()));
         }
 
