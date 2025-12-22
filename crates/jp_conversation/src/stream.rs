@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use jp_config::{AppConfig, Config as _, PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use time::UtcDateTime;
 use tracing::error;
 
@@ -13,7 +14,7 @@ use crate::event::{
 };
 
 /// An internal representation of events in a conversation stream.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InternalEvent {
     /// The configuration state of the conversation is updated.
@@ -836,6 +837,137 @@ pub enum StreamError {
     /// An error occurred for the stream [`AppConfig`].
     #[error(transparent)]
     Config(#[from] jp_config::ConfigError),
+}
+
+// A custom deserializer for `InternalEvent` that allows us to avoid serde
+// allocations when trying to match `untagged` enum variants.
+//
+// This essentially "flattens" the `InternalEvent` enum into one where no
+// untagged variants exist, allowing serde to match the correct variant based on
+// the `type` field.
+//
+// We then convert the `InternalEventFlattened` back into the original
+// `InternalEvent` type.
+//
+// `cargo dhat` had shown this to be a hotspot in the codebase, so we're
+// optimizing it for performance.
+#[allow(clippy::allow_attributes, clippy::missing_docs_in_private_items)]
+impl<'de> Deserialize<'de> for InternalEvent {
+    #[expect(clippy::too_many_lines)]
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum InternalEventFlattened {
+            ConfigDelta(ConfigDelta),
+
+            ChatRequest {
+                timestamp: UtcDateTime,
+                #[serde(default, with = "jp_serde::repr::base64_json_map")]
+                metadata: Map<String, Value>,
+                #[serde(flatten)]
+                data: ChatRequest,
+            },
+            ChatResponse {
+                timestamp: UtcDateTime,
+                #[serde(default, with = "jp_serde::repr::base64_json_map")]
+                metadata: Map<String, Value>,
+                #[serde(flatten)]
+                data: ChatResponse,
+            },
+            ToolCallRequest {
+                timestamp: UtcDateTime,
+                #[serde(default, with = "jp_serde::repr::base64_json_map")]
+                metadata: Map<String, Value>,
+                #[serde(flatten)]
+                data: ToolCallRequest,
+            },
+            ToolCallResponse {
+                timestamp: UtcDateTime,
+                #[serde(default, with = "jp_serde::repr::base64_json_map")]
+                metadata: Map<String, Value>,
+                #[serde(flatten)]
+                data: ToolCallResponse,
+            },
+            InquiryRequest {
+                timestamp: UtcDateTime,
+                #[serde(default, with = "jp_serde::repr::base64_json_map")]
+                metadata: Map<String, Value>,
+                #[serde(flatten)]
+                data: InquiryRequest,
+            },
+            InquiryResponse {
+                timestamp: UtcDateTime,
+                #[serde(default, with = "jp_serde::repr::base64_json_map")]
+                metadata: Map<String, Value>,
+                #[serde(flatten)]
+                data: InquiryResponse,
+            },
+        }
+
+        let event = match InternalEventFlattened::deserialize(deserializer)? {
+            InternalEventFlattened::ConfigDelta(d) => return Ok(Self::ConfigDelta(d)),
+
+            InternalEventFlattened::ChatRequest {
+                timestamp,
+                metadata,
+                data,
+            } => ConversationEvent {
+                timestamp,
+                metadata,
+                kind: data.into(),
+            },
+            InternalEventFlattened::ChatResponse {
+                timestamp,
+                metadata,
+                data,
+            } => ConversationEvent {
+                timestamp,
+                metadata,
+                kind: data.into(),
+            },
+            InternalEventFlattened::ToolCallRequest {
+                timestamp,
+                metadata,
+                data,
+            } => ConversationEvent {
+                timestamp,
+                metadata,
+                kind: data.into(),
+            },
+            InternalEventFlattened::ToolCallResponse {
+                timestamp,
+                metadata,
+                data,
+            } => ConversationEvent {
+                timestamp,
+                metadata,
+                kind: data.into(),
+            },
+            InternalEventFlattened::InquiryRequest {
+                timestamp,
+                metadata,
+                data,
+            } => ConversationEvent {
+                timestamp,
+                metadata,
+                kind: data.into(),
+            },
+            InternalEventFlattened::InquiryResponse {
+                timestamp,
+                metadata,
+                data,
+            } => ConversationEvent {
+                timestamp,
+                metadata,
+                kind: data.into(),
+            },
+        };
+
+        Ok(Self::Event(Box::new(event)))
+    }
 }
 
 #[cfg(test)]
