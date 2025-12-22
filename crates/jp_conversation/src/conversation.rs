@@ -24,7 +24,7 @@ pub struct Conversation {
 
     /// Whether the conversation is stored in the user or workspace storage.
     // TODO: rename to `user_local`
-    #[serde(rename = "local")]
+    #[serde(default, rename = "local", skip_serializing_if = "skip_if::is_false")]
     pub user: bool,
 
     /// Mark the conversation as ephemeral.
