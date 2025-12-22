@@ -16,7 +16,7 @@ use crate::error::{Error, Result};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Conversation {
     /// The optional title of the conversation.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 
     /// The last time the conversation was activated.
@@ -24,16 +24,8 @@ pub struct Conversation {
 
     /// Whether the conversation is stored in the user or workspace storage.
     // TODO: rename to `user_local`
-    #[serde(skip, rename = "local")]
+    #[serde(rename = "local")]
     pub user: bool,
-
-    /// The time of the last event, or `None` if the conversation is empty.
-    #[serde(skip, default)]
-    pub last_event_at: Option<UtcDateTime>,
-
-    /// The number of events in the conversation.
-    #[serde(skip)]
-    pub events_count: usize,
 
     /// Mark the conversation is ephemeral.
     ///
@@ -41,6 +33,14 @@ pub struct Conversation {
     /// by the system.
     #[serde(default, skip_serializing_if = "skip_if::is_false")]
     pub ephemeral: bool,
+
+    /// The time of the last event, or `None` if the conversation is empty.
+    #[serde(skip)]
+    pub last_event_at: Option<UtcDateTime>,
+
+    /// The number of events in the conversation.
+    #[serde(skip)]
+    pub events_count: usize,
 }
 
 impl Default for Conversation {
