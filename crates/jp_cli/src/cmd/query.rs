@@ -5,7 +5,7 @@ mod turn;
 use std::{
     collections::{BTreeMap, HashSet},
     env, fs,
-    io::{self, BufRead as _},
+    io::{self, BufRead as _, IsTerminal},
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -412,10 +412,11 @@ impl Query {
             .unwrap_or_default();
 
         // If stdin contains data, we prepend it to the chat request.
-        let piped = if atty::is(atty::Stream::Stdin) {
+        let stdin = io::stdin();
+        let piped = if stdin.is_terminal() {
             String::new()
         } else {
-            io::stdin()
+            stdin
                 .lock()
                 .lines()
                 .map_while(std::result::Result::ok)
