@@ -27,7 +27,7 @@ pub struct Conversation {
     #[serde(rename = "local")]
     pub user: bool,
 
-    /// Mark the conversation is ephemeral.
+    /// Mark the conversation as ephemeral.
     ///
     /// An ephemeral conversation that is not active, may be garbage collected
     /// by the system.
