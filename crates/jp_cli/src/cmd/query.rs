@@ -201,6 +201,16 @@ pub(crate) struct Query {
     )]
     no_tools: Vec<Option<String>>,
 
+    /// Mark a new conversation as ephemeral.
+    ///
+    /// The conversation is persisted, but only until the conversation is no
+    /// longer marked as active (e.g. when a new conversation is started).
+    ///
+    /// This differs from `--no-persist` in that the conversation can contain
+    /// multiple turns, as long as it remains active.
+    #[arg(long = "tmp", requires = "new_conversation")]
+    ephemeral: bool,
+
     /// The tool to use.
     ///
     /// If a value is provided, the tool matching the value will be used.
@@ -446,15 +456,21 @@ impl Query {
 
         // Set new active conversation if requested.
         if self.new_conversation {
-            let id = ws.create_conversation(Conversation::default().with_local(self.local), cfg);
+            let conversation = Conversation::default()
+                .with_local(self.local)
+                .with_ephemeral(self.ephemeral);
+
+            let id = ws.create_conversation(conversation, cfg);
 
             debug!(
                 %id,
                 local = %self.local,
+                ephemeral = %self.ephemeral,
                 "Creating new active conversation due to --new flag."
             );
 
             ws.set_active_conversation_id(id)?;
+            ws.remove_non_active_ephemeral_conversations();
         }
 
         Ok(last_active_conversation_id)
@@ -923,6 +939,7 @@ impl IntoPartialAppConfig for Query {
             no_tools,
             reasoning,
             no_reasoning,
+            ephemeral: _,
         } = &self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);

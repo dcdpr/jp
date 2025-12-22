@@ -338,6 +338,20 @@ impl Storage {
 
         Ok(())
     }
+
+    /// Remove all ephemeral conversations, except the active one.
+    pub fn remove_ephemeral_conversations(&self, skip: &[ConversationId]) {
+        for (id, conversation) in self.load_all_conversations_details() {
+            if !conversation.ephemeral || skip.contains(&id) {
+                continue;
+            }
+
+            let path = self.root.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+            if let Err(error) = fs::remove_dir_all(&path) {
+                warn!(path = %path.display(), %error, "Failed to remove ephemeral conversation.");
+            }
+        }
+    }
 }
 
 fn load_count_and_timestamp_events(entry: &fs::DirEntry) -> Option<(usize, Option<UtcDateTime>)> {
