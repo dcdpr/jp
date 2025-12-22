@@ -6,13 +6,14 @@ use jp_id::{
     Id, NANOSECONDS_PER_DECISECOND,
     parts::{GlobalId, TargetId, Variant},
 };
-use serde::{Deserialize, Serialize, ser::SerializeStruct as _};
+use jp_serde::skip_if;
+use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 
 use crate::error::{Error, Result};
 
 /// A sequence of events between the user and LLM.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Conversation {
     /// The optional title of the conversation.
     #[serde(default)]
@@ -22,7 +23,8 @@ pub struct Conversation {
     pub last_activated_at: UtcDateTime,
 
     /// Whether the conversation is stored in the user or workspace storage.
-    #[serde(skip)]
+    // TODO: rename to `user_local`
+    #[serde(skip, rename = "local")]
     pub user: bool,
 
     /// The time of the last event, or `None` if the conversation is empty.
@@ -32,28 +34,13 @@ pub struct Conversation {
     /// The number of events in the conversation.
     #[serde(skip)]
     pub events_count: usize,
-}
 
-impl Serialize for Conversation {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut n = 2;
-        if self.title.is_some() {
-            n += 1;
-        }
-
-        let mut state = serializer.serialize_struct("Conversation", n)?;
-
-        if let Some(title) = &self.title {
-            state.serialize_field("title", title)?;
-        }
-
-        state.serialize_field("last_activated_at", &self.last_activated_at)?;
-        state.serialize_field("local", &self.user)?;
-        state.end()
-    }
+    /// Mark the conversation is ephemeral.
+    ///
+    /// An ephemeral conversation that is not active, may be garbage collected
+    /// by the system.
+    #[serde(default, skip_serializing_if = "skip_if::is_false")]
+    pub ephemeral: bool,
 }
 
 impl Default for Conversation {
@@ -64,6 +51,7 @@ impl Default for Conversation {
             user: false,
             last_event_at: None,
             events_count: 0,
+            ephemeral: false,
         }
     }
 }
@@ -82,6 +70,13 @@ impl Conversation {
     #[must_use]
     pub const fn with_local(mut self, local: bool) -> Self {
         self.user = local;
+        self
+    }
+
+    /// Sets whether the conversation is ephemeral.
+    #[must_use]
+    pub const fn with_ephemeral(mut self, ephemeral: bool) -> Self {
+        self.ephemeral = ephemeral;
         self
     }
 }
@@ -276,6 +271,7 @@ mod tests {
             user: true,
             last_event_at: None,
             events_count: 0,
+            ephemeral: false,
         };
 
         insta::assert_json_snapshot!(conv);

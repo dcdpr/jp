@@ -433,6 +433,16 @@ impl Workspace {
     pub fn id(&self) -> &Id {
         &self.id
     }
+
+    /// Remove all ephemeral conversations, except the active one.
+    pub fn remove_non_active_ephemeral_conversations(&self) {
+        let Some(storage) = self.storage.as_ref() else {
+            return;
+        };
+
+        let active_id = self.active_conversation_id();
+        storage.remove_ephemeral_conversations(&[active_id]);
+    }
 }
 
 pub fn user_data_dir() -> Result<PathBuf> {
