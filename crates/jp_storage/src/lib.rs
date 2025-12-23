@@ -643,6 +643,7 @@ mod tests {
         let id2 = ConversationId::try_from_deciseconds_str("17636257527").unwrap();
         let id3 = ConversationId::try_from_deciseconds_str("17636257528").unwrap();
         let id4 = ConversationId::try_from_deciseconds_str("17636257529").unwrap();
+        let id5 = ConversationId::try_from_deciseconds_str("17636257530").unwrap();
 
         let dir1 = convs.join(id1.to_dirname(None));
         fs::create_dir_all(&dir1).unwrap();
@@ -662,15 +663,25 @@ mod tests {
         .unwrap();
         write_json(&dir2.join("events.json"), &json!([])).unwrap();
 
-        fs::create_dir_all(convs.join(id3.to_dirname(None))).unwrap();
-        fs::create_dir_all(convs.join(id4.to_dirname(Some("foo")))).unwrap();
+        let dir3 = convs.join(id3.to_dirname(Some("hello world")));
+        fs::create_dir_all(&dir3).unwrap();
+        write_json(
+            &dir3.join("metadata.json"),
+            &json!({"last_activated_at": utc_datetime!(2023-01-01 00:00:00), "ephemeral": true}),
+        )
+        .unwrap();
+        write_json(&dir3.join("events.json"), &json!([])).unwrap();
+
+        fs::create_dir_all(convs.join(id4.to_dirname(None))).unwrap();
+        fs::create_dir_all(convs.join(id5.to_dirname(Some("foo")))).unwrap();
 
         let storage = Storage::new(path).unwrap();
-        storage.remove_ephemeral_conversations(&[id3, id4]);
+        storage.remove_ephemeral_conversations(&[id4, id5]);
 
         assert!(!convs.join(id1.to_dirname(None)).exists());
         assert!(convs.join(id2.to_dirname(Some("hello world"))).exists());
-        assert!(convs.join(id3.to_dirname(None)).exists());
-        assert!(convs.join(id4.to_dirname(Some("foo"))).exists());
+        assert!(!convs.join(id3.to_dirname(Some("hello world"))).exists());
+        assert!(convs.join(id4.to_dirname(None)).exists());
+        assert!(convs.join(id5.to_dirname(Some("foo"))).exists());
     }
 }
