@@ -66,6 +66,7 @@ use crate::{
     providers::{PartialProviderConfig, ProviderConfig},
     style::{PartialStyleConfig, StyleConfig},
     template::{PartialTemplateConfig, TemplateConfig},
+    types::extending_path::ExtendingRelativePath,
 };
 
 /// The prefix to use for environment variables that set configuration options.
@@ -115,7 +116,7 @@ pub struct AppConfig {
     /// Note that extended files ARE loaded by default, in contrast to
     /// [`Self::config_load_paths`].
     #[setting(default = vec!["config.d/**/*".into()], merge = schematic::merge::preserve)]
-    pub extends: Vec<RelativePathBuf>,
+    pub extends: Vec<ExtendingRelativePath>,
 
     /// Assistant configuration.
     ///
