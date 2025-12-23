@@ -113,25 +113,44 @@ impl InstructionsConfig {
             pub description: Option<&'a str>,
 
             /// See [`InstructionsConfig::items`].
-            #[serde(rename = "$value")]
+            #[serde(rename = "$value", skip_serializing_if = "Items::is_empty")]
             pub items: Items<'a>,
 
             /// See [`InstructionsConfig::examples`].
+            #[serde(skip_serializing_if = "Examples::is_empty")]
             pub examples: Examples<'a>,
         }
 
         #[derive(Serialize)]
+        #[serde(rename = "items")]
         struct Items<'a> {
             /// See [`InstructionsConfig::items`].
             #[serde(default, rename = "item")]
             items: &'a [String],
         }
 
+        impl Items<'_> {
+            /// Returns `true` if the items are empty.
+            #[must_use]
+            const fn is_empty(&self) -> bool {
+                self.items.is_empty()
+            }
+        }
+
         #[derive(Serialize)]
+        #[serde(rename = "examples")]
         struct Examples<'a> {
             /// See [`InstructionsConfig::examples`].
             #[serde(default, rename = "$value")]
             examples: Vec<Example<'a>>,
+        }
+
+        impl Examples<'_> {
+            /// Returns `true` if the examples are empty.
+            #[must_use]
+            const fn is_empty(&self) -> bool {
+                self.examples.is_empty()
+            }
         }
 
         #[derive(Serialize)]

@@ -653,7 +653,7 @@ async fn mcp_tool_definition(
 
         let default = override_cfg
             .and_then(|v| v.default.clone())
-            .or(opts.get("default").cloned());
+            .or_else(|| opts.get("default").cloned());
 
         let mut description = override_cfg.and_then(|v| v.description.clone());
         match (

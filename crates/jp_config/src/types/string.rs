@@ -155,7 +155,7 @@ impl ToPartial for MergedString {
     }
 }
 
-/// Merge strategy for `VecWithStrategy`.
+/// Merge strategy for `MergeableString`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum MergedStringStrategy {

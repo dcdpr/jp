@@ -48,6 +48,7 @@ which = { workspace = true, features = ["real-sys"] }
 assert_matches = { workspace = true }
 indoc = { workspace = true }
 insta = { workspace = true }
+pretty_assertions = { workspace = true, features = ["std"] }
 serial_test = { workspace = true }
 tempfile = { workspace = true }
 test-log = { workspace = true }

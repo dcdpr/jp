@@ -26,9 +26,9 @@ where
         MergeableVec::Merged(v) => v.value,
     };
 
-    let next_is_replace = matches!(next, MergeableVec::Vec(_));
+    let next_is_merged = matches!(next, MergeableVec::Merged(_));
     let (strategy, mut next_value, is_default) = match next {
-        MergeableVec::Vec(v) => (MergedVecStrategy::Replace, v, false),
+        MergeableVec::Vec(v) => (MergedVecStrategy::Append, v, false),
         MergeableVec::Merged(v) => (v.strategy, v.value, v.is_default),
     };
 
@@ -40,14 +40,14 @@ where
         MergedVecStrategy::Replace => next_value,
     };
 
-    Ok(Some(if next_is_replace {
-        MergeableVec::Vec(value)
-    } else {
+    Ok(Some(if next_is_merged {
         MergeableVec::Merged(MergedVec {
             value,
             strategy,
             is_default,
         })
+    } else {
+        MergeableVec::Vec(value)
     }))
 }
 
@@ -70,7 +70,7 @@ mod tests {
             TestCase {
                 prev: MergeableVec::Vec(vec![1, 2, 3]),
                 next: MergeableVec::Vec(vec![4, 5, 6]),
-                expected: MergeableVec::Vec(vec![4, 5, 6]),
+                expected: MergeableVec::Vec(vec![1, 2, 3, 4, 5, 6]),
             },
             TestCase {
                 prev: MergeableVec::Vec(vec![1, 2, 3]),
@@ -105,7 +105,7 @@ mod tests {
                     is_default: false,
                 }),
                 next: MergeableVec::Vec(vec![4, 5, 6]),
-                expected: MergeableVec::Vec(vec![4, 5, 6]),
+                expected: MergeableVec::Vec(vec![1, 2, 3, 4, 5, 6]),
             },
             TestCase {
                 prev: MergeableVec::Merged(MergedVec {

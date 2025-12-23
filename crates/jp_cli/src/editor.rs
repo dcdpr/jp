@@ -302,14 +302,14 @@ fn build_history_text(history: &ConversationStream) -> String {
     let mut text = String::new();
 
     if !history.is_empty() {
-        text.push_str("\n# Conversation History");
+        text.push_str("\n# Conversation History (last 10 entries)");
     }
 
     let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
     let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
 
     let mut messages = vec![];
-    for event in history.iter() {
+    for event in history.iter().rev().take(10) {
         let mut buf = String::new();
         let timestamp = event
             .timestamp
@@ -383,7 +383,6 @@ fn build_history_text(history: &ConversationStream) -> String {
         messages.push(buf);
     }
 
-    messages.reverse();
     text.extend(messages);
     text
 }
