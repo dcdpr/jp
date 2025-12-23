@@ -5,10 +5,13 @@ use std::path::{Path, PathBuf};
 use glob::glob;
 use indexmap::IndexMap;
 use schematic::{ConfigLoader, MergeError, MergeResult, PartialConfig, TransformResult};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 use super::Config;
-use crate::{AppConfig, BoxedError, PartialAppConfig, error::Error};
+use crate::{
+    AppConfig, BoxedError, PartialAppConfig, error::Error,
+    types::extending_path::ExtendingRelativePath,
+};
 
 /// Valid file extensions for configuration files.
 const VALID_CONFIG_FILE_EXTS: &[&str] = &["toml", "json", "json5", "yaml", "yml"];
@@ -234,13 +237,34 @@ fn load_config_file_with_extends(
 ) -> Result<(), Error> {
     let root = path.parent().map(Path::to_path_buf);
 
+    let (before, after): (Vec<_>, Vec<_>) = ConfigLoader::<AppConfig>::new()
+        .file(path)?
+        .load_partial(&())?
+        .extends
+        .into_iter()
+        .flatten()
+        .partition(ExtendingRelativePath::is_before);
+
+    load_optional_paths(before, root.as_deref(), loader)?;
+
     if optional {
         loader.file_optional(path)?;
     } else {
         loader.file(path)?;
     }
 
-    for path in loader.load_partial(&())?.extends.iter().flatten() {
+    load_optional_paths(after, root.as_deref(), loader)?;
+
+    Ok(())
+}
+
+/// Load the optional paths.
+fn load_optional_paths(
+    extends: impl IntoIterator<Item = ExtendingRelativePath>,
+    root: Option<&Path>,
+    loader: &mut ConfigLoader<AppConfig>,
+) -> Result<(), Error> {
+    for path in extends {
         let Some(root) = &root else {
             continue;
         };
@@ -249,6 +273,12 @@ fn load_config_file_with_extends(
         let Some(path_str) = path.as_os_str().to_str() else {
             continue;
         };
+
+        // Path without glob patterns, warn if it is not a file.
+        if !path_str.contains(['*', '?', '[']) && !path.is_file() {
+            warn!(path = %path.display(), "Unable to extend with non-existing file");
+            continue;
+        }
 
         for entry in glob(path_str)? {
             let path = match entry {
@@ -381,7 +411,7 @@ mod tests {
     use std::fs;
 
     use assert_matches::assert_matches;
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use serial_test::serial;
     use tempfile::tempdir;
     use test_log::test;
@@ -697,7 +727,7 @@ mod tests {
                 root: None,
                 want: Ok(Some((
                     "/providers/llm/openrouter",
-                    Some(serde_json::json!({"api_key_env": "FOO", "app_referrer": "BAR"})),
+                    Some(json!({"api_key_env": "FOO", "app_referrer": "BAR"})),
                 ))),
             }),
             ("find upstream", TestCase {
@@ -715,7 +745,7 @@ mod tests {
                 root: None,
                 want: Ok(Some((
                     "/providers/llm/openrouter",
-                    Some(serde_json::json!({"api_key_env": "FOO", "app_referrer": "BAR"})),
+                    Some(json!({"api_key_env": "FOO", "app_referrer": "BAR"})),
                 ))),
             }),
             ("merge until root", TestCase {
@@ -733,7 +763,7 @@ mod tests {
                 root: Some("foo"),
                 want: Ok(Some((
                     "/providers/llm/openrouter",
-                    Some(serde_json::json!({"api_key_env": "FOO"})),
+                    Some(json!({"api_key_env": "FOO"})),
                 ))),
             }),
             ("load dir instead of file", TestCase {
@@ -750,6 +780,199 @@ mod tests {
                 path: "foo",
                 root: None,
                 want: Ok(None),
+            }),
+            ("regular extends with string replace", TestCase {
+                files: vec![
+                    (
+                        // loaded first, merged last
+                        "config.toml",
+                        indoc::indoc!(
+                            r#"
+                            extends = ["one.toml", "two.toml"]
+                            assistant.system_prompt = "foo"
+                        "#
+                        ),
+                    ),
+                    (
+                        // loaded second, merged first
+                        "one.toml",
+                        indoc::indoc!(
+                            r#"
+                            assistant.system_prompt = "bar"
+                        "#
+                        ),
+                    ),
+                    (
+                        // loaded third, merged second
+                        "two.toml",
+                        indoc::indoc!(
+                            r#"
+                            assistant.system_prompt = "baz"
+                        "#
+                        ),
+                    ),
+                ],
+                path: "config.toml",
+                root: None,
+                want: Ok(Some(("/assistant/system_prompt", Some("foo".into())))),
+            }),
+            ("regular extends with merged string", TestCase {
+                files: vec![
+                    (
+                        // loaded first, merged last
+                        "config.toml",
+                        indoc::indoc!(
+                            r#"
+                            extends = ["one.toml", "two.toml"]
+                            assistant.system_prompt = { value = "foo", strategy = "prepend" }
+                        "#
+                        ),
+                    ),
+                    (
+                        // loaded second, merged first
+                        "one.toml",
+                        indoc::indoc!(
+                            r#"
+                            assistant.system_prompt = "baz"
+                        "#
+                        ),
+                    ),
+                    (
+                        // loaded third, merged second
+                        "two.toml",
+                        indoc::indoc!(
+                            r#"
+                            assistant.system_prompt = { value = "bar", strategy = "prepend" }
+                        "#
+                        ),
+                    ),
+                ],
+                path: "config.toml",
+                root: None,
+                want: Ok(Some((
+                    "/assistant/system_prompt",
+                    Some(json!({ "value": "foobarbaz", "strategy": "prepend" })),
+                ))),
+            }),
+            ("nested extends with merged string", TestCase {
+                files: vec![
+                    (
+                        // loaded first, merged last
+                        "config.toml",
+                        indoc::indoc!(
+                            r#"
+                            extends = ["one.toml", "three.toml"]
+                            assistant.system_prompt = { value = "foo", strategy = "prepend" }
+                        "#
+                        ),
+                    ),
+                    (
+                        // loaded second, merged second
+                        "one.toml",
+                        indoc::indoc!(
+                            r#"
+                            extends = [{ path = "two.toml", strategy = "after" }]
+                            assistant.system_prompt = "baz"
+                        "#
+                        ),
+                    ),
+                    (
+                        // loaded third, merged first
+                        "two.toml",
+                        indoc::indoc!(
+                            r#"
+                            assistant.system_prompt = { value = "qux", strategy = "append" }
+                        "#
+                        ),
+                    ),
+                    (
+                        // loaded fourth, merged third
+                        "three.toml",
+                        indoc::indoc!(
+                            r#"
+                            assistant.system_prompt = { value = "bar", strategy = "prepend" }
+                        "#
+                        ),
+                    ),
+                ],
+                path: "config.toml",
+                root: None,
+                want: Ok(Some((
+                    "/assistant/system_prompt",
+                    Some(json!({ "value": "foobarbazqux", "strategy": "prepend" })),
+                ))),
+            }),
+            ("complex extends", TestCase {
+                files: vec![
+                    (
+                        // loaded first, merged fourth
+                        "config.toml",
+                        indoc::indoc!(
+                            r#"
+                            extends = [
+                                "one.toml",
+                                { path = "two.toml", strategy = "before" },
+                                { path = "three.toml", strategy = "after" },
+                            ]
+
+                            assistant.system_prompt = { value = "foo", strategy = "prepend" }
+                        "#
+                        ),
+                    ),
+                    (
+                        // loaded second, merged second
+                        "one.toml",
+                        indoc::indoc!(
+                            r#"
+                            extends = [{ path = "four.toml", strategy = "before" }]
+
+                            assistant.system_prompt = { value = "bar", strategy = "append" }
+                        "#
+                        ),
+                    ),
+                    (
+                        // loaded fourth, merged third
+                        "two.toml",
+                        indoc::indoc!(
+                            r#"
+                            assistant.system_prompt = { value = "baz", strategy = "append" }
+                        "#
+                        ),
+                    ),
+                    (
+                        // loaded fifth, merged last
+                        "three.toml",
+                        indoc::indoc!(
+                            r#"
+                            assistant.system_prompt = { value = "qux", strategy = "append" }
+                        "#
+                        ),
+                    ),
+                    (
+                        // loaded third, merged first
+                        "four.toml",
+                        indoc::indoc!(
+                            r#"
+                            assistant.system_prompt = { value = "quux", strategy = "replace" }
+                        "#
+                        ),
+                    ),
+                    (
+                        // ignored
+                        "five.toml",
+                        indoc::indoc!(
+                            r#"
+                            assistant.system_prompt = { value = "ignored", strategy = "replace" }
+                        "#
+                        ),
+                    ),
+                ],
+                path: "config.toml",
+                root: None,
+                want: Ok(Some((
+                    "/assistant/system_prompt",
+                    Some(json!({"value": "fooquuxbarbazqux", "strategy": "append"})),
+                ))),
             }),
         ];
 
