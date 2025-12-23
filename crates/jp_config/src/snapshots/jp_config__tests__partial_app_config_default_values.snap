@@ -13,7 +13,9 @@ Ok(
             ),
             extends: Some(
                 [
-                    "config.d/**/*",
+                    Path(
+                        "config.d/**/*",
+                    ),
                 ],
             ),
             assistant: PartialAssistantConfig {
