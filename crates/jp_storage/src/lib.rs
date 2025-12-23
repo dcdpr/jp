@@ -346,7 +346,11 @@ impl Storage {
                 continue;
             }
 
-            let path = self.root.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+            let path = self
+                .root
+                .join(CONVERSATIONS_DIR)
+                .join(id.to_dirname(conversation.title.as_deref()));
+
             if let Err(error) = fs::remove_dir_all(&path) {
                 warn!(path = %path.display(), %error, "Failed to remove ephemeral conversation.");
             }
@@ -418,7 +422,7 @@ fn load_conversation_metadata(entry: &fs::DirEntry) -> Option<(ConversationId, C
         return None;
     };
 
-    let conversation_id = match ConversationId::from_dirname(dir_name) {
+    let conversation_id = match ConversationId::try_from_dirname(dir_name) {
         Ok(id) => id,
         Err(error) => {
             warn!(
@@ -531,8 +535,10 @@ mod tests {
     };
 
     use jp_conversation::ConversationId;
+    use serde_json::json;
     use tempfile::tempdir;
     use test_log::test;
+    use time::macros::utc_datetime;
 
     use super::*;
 
@@ -625,5 +631,46 @@ mod tests {
             id.to_dirname(Some("")), // Empty title
             "17457886043"
         );
+    }
+
+    #[test]
+    fn test_remove_ephemeral_conversations() {
+        let storage_dir = tempdir().unwrap();
+        let path = storage_dir.path();
+        let convs = path.join(CONVERSATIONS_DIR);
+
+        let id1 = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+        let id2 = ConversationId::try_from_deciseconds_str("17636257527").unwrap();
+        let id3 = ConversationId::try_from_deciseconds_str("17636257528").unwrap();
+        let id4 = ConversationId::try_from_deciseconds_str("17636257529").unwrap();
+
+        let dir1 = convs.join(id1.to_dirname(None));
+        fs::create_dir_all(&dir1).unwrap();
+        write_json(
+            &dir1.join("metadata.json"),
+            &json!({"last_activated_at": utc_datetime!(2023-01-01 00:00:00), "ephemeral": true}),
+        )
+        .unwrap();
+        write_json(&dir1.join("events.json"), &json!([])).unwrap();
+
+        let dir2 = convs.join(id2.to_dirname(Some("hello world")));
+        fs::create_dir_all(&dir2).unwrap();
+        write_json(
+            &dir2.join("metadata.json"),
+            &json!({"last_activated_at": utc_datetime!(2023-01-01 00:00:00), "ephemeral": false}),
+        )
+        .unwrap();
+        write_json(&dir2.join("events.json"), &json!([])).unwrap();
+
+        fs::create_dir_all(convs.join(id3.to_dirname(None))).unwrap();
+        fs::create_dir_all(convs.join(id4.to_dirname(Some("foo")))).unwrap();
+
+        let storage = Storage::new(path).unwrap();
+        storage.remove_ephemeral_conversations(&[id3, id4]);
+
+        assert!(!convs.join(id1.to_dirname(None)).exists());
+        assert!(convs.join(id2.to_dirname(Some("hello world"))).exists());
+        assert!(convs.join(id3.to_dirname(None)).exists());
+        assert!(convs.join(id4.to_dirname(Some("foo"))).exists());
     }
 }

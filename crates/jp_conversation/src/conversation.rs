@@ -141,7 +141,7 @@ impl ConversationId {
     ///
     /// Returns an error if the directory name is missing the target ID or
     /// timestamp.
-    pub fn from_dirname(dirname: impl AsRef<str>) -> Result<Self> {
+    pub fn try_from_dirname(dirname: impl AsRef<str>) -> Result<Self> {
         dirname
             .as_ref()
             .split('-')
