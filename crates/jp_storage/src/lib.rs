@@ -654,20 +654,21 @@ mod tests {
         .unwrap();
         write_json(&dir1.join("events.json"), &json!([])).unwrap();
 
-        let dir2 = convs.join(id2.to_dirname(Some("hello world")));
+        let title = "hello world";
+        let dir2 = convs.join(id2.to_dirname(Some(title)));
         fs::create_dir_all(&dir2).unwrap();
         write_json(
             &dir2.join("metadata.json"),
-            &json!({"last_activated_at": utc_datetime!(2023-01-01 00:00:00), "ephemeral": false}),
+            &json!({"last_activated_at": utc_datetime!(2023-01-01 00:00:00), "title": title, "ephemeral": false}),
         )
         .unwrap();
         write_json(&dir2.join("events.json"), &json!([])).unwrap();
 
-        let dir3 = convs.join(id3.to_dirname(Some("hello world")));
+        let dir3 = convs.join(id3.to_dirname(Some(title)));
         fs::create_dir_all(&dir3).unwrap();
         write_json(
             &dir3.join("metadata.json"),
-            &json!({"last_activated_at": utc_datetime!(2023-01-01 00:00:00), "ephemeral": true}),
+            &json!({"last_activated_at": utc_datetime!(2023-01-01 00:00:00), "title": title, "ephemeral": true}),
         )
         .unwrap();
         write_json(&dir3.join("events.json"), &json!([])).unwrap();
@@ -679,8 +680,8 @@ mod tests {
         storage.remove_ephemeral_conversations(&[id4, id5]);
 
         assert!(!convs.join(id1.to_dirname(None)).exists());
-        assert!(convs.join(id2.to_dirname(Some("hello world"))).exists());
-        assert!(!convs.join(id3.to_dirname(Some("hello world"))).exists());
+        assert!(convs.join(id2.to_dirname(Some(title))).exists());
+        assert!(!convs.join(id3.to_dirname(Some(title))).exists());
         assert!(convs.join(id4.to_dirname(None)).exists());
         assert!(convs.join(id5.to_dirname(Some("foo"))).exists());
     }
