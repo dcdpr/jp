@@ -19,7 +19,7 @@ use crate::{
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::{
-        string::{MergeableString, PartialMergeableString},
+        string::{MergeableString, PartialMergeableString, PartialMergedString},
         vec::{MergeableVec, MergedVec, MergedVecStrategy},
     },
 };
@@ -32,7 +32,7 @@ pub struct AssistantConfig {
     pub name: Option<String>,
 
     /// The system prompt to use for the assistant.
-    #[setting(nested, default = "You are a helpful assistant.", merge = string_with_strategy)]
+    #[setting(nested, default = default_system_prompt, merge = string_with_strategy)]
     pub system_prompt: Option<MergeableString>,
 
     /// A list of instructions for the assistant.
@@ -101,6 +101,7 @@ impl ToPartial for AssistantConfig {
 fn default_instructions(_: &()) -> TransformResult<MergeableVec<PartialInstructionsConfig>> {
     Ok(MergeableVec::Merged(MergedVec {
         strategy: MergedVecStrategy::Replace,
+        is_default: true,
         value: vec![PartialInstructionsConfig {
             title: Some("How to respond to the user".into()),
             items: Some(vec![
@@ -118,6 +119,17 @@ fn default_instructions(_: &()) -> TransformResult<MergeableVec<PartialInstructi
             ..Default::default()
         }],
     }))
+}
+
+/// The default system prompt for the assistant.
+#[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
+fn default_system_prompt(_: &()) -> TransformResult<Option<PartialMergeableString>> {
+    Ok(Some(PartialMergeableString::Merged(PartialMergedString {
+        value: Some("You are a helpful assistant.".to_owned()),
+        strategy: None,
+        separator: None,
+        is_default: Some(true),
+    })))
 }
 
 #[cfg(test)]
@@ -153,6 +165,14 @@ mod tests {
                     title: Some("foo".into()),
                     ..Default::default()
                 }],
+                // NOTE: this is `true`, because the default value for this
+                // field is `true`, and when we do `try_from_cli` we trigger
+                // `try_vec_of_nested` on `&mut [PartialInstructionsConfig]`,
+                // NOT on the `MergeableVec<PartialInstructionsConfig>`. This
+                // means `is_default` is left untouched. This is *correct*, but
+                // it might be confusing in some cases, so we might want to
+                // change this in the future.
+                is_default: true,
             })
         );
 
@@ -177,6 +197,7 @@ mod tests {
                         ..Default::default()
                     }
                 ],
+                is_default: true,
             })
         );
 
@@ -201,6 +222,7 @@ mod tests {
                         ..Default::default()
                     }
                 ],
+                is_default: true,
             })
         );
 
@@ -214,6 +236,7 @@ mod tests {
                     title: Some("qux".into()),
                     ..Default::default()
                 }],
+                is_default: true,
             })
         );
 
@@ -227,6 +250,7 @@ mod tests {
                     title: Some("boop".into()),
                     ..Default::default()
                 }],
+                is_default: true,
             })
         );
 
@@ -244,6 +268,7 @@ mod tests {
                     items: Some(vec!["one".into()]),
                     ..Default::default()
                 }],
+                is_default: true,
             })
         );
 
@@ -258,6 +283,7 @@ mod tests {
                     items: Some(vec!["two".into()]),
                     ..Default::default()
                 }],
+                is_default: true,
             })
         );
 
@@ -282,6 +308,7 @@ mod tests {
                 value: Some("foo".into()),
                 strategy: None,
                 separator: None,
+                is_default: None,
             }))
         );
 
@@ -295,6 +322,7 @@ mod tests {
                 value: Some("foo".into()),
                 strategy: Some(MergedStringStrategy::Append),
                 separator: None,
+                is_default: None,
             }))
         );
 
@@ -310,6 +338,7 @@ mod tests {
                 value: Some("foo".into()),
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::Space),
+                is_default: None,
             }))
         );
     }
@@ -401,6 +430,7 @@ mod tests {
                             examples: vec![],
                         }],
                         strategy: MergedVecStrategy::Append,
+                        ..Default::default()
                     }
                     .into(),
                     ..Default::default()
@@ -424,6 +454,7 @@ mod tests {
                             },
                         ],
                         strategy: MergedVecStrategy::Append,
+                        ..Default::default()
                     }
                     .into(),
                     ..Default::default()
@@ -512,6 +543,7 @@ mod tests {
                         value: Some("foo".into()),
                         strategy: Some(MergedStringStrategy::Append),
                         separator: Some(MergedStringSeparator::Paragraph),
+                        is_default: None,
                     })),
                     instructions: MergedVec {
                         value: vec![
@@ -531,6 +563,7 @@ mod tests {
                             },
                         ],
                         strategy: MergedVecStrategy::Append,
+                        ..Default::default()
                     }
                     .into(),
                     ..Default::default()
