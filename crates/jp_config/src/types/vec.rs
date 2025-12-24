@@ -199,6 +199,7 @@ pub struct MergedVec<T> {
     /// When `true`, if another value is merged in, this value will be
     /// overwritten.
     #[setting(default)]
+    #[serde(default)]
     pub is_default: bool,
 }
 

@@ -165,7 +165,14 @@ mod tests {
                     title: Some("foo".into()),
                     ..Default::default()
                 }],
-                ..Default::default()
+                // NOTE: this is `true`, because the default value for this
+                // field is `true`, and when we do `try_from_cli` we trigger
+                // `try_vec_of_nested` on `&mut [PartialInstructionsConfig]`,
+                // NOT on the `MergeableVec<PartialInstructionsConfig>`. This
+                // means `is_default` is left untouched. This is *correct*, but
+                // it might be confusing in some cases, so we might want to
+                // change this in the future.
+                is_default: true,
             })
         );
 
@@ -190,7 +197,7 @@ mod tests {
                         ..Default::default()
                     }
                 ],
-                ..Default::default()
+                is_default: true,
             })
         );
 
@@ -215,7 +222,7 @@ mod tests {
                         ..Default::default()
                     }
                 ],
-                ..Default::default()
+                is_default: true,
             })
         );
 
@@ -229,7 +236,7 @@ mod tests {
                     title: Some("qux".into()),
                     ..Default::default()
                 }],
-                ..Default::default()
+                is_default: true,
             })
         );
 
@@ -243,7 +250,7 @@ mod tests {
                     title: Some("boop".into()),
                     ..Default::default()
                 }],
-                ..Default::default()
+                is_default: true,
             })
         );
 
@@ -261,7 +268,7 @@ mod tests {
                     items: Some(vec!["one".into()]),
                     ..Default::default()
                 }],
-                ..Default::default()
+                is_default: true,
             })
         );
 
@@ -276,7 +283,7 @@ mod tests {
                     items: Some(vec!["two".into()]),
                     ..Default::default()
                 }],
-                ..Default::default()
+                is_default: true,
             })
         );
 
