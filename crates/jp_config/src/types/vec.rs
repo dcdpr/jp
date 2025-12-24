@@ -81,6 +81,12 @@ impl<T> MergeableVec<T> {
             Self::Merged(v) => v.value.is_empty(),
         }
     }
+
+    /// Returns `true` if the `MergeableVec` is the default value.
+    #[must_use]
+    pub const fn is_default(&self) -> bool {
+        matches!(self, Self::Merged(v) if v.is_default)
+    }
 }
 
 impl<T: ToPartial> MergeableVec<T> {
@@ -98,6 +104,7 @@ impl<T: ToPartial> MergeableVec<T> {
             Self::Merged(v) => MergeableVec::Merged(MergedVec {
                 value: v.value.iter().map(ToPartial::to_partial).collect(),
                 strategy: v.strategy,
+                is_default: v.is_default,
             }),
         }
     }
@@ -177,7 +184,7 @@ where
 }
 
 /// Strings that are merged using the specified merge strategy.
-#[derive(Debug, Config, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Config, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MergedVec<T> {
     /// The vec value.
     #[setting(default = vec![])]
@@ -186,6 +193,13 @@ pub struct MergedVec<T> {
     /// The merge strategy.
     #[setting(default)]
     pub strategy: MergedVecStrategy,
+
+    /// Whether the value is the default value.
+    ///
+    /// When `true`, if another value is merged in, this value will be
+    /// overwritten.
+    #[setting(default)]
+    pub is_default: bool,
 }
 
 impl<T> From<MergedVec<T>> for MergeableVec<T> {
@@ -202,6 +216,7 @@ where
         Self::Partial {
             value: Some(self.value.clone()),
             strategy: Some(self.strategy),
+            is_default: Some(self.is_default),
         }
     }
 }

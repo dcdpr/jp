@@ -25,6 +25,14 @@ pub enum MergeableString {
     Merged(MergedString),
 }
 
+impl PartialMergeableString {
+    /// Returns `true` if the `MergeableString` is the default value.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::Merged(v) if v.is_default.is_some_and(|v| v))
+    }
+}
+
 impl From<&str> for PartialMergeableString {
     fn from(value: &str) -> Self {
         Self::String(value.to_string())
@@ -112,6 +120,13 @@ pub struct MergedString {
     /// The separator to use between the previous value and the new value.
     #[setting(default)]
     pub separator: MergedStringSeparator,
+
+    /// Whether the value is the default value.
+    ///
+    /// When `true`, if another value is merged in, this value will be
+    /// overwritten.
+    #[setting(default)]
+    pub is_default: bool,
 }
 
 impl AssignKeyValue for PartialMergedString {
@@ -120,6 +135,8 @@ impl AssignKeyValue for PartialMergedString {
             "" => *self = kv.try_object()?,
             "value" => self.value = kv.try_some_string()?,
             "strategy" => self.strategy = kv.try_some_from_str()?,
+            "separator" => self.separator = kv.try_some_from_str()?,
+            "is_default" => self.is_default = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -133,6 +150,7 @@ impl ToPartial for MergedString {
             value: Some(self.value.clone()),
             strategy: Some(self.strategy),
             separator: Some(self.separator),
+            is_default: Some(self.is_default),
         }
     }
 }
