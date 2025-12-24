@@ -19,7 +19,7 @@ use jp_conversation::{
 };
 use jp_test::mock::{Snap, Vcr};
 use schemars::Schema;
-use time::macros::datetime;
+use time::macros::{datetime, utc_datetime};
 
 use crate::{
     event::Event,
@@ -99,7 +99,7 @@ impl TestRequest {
 
                             AppConfig::from_partial(cfg).unwrap().into()
                         })
-                        .with_created_at(datetime!(2020-01-01 0:00 utc)),
+                        .with_created_at(utc_datetime!(2020-01-01 0:00)),
                     )
                     .build()
                     .unwrap(),
@@ -519,7 +519,7 @@ pub async fn run_chat_completion(
                             .clone()
                             .into_iter()
                             .map(|mut v| {
-                                v.event.timestamp = datetime!(2020-01-01 0:00 utc).into();
+                                v.event.timestamp = utc_datetime!(2020-01-01 0:00);
                                 v
                             })
                             .collect::<Vec<_>>(),

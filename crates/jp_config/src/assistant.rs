@@ -8,12 +8,14 @@
 pub mod instructions;
 pub mod tool_choice;
 
-use instructions::{InstructionsConfig, PartialInstructionsConfig};
 use schematic::{Config, TransformResult};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    assistant::tool_choice::ToolChoice,
+    assistant::{
+        instructions::{InstructionsConfig, PartialInstructionsConfig},
+        tool_choice::ToolChoice,
+    },
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
     internal::merge::{string_with_strategy, vec_with_strategy},
     model::{ModelConfig, PartialModelConfig},
@@ -134,6 +136,7 @@ fn default_system_prompt(_: &()) -> TransformResult<Option<PartialMergeableStrin
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
     use schematic::PartialConfig as _;
     use serde_json::{Value, json};
     use test_log::test;
@@ -397,13 +400,22 @@ mod tests {
                     ..Default::default()
                 },
                 expected: PartialAssistantConfig {
-                    instructions: vec![PartialInstructionsConfig {
-                        title: Some("bar".into()),
-                        description: None,
-                        position: None,
-                        items: None,
-                        examples: vec![],
-                    }]
+                    instructions: vec![
+                        PartialInstructionsConfig {
+                            title: Some("foo".into()),
+                            description: None,
+                            position: None,
+                            items: None,
+                            examples: vec![],
+                        },
+                        PartialInstructionsConfig {
+                            title: Some("bar".into()),
+                            description: None,
+                            position: None,
+                            items: None,
+                            examples: vec![],
+                        },
+                    ]
                     .into(),
                     ..Default::default()
                 },

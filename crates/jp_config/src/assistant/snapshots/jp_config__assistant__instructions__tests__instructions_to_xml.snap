@@ -5,11 +5,11 @@ expression: xml
 <instruction>
   <title>foo</title>
   <description>bar</description>
-  <Items>
+  <items>
     <item>foo</item>
     <item>bar &lt;test&gt;bar&lt;/test&gt;</item>
     <item>baz]]&gt; baz</item>
-  </Items>
+  </items>
   <examples>
     <simple>foo</simple>
     <detailed>

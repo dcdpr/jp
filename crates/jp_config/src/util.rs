@@ -421,6 +421,7 @@ mod tests {
         assistant::instructions::PartialInstructionsConfig,
         conversation::tool::RunMode,
         model::id::{PartialModelIdConfig, ProviderId},
+        types::vec::{MergedVec, MergedVecStrategy},
     };
 
     // Helper to write config content to a file, creating parent dirs
@@ -558,29 +559,33 @@ mod tests {
             name: Some("foo".parse().unwrap()),
         }
         .into();
-        partial.assistant.instructions = vec![
-            PartialInstructionsConfig {
-                title: None,
-                description: None,
-                position: Some(100),
-                items: Some(vec![]),
-                examples: vec![],
-            },
-            PartialInstructionsConfig {
-                title: None,
-                description: None,
-                position: Some(-1),
-                items: Some(vec![]),
-                examples: vec![],
-            },
-            PartialInstructionsConfig {
-                title: None,
-                description: None,
-                position: Some(0),
-                items: Some(vec![]),
-                examples: vec![],
-            },
-        ]
+        partial.assistant.instructions = MergedVec {
+            value: vec![
+                PartialInstructionsConfig {
+                    title: None,
+                    description: None,
+                    position: Some(100),
+                    items: Some(vec![]),
+                    examples: vec![],
+                },
+                PartialInstructionsConfig {
+                    title: None,
+                    description: None,
+                    position: Some(-1),
+                    items: Some(vec![]),
+                    examples: vec![],
+                },
+                PartialInstructionsConfig {
+                    title: None,
+                    description: None,
+                    position: Some(0),
+                    items: Some(vec![]),
+                    examples: vec![],
+                },
+            ],
+            strategy: MergedVecStrategy::Replace,
+            is_default: false,
+        }
         .into();
 
         let config = build(partial).unwrap();

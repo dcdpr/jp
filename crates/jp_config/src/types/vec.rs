@@ -35,7 +35,7 @@ use crate::{delta::PartialConfigDelta, partial::ToPartial};
 #[derive(Debug, Config, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged, rename_all = "snake_case")]
 pub enum MergeableVec<T> {
-    /// A vec that is merged using the [`schematic::merge::replace`]
+    /// A vec that is merged using the [`schematic::merge::append_vec`]
     #[setting(default)]
     Vec(Vec<T>),
     /// A vec that is merged using the specified merge strategy.
@@ -222,11 +222,11 @@ where
     }
 }
 
-/// Merge strategy for `VecWithStrategy`.
+/// Merge strategy for `MergeableVec`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum MergedVecStrategy {
-    /// Append the string to the previous value, without any separator.
+    /// Append the vec to the previous value.
     #[default]
     Append,
 

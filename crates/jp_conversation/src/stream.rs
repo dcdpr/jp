@@ -976,7 +976,7 @@ mod tests {
         conversation::tool::RunMode,
         model::id::{PartialModelIdConfig, ProviderId},
     };
-    use time::macros::datetime;
+    use time::macros::utc_datetime;
 
     use super::*;
 
@@ -994,7 +994,7 @@ mod tests {
         let mut stream = ConversationStream {
             base_config: AppConfig::from_partial(base_config).unwrap().into(),
             events: vec![],
-            created_at: datetime!(2020-01-01 0:00 utc).into(),
+            created_at: utc_datetime!(2020-01-01 0:00),
         };
 
         insta::assert_json_snapshot!(&stream);
@@ -1003,14 +1003,14 @@ mod tests {
             .events
             .push(InternalEvent::Event(Box::new(ConversationEvent::new(
                 ChatRequest::from("foo"),
-                datetime!(2020-01-01 0:00 utc),
+                utc_datetime!(2020-01-01 0:00),
             ))));
 
         stream
             .events
             .push(InternalEvent::Event(Box::new(ConversationEvent::new(
                 ChatResponse::message("bar"),
-                datetime!(2020-01-02 0:00 utc),
+                utc_datetime!(2020-01-02 0:00),
             ))));
 
         insta::assert_json_snapshot!(&stream);

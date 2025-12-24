@@ -19,6 +19,7 @@ pub enum ToolChoice {
 
     /// Require calling the specified named tool.
     #[variant(fallback)]
+    #[serde(untagged)]
     Function(String),
 }
 

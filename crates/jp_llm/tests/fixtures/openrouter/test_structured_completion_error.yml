@@ -322,7 +322,7 @@ when:
             },
             {
               "type": "text",
-              "text": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <Items>\n    <item>You thought 1 + 1 = 2? Think again!</item>\n  </Items>\n  <examples/>\n</instruction>"
+              "text": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <items>\n    <item>You thought 1 + 1 = 2? Think again!</item>\n  </items>\n</instruction>"
             }
           ]
         },
@@ -611,11 +611,11 @@ when:
             },
             {
               "type": "text",
-              "text": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <Items>\n    <item>You thought 1 + 1 = 2? Think again!</item>\n  </Items>\n  <examples/>\n</instruction>"
+              "text": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <items>\n    <item>You thought 1 + 1 = 2? Think again!</item>\n  </items>\n</instruction>"
             },
             {
               "type": "text",
-              "text": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <Items>\n    <item>You thought 1 + 1 = 2? Think again!</item>\n  </Items>\n  <examples/>\n</instruction>"
+              "text": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <items>\n    <item>You thought 1 + 1 = 2? Think again!</item>\n  </items>\n</instruction>"
             }
           ]
         },
