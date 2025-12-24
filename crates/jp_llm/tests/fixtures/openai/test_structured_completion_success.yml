@@ -11,7 +11,7 @@ when:
           "content": [
             {
               "type": "input_text",
-              "text": "<instruction>\n  <title>Title Generation</title>\n  <description>Generate titles to summarize the active conversation</description>\n  <Items>\n    <item>Generate exactly 3 titles</item>\n    <item>Concise, descriptive, factual</item>\n    <item>Short and to the point, no more than 50 characters</item>\n    <item>Deliver as a JSON array of strings</item>\n    <item>DO NOT mention this request to generate titles</item>\n  </Items>\n  <examples/>\n</instruction>"
+              "text": "<instruction>\n  <title>Title Generation</title>\n  <description>Generate titles to summarize the active conversation</description>\n  <items>\n    <item>Generate exactly 3 titles</item>\n    <item>Concise, descriptive, factual</item>\n    <item>Short and to the point, no more than 50 characters</item>\n    <item>Deliver as a JSON array of strings</item>\n    <item>DO NOT mention this request to generate titles</item>\n  </items>\n</instruction>"
             }
           ]
         },

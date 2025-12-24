@@ -152,7 +152,7 @@ when:
       "messages": [
         {
           "role": "system",
-          "content": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <Items>\n    <item>Did not receive any structured data</item>\n  </Items>\n  <examples/>\n</instruction>",
+          "content": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <items>\n    <item>Did not receive any structured data</item>\n  </items>\n</instruction>",
           "tool_calls": [],
           "thinking": null
         },
@@ -539,13 +539,13 @@ when:
       "messages": [
         {
           "role": "system",
-          "content": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <Items>\n    <item>Did not receive any structured data</item>\n  </Items>\n  <examples/>\n</instruction>",
+          "content": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <items>\n    <item>Did not receive any structured data</item>\n  </items>\n</instruction>",
           "tool_calls": [],
           "thinking": null
         },
         {
           "role": "system",
-          "content": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <Items>\n    <item>Missing `answer` field.</item>\n  </Items>\n  <examples/>\n</instruction>",
+          "content": "<instruction>\n  <title>Structured Data Validation Error</title>\n  <description>The following error occurred while validating the structured data. Please try again.</description>\n  <items>\n    <item>Missing `answer` field.</item>\n  </items>\n</instruction>",
           "tool_calls": [],
           "thinking": null
         },

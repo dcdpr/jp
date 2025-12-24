@@ -584,6 +584,7 @@ mod tests {
                 },
             ],
             strategy: MergedVecStrategy::Replace,
+            is_default: false,
         }
         .into();
 
