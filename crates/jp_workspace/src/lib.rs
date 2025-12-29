@@ -35,7 +35,7 @@ pub struct Workspace {
     pub root: PathBuf,
 
     /// The globally unique ID of the workspace.
-    id: Id,
+    id: id::Id,
 
     /// The (optional) storage for the workspace.
     ///
@@ -79,11 +79,11 @@ impl Workspace {
 
     /// Creates a new workspace with the given root directory.
     pub fn new(root: impl AsRef<Path>) -> Self {
-        Self::new_with_id(root, Id::new())
+        Self::new_with_id(root, id::Id::new())
     }
 
     /// Creates a new workspace with the given root directory and ID.
-    pub fn new_with_id(root: impl AsRef<Path>, id: Id) -> Self {
+    pub fn new_with_id(root: impl AsRef<Path>, id: id::Id) -> Self {
         let root = root.as_ref().to_path_buf();
         trace!(root = %root.display(), id = %id, "Initializing Workspace.");
 
