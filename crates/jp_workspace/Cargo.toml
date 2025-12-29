@@ -21,6 +21,7 @@ jp_tombmap = { workspace = true }
 
 ahash = { workspace = true }
 directories = { workspace = true }
+parking_lot = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }

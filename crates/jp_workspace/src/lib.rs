@@ -6,25 +6,24 @@
 
 mod error;
 mod id;
-pub mod query;
 mod state;
 
 use std::{
+    cell::OnceCell,
     iter,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-use ahash::{HashMap, HashMapExt};
 pub use error::Error;
 use error::Result;
 pub use id::Id;
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
-use jp_storage::{DEFAULT_STORAGE_DIR, Storage};
+use jp_storage::Storage;
 use jp_tombmap::TombMap;
 use state::{LocalState, State, UserState};
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, warn};
 
 const APPLICATION: &str = "jp";
 
@@ -36,7 +35,7 @@ pub struct Workspace {
     pub root: PathBuf,
 
     /// The globally unique ID of the workspace.
-    id: id::Id,
+    id: Id,
 
     /// The (optional) storage for the workspace.
     ///
@@ -80,11 +79,11 @@ impl Workspace {
 
     /// Creates a new workspace with the given root directory.
     pub fn new(root: impl AsRef<Path>) -> Self {
-        Self::new_with_id(root, id::Id::new())
+        Self::new_with_id(root, Id::new())
     }
 
     /// Creates a new workspace with the given root directory and ID.
-    pub fn new_with_id(root: impl AsRef<Path>, id: id::Id) -> Self {
+    pub fn new_with_id(root: impl AsRef<Path>, id: Id) -> Self {
         let root = root.as_ref().to_path_buf();
         trace!(root = %root.display(), id = %id, "Initializing Workspace.");
 
@@ -95,17 +94,6 @@ impl Workspace {
             state: State::default(),
             disable_persistence: false,
         }
-    }
-
-    /// Enable persistence for the workspace.
-    ///
-    /// The workspace will be persisted to the default storage directory in the
-    /// workspace root, which is `.jp/`.
-    ///
-    /// See also: [`Self::persisted_at`].
-    pub fn persisted(self) -> Result<Self> {
-        let path = self.root.join(DEFAULT_STORAGE_DIR);
-        self.persisted_at(&path)
     }
 
     /// Enable persistence for the workspace at the given (absolute) path.
@@ -121,7 +109,9 @@ impl Workspace {
 
     /// Enable local storage for the workspace.
     pub fn with_local_storage(mut self) -> Result<Self> {
-        let storage = self.storage.take().ok_or(Error::MissingStorage)?;
+        if self.storage.is_none() {
+            return Err(Error::MissingStorage);
+        }
 
         let root = user_data_dir()?.join("workspace");
         let id: &str = &self.id;
@@ -131,7 +121,11 @@ impl Workspace {
             .ok_or_else(|| Error::NotDir(self.root.clone()))?
             .to_string_lossy();
 
-        self.storage = Some(storage.with_user_storage(&root, name, id)?);
+        self.storage = self
+            .storage
+            .map(|storage| storage.with_user_storage(&root, name, id))
+            .transpose()?;
+
         Ok(self)
     }
 
@@ -165,44 +159,31 @@ impl Workspace {
 
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
-        // Workspace state
-        // let (mut conversations, events) = storage.load_conversations_and_events()?;
-        let conversations = TombMap::new();
-        let mut events = TombMap::new();
-
         // Local state
         let conversations_metadata = storage.load_conversations_metadata()?;
+        let active_conversation_id = conversations_metadata.active_conversation_id;
+        debug!(%active_conversation_id, "Loaded workspace state metadata.");
 
-        debug!(
-            conversations = %conversations.len(),
-            active_conversation_id = %conversations_metadata.active_conversation_id,
-            "Loaded workspace state."
-        );
+        let active_conversation = storage.load_conversation_metadata(&active_conversation_id)?;
+        let conversation_ids = storage.load_all_conversation_ids();
 
-        // Remove the active conversation from the list of conversations, we
-        // store it separately to ensure an active conversation always exists,
-        // and cannot be removed.
-        let active_conversation =
-            storage.load_conversation_metadata(&conversations_metadata.active_conversation_id)?;
+        let conversations = conversation_ids
+            .iter()
+            .filter(|id| id != &&active_conversation_id)
+            .map(|id| (*id, OnceCell::new()))
+            .collect();
 
-        let conversation_events =
-            storage.load_conversation_events(&conversations_metadata.active_conversation_id)?;
+        let mut events: TombMap<_, _> = conversation_ids
+            .into_iter()
+            .map(|id| (id, OnceCell::new()))
+            .collect();
 
-        events.insert(
-            conversations_metadata.active_conversation_id,
-            conversation_events,
-        );
-
-        // let active_conversation = conversations
-        //     .remove_untracked(&conversations_metadata.active_conversation_id)
-        //     .unwrap_or_else(|| {
-        //         info!(
-        //             id = %conversations_metadata.active_conversation_id,
-        //             "Active conversation not found in workspace. Creating a new one."
-        //         );
-        //
-        //         Conversation::default()
-        //     });
+        // We can `set` without checking if the cell is already initialized, as
+        // we just initialized it above.
+        let _err = events
+            .entry(active_conversation_id)
+            .or_default()
+            .set(storage.load_conversation_events(&active_conversation_id)?);
 
         self.state = State {
             local: LocalState {
@@ -263,6 +244,7 @@ impl Workspace {
             .local
             .conversations
             .remove(&id)
+            .and_then(|mut v| v.take())
             .ok_or(Error::not_found("Conversation", &id))?;
 
         // Replace the active conversation with the new one.
@@ -288,38 +270,70 @@ impl Workspace {
             .local
             .events
             .get(&old_active_conversation_id)
+            .and_then(|v| v.get())
             .is_some_and(|v| !v.is_empty())
         {
-            self.state
+            // Guaranteed to not be initialized.
+            let _err = self
+                .state
                 .local
                 .conversations
-                .insert(old_active_conversation_id, old_active_conversation);
+                .entry(old_active_conversation_id)
+                .or_default()
+                .set(old_active_conversation);
         }
 
         Ok(())
     }
 
-    /// Returns a map of conversation IDs to their metadata, event count, and
-    /// event timestamp.
-    #[must_use]
-    pub fn conversations_details(&self) -> HashMap<ConversationId, Conversation> {
-        let Some(storage) = self.storage.as_ref() else {
-            return HashMap::new();
-        };
-
-        storage.load_all_conversations_details()
+    /// Returns an iterator over all conversations, including the active
+    /// conversation.
+    pub fn conversations(&self) -> impl Iterator<Item = (&ConversationId, &Conversation)> {
+        iter::once((
+            &self
+                .state
+                .user
+                .conversations_metadata
+                .active_conversation_id,
+            &self.state.local.active_conversation,
+        ))
+        .chain(
+            self.state
+                .local
+                .conversations
+                .iter()
+                .filter_map(|v| get_or_init_conversation(self.storage.as_ref(), v)),
+        )
     }
 
-    /// Returns an iterator over all conversations.
-    pub fn conversations(&self) -> impl Iterator<Item = (&ConversationId, &Conversation)> {
-        self.all_conversations()
+    /// Returns an iterator over all mutable conversations, including the active
+    /// conversation.
+    pub fn conversations_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&ConversationId, &mut Conversation)> {
+        iter::once((
+            &self
+                .state
+                .user
+                .conversations_metadata
+                .active_conversation_id,
+            &mut self.state.local.active_conversation,
+        ))
+        .chain(
+            self.state
+                .local
+                .conversations
+                // FIXME
+                .iter_mut_untracked()
+                .filter_map(|v| get_or_init_conversation_mut(self.storage.as_ref(), v)),
+        )
     }
 
     /// Gets a reference to a conversation by its ID.
     #[must_use]
     pub fn get_conversation(&self, id: &ConversationId) -> Option<&Conversation> {
-        self.all_conversations()
-            .find_map(|(i, c)| (id == i).then_some(c))
+        self.conversations()
+            .find_map(|(i, v)| (i == id).then_some(v))
     }
 
     /// Similar to [`Self::get_conversation`], but returns an error if the
@@ -332,11 +346,8 @@ impl Workspace {
     /// Gets a mutable reference to a conversation by its ID.
     #[must_use]
     pub fn get_conversation_mut(&mut self, id: &ConversationId) -> Option<&mut Conversation> {
-        if id == &self.active_conversation_id() {
-            return Some(&mut self.state.local.active_conversation);
-        }
-
-        self.state.local.conversations.get_mut(id)
+        self.conversations_mut()
+            .find_map(|(i, v)| (i == id).then_some(v))
     }
 
     /// Similar to [`Self::get_conversation_mut`], but returns an error if the
@@ -354,12 +365,27 @@ impl Workspace {
     ) -> ConversationId {
         let id = ConversationId::default();
 
-        self.state.local.conversations.insert(id, conversation);
-        self.state
+        // This can only fail if `ConversationId::default()` is called multiple
+        // times within the same nanosecond, which is highly unlikely, and not
+        // an issue if it does happen.
+        let _err = self
+            .state
+            .local
+            .conversations
+            .entry(id)
+            .insert_entry(OnceCell::new())
+            .get_mut()
+            .set(conversation);
+
+        // See above.
+        let _err = self
+            .state
             .local
             .events
             .entry(id)
-            .or_insert_with(|| ConversationStream::new(config));
+            .insert_entry(OnceCell::new())
+            .get_mut()
+            .set(ConversationStream::new(config));
         id
     }
 
@@ -373,7 +399,19 @@ impl Workspace {
             return Err(Error::CannotRemoveActiveConversation(active_id));
         }
 
-        Ok(self.state.local.conversations.remove(id))
+        // Make sure to load the conversation from disk first, so that our
+        // `TombMap` can record the removal (allowing our persistence logic to
+        // trigger a file deletion).
+        if self.get_conversation(id).is_none() {
+            return Ok(None);
+        }
+
+        Ok(self
+            .state
+            .local
+            .conversations
+            .remove(id)
+            .and_then(|mut v| v.take()))
     }
 
     /// Gets a reference to the currently active conversation.
@@ -393,7 +431,12 @@ impl Workspace {
     /// Gets the event stream for a specific conversation.
     #[must_use]
     pub fn get_events(&self, id: &ConversationId) -> Option<&ConversationStream> {
-        self.state.local.events.get(id)
+        self.state
+            .local
+            .events
+            .get_key_value(id)
+            .and_then(|v| get_or_init_events(self.storage.as_ref(), v))
+            .map(|v| v.1)
     }
 
     /// Similar to [`Self::get_events`], but returns an error if the
@@ -405,27 +448,26 @@ impl Workspace {
 
     /// Gets a mutable reference to the event stream for a specific conversation.
     #[must_use]
-    pub fn get_events_mut(&mut self, id: &ConversationId) -> Option<&mut ConversationStream> {
-        self.state.local.events.get_mut(id)
+    pub fn get_events_mut<'a>(
+        &'a mut self,
+        id: &'a ConversationId,
+    ) -> Option<&'a mut ConversationStream> {
+        self.state
+            .local
+            .events
+            .get_mut(id)
+            .and_then(|v| get_or_init_events_mut(self.storage.as_ref(), (id, v)))
+            .map(|v| v.1)
     }
 
     /// Similar to [`Self::get_events_mut`], but returns an error if the
     /// conversation does not exist.
-    pub fn try_get_events_mut(&mut self, id: &ConversationId) -> Result<&mut ConversationStream> {
+    pub fn try_get_events_mut<'a>(
+        &'a mut self,
+        id: &'a ConversationId,
+    ) -> Result<&'a mut ConversationStream> {
         self.get_events_mut(id)
             .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
-    }
-
-    /// Returns an iterator over all conversations, including the active one.
-    fn all_conversations(&self) -> impl Iterator<Item = (&ConversationId, &Conversation)> {
-        self.state.local.conversations.iter().chain(iter::once((
-            &self
-                .state
-                .user
-                .conversations_metadata
-                .active_conversation_id,
-            &self.state.local.active_conversation,
-        )))
     }
 
     /// Returns the globally unique ID of the workspace.
@@ -442,6 +484,78 @@ impl Workspace {
 
         let active_id = self.active_conversation_id();
         storage.remove_ephemeral_conversations(&[active_id]);
+    }
+}
+
+fn get_or_init_events<'a>(
+    storage: Option<&Storage>,
+    (id, conversation): (&'a ConversationId, &'a OnceCell<ConversationStream>),
+) -> Option<(&'a ConversationId, &'a ConversationStream)> {
+    maybe_init_events(storage, (id, conversation));
+    conversation.get().map(|v| (id, v))
+}
+
+fn get_or_init_events_mut<'a>(
+    storage: Option<&Storage>,
+    (id, conversation): (&'a ConversationId, &'a mut OnceCell<ConversationStream>),
+) -> Option<(&'a ConversationId, &'a mut ConversationStream)> {
+    maybe_init_events(storage, (id, conversation));
+    conversation.get_mut().map(|v| (id, v))
+}
+
+fn get_or_init_conversation<'a>(
+    storage: Option<&Storage>,
+    (id, conversation): (&'a ConversationId, &'a OnceCell<Conversation>),
+) -> Option<(&'a ConversationId, &'a Conversation)> {
+    maybe_init_conversation(storage, (id, conversation));
+    conversation.get().map(|v| (id, v))
+}
+
+fn get_or_init_conversation_mut<'a>(
+    storage: Option<&'a Storage>,
+    (id, conversation): (&'a ConversationId, &'a mut OnceCell<Conversation>),
+) -> Option<(&'a ConversationId, &'a mut Conversation)> {
+    maybe_init_conversation(storage, (id, conversation));
+    conversation.get_mut().map(|v| (id, v))
+}
+
+fn maybe_init_conversation<'a>(
+    storage: Option<&Storage>,
+    (id, conversation): (&'a ConversationId, &'a OnceCell<Conversation>),
+) {
+    let Some(storage) = storage else {
+        return;
+    };
+
+    if conversation.get().is_none() {
+        let Ok(stream) = storage.load_conversation_metadata(id) else {
+            warn!(%id, "Failed to load conversation metadata. Skipping.");
+            return;
+        };
+
+        if let Err(error) = conversation.set(stream) {
+            warn!(%id, ?error, "Failed to initialize conversation metadata. Skipping.");
+        }
+    }
+}
+
+fn maybe_init_events<'a>(
+    storage: Option<&Storage>,
+    (id, conversation): (&'a ConversationId, &'a OnceCell<ConversationStream>),
+) {
+    let Some(storage) = storage else {
+        return;
+    };
+
+    if conversation.get().is_none() {
+        let Ok(stream) = storage.load_conversation_events(id) else {
+            warn!(%id, "Failed to load conversation events. Skipping.");
+            return;
+        };
+
+        if let Err(error) = conversation.set(stream) {
+            warn!(%id, ?error, "Failed to initialize conversation events. Skipping.");
+        }
     }
 }
 
@@ -607,7 +721,14 @@ mod tests {
 
         let id = ConversationId::default();
         let conversation = Conversation::default();
-        workspace.state.local.conversations.insert(id, conversation);
+        workspace
+            .state
+            .local
+            .conversations
+            .entry(id)
+            .or_default()
+            .set(conversation)
+            .unwrap();
         assert_eq!(workspace.conversations().count(), 2);
     }
 
@@ -624,7 +745,10 @@ mod tests {
             .state
             .local
             .conversations
-            .insert(id, conversation.clone());
+            .entry(id)
+            .or_default()
+            .set(conversation.clone())
+            .unwrap();
         assert_eq!(workspace.get_conversation(&id), Some(&conversation));
     }
 
@@ -647,7 +771,12 @@ mod tests {
             AppConfig::from_partial(partial).unwrap().into(),
         );
         assert_eq!(
-            workspace.state.local.conversations.get(&id),
+            workspace
+                .state
+                .local
+                .conversations
+                .get(&id)
+                .and_then(|v| v.get()),
             Some(&conversation)
         );
     }
@@ -663,7 +792,10 @@ mod tests {
             .state
             .local
             .conversations
-            .insert(id, conversation.clone());
+            .entry(id)
+            .or_default()
+            .set(conversation.clone())
+            .unwrap();
 
         assert_ne!(workspace.active_conversation_id(), id);
         let removed_conversation = workspace.remove_conversation(&id).unwrap().unwrap();

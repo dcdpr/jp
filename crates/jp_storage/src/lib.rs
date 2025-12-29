@@ -2,6 +2,7 @@ pub mod error;
 pub mod value;
 
 use std::{
+    cell::OnceCell,
     fs,
     io::BufReader,
     iter,
@@ -13,7 +14,8 @@ pub use error::Error;
 use jp_conversation::{Conversation, ConversationId, ConversationStream, ConversationsMetadata};
 use jp_id::Id as _;
 use jp_tombmap::TombMap;
-use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
+use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
+use serde::de::DeserializeOwned;
 use time::{UtcDateTime, macros::format_description};
 use tracing::{trace, warn};
 
@@ -22,7 +24,6 @@ use crate::{
     value::{read_json, write_json},
 };
 
-pub const DEFAULT_STORAGE_DIR: &str = ".jp";
 pub const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
 pub const CONVERSATIONS_DIR: &str = "conversations";
@@ -176,14 +177,21 @@ impl Storage {
                 continue;
             };
 
-            let Some(path) = find_conversation_dir_path(root, id).map(|v| v.join(METADATA_FILE))
-            else {
+            let Some(conv_dir) = find_conversation_dir_path(root, id) else {
                 continue;
             };
 
-            if path.is_file() {
-                return read_json(&path);
+            let path = conv_dir.join(METADATA_FILE);
+            if !path.is_file() {
+                continue;
             }
+
+            let mut conversation: Conversation = read_json(&path)?;
+            conversation.user = Some(root) == self.user.as_ref();
+            (conversation.events_count, conversation.last_event_at) =
+                load_count_and_timestamp_events(&conv_dir).unwrap_or((0, None));
+
+            return Ok(conversation);
         }
 
         Err(jp_conversation::Error::UnknownId(*id).into())
@@ -205,7 +213,7 @@ impl Storage {
                     let (id, mut conversation) = load_conversation_metadata(&entry)?;
                     conversation.user = Some(root) == self.user.as_ref();
                     (conversation.events_count, conversation.last_event_at) =
-                        load_count_and_timestamp_events(&entry).unwrap_or((0, None));
+                        load_count_and_timestamp_events(&entry.path()).unwrap_or((0, None));
 
                     Some((id, conversation))
                 })
@@ -216,29 +224,34 @@ impl Storage {
         conversations
     }
 
-    pub fn load_conversation_events(&self, id: &ConversationId) -> Result<ConversationStream> {
+    pub fn load_all_conversation_ids(&self) -> Vec<ConversationId> {
+        let mut conversations = vec![];
         for root in [Some(&self.root), self.user.as_ref()] {
             let Some(root) = root else {
                 continue;
             };
 
-            let Some(path) = find_conversation_dir_path(root, id).map(|v| v.join(EVENTS_FILE))
-            else {
-                continue;
-            };
-
-            if path.is_file() {
-                return read_json(&path);
-            }
+            let path = root.join(CONVERSATIONS_DIR);
+            conversations.extend(
+                dir_entries(&path)
+                    .collect::<Vec<_>>()
+                    .par_iter()
+                    .filter_map(load_conversation_id_from_entry)
+                    .collect::<Vec<_>>(),
+            );
         }
 
-        Err(jp_conversation::Error::UnknownId(*id).into())
+        conversations
+    }
+
+    pub fn load_conversation_events(&self, id: &ConversationId) -> Result<ConversationStream> {
+        self.load_conversation_file(id, EVENTS_FILE)
     }
 
     pub fn persist_conversations_and_events(
         &mut self,
-        conversations: &TombMap<ConversationId, Conversation>,
-        events: &TombMap<ConversationId, ConversationStream>,
+        conversations: &TombMap<ConversationId, OnceCell<Conversation>>,
+        events: &TombMap<ConversationId, OnceCell<ConversationStream>>,
         active_conversation_id: &ConversationId,
         active_conversation: &Conversation,
     ) -> Result<()> {
@@ -258,6 +271,7 @@ impl Storage {
         // persist.
         let all_conversations = conversations
             .iter()
+            .filter_map(|(id, conversation)| conversation.get().map(|v| (id, v)))
             .chain(iter::once((active_conversation_id, active_conversation)));
 
         for (id, conversation) in all_conversations {
@@ -288,7 +302,7 @@ impl Storage {
             write_json(&meta_path, conversation)?;
 
             let events_path = conv_dir.join(EVENTS_FILE);
-            if let Some(stream) = events.get(id) {
+            if let Some(stream) = events.get(id).and_then(|v| v.get()) {
                 write_json(&events_path, stream)?;
             }
         }
@@ -356,15 +370,39 @@ impl Storage {
             }
         }
     }
+
+    fn load_conversation_file<T: DeserializeOwned>(
+        &self,
+        id: &ConversationId,
+        file: &str,
+    ) -> Result<T> {
+        for root in [Some(&self.root), self.user.as_ref()] {
+            let Some(root) = root else {
+                continue;
+            };
+
+            let Some(path) = find_conversation_dir_path(root, id).map(|v| v.join(file)) else {
+                continue;
+            };
+
+            if !path.is_file() {
+                continue;
+            }
+
+            return read_json(&path);
+        }
+
+        Err(jp_conversation::Error::UnknownId(*id).into())
+    }
 }
 
-fn load_count_and_timestamp_events(entry: &fs::DirEntry) -> Option<(usize, Option<UtcDateTime>)> {
+fn load_count_and_timestamp_events(path: &Path) -> Option<(usize, Option<UtcDateTime>)> {
     #[derive(serde::Deserialize)]
     struct RawEvent {
         timestamp: Box<serde_json::value::RawValue>,
     }
     let fmt = format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond]");
-    let path = entry.path().join(EVENTS_FILE);
+    let path = path.join(EVENTS_FILE);
     let file = fs::File::open(&path).ok()?;
     let reader = BufReader::new(file);
 
@@ -412,27 +450,7 @@ fn find_conversation_dir_path(root: &Path, id: &ConversationId) -> Option<PathBu
 }
 
 fn load_conversation_metadata(entry: &fs::DirEntry) -> Option<(ConversationId, Conversation)> {
-    if !entry.file_type().ok()?.is_dir() {
-        return None;
-    }
-
-    let file_name = entry.file_name();
-    let Some(dir_name) = file_name.to_str() else {
-        warn!(path = ?entry.path(), "Skipping directory with invalid name.");
-        return None;
-    };
-
-    let conversation_id = match ConversationId::try_from_dirname(dir_name) {
-        Ok(id) => id,
-        Err(error) => {
-            warn!(
-                %error,
-                path = ?entry.path(),
-                "Failed to parse ConversationId from directory name. Skipping."
-            );
-            return None;
-        }
-    };
+    let conversation_id = load_conversation_id_from_entry(entry)?;
 
     let path = entry.path();
 
@@ -452,6 +470,28 @@ fn load_conversation_metadata(entry: &fs::DirEntry) -> Option<(ConversationId, C
     };
 
     Some((conversation_id, conversation))
+}
+
+fn load_conversation_id_from_entry(entry: &fs::DirEntry) -> Option<ConversationId> {
+    if !entry.file_type().ok()?.is_dir() {
+        return None;
+    }
+
+    let file_name = entry.file_name();
+    let Some(dir_name) = file_name.to_str() else {
+        warn!(path = ?entry.path(), "Skipping directory with invalid name.");
+        return None;
+    };
+
+    ConversationId::try_from_dirname(dir_name)
+        .inspect_err(|error| {
+            warn!(
+                %error,
+                path = ?entry.path(),
+                "Failed to parse ConversationId from directory name. Skipping."
+            );
+        })
+        .ok()
 }
 
 fn remove_unused_conversation_dirs(

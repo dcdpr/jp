@@ -18,7 +18,7 @@ impl Use {
             let mut conversations = ctx
                 .workspace
                 .conversations()
-                .filter(|(id, _)| id != &&active_id)
+                .filter(|(id, _)| *id != &active_id)
                 .collect::<Vec<_>>();
 
             conversations.sort_by(|a, b| b.1.last_activated_at.cmp(&a.1.last_activated_at));

@@ -2,7 +2,6 @@ use crossterm::style::Stylize as _;
 use inquire::Confirm;
 use jp_conversation::{Conversation, ConversationId};
 use jp_format::conversation::DetailsFmt;
-use jp_workspace::query::ConversationQuery;
 
 use crate::{Output, cmd::Success, ctx::Ctx};
 
@@ -80,15 +79,17 @@ impl Rm {
         // the active conversation to another one, or create a new one if
         // needed.
         if id == active_id {
-            let new_active_id = {
-                let mut conversations = ctx.workspace.conversations();
-                let mut query = ConversationQuery::new(active_id, &mut conversations);
-                query.last_active_conversation_id().copied()
-            }
-            .unwrap_or_else(|| {
-                ctx.workspace
-                    .create_conversation(Conversation::default(), ctx.config())
-            });
+            #[expect(clippy::map_unwrap_or, reason = "`map_or_else` fails borrow check")]
+            let new_active_id = ctx
+                .workspace
+                .conversations()
+                .filter(|(id, _)| *id != &active_id)
+                .max_by_key(|(_, conversation)| conversation.last_activated_at)
+                .map(|(id, _)| *id)
+                .unwrap_or_else(|| {
+                    ctx.workspace
+                        .create_conversation(Conversation::default(), ctx.config())
+                });
 
             ctx.workspace.set_active_conversation_id(new_active_id)?;
         }

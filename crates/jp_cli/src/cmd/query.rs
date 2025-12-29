@@ -292,8 +292,10 @@ impl Query {
         let has_request = ctx
             .workspace
             .get_events(&conversation_id)
-            .and_then(ConversationStream::last)
-            .and_then(|v| v.as_chat_request().map(|v| !v.is_empty()))
+            .and_then(|v| {
+                v.last()
+                    .and_then(|v| v.as_chat_request().map(|v| !v.is_empty()))
+            })
             .unwrap_or(false);
 
         if !has_request {
@@ -310,8 +312,7 @@ impl Query {
         let stream = ctx
             .workspace
             .get_events(&conversation_id)
-            .cloned()
-            .unwrap_or_else(|| ConversationStream::new(cfg.clone()));
+            .map_or_else(|| ConversationStream::new(cfg.clone()), Clone::clone);
 
         // Generate title for new or empty conversations.
         if (self.new_conversation || stream.is_empty())
