@@ -97,8 +97,6 @@ impl Workspace {
     }
 
     /// Enable persistence for the workspace at the given (absolute) path.
-    ///
-    /// See also: [`Self::persisted`].
     pub fn persisted_at(mut self, path: &Path) -> Result<Self> {
         trace!(path = %path.display(), "Enabling workspace persistence.");
 
@@ -133,7 +131,7 @@ impl Workspace {
     ///
     /// If this is called, then [`Self::persist`] becomes a no-op.
     ///
-    /// Persistence can be re-enabled by calling [`Self::persisted`].
+    /// Persistence can be re-enabled by calling [`Self::persisted_at`].
     pub fn disable_persistence(&mut self) {
         self.disable_persistence = true;
     }
