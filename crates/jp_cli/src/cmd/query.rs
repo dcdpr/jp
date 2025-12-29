@@ -292,10 +292,8 @@ impl Query {
         let has_request = ctx
             .workspace
             .get_events(&conversation_id)
-            .and_then(|v| {
-                v.last()
-                    .and_then(|v| v.as_chat_request().map(|v| !v.is_empty()))
-            })
+            .and_then(ConversationStream::last)
+            .and_then(|v| v.as_chat_request().map(|v| !v.is_empty()))
             .unwrap_or(false);
 
         if !has_request {
