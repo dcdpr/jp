@@ -15,7 +15,6 @@ use jp_conversation::{Conversation, ConversationId, ConversationStream, Conversa
 use jp_id::Id as _;
 use jp_tombmap::TombMap;
 use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
-use serde::de::DeserializeOwned;
 use time::{UtcDateTime, macros::format_description};
 use tracing::{trace, warn};
 
@@ -24,6 +23,7 @@ use crate::{
     value::{read_json, write_json},
 };
 
+pub const DEFAULT_STORAGE_DIR: &str = ".jp";
 pub const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
 pub const CONVERSATIONS_DIR: &str = "conversations";
@@ -245,7 +245,25 @@ impl Storage {
     }
 
     pub fn load_conversation_events(&self, id: &ConversationId) -> Result<ConversationStream> {
-        self.load_conversation_file(id, EVENTS_FILE)
+        let this = &self;
+        for root in [Some(&this.root), this.user.as_ref()] {
+            let Some(root) = root else {
+                continue;
+            };
+
+            let Some(path) = find_conversation_dir_path(root, id).map(|v| v.join(EVENTS_FILE))
+            else {
+                continue;
+            };
+
+            if !path.is_file() {
+                continue;
+            }
+
+            return read_json(&path);
+        }
+
+        Err(jp_conversation::Error::UnknownId(*id).into())
     }
 
     pub fn persist_conversations_and_events(
@@ -369,30 +387,6 @@ impl Storage {
                 warn!(path = %path.display(), %error, "Failed to remove ephemeral conversation.");
             }
         }
-    }
-
-    fn load_conversation_file<T: DeserializeOwned>(
-        &self,
-        id: &ConversationId,
-        file: &str,
-    ) -> Result<T> {
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
-                continue;
-            };
-
-            let Some(path) = find_conversation_dir_path(root, id).map(|v| v.join(file)) else {
-                continue;
-            };
-
-            if !path.is_file() {
-                continue;
-            }
-
-            return read_json(&path);
-        }
-
-        Err(jp_conversation::Error::UnknownId(*id).into())
     }
 }
 
