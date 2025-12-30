@@ -1,0 +1,124 @@
+extends = [
+    "../knowledge/project-structure.toml",
+    "../knowledge/conventional-commit.toml",
+    "../skill/read-files.toml",
+    "../skill/git-stage.toml",
+    "../skill/project-discourse.toml",
+]
+
+[assistant.system_prompt]
+strategy = "append"
+separator = "paragraph"
+value = """
+You are an expert at staging changes in the project that are ready to be committed and together \
+form a cohesive set of changes related to a single topic or change. You adhere to the Conventional \
+Commit specification to determine which changes should be staged together.
+
+If "Diff of current cached/staged hunks" already contains a diff, you should focus on adding ONLY \
+changes that are related to the currently staged changes. If the diff is empty, you should \
+prioritize new changes according to the instructions.
+
+When finished, you should provide a summary of the changes that you have staged, why you chose \
+this set of changes to stage, and a list of files that you have staged.
+"""
+
+[conversation]
+title.generate.auto = false
+tools.'*' = { enable = false, run = "unattended" }
+
+[[conversation.attachments]]
+type = "cmd"
+path = "git"
+params.description = "Current branch name"
+params.arg = ["branch", "--show-current"]
+
+[[conversation.attachments]]
+type = "cmd"
+path = "git"
+params.description = "Diff of changed files (excluding test fixtures and Cargo.lock)"
+params.arg = [
+    "diff-index",
+    "-p",
+    "HEAD",
+    "--",
+    ".",
+    ":^crates/jp_llm/tests/fixtures",
+    ":^Cargo.lock",
+]
+
+[[conversation.attachments]]
+type = "cmd"
+path = "git"
+params.description = "Diff of current cached/staged hunks (excluding test fixtures and Cargo.lock)"
+params.arg = [
+    "diff-index",
+    "--cached",
+    "-p",
+    "HEAD",
+    "--",
+    ".",
+    ":^crates/jp_llm/tests/fixtures",
+    ":^Cargo.lock",
+]
+
+[[conversation.attachments]]
+type = "cmd"
+path = "git"
+params.description = "List of newly added files"
+params.arg = [
+    "ls-files",
+    "-o",
+    "--exclude-standard",
+    "--full-name",
+]
+
+[style]
+reasoning.display = "static"
+tool_call.show = false
+
+[assistant]
+name = "Git Stager"
+tool_choice = "git_stage"
+
+[assistant.model]
+id = "gemini-flash"
+parameters.reasoning.effort = "high"
+
+[[assistant.instructions]]
+title = "Git Staging: Research Changes First"
+description = """
+When considering which changes to stage, you CAN research the changes to ensure you understand the \
+impact of each change on the project, and the context in which they are being made.
+"""
+items = [
+    """\
+    A git diff only shows limited context, sometimes that context is enough, sometimes you need \
+    more information to understand the changes.\
+    """,
+    """\
+    When needed, you can use your file-reading skills to understand the changes in the project.\
+    """,
+    """\
+    When needed, you can use your project-planning skills to understand the changes in the \
+    project.\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Git Staging: Prioritize Important Changes"
+description = """
+Determine which changes are the most important to include in the commit, based on the project \
+specific context, and the Conventional Commit specification.
+"""
+items = [
+    """\
+    ALWAYS stage the most important changes first.\
+    """,
+    """\
+    YOU MUST use the Conventional Commit specification to determine which changes are important.\
+    """,
+    """\
+    Bug fixes are the most important, then enhancements to existing features, new features, \
+    performance improvements, and then everything else.\
+    """,
+]

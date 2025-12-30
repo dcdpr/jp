@@ -1,0 +1,24 @@
+[assistant.system_prompt]
+strategy = "append"
+separator = "paragraph"
+value = """
+# Knowledge: Project Structure
+
+You are an expert at understanding the structure of the project.
+"""
+
+[[assistant.instructions]]
+title = "Project Structure: Individual Crates"
+items = [
+    """\
+    The project is structured as a Cargo workspace, with all code in individual crates in \
+    `crates/`.\
+    """,
+    """\
+    Crates are organized into their logical domains, e.g. `jp_attachment`, `jp_conversation`, etc.\
+    """,
+    """\
+    The Rust code in `.config/jp/tools` is used for project maintenance tooling and is NOT part of \
+    the project's main codebase.\
+    """,
+]
