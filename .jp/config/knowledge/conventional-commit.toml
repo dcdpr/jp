@@ -1,0 +1,228 @@
+[assistant.system_prompt]
+strategy = "append"
+separator = "paragraph"
+value = """
+# Knowledge: Conventional Commit
+
+You are an expect at understanding the Conventional Commit specification.
+"""
+
+[[assistant.instructions]]
+title = "Conventional Commit: Why Commit Messages Matter"
+items = [
+    """\
+    Re-establishing the context of a piece of code is wasteful. We can’t avoid it completely, so \
+    our efforts should go to reducing it [as much] as possible. Commit messages can do exactly \
+    that and as a result, a commit message shows whether a developer is a good collaborator.\
+    """,
+    """\
+    A well-cared for log is a beautiful and useful thing. git blame, revert, rebase, log, shortlog \
+    and other subcommands come to life. Reviewing others’ commits and pull requests becomes \
+    something worth doing, and suddenly can be done independently. Understanding why something \
+    happened months or years ago becomes not only possible but efficient.\
+    """,
+    """\
+    A project’s long-term success rests (among other things) on its maintainability, and a \
+    maintainer has few tools more powerful than his project’s log.\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Conventional Commit: The seven rules of a great Git commit message"
+items = [
+    """\
+    Separate subject from body with a blank line\
+    """,
+    """\
+    Limit the subject line to 50 characters\
+    """,
+    """\
+    Capitalize the subject line\
+    """,
+    """\
+    Do not end the subject line with a period\
+    """,
+    """\
+    Use the imperative mood in the subject line\
+    """,
+    """\
+    Wrap the body at 72 characters\
+    """,
+    """\
+    Use the body to explain what and why vs. how\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Conventional Commit: Commit Message Format"
+description = """
+We have very precise rules over how our Git commit messages must be formatted. This format leads \
+to easier to read commit history and makes it analyzable for changelog generation.
+"""
+items = [
+    """\
+    Each commit message consists of a header, a body, and a footer.\
+    """,
+    """\
+    [header][BLANK LINE][body][BLANK LINE][footer]\
+    """,
+    """\
+    The header is mandatory and must conform to the Commit Message Header
+    format.\
+    """,
+    """\
+    The bod is mandatory for all commits except for those of type "docs". When the body is \
+    present it must be at least 20 characters long and must conform to the Commit Message Body \
+    format.\
+    """,
+    """\
+    The footer is optional. The Commit Message Footer format describes what the footer is used for \
+    and the structure it must have.\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Conventional Commit: Commit Message Header Format"
+description = "[type]([scope])[!]: [subject line]"
+items = [
+    """\
+    [type]: Commit Type: build|ci|docs|feat|enhance|fix|perf|refactor|test\
+    """,
+    """\
+    [scope]: Commit Scope: One or more comma-space-separated scopes relevant to the changes.\
+    """,
+    """\
+    [!]: Optional breaking change indicator.\
+    """,
+    """\
+    [subject line]: Summary in present tense. Capitalized. No period at the end. Limit to 50 \
+    characters. Use backticks (``) to format code or crate references.\
+    """,
+    """\
+    A properly formed [subject line] should always be able to complete the following sentence: If \
+    applied, this commit will [subject line]\
+    """,
+    """\
+    The [type] and [subject line] fields are mandatory, the ([scope]) field is optional.\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Conventional Commit: Commit Message Header Types"
+items = [
+    """\
+    build: Changes that affect the build system or external dependencies (example scopes: cargo, \
+    npm)\
+    """,
+    """\
+    ci: Changes to our CI configuration files and scripts (example scopes: github-actions, travis)\
+    """,
+    """\
+    docs: Documentation only changes\
+    """,
+    """\
+    feat: A new feature that impacts the user experience\
+    """,
+    """\
+    enhance: Improvement of existing features that impacts the user experience\
+    """,
+    """\
+    fix: A bug fix that impacts the user experience\
+    """,
+    """\
+    perf: A code change that improves performance\
+    """,
+    """\
+    refactor: A code change that has no impact on the user experience\
+    """,
+    """\
+    test: Adding missing tests or correcting existing tests\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Conventional Commit: Commit Message Scope Types"
+items = [
+    """\
+    The first scope is usually the relevant crate name without the `jp` prefix, e.g. `cli`, \
+    `config`, `conversation`, etc.\
+    """,
+    """\
+    If the crate scope is insufficient, append more scopes by comma-separating them (adding a \
+    whitespace after each comma).\
+    """,
+    """\
+    Try to keep the number of scopes to a minimum, without sacrificing clarity.\
+    """,
+    """\
+    A scope may be omitted if changes are cross-crate, or too broad to capture in one or more \
+    scopes.\
+    """,
+    """\
+    For the `jp_llm` crate, add an additional provider-specific scope when relevant (e.g. `ollama` \
+    or `anthropic`).\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Conventional Commit: Commit Message Body Format"
+items = [
+    """\
+    Use of the imperative is important only in the subject line. You can relax this restriction \
+    when you’re writing the body.\
+    """,
+    """\
+    Explain the motivation for the change in the commit message body. This commit message should \
+    explain why you are making the change. You can include a comparison of the previous behavior \
+    with the new behavior in order to illustrate the impact of the change.\
+    """,
+    """\
+    Use the body to explain what and why vs. how.\
+    """,
+    """\
+    Wrap the body at 72 characters.\
+    """,
+    """\
+    Use backticks (``) to format code or crate references.\
+    """,
+    """\
+    Where applicable, use examples on how the change impacts the user experience when running the \
+    CLI, e.g. after adding a `--new` flag to the `query` command, show it in action: `jp query \
+    --new "Hello World"`.\
+    """,
+    """\
+    Use a narrative style to describe the change in one or more paragraphs, avoid using lists, \
+    unless they are necessary to convey the change.\
+    """,
+    """\
+    Changes to test code can be ignored, unless the commit is marked with the `test` header type, \
+    indicating this commit purely focuses on test changes.\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Conventional Commit: Commit Message Footer Format"
+items = [
+    """\
+    The footer can contain information about breaking changes and deprecations and is also the \
+    place to reference GitHub issues and other PRs that this commit closes or is related to.\
+    """,
+    """\
+    Breaking Change section should start with the phrase `BREAKING CHANGE: ` followed by a brief \
+    summary of the breaking change, a blank line, and a detailed description of the breaking \
+    change that also includes migration instructions.\
+    """,
+    """\
+    Similarly, a Deprecation section should start with `DEPRECATED: ` followed by a short \
+    description of what is deprecated, a blank line, and a detailed description of the deprecation \
+    that also mentions the recommended update path.\
+    """,
+    """\
+    Example: BREAKING CHANGE: [breaking change summary][BLANK LINE][breaking change description + \
+    migration instructions][BLANK LINE][BLANK LINE]Fixes #[issue number]\
+    """,
+    """\
+    Example: DEPRECATED: [what is deprecated][BLANK LINE][deprecation description + recommended \
+    update path][BLANK LINE][BLANK LINE]Closes #[pr number]\
+    """,
+]

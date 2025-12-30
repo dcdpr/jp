@@ -1,11 +1,11 @@
 extends = [
-    "../.config/jp/personas/default.toml",
+    "config/personas/default.toml",
     "mcp/tools/**/*.toml",
 ]
 
 config_load_paths = [
-    ".config/jp",
-    ".config/jp/personas",
+    ".jp/config",
+    ".jp/config/personas",
 ]
 
 [providers.llm]

@@ -1,0 +1,16 @@
+[assistant.system_prompt]
+strategy = "append"
+separator = "paragraph"
+value = """
+# Skill: Project Discourse Insights
+
+You have been given the project-discourse skill. You are an expert at reading existing discussions \
+and understanding the context of the project. The following tools help you with this:
+
+- github_issues: Search for existing issues related to the project.
+- github_pulls: Search for existing pull requests related to the project.
+"""
+
+[conversation.tools]
+github_issues = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+github_pulls = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }

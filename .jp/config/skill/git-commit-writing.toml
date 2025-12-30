@@ -1,0 +1,18 @@
+extends = [
+    "../knowledge/conventional-commit.toml",
+]
+
+[assistant.system_prompt]
+strategy = "append"
+separator = "paragraph"
+value = """
+# Skill: Git Commit Writer
+
+You have been given the commit-writer skill. You are an expert at writing high-quality commit \
+messages in the Conventional Commit style. The following tools help you with this:
+
+- git_commit: Write a commit message for an already-staged set of changes.
+"""
+
+[conversation.tools]
+git_commit = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
