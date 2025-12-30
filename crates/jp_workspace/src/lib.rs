@@ -158,16 +158,38 @@ impl Workspace {
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
         // Local state
-        let conversations_metadata = storage.load_conversations_metadata()?;
-        let active_conversation_id = conversations_metadata.active_conversation_id;
-        debug!(%active_conversation_id, "Loaded workspace state metadata.");
+        let mut metadata = storage.load_conversations_metadata()?;
+        debug!(
+            active_conversation_id = %metadata.active_conversation_id,
+            "Loaded workspace state metadata."
+        );
 
-        let active_conversation = storage.load_conversation_metadata(&active_conversation_id)?;
         let conversation_ids = storage.load_all_conversation_ids();
+        let active_conversation = match storage
+            .load_conversation_metadata(&metadata.active_conversation_id)
+        {
+            Ok(conversation) => conversation,
+            // If the active conversation cannot be found on disk, we try to
+            // load the last known conversation on disk, and if that fails, we
+            // return an error.
+            Err(error @ jp_storage::Error::Conversation(jp_conversation::Error::UnknownId(_))) => {
+                let last_conversation_id = conversation_ids.last().copied();
+                warn!(
+                    %error,
+                    missing_id = %metadata.active_conversation_id,
+                    new_id = %last_conversation_id.as_ref().map(ToString::to_string).unwrap_or_default(),
+                    "Failed to load active conversation, falling back to last stored conversation."
+                );
+
+                metadata.active_conversation_id = last_conversation_id.ok_or(error)?;
+                storage.load_conversation_metadata(&metadata.active_conversation_id)?
+            }
+            Err(error) => return Err(error.into()),
+        };
 
         let conversations = conversation_ids
             .iter()
-            .filter(|id| id != &&active_conversation_id)
+            .filter(|id| id != &&metadata.active_conversation_id)
             .map(|id| (*id, OnceCell::new()))
             .collect();
 
@@ -179,9 +201,9 @@ impl Workspace {
         // We can `set` without checking if the cell is already initialized, as
         // we just initialized it above.
         let _err = events
-            .entry(active_conversation_id)
+            .entry(metadata.active_conversation_id)
             .or_default()
-            .set(storage.load_conversation_events(&active_conversation_id)?);
+            .set(storage.load_conversation_events(&metadata.active_conversation_id)?);
 
         self.state = State {
             local: LocalState {
@@ -190,7 +212,7 @@ impl Workspace {
                 events,
             },
             user: UserState {
-                conversations_metadata,
+                conversations_metadata: metadata,
             },
         };
 
