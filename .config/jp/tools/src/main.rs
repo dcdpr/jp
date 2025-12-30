@@ -1,11 +1,12 @@
 use std::env;
 
+use jp_tool::{Context, Outcome};
 use serde_json::{from_str, json};
 use tools::{Tool, run};
 
 #[tokio::main]
 async fn main() {
-    let context = match input(1, "context") {
+    let context = match input::<Context>(1, "context") {
         Ok(workspace) => workspace,
         Err(error) => return println!("{error}"),
     };
@@ -15,8 +16,10 @@ async fn main() {
         Err(error) => return println!("{error}"),
     };
 
+    let format_parameters = context.format_parameters;
     let name = tool.name.clone();
     match run(context, tool).await {
+        Ok(Outcome::Success { content }) if format_parameters => println!("{content}"),
         Ok(outcome) => match serde_json::to_string(&outcome) {
             Ok(content) => println!("{content}"),
             Err(error) => handle_error(&error, &name),

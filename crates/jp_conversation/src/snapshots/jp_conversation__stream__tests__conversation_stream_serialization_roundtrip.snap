@@ -39,7 +39,8 @@ expression: "&stream"
                   "lines": 10
                 }
               },
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           }
         }

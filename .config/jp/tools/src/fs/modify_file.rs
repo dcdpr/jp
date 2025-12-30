@@ -4,18 +4,26 @@
 // semantic edits with (in-memory) staged changes.
 
 use std::{
-    fs::{self, File},
-    io::Read as _,
+    fmt::{self, Write as _},
+    fs::{self},
     ops::{Deref, DerefMut},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
+use crossterm::style::{ContentStyle, Stylize as _};
 use fancy_regex::RegexBuilder;
 use jp_tool::{AnswerType, Outcome, Question};
 use serde_json::{Map, Value};
+use similar::{ChangeTag, TextDiff};
 
 use super::utils::is_file_dirty;
 use crate::{Context, Error};
+
+pub struct Change {
+    pub path: PathBuf,
+    pub before: String,
+    pub after: String,
+}
 
 pub struct Content(String);
 
@@ -104,6 +112,10 @@ pub(crate) async fn fs_modify_file(
     new_string: String,
     replace_using_regex: bool,
 ) -> std::result::Result<Outcome, Error> {
+    if string_to_replace == new_string {
+        return Err("String to replace is the same as the new string.".into());
+    }
+
     let p = PathBuf::from(&path);
 
     if p.is_absolute() {
@@ -120,7 +132,7 @@ pub(crate) async fn fs_modify_file(
 
     let absolute_path = ctx.root.join(path.trim_start_matches('/'));
 
-    let mut modified_files = vec![];
+    let mut changes = vec![];
     for entry in glob::glob(&absolute_path.to_string_lossy())? {
         let entry = entry?;
         if !entry.exists() {
@@ -131,35 +143,14 @@ pub(crate) async fn fs_modify_file(
             return Err("Path is not a regular file.".into());
         }
 
-        if is_file_dirty(&ctx.root, &p)? {
-            match answers.get("modify_dirty_file").and_then(Value::as_bool) {
-                Some(true) => {}
-                Some(false) => {
-                    return Err(
-                        "File has uncommitted changes. Please commit or discard first.".into(),
-                    );
-                }
-                None => {
-                    return Ok(Outcome::NeedsInput {
-                        question: Question {
-                            id: "modify_dirty_file".to_string(),
-                            text: format!("File '{path}' has uncommitted changes. Modify anyway?"),
-                            answer_type: AnswerType::Boolean,
-                            default: Some(Value::Bool(false)),
-                        },
-                    });
-                }
-            }
-        }
+        let Ok(path) = entry.strip_prefix(&ctx.root) else {
+            return Err("Path is not within workspace root.".into());
+        };
 
-        // Read existing file content
-        let mut file = File::open(&absolute_path)?;
-        let mut content = String::new();
-        file.read_to_string(&mut content)?;
+        let before = fs::read_to_string(&entry)?;
+        let contents = Content(before);
 
-        let contents = Content(content);
-
-        let new_content = if replace_using_regex {
+        let after = if replace_using_regex {
             contents.replace_using_regexp(&string_to_replace, &new_string)?
         } else {
             let (start_byte, mut end_byte) = contents
@@ -190,19 +181,124 @@ pub(crate) async fn fs_modify_file(
             new_content
         };
 
-        // Write modified content back to file
-        fs::write(&absolute_path, new_content)?;
+        changes.push(Change {
+            path: path.to_path_buf(),
+            before: contents.0,
+            after,
+        });
+    }
 
-        if let Ok(relative_path) = absolute_path.strip_prefix(&ctx.root) {
-            modified_files.push(relative_path.to_string_lossy().to_string());
+    if ctx.format_parameters {
+        Ok(format_changes(changes, &ctx.root).into())
+    } else {
+        apply_changes(changes, &ctx.root, answers)
+    }
+}
+
+fn format_changes(changes: Vec<Change>, root: &Path) -> String {
+    changes
+        .into_iter()
+        .map(|change| {
+            let path = root.join(change.path.to_string_lossy().trim_start_matches('/'));
+            let diff = file_diff(&change.before, &change.after);
+            format!("{}:\n\n```diff\n{diff}\n```", path.display())
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn apply_changes(
+    changes: Vec<Change>,
+    root: &Path,
+    answers: &Map<String, Value>,
+) -> Result<Outcome, Error> {
+    let modified = changes
+        .iter()
+        .map(|c| c.path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+
+    for Change { path, after, .. } in changes {
+        if is_file_dirty(root, &path)? {
+            match answers.get("modify_dirty_file").and_then(Value::as_bool) {
+                Some(true) => {}
+                Some(false) => {
+                    return Err(
+                        "File has uncommitted changes. Please commit or discard first.".into(),
+                    );
+                }
+                None => {
+                    return Ok(Outcome::NeedsInput {
+                        question: Question {
+                            id: "modify_dirty_file".to_string(),
+                            text: format!(
+                                "File '{}' has uncommitted changes. Modify anyway?",
+                                path.display()
+                            ),
+                            answer_type: AnswerType::Boolean,
+                            default: Some(Value::Bool(false)),
+                        },
+                    });
+                }
+            }
+        }
+
+        let absolute_path = root.join(path.to_string_lossy().trim_start_matches('/'));
+
+        fs::write(absolute_path, after)?;
+    }
+
+    Ok(format!("File(s) modified successfully:\n\n{}.", modified.join("\n")).into())
+}
+
+struct Line(Option<usize>);
+
+impl fmt::Display for Line {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            None => write!(f, "    "),
+            Some(idx) => write!(f, "{:<4}", idx + 1),
+        }
+    }
+}
+
+fn file_diff(old: &str, new: &str) -> String {
+    let diff = TextDiff::from_lines(old, new);
+
+    let mut buf = String::new();
+    for (idx, group) in diff.grouped_ops(3).iter().enumerate() {
+        if idx > 0 {
+            println!("{:-^1$}", "-", 80);
+        }
+        for op in group {
+            for change in diff.iter_inline_changes(op) {
+                let (sign, s) = match change.tag() {
+                    ChangeTag::Delete => ("-", ContentStyle::new().red()),
+                    ChangeTag::Insert => ("+", ContentStyle::new().green()),
+                    ChangeTag::Equal => (" ", ContentStyle::new().dim()),
+                };
+                let _ = write!(
+                    &mut buf,
+                    "{}{} |{}",
+                    s.apply(Line(change.old_index())),
+                    s.apply(Line(change.new_index())),
+                    s.apply(sign).bold(),
+                );
+                for (emphasized, value) in change.iter_strings_lossy() {
+                    if emphasized {
+                        let _ = write!(&mut buf, "{}", s.apply(value).underlined().on_black());
+                    } else {
+                        let _ = write!(&mut buf, "{}", s.apply(value));
+                    }
+                }
+                if change.missing_newline() {
+                    buf.push('\n');
+                }
+            }
         }
     }
 
-    Ok(format!(
-        "File(s) modified successfully:\n\n{}.",
-        modified_files.join("\n")
-    )
-    .into())
+    buf.push_str("".reset().to_string().as_str());
+    buf
 }
 
 #[cfg(test)]
@@ -287,7 +383,10 @@ mod tests {
             let absolute_file_path = root.join(file_path);
             fs::write(&absolute_file_path, test_case.start_content).unwrap();
 
-            let ctx = Context { root };
+            let ctx = Context {
+                root,
+                format_parameters: false,
+            };
 
             let actual = fs_modify_file(
                 ctx,
@@ -317,12 +416,6 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_issue_with_changing_number_of_lines() {
-        // {
-        //   "path": "crates/jp_conversation/src/event/tool_call.rs",
-        //   "string_to_replace": "/// A tool call response event - the result of executing a tool.\n///\n/// This event MUST be in response to a `ToolCallRequest` event, with a matching `id`.\n#[derive(Debug, Clone, PartialEq)]\npub struct ToolCallResponse {\n    /// ID matching the corresponding ToolCallRequest\n    pub id: String,",
-        //   "new_string": "/// A tool call response event - the result of executing a tool.\n///\n/// This event MUST be in response to a `ToolCallRequest` event, with a matching `id`.\n#[derive(Debug, Clone, PartialEq)]\npub struct ToolCallResponse {\n    /// ID matching the corresponding `ToolCallRequest`\n    pub id: String,"
-        // }
-
         let string_to_replace = "/// A tool call response event - the result of executing a \
                                  tool.\n///\n/// This event MUST be in response to a \
                                  `ToolCallRequest` event, with a matching `id`.\n#[derive(Debug, \
@@ -376,7 +469,10 @@ mod tests {
         let absolute_file_path = root.join(file_path);
         fs::write(&absolute_file_path, source).unwrap();
 
-        let ctx = Context { root };
+        let ctx = Context {
+            root,
+            format_parameters: false,
+        };
 
         let _actual = fs_modify_file(
             ctx,
@@ -430,7 +526,10 @@ mod tests {
             let absolute_file_path = root.join(file_path);
             fs::write(&absolute_file_path, test_case.start_content).unwrap();
 
-            let ctx = Context { root };
+            let ctx = Context {
+                root,
+                format_parameters: false,
+            };
 
             let actual = fs_modify_file(
                 ctx,

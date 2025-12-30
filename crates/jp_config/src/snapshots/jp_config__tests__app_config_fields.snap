@@ -43,6 +43,7 @@ expression: "AppConfig::fields()"
     "conversation.tools.*.result",
     "conversation.tools.*.run",
     "conversation.tools.*.style.inline_results",
+    "conversation.tools.*.style.parameters",
     "conversation.tools.*.style.results_file_link",
     "conversation.title.generate.auto",
     "conversation.title.generate.model",

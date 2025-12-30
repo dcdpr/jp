@@ -54,6 +54,16 @@ pub enum AnswerType {
 pub struct Context {
     /// The root path that the tool should run in.
     pub root: PathBuf,
+
+    /// Indicates a request to format tool call arguments, instead of running
+    /// the tool.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub format_parameters: bool,
+}
+
+#[expect(clippy::trivially_copy_pass_by_ref)]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl From<String> for Outcome {

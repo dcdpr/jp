@@ -6,7 +6,7 @@ use jp_config::{
     AppConfig,
     conversation::tool::{
         ToolConfigWithDefaults,
-        style::{InlineResults, LinkStyle, TruncateLines},
+        style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
     },
     style::{
         StyleConfig,
@@ -99,6 +99,7 @@ impl StreamEventHandler {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn handle_tool_call(
         &mut self,
         cfg: &AppConfig,
@@ -126,15 +127,58 @@ impl StreamEventHandler {
         .await?;
 
         if handler.render_tool_calls {
-            let mut title = format!("Calling tool **{}**", tool.name);
+            let (raw, args) = match &tool_config.style().parameters {
+                ParametersStyle::Off => (false, ".".to_owned()),
+                ParametersStyle::Json => {
+                    let args = serde_json::to_string_pretty(&call.arguments)
+                        .unwrap_or_else(|_| format!("{:#}", Value::Object(call.arguments.clone())));
 
-            if !call.arguments.is_empty() {
-                let arguments = serde_json::to_string_pretty(&call.arguments)?;
-                title.push_str(&format!(" with arguments:\n\n```json\n{arguments}\n```\n"));
-            }
+                    (false, format!(" with arguments:\n\n```json\n{args}\n```"))
+                }
+                ParametersStyle::FunctionCall => {
+                    let mut buf = String::new();
+                    buf.push('(');
+                    for (i, (key, value)) in call.arguments.iter().enumerate() {
+                        if i > 0 {
+                            buf.push_str(", ");
+                        }
+                        buf.push_str(&format!("{key}={value}"));
+                    }
+                    buf.push(')');
+                    (false, buf)
+                }
+                ParametersStyle::Custom(command) => {
+                    let cmd = command.clone().command();
+                    let name = tool_config.source().tool_name();
 
-            let data = format!("\n{title}\n");
-            handler.handle(&data, &cfg.style, false)?;
+                    match tool.format_args(name, &cmd, &call.arguments, &root)? {
+                        Ok(args) if args.is_empty() => (false, ".".to_owned()),
+                        Ok(args) => (true, format!(":\n\n{args}")),
+                        result @ Err(_) => {
+                            let response = ToolCallResponse {
+                                id: call.id,
+                                result,
+                            };
+
+                            self.tool_call_responses.push(response.clone());
+                            return build_tool_call_response(
+                                &cfg.style,
+                                &response,
+                                &tool_config,
+                                handler,
+                            );
+                        }
+                    }
+                }
+            };
+
+            handler.handle(
+                &format!("\nCalling tool **{}**", tool.name),
+                &cfg.style,
+                false,
+            )?;
+            handler.handle(&args, &cfg.style, raw)?;
+            handler.handle("\n\n", &cfg.style, false)?;
         }
 
         let mut answers = IndexMap::new();

@@ -3,8 +3,8 @@ use std::{path::Path, sync::Arc};
 use crossterm::style::Stylize as _;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{
-    OneOrManyTypes, ResultMode, RunMode, ToolConfigWithDefaults, ToolParameterConfig, ToolSource,
-    item::ToolParameterItemConfig,
+    OneOrManyTypes, ResultMode, RunMode, ToolCommandConfig, ToolConfigWithDefaults,
+    ToolParameterConfig, ToolSource, item::ToolParameterItemConfig,
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_inquire::{InlineOption, InlineSelect};
@@ -62,6 +62,32 @@ impl ToolDefinition {
         }
     }
 
+    pub fn format_args(
+        &self,
+        name: Option<&str>,
+        cmd: &ToolCommandConfig,
+        arguments: &Map<String, Value>,
+        root: &Path,
+    ) -> Result<Result<String, String>, ToolError> {
+        let name = name.unwrap_or(&self.name);
+        if arguments.is_empty() {
+            return Ok(Ok(String::new()));
+        }
+
+        let ctx = json!({
+            "tool": {
+                "name": self.name,
+                "arguments": arguments,
+            },
+            "context": {
+                "format_parameters": true,
+                "root": root.to_string_lossy(),
+            },
+        });
+
+        run_cmd_with_ctx(name, cmd, &ctx, root)
+    }
+
     pub async fn call(
         &self,
         id: String,
@@ -76,7 +102,7 @@ impl ToolDefinition {
 
         // If the tool call has answers to provide to the tool, it means the
         // tool already ran once, and we should not ask for confirmation again.
-        let cancel_reasoning = if answers.is_empty() {
+        let reject_run_reply = if answers.is_empty() {
             self.prepare_run(
                 config.run(),
                 &mut arguments,
@@ -89,7 +115,7 @@ impl ToolDefinition {
             None
         };
 
-        let result = if let Some(content) = cancel_reasoning {
+        let result = if let Some(content) = reject_run_reply {
             ToolCallResponse {
                 id,
                 result: Ok(content),
@@ -146,98 +172,118 @@ impl ToolDefinition {
             });
         }
 
-        let command = {
-            let ctx = json!({
-                "tool": {
-                    "name": name,
-                    "arguments": arguments,
-                    "answers": answers,
-                },
-                "context": {
-                    "root": root.to_string_lossy().into_owned(),
-                },
-            });
+        let ctx = json!({
+            "tool": {
+                "name": name,
+                "arguments": arguments,
+                "answers": answers,
+            },
+            "context": {
+                "root": root.to_string_lossy().into_owned(),
+            },
+        });
 
-            let Some(command) = config.command() else {
-                return Err(ToolError::MissingCommand);
-            };
-
-            let tmpl = Arc::new(Environment::new());
-
-            let program = tmpl.render_str(&command.program, &ctx).map_err(|error| {
-                ToolError::TemplateError {
-                    data: command.program.clone(),
-                    error,
-                }
-            })?;
-
-            let args = command
-                .args
-                .iter()
-                .map(|s| tmpl.render_str(s, &ctx))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| ToolError::TemplateError {
-                    data: command.args.join(" ").clone(),
-                    error,
-                })?;
-
-            let expression = if command.shell {
-                let cmd = std::iter::once(program.clone())
-                    .chain(args.iter().cloned())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-
-                duct_sh::sh_dangerous(cmd)
-            } else {
-                duct::cmd(program.clone(), args)
-            };
-
-            expression
-                .dir(root)
-                .unchecked()
-                .stdout_capture()
-                .stderr_capture()
+        let Some(command) = config.command() else {
+            return Err(ToolError::MissingCommand);
         };
 
-        match command.run() {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let content = match serde_json::from_str::<Outcome>(&stdout) {
-                    Err(_) => stdout.to_string(),
-                    Ok(Outcome::Success { content }) => content,
-                    Ok(Outcome::NeedsInput { question }) => {
-                        return Err(ToolError::NeedsInput { question });
-                    }
-                };
+        Ok(ToolCallResponse {
+            id,
+            result: run_cmd_with_ctx(name, &command, &ctx, root)?,
+        })
 
-                if output.status.success() {
-                    Ok(ToolCallResponse {
-                        id,
-                        result: Ok(content),
-                    })
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    Ok(ToolCallResponse {
-                        id,
-                        result: Err(json!({
-                            "message": format!("Tool '{name}' execution failed."),
-                            "stderr": stderr,
-                            "stdout": content,
-                        })
-                        .to_string()),
-                    })
-                }
-            }
-            Err(error) => Ok(ToolCallResponse {
-                id,
-                result: Err(json!({
-                    "message": format!(
-                        "Failed to execute command '{command:?}': {error}",
-                    ),
-                })
-                .to_string()),
-            }),
-        }
+        // let command = {
+        //     let ctx = json!({
+        //         "tool": {
+        //             "name": name,
+        //             "arguments": arguments,
+        //             "answers": answers,
+        //         },
+        //         "context": {
+        //             "root": root.to_string_lossy().into_owned(),
+        //         },
+        //     });
+        //
+        //     let Some(command) = config.command() else {
+        //         return Err(ToolError::MissingCommand);
+        //     };
+        //
+        //     let tmpl = Arc::new(Environment::new());
+        //
+        //     let program = tmpl.render_str(&command.program, &ctx).map_err(|error| {
+        //         ToolError::TemplateError {
+        //             data: command.program.clone(),
+        //             error,
+        //         }
+        //     })?;
+        //
+        //     let args = command
+        //         .args
+        //         .iter()
+        //         .map(|s| tmpl.render_str(s, &ctx))
+        //         .collect::<Result<Vec<_>, _>>()
+        //         .map_err(|error| ToolError::TemplateError {
+        //             data: command.args.join(" ").clone(),
+        //             error,
+        //         })?;
+        //
+        //     let expression = if command.shell {
+        //         let cmd = std::iter::once(program.clone())
+        //             .chain(args.iter().cloned())
+        //             .collect::<Vec<_>>()
+        //             .join(" ");
+        //
+        //         duct_sh::sh_dangerous(cmd)
+        //     } else {
+        //         duct::cmd(program.clone(), args)
+        //     };
+        //
+        //     expression
+        //         .dir(root)
+        //         .unchecked()
+        //         .stdout_capture()
+        //         .stderr_capture()
+        // };
+        //
+        // match command.run() {
+        //     Ok(output) => {
+        //         let stdout = String::from_utf8_lossy(&output.stdout);
+        //         let content = match serde_json::from_str::<Outcome>(&stdout) {
+        //             Err(_) => stdout.to_string(),
+        //             Ok(Outcome::Success { content }) => content,
+        //             Ok(Outcome::NeedsInput { question }) => {
+        //                 return Err(ToolError::NeedsInput { question });
+        //             }
+        //         };
+        //
+        //         if output.status.success() {
+        //             Ok(ToolCallResponse {
+        //                 id,
+        //                 result: Ok(content),
+        //             })
+        //         } else {
+        //             let stderr = String::from_utf8_lossy(&output.stderr);
+        //             Ok(ToolCallResponse {
+        //                 id,
+        //                 result: Err(json!({
+        //                     "message": format!("Tool '{name}' execution failed."),
+        //                     "stderr": stderr,
+        //                     "stdout": content,
+        //                 })
+        //                 .to_string()),
+        //             })
+        //         }
+        //     }
+        //     Err(error) => Ok(ToolCallResponse {
+        //         id,
+        //         result: Err(json!({
+        //             "message": format!(
+        //                 "Failed to execute command '{command:?}': {error}",
+        //             ),
+        //         })
+        //         .to_string()),
+        //     }),
+        // }
     }
 
     async fn call_mcp(
@@ -499,6 +545,82 @@ impl ToolDefinition {
 
         result.result = Ok(content);
         Ok(result)
+    }
+}
+
+fn run_cmd_with_ctx(
+    name: &str,
+    command: &ToolCommandConfig,
+    ctx: &Value,
+    root: &Path,
+) -> Result<Result<String, String>, ToolError> {
+    let command = {
+        let tmpl = Arc::new(Environment::new());
+
+        let program =
+            tmpl.render_str(&command.program, ctx)
+                .map_err(|error| ToolError::TemplateError {
+                    data: command.program.clone(),
+                    error,
+                })?;
+
+        let args = command
+            .args
+            .iter()
+            .map(|s| tmpl.render_str(s, ctx))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| ToolError::TemplateError {
+                data: command.args.join(" ").clone(),
+                error,
+            })?;
+
+        let expression = if command.shell {
+            let cmd = std::iter::once(program.clone())
+                .chain(args.iter().cloned())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            duct_sh::sh_dangerous(cmd)
+        } else {
+            duct::cmd(program.clone(), args)
+        };
+
+        expression
+            .dir(root)
+            .unchecked()
+            .stdout_capture()
+            .stderr_capture()
+    };
+
+    match command.run() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let content = match serde_json::from_str::<Outcome>(&stdout) {
+                Err(_) => stdout.to_string(),
+                Ok(Outcome::Success { content }) => content,
+                Ok(Outcome::NeedsInput { question }) => {
+                    return Err(ToolError::NeedsInput { question });
+                }
+            };
+
+            if output.status.success() {
+                Ok(Ok(content))
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Ok(Err(json!({
+                    "message": format!("Tool '{name}' execution failed."),
+                    "stderr": stderr,
+                    "stdout": content,
+                })
+                .to_string()))
+            }
+        }
+        Err(error) => Ok(Err(json!({
+            "message": format!(
+                "Failed to execute command '{command:?}': {error}",
+            ),
+        })
+        .to_string())),
     }
 }
 

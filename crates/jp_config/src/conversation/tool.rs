@@ -1,8 +1,9 @@
 //! Tool configuration for conversations.
 
-use std::str::FromStr;
+use std::{fmt, path::Path, process::Output, str::FromStr, sync::Arc};
 
 use indexmap::IndexMap;
+use minijinja::Environment;
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -189,7 +190,7 @@ pub struct ToolConfig {
 
     /// The command to run. Only used for local tools.
     #[setting(nested)]
-    pub command: Option<ToolCommandConfigOrString>,
+    pub command: Option<CommandConfigOrString>,
 
     /// The description of the tool. This will override any existing
     /// description, such as the one from an MCP server, or a built-in tool.
@@ -331,10 +332,11 @@ impl ToPartial for ToolConfig {
     }
 }
 
-/// Tool command configuration, either as a string or a complete configuration.
-#[derive(Debug, Clone, PartialEq, Config)]
+/// Command configuration, either as a string or a complete configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
 #[config(rename_all = "snake_case", serde(untagged))]
-pub enum ToolCommandConfigOrString {
+#[serde(untagged)]
+pub enum CommandConfigOrString {
     /// A single string, which is interpreted as the command to run.
     String(String),
 
@@ -343,7 +345,16 @@ pub enum ToolCommandConfigOrString {
     Config(ToolCommandConfig),
 }
 
-impl AssignKeyValue for PartialToolCommandConfigOrString {
+impl fmt::Display for CommandConfigOrString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::String(v) => write!(f, "{v}"),
+            Self::Config(v) => write!(f, "{v}"),
+        }
+    }
+}
+
+impl AssignKeyValue for PartialCommandConfigOrString {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object_or_from_str()?,
@@ -357,7 +368,7 @@ impl AssignKeyValue for PartialToolCommandConfigOrString {
     }
 }
 
-impl PartialConfigDelta for PartialToolCommandConfigOrString {
+impl PartialConfigDelta for PartialCommandConfigOrString {
     fn delta(&self, next: Self) -> Self {
         match (self, next) {
             (Self::Config(prev), Self::Config(next)) => Self::Config(prev.delta(next)),
@@ -366,7 +377,7 @@ impl PartialConfigDelta for PartialToolCommandConfigOrString {
     }
 }
 
-impl ToPartial for ToolCommandConfigOrString {
+impl ToPartial for CommandConfigOrString {
     fn to_partial(&self) -> Self::Partial {
         match self {
             Self::String(v) => Self::Partial::String(v.to_owned()),
@@ -375,7 +386,7 @@ impl ToPartial for ToolCommandConfigOrString {
     }
 }
 
-impl FromStr for PartialToolCommandConfigOrString {
+impl FromStr for PartialCommandConfigOrString {
     type Err = BoxedError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -383,12 +394,12 @@ impl FromStr for PartialToolCommandConfigOrString {
     }
 }
 
-impl ToolCommandConfigOrString {
+impl CommandConfigOrString {
     /// Return the command configuration.
     ///
     /// If the configuration is a string, it is interpreted as a shell command.
     #[must_use]
-    fn command(self) -> ToolCommandConfig {
+    pub fn command(self) -> ToolCommandConfig {
         match self {
             Self::String(v) => {
                 let mut iter = v.split_whitespace().map(str::to_owned);
@@ -405,7 +416,7 @@ impl ToolCommandConfigOrString {
 }
 
 /// Tool command configuration.
-#[derive(Debug, Clone, PartialEq, Config)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolCommandConfig {
     /// The program to run.
@@ -424,6 +435,62 @@ pub struct ToolCommandConfig {
     /// confirmation before running the tool, for security reasons.
     #[setting(default)]
     pub shell: bool,
+}
+
+impl ToolCommandConfig {
+    /// Run the command.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the command fails.
+    pub fn run(&self, root: &Path, ctx: &Value) -> Result<Output, BoxedError> {
+        let tmpl = Arc::new(Environment::new());
+
+        let program = tmpl.render_str(&self.program, ctx)?;
+        let args = self
+            .args
+            .iter()
+            .map(|s| tmpl.render_str(s, ctx))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let expression = if self.shell {
+            let cmd = std::iter::once(program)
+                .chain(args.iter().cloned())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            duct_sh::sh_dangerous(cmd)
+        } else {
+            duct::cmd(program, args)
+        };
+
+        expression
+            .dir(root)
+            .unchecked()
+            .stdout_capture()
+            .stderr_capture()
+            .run()
+            .map_err(Into::into)
+    }
+}
+
+impl fmt::Display for ToolCommandConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.shell {
+            writeln!(f, "/bin/sh -c'")?;
+        }
+
+        write!(f, "{}", self.program)?;
+        for arg in &self.args {
+            write!(f, " {arg}")?;
+        }
+
+        if self.shell {
+            write!(f, "'")?;
+        }
+
+        Ok(())
+    }
 }
 
 impl AssignKeyValue for PartialToolCommandConfig {
@@ -569,7 +636,7 @@ impl OneOrManyTypes {
     #[must_use]
     pub fn has_type(&self, type_: &str) -> bool {
         match self {
-            Self::One(v) => v == type_,
+            Self::One(v) => v.as_str() == type_,
             Self::Many(v) => v.iter().any(|v| v == type_),
         }
     }
@@ -578,7 +645,7 @@ impl OneOrManyTypes {
     #[must_use]
     pub fn is_type(&self, type_: &str) -> bool {
         match self {
-            Self::One(v) => v == type_,
+            Self::One(v) => v.as_str() == type_,
             Self::Many(v) => v.len() == 1 && v[0] == type_,
         }
     }
@@ -851,7 +918,7 @@ impl ToolConfigWithDefaults {
         self.tool
             .command
             .clone()
-            .map(ToolCommandConfigOrString::command)
+            .map(CommandConfigOrString::command)
     }
 
     /// Return the source of the tool.
@@ -971,12 +1038,12 @@ mod tests {
         p.assign(kv).unwrap();
         assert_eq!(
             p.command,
-            Some(PartialToolCommandConfigOrString::String(
+            Some(PartialCommandConfigOrString::String(
                 "cargo check".to_owned()
             ))
         );
 
-        let cfg = ToolCommandConfigOrString::from_partial(p.command.clone().unwrap()).unwrap();
+        let cfg = CommandConfigOrString::from_partial(p.command.clone().unwrap()).unwrap();
         assert_eq!(cfg.command(), ToolCommandConfig {
             program: "cargo".to_owned(),
             args: vec!["check".to_owned()],
@@ -991,7 +1058,7 @@ mod tests {
         p.assign(kv).unwrap();
         assert_eq!(
             p.command,
-            Some(PartialToolCommandConfigOrString::Config(
+            Some(PartialCommandConfigOrString::Config(
                 PartialToolCommandConfig {
                     program: Some("cargo".to_owned()),
                     args: Some(vec!["check".to_owned(), "--verbose".to_owned()]),
@@ -1000,7 +1067,7 @@ mod tests {
             ))
         );
 
-        let cfg = ToolCommandConfigOrString::from_partial(p.command.unwrap()).unwrap();
+        let cfg = CommandConfigOrString::from_partial(p.command.unwrap()).unwrap();
         assert_eq!(cfg.command(), ToolCommandConfig {
             program: "cargo".to_owned(),
             args: vec!["check".to_owned(), "--verbose".to_owned()],
