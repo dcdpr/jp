@@ -1,6 +1,5 @@
 use std::{collections::HashMap, env, path::Path, process::Stdio, sync::Arc, time::Duration};
 
-use hex::ToHex as _;
 use indexmap::IndexMap;
 use jp_config::providers::mcp::{AlgorithmConfig, McpProviderConfig};
 use rmcp::{
@@ -327,6 +326,6 @@ pub fn verify_file_checksum(
         server: server.to_string(),
         path,
         expected: hash.to_string(),
-        got: digest.encode_hex(),
+        got: digest,
     })
 }

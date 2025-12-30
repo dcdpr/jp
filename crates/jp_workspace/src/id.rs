@@ -11,7 +11,7 @@ use std::{
     ops::Deref,
     path::Path,
     str::FromStr,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use crate::{Error, Result};
@@ -59,7 +59,7 @@ impl Default for Id {
     fn default() -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("valid timestamp")
+            .unwrap_or(Duration::ZERO)
             .as_millis();
 
         generate_id_from_timestamp(timestamp)
