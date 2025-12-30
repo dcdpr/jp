@@ -55,23 +55,22 @@ impl Ls {
 
         let mut conversations = ctx
             .workspace
-            .conversations_details()
-            .into_iter()
+            .conversations()
             .filter(|(_, c)| !self.local || c.user)
             .map(|(id, conversation)| {
                 let Conversation {
                     title,
                     user,
                     last_event_at,
-                    events_count: events,
+                    events_count,
                     ..
                 } = conversation;
                 Details {
-                    id,
-                    title,
-                    messages: events,
-                    last_event_at,
-                    local: user,
+                    id: *id,
+                    title: title.clone(),
+                    messages: *events_count,
+                    last_event_at: *last_event_at,
+                    local: *user,
                 }
             })
             .collect::<Vec<_>>();
@@ -105,7 +104,7 @@ impl Ls {
             rows.push(row);
         }
 
-        for details in conversations.into_iter().skip(skip) {
+        for details in conversations {
             rows.push(self.build_conversation_row(
                 ctx,
                 active_conversation_id,
