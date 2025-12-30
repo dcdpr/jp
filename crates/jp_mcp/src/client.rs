@@ -13,7 +13,7 @@ use rmcp::{
 };
 use sha1::{Digest as _, Sha1};
 use sha2::Sha256;
-use tokio::{process::Command, runtime::Handle, sync::Mutex, task::JoinSet};
+use tokio::{process::Command, runtime::Handle, sync::RwLock, task::JoinSet};
 use tracing::trace;
 
 use crate::{
@@ -26,17 +26,17 @@ use crate::{
 #[derive(Clone)]
 pub struct Client {
     /// All MCP servers known to the client.
-    servers: Arc<Mutex<IndexMap<McpServerId, McpProviderConfig>>>,
+    servers: Arc<RwLock<IndexMap<McpServerId, McpProviderConfig>>>,
 
     /// Running MCP services.
-    services: Arc<Mutex<HashMap<McpServerId, RunningService<RoleClient, ()>>>>,
+    services: Arc<RwLock<HashMap<McpServerId, RunningService<RoleClient, ()>>>>,
 }
 
 impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client")
             .field("servers", &self.servers)
-            .field("services", &self.services.blocking_lock().keys())
+            .field("services", &self.services.blocking_read().keys())
             .finish()
     }
 }
@@ -51,13 +51,13 @@ impl Client {
             .collect();
 
         Self {
-            services: Arc::new(Mutex::new(HashMap::new())),
-            servers: Arc::new(Mutex::new(servers)),
+            services: Arc::new(RwLock::new(HashMap::new())),
+            servers: Arc::new(RwLock::new(servers)),
         }
     }
 
     pub async fn get_tool(&self, id: &McpToolId, server_id: Option<&McpServerId>) -> Result<Tool> {
-        let servers = self.servers.lock().await;
+        let servers = self.servers.read().await;
         let server_ids = match server_id {
             Some(server_id) => vec![server_id],
             None => servers.keys().collect(),
@@ -68,7 +68,7 @@ impl Client {
                 continue;
             };
 
-            let tools = match self.services.lock().await.get(server_id) {
+            let tools = match self.services.read().await.get(server_id) {
                 Some(client) => client.peer().list_all_tools().await?,
                 None => {
                     Self::create_client(server_id, server)
@@ -92,7 +92,7 @@ impl Client {
         id: &McpToolId,
         server_name: Option<&McpServerId>,
     ) -> Result<McpServerId> {
-        let servers = self.servers.lock().await;
+        let servers = self.servers.read().await;
         for server_id in servers.keys() {
             if let Some(name) = server_name
                 && name != server_id
@@ -116,7 +116,8 @@ impl Client {
         server_name: Option<&str>,
         params: &serde_json::Value,
     ) -> Result<CallToolResult> {
-        for (server_id, client) in self.services.lock().await.iter() {
+        let services = self.services.read().await;
+        for (server_id, client) in services.iter() {
             if let Some(server) = server_name
                 && server_id.as_str() != server
             {
@@ -147,7 +148,7 @@ impl Client {
     /// a list of URIs which can be sent to [`Self::get_resource_contents`] to
     /// retrieve the contents.
     pub async fn list_resources(&self, id: &McpServerId) -> Result<Vec<Resource>> {
-        let clients = self.services.lock().await;
+        let clients = self.services.read().await;
         let client = clients.get(id).ok_or(Error::UnknownServer(id.clone()))?;
 
         Ok(client.peer().list_all_resources().await?)
@@ -162,7 +163,7 @@ impl Client {
         id: &McpServerId,
         uri: impl Into<String>,
     ) -> Result<Vec<ResourceContents>> {
-        let clients = self.services.lock().await;
+        let clients = self.services.read().await;
         let client = clients.get(id).ok_or(Error::UnknownServer(id.clone()))?;
 
         Ok(client
@@ -177,7 +178,7 @@ impl Client {
         server_ids: &[McpServerId],
         handle: Handle,
     ) -> Result<JoinSet<Result<()>>> {
-        let mut clients = self.services.lock().await;
+        let mut clients = self.services.write().await;
         let servers_to_stop: Vec<_> = clients
             .keys()
             .filter(|&name| server_ids.iter().all(|s| s != name))
@@ -206,13 +207,13 @@ impl Client {
                 let clients = self.services.clone();
                 let server_id = server_id.clone();
                 async move {
-                    let servers = servers.lock().await;
+                    let servers = servers.read().await;
                     let server = servers
                         .get(&server_id)
                         .ok_or(Error::UnknownServer(server_id.clone()))?;
 
                     let client = Self::create_client(&server_id, server).await?;
-                    clients.lock().await.insert(server_id.clone(), client);
+                    clients.write().await.insert(server_id.clone(), client);
                     Ok(())
                 }
             });
@@ -280,12 +281,12 @@ impl Client {
 
     /// List tools available on a specific server.
     async fn list_tools_by_server_id(&self, server_id: &McpServerId) -> Result<Vec<Tool>> {
-        let servers = self.servers.lock().await;
+        let servers = self.servers.read().await;
         let Some(server) = servers.get(server_id) else {
             return Err(Error::UnknownServer(server_id.clone()));
         };
 
-        Ok(match self.services.lock().await.get(server_id) {
+        Ok(match self.services.read().await.get(server_id) {
             Some(client) => client.peer().list_all_tools().await?,
             None => {
                 Self::create_client(server_id, server)
