@@ -398,6 +398,7 @@ impl ToolDefinition {
                     InlineOption::new('n', "Skip running tool"),
                     InlineOption::new('e', "Run tool, but first edit arguments"),
                     InlineOption::new('r', "Skip running tool, and tell assistant why"),
+                    InlineOption::new('p', "Print raw tool arguments"),
                 ],
             )
             .with_default('y')
@@ -418,6 +419,18 @@ impl ToolDefinition {
                                 error,
                             })?
                     )));
+                }
+                'p' => {
+                    println!("{}\n", serde_json::to_string_pretty(&arguments)?);
+
+                    return Box::pin(self.prepare_run(
+                        RunMode::Ask,
+                        arguments,
+                        source,
+                        mcp_client,
+                        editor,
+                    ))
+                    .await;
                 }
                 _ => unreachable!(),
             },
