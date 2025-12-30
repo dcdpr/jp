@@ -3,7 +3,7 @@ use std::{
     collections::{HashMap, HashSet, TryReserveError, hash_map},
     fmt::{self, Debug},
     hash::{BuildHasher, Hash, RandomState},
-    ops::Index,
+    ops::{Deref, DerefMut, Index},
     ptr,
 };
 
@@ -316,7 +316,7 @@ impl<K, V, S> TombMap<K, V, S> {
 
     /// An iterator visiting all key-value pairs in arbitrary order,
     /// with mutable references to the values.
-    /// The iterator element type is `(&'a K, &'a mut V)`.
+    /// The iterator element type is `(&'a K, Mut<'a, K, V>)`.
     ///
     /// # Examples
     ///
@@ -339,19 +339,11 @@ impl<K, V, S> TombMap<K, V, S> {
     ///
     /// In the current implementation, iterating over map takes O(capacity) time
     /// instead of O(len) because it internally visits empty buckets too.
-    ///
-    /// # Panics
-    ///
-    /// This function is not yet implemented and panics at runtime.
-    pub fn iter_mut(&mut self) -> hash_map::IterMut<'_, K, V> {
-        // FIXME: This does **NOT** have change detection.
-        //
-        // We will need to return our own `IterMut` type, which returns a custom
-        // `Mut<&mut V>` type, which then implements `DerefMut` to return a
-        // `&mut V`.
-        //
-        // self.live.iter_mut()
-        panic!("`iter_mut` is not yet implemented. Use `iter_mut_untracked` instead.");
+    pub fn iter_mut(&mut self) -> IterMut<'_, K, V> {
+        IterMut {
+            base: self.live.iter_mut(),
+            modified: ptr::NonNull::from(&mut self.modified),
+        }
     }
 
     /// Returns the number of elements in the map.
@@ -438,11 +430,8 @@ impl<K, V, S> TombMap<K, V, S> {
         self.live.iter().filter(|(k, _)| self.modified.contains(k))
     }
 
-    /// This is a (temporary) workaround for the fact that `iter_mut` does not
-    /// do change detection for individual elements in the mutable iterator.
-    ///
-    /// Sometimes that is okay, in which case you can use this specialized
-    /// method.
+    /// This is similar to [`Self::iter_mut`] but does not do change detection
+    /// for individual elements in the mutable iterator.
     pub fn iter_mut_untracked(&mut self) -> impl Iterator<Item = (&K, &mut V)>
     where
         K: Eq + Hash,
@@ -1182,6 +1171,137 @@ pub enum Entry<'a, K, V> {
     Vacant(VacantEntry<'a, K, V>),
 }
 
+/// An iterator over the entries of a `TombMap`.
+pub struct IterMut<'a, K, V> {
+    base: hash_map::IterMut<'a, K, V>,
+    modified: ptr::NonNull<HashSet<K>>,
+}
+
+impl<'a, K, V> Iterator for IterMut<'a, K, V> {
+    type Item = (&'a K, Mut<'a, K, V>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.base.next().map(|(key, value)| {
+            (key, Mut {
+                key,
+                value,
+                modified: self.modified,
+            })
+        })
+    }
+}
+
+/// A wrapper for a mutable reference to a value in a `TombMap`.
+pub struct Mut<'a, K, V> {
+    key: &'a K,
+    value: &'a mut V,
+    modified: ptr::NonNull<HashSet<K>>,
+}
+
+impl<'a, K, V> Mut<'a, K, V> {
+    pub fn new_untracked(key: &'a K, value: &'a mut V) -> Self {
+        Self {
+            key,
+            value,
+            modified: ptr::NonNull::from(&mut HashSet::new()),
+        }
+    }
+
+    /// Returns the key associated with this entry.
+    #[inline]
+    #[must_use]
+    pub fn key(&self) -> &K {
+        self.key
+    }
+
+    /// Returns a mutable reference to the value.
+    ///
+    /// This will mark the key as modified.
+    #[inline]
+    pub fn get_mut(&mut self) -> &mut V
+    where
+        K: Clone + Eq + Hash,
+    {
+        // SAFETY: The pointer is valid for 'a.
+        let modified: &mut HashSet<K> = unsafe { self.modified.as_mut() };
+        modified.insert(self.key.clone());
+        self.value
+    }
+
+    /// Converts the `Mut` into a mutable reference to the value with the lifetime of the map.
+    ///
+    /// This will mark the key as modified.
+    #[inline]
+    #[must_use]
+    pub fn into_mut(mut self) -> &'a mut V
+    where
+        K: Clone + Eq + Hash,
+    {
+        // SAFETY: The pointer is valid for 'a.
+        let modified: &mut HashSet<K> = unsafe { self.modified.as_mut() };
+        modified.insert(self.key.clone());
+        self.value
+    }
+
+    pub fn map<U, F>(self, f: F) -> Mut<'a, K, U>
+    where
+        F: FnOnce(&mut V) -> &mut U,
+    {
+        Mut {
+            key: self.key,
+            value: f(self.value),
+            modified: self.modified,
+        }
+    }
+
+    pub fn and_then<U, F>(self, f: F) -> Option<Mut<'a, K, U>>
+    where
+        F: FnOnce(&mut V) -> Option<&mut U>,
+    {
+        f(self.value).map(|value| Mut {
+            key: self.key,
+            value,
+            modified: self.modified,
+        })
+    }
+}
+
+impl<K, V> AsMut<V> for Mut<'_, K, V>
+where
+    K: Clone + Eq + Hash,
+{
+    fn as_mut(&mut self) -> &mut V {
+        self.get_mut()
+    }
+}
+impl<K, V> Deref for Mut<'_, K, V> {
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        self.value
+    }
+}
+
+impl<K, V> DerefMut for Mut<'_, K, V>
+where
+    K: Clone + Eq + Hash,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // SAFETY: The pointer is valid for 'a.
+        let modified: &mut HashSet<K> = unsafe { self.modified.as_mut() };
+        modified.insert(self.key.clone());
+        self.value
+    }
+}
+
+impl<K: Debug, V: Debug> Debug for Mut<'_, K, V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Mut")
+            .field(self.key)
+            .field(self.value)
+            .finish()
+    }
+}
 impl<K: Debug, V: Debug> Debug for Entry<'_, K, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
@@ -1233,12 +1353,12 @@ impl<'a, K, V, S> IntoIterator for &'a TombMap<K, V, S> {
 }
 
 impl<'a, K, V, S> IntoIterator for &'a mut TombMap<K, V, S> {
-    type Item = (&'a K, &'a mut V);
-    type IntoIter = hash_map::IterMut<'a, K, V>;
+    type Item = (&'a K, Mut<'a, K, V>);
+    type IntoIter = IterMut<'a, K, V>;
 
     #[inline]
-    fn into_iter(self) -> hash_map::IterMut<'a, K, V> {
-        panic!("`iter_mut` is not yet implemented. Use `iter_mut_untracked` instead.");
+    fn into_iter(self) -> IterMut<'a, K, V> {
+        self.iter_mut()
     }
 }
 
@@ -1869,6 +1989,7 @@ mod tests {
         AndModifyIncrement(&'static str),
         Clear,
         RetainOddValues,
+        IterMutIncrement(&'static str),
         Drain,
     }
 
@@ -1969,9 +2090,26 @@ mod tests {
                 ExpectedState::new([("x", 50)], ["a", "b", "c"], ["x"]),
             ),
             (
-                "15. Drain",
+                "15. Insert 'y' after clear",
+                Action::Insert("y", 51),
+                ExpectedState::new([("x", 50), ("y", 51)], ["a", "b", "c"], ["x"]),
+            ),
+            (
+                "16. Insert 'z' after clear",
+                Action::Insert("z", 52),
+                ExpectedState::new([("x", 50), ("y", 51), ("z", 52)], ["a", "b", "c"], ["x"]),
+            ),
+            (
+                "17. IterMut all, modify 'y'",
+                Action::IterMutIncrement("y"),
+                ExpectedState::new([("x", 50), ("y", 52), ("z", 52)], ["a", "b", "c"], [
+                    "x", "y",
+                ]),
+            ),
+            (
+                "18. Drain",
                 Action::Drain,
-                ExpectedState::new([], ["a", "b", "c", "x"], []),
+                ExpectedState::new([], ["a", "b", "c", "x", "y", "z"], []),
             ),
         ];
 
@@ -1999,6 +2137,14 @@ mod tests {
                 }
                 Action::RetainOddValues => {
                     map.retain(|_k, v| *v % 2 != 0);
+                }
+                #[expect(clippy::explicit_iter_loop)]
+                Action::IterMutIncrement(k1) => {
+                    for (k, mut v) in map.iter_mut() {
+                        if k == &k1 {
+                            *v += 1;
+                        }
+                    }
                 }
                 Action::Drain => {
                     let _drained: Vec<_> = map.drain().collect();

@@ -122,7 +122,7 @@ impl Task for TitleGeneratorTask {
         self: Box<Self>,
         ctx: &mut Workspace,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        if let Some(conversation) = ctx.get_conversation_mut(&self.conversation_id) {
+        if let Some(mut conversation) = ctx.get_conversation_mut(&self.conversation_id) {
             conversation.title = self.title;
         }
 

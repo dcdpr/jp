@@ -37,7 +37,7 @@ impl Edit {
         let id = self.id.unwrap_or(active_id);
 
         if let Some(user) = self.local {
-            let conversation = ctx.workspace.try_get_conversation_mut(&id)?;
+            let mut conversation = ctx.workspace.try_get_conversation_mut(&id)?;
             conversation.user = user.unwrap_or(!conversation.user);
         }
 

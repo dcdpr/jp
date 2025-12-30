@@ -23,7 +23,6 @@ use crate::{
     value::{read_json, write_json},
 };
 
-pub const DEFAULT_STORAGE_DIR: &str = ".jp";
 pub const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
 pub const CONVERSATIONS_DIR: &str = "conversations";
