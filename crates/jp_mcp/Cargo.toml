@@ -15,7 +15,6 @@ version.workspace = true
 [dependencies]
 jp_config = { workspace = true }
 
-hex = { workspace = true }
 indexmap = { workspace = true }
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 serde = { workspace = true }
