@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, error::Error, fs, path::Path};
+use std::{borrow::Cow, collections::BTreeSet, error::Error, fs, path::Path};
 
 use async_trait::async_trait;
 use glob::Pattern;
@@ -86,13 +86,32 @@ impl Handler for FileContent {
             return Ok(vec![]);
         }
 
-        let mut builder = OverrideBuilder::new(cwd);
-        for pattern in &self.includes {
-            let mut pattern = pattern.as_str();
+        let mut attachments = Vec::with_capacity(self.includes.len());
 
-            if pattern.starts_with('/') {
-                pattern = &pattern[1..];
-            }
+        // Any includes that are paths without glob patterns are always
+        // included, so we can skip any expensive tree walking for `.ignore`
+        // files nor do we care about `self.excludes`.
+        //
+        // We also check if the path is a directory, as those will have to use
+        // globbing and respect `.ignore` files.
+        let (includes, paths): (Vec<_>, Vec<_>) = self
+            .includes
+            .iter()
+            .partition(|p| p.as_str().contains(['*', '?', '[']) || cwd.join(p.as_str()).is_dir());
+
+        attachments.extend(paths.into_iter().filter_map(|pattern| {
+            let pattern = sanitize_pattern(pattern.as_str(), cwd);
+            let path = cwd.join(pattern.as_ref());
+            build_attachment(&path, cwd)
+        }));
+
+        if includes.is_empty() {
+            return Ok(attachments);
+        }
+
+        let mut builder = OverrideBuilder::new(cwd);
+        for pattern in includes {
+            let pattern = sanitize_pattern(pattern.as_str(), cwd);
 
             // We are hiding hidden files or directories by default (see
             // `hidden(true)`). If you were to add a pattern such as
@@ -120,17 +139,7 @@ impl Handler for FileContent {
                 builder.add(&format!(".{dir}/"))?;
             }
 
-            // If the pattern is a directory, add it recursively.
-            if cwd.join(pattern).is_dir() {
-                if pattern.ends_with('/') {
-                    pattern = &pattern[..pattern.len() - 1];
-                }
-
-                builder.add(&format!("{pattern}/**/*"))?;
-                continue;
-            }
-
-            builder.add(pattern)?;
+            builder.add(pattern.as_ref())?;
         }
         for p in &self.excludes {
             builder.add(&format!("!{p}"))?;
@@ -155,36 +164,62 @@ impl Handler for FileContent {
                         return WalkState::Continue;
                     }
 
-                    let Ok(rel) = path.strip_prefix(cwd) else {
-                        warn!(
-                            path = %path.display(),
-                            "Attachment path outside of working directory, skipping."
-                        );
-
+                    let Some(attachment) = build_attachment(path, cwd) else {
                         return WalkState::Continue;
                     };
 
-                    let content = match fs::read_to_string(path) {
-                        Ok(content) => content,
-                        Err(error) => {
-                            warn!(path = %rel.display(), %error, "Failed to read attachment.");
-                            return WalkState::Continue;
-                        }
-                    };
-
-                    let _result = tx.send(Attachment {
-                        source: rel.to_string_lossy().to_string(),
-                        content,
-                        ..Default::default()
-                    });
+                    let _result = tx.send(attachment);
 
                     WalkState::Continue
                 })
             });
 
         drop(tx);
-        return Ok(rx.into_iter().collect());
+        attachments.extend(rx);
+        return Ok(attachments);
     }
+}
+
+/// If the pattern is a directory, add it recursively.
+fn sanitize_pattern<'a>(mut pattern: &'a str, cwd: &Path) -> Cow<'a, str> {
+    if pattern.starts_with('/') {
+        pattern = &pattern[1..];
+    }
+
+    if cwd.join(pattern).is_dir() {
+        if pattern.ends_with('/') {
+            pattern = &pattern[..pattern.len() - 1];
+        }
+
+        Cow::Owned(format!("{pattern}/**/*"))
+    } else {
+        Cow::Borrowed(pattern)
+    }
+}
+
+fn build_attachment(path: &Path, cwd: &Path) -> Option<Attachment> {
+    let Ok(rel) = path.strip_prefix(cwd) else {
+        warn!(
+            path = %path.display(),
+            "Attachment path outside of working directory, skipping."
+        );
+
+        return None;
+    };
+
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) => {
+            warn!(path = %rel.display(), %error, "Failed to read attachment.");
+            return None;
+        }
+    };
+
+    Some(Attachment {
+        source: rel.to_string_lossy().to_string(),
+        content,
+        ..Default::default()
+    })
 }
 
 /// We need to do some extra work to get the path relative to the
