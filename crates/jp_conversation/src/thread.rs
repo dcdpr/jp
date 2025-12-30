@@ -2,6 +2,7 @@
 
 use jp_attachment::Attachment;
 use jp_config::assistant::instructions::InstructionsConfig;
+use quick_xml::se::TextFormat;
 use serde::Serialize;
 use tracing::trace;
 
@@ -201,6 +202,15 @@ impl Documents {
         let mut buffer = String::new();
         let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
         serializer.indent(' ', 2);
+
+        if self
+            .documents
+            .iter()
+            .any(|v| v.content.contains(['<', '>']))
+        {
+            serializer.text_format(TextFormat::CData);
+        }
+
         self.serialize(serializer)?;
         Ok(buffer)
     }
