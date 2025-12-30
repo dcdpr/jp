@@ -1186,17 +1186,16 @@ impl<'a, K, V> Iterator for IterMut<'a, K, V> {
             (key, Mut {
                 key,
                 value,
-                modified: self.modified,
+                modified: Some(self.modified),
             })
         })
     }
 }
-
 /// A wrapper for a mutable reference to a value in a `TombMap`.
 pub struct Mut<'a, K, V> {
     key: &'a K,
     value: &'a mut V,
-    modified: ptr::NonNull<HashSet<K>>,
+    modified: Option<ptr::NonNull<HashSet<K>>>,
 }
 
 impl<'a, K, V> Mut<'a, K, V> {
@@ -1204,7 +1203,7 @@ impl<'a, K, V> Mut<'a, K, V> {
         Self {
             key,
             value,
-            modified: ptr::NonNull::from(&mut HashSet::new()),
+            modified: None,
         }
     }
 
@@ -1223,9 +1222,11 @@ impl<'a, K, V> Mut<'a, K, V> {
     where
         K: Clone + Eq + Hash,
     {
-        // SAFETY: The pointer is valid for 'a.
-        let modified: &mut HashSet<K> = unsafe { self.modified.as_mut() };
-        modified.insert(self.key.clone());
+        if let Some(mut modified) = self.modified {
+            // SAFETY: The pointer is valid for 'a.
+            let modified: &mut HashSet<K> = unsafe { modified.as_mut() };
+            modified.insert(self.key.clone());
+        }
         self.value
     }
 
@@ -1234,13 +1235,15 @@ impl<'a, K, V> Mut<'a, K, V> {
     /// This will mark the key as modified.
     #[inline]
     #[must_use]
-    pub fn into_mut(mut self) -> &'a mut V
+    pub fn into_mut(self) -> &'a mut V
     where
         K: Clone + Eq + Hash,
     {
-        // SAFETY: The pointer is valid for 'a.
-        let modified: &mut HashSet<K> = unsafe { self.modified.as_mut() };
-        modified.insert(self.key.clone());
+        if let Some(mut modified) = self.modified {
+            // SAFETY: The pointer is valid for 'a.
+            let modified: &mut HashSet<K> = unsafe { modified.as_mut() };
+            modified.insert(self.key.clone());
+        }
         self.value
     }
 
@@ -1288,9 +1291,11 @@ where
     K: Clone + Eq + Hash,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        // SAFETY: The pointer is valid for 'a.
-        let modified: &mut HashSet<K> = unsafe { self.modified.as_mut() };
-        modified.insert(self.key.clone());
+        if let Some(mut modified) = self.modified {
+            // SAFETY: The pointer is valid for 'a.
+            let modified: &mut HashSet<K> = unsafe { modified.as_mut() };
+            modified.insert(self.key.clone());
+        }
         self.value
     }
 }
