@@ -267,7 +267,7 @@ fn file_diff(old: &str, new: &str) -> String {
     let mut buf = String::new();
     for (idx, group) in diff.grouped_ops(3).iter().enumerate() {
         if idx > 0 {
-            println!("{:-^1$}", "-", 80);
+            let _ = writeln!(buf, "{:-^1$}", "-", 80);
         }
         for op in group {
             for change in diff.iter_inline_changes(op) {
