@@ -43,7 +43,7 @@ commit *ARGS: _install-jp
         args="$msg"
     fi
 
-    jp query --new --tmp --cfg=personas/committer $args
+    jp query --new --tmp --cfg=personas/committer $args || exit 1
     git commit --amend
 
 [group('jp')]
