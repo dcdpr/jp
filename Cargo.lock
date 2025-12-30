@@ -2134,6 +2134,7 @@ dependencies = [
  "indoc",
  "insta",
  "jp_id",
+ "minijinja",
  "path-clean",
  "pretty_assertions",
  "quick-xml",
