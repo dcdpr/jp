@@ -240,6 +240,7 @@ impl Storage {
             );
         }
 
+        conversations.sort();
         conversations
     }
 
