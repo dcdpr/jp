@@ -2355,6 +2355,7 @@ dependencies = [
 name = "jp_tombmap"
 version = "0.1.0"
 dependencies = [
+ "ahash",
  "serde",
  "test-log",
 ]

@@ -13,6 +13,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+ahash = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]

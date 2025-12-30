@@ -2,11 +2,12 @@ use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet, TryReserveError, hash_map},
     fmt::{self, Debug},
-    hash::{BuildHasher, Hash, RandomState},
+    hash::{BuildHasher, Hash},
     ops::{Deref, DerefMut, Index},
     ptr,
 };
 
+use ahash::RandomState;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use self::Entry::*;
@@ -1962,10 +1963,14 @@ mod tests {
     use super::*;
 
     // Helper to compare HashMaps (standard library for expected state)
-    fn assert_maps_equal<K, V>(actual: &HashMap<K, V>, expected: &HashMap<K, V>, context: &str)
-    where
+    fn assert_maps_equal<K, V, S>(
+        actual: &HashMap<K, V, S>,
+        expected: &HashMap<K, V, S>,
+        context: &str,
+    ) where
         K: Eq + Hash + Debug,
         V: Eq + Debug,
+        S: BuildHasher,
     {
         assert_eq!(actual.len(), expected.len(), "{context}");
 
@@ -1995,7 +2000,7 @@ mod tests {
 
     #[derive(Debug, Clone)]
     struct ExpectedState {
-        live: HashMap<&'static str, i32>,
+        live: HashMap<&'static str, i32, RandomState>,
         dead: HashSet<&'static str>,
         modified: HashSet<&'static str>,
     }
