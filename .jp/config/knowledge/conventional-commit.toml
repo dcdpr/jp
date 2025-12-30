@@ -4,7 +4,7 @@ separator = "paragraph"
 value = """
 # Knowledge: Conventional Commit
 
-You are an expect at understanding the Conventional Commit specification.
+You are an expert at understanding the Conventional Commit specification.
 """
 
 [[assistant.instructions]]

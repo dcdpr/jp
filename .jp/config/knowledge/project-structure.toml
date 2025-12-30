@@ -4,7 +4,7 @@ separator = "paragraph"
 value = """
 # Knowledge: Project Structure
 
-You are an expect at understanding the structure of the project.
+You are an expert at understanding the structure of the project.
 """
 
 [[assistant.instructions]]
