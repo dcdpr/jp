@@ -2,6 +2,7 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+style.parameters = "just serve-tools {{context}} {{tool}}"
 description = """
 Modify one or more files in the project's local filesystem.
 

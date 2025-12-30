@@ -56,6 +56,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ctx = Context {
             root: dir.path().to_owned(),
+            format_parameters: false,
         };
 
         std::fs::write(dir.path().join("Cargo.toml"), indoc::indoc! {r#"

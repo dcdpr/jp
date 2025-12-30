@@ -46,6 +46,7 @@ PartialAppConfig {
                 style: PartialDisplayStyleConfig {
                     inline_results: None,
                     results_file_link: None,
+                    parameters: None,
                 },
             },
             tools: {},

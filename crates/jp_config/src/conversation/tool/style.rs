@@ -1,12 +1,14 @@
 //! Display style configuration for tools.
 
-use std::{fmt, num::ParseIntError};
+use std::{fmt, num::ParseIntError, str::FromStr};
 
-use schematic::{Config, ConfigEnum};
+use schematic::{Config, ConfigEnum, Schematic};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    conversation::tool::CommandConfigOrString,
     delta::{PartialConfigDelta, delta_opt},
     partial::{ToPartial, partial_opt},
 };
@@ -22,6 +24,10 @@ pub struct DisplayStyleConfig {
     /// How to display the link to the file containing the tool call results.
     #[setting(default)]
     pub results_file_link: LinkStyle,
+
+    /// How to display the tool call parameters.
+    #[setting(default)]
+    pub parameters: ParametersStyle,
 }
 
 impl AssignKeyValue for PartialDisplayStyleConfig {
@@ -30,6 +36,7 @@ impl AssignKeyValue for PartialDisplayStyleConfig {
             "" => *self = kv.try_object()?,
             "inline_results" => self.inline_results = kv.try_some_from_str()?,
             "results_file_link" => self.results_file_link = kv.try_some_from_str()?,
+            "parameters" => self.parameters = kv.try_some_from_str()?,
             _ => return missing_key(&kv),
         }
 
@@ -42,6 +49,7 @@ impl PartialConfigDelta for PartialDisplayStyleConfig {
         Self {
             inline_results: delta_opt(self.inline_results.as_ref(), next.inline_results),
             results_file_link: delta_opt(self.results_file_link.as_ref(), next.results_file_link),
+            parameters: delta_opt(self.parameters.as_ref(), next.parameters),
         }
     }
 }
@@ -53,6 +61,7 @@ impl ToPartial for DisplayStyleConfig {
         Self::Partial {
             inline_results: partial_opt(&self.inline_results, defaults.inline_results),
             results_file_link: partial_opt(&self.results_file_link, defaults.results_file_link),
+            parameters: partial_opt(&self.parameters, defaults.parameters),
         }
     }
 }
@@ -122,4 +131,54 @@ pub enum LinkStyle {
 
     /// No link.
     Off,
+}
+
+/// Define the name to serialize and deserialize for a unit variant.
+mod strings {
+    use crate::named_unit_variant;
+
+    named_unit_variant!(json);
+    named_unit_variant!(function_call);
+    named_unit_variant!(off);
+}
+
+/// How to display the link to the file containing the tool call results.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, Schematic)]
+#[serde(untagged)]
+pub enum ParametersStyle {
+    /// A JSON representation of the tool call parameters.
+    #[default]
+    #[serde(with = "strings::json")]
+    Json,
+
+    /// Function call syntax.
+    ///
+    /// e.g. `tool_name(arg1 = "value", arg2 = 123)`.
+    #[serde(with = "strings::function_call")]
+    FunctionCall,
+
+    /// No parameters are displayed.
+    #[serde(with = "strings::off")]
+    Off,
+
+    /// A custom command to format how the tool call parameters are displayed in
+    /// the terminal.
+    ///
+    /// The command is provided with the json representation of the parameters,
+    /// and is expected to return a string that is shown verbatim in the
+    /// terminal.
+    Custom(CommandConfigOrString),
+}
+
+impl FromStr for ParametersStyle {
+    type Err = BoxedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "off" => Self::Off,
+            "json" => Self::Json,
+            "function_call" => Self::FunctionCall,
+            _ => Self::Custom(CommandConfigOrString::String(s.to_owned())),
+        })
+    }
 }
