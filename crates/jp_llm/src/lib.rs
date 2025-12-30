@@ -12,4 +12,4 @@ pub(crate) mod test;
 
 pub use error::{Error, ToolError};
 pub use provider::Provider;
-pub use stream::aggregator::tool_call_request::AggregationError;
+pub use stream::{aggregator::tool_call_request::AggregationError, chain::EventChain};
