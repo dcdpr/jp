@@ -9,7 +9,7 @@ use jp_id::{
     Id,
     parts::{GlobalId, TargetId, Variant},
 };
-use schematic::{Config, ConfigEnum, Schematic};
+use schematic::{Config, ConfigEnum, PartialConfig as _, Schematic};
 use serde::{
     Deserialize, Deserializer, Serialize,
     de::{self, MapAccess, Visitor},
@@ -58,6 +58,7 @@ impl PartialConfigDelta for PartialModelIdOrAliasConfig {
     fn delta(&self, next: Self) -> Self {
         match (self, next) {
             (Self::Id(prev), Self::Id(next)) => Self::Id(prev.delta(next)),
+            (Self::Alias(prev), Self::Alias(next)) if prev == &next => Self::empty(),
             (_, next) => next,
         }
     }
