@@ -20,21 +20,55 @@ install:
 
 [group('jp')]
 issue-bug +ARGS="Please create a bug report for the following:\n\n": _install-jp
-    jp query --no-persist --new --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
+    jp query --new --tmp --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
 
 # Create a feature request issue.
 [group('jp')]
 issue-feat +ARGS="Please create a feature request for the following:\n\n": _install-jp
-    jp query --no-persist --new --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
+    jp query --new --tmp --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
 
 # Open a commit message in the editor, using Jean-Pierre.
 [group('jp')]
 [positional-arguments]
-commit +ARGS="Give me a commit message": _install-jp
+commit *ARGS: _install-jp
     #!/usr/bin/env sh
-    if message=$(jp query --no-persist --new --cfg=personas/commit "$@"); then
-        echo "$message" | sed -e 's/\x1b\[[0-9;]*[mGKHF]//g' | git commit --edit --file=-
+    args="$@"
+    msg="Give me a commit message"
+
+    starts_with() { case $2 in "$1"*) true;; *) false;; esac; }
+    if starts_with "--" "$@"; then
+    elif starts_with "-" "$@"; then
+        args="$* -- $msg"
+    elif [ -z "$args" ]; then
+        args="$msg"
     fi
+
+    jp query --new --tmp --cfg=personas/committer $args
+    git commit --amend
+
+[group('jp')]
+[positional-arguments]
+stage *ARGS: _install-jp
+    #!/usr/bin/env sh
+    args="$@"
+    msg="Find related changes in the git diff and stage ONE set of changes in preparation for a \
+    commit using the 'git_stage' tool. Follow your prompt instructions carefully."
+
+    starts_with() { case $2 in "$1"*) true;; *) false;; esac; }
+    contains() { case $2 in *"$1"*) true;; *) false;; esac; }
+    if starts_with "--" "$@"; then
+    elif starts_with "-" "$@" && ! contains "--" "$@"; then
+        args="$* -- $msg"
+    elif [ -z "$args" ]; then
+        args="$msg"
+    fi
+
+    jp query --new --tmp --cfg=personas/stager $args
+
+stage-and-commit: _install-jp
+    #!/usr/bin/env sh
+    out=$(just stage -c style.reasoning.display=hidden)
+    just commit "$out - now write me a commit message"
 
 # Generate changelog for the project.
 [group('build')]
@@ -66,8 +100,8 @@ check *FLAGS:
 
 # Run tests, using nextest.
 [group('check')]
-test *FLAGS: (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
-    cargo nextest run --workspace --all-targets {{FLAGS}}
+test *FLAGS="--workspace": (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
+    cargo nextest run --all-targets {{FLAGS}}
 
 # Continuously run tests, using Bacon.
 [group('check')]
