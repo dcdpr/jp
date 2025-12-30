@@ -21,7 +21,7 @@ pub use id::Id;
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::Storage;
-use jp_tombmap::TombMap;
+use jp_tombmap::{Mut, TombMap};
 use state::{LocalState, State, UserState};
 use tracing::{debug, info, trace, warn};
 
@@ -306,25 +306,33 @@ impl Workspace {
 
     /// Returns an iterator over all mutable conversations, including the active
     /// conversation.
+    ///
+    /// This returns a [`jp_tombmap::Mut`] instead of a reference to the
+    /// conversation, to allow for change tracking.
     pub fn conversations_mut(
         &mut self,
-    ) -> impl Iterator<Item = (&ConversationId, &mut Conversation)> {
+    ) -> impl Iterator<Item = (&ConversationId, Mut<'_, ConversationId, Conversation>)> {
         iter::once((
             &self
                 .state
                 .user
                 .conversations_metadata
                 .active_conversation_id,
-            &mut self.state.local.active_conversation,
+            Mut::new_untracked(
+                &self
+                    .state
+                    .user
+                    .conversations_metadata
+                    .active_conversation_id,
+                &mut self.state.local.active_conversation,
+            ),
         ))
-        .chain(
-            self.state
-                .local
-                .conversations
-                // FIXME
-                .iter_mut_untracked()
-                .filter_map(|v| get_or_init_conversation_mut(self.storage.as_ref(), v)),
-        )
+        .chain(self.state.local.conversations.iter_mut().filter_map(
+            |(id, conversation)| {
+                maybe_init_conversation(self.storage.as_ref(), (id, &conversation));
+                conversation.and_then(OnceCell::get_mut).map(|v| (id, v))
+            },
+        ))
     }
 
     /// Gets a reference to a conversation by its ID.
@@ -343,14 +351,20 @@ impl Workspace {
 
     /// Gets a mutable reference to a conversation by its ID.
     #[must_use]
-    pub fn get_conversation_mut(&mut self, id: &ConversationId) -> Option<&mut Conversation> {
+    pub fn get_conversation_mut(
+        &mut self,
+        id: &ConversationId,
+    ) -> Option<Mut<'_, ConversationId, Conversation>> {
         self.conversations_mut()
             .find_map(|(i, v)| (i == id).then_some(v))
     }
 
     /// Similar to [`Self::get_conversation_mut`], but returns an error if the
     /// conversation does not exist.
-    pub fn try_get_conversation_mut(&mut self, id: &ConversationId) -> Result<&mut Conversation> {
+    pub fn try_get_conversation_mut(
+        &mut self,
+        id: &ConversationId,
+    ) -> Result<Mut<'_, ConversationId, Conversation>> {
         self.get_conversation_mut(id)
             .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
     }
@@ -507,14 +521,6 @@ fn get_or_init_conversation<'a>(
 ) -> Option<(&'a ConversationId, &'a Conversation)> {
     maybe_init_conversation(storage, (id, conversation));
     conversation.get().map(|v| (id, v))
-}
-
-fn get_or_init_conversation_mut<'a>(
-    storage: Option<&'a Storage>,
-    (id, conversation): (&'a ConversationId, &'a mut OnceCell<Conversation>),
-) -> Option<(&'a ConversationId, &'a mut Conversation)> {
-    maybe_init_conversation(storage, (id, conversation));
-    conversation.get_mut().map(|v| (id, v))
 }
 
 fn maybe_init_conversation<'a>(
