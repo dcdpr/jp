@@ -20,12 +20,12 @@ install:
 
 [group('jp')]
 issue-bug +ARGS="Please create a bug report for the following:\n\n": _install-jp
-    jp query --new --tmp --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
+    jp query --new-local --tmp --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
 
 # Create a feature request issue.
 [group('jp')]
 issue-feat +ARGS="Please create a feature request for the following:\n\n": _install-jp
-    jp query --new --tmp --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
+    jp query --new-local --tmp --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
 
 # Open a commit message in the editor, using Jean-Pierre.
 [group('jp')]
@@ -43,7 +43,7 @@ commit *ARGS: _install-jp
         args="$msg"
     fi
 
-    jp query --new --tmp --cfg=personas/committer $args || exit 1
+    jp query --new-local --tmp --cfg=personas/committer $args || exit 1
     git commit --amend
 
 [group('jp')]
@@ -63,7 +63,7 @@ stage *ARGS: _install-jp
         args="$msg"
     fi
 
-    jp query --new --tmp --cfg=personas/stager $args
+    jp query --new-local --tmp --cfg=personas/stager $args
 
 stage-and-commit: _install-jp
     #!/usr/bin/env sh

@@ -14,6 +14,7 @@ use serde_json::Value;
 use crate::{Ctx, ctx::IntoPartialAppConfig};
 
 #[derive(Debug, clap::Subcommand)]
+#[expect(clippy::large_enum_variant)]
 pub(crate) enum Commands {
     /// Initialize a new workspace.
     Init(init::Init),
