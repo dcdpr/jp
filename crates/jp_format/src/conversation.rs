@@ -2,7 +2,7 @@ use std::fmt;
 
 use comfy_table::{Cell, CellAlignment, Row, Table};
 use crossterm::style::Stylize as _;
-use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_conversation::ConversationId;
 use time::UtcDateTime;
 
 use crate::datetime::DateTimeFmt;
@@ -30,7 +30,7 @@ pub struct DetailsFmt {
     pub last_message_at: Option<UtcDateTime>,
 
     /// Display the last time the conversation was activated.
-    pub last_activated_at: UtcDateTime,
+    pub last_activated_at: Option<UtcDateTime>,
 
     /// Use OSC-8 hyperlinks.
     pub hyperlinks: bool,
@@ -41,33 +41,49 @@ pub struct DetailsFmt {
 
 impl DetailsFmt {
     #[must_use]
-    pub fn new(
-        id: ConversationId,
-        conversation: &Conversation,
-        events: &ConversationStream,
-    ) -> Self {
-        let last_message_at = events.iter().map(|m| m.event.timestamp).max();
-
+    pub fn new(id: ConversationId) -> Self {
         Self {
             id,
-            assistant_name: events.config().ok().and_then(|c| c.assistant.name.clone()),
-            title: conversation.title.clone(),
-            message_count: events.len(),
+            assistant_name: None,
+            title: None,
+            message_count: 0,
             local: None,
             active_conversation: None,
-            last_message_at,
-            last_activated_at: conversation.last_activated_at,
+            last_message_at: None,
+            last_activated_at: None,
             hyperlinks: true,
             color: true,
         }
     }
 
     #[must_use]
-    pub fn with_title(self, title: impl Into<String>) -> Self {
-        Self {
-            title: Some(title.into()),
-            ..self
-        }
+    pub fn with_event_count(mut self, message_count: usize) -> Self {
+        self.message_count = message_count;
+        self
+    }
+
+    #[must_use]
+    pub fn with_assistant_name(mut self, assistant_name: Option<impl Into<String>>) -> Self {
+        self.assistant_name = assistant_name.map(Into::into);
+        self
+    }
+
+    #[must_use]
+    pub fn with_last_message_at(mut self, last_message_at: Option<UtcDateTime>) -> Self {
+        self.last_message_at = last_message_at;
+        self
+    }
+
+    #[must_use]
+    pub fn with_last_activated_at(mut self, last_activated_at: Option<UtcDateTime>) -> Self {
+        self.last_activated_at = last_activated_at;
+        self
+    }
+
+    #[must_use]
+    pub fn with_title(mut self, title: Option<impl Into<String>>) -> Self {
+        self.title = title.map(Into::into);
+        self
     }
 
     #[must_use]
@@ -129,8 +145,10 @@ impl DetailsFmt {
                     "Currently Active".green().bold().to_string()
                 } else if active == self.id {
                     "Currently Active".to_owned()
+                } else if let Some(last_activated_at) = self.last_activated_at {
+                    DateTimeFmt::new(last_activated_at).to_string()
                 } else {
-                    DateTimeFmt::new(self.last_activated_at).to_string()
+                    "Unknown".to_owned()
                 },
             ));
         }
