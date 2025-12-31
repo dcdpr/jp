@@ -83,15 +83,36 @@ pub(crate) struct Query {
     /// If a query is provided, it will be appended to the end of the previous
     /// message. If no query is provided, $EDITOR will open with the last
     /// message in the conversation.
-    #[arg(long = "replay", conflicts_with = "new_conversation")]
+    #[arg(long = "replay", conflicts_with = "new")]
     replay: bool,
 
     /// Start a new conversation without any message history.
-    #[arg(short = 'n', long = "new")]
+    #[arg(
+        short = 'n',
+        long = "new",
+        group = "new",
+        conflicts_with = "new_local_conversation"
+    )]
     new_conversation: bool,
 
+    /// Start a new local conversation without any message history.
+    ///
+    /// This is the same as `--new --local`.
+    #[arg(
+        short = 'N',
+        long = "new-local",
+        group = "new",
+        conflicts_with_all = ["new_conversation", "local"]
+    )]
+    new_local_conversation: bool,
+
     /// Store the conversation locally, outside of the workspace.
-    #[arg(short = 'l', long = "local", requires = "new_conversation")]
+    #[arg(
+        short = 'l',
+        long = "local",
+        requires = "new_conversation",
+        conflicts_with = "new_local_conversation"
+    )]
     local: bool,
 
     /// Add attachment to the configuration.
@@ -209,7 +230,7 @@ pub(crate) struct Query {
     ///
     /// This differs from `--no-persist` in that the conversation can contain
     /// multiple turns, as long as it remains active.
-    #[arg(long = "tmp", requires = "new_conversation")]
+    #[arg(long = "tmp", requires = "new")]
     ephemeral: bool,
 
     /// The tool to use.
@@ -314,7 +335,7 @@ impl Query {
             .unwrap_or_else(|| ConversationStream::new(cfg.clone()));
 
         // Generate title for new or empty conversations.
-        if (self.new_conversation || stream.is_empty())
+        if (self.is_new() || stream.is_empty())
             && ctx.term.args.persist
             && cfg.conversation.title.generate.auto
         {
@@ -474,16 +495,16 @@ impl Query {
         let last_active_conversation_id = ws.active_conversation_id();
 
         // Set new active conversation if requested.
-        if self.new_conversation {
+        if self.is_new() {
             let conversation = Conversation::default()
-                .with_local(self.local)
+                .with_local(self.is_local())
                 .with_ephemeral(self.ephemeral);
 
             let id = ws.create_conversation(conversation, cfg);
 
             debug!(
                 %id,
-                local = %self.local,
+                local = %self.is_local(),
                 ephemeral = %self.ephemeral,
                 "Creating new active conversation due to --new flag."
             );
@@ -911,6 +932,16 @@ impl Query {
     fn force_edit(&self) -> bool {
         !self.force_no_edit() && self.edit.is_some()
     }
+
+    #[must_use]
+    fn is_local(&self) -> bool {
+        self.local || self.new_local_conversation
+    }
+
+    #[must_use]
+    fn is_new(&self) -> bool {
+        self.new_conversation || self.new_local_conversation
+    }
 }
 
 fn get_config_delta_from_cli(
@@ -947,6 +978,7 @@ impl IntoPartialAppConfig for Query {
             schema: _,
             replay: _,
             new_conversation: _,
+            new_local_conversation: _,
             local: _,
             attachments,
             edit,
@@ -1001,7 +1033,7 @@ impl IntoPartialAppConfig for Query {
         // New conversations do not apply any existing conversation
         // configurations. This is handled by the other configuration layers
         // (files, environment variables, CLI arguments).
-        if self.new_conversation {
+        if self.is_new() {
             return Ok(partial);
         }
 
