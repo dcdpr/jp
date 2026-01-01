@@ -374,7 +374,11 @@ impl Storage {
     /// Remove all ephemeral conversations, except the active one.
     pub fn remove_ephemeral_conversations(&self, skip: &[ConversationId]) {
         for (id, conversation) in self.load_all_conversations_details() {
-            if !conversation.ephemeral || skip.contains(&id) {
+            if conversation
+                .ephemeral
+                .is_none_or(|v| v > UtcDateTime::now())
+                || skip.contains(&id)
+            {
                 continue;
             }
 
@@ -669,6 +673,8 @@ mod tests {
 
     #[test]
     fn test_remove_ephemeral_conversations() {
+        use time::ext::NumericalDuration;
+
         let storage_dir = tempdir().unwrap();
         let path = storage_dir.path();
         let convs = path.join(CONVERSATIONS_DIR);
@@ -683,7 +689,10 @@ mod tests {
         fs::create_dir_all(&dir1).unwrap();
         write_json(
             &dir1.join("metadata.json"),
-            &json!({"last_activated_at": utc_datetime!(2023-01-01 00:00:00), "ephemeral": true}),
+            &json!({
+                "last_activated_at": utc_datetime!(2023-01-01 00:00:00),
+                "ephemeral": UtcDateTime::now().saturating_sub(1.hours())
+            }),
         )
         .unwrap();
         write_json(&dir1.join("events.json"), &json!([])).unwrap();
@@ -693,7 +702,11 @@ mod tests {
         fs::create_dir_all(&dir2).unwrap();
         write_json(
             &dir2.join("metadata.json"),
-            &json!({"last_activated_at": utc_datetime!(2023-01-01 00:00:00), "title": title, "ephemeral": false}),
+            &json!({
+                "title": title,
+                "last_activated_at": utc_datetime!(2023-01-01 00:00:00),
+                "ephemeral": UtcDateTime::now().saturating_add(1.hours())
+            }),
         )
         .unwrap();
         write_json(&dir2.join("events.json"), &json!([])).unwrap();
@@ -702,7 +715,11 @@ mod tests {
         fs::create_dir_all(&dir3).unwrap();
         write_json(
             &dir3.join("metadata.json"),
-            &json!({"last_activated_at": utc_datetime!(2023-01-01 00:00:00), "title": title, "ephemeral": true}),
+            &json!({
+                "title": title,
+                "last_activated_at": utc_datetime!(2023-01-01 00:00:00),
+                "ephemeral": UtcDateTime::now().saturating_sub(1.hours())
+            }),
         )
         .unwrap();
         write_json(&dir3.join("events.json"), &json!([])).unwrap();

@@ -31,8 +31,14 @@ pub struct Conversation {
     ///
     /// An ephemeral conversation that is not active, may be garbage collected
     /// by the system.
-    #[serde(default, skip_serializing_if = "skip_if::is_false")]
-    pub ephemeral: bool,
+    ///
+    /// The ephemeral timestamp is the *earliest* time at which the conversation
+    /// will be garbage collected. In other words, if the ephemeral timestamp is
+    /// in the future, garbage collection will not occur, if the timestamp is
+    /// *exactly* now, the conversation *might* be garbage collected, but it
+    /// might also happen at a later time, when the timestamp is in the past.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ephemeral: Option<UtcDateTime>,
 
     /// The time of the last event, or `None` if the conversation is empty.
     #[serde(skip)]
@@ -49,7 +55,7 @@ impl Default for Conversation {
             last_activated_at: UtcDateTime::now(),
             title: None,
             user: false,
-            ephemeral: false,
+            ephemeral: None,
             last_event_at: None,
             events_count: 0,
         }
@@ -75,7 +81,7 @@ impl Conversation {
 
     /// Sets whether the conversation is ephemeral.
     #[must_use]
-    pub const fn with_ephemeral(mut self, ephemeral: bool) -> Self {
+    pub const fn with_ephemeral(mut self, ephemeral: Option<UtcDateTime>) -> Self {
         self.ephemeral = ephemeral;
         self
     }
@@ -269,7 +275,7 @@ mod tests {
                 time::Time::MIDNIGHT,
             ),
             user: true,
-            ephemeral: false,
+            ephemeral: None,
             last_event_at: None,
             events_count: 0,
         };

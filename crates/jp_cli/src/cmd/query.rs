@@ -231,7 +231,7 @@ pub(crate) struct Query {
     /// This differs from `--no-persist` in that the conversation can contain
     /// multiple turns, as long as it remains active.
     #[arg(long = "tmp", requires = "new")]
-    ephemeral: bool,
+    ephemeral: Option<Option<humantime::Duration>>,
 
     /// The tool to use.
     ///
@@ -496,16 +496,19 @@ impl Query {
 
         // Set new active conversation if requested.
         if self.is_new() {
-            let conversation = Conversation::default()
-                .with_local(self.is_local())
-                .with_ephemeral(self.ephemeral);
+            let conversation = Conversation::default().with_local(self.is_local());
 
             let id = ws.create_conversation(conversation, cfg);
+            if let Some(duration) = self.ephemeral_duration()
+                && let Some(mut conversation) = ws.get_conversation_mut(&id)
+            {
+                conversation.ephemeral = id.timestamp().checked_add(duration);
+            }
 
             debug!(
                 %id,
                 local = %self.is_local(),
-                ephemeral = %self.ephemeral,
+                ephemeral = %self.is_ephemeral(),
                 "Creating new active conversation due to --new flag."
             );
 
@@ -941,6 +944,18 @@ impl Query {
     #[must_use]
     fn is_new(&self) -> bool {
         self.new_conversation || self.new_local_conversation
+    }
+
+    #[must_use]
+    fn is_ephemeral(&self) -> bool {
+        self.ephemeral.is_some()
+    }
+
+    #[must_use]
+    fn ephemeral_duration(&self) -> Option<time::Duration> {
+        self.ephemeral?
+            .and_then(|v| Duration::from(v).try_into().ok())
+            .or_else(|| Some(time::Duration::new(0, 0)))
     }
 }
 
