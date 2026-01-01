@@ -26,6 +26,7 @@ impl Show {
             .with_last_activated_at(conversation.map(|v| v.last_activated_at))
             .with_local_flag(user)
             .with_active_conversation(active_id)
+            .with_expires_at(conversation.and_then(|v| v.expires_at))
             .with_hyperlinks(ctx.term.args.hyperlinks)
             .with_color(ctx.term.args.colors);
 

@@ -1,8 +1,11 @@
+use std::time::Duration;
+
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _, model::id::PartialModelIdOrAliasConfig,
 };
 use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{provider, structured};
+use time::UtcDateTime;
 
 use crate::{Output, cmd::Success, ctx::Ctx};
 
@@ -21,6 +24,14 @@ pub(crate) struct Edit {
     /// workspace conversations.
     #[arg(long, group = "edit")]
     local: Option<Option<bool>>,
+
+    /// Set the expiration time of the conversation.
+    #[arg(long = "tmp", group = "edit")]
+    expires_at: Option<Option<humantime::Duration>>,
+
+    /// Remove the expiration time of the conversation.
+    #[arg(long = "no-tmp", group = "edit", conflicts_with = "expires_at")]
+    no_expires_at: bool,
 
     /// Edit the title of the conversation.
     #[arg(long, group = "edit", conflicts_with = "no_title")]
@@ -51,6 +62,14 @@ impl Edit {
             ctx.workspace.try_get_conversation_mut(&id)?.title = Some(title);
         } else if self.no_title {
             ctx.workspace.try_get_conversation_mut(&id)?.title = None;
+        }
+
+        if let Some(ephemeral) = self.expires_at {
+            let mut conversation = ctx.workspace.try_get_conversation_mut(&id)?;
+            let duration = ephemeral.map_or(Duration::ZERO, Into::into);
+            conversation.expires_at = Some(UtcDateTime::now() + duration);
+        } else if self.no_expires_at {
+            ctx.workspace.try_get_conversation_mut(&id)?.expires_at = None;
         }
 
         Ok(Success::Message("Conversation updated.".into()))

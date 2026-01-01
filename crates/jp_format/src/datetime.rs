@@ -51,16 +51,21 @@ impl DateTimeFmt {
 
 impl fmt::Display for DateTimeFmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ago = (UtcDateTime::now() - self.timestamp)
-            .try_into()
-            .map_err(|_| fmt::Error)
-            .map(|v| timeago::Formatter::new().convert(v))?;
+        let diff = UtcDateTime::now() - self.timestamp;
+        let is_past = diff.is_negative();
 
+        let dur = (UtcDateTime::now() - self.timestamp).unsigned_abs();
+        let mut fmt = timeago::Formatter::new();
+        if is_past {
+            fmt.ago("");
+        }
+
+        let ago = fmt.convert(dur);
         let dt = self
             .timestamp
             .to_offset(self.offset)
             .format(&self.format)
-            .map_err(|_| fmt::Error)?;
+            .unwrap_or_default();
 
         if self.color {
             write!(f, "{ago} ({})", dt.italic())
