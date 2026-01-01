@@ -223,15 +223,16 @@ pub(crate) struct Query {
     )]
     no_tools: Vec<Option<String>>,
 
-    /// Mark a new conversation as ephemeral.
+    /// Set the expiration date of the conversation.
     ///
     /// The conversation is persisted, but only until the conversation is no
-    /// longer marked as active (e.g. when a new conversation is started).
+    /// longer marked as active (e.g. when a new conversation is started), and
+    /// when the expiration date is reached.
     ///
     /// This differs from `--no-persist` in that the conversation can contain
-    /// multiple turns, as long as it remains active.
+    /// multiple turns, as long as it remains active and not expired.
     #[arg(long = "tmp", requires = "new")]
-    ephemeral: Option<Option<humantime::Duration>>,
+    expires_in: Option<Option<humantime::Duration>>,
 
     /// The tool to use.
     ///
@@ -499,16 +500,22 @@ impl Query {
             let conversation = Conversation::default().with_local(self.is_local());
 
             let id = ws.create_conversation(conversation, cfg);
-            if let Some(duration) = self.ephemeral_duration()
+            if let Some(duration) = self.expires_in_duration()
                 && let Some(mut conversation) = ws.get_conversation_mut(&id)
             {
-                conversation.ephemeral = id.timestamp().checked_add(duration);
+                conversation.expires_at = duration
+                    .try_into()
+                    .ok()
+                    .and_then(|v| id.timestamp().checked_add(v));
             }
 
             debug!(
-                %id,
-                local = %self.is_local(),
-                ephemeral = %self.is_ephemeral(),
+                id = id.to_string(),
+                local = self.is_local(),
+                expires_in = self.expires_in_duration().map_or_else(
+                    || "when inactive".to_owned(),
+                    |v| humantime::format_duration(v).to_string()
+                ),
                 "Creating new active conversation due to --new flag."
             );
 
@@ -947,15 +954,10 @@ impl Query {
     }
 
     #[must_use]
-    fn is_ephemeral(&self) -> bool {
-        self.ephemeral.is_some()
-    }
-
-    #[must_use]
-    fn ephemeral_duration(&self) -> Option<time::Duration> {
-        self.ephemeral?
-            .and_then(|v| Duration::from(v).try_into().ok())
-            .or_else(|| Some(time::Duration::new(0, 0)))
+    fn expires_in_duration(&self) -> Option<Duration> {
+        self.expires_in?
+            .map(Duration::from)
+            .or_else(|| Some(Duration::new(0, 0)))
     }
 }
 
@@ -1010,7 +1012,7 @@ impl IntoPartialAppConfig for Query {
             no_tools,
             reasoning,
             no_reasoning,
-            ephemeral: _,
+            expires_in: _,
         } = &self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);

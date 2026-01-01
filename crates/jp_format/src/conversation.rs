@@ -32,6 +32,9 @@ pub struct DetailsFmt {
     /// Display the last time the conversation was activated.
     pub last_activated_at: Option<UtcDateTime>,
 
+    /// Display the timestamp of conversation expiration.
+    pub expires_at: Option<UtcDateTime>,
+
     /// Use OSC-8 hyperlinks.
     pub hyperlinks: bool,
 
@@ -51,6 +54,7 @@ impl DetailsFmt {
             active_conversation: None,
             last_message_at: None,
             last_activated_at: None,
+            expires_at: None,
             hyperlinks: true,
             color: true,
         }
@@ -77,6 +81,12 @@ impl DetailsFmt {
     #[must_use]
     pub fn with_last_activated_at(mut self, last_activated_at: Option<UtcDateTime>) -> Self {
         self.last_activated_at = last_activated_at;
+        self
+    }
+
+    #[must_use]
+    pub fn with_expires_at(mut self, expires_at: Option<UtcDateTime>) -> Self {
+        self.expires_at = expires_at;
         self
     }
 
@@ -150,6 +160,13 @@ impl DetailsFmt {
                 } else {
                     "Unknown".to_owned()
                 },
+            ));
+        }
+
+        if let Some(expires_at) = self.expires_at {
+            map.push((
+                "Expires In".to_owned(),
+                DateTimeFmt::new(expires_at).to_string(),
             ));
         }
 

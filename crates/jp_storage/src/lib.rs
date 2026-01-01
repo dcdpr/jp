@@ -375,7 +375,7 @@ impl Storage {
     pub fn remove_ephemeral_conversations(&self, skip: &[ConversationId]) {
         for (id, conversation) in self.load_all_conversations_details() {
             if conversation
-                .ephemeral
+                .expires_at
                 .is_none_or(|v| v > UtcDateTime::now())
                 || skip.contains(&id)
             {
