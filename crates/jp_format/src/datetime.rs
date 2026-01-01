@@ -49,36 +49,6 @@ impl DateTimeFmt {
     }
 }
 
-// #[must_use]
-// pub fn fmt_ago(&self) -> String {
-//     let diff = UtcDateTime::now() - self.timestamp;
-//     let is_past = diff.is_negative();
-//
-//     let dur = (UtcDateTime::now() - self.timestamp).unsigned_abs();
-//     let mut fmt = timeago::Formatter::new();
-//     if is_past {
-//         fmt.ago("");
-//     }
-//
-//     let ago = fmt.convert(dur);
-//
-//     let Ok(dt) = self.timestamp.to_offset(self.offset).format(&self.format) else {
-//         return "?".to_owned();
-//     };
-//
-//     if self.color {
-//         format!("{ago} ({})", dt.italic())
-//     } else {
-//         format!("{ago} ({dt})")
-//     }
-// }
-//
-// #[must_use]
-// pub fn fmt_duration(&self) -> String {
-//     let v = UtcDateTime::now() - self.timestamp;
-//     humantime::format_duration(v.unsigned_abs()).to_string()
-// }
-
 impl fmt::Display for DateTimeFmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let diff = UtcDateTime::now() - self.timestamp;
