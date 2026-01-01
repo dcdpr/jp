@@ -166,7 +166,11 @@ impl DetailsFmt {
         if let Some(expires_at) = self.expires_at {
             map.push((
                 "Expires In".to_owned(),
-                DateTimeFmt::new(expires_at).to_string(),
+                if expires_at < UtcDateTime::now() {
+                    "On Deactivation".to_string()
+                } else {
+                    DateTimeFmt::new(expires_at).to_string()
+                },
             ));
         }
 

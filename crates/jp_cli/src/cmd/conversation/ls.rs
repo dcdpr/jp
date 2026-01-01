@@ -35,6 +35,7 @@ enum Sort {
     Id,
     Created,
     Activity,
+    Expires,
     Messages,
     Local,
 }
@@ -44,6 +45,7 @@ struct Details {
     title: Option<String>,
     messages: usize,
     last_event_at: Option<UtcDateTime>,
+    expires_at: Option<UtcDateTime>,
     local: bool,
 }
 
@@ -62,6 +64,7 @@ impl Ls {
                     title,
                     user,
                     last_event_at,
+                    expires_at,
                     events_count,
                     ..
                 } = conversation;
@@ -70,6 +73,7 @@ impl Ls {
                     title: title.clone(),
                     messages: *events_count,
                     last_event_at: *last_event_at,
+                    expires_at: *expires_at,
                     local: *user,
                 }
             })
@@ -82,6 +86,7 @@ impl Ls {
             Some(Sort::Created) => a.id.timestamp().cmp(&b.id.timestamp()),
             Some(Sort::Messages) => a.messages.cmp(&b.messages),
             Some(Sort::Activity) => a.last_event_at.cmp(&b.last_event_at),
+            Some(Sort::Expires) => a.expires_at.cmp(&b.expires_at),
             Some(Sort::Local) => a.local.cmp(&b.local),
             _ => a.id.cmp(&b.id),
         });
@@ -91,7 +96,8 @@ impl Ls {
         }
 
         let conversations: Vec<_> = conversations.into_iter().skip(skip).collect();
-        let (local_column, title_column, header) = build_header_row(&conversations);
+        let (expires_at_column, local_column, title_column, header) =
+            build_header_row(&conversations);
 
         let mut rows = vec![];
         if count > limit {
@@ -110,6 +116,7 @@ impl Ls {
                 active_conversation_id,
                 local_column,
                 title_column,
+                expires_at_column,
                 details,
             ));
         }
@@ -123,6 +130,7 @@ impl Ls {
         active_conversation_id: ConversationId,
         local_column: bool,
         title_column: bool,
+        expires_at_column: bool,
         details: Details,
     ) -> Row {
         let Details {
@@ -130,6 +138,7 @@ impl Ls {
             title,
             messages,
             last_event_at: last_message_at,
+            expires_at,
             local,
         } = details;
 
@@ -170,6 +179,20 @@ impl Ls {
         row.add_cell(Cell::new(id_fmt));
         row.add_cell(Cell::new(messages_fmt).set_alignment(CellAlignment::Right));
         row.add_cell(Cell::new(last_message_at_fmt).set_alignment(CellAlignment::Right));
+
+        if expires_at_column {
+            let expires_at_fmt = expires_at.map_or_else(String::new, |t| {
+                if t < UtcDateTime::now() {
+                    "Now".to_string()
+                } else {
+                    let dur = (UtcDateTime::now() - t).unsigned_abs();
+                    timeago::Formatter::new().ago("").convert(dur)
+                }
+            });
+
+            row.add_cell(Cell::new(expires_at_fmt).set_alignment(CellAlignment::Right));
+        }
+
         if local_column {
             let local = if local {
                 "Y".blue().to_string()
@@ -188,11 +211,17 @@ impl Ls {
     }
 }
 
-fn build_header_row(conversations: &[Details]) -> (bool, bool, Row) {
+fn build_header_row(conversations: &[Details]) -> (bool, bool, bool, Row) {
     let mut header = Row::new();
     header.add_cell(Cell::new("ID"));
     header.add_cell(Cell::new("#").set_alignment(CellAlignment::Right));
     header.add_cell(Cell::new("Activity").set_alignment(CellAlignment::Right));
+
+    let mut expires_at_column = false;
+    if conversations.iter().any(|d| d.expires_at.is_some()) {
+        expires_at_column = true;
+        header.add_cell(Cell::new("Expires In").set_alignment(CellAlignment::Right));
+    }
 
     // Show "local" column if any conversations are stored locally.
     let mut local_column = false;
@@ -207,5 +236,5 @@ fn build_header_row(conversations: &[Details]) -> (bool, bool, Row) {
         header.add_cell(Cell::new("Title").set_alignment(CellAlignment::Left));
     }
 
-    (local_column, title_column, header)
+    (expires_at_column, local_column, title_column, header)
 }
