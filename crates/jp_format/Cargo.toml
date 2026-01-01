@@ -17,7 +17,6 @@ jp_conversation = { workspace = true }
 
 comfy-table = { workspace = true }
 crossterm = { workspace = true }
-humantime = { workspace = true }
 time = { workspace = true, features = ["local-offset"] }
 timeago = { workspace = true }
 

@@ -2180,7 +2180,6 @@ version = "0.1.0"
 dependencies = [
  "comfy-table",
  "crossterm",
- "humantime",
  "jp_conversation",
  "time",
  "timeago",
