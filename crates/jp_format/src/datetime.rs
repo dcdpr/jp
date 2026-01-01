@@ -65,7 +65,7 @@ impl fmt::Display for DateTimeFmt {
             .timestamp
             .to_offset(self.offset)
             .format(&self.format)
-            .unwrap_or_else(|_| String::new());
+            .unwrap_or_default();
 
         if self.color {
             write!(f, "{ago} ({})", dt.italic())
