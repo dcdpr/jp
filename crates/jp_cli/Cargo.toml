@@ -52,6 +52,7 @@ crossterm = { workspace = true }
 dhat = { workspace = true, optional = true }
 duct = { workspace = true }
 futures = { workspace = true }
+humantime = { workspace = true }
 indexmap = { workspace = true }
 indoc = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }

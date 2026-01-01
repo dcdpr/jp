@@ -374,7 +374,11 @@ impl Storage {
     /// Remove all ephemeral conversations, except the active one.
     pub fn remove_ephemeral_conversations(&self, skip: &[ConversationId]) {
         for (id, conversation) in self.load_all_conversations_details() {
-            if !conversation.ephemeral || skip.contains(&id) {
+            if conversation
+                .ephemeral
+                .is_none_or(|v| v > UtcDateTime::now())
+                || skip.contains(&id)
+            {
                 continue;
             }
 

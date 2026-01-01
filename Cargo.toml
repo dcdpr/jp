@@ -53,6 +53,7 @@ grep-printer = { version = "0.2", default-features = false }
 grep-regex = { version = "0.1", default-features = false }
 grep-searcher = { version = "0.1", default-features = false }
 httpmock = { git = "https://github.com/JeanMertz/httpmock", branch = "tweaks", default-features = false }
+humantime = { version = "2", default-features = false }
 ignore = { version = "0.4", default-features = false }
 indexmap = { version = "2", default-features = false }
 indoc = { version = "2", default-features = false }
