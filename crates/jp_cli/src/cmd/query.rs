@@ -520,7 +520,6 @@ impl Query {
             );
 
             ws.set_active_conversation_id(id)?;
-            ws.remove_non_active_ephemeral_conversations();
         }
 
         Ok(last_active_conversation_id)

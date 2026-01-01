@@ -228,6 +228,7 @@ impl Workspace {
 
         trace!("Persisting state.");
 
+        let active_id = self.active_conversation_id();
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
 
         storage.persist_conversations_metadata(&self.state.user.conversations_metadata)?;
@@ -241,6 +242,7 @@ impl Workspace {
                 .active_conversation_id,
             &self.state.local.active_conversation,
         )?;
+        storage.remove_ephemeral_conversations(&[active_id]);
 
         info!(path = %self.root.display(), "Persisted state.");
         Ok(())
@@ -508,16 +510,6 @@ impl Workspace {
     #[must_use]
     pub fn id(&self) -> &Id {
         &self.id
-    }
-
-    /// Remove all ephemeral conversations, except the active one.
-    pub fn remove_non_active_ephemeral_conversations(&self) {
-        let Some(storage) = self.storage.as_ref() else {
-            return;
-        };
-
-        let active_id = self.active_conversation_id();
-        storage.remove_ephemeral_conversations(&[active_id]);
     }
 }
 
