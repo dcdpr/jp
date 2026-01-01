@@ -13,7 +13,7 @@ use rmcp::{
 use sha1::{Digest as _, Sha1};
 use sha2::Sha256;
 use tokio::{process::Command, runtime::Handle, sync::RwLock, task::JoinSet};
-use tracing::trace;
+use tracing::{trace, warn};
 
 use crate::{
     Error,
@@ -241,8 +241,20 @@ impl Client {
                 let vars = config
                     .variables
                     .iter()
-                    .map(|key| Ok((key.to_owned(), env::var(key)?)))
-                    .collect::<Result<HashMap<_, _>>>()?;
+                    .filter_map(|key| {
+                        env::var(key)
+                            .inspect(|error| {
+                                warn!(
+                                    key,
+                                    error,
+                                    server = %id,
+                                    "Failed to read MCP server environment variable"
+                                );
+                            })
+                            .ok()
+                            .map(|value| (key.to_owned(), value))
+                    })
+                    .collect::<HashMap<_, _>>();
 
                 // Create command
                 let mut cmd = Command::new(&config.command);
