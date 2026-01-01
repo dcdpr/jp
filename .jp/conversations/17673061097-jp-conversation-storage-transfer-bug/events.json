@@ -1,0 +1,1123 @@
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2026-01-01 22:21:49.779543",
+    "delta": {
+      "inherit": true,
+      "config_load_paths": [
+        ".jp/config",
+        ".jp/config/personas"
+      ],
+      "extends": [
+        "config.d/**/*"
+      ],
+      "assistant": {
+        "system_prompt": {
+          "value": "You are Jean-Pierre, the AI Pair Programmer, working on your own creation. The project you are working on is called JP (short for Jean-Pierre), a Rust-based command-line toolkit to support humans in their daily work as a software programmer. Built to integrate into their existing workflow, providing a flexible and powerful pair-programming experience with LLMs. ",
+          "strategy": "replace",
+          "separator": "none",
+          "isDefault": false
+        },
+        "instructions": [
+          {
+            "title": "How to respond to the user",
+            "position": 0,
+            "items": [
+              "Be concise",
+              "Use simple sentences. But feel free to use technical jargon.",
+              "Do NOT overexplain basic concepts. Assume the user is technically proficient.",
+              "AVOID flattering, corporate-ish or marketing language. Maintain a neutral viewpoint.",
+              "AVOID vague and / or generic claims which may seem correct but are not substantiated by the context."
+            ]
+          },
+          {
+            "title": "Core Tasks",
+            "description": "These are the core tasks you must perform.",
+            "position": 0,
+            "items": [
+              "Answering general programming questions.",
+              "Explaining how the code in a question works.",
+              "Reviewing the code in a question.",
+              "Generating unit tests for the provided code.",
+              "Proposing fixes for problems in the provided code.",
+              "Scaffolding code for a new project.",
+              "Finding relevant code to the user's query.",
+              "Proposing fixes for test failures.",
+              "Running tools."
+            ]
+          },
+          {
+            "title": "Guidelines",
+            "description": "You must follow these guidelines.",
+            "position": 0,
+            "items": [
+              "Follow the user's requirements carefully and to the letter.",
+              "Keep your answers short and impersonal, especially if the user responds with context outside of your tasks.",
+              "Minimize other prose.",
+              "Use Markdown formatting in your answers.",
+              "Limit non-code text width to 120 characters.",
+              "Include the programming language name at the start of the Markdown code blocks.",
+              "Avoid including line numbers in code blocks.",
+              "Avoid wrapping the whole response in triple backticks.",
+              "Only return code that's relevant to the task at hand. You may not need to return all of the code that the user has shared.",
+              "Use actual line breaks instead of '\\\n' in your response to begin new lines.",
+              "Use '\\\n' only when you want a literal backslash followed by a character 'n'.",
+              "All non-code responses must be in the language of the user's query."
+            ]
+          }
+        ],
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "google",
+            "name": "gemini-3-flash-preview"
+          },
+          "parameters": {
+            "reasoning": {
+              "effort": "high",
+              "exclude": false
+            },
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": true,
+            "model": {
+              "id": {
+                "provider": "anthropic",
+                "name": "claude-3-5-haiku-latest"
+              },
+              "parameters": {
+                "reasoning": "off",
+                "stop_words": [],
+                "other": {}
+              }
+            }
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "osc8",
+              "parameters": "json"
+            }
+          },
+          "crate_readme": {
+            "source": "mcp.bookworm",
+            "enable": true
+          },
+          "crate_resource": {
+            "source": "mcp.bookworm",
+            "enable": true
+          },
+          "crate_versions": {
+            "source": "mcp.bookworm",
+            "enable": true
+          },
+          "crate_search_items": {
+            "source": "mcp.bookworm",
+            "enable": true
+          },
+          "crates_search": {
+            "source": "mcp.bookworm",
+            "enable": true
+          },
+          "web_search": {
+            "source": "mcp.kagi.kagi_search_fetch",
+            "enable": true
+          },
+          "web_summarize_content": {
+            "source": "mcp.kagi.kagi_summarizer",
+            "enable": true
+          },
+          "cargo_check": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Run `cargo check` for the given package, validating if the code compiles.",
+            "parameters": {
+              "package": {
+                "type": "string",
+                "required": false,
+                "description": "Package to run check for, if unspecified, all workspace packages will be checked.",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "cargo_expand": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Expand the auto-generated Rust code for the given item.",
+            "parameters": {
+              "package": {
+                "type": "string",
+                "required": false,
+                "description": "Package to find the item in, required if working with a workspace.",
+                "enum": []
+              },
+              "item": {
+                "type": "string",
+                "required": true,
+                "description": "Local path to module or other named item to expand, e.g. os::unix::ffi",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "cargo_test": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Execute all unit and integration tests and build examples of the project.",
+            "parameters": {
+              "package": {
+                "type": "string",
+                "required": false,
+                "description": "Package to run tests for, if unspecified, all workspace packages will be tested.",
+                "enum": []
+              },
+              "testname": {
+                "type": "string",
+                "required": false,
+                "description": "If specified, only run tests containing this string in their names.",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "fs_create_file": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Create a new file in the project's local filesystem.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to create. The path must be relative to the project's root.\n",
+                "enum": []
+              },
+              "content": {
+                "type": "string",
+                "required": false,
+                "description": "The content of the file to create. If not specified, the file will be empty.\n",
+                "enum": []
+              }
+            }
+          },
+          "fs_delete_file": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Delete a file in the project's local filesystem.\n\nThe file must exist, be a regular file, and have no uncommitted changes.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to delete. The path must be relative to the project's root.\n",
+                "enum": []
+              }
+            }
+          },
+          "fs_grep_files": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Grep files in the project's local filesystem.\n\nIf misused, this tool can return *A LOT* of matches, making it difficult to\nparse the results. It is recommended to use search patterns that are as specific\nas possible to the content you are looking for.\n\nIf the number of results exceeds 100, the `context` option is disabled, and 50\nmatches are returned without context. You can re-run the tool with a more\nspecific pattern or limited to specific paths to narrow down the results with\ncontext.\n",
+            "parameters": {
+              "pattern": {
+                "type": "string",
+                "required": true,
+                "description": "Regular expression to filter the results by.\n",
+                "enum": []
+              },
+              "context": {
+                "type": "integer",
+                "default": 0,
+                "required": false,
+                "description": "Number of lines of context to include before and after the matching lines.\n",
+                "enum": []
+              },
+              "paths": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of files or directories to search.\n\nIf unspecified, all files in the project will be returned.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "fs_grep_user_docs": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Grep the project's user documentation.",
+            "parameters": {
+              "pattern": {
+                "type": "string",
+                "required": true,
+                "description": "Regular expression to filter the results by.\n",
+                "enum": []
+              },
+              "return_entire_file": {
+                "type": "boolean",
+                "default": false,
+                "required": false,
+                "description": "Whether to return the entire file contents.\n\nIf enabled, the tool will return the entire file contents of any files matching\nthe pattern. If disabled (the default), only the matching lines and 5 contextual\nlines above and below the matching lines will be returned.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "fs_list_files": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "List files in the project's local filesystem.",
+            "parameters": {
+              "prefixes": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of path prefixes to filter the results by.\n\nIf unspecified, all files in the project will be returned.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "extensions": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of file extensions to filter the results by.\n\nIf unspecified, all extensions will be returned.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "fs_modify_file": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Modify one or more files in the project's local filesystem.\n\nThe files must exist, be a regular file, and have no uncommitted changes.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to delete. The path must be relative to the project's root.\n\nThe path may contain glob patterns, e.g. `src/**/*.rs`.\n",
+                "enum": []
+              },
+              "string_to_replace": {
+                "type": "string",
+                "required": true,
+                "description": "The string to replace in the file. The string may span multiple lines.\n",
+                "enum": []
+              },
+              "new_string": {
+                "type": "string",
+                "required": true,
+                "description": "new string to replace the `string_to_replace` with. The string may span multiple lines. If empty, the `string_to_replace` will be deleted.\n",
+                "enum": []
+              },
+              "replace_using_regex": {
+                "type": "boolean",
+                "default": false,
+                "required": true,
+                "description": "Whether to treat `string_to_replace` as a regular expression.\n\nIf `true`, `string_to_replace` is treated as a regular expression and the `new_string` is treated as a replacement string, which may contain capture groups.\n\nIf `false`, `string_to_replace` is treated as a literal string and the `new_string` is treated as a literal string.\n\nWhen `true`, replaces all non-overlapping matches in text with the replacement provided.\n\nAll instances of `$name` in the replacement string is replaced with the corresponding capture group name.\n\n`name` may be an integer corresponding to the index of the capture group (counted by order of opening parenthesis where `0` is the entire match) or it can be a name (consisting of letters, digits or underscores) corresponding to a named capture group (e.g. `(?<name>exp)`).\n\nIf `name` isn’t a valid capture group (whether the name doesn’t exist or isn’t a valid index), then it is replaced with the empty string.\n\nThe longest possible name is used. e.g., `$1a` looks up the capture group named `1a` and not the capture group at index `1`. To exert more precise control over the name, use braces, e.g., `${1}a`.\n\nTo write a literal `$` use `$$`.\n",
+                "enum": []
+              }
+            },
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full",
+              "parameters": "just serve-tools {{context}} {{tool}}"
+            }
+          },
+          "fs_read_file": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Read the contents of a file in the project's local filesystem.\n\nYou can use `fs_grep_files` to search for specific patterns in the file\ncontents, before reading the entire contents of a specific file using this tool.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to read.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "git_commit": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Commit the staged changes to the local git repository using the provided\nmessage.\n",
+            "parameters": {
+              "message": {
+                "type": "string",
+                "required": true,
+                "description": "The commit message to use. Can be multiline.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "git_diff": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "List the differences between the current state of the git repository and the\nlast committed state.\n",
+            "parameters": {
+              "paths": {
+                "type": "array",
+                "required": true,
+                "description": "The paths to diff. Can be a single path or a list of paths.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "cached": {
+                "type": "boolean",
+                "required": false,
+                "description": "If `true`, the diff will be computed against the cached state of the git\nrepository. If `false`, the diff will be computed against the last committed\nstate of the git repository.\n\nIf unspecified, it will default to `false`.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "git_stage": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Stage a file or a specific patch to the index of the git repository.\n\nWhen providing one or more paths, all changes of those files will be staged. If\nproviding one or more patches, only the changes of those patches will be staged,\nallowing you to stage individual \"hunks\" of a changed file.\n",
+            "parameters": {
+              "paths": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of paths to stage. Can be a single path or a list of paths.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "patches": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of patches to apply. Can be a single patch or a list of patches.\n\nThis is useful if you want to stage individual \"hunks\" of a changed file.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "git_unstage": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Unstage (restore/reset) one or more staged files, undoing the effects of `git_stage`.\n",
+            "parameters": {
+              "paths": {
+                "type": "array",
+                "required": true,
+                "description": "List of paths to unstage. Can be a single path or a list of paths.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "github_code_search": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Find code matching a query in any GitHub repository.\n\nThis tool returns a list of matched files, to fetch the actual code of a\nfile, use the `github_read_file` tool.\n\nNOTE: Code search always searches the repository's default branch (usually\n`main`), it is not possible to search in a specific branch or tag.\n",
+            "parameters": {
+              "repository": {
+                "type": "string",
+                "required": false,
+                "description": "Repository to search for code.\n\nIf unspecified, it defaults to the current project's GitHub repository.\n",
+                "enum": []
+              },
+              "query": {
+                "type": "string",
+                "required": true,
+                "description": "Search query to find code.\n\nGitHub code-search supports:\n\n- Bare terms (`http-push`) and quoted phrases (`\"sparse index\"`)\n- Boolean ops: implicit AND, `OR`, `NOT`, parentheses\n- Qualifiers: `language:rust`, `path:/src/**/*.rs`, `symbol:MyFunc`,\n  `in:file`, `in:path`, `filename:Cargo.toml`, `extension:rs`,\n  `size:>10k`\n- Regex – wrap in `/.../` (`/^impl.*Display/`); escape quotes/backslashes (`\\\"`, `\\\\`)\n- You must include at least one term when using qualifiers (e.g. `helper language:go`)\n- You can't use the following wildcard characters as part of your\n  search query: . , : ; / \\ ` ' \" = * ! ? # $ & + ^ | ~ < > ( ) { } [\n  ] @. The search will simply ignore these symbols.\n\nExample: `json in:file filename:package.json NOT path:tests/\n",
+                "enum": []
+              }
+            }
+          },
+          "github_create_issue_bug": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Track a new bug in the project's GitHub repository.\n\n- MOST IMPORTANTLY: Avoid fluff, and focus on the issue at hand. Do not add more\n  text than is necessary to explain the issue.\n\n- Use markdown to format text.\n\n- Explain the motivation for creating the issue. You can include a comparison of\n  the current behavior with the expected behavior in order to illustrate the\n  impact of the issue.\n\n- Use the body to explain what and why vs. how.\n\n- Wrap the body at 72 characters.\n\n- Use backticks (``) to format code or crate references.\n\n- Add optional references to related issues or PRs in the body.\n\n- Link to relevant code, documentation, or other resources in the body, using\n  proper Github links.\n\n- Use a narrative style to describe the issue in one or more paragraphs, avoid\n  using lists, unless they are necessary to convey details about the issue.\n",
+            "parameters": {
+              "title": {
+                "type": "string",
+                "required": true,
+                "description": "The title of the bug to track.\n\nShould be a single line, not include any markdown except for backticks (`) where\napplicable. Keep the title short and descriptive.\n",
+                "enum": []
+              },
+              "description": {
+                "type": "string",
+                "required": true,
+                "description": "A clear and concise description of what the issue is about.",
+                "enum": []
+              },
+              "expected_behavior": {
+                "type": "string",
+                "required": true,
+                "description": "A description of the expected behavior.",
+                "enum": []
+              },
+              "actual_behavior": {
+                "type": "string",
+                "required": true,
+                "description": "A description of the actual behavior.",
+                "enum": []
+              },
+              "complexity": {
+                "type": "string",
+                "required": true,
+                "description": "Complexity of the issue.\n\nThis is used to estimate the effort required to fix the issue.\n",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "reproduce": {
+                "type": "string",
+                "required": false,
+                "description": "Optional notes on how to reproduce the issue.\n\nThis is only needed if the combination of `description`, `expected_behavior`,\nand `actual_behavior` is not sufficient to explain the issue.\n",
+                "enum": []
+              },
+              "proposed_solution": {
+                "type": "string",
+                "required": false,
+                "description": "Optional proposed solution to the issue.\n\nThis should be a high-level, SHORT description of the solution you would\npropose. It should be brief, not go into too much detail, and IF code is added,\nit should be limited in size, and optionally be pseudo-code to avoid making the\nsolution obsolete if the code is later changed.\n",
+                "enum": []
+              },
+              "tasks": {
+                "type": "array",
+                "required": false,
+                "description": "Optional tasks in the order they need to be done in to resolve the bug. Include\nlinks to specific lines of code where the task should happen at.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "resource_links": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of resources relevant to the issue.\n\nThe links should only contain the path to the resource, not the full URL.\n\nThe following resource links are supported:\n\n- issue: issues/{issue number}\n- pull: pull/{pull request number}\n- commit: commit/{commit hash}\n- file: blob/{commit hash}/{file path}\n\n  relevant files for this issue. This will help people navigate the project and\n  offer some clues of where to start.\n\n- lines: blob/{commit hash}/{file path}#L{start line}-L{end line}\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "labels": {
+                "type": "array",
+                "required": false,
+                "description": "Additional labels to add to the issue.\n\n- The issue will always be assigned the `bug` label.\n- If unspecified, no additional labels will be added.\n- Only labels that exist on the project can be added, non-existing labels will\n  result in an error with a list of valid labels, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "assignees": {
+                "type": "array",
+                "required": false,
+                "description": "Assignees to add to the issue.\n\n- You should only add assignees if explicitly requested by the user.\n- If unspecified, no assignees will be added.\n- Only collaborators on the project can be added, non-existing assignees will\n  result in an error with a list of valid assignees, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "github_create_issue_enhancement": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "File a new enhancement request in the project's GitHub repository.\n\n- MOST IMPORTANTLY: Avoid fluff, and focus on the enhancement at hand. Do not\n  add more text than is necessary to explain the enhancement.\n\n- Use markdown to format text.\n\n- Explain the motivation for creating the issue. You can include a comparison of\n  the current behavior with the expected behavior in order to illustrate the\n  impact of the request.\n\n- Use the body to explain what and why vs. how.\n\n- Wrap the body at 72 characters.\n\n- Use backticks (``) to format code or crate references.\n\n- Add optional references to related issues or PRs in the body.\n\n- Link to relevant code, documentation, or other resources in the body, using\n  proper Github links.\n\n- Use a narrative style to describe the issue in one or more paragraphs, avoid\n  using lists, unless they are necessary to convey details about the issue.\n",
+            "parameters": {
+              "title": {
+                "type": "string",
+                "required": true,
+                "description": "The title of the enhancement to track.\n\nShould be a single line, not include any markdown except for backticks (`) where\napplicable. Keep the title short and descriptive.\n",
+                "enum": []
+              },
+              "description": {
+                "type": "string",
+                "required": true,
+                "description": "A clear and concise description of what the enhancement request is about.\n",
+                "enum": []
+              },
+              "context": {
+                "type": "string",
+                "required": true,
+                "description": "What are you trying to do and how would you want to do it differently? Is it\nsomething you currently you cannot do? Is this related to an issue/problem?\n",
+                "enum": []
+              },
+              "complexity": {
+                "type": "string",
+                "required": true,
+                "description": "Complexity of the enhancement request.\n\nThis is used to estimate the effort required to implement the enhancement.\n",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "alternatives": {
+                "type": "string",
+                "required": false,
+                "description": "Can you achieve the same result doing it in an alternative way? Is the\nalternative considerable?\n",
+                "enum": []
+              },
+              "proposed_implementation": {
+                "type": "string",
+                "required": false,
+                "description": "Optional proposed implementation for the enhancement.\n\nThis should be a high-level, SHORT description of the implementation you would\npropose. It should be brief, not go into too much detail, and IF code is added,\nit should be limited in size, and optionally be pseudo-code to avoid making the\nimplementation obsolete if the code is later changed.\n",
+                "enum": []
+              },
+              "tasks": {
+                "type": "array",
+                "required": false,
+                "description": "Optional tasks in the order they need to be done in to implement the\nenhancement. Include links to specific lines of code where the task should\nhappen at.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "resource_links": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of resources relevant to the issue.\n\nThe links should only contain the path to the resource, not the full URL.\n\nThe following resource links are supported:\n\n- issue: issues/{issue number}\n\n  These could be issues related to the current enhancement request, either bugs\n  or other enhancement requests. This can also include issues with similar\n  feature requests.\n\n- pull: pull/{pull request number}\n\n  Any pull requests related to the current enhancement request.\n\n- commit: commit/{commit hash}\n- file: blob/{commit hash}/{file path}\n\n  relevant files for this issue. This will help people navigate the project and\n  offer some clues of where to start.\n\n- lines: blob/{commit hash}/{file path}#L{start line}-L{end line}\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "labels": {
+                "type": "array",
+                "required": false,
+                "description": "Additional labels to add to the issue.\n\n- The issue will always be assigned the `enhancement` label.\n- If unspecified, no additional labels will be added.\n- Only labels that exist on the project can be added, non-existing labels will\n  result in an error with a list of valid labels, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "assignees": {
+                "type": "array",
+                "required": false,
+                "description": "Assignees to add to the issue.\n\n- You should only add assignees if explicitly requested by the user.\n- If unspecified, no assignees will be added.\n- Only collaborators on the project can be added, non-existing assignees will\n  result in an error with a list of valid assignees, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "github_issues": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Find one or more issues in the project's GitHub repository.",
+            "parameters": {
+              "number": {
+                "type": "integer",
+                "required": false,
+                "description": "Issue number to get information about.\n\nIf unspecified, a list of all issues will be returned, without the\nissue contents. You can re-run the tool with the correct issue\nnumber to get more details about an issue.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "github_list_files": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "List all files in a GitHub repository. Can be combined with `github_read_file`\nto fetch the contents of a file.\n"
+          },
+          "github_read_file": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Fetch the contents of one or more files\n",
+            "parameters": {
+              "repository": {
+                "type": "string",
+                "required": false,
+                "description": "Repository to search for code.\n\nIf unspecified, it defaults to the current project's GitHub repository.\n",
+                "enum": []
+              },
+              "ref": {
+                "type": "string",
+                "required": false,
+                "description": "The name of the commit/branch/tag.\n\nIf unspecified, it defaults to the repository’s default branch (usually `main`)\n",
+                "enum": []
+              },
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "File path to get contents of.\n",
+                "enum": []
+              }
+            }
+          },
+          "github_pulls": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Find one or more pull requests in the project's GitHub repository.",
+            "parameters": {
+              "number": {
+                "type": "integer",
+                "required": false,
+                "description": "Pull request number to get information about.\n\nIf unspecified, a list of all pull requests will be returned, without the\npull request contents. You can re-run the tool with the correct pull request\nnumber to get more details about a pull request.\n",
+                "enum": []
+              },
+              "state": {
+                "type": "string",
+                "required": false,
+                "description": "Filter pull requests by their state.\n\nIf unspecified, all pull requests will be returned.\n",
+                "enum": [
+                  "open",
+                  "closed"
+                ]
+              },
+              "file_diffs": {
+                "type": "array",
+                "required": false,
+                "description": "List of changed file paths to get the diff for.\n\nIf unspecified, only the list of changed files will be returned, but not the\nactual diff. You can re-run the tool with the correct file path to get the\ndiff.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "web_fetch": {
+            "source": "local",
+            "enable": true,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Fetch the contents of a web page over HTTP(S).\n",
+            "parameters": {
+              "url": {
+                "type": "string",
+                "required": true,
+                "description": "The URL of the web page to fetch.\n",
+                "enum": []
+              }
+            }
+          }
+        },
+        "attachments": [
+          "file:///crates/jp_storage/src/lib.rs",
+          "file:///crates/jp_cli/src/cmd/conversation/edit.rs",
+          "file:///crates/jp_workspace/src/lib.rs"
+        ]
+      },
+      "style": {
+        "code": {
+          "theme": "Monokai Extended",
+          "color": true,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": true
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": [
+          "JP_EDITOR",
+          "VISUAL",
+          "EDITOR"
+        ]
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "aliases": {
+            "anthropic": {
+              "provider": "anthropic",
+              "name": "claude-sonnet-4-5"
+            },
+            "claude": {
+              "provider": "anthropic",
+              "name": "claude-sonnet-4-5"
+            },
+            "sonnet": {
+              "provider": "anthropic",
+              "name": "claude-sonnet-4-5"
+            },
+            "opus": {
+              "provider": "anthropic",
+              "name": "claude-opus-4-5"
+            },
+            "haiku": {
+              "provider": "anthropic",
+              "name": "claude-haiku-4-5"
+            },
+            "openai": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "chatgpt": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "gpt": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "gpt5": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "gpt5-mini": {
+              "provider": "openai",
+              "name": "gpt-5-mini"
+            },
+            "gpt-mini": {
+              "provider": "openai",
+              "name": "gpt-5-mini"
+            },
+            "gpt5-nano": {
+              "provider": "openai",
+              "name": "gpt-5-nano"
+            },
+            "gpt-nano": {
+              "provider": "openai",
+              "name": "gpt-5-nano"
+            },
+            "o3-research": {
+              "provider": "openai",
+              "name": "o3-deep-research"
+            },
+            "o4-mini-research": {
+              "provider": "openai",
+              "name": "o4-mini-deep-research"
+            },
+            "codex": {
+              "provider": "openai",
+              "name": "gpt-5-codex"
+            },
+            "gpt-5-codex": {
+              "provider": "openai",
+              "name": "gpt-5-codex"
+            },
+            "codex-mini": {
+              "provider": "openai",
+              "name": "codex-mini-latest"
+            },
+            "google": {
+              "provider": "google",
+              "name": "gemini-3-pro-preview"
+            },
+            "gemini": {
+              "provider": "google",
+              "name": "gemini-3-pro-preview"
+            },
+            "gemini-pro": {
+              "provider": "google",
+              "name": "gemini-3-pro-preview"
+            },
+            "gemini-flash": {
+              "provider": "google",
+              "name": "gemini-3-flash-preview"
+            },
+            "gemini-lite": {
+              "provider": "google",
+              "name": "gemini-2.5-flash-lite"
+            }
+          },
+          "anthropic": {
+            "api_key_env": "ANTHROPIC_API_KEY",
+            "base_url": "https://api.anthropic.com",
+            "chain_on_max_tokens": true,
+            "beta_headers": [
+              "context-1m-2025-08-07",
+              "interleaved-thinking-2025-05-14",
+              "context-management-2025-06-27",
+              "structured-outputs-2025-11-13"
+            ]
+          },
+          "deepseek": {
+            "api_key_env": "DEEPSEEK_API_KEY"
+          },
+          "google": {
+            "api_key_env": "GEMINI_API_KEY",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta"
+          },
+          "llamacpp": {
+            "base_url": "http://127.0.0.1:8080"
+          },
+          "ollama": {
+            "base_url": "http://localhost:11434"
+          },
+          "openai": {
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://api.openai.com",
+            "base_url_env": "OPENAI_BASE_URL"
+          },
+          "openrouter": {
+            "api_key_env": "OPENROUTER_API_KEY",
+            "app_name": "JP",
+            "base_url": "https://openrouter.ai"
+          }
+        },
+        "mcp": {
+          "github": {
+            "type": "stdio",
+            "command": "github-mcp-server",
+            "arguments": [
+              "stdio",
+              "--read-only",
+              "--toolsets",
+              "issues,pull_requests,repos"
+            ],
+            "variables": [
+              "GITHUB_PERSONAL_ACCESS_TOKEN"
+            ],
+            "checksum": {
+              "algorithm": "sha256",
+              "value": "7400a3f4b8ba04bef50b83687338560cb5a3769c83c52985c8365f8d8af17510"
+            }
+          },
+          "kagi": {
+            "type": "stdio",
+            "command": "/Users/jean/.cargo/bin/uvx",
+            "arguments": [
+              "kagimcp"
+            ],
+            "variables": [
+              "KAGI_API_KEY"
+            ],
+            "checksum": {
+              "algorithm": "sha256",
+              "value": "8ff70dc528c434469b43a1b05f752f46d8abe41c010edcbff6e5f3cc3131f2f3"
+            }
+          },
+          "bookworm": {
+            "type": "stdio",
+            "command": "/Users/jean/Projects/Personal/modelcontextprotocol/bookworm/target/release/wrm-mcp",
+            "arguments": [],
+            "variables": [
+              "WRM_LOG",
+              "WRM_LOG_FILE"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-01 22:32:43.606089",
+    "type": "chat_request",
+    "content": "I have this issue where that is best shown with a demo:\n\n```shell\n$ jp c ls\n╭───────────────────────────────────────────────────────────────────────────────────────────────────────────╮\n│ ID                        #         Activity   Local   Title                                              │\n├───────────────────────────────────────────────────────────────────────────────────────────────────────────┤\n╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯\n\n$ jp q -n Is this thing on?\nI am active. Ready to assist with JP development or any other programming tasks.\n\n$ jp q -n second conversation\nI am ready. What is the next task for the JP toolkit?\n\n$ jp c ls\n\n╭───────────────────────────────────────────────────────────────────────────────────────────────────────────╮\n│ ID                        #         Activity   Local   Title                                              │\n├───────────────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   jp-c17673062211-otvo8     4     1 minute ago     N     System Check Confirmation                        │\n│ * jp-c17673062717-otvo8     4   30 seconds ago     N     Placeholder Conversation Title                   │\n╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯\n\n$ jp c edit --local=true jp-c17673062717-otvo8\nConversation updated.\n\n$ jp c ls\n\n╭───────────────────────────────────────────────────────────────────────────────────────────────────────────╮\n│ ID                        #         Activity   Local   Title                                              │\n├───────────────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   jp-c17673062211-otvo8     4     1 minute ago     N     System Check Confirmation                        │\n│ * jp-c17673062717-otvo8     4   30 seconds ago     Y     Placeholder Conversation Title                   │\n╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯\n\n$ jp c edit --local=true jp-c17673062211-otvo8\nConversation updated.\n\n$ jp c ls\n\n╭───────────────────────────────────────────────────────────────────────────────────────────────────────────╮\n│ ID                        #         Activity   Local   Title                                              │\n├───────────────────────────────────────────────────────────────────────────────────────────────────────────┤\n│   jp-c17673062211-otvo8     0                    Y     System Check Confirmation                          │\n│ * jp-c17673062717-otvo8     4   30 seconds ago   Y     Placeholder Conversation Title                     │\n╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯\n```\n\nAs you can see, if we swap the storage location for a NON-ACTIVE conversation,\nwe lose information about that conversation's events. I looked into it, and\nwhile `metadata.json` is transfered correctly between workspace and user\nstorage, `events.json` is not, and instead it is removed from the old location,\nbut never re-created at the new location.\n\nI am fairly certain this has to do with our recently added lazy loading of\nconversation details.\n\nCan you spot the bug? What is the correct solution from both a technical and\narchitectural standpoint?"
+  },
+  {
+    "timestamp": "2026-01-01 22:37:29.183904",
+    "type": "chat_response",
+    "reasoning": "**Debugging the Bug**\n\nI've been digging into the `jp c edit --local=true` implementation, specifically within `crates/jp_cli/src`. It appears the bug lies in how we're handling the movement of the `events.json` file during the conversation transition. I suspect it's getting lost in the shuffle between global and local storage. I'm focusing my investigation on the file handling logic within that command.\n\n\n**Refining the Logic**\n\nI'm now zeroing in on the `Edit::run` function. It seems the issue stems from the interaction between local changes and the subsequent persistence of the workspace. Specifically, I'm tracing how the `Ctx` is dropped after the edit operation, and how this impacts the `Workspace::persist` call, especially concerning the `events.json` file. The problem could be in how local conversations are handled versus global persistence after editing. I'm checking the flow of `persist_conversations_and_events`.\n\n\n**Pinpointing the Culprit**\n\nI've been re-examining the `persist_conversations_and_events` function in the storage layer. I'm focusing on the condition that determines when to remove unused conversations and the logic for the \"active\" conversation. The potential problem may lie in how the active conversation is handled in relation to persistence and modification flags within the TombMap structure, especially when local edits are involved. I'm checking the interaction of `is_modified` and `is_removed` to see if the active conversation's persistence is incorrectly skipped or duplicated.\n\n\n**Fixing the Persistence**\n\nI'm zeroing in on the persistence logic within `persist_conversations_and_events`. I've realized the `events.get(id).and_then(|v| v.get())` call is the culprit. This means the event stream isn't always present when writing. Specifically, the issue is that events aren't loaded into memory for non-active conversations and thus are not persisted during the `jp c edit --local=true` process. It appears I need to ensure all events are loaded, not just the active ones, before persisting. I'm exploring how to force-load the stream for all conversations before writing them to disk.\n\n\n**Solving the Persistence Problem**\n\nMy focus is now on the `Workspace::persist` function and how it interacts with the local and global storage. I believe I've pinpointed the issue: events for non-active conversations are not loaded and persisted during the `jp c edit --local=true` process. It appears that the `events.get(id).and_then(|v| v.get())` call is always returning `None` because the event stream isn't initialized for the non-active ones. The fix involves ensuring all events, regardless of activity, are loaded before being persisted. I'm exploring how to force-load these events within the persistence logic.\n\n\n**Resolving the Move**\n\nI'm now thinking about the interplay between the conversation move and event persistence. I believe the core problem lies in `remove_unused_conversation_dirs`. It's correctly deleting the *old* directory, but crucially, it's doing so before the events are ensured to be in the *new* location. The `events.get(id).and_then(|v| v.get())` call being `None` now seems more like a race condition: we're trying to read events from the *new* location, but the move hasn't completed. I need to make the event loading more robust and consider how to move the event files at the storage level. I need to check the exact file move operation and ensure all data is present at the new location prior to the deletion of the old directory.\n\n\n**Architecting the Transfer**\n\nI'm now thinking about how the `jp_storage` layer should handle the file transfer during a conversation \"move.\"  When the title or scope changes (even if the ID stays the same), the directory name changes.  I realized we need to make sure the event file is transferred properly *before* deleting the old directory. The current approach is deleting the directory prematurely, leading to lost events, since the data isn't in memory. My focus is now on ensuring the persistence logic within `jp_storage` knows about and manages the file transfer for these moving conversations.\n\n\n**Optimizing the Transfer**\n\nI'm now thinking about how to improve the conversation move process in `jp_storage`, particularly around the `events.json` file.  The current issue is that `remove_unused_conversation_dirs` happens *before* we've ensured the events are in the new location, creating the risk of data loss.  The best solution is to copy the `events.json` file to the new location *before* deleting the old directory. This will be more robust than loading the potentially large event data into memory just for the transfer.  I'm now focusing on altering the file management logic within the storage layer to handle this copy/move operation safely and efficiently.\n\n\n**Enhancing the Persistence**\n\nI'm now thinking specifically about how to address the lazy loading and aggressive destruction in `Storage::persist_conversations_and_events`. I've realized the key is to handle potential \"moving\" conversations during the persistence process, ensuring the `events.json` file is transferred appropriately. If a conversation's path changes (title or scope change), and the events are not loaded, I need to check if the `events.json` file exists in any of the directories slated for deletion and move it to the new location. This should happen before deleting the old directories. I'm focusing on modifying `persist_conversations_and_events` to manage this transfer effectively.\n\n\n**Rethinking File Management**\n\nI'm now revising the file handling logic to address the event persistence issue. Specifically, if `events.get(id).and_then(|v| v.get())` returns `None`, I'll attempt to load the `events.json` file from the old, soon-to-be-deleted directory. This approach aims to prevent data loss during conversation moves, ensuring the event stream is always available before the directory is removed. I'm focusing on integrating this check into the existing persistence process for robustness.\n\n\n**Implementing the Event Move**\n\nI'm now thinking about how to handle the events during directory renames in `Storage::persist_conversations_and_events`. It turns out `load_conversation_events(id)` can load the events for both the current and old directories, *as long as* the directory hasn't been removed yet. This means I can capture the event stream, even if it's not loaded, *before* directory deletion happens. The approach is to call `load_conversation_events` to check for events in both the current and old directories when preparing for deletion. I'm focusing on ensuring the stream is correctly handled before the directory gets removed.\n\n\n\n**Fixing the Event Transfer**\n\nI'm now implementing the solution. I'm modifying `persist_conversations_and_events` to check for events in the old directory if `stream_to_write` is `None` *and* the conversation is modified. I'm adding `self.load_conversation_events(id)` to check for events in both the current and old directories when preparing for deletion. Now, if events aren't loaded, they can still be persisted. I'm testing the changes to ensure all events are moved correctly.\n\n\n**Analyzing the Architecture**\n\nI'm now questioning whether the `Storage` layer should be responsible for moving the events file during directory renaming. It seems the design is flawed since the persistence layer, `Storage`, handles the physical layout and deletion of directories. If the `id.to_dirname(title)` changes, the old directory is deleted, resulting in lost events. My focus is on determining if this file transfer should be a core responsibility of the `Storage` module to ensure data integrity during such renaming operations. I'm reassessing the current implementation in light of this architectural concern.\n\n\n**Architecting the Move**\n\nI'm now thinking about how the directory deletion is being handled in the storage layer. We are deleting the old directory before writing the new metadata. The event data is only present in memory if the conversation is active or if we have loaded it. My focus is now on ensuring the deletion of old directories occurs only *after* we've ensured the new directory structure, and especially the `events.json` file, are correctly written. I'm reassessing the order of operations in the persistence logic.\n\n\n**Integrating the File Transfer**\n\nI'm implementing a solution where the storage layer now handles file transfer during the conversation move. I've introduced a check in `persist_conversations_and_events` to see if the ID has changed. If so, I check for events and perform a copy to the new location before deleting the old one. The core logic now ensures the `events.json` file is transferred to the new directory before the old one is removed, ensuring data integrity during renames. I'm testing the fix with various scenarios.\n\n\n**Revising the Persistence**\n\nI've been examining the file movement within `persist_conversations_and_events`, specifically the logic where conversations are being moved or renamed. I've introduced code to load event streams if the ID changes to ensure they are available before the old directories are deleted. This makes sure that the `events.json` file is present before attempting to remove any outdated directories. I'm focusing on validating this behavior with various test cases, and ensuring that all event data is properly migrated during renames.\n\n\n**Optimizing the Event Handling**\n\nI'm now zeroing in on the event handling logic within `persist_conversations_and_events`. I realized the `remove_unused_conversation_dirs` function is called after persisting the conversation. However, the events aren't always loaded in memory and are potentially lost in local modifications, especially when using `--local=true`. The key seems to be ensuring event streams are loaded before checking whether or not to delete directories. I'm focusing on ensuring event streams are loaded before checking directory statuses, to handle persistence correctly in different scenarios, especially `jp c edit --local=true`.\n\n\n**Finalizing Event Persistence**\n\nI'm now revising the file handling logic to guarantee no data loss during local edits. My code now ensures the `events.json` is loaded for all *modified* and *active* conversations. This critical fix resolves the issue with event loss during local edits because the events are now always present before any deletion occurs. I'm focusing on rigorous testing to validate this behavior across all scenarios.\n\n\n**Enhancing Persistence Logic**\n\nMy focus is now on ensuring the conversation events are properly loaded *before* the removal of any old directories. I've realized `try_get_conversation_mut` loads the metadata, but I need to ensure events are also loaded. This means I need to make sure the event stream exists in all cases. This also helps with the local `events.json` files being persisted. I'm focusing on ensuring those `events.json` files are properly handled before removal.\n\n\n**Analyzing the Architecture**\n\nMy focus shifts towards `persist_conversations_and_events`. I'm now realizing `all_conversations` will contain the metadata for a *modified* conversation, even if its `events` haven't been loaded. This means we'll attempt to persist, but the events won't be there.  The question is: Should we even try persisting if the events aren't loaded? Should we rely on the `is_modified` flag in this logic, and how should it influence the decision to persist the whole conversation, including events? I'm re-evaluating the role of `is_modified` in this specific scenario.\n\n\n**Analyzing Persistence Behavior**\n\nI'm now diving deeper into the nuances of persistence when a conversation is loaded but not modified, focusing on potential redundancies and edge cases. I'm examining how this impacts directory creation and metadata writes, particularly considering scenarios where paths remain unchanged. I'm now questioning whether persisting metadata and events for non-modified, non-active conversations is truly necessary or if it can be optimized.\n\n\n**Improving the Event Loading**\n\nI'm focusing now on ensuring all events are available before directory deletion. Specifically, I realized that if `load_conversation_events` fails, it may mean a new or empty conversation. I'm modifying my approach to always load the events before deletion, even for seemingly new conversations. I'm now making sure all conversations, active or not, are persisted correctly.\n\n\n**Improving Local Edit Persistence**\n\nI'm revisiting the interaction of `is_modified` and `is_removed` within `persist_conversations_and_events`. I'm now making sure that the logic which determines the correct directory deletion behaviour correctly handles the `events.json` files for local edits. I'm especially focusing on ensuring `events.json` files get copied when needed, not removed prematurely. My goal is to ensure data integrity during conversation modifications.\n\n\n**Refining Persistence Process**\n\nI'm working to refine the event loading logic within `persist_conversations_and_events`, ensuring events are present during `jp c edit --local=true`. I am now focusing on loading events for both current and old directories when an ID changes. This is done to ensure the file exists prior to directory deletion.\n\n\n**Revising the Persistence**\n\nI'm now zeroing in on the persistence loop and the interaction with the `active_conversation_id`.  I'm realizing the code skips persisting the *inactive* conversations' events because the `stream` is `None`.  However, since we are iterating over a set of modified or removed conversation IDs, this causes a data loss when local edits occur, since the event streams are not loaded into memory and aren't present at all.  I'm now working to ensure event streams are loaded when persisting even *inactive* conversations, to ensure the data is present for persistence.\n\n\n**Refining Persistence Process**\n\nI'm revisiting the persistence logic and focusing on why event streams are sometimes missing. I've realized the `events.json` file might not exist in the right place during local edits with `jp c edit --local=true`. I need to ensure events are loaded and persisted for all edited conversations, regardless of their active status. The goal is to address data loss and guarantee all edits, including events, are saved correctly.\n\n\n**Refining Persistence Process**\n\nI'm focusing now on ensuring all events are persisted during renames by loading them before writing. My thinking is to load any events for the `old` location, if we're renaming a conversation. I'm focusing on ensuring events are loaded for all conversations.\n\n**Improving Event Loading and Persistence**\n\nI'm now implementing the fix where I load event streams for modified and active conversations, even if they're not already in memory, before persistence. I'm focusing on ensuring `loaded_stream` is correctly scoped to ensure the event data is available throughout the process.  The goal is to prevent the data loss, by loading events before saving.",
+    "metadata": {
+      "google_thought_signature": "RXM2SEFncktod0lCY3NqYWZJelVUMjdyUWtyS3Q5QlBGR3hDd0ZUREc0VHhoaE0xMDBXT2JBd3dhUkpLakJDcGdUTnpRWlNFeW1KU2JLNW5aZXdvWTFGTVJYMHB2M3FjMFdoRHAvRXAvUG55dmthYXdEdVo0S3ZFM0NlU3VnSHFDN3JGZFZsSFQvZTkrVmVwbWsxRldBU2JqcWJRU2FkN3B6ekg0cnlISS82bTI3bHViajJuZktGQWIyMHBVZUt4Q1lBaFFkcjVodm1YZlFKV1lJUndvUkpiU05sNEgvb3pPVlRiNi8vWnJGTkpPZTVrS1NNZm5TaHJKSjJMV1J5ODNMV3VpRnpRUHBrRmR2c3E3M3ZDVjVZNXpBbzZuUGhsdVJJYWRlYThHcDdvWUE0dzkvNEwzZFNkUDlHWEs3TlR0Zy84MFV6WkZWUTVGb21KTTdQRi9oZkxjNXBLR01RMDZoMXBUeG5tZ2JqeGYvNHUrRGlYS0Jjb21xZTFkcHdwb0M2aUNaSVlheUxNZ2g1MHAwbFRsS0hMYzFJNWloRm5zQmxwejdFRFZrQTlxVzJZNklEQXpKOUZCcStoMTROdEcyV3FQN3UwcVQ5ckN5SzFCV1FLUWhCRkRWeHBQVUgwUS9FT0pSWjlvNkJlNkJSTGdyMm50NGlEQVN4cVk2dXRXNnQyMWhiTzVVbU5oT2V4ZWR5RUxPV3ArbVBQTU9nZVJZYlE5REMxV2RFM09tb05SYVlnYmpKaWYzN0xKQnh0RGt2OXRMNWRyRnFUbUY1dklXaEJHT0hFYnlKZ3JDL1ZPVXZic3E0cm8vVjVlVTc2TjNDenlyWld2TmJ1bUFOOFJkVit5cG9UNHV0Z0V5UlpFVVZRdVFNZkEvSnRLdytNUW8xSXlzaVhwZSs0R3NFUXFXeExTb0FWZU5mTncvUlJHUDZRWDg3emphazdZd2tONXdPRHpMR2FuaXRuTm1PMkVNWjdQOVdKS3VhM08yNGFkd21KL1dZNWU4QVJYUHg4dWR4aVNRZFRGcGNCV1Ixbmt2SS9sMnhxN0prQ2IzWTZjcDZtMVhQSG5LS25uMjNzaWcvRm1mWUFWdDQvZmVqM1FJeDRTcUR1Tk1NeEVTeXNvOGQvcmdKMWgwNWVUNk9KMnFXaHcwQlBxS3FUVXRTRUNjMmlkVVBiNFMwMDMzbkhMYUtrdmJmOEpSdnJzM3BaZzcvUEk4a01uVjFpeWdzRjJjaFcwTUlML21rZnBRTzB5OGxFMlR0OWtyalFIVXNidVVPdTRlcHV5NHlSMmphUUNOMm9zVGJOdkxqMEpaM0w5QTU1NDRhck83QSs2K2NzdUtiamJBbGhTUmpSTUxDYm95dGZNQ1pYSm9vMzNwTTdFUzYyWW5aYjV3a3NtUXZUREJ6RzZLNkRUSlNtVDBMeU4zYTR5KzIwYzlyTmFFMXFPS0oyZHNjRG9UUFNXZGlsVDNWcXF3YnpndnN0SUFwQU42cFZobTFuait0SUJTcGNacDkwdEM4MGRzczlldk9zSXpZZmp4TWQ5d3lxcUlrL1lBS21EelRhcnlvUXk5azF1dTV0RWYrLzdGbTdCdzE0a3dtWTJJYzcxcDdlYlN5dVQ4L3ZLWks5ZUM1eTBGWVJaV0VFajNhRkJwemU4Und3NW4vTktuekNacjBLRndlNW5GSng1aGo3YURxU09SK21YS0FrK3NtT0cxQ0dkT0Q2VGpJY3N0RW5RVGF4QW1mUFZWUnNFSmJvOGtCazl4L0MwaE1JY3o0L1VpUVh2VEt3d3MzN2E0U280aVRUcy9BYysrNFRCREtoZE9Ga3RzNERhZXlHYTdicGVCb2xKRXE4UGU3N0M1QnRKbkt2UW1MYk9RV1cybmJzTW5IMnNqT2MySDI4S1dLOUlrNVhBS1J2OG5PMStwSFZBTVE4SE9rNm1uUUhQcDhLUlRlTnl2Z0VHWEJkV2k2S3Z1ZkFnT09hazkrd3NBKzZDOVJtNjhpQW01YzV4eXdBd1FtY1ljVytZeWxnRDFXZ2hNKzFUU2F5TnpSblB6cUxQWk9MajRJNWJSR0hoajhqL0svL0lmREx0dXJpK1FvSzhVc1hMUDBQdWlER3NhUWY0anRQaWNtT1VXRFRzL2hBZ0dnSnIrRzYzblYwc1FJS3BSQmkzeHdiNmc1NjdSRkRKN20xeGI2d0JMM20yV2h1Wm8ra3hHMGl6MDkyb2NDdEI4QXdiWERreWl4cE5oNnh1K2FiS2tUaUptZ0t4eDF4TDVZRTkycUh2NW5rWERIZ0RSNUNqbGp2U1pYbk5ObjJrZy9ma1YvSWpyUUdDQW14M2ZZVTBXbjBpT3cwZjJDVmppRDhWekVLWTFOTnFtVHB2dGFFRWNsK1dEMysrOVpqdS9XdWE1L0w4V0gvNCtxT1VETUFuNGJ2NmNxU01JdU9KNXYvNDNwUGQ0UlBPVzVTMzIxb3ZrTHRGM0MwalUvbVczbTlVV0xaQzV3QkZXMGxCNHlkYlhmTXJ6c25vWjJnZzgxeC90Y3N2ZEQ4d1hVZWJqQlRQaU9yemIyQjZ4U1VuaTRXaWtCMm5RelJGNlRuUTI1ZzVCRnNaS0VlbzJ2MkJOWFJFNXhkR3F3UUdoR1VaMzJKWDI4ZzFTMXh0V2VPbmJ5RnA0dGM5aXpRQWNSWHZxS0xxSHEyNUUyUG5Ua3BldzRrZ2lva0J3SUxQTHhIU09pdGN4aHVKTFdFTEZadVRoSEJseTB0YVFTM1JaVkZOK3NRclJZcm1PYmJLYkFnQlZGNFJ4ZVhyc3NqZEtkL01WRWp5R2JDQ2FpL25zTThabXFJMjBjVktPRTBOYVZPc3YxM092VW8zbkMvZnNXUDc1YktRZU1QTTFBL2VyTlJQdCs5VE9OSXlkVERQdmZ6KzJURVFXaEtScVFHcmxORkRiZ2dhTXBGZWlrbXlZeVRiSTNPUlpxM2FZZWF1cEJDdVdLODgzWkkxeU5rS3NUUnhiWXFQMDhZZ2dVdGM1RFVZTWpMZzJwNm5qVXloKzNCRy9nUWtSZVdDWVZsM2I1V0E3V2pJQkZad0d0R3owUElIaDR3U3BYbmEzRGl2YmFocU1OSjhRUDB3NnF3Z2FIWU1kTWpZbWMrVHRXam5tWVJkZzA2N0pXMWhqTW05T25SQ1hCRGVLazV5ZDdUZ3E4eU5CeXBaamV1UVlueGtTT3BhZEU0ZkhTUTZJRDdvVjhpVWxpMTA0ZXVyM21Ia1hOZHY0aktCTHFGOS9aZWFkbS9nWVhma29kUTM3N2dUM2NPeURuQWtETkxPRDl6MDhDaUxBL2pSMXNIRUJhRDlXQkhDNlkzOXppUUtRTDl2Vmo3RXlTQXZicTRVUXd1TUpuSDR2R1BDMlFKdjk3b3pGVTVyRFBUR3laQnhhVWxqa2E0aXZnRHkvTmNxbnRrdUMxTWg2QThkZ0tXQm5CSE9TUW51M0t5WS8yaG9TcDRZL20vRDlIZEgvVitkdG9nSTZ6RkJXS1lGZTRkU2cyREhVNWh2cHZxeHN6RUlLeFFObXhDdk55RHNEQUJMbjVPMmh5eStTYk1TMzRJekVyUEVwYTNWMGFMRnBVZlFGcFEyY0h4Z1dtYzZLZ0tIWHk0WnVwMWF4N1IvaXpKTmlJZ0Vyb2ZVYVZDZXh3dGlGcUViZHg1cUFyOER4NzRpTG5Ya1RVZG5VSDlLbFlFNGllSmNCS0JxNmY2YWNOaUsydmg2WEtOT3hmaUVhOHpsUHFjQzBwWUs4eTloMW9oak1ROVZoUFJjb3I4TG9EZkc5aVpDeUdsNzVMbm02ZCsxUXBiS1daaS9EVXc2RnFkRWhDNVFGSVpPT2NDMFRwS1NBbnltVy94RWg1NDBzOEUvY2ZUTTIyalNNbVZxOFdLVlJtRmMrOFNsWkhCanZINVJEV0tuVGk5akdpcytnZUw2aTJWMTRXUVpyd1BLMmFBWFh0aVduYmJJa3IxaXFDSWI4NTV1eGY1TU5qc3lhQWZhTWtObFI2K0FxNGJIaEIxZVQzUU9nbU1zTWVPZk5ibVgyb0Z3V1dzMWYyS3FOUVBzQWJaUU9EZkRjSS9ZLzh2UmVFL0p5bWpYMjdnUXlVQzNrVlkxNkl5SHRIT3M3TTViSHdqZUNkYmhGaGRrYlczcC9IdnB1Qlp5Mnh5YUZwa0JzVUJDb2JDbTB2Q0I2SWpPUDIra3ZzTklqd1huTm9ROVZxKzhQOTdRT1ZmTjY1cGJuTXFsUVZXc3ZxSUZ0akM5R2c1d0w2a20xTmJTL2d1UGErd0xUUmRIeVB5YWtCU0Mzb1hHQXVHTFUrT21iRU11TW4vOUNCM3FlSU5YYVp2dm5QSjE5WXNLUWdvUmEwSFlIN3BmcEVidUdPdHFXdnM5TGM1cHlRQWdIdmV3VmRyVjg0WGR4Y3RCQUJRODVoYW1nUGZ1Y01LTEhNYUZLUDBlYVdzWHV5eFY4NjRkcnp2UFQ2R0JLbE9pOXhJQkNqMTMzdTZrTDJKbCtoMjZ1RUJPd1dQb3dzWHdwU3ptNjRlcFhYSDZ4Mks2SmZGQmxYSnZlS1B0M0dRMWFmYzFqbjBaL1hSNXduRUhnVVlzMzFMWERMamRVV1pjTk45Vlp5WUQwczlKb1lITXNkYkhlZnRad2d4eHZGbXQrNDgzTXpzT1pBT2lsb29NQ3BrV3RmQWhqckRDWVc4UllXWVNvVHlrcXpvVWJZNGlwNlh1SmNmTFlzM0ZwZUhFVDdkTCtoZDUzUWNQVC9pbXlpSU96bkVxa1ZWTWlrNnZSZ3RINUNLQkhoblRQRmFmRjh6c2RmVXFRSG05djRhK0MwUVdxMUlEbG5seWt5RHU4OW53Vnh2eUZJSkhHeVRPODVQOHFodEtpSm90UVBXZWRETEhzYXM3cFJIaC93ZVZ4WGZMQU54dlh2UE05OFh5WDNaTC8vd2lENUxGbUNOaXA4WUM4YUdKcHFibi93NnZPWlZzLzFWN1p3RjRyV1F6RVh5QXVYV0R6cGwxaE9QenRFL0F0SnRwVXRBdDhCMDVDaUwxeXdabzFaUHhhcy9OTjdIbTNENnNHSUhiN2xuRGhoeXlBSmZGTUIwYWQ0YTlTSUluZUJpRDZqbkZIS3FjemFkU0xFZlpHNDdGVmMyQWZMd0xzUEFWRktsLy9nQllUVlNJK2pMbzRrMTJ2ZmhGaVBoSmNsY1gvb2l6Q0YrS0NYelFqVy9CTG9FYU1RZmlZejl3dGJUOTZuNXNOOTg2bklVK0daNmpkelIydVgyT3pCY1RJbld1VGZaR3Exa05SN0pzL1U3RkxFQTZZbGJKTFhBMm1nSkl6OGpqbW1HS3FpaEU5bmJhZ284S2pDK2hmamwvWm1MZm5sR29jaXBoUjM1eEk3TFZPM2p1c05UcGZRQ3hYckRsZ3FLMzZuKzF4N0tZbWU2dWt0RDlRbTIvSlV1OERXRkdNWk1EanlNc3NCLzJvSHYvT0xVcFZNSEhORElIVmZnUUdsZ0o1Mk5zaFhtOGFEMEdkUmpHcEE3STlGT3ZBYnFrVUVqMEMzMU45UlpUN2tFZDNHZUdhR3E5U1ZycWJoMlMwSUJsNEdxVFh4ekxWWVROMURVUWpCWDdRZUZEZVJvS21saE9OL3hEeEgyaXdiYUkrOVFNeGxzeDVLZ3M2TXUxZWd5WGtzbnNWSW8yek9yQjNlYU00TFgwbUQ4ZUtJOXZybkNqMEwyNWR1S0haTUk1ZCsyWHVZMnQrTDZsdEI1d0J0NUtkZGRGdUd2YmtHMHpVb2FkcWNPdTlRcWZ0TzJPN294d0RhelBEM1pIZ0FVemk2a2Z3RFNvNnZ2aC80cTVCN0VLelhrVHFIKzFNWnFBRjJkV2FyeTFDQ0ZOdjdxa3RVQUlaMzRmNmVGTHpNaFdyeEtKdDhMcks2MGhYTzdHTkJYRWpTbTl5cm1OaEVYUXNIdDNtNzBvUHI0NjdjMERjQzhoZDJBT21YTWJxWHNhK3NrUEJDSU4rcEZkM1Q4Q0JWQXh0MGJlTDN0VjJXNEpQTmJrekZjSk04MHpzQzJDSVU3QXEvaC9PY2ZSQW4yZ0VMMzdNTGNKR1NnbzYrT1dyVks0RXlEK3hBRmVHMllqb1IxU1dSRE42THpQc0RwYWZLdTRUaW9aVHZFR1Q4dGpXMW1QTnlwcnVRc2djK2Q3YzVWeVZ5aVhpRkFzNVFzNUp3ZGNyZ21HSFZrTGc5UTJUUHBjR2swcWF0dFNWQ2xyRVhoSGFwbWN3dU8vcXZlSmxobS9zWjluZDltV3pGcjc2SDFJaENiVFAxbmhwd3R0VVpPNktRQmFUc3hxWXRjRFBTSjU2bTl5ZGVLT1pZTUVLM1JWODVXUXhwakdxcG5YeEwrT3cwbWxoNUJ0VTJXaUN5NEt4Z1Q1NHZkdnFuTVZoMmhhU29OSjBHTWJXamtpcHBNYWdZakpoZHBmOW51dmpYRi9qMUZOSGk1Y1FZQitBaFp4Q1hMMHNmRWNqT1dnSHQwdEZHaUZETVhBZ3lJaTY1MzlIYVVjOGh0SGgxMTgxRWIxK1hPTWdLS2Z6R3ZSdklBQ1dYeitETUp0VUwrQnBZalNla1lxTmlxRWtFazlxaDJNeEZjMFhJY2NBWVlyUmQvQkQ2QzZ3UGJMYnQ0dE9SR0pobUlUM2hvQ0d4ZmtNU3Z5Yk43RE52Yldhd3Fibm1SWVM3Tk5kdVJMZjdudk5IaTBCM2FiQmRlZzhxelI0cXhmZ2c3VFAxOU5jSHYvOXl5M1puL3lKVFBQMVJlNENIeWZseEMxaXlxSW1vSVlLUWFMZURZcldYN3Vya3dwZkYxbjVFclJnNkJ5SE9NUGRadkpNQmE1ZUdYTmh1NGRqQVEvYzR3WkpJMEVvMXVET3RIaHMwMXBrSnFIZkovNS9rOGhxKzByb1BGNk5wc3hMbWxhZUNSQitxU2hmNGpDTHR5d0NYdEVCb1owekhKZFAraVBTRGdqZzRzV1pvaHhXY2JGQnIwY3lqdnRHNUJudmpRNFo1QUtyaG1NTGtkMGRtbUszZmFPVEJMQjIwSzhrUGhxWU1ZRXVHU1Joejl1aGt5ZzRaeUpqVVpNQUwvZ3o4K1FTakhhSTNqWUhHcUcyUnhYd2NIMnFpTFZhdnR0YVh3WTc3RTE1cDhwczFYVXVJbnlDdjF4V2E1UFJWY1VvQklNU0diWG45dU5EMlBNT0lvSWFQQUpKVVVsWmF6NytCc3RsZVhINitnbWVZYzd6Qi9DQkhRZkNCR1NTWVBFaFJTaGN2VHFwSFhVbXZMT3JZdksrOHp3L2prWVFKL3BwS3NlZnc4VUtITXdGYVhOUWRmVHBpNTdYS25vNDFTSXdabTV5UnphdGpWL1loaFoyd1Y2ODdKcTBQVVI2Q2gvRDBOZVNBL3V0MGZBeHU3N0JLTXoxdG5ra3g3WXRYZkNmdnkrN2xLN24rbll5Y2w3dDZZeFBNcFE2bGpkaXJvRTdWVU5KOVhpMEpWUmRkdVNkZEk5amhFNE5FbWd1dU11RVRiWWNYRzV3WVJyNlJFVWxXcGk2cW1ML2dHeEhzNm8ySkJDa3lWS21LQXAreU1rRlVIUTlnVXJhYTRtbGYzQXRJbkRnNVg0Vy94elRrZGdwT0ZrUlRLL3pmUjBkOUhyaExHdVNvUWtYVmVDLzFhMzFEMHk5ZU1mYTZpK29TRzhaY0lxS2paMlRydnRFSjl6RGhGUzBQNi9nd212MUUvNitLU0FyWElqUi9WeFdzMHZ2SHViYWZINHNGTXdjZldDVVU4Y2NlR1BQOTdEbGdGU2RvRFNzZmw0ZmxYYmZOSDlaRUMxcmdoQlNXVlRTNzZMTUpQajVDWWdob2dRV1kvOStQcHRNWmJzZkdNUEZsK1VncVdWdnlHNklsQ2RacFRKQlAyUXVObUl2SG9pRzNXbHlESFN4ZjdoQjFhK3cxb2dJT3pNb3dNWmE4UHd0VnQ2clNOVFhlOGlHWFdQK25QaUIzZzRHNkJxdVA4c1ZPRVRCOHJ1UTgxa1RmazFCQ0FRWWFQUG5CdDMxZXB5UG9Bb3pmY1hBeXc2MXU3dVFwRHprS0w4OXdCRG5nTGliU0NpUWFWcktvc3h2V2xjbnJoVGpabHpMcnFkekdhTjVHbjU0bzZlQ012b3BFaHdSL2E2U1VwLzFIY0VuTFpRODg2UkJjSm1zUS81NklDd01YdG9Ba0pQaGRpUjRsWjg5UmFTOW5objhPaVBwcTQ1QlN0WStNRFM3ZkNNaGNYSG1keis5U0xpNzFHQUMzUFpZVTd3Sy9LZEx2d0NiWWNoc1llWkxnS1NPTFpiTERJek5ad2toL2dSMGVhMGZxR1Bna3pkUWNmbytiN0VCZmdMYmErU0lBM1krQThNVEduMUwzYVNQbWdLamp1QU42UTV4UkROVEpWWmtxSU5XcSs1NGgrMmN0V0FoWlQ2a1Z4VzE2QlBnS29uUjY2ZE5sTUdYZnVKeHY4dUp4S00veUVYTlhZeXBCTmI2N3pSak5rSTdYV2w2QWJzR2JFT01zdEVpVFVuRTUzNzlpeDJDbjRWaTBDaEl3dlJLWVRZT0pTaXRHcUxhWlFHbTQ3RWFLbFlXbC9paWZUK2ZqSHorZHpacUs4bE00aDZPYStlUGkrck9reTJSVStPL0Zia0MvMlpocXErUTBSUEhKZ3JHVmpud0FrZ3pIOStxMy9lOXB3bzRjbTdUREk3aDArYVFjcVJyWnFwMEdmT0hUL1doZjJFTTBPQzBmS2pYOVZPamlxV1kzYjg0OVpSZG0wekNOYUNaTFJYbjJUbXhIV2Z3MXRxSnFFV1FPRzVFeE5idFd1c1JnVFRnZEJXRlQzbllOZE9yL1lCeXU1NWNhbjVrSERibjVSQXJUUmRlSi9DcVJEVDF4NDdzNTc2MWdZdzRDY1hGYjlWVi94eWtUNTdQakVzUXI0YnJrWmpVUHhVK1Ztbzl4aDFhT1E1bFVBMUlWYkdOSlBFNjFydldtSFNoNUlvMm1KZmtaaDNaZnNORnpCUHVUOE1MSU9iUXRqcXhoSXVXRUQzSlE2K3l4ODg3eUZGMERBbkp2YmdTcnZGeDZPL05PclEvZ3JITFZGN25KVWdOSHFCR1pON1VSQ3NmNUV6aFJYM28xN0YrNHd5K054QTJwNGg2SzJ3TWY0cDZOdElyWnZmSklHUjdNYTduRVZLOGtqdVZUOENMOVhEMmQzWEhQeTA4c085RERtSmJTRDJDN1U5RlZobnhWd2FmeVB2SGVZd1dKMk5Xbk1mek9QYWRIQkZtKzJ4c1BxWUVIMFF2UFJSaEpDM2tNK3dyU3hML0FweFRURTRia01tczJjYS9FbUYxTytHT0hjQmF1KzcwRFBkOS95QVV1RFZvLy9jN25HMUxhbE42d1Y1bWMzYlJMTzB6c0NGQWdNOUowcEdRWUNwUWpINUw0ZmdmT3FRNytnaUxrd0lNY2R6ZG1oU1JrUGVNMGQ3SHVaa2RTUDIwRzc4OW9tSk5LUFVySDV1RUkvNW0xYlRSZFQ5MUd5ZXQzUGdGYjRHTzl3RGtsNGU2QTJJdkJmWU5Hd20yWVdleVcyaUl3NTdwMlNIRm40NU16NTVrYXZkNzJTdU5kSjNJZWxwNnV6WEVtS2UzNm1tYjJMNGJUdVlJa1ZQVHRndHhHQm5tVjN0U01kMTRMdVM0L2laVkdUVTM2Y2Jud3RaOU5kcmRqZTBMazZZU25JQXc5ZW02WEZlOVRaSWxWZ0IrYXptYkZxTnYzejcvQTlSSGlTTjRtYURad2ptclJTZm8xejNwb3VEeDVJMnV3dmI1RndwTFJCNzNDTENnbWtiTzJvQ1I4VlZjT2NGdWkzQ2VmZC8zV1hoa3NTYTJSZDhUaDhLblR5ZlNteDhQMlhUV3ViN0x2K0Y3b2hxcjNtYzdtQzBlclN6MTJlRFo4SE9UNG52Mm5wUjlOUHpSU01KTFRRdlk1NVhWRU5pZE15MEkyK3VCdTNidE9PS0ZGMmRSK3NSbGpWTFRiYitrNG9nS0JnSEZubnluNHEveDVtSExVZFlEMEYyQXh5bTBVSFlvY2huRitsWHd3UXdKdVdqN0tZUDVHSlpXOUZMdUJVVGZaQVBIQk1DMloyUlRqbEdDWW9abTRZcGk3Y1lxTXpwMnBDMVZ5R2kvNEVDSy94cW1FcWxvSnhscHhwZkp2ejhKZG44YlVNSU5WU01QUDQ1TCt0V3BQbVE4bnpiZHVUeENROWw5c2QxWG5JSEk1R3JqdTV6dzU0YVVNaTBYVXM0MHJIcWxXeUphMmUzemt0V3hKVzBvNUdtQjJnaTBYclRFNmZSVVBxUjkyaTBhUjRRMkFRY0xKVkNBVnl0ZkhTcVd5cGordC8rcTIrZnFpa2tjdFcrMTRaWG04YzhoMXJqVE5YeUpMc3Zid21lcXVjcG9BU3puZEljeWRwSWNFTW9rT1p2OFlhQVhiaW1WV2xZcjh2a1IxNC82SEtSTzRJaTE2UG55L2NRcHB4cFFsL293M0ZxZUZRVThkdGRSS2VQTEI2VWV4S0dwVmJ6RGhGWVRjQmNoV3lNbEQrSHpxbjFmY2FCb2pSMlVRckNnMzRFUmxDSVd4dEhSR2Z0NjdLcHpzMjk4ZTNUdjkxL0ptdGIvVVdyaWI5ZC81L3J0VC83NGYzY0oyOGd3TVBSRG9GOWJkWXFaR1NVTU9ya01MdC92aWt1RjJScXBrbXpsajdjT25wc2kvclE5d2xJU0IvUGNZRmg5eVZSQ1BYL05EK2Jodis5aHhhSG56Mzg0U2Jrd0pWK3lOS0FZcUUwZWZ2SVJJdjBPWDV2V1F3QzdWRGxpVFU5QjVjNHJmK3FTS3d6UENVUThlbHQyMzNlQkJrbXN1UHFuNmRrbkx5K2R6amwxbFIwelpmalFaL016TjgyK2htL2Z6RUR3Qldndkp2YWlNTytvZnJ1S0ViSGhvVlU5cUJUdjJDNGdlZzNzcTFLaEhzWEk1YmNuaU55QTZraXhQbXprcXVVVEZIS0dXZTZ5WEw2bStJbWhqVkZ4WFNOY3FqUGY5ZEFMVWgzUDk0SndSb1hPU3pPcjBCdS9VUnRmNCttV1hsRW9xUy96c1hWajlDREJGczB0R2FpRUZVWEdVdnpGUEpvTFV6UklnaW11V2c0dDBMTzlvV2Vzd29Wc1VRVzFCbmZXeDFPcC8rWnFINENudS9lcSsvZ01YQm5QUWRBNmh4dytBNWpnc2NCU2V5alpqaXNiTlpuV1FNL1VrRk1paFRCbEI5RFlpM3JUM1ZXakQvMHE0QkpPVWpOVnlxY1l1K3ozMTVHQTI4UUZhSnFyQ3Q2ZlNlQ1oyUk10WUlvUTNwQW8zeGxUY0l0RGRjYkVHSXdDRm85ZlY1V1c2elo1ZldwZWM1NnBkcWdORitzYU1ETjdnV0k2RHA5WGJkaWRjM0tDN21DWVgyanptMTJzWEJKeVVoTDZ3Sm84Z2c3TnArS3g0aTVqc0pydFMzZHdEaksvYzFpOWdRUnRNcDhTa3ZFcGh5dFFneGVaSUxCMDdIYjR1MENuTmMrdEhnQmh3YjBiY295OW9FOFlnekpiRDF0RmUxZUdheEVRZVpCWms0YWRNcGpSNUo3T0QzUUNIZnNoTTBDTXpyTFV2ZzFaOXNBOHMwbVZBaGtDZVA5QnNYclNpdksxdGlERHZ5MzR6TzRPMFNNMzNpL2xmSUZGbTBuTjZ1bWthbjA2a0JNTC9XTE1oR2hFZ1JsSnVYSlVUM3F3c25SZW0vbVFuTHQvU3cxY0x0alA5Z2xQaVEzRVJEZ3ZudDQvTGxCc3NmTS9QYlE0ekJJdWppWUpuSkxYdUpzcTRpVlRKVTlmaVI2bGgrTm5VNTIwOWZNNUY3YU5EMnJIeUxkNExrN0NTTWk1a3Nranl6aFpOWnk2K1c1ajBBRUoweHdHT2pTWVljWm9UKzloNHZ1dTJJcU96SDkwRzV3Z1o1VVVmUTRSMWJiQnhKMUFxKzkwSWd6ODI2Zm1QWDVWcWZLVlZPZVpqQUV0YVpieGpHamNQS2JNTWdzUDBsNEJZYnFFV0Z2djNKdGNtazN0RW03WS9HaWxFVDVhbW1MQVAyOEZzcHNHQzQrdC8rRVV6N2d3Z0ZwWHV1d1RTL2NGck5QSGtSMU5sNndUUERHempHVDk2WlhFNDZNbmdFQjhXMTRCbDV4Y0lYcm5wUlhwNFlFNFE5cC9EbzdobnBWbUFqWWZab0ZtRjRlemZKTllQem1xRkZ0SmVDOEFKdE9UWUN2VWY4eWp3aFIxREpvcFpkNUlpeWdsOXVFRzBuMlFSbTJvYWRZeFlqNEw2a0ZCQW96K2svZmc5VUhOeDgraFU0MkhKeE1PS0FvYkFRTWN4RXBKcmRnbGFVMlN2T0daVkR0cWZpUUJvUmRMTEdJVllmYlNINHBHdWo1aTljckZVa29Ha0RmRTNIaXR4TG4yOEVvWFFVNUZZMUZjSCtiWC9PS05EVWF2WG5xWFNpMjIrenNMbGZRYjdkU29lZU1jQ3BFWDlYdC9pdFNUVDZ4ZUpZQU53TVB4T2pKZWp4b2hjSUw4SWtGV2ZaNmI0U1gzUWtaSnZlSmZtSGdVVFBNUDlBT1VTemkvdUd1QVBaU0JHYjZ2UWx4NDFlOTErRFRscjh1VXJJNWtJY3lUQ05QY25VbE9qZzdIbDR1bXdsQWtyenQ1aldnT2RWRm55TGcvVFJDUmJvUW9jTncwSWNzb0lJZUZYRkpROSs0Z2JpdFZPK1VaMWRZS2xFWDJaZ3ppd2ljeEFUOHM1b2plOHhCZ0l5aDVWK2N0M2xLcGErM0xFdVNrY2k3S1BSU1crZjY5UVB5bUx3VkVmVHI4c2NjdzJOVEwrY3ViZHF6ZlI4aVFQdkR6NEwvOUNiT3A0eEsvU3gxMVVWdlVWSVkvd1lWbmNzKzJOVlBJV3c4bWRnWFQyRDVjVFIrNUcvQmVZQUFRbko2YW1Ua0JONlFkVkV5Rnkva1BqUndBekpNVGYvMWU2MUNscm9vM3YzUFV6NjZ1MGdURzYrUDdndFc2TGZWMmpUV21Ed0d5NjhBbjd6Rm95NWZZUjJTL0xXd2wyYzhaWHNyUFNXbWpWcXVOZVpYTGZva0Z2WEhUdlV3SFVocGNzekNGMnlJSnl1d1ZVcnE1TUtxOG5HTjV3T2ZscmhyOTk0QzFCRVNuYWRlUTJsOXljdjduZTFIYzdNZ0NQamZPMFpGcHEyU0dlUDY1em5XdThCS0xWMzQ4NWxsN2U3NFNJNnZtTjgwSEN4Wi9uenJEdEoxT2JqU3JnRjdoeTFvcEg2TExGZ0FKZjh3ZUtzK2ZvWTNiTXVjLzJiRVBJZ2twZmtZbjllSUdCdkZPZGFyRUpoc1MrTEFiT3AwKzNXM3ltVVc0ZTRVOW9YSG9lR1hQT1JJZTFnZE90NkFGRVoremhST2ZaczlQamRFWDQ0dUFkeWxJanVjU0Z1Z3JVbjRaUCtnZUROUCtiajMzMU40dGpHUktuMS8weFBhSGtnRzVITFh4VTdTU2RrdjFJdFVxWWJmSWpxUk5PbENoSGt4bVdPbWxkMlFTUllwcHRWeWRkaVJ3WHRiUEVjT3VwT05mc0hhSVF2SlNScmlQOXBtMDhpcnRCcGVDbUJXQW4zQ3dQSzRQMUp2UmcwSXd4M2hYRkI1dWl6a0Voc21hVUpLV1NEOWgreGRKckdyUlRVSEJORHJKMUoyS2lsS0RRbG44alhqT054QjY4dU1sTWxUSi9zL2gwMEthejA4R2h0RkR1YWpJWnJwLzVuTmNxOUtyK1locXdlOFBSVWVnMVJIYzBkWmJKSHl4TkV0Wk8rczN0VlZPV25OQ2RnUGdQUVlmQ0w1Q1hmNnpGZzdnUjNTVWFrTXpwTVFrL25PR2FlbFRxSFJVMVNkYXV1Y1VOSDRQL25ocyt1V1pRd05ZMy8zb2JQVHlRcEE3TE1PTlA3Yks1NVlOSm1RTEpPRDJvV0krV1dGa3pUTS9DS3pKeUpmbkZBTVBhZ01CdGVnNS8yVVhScm5ZMTFSWkVuSTFkQ0Q0VW9xQzVYNWE0OXdYV3hFN0Y3aE5jUlB4RjhxRVl0cUR3Tng3MkQzUlZoV2kycTBkTWJkdGFHNm8rSDliL3htckNSd3YwcCtxd3BtWjNzZzROb2o5dUZhSjY5RW1tV2VNQ0lnb0pGTS9qcEVsaVo4eVdHSmQ1VHhYSEx3S005K2RRWTcrZ244ODNUR1gyNC8rSjlqMHNBTktwYzducERjeVVpOHA0WnhKRURMazM5MzJ4NW8ydjB3TjQ0dkZ1ZU1yTm4zWU15eDVoQW1FZjU1bCtQN041NHpTQ3cxcWF3OWNhaVI1UCtKL2RRNUJSTlNlcjhzSGt4UUJUdW42SXJMSWh6dzg5ek1jUy8zT0FDSWVvU0M5Y3YyQW1jblBEL0dYTmg0QmNoOEFTSVhiclFFNXVpd01iRmxEOG5lWG5aWlhnek13TVIrUXVDZk5FL3ZhMG9iZjEyaWJXdTNmcEJkalRoV1ZTMXRaRFBJREg5ZlpyS2owMUdhNGt4bURsdndYSU85eTNKaHZsczdSS25Oc2MxZVN0NDZUdHFsM3RHRDM0bjVRNHpjdkZYMk9lYjlLY1ZJWTBnODhoYk9OMTIwZVVvUEJOeVR0dkppcDNBdmR3YVVqTE41QnJWZU1ZR3o2QWFrbXQ0ZjRWVTFDR2JJLytrQ0IwY3lVdEo0TnQ2ODFqajdCdHRFT0xUaStMUDVWeUlUMEJWQUw3REZCcGFZSFVZUEVUZGNqTEdxcXBKSXR2b2FCVXpTc1J3aFlIeHI0OGc2OUZzZjBnTnRES2tueXZVaVpVc0ZzcGtyRDBtL2tFczFwTGxyMHd4S3owTnNPUytsU0l6SWd2NFdKeE81a0VTMXlhaituS1dGVi9jZndXd3VLQ3d5S1d4bXVSY1BxeVhCcURuZUpNakJKV3UrUStRNis4aEJuVEpoaTh3TW5wemQySnorc09uYTZhd3FtTktQZ3RxN0YzV0dnN0JwWXQ2bGs4eExsSmY5bGZZUGVnbUdNZ3duNERGaE1xVDNieVUyclpSOTJjek5GaEFDU243d3NKajVFbVhVZ2RFaXJtR0JocXVBY3lmTGJ6WUEzRDM2TXpFcisyaTYrM3dKYk1BVnpyWmMwYnlFdzhFWSszU2JYVmQ1ZTE0MHphTHJOKzJzdDZUVkNRcEZ2ZTRXSElDR1RmT1ZpZ1VYdjJRNXVLT1RXT0ZQRDQzUUZrZmhkMnRMKzIvWHB5bndzZ012dlRobThqcUk5QjlySGJodzVLSUROQ01SYmRzQlZibTdzUXJKdlQ4dThrczQySVdxN014VzVlRHJWU0Fvbmp6dGhIL2lBQjZQbVRuOTZ3MStsRDJqZUp3T1QwdStNWHp3TjNtR0NVTWFqY2lSUm92YlU1Y3lVQThIWVZ1eUg0bmcrSklpakltTTVHalFjeHNaelJuaGpYbnZrTlJINVUzcWZxcC9VbVJyUGJMa2xzNmtrRlhzY1FoNmQ4a0FHSkNmNk5LeEZISi9JSHl1WnlMWnBPMDB4M2l5cUxBQVRqUTRzcUk4VmFKbW9aS04yb3ByTnllR2Y4UUFGdGcxeUtKUi84bVpETHJVdWQ1WnltMnBCWElQbFBjTlVIVjFNNmxVUklIcjJBYWxtM0s4QWhGbzhjVTk3OUdONkp1Q0RvVkhIckZ0VVNPd0VEWDR5VC85d3pZam11c2wwczhtNzh1a0pqbm9Za2VZckZPSWNtREl6dmpvVHh5MDZXM1FQc2RNYWNCMGI0OEZZdEMyQVpNMVVHclNRV003bE8rQ1h5ZW1mNmR4S1hSSU54NEU0TlFlem8wWWpyMWlGelRxUkc4NGFwMGJvRmg2NG1tWEFHdVNvWHZaaXVjaW1mQlY0TEpsSllzVmhJRWFvTFJBOWJtbWV1WEVrTTdVYVFxcUlUTFZ5M1QyRnBSTW16bU1KQ3Z6U0dLQk9DMmkzdnFiZWkxRmtyK29LNEw1V0ZSWUNRWE45b28vbWI5WisvUlFKUmE0aThFYjBKcFNyNGhoVXhFNm11L0d5V295YWJiUVk1WnNsUkxDOXNhTWtVbW5xTG9hRXpobm5sRHRCZHFhbXYySDdRQjVod3poWE5iMlFLOUg1ZFFHMW1ERm5MdHYraWVVcnNPMzN5THFJYzQwNWhueUVMK2kxcGt5RkxCMEh2RUdBNlRoNzYxWE5wVFJrMmxHZW1LdVpjdE0vVkVzTWY0TmNQV3AvbWJLK0UvbHd6R29NZHJ5MVVTQ0JNRkZVZ2s4eUdPZ0tPdWlCdWpDL1gxSFN0K1haNHhCMFcyRGloMzIwWlR2Um5Sbk02K3dKdFR1UGc4cnhKMHNFQ1pBOGhCTkRHVEUzemxORmlYcDQrbXpZc2xRTDJEemhiTnRoZFZuWjZ0TmlJaDU5L2RmZVRWcW50cTlmZ1NSK3EyZHg1ZDU4b1BJSmxKYzgrc3pNL2tqbG9tZFRtcDV1YktkR0hMQmdoWWUwaFdudHE2UDEvNWZRMk9HMVRCMmtaWUpvOXRPVXRjbnkxSGpMM3RTMVFLVUVPZlphT0ViNnVaZGw2TXh5SSt6bzQ3R0k5QXBqbjQ1cDkwWS9vMVVkeDl3NnlXRURHcTQ4d3UyK3FPU3FMb1l5djRuOWUxLy9Ec0c5c3NVK1Voa0htSVoxTXYya0paUjRKcWx2NDl1UGllbVU4Ymhmb0NnczM5Qi9QL0xPdVZSMXAvWXV3VUVCSXFoamZnR1FXUkUvb2Y4WitMOGZ4Vm1UbEZ3M3NibDU4RUFSRy9YaFEvWks0ZzR3dEJ3Y0gwaVJRdUFkZDFWSlNZNncyWEdNL1lsZTBycU1zbEZ2QWtPbTc2Y3F3UHEvd1VISUptNDZYSjZNTjFxdmJMV0tqcnhIUW1meWVaMzYyd1hNQVpqdk1lamx3aWNGNzdVVHJ6ZFVxbVczczV1dUw0a3VPbDdBczlZRzdDN0dJTFRsYXR3a2kzR1Q2V3I2SUhwenN1ekJYR3N2ZTRqUkEwRlU2NVd2cHk1NVpuc3Y4OGNzelhJUDlqZmRIWkNSbXFlVERXN2x6Q0J4dkxYTWg3RCtKaWREaGZ1anlyd01qQUlaYjdsYUpoVHdWakF5Q3VCb0pJYTdEQm5vdFlVRzJTU3c4OS83ZVhxdlBtbFdjVnVPeXA3WUJEb1FoT0JGbC9YNCthNVBoV3p5M21Xbk5yaGFpZi9yMXY0WTRscTRLbGRzRHhTK1Bta20rV3dtbitIL0NieDhwa2NyTXV0M2pIZ2laRzlMcXhTcVdDTHZndFZiSXhOeXFRVXhiUFZsZUFkRmRkTnBoZnZ6QTV1Z3hKMmJHckNDeG9LZjNxS2xRZXFXdTUzWnBPc3NpNWZ2ME9kS0diQmM0Ly9XQS9rY1VobmZVVnl0S2xvdGh1WUFBTm16Wk5LS0ZOamhxZEdPUUlFZld4blIwZzEwMDVVVW1SaytDTjFOUG9VOWd5ekpsbjBXMzUvR3NsQ1NrMGxWeVk3czNyNnFTZUpSaUNnd0RvNDhxT0V1bnNVcUFubnRxa2VnT1lhTDRldGJHMk00UzhkMUp3ODRZT3dHOWh1bG1Rd1RlL1pSYWR6cTkzYTJQd1ZLekMxYWg2MWJRdXNIcHBnVTMwdGcvSG1SS3hvUzJkd2cwQm9pWnVFWk5LdERJYlRtZnl2QVVzcnIyNCtFOXM4d0FiSnJDTks0SHBlVVVxYVZhK2pPK0NKSmxNeWZaUXpUL2NzYWQ4cGxuR0R6Rzhib09WeEVDd3FzYzVDcnVDSitqNEJ2NVV3ZmpkS3orMWgrZ0tkbGo4NGpXUkZuL01mRVJqUmVVVmgzTEZLZTRPSm9wNU5xT1RXTDFPaDg5NnQrN0wwNnNablljNDJkWTVkNGFWQys5TXl6T0hOWWFvWXAxMzBEVXNTM2FHcmxJeFFMZ2p1emd4d2FzR2ZTdDNuaFJOT1VFSXBua0QzQlFEUUlTMU1IZTB2ZXVjNjhpNnJUVERzbWM3TTE1R2QvSm5GR1lYRHREMHVmNVVPMXFYNXNWS2QyUjdya2p1QkxUR0dFdERaWWY3QjZPTkw2RXlmWENGcUhBSW1HcGdzZFVmOVp5UmtaNjZ5cEx4enBVWWVTSXBBZGtKeFY4MUd2bjlMemlmb01WTUd5SHdzcGg3eXZtMDZNTHVYTjRCMGNtaCtVSFRqT1FBUi91TktEZzJ2blllVFFhYlhEM2ZITVNBU3c5SVN4czFqOEIydmE2bEhpT3k5K0ZvNzZwT2d4WlBkYmtMbWRLakdWbXpWT3IzdGNoNk5pNUxsWlpCbjdBQm9LbVRDU3dGWDJXSEZLU2JTSXNacnJkWWhMcTgzUkRhRlFVYWJNcFhQeGltalpSSU12S2hVNWpnU3J2YXlBMG1ydFNUYkZ0VkJLYThXNWhENFZSOUtkVzVvbHJXSnFQeHNleFA5QlprTUdvdHhXUXhXaGRNczd4Z1d0NlRJcUsveEpxeWtLczhwRTNSOEpiS0xvMHIvb2pmWmxSL3dKc1kxVE9hSFMvbWRnZTcyNFBpQm4rWnVIb0Vkdm5kekRsRm5BOWtGNUZZZFY4eUVDTGtxVThlNkJsMitBbmd5KzJ1YW5xSmVFdWxOY3Z4WkNiNzJ4cXo1VWdDeFFzNWEzZk9uNU13and6c1hVbE9VME5pZlJRbVFYb2Z5SWlZMUtkaE14NDZmT0phK3BxQXlKZlAxWEdFNlM3UDB4UngxZnBkei9pSGYzbU5sSmJlTWhWeHVRbzZCWHpYOWRRNUtPRUx3bWpsUGU4S0l4YTVicDhBNHFseStqSGZBalhlUm03aWFSNEdXZ3prQitnZ2NkZDNkOFlua2NCeFdwSVpPcGk3QVlTVjhkUVZBTnZnL3dnZVJBTGJHcEpGanBncm9lajFNdHR4MzVuL0JHdDdxaUNzRHZsZHc1d25WalVIOHFNaDhIdUpCUno1eVY4ZFNNdTRWc0I5RGVuN1VqaFFjS3IxOG9SV0t0TnB1T1FjeUdib1F5RituY1psQy9SQzFGMzVxT2tSdXRhall6THh1bkpWbzUzYzNzM203cUVGSkNLTm9iaTNneGRDbzNWQjQxcEdQamVpNGp6RG5CUlNiZzlIQ3hHRiswMDcwOXYxNnRtbDVsU0VmVWxEMTByMERKMVk4ekNPcU4rRUMxY0IzY3NPYmwrUGwwbWZnbmhoWG80YlE3VmIvYWwyN1BHajRWSjVHZFF1N1lOWnRRdHNvdHNISVRtcVp1M1JyRjI4U3hmdnIvbWNsODl5M0Z2MUZhR1FHcGs2OHhJR0tCVmluY1BoTWN1MDhjZDY5NlVpQnh6d0hLWVUwWDZrSjRSdCt0ekpINlpLOER4QmhUUDdJbjQyakUwemQwWGtQWGVjQWhMMjd4U2dWSGRSTERWSzdXM2ZKemxsM1JUdDFjRHhMcXRWN0w4ME9wTERHTTNERkpDL1QweSt3VGZIakhFV2xEVFV6MEFDazRsSVVXWUJ6RTRYMDcwSmlXMHdwdlozdFVTZGxYTXkzcmRPM0pwbmVBeDRMalJjcmFydUZqTUV5OFVpRlZEZEErTEJHc3kxeEJDcERJanBnYkQ3MFNzMWkyOEdQUFljV0dxN09GRkh0ejV6ZkZNd09EQXFWTnZqeTdQVytkU1lkeG11T05lbGllV29rU1JkNjQ3djAxMW5QcVV4azlpbjlyS2Z3SUF2bVA2RzZwU2U3eUlYYjRlMldMNVJ4T04yUkJTdzRGVDZLaUhrckoxaGtoUFN0eUtFMWNmRDhJU0lVREtBZyszVTRlbktuRzZZNjNwSHpOUXZ6aEUzak1qRkZkd1ZoVGhvd2NId1hlL3V5bU93Z1huZEpCMnBaZEdONW1CVXZMdkpjaml6ZXd6a0hsaGxxNVJtU2Q5clhhdTJqdVE1RXFuTXJ5K3N1bkpNa0I2Kzlia0dwelc3aUJjVlYxMGF2VDVvcXRjM1p1dDZQLzBqcFg0K2JpKzJwQmNWajlaZThnMUNHTDk4ekFWMW5WK3lIbW9XZ09BKzM0UXFRc2oxdEloWHRxWDl3ZjdWM0diU0ZwdThMWldCR0kvTDB6WkJPY0Q1SERxR0R3Y3F5VHp2VVUvbkl5RUJCRFlhdWI1VkR2TnFBR1ErVFRPOWJNTGZ4clBTL3RVQlVnYVcwVlZRblY4S3gvM1FyR2RDK3JGUWR1N0gxOW92elVDUmZCUFh1NnpYallvbk4yTkdicXNzcGFxb0FzbFIxSDlUN3p2QWYxNnkyQzdMODQwOGpFcDJ4V0VQOE9sOVlPN2drc2dlb2RBcW5MUmZ4eHV1cVN6VitMeDlFemxuN3QvNFM2WWRTeEhNdkVCbGRCY3ZSL0JPQnZMZTBubnVUVUhUazdLeFAvaXExRnVCNVZFQ29BMmVUZWx3azJsZXVtVWc2T0hLZmdOTW9VdzUvZ0htaU9aQ296cWl1MFBkS1ZuVmtlMlYzbklpVHprRExEUm1YSFR2bldIT0ZFbUU5YXFxMmlSNWZneE9MRmx4Y0x3NGhEcVBFK2JtYXRmVlpaY1F5TkdYZjU1VjZYOWpya3VZeWUwRndNUTRKY1A4VXRDV3p1NUtNZjhTZXNyMThZWnU3UUpLb0U2REsvV0syN2JXY3lvVGNmRS9uRUNtcGV4QklFTXNxdGQ4aWdUUjV5SHVkbCsvVlV5bGl2NEZ0YkpQYlV5UDAvRFZ6WEduY2xyeDRTaHRrNTMwZ2hNVzlkQXJyelh0dFdHTlpudFprZWdwMHRSQXNLRUMwRkI2VU93bmEvdWJKSTJnNEpvWWp0amZES3cwdUFHczdJQk0yZjZLWU1xMEdBNm9LNCtPNGZPZ1JwaFovd1dxc0VrY1B3eEpvY1I5SzA2NXRoUlpsVDVzaklpYTFSRDRmWFhvaUdscFMzb0ZXSVRka0FKZ3dpSzRwYU1JV3ZnazB1RGwyOE82NG9iQVB5ZmNBY2RMYXpHNFdJRm5ld1dmTkJPYjJ5b3F0R0pGVVdONVFaNFQzU2FpVkJwZi81enNCODFFeTlZdmU5UVllK1Z0eUhNbWhUbFhsUGRibTY0RTREWm1TblJCOEdNZisxb2U3VU4raEJYMDdESlk1Tll1VkdVMHFkc3l1UkRSMHo1SEdqdWlSUHB3ZzBOWS8xcERiOUpiRmtkN2h0MldmY1VVcFMzemUxQWZxb3dnNGp6b0hzaUVicHdwSHBTRjB1N2RGYlRydFNVaTNaRGkvYUhCR2pMbm01SmtsS1c1eFdsU3ZKNmpyU2VzVDk0VkJOWm1paEtQWGRLRHd2OWlWZjFqYmtsZWVnTk82K1pDRXdIL2dNbDBiZjJxaDhOMUJmNk44RXVyWm9SQldKUjZKYU10VEJWQkNKOGhMcnVtYnRsLzlOMDJ2S2tocmdNd3BmdmhFSnBwemNjbzZVUmJLa3cyeFpCdDlHa0tRbklKSWJtSmFjSkx4dmg1YnR3S0VNUkk2NmJ4MVFOd040OTcwamhRYW94S0wza3BLQmhNd0VtdXNqd084eDY1R3BickdVOVBpeitpcVhmc0Q3UE00S1Q2S0s4UXFSUGk1SjZFTG45OHZ1aEFJay9KNFo3WkYyZjFiZFZvZlNqVGo0N01zS2V2SlAxZGpTV3NtS0ZrRjZIRTNTZUR0c2RkWFduSG9WVUZCa2ZDSmJaWVNieVVWM21CZ1ZFdFV6aE1od2Yyd0hCSTdzOHM5VHJxWk0zeXdYL2s1eDljRk1rampGZithckduajVTaCs1RDA1T2hjaElTUTQ4eTl0dFBacTlSWjF3eFIwV3p1OXVJUU9YMExybVhKZ3lKUHlibXNPNlNPODF2ajNUQkduUHF2UG55dll6MXl5aGh6NTdraDFwb1FYai80N0hsT0cxS2ZFcjJlZzJaeDlzSDZoSWl4Q2Q5MGlDRlFnZHh0ZlNhUG40ZElGaklXd1dWQUcwZklpYS83TVBJZ3F3b1dhbHZ4dXlhNk00eXkxMVZQQWx6VzVweDliVXdtZ054OG1VSitLcnpyYzh3OFYwTDdvOFZXMS9TSG1RY1dTOG1CaW9JbUgxd2wyVXBUTkRyOVVVamVLaWkwcDZrcjhXZ2wvdU9HSzdFUnhFR0J1TjJiMWNYL0xwUEFOTzhMcmtXWVNXSG12eURoZXlLcjU1clNrV0NqalYxRDNBbkx6dnMzOVlRei9VUkd1VDhoRVI1N0pIeXFqcDRGK09IV3dValRlMWFzK2JzSzJmWXc4YjhURUxDUDBvQWNOU00vTXRSTXpxVnVZbGlFWWJtcDd2b0RJY29kQkVzNkFsQzh3T0o1SFpvWWFCOGVyRWRmaE5wbHF0VG5Ib21yZXBaR0dSck5zS2VrcHlHM3d0Z0lXcTBENTdUdzQwanhSUFFGNlNaZU5tKzVPNkJyT1ArNHZPZFdmSkpvWWRGc1hQVzlxNXc0TGN5ZzNtYXdLTGdVSWhUeTdxNlBYb005cXlGUkNGOWw3eGlzTVlBRTdBa2tybDBNeUN2L2l6b3RVbzI3QjZ5dHBaUEc3QUhCMng2S1NBdE5NR21WNjRIakYrRzdyRFNxV1FDaG1IdUhjK2EzZG5GWUkwWVVZeXZsYmppWFgwNTM3NG8wRVhLYlREaFNiNTE2ZkIzeUhSRVpsc1FVY0lNd1owQnZ2ajEvZFMyQ0NNRWhZKzVpdjhDYVNJSE5KMW5SZ0tqMXNkdXdLTllMQ2ZkWWZyNnVja0JBR0orSmViTDlYdENHb0Q4SmVPUXp2M1o4cHBKQklVM2hKODhjc2lMNXdrY2ZWMmx5UXl3Q284bGJDcWtXYkl6VjFPUlcwY0hVd2JKWVU0anRaUXdqRFZiY0tPS242anVhZDFDL1pKUG14VGJ5NnFZYXRZNWw1Y2lJZUI4cDNhSVhHZGpDUWxYa2VwMG1mR1lvMDhISDlsMFpnOWIrMXU3K1FoOEg0M3FuaGljNC9VNnRnS1ZoWlVwRG03ZFE0RktjTE9jWDVXdEdrKzFKN3J5ZWlPUGxOUnJhb2gwamc4YWh1bENQZnZIQ1ZaamY1RVFCMlRYWjBUUnBta3k3SG1vT0RkTTNGdUNxVkpmMjRCTjM5OStrMG03N3VLQldVNXRVTkJWcUNvM3R1MW9lS3JFU1Q2cXlWdTdnb0tYOW4xTUw0SDl3U1B5SlhGZGVHMk1HU1crbEovWW55cFBpUy9qUEpRWGVlZlpEZTVQUnEycXBIKzk4cHVBcVl2U0MraytZamNiZGJEdzBvd09EZ0RNK1d3SFZWQWQzT21kSytodjdtRkw3a1A4ZnNLeFBubm94cmtMa0ZwZk9Hc3NLRG1PQ2hzYSswbkprKzJJRDZGOGwwWllUa0VXN0doRkprdGxGd21DZUR1S3VpUkxwMXRObWlQY3BabU41bWZ5TUN6dlpidlVYZ21TUGlwZGEzQUxuQnFnZzVWM2M5alZFY2N2ZkovbWhaMldyOTl3SlVSRXYrQzJMNCthL3FVN2ZzQXdMRng5eWZGS2pNelovM2xhbXI0ZkZLWjFkT3hGQmsxNVdsMjBBSzVTWDUrRVhrUmpBYTFUejRqcmQrbWRZSlJuM0xXRis5Tk8zYllaTk5WSjgxM24zN2VLeVUyZHJ3MkNhUThzZXEwUW42dGRPNTBaalEwK0NWbXFobVhEa0lib2tGNi9ERWF3R1o4cCtrWmR0VzZTUVVZcCtzd2xpZUZrd29XQlpGcHlKenkwNWZFc1Z5cHNvYmpwVXdNN0wxTXF2UG9JckpVY0JZdGJobWRrZEZLZmZLMUNYcGd0R1RLMU9SYW56aDZSdTJqUVJtV3dpQzZnYmQ3dUpyWUgybm12VlliaFJtRlNKclgxUEVQZ1FUUnJUeGpFWFhtQU1BSUd6dnQ2QURWb0Q0djFETmxyNTlrcUkzTkMvZ2Fza3JhUG82ZHFLOTM0U3VhUnlsdnlsK3lrKzF3UlBiTmNvZ3ZITWlOZnp5c0MxOEhnK2NGZXlVWnVITktvczRBM29qTXJnYlUyRmU5dG1yUWk1OStLTml3OWt0czV1MVNBVGtLZE4yU3RKeVJSS1JRTHZZNy8zK3g4Nk04RUZ3SU9HUjZ5dUZtL1VpWTJlZFI0VzBCN2RhSzJ3NTA1NXJLQzNTTkJIZWVsNFo4ZUo0Z1FyQldLSnZYV2JtRmZpRjFFeTZCMktJSHBEdUM4eEc2NEQxSzZGMVNrM3VUaThHV0ZSaTlCMWE0ejdCKzBVT0pySnVnSCtzRnhiTy93azRuT0JRRlZ1c3pYemplUkVCZlBzZXJPY2RBaGRGbEd6QVNyaE10N0J6WXB2aC9PSFJiRWZWMTc5NWhFcUpsU1BPMWZPUktEeUJsbXFtdEdBdG4rL2tRb2pyVkZrR2txNVVhQ2dxd1dIK2FwbVE2YkhhZ1A3V0hicGFaTzIxSldZblY0SEl2cW81Tkg3UGxGcnE3Q0lWTTRyalBoNGRzSzVWZEJDN2x2RnB6NFRRcmV0T3JEdlpvWWpzbzQwcFlXSkVhT2tGblB1TEkzMzFNaDVwdVNTckdhYlFTbmcyb25CVFQ2NjFEK2xCNVIrNUhZYmZHQUJYdnRva1FqU0Y0dXVxVjQ1K000TW9Ub2RQOERTbnNRR3ZXNmFMRi9WUmc3TGFRa3JHaDAvbGYrZUtTS1g4S1hUaVhweEIyQUR0bWxvYXIreFhsMGJzdDV0RTgway9aUUs5U3JIcFgxdGgraG1HY2wzeG5Yb2J6VUFxYnR3UFRYNWR0T2dZMFR3eHhQMytQWGNtR3E0QmVrdXpJM1NqVWJyajg1VFdEdzRvYVZkS05nS2paMFhUZlpyZjZhZHF1U0k5SFViYnJnU3RwQ1hsMDYza04rVFgvaURiQ01JTkZEMGR2Vm9oazQ3SnVtblhJY1dTR3B4S0xDM0J4aEQvc3JiYVlHZ3cvcnZuZHl5aFRKN0hGa2xxSTJoeko5enIzWW8vekN1dHZXa3BvZkM5TEJNSCtRNm1jdnRKUVN1ZWRZbEhFS1hoS3ZXcEJjRVpLS09taFl3ZDhVdVJvSmk5Q2Z0RHJoRElSMTh4aC95UUlGaGpUVWppK2JvWjFEMGhCMDZwaVdUVENnZGdEYjc4VG1INTgzTkR0RlIzaUJ3ODJieXl4aW83MndNNnh2NDNCOFZwbUQ4ZzJMVDMrbW5NeUwwSjZlNlA3anZKM1UxVTlDQ2xNQTlUdWRqaGx6bDFybG1IRUkzQTd1cHRab0YrcVE0My9LQkl1ZlFXam1tc2JwcFZnTUNKTjMycndBTCtsaUxDU21HOVVWeDdBMnBoUCtxN0lmRmJUOGNSOVhxUDE2TjhrU0ZTeWx0SlUwaGhENHdLanEvU2F3VkcwdTltSEJkYWZwUkE0a0kzS2dTMXF0Vnc0c1lpaC9TS1U4R2svbTk1cWJTWlFxT0hJT1FaNVo2Mm5sakhQYTZOU054dThKOC9rSkllbzRKa2NDZ1NTNlM2cGlUdGRjRE1iR1NuODcwRnpMZzViNEtIWmxtRlpsMy8rb1k0YmpQYTl1UHpIVnJYWm8xNjM4QlZmR1dVR3JwMjhmY01qR1pWTm13TitJMmdFaDhVYW43UWdtYkNhTnJQalZubS9OUUJqdzhMSjc4YTdQRWFnWCtyWTBhdi96QmpUNG1ReGhuSi9LdDl0MTZOV1VpTEZvdFVUdHN5ak1GdDgxREtRMVhEZi9ZSXBvMlRsYzltdWx3cTJZdHZINFJJZHJkSTBwTVpyd1ZvWXpBbTdPUHVlWVIxSitrV0lPTjZiYU5TOGFpb1g3bXJUaVRpbTZValF4V1NkZ0tFV1JRRTNNcFpSV0lUallKK2JSVk5lZ3k5YU1tS1BGa0sxcXlYRVhZNnBWZzk3VUx5WXI4NThXUnAwdHFHbk9LMUtxMEZyU0lMaS9BTjE5a25lOWFKMnFOUmpVMTJ2amQ3Z3JYOWNPQnl4WSs1N3FPODloNllBekpoVjREQVVPbU94VzRxV29jT0JlZUNvUTllNTM1UzRiTHVFUnBIbm9nV1gybDZmSHN6cFI3aDZHb1BtVkoveE9hamlNcVN0Ymhnb2YrQnYwdGxxQlo1bnUxTEh0clB1aHErK1RvdG9Pc3JYM1huZzAyYXRPaDZmWW1mQStpS1lSVU9OVkxGdXRRNWM0MUJubWhTM3RDdGYzdzFMMDZ0Z1ErRlQvWm94UG9tc1pOdFpuSzdNVTgxeHo2bmkzZThMd05oTlFFNldNMGtOandnWm1XUHFjK0VmRERuYTU0c3QxdzRHN0ZtUGhURTBvaGhHT0ZxeE5YMzVadlpmcHhMV0VlYWpSMmtrTW9KeS9lcVVKZ2JNc3JNZEREb0lzNVMyUkRxZ2d3VkdJZitiZ29VdDQ1amo5Y09xNmV0MXF6YXFtYnNha2VXbFFCQkZwR2hMcUlQMjBSaThSczdYMUU5WlZ2RkE3aE4ydmlRWnp3SXZPSkd0WXlRZGtmbXpsazA4S3YvY0xhZ01LY2VRcWRlZFlTaHVMaG5xRnRhOVFvMjZ0TW5mMGRlOHdUQzArS3kzanpkdkF5QlBPQjQwRDhiUGpCQmxVNzZiL1lOM3NMb014M3V2YzZnSHE5ZTA4dmluelkzYUtIVTFhSHVvclpjQTZWWHJLRjlPdHpoS0krRUZrSmM3OStLMnpNTEQxQzlkMXNqN0NDaVkwWFNKb2V4TldzODc4K0JNSE00NERrdDFManBwR1VzWXRJbDRDUWpxUm14SWU5Q2NLTS9vYXVxQ3hZNzRNOUhJaVdrL1lXRUNvMmFHVklCOHpQRmo0b1ZJNGFDZEw3ZHlVWERzTnZrWC8ySzZvRkhHZXlCVFFoaURKSlo5cStVaWpYdzRxVW4wRHMwbDNUZ2ZFeThxMVBnY2FiditVSXBvS1QzZXJNbU0yNGxvL2svc3IvQmxFdWFOeHd6SnJWdWFDRHdRa1ZUbnRiMXpTSVFLZXNoZkVxZU9jTGRnSnVMNHlZVnBOV2hjYXYrZ0Q2K0lNNkVpcnV2UmgweWZiTkZQTmNma3dqTVVNK2xpalVIeUJ4Wm5ZeUN2Z3lnRi9zbkNSTTlSRmIzc0VEYTZYdms2TTVGcStjRHRpOHJsTG43c3lVME9SKytHUkJDa25lemY4YTJ3UXI3dXhndnZlb0UxeU9UbE14T2IwdjdFclhhditLWnZjZkkrY1NkWEUxcDhtMjBXWDV6dUc4b1BYVTZob05PakQvZU01RmREcmxlcDNPV0crTGtScS9OMitDdDVSZXJSZ0I4K3liOExvRXdJaW0yVngzWXdZcWxPRVlsU3BRTmFOaEdKY2JXK1Z6UEFUKzZYdzVDU3FZK3ZuWHRJMzlFQkJnbVQ3WW4waWd5SHZlbXhFMTNocEJzRzNBWmJqY3BMaHBTdEVaU3F2VWtaUktDQTFnYlAvQnJFNEQwVjdTNDlXTTRUZEJ5d1VsY1VraERobVM3aU9ZdFVKcWZ3QWtsWks2QVdYVitucWxoQWZpeHlUamhpa1p3TDRlUFh1bmhYNXhtTkFjQXhZOEY5OEJhQzAxRWlXa2I0SFAwZjAxcXZlWDZzSjQzYjE2TE4rK0xURzJCUFczOWJFSDQ0U3hhTWRlTE8za05TWWhQSjRsRGFjcW50bFU2NGZScTdCTDFxdVJ2Y3o1UzVEZlFqNVlqMkovWFBha3UxYzB4WitRNjJqalFnSEtHMkNiREpWZldhb0hhcVgvK2lyNldGUDJkQTVCUmN3c2E2MEgveHAxL0NqYS9LM3NtK2h4bkJ5V3FIVmdBT0NDZXVXb3BkbUJ5L2xUWjJqSlpMWFZDZDVmUE1sclBXMjhkNmFyOEtna3YrNlBDWGZCV3hXUmZqSlNyOUxqUkErU08rc3Q1ZmRGT01SSjVBYS83a2xLRVRmazIyK3dNbFZVL011TzdyOVo1SitERXZhQjB4QU9kb1ZZTGp6OWc3ZEd4WU5vM3k0NjFITGJVek9ZdGN6emdVVmc3ai9DcHE1QlBIQ0hWaS95UUF6dXd6SXRNV3BTTWdsTkV4YnJ2UEJ4QXVRSHNlSFhkbFltNWtkWlNHVlhYbm5GeUdsQk9MWUVwNEI1Q2F2YmVFZ2ZOZWhOZGRCR3dQdjVEUklIbmc1ZEtEWk04S2hTS2dIL0dMU2g0QjlPM2NLNm1WZWtkeVVKdkxxejc0R2ZpbGMybThKQ1pPMmVCN1hpMkxXL2F5cTFMVEowTUd2MDVZRUtQS2dMQXpFRzI2UUZmOExaL3VIVjd0cFEyUVUwRUErY2J3SW1zOUk2WXZkMHFKbTNGTU1kcENtdzVOaXFWUFlNV0hwSXdFcGV6ekhCMTNEWTVEcVZrSXNud0JUbm9MckxxYXZnb1BEaGRERnJScTJXWXBySCtvakxVRElVbTBDcys0MkhsYkM5VUJrMTcvZDE1WkpxakhSZE0rMUtwaitDQW1lYXdiSWZ0enNqQ1ZOVGlLZG1DK3pBNEFXeTdBK0dNbC9KUGYvd0JMZjYxT05mV3k2M2hMbkJNSnJDT2NGaE9DMHQxMndsQy9sckdITTU1R29ndTVzK0IraEV6Y3hWVWFLTlNCYXB4S1ZFQTNBalhCaDJ6MHN4TGRVNWx3Vjd6eXNiZXF6ZE52eWhpbjdha3ZqbmZvNERzaHZRUVVjb2FTZXdQTCtrbWd5c0xQbkNYSENKckVvVExZaG8xN2QvMUM4RVY2YWpHdHJRUFpqajBjMTBZa3pPbGNxdk94Ui9jWkZ2azM1UlAvU2Q0Y1FYeGZVbm82aEh2QzdUek5KK01YRXV1L0Q4cGYzVDRYNFRvVWlEQ3F5Y3NyL1R2R1VCK0k0UTBkbVhRVFhRTXptVmhDUVZEOVlrYkNsNDJhQmhMdTM4b0doa2FXQVpqbzQ2ZVBPeVpBRDNleWt0bndVM3VML1dEOU45ZTNXLzV2M2gyQmJLcHBIaDVZWUNZMm5RY1RsWHdwTmpPY3FDL1NrSjR4Nm1TSFFxeHlMbXUya0ZBSDN6S09GY2JuUHhTclFLVjVKckF0RHNkbWRqcjhHbDRsRXhORy8vVDZ0cDNRVm1oYXQwUGJEMTBVT3BRM3BCTW9xQ2pUcFQzdlBhZ1BMaVN1RzhhSDRhZS9SVnRlL0VJa0JzK1FibG1vbFhBNTB0OGZsUzdwSjlOclVkNFpWTFczOHVvSFRtUGl2ZkxmMDNYd29UZE53KzRCRGs4bWVZZDQ1RWlHL05OalViQUtWbjFQcFZZTDZVeU5jWTVZd1VFNUQ0WGlKdXR3VjNyTTd2c3hXMWpqS3VLSEFnRGcxSFBBYXlLNGx1VWhiQWZtV1praVVoQ24weldCbmsxSGVDRGN2RkVrd0JSZ2x0TEZxSVg5Ym05NUpha2xiK1psRWVib0lGMmFaMmViUVJISEpZN1g1bXhmc243cENrc1VYdzdDV3U5WVo5eWV6K1liQjFMM004TThtWGJjUXZqM0hQQ2JlL0J3UW9oRm9ZbEh1bUFsN1BIeDBLMlNwVC9RUHpjaVRhTERQOUJWYlowZG1VOFVaS3VjUjhDREw0K3NTWTFZck43dVBVWE9Bekd5ZzY3SVMvSkN3dDl4dnN6eEFPbU12RmtVYlkyTVFwV3lmQ3dXa1NsMUovUG0wWWxXRVZlWlBLY2dITFUyL1BXbkV6OVZYWTIrMFNrdFNobU1YODFycWdwSUxod1MzMzlWRXN0eW41SlRORXFDcitFSXQ1N3JLS3JycUo5Vm1hZzFJM0FST3NlRHdaSFVzUGVKeHJFZEVwSlFsL3hXQ3NiODdUbFFtT3pLcFBpMlVYVXpXUldLWStyS1AyNTlrdTdiL003ZGp3R3I1aXJaQklVY0MycW1ubHZLemRmMitFNSttbTBZck53d3QvMWpOVTRzWE9BY2UrdVdmQXJuRVptWlYySjVlNG5JbFQ2d2krT3owYTFPRnp4YnNFckZlTHVYUUtXM09tajc5RXRzK1k1MVJ2Ym44TmJOUkdVVm5WeUd2WGpPWTNIMVZOVHZTcDZ1WG0xajN5ZGg0emoyNHowVExwMnRGNCtHbTFzQ3N0ejNlZ3RGcVlnUElJMHo2NFpFeVNkTXFJb0JEYXdRclN2VXorajVyYzloK0c1dUlMSUxQOE8xb3hweHlZRWlReWRDRFlzeWtNWGFZUGcvK2RKR0J0NlN0MEgzUVZFR2tGRjBycW9EdkE3Sk52Ly9VRE5jZmFMKzJXM05aVENIM2xxYjJHRmFuN0pKQWpjNjM3SnhzSnhIQ0dKZWRSQk5HeStPV3JtbUxVUVpacGN5Rk1XL21JMUVrc0NuZzVCcVVReUJGSDRPbzV2UnB5REZCNE5wUDRQVC8vTGVkdzhVQ20yY0hjSUJodm9TN2N3bmNPOEdhQUFvY3J5MWIyU0lEZFUvYitwdFMwUFhLMGZsY0w3c2JtREVJa0IzUXoveStrTVdqWGdxVzVsU2N4MlNlWVhpeXdMR0t6b0ZpbDR1bFB2Y0JBSWU5NjgzTzlINUJjTjNsK0k4aUwzUXNNV1VxZlhPby9uWWJtMVBLMXQ1ekRuUGhmV0tHNVMvZlNBYUdmUHZ1SnBoZm9SSlc5Nk84TmdjRVU3TDA5V0txSENQcDE4dzZVK2gvVlpvbCtpSXJBamQ1aWY4WlE2b0dEVTZYdzBraWdFSmtyNHl6WHh3dlB3RTF0WkE1bFVjK2J5R0ovdmtBRE9ZNjdja2JQdGJ5K3dId1ZDenJtdXBiR3pVcG9lWFRZZ3Y1Slk0ZmVLQWdsN3VQdlRIQStNQWdkYlN2WVJEaTNDb2x1bUExc01WRnB2WU5rY3d0ZjhNWFlzMUZ0REhaNjBjcFVldDYzRzZlUmN5S2EyVUxodnNKTDI3TDZmSS9vVkZTWk1wbzV6YTZwYzZJOFhuV3h6a2RyRi9GR0xFaDBTV0pCaHJobks1YVVPT2Y2TGhCTnZ0YWZwS0lPTFZnNVk4eHZ1OVFscGt0TG9KUjJQa1Z3QnBQaWRhb1pEdnhadVJWTWN0S0NxaGVvNnZwZFpDa1EvZGowclg2eUVTbmYrbDQ4Qm9TaGZwdHZTRC9qOHBEcGVtQVUxeWJERURDSTh5eHJGTjltY1U3MlVvS3RobUZoZVVnN2tCMjNwc3I5dGVRYko4aGlEeEFzeERUL3BYa1VNMGZsSjFEVmloZ0V6N0VobSttTXk1QkF5NzhyVjJyMTRRKzZBOEdHWjd5Um9LWkxmcW4wUldvbVJXV0lBMEF0QWNpMjZld0t0NFg1QVJZTURSTmptOFdpcTNjWkZlYVdqcDEwNVNXS1E3dDkzTSszcERqZE5rTFVhOGFNMEpwVjZrcXZNRW90ZDBoSm4zWWQzZ256dUtQY1Urb3dzQ25HWGRQSm9HN3phQS9kTCtVRjZJOUhGSjVteFk2R1E1WmdYZW10ZzMxY016Y1RVNkRMb01PYTdScHQ0bkl0Zk8zdWs2V0Q0aGlLcG1wRXQ5V3NGZTI4ZnpxTGtyVkxlV2c0UHFrNExWd0J4TGk5QzVUSmxxUENYSkxqdzV0cy9mUWlxVkc3OHVLendtVUgyWWRMWVJBQURBZzl4OEFYNkp0V0hVZ0xRMmxjRlZpRFRUK0VObGE0WmdVUUI4akcvRG9kUEtDN3doalRmQTIvMmdiaDdzWWJIWFBhblI4VzNMUitmUlMzWExPam4ydGw3aWVTSEVMK3RKTXhDY0E5dHdZT205NFowNXVxSmJYZTVVdTdTYzRJVzFwbTRqWWFEcHMxYnRSOFJLS1BIU0dCbVZ0YlFLOWlkdUNrZHNpNlRVSjJpb2s3K2EyZFlEMnJDb2VJZitlaStUbWw0ZFN5ejBGNUh5clFCenpRTmNEdUtiM3JneXBVNS8rK2YrWGhiZGN1OVBkTUJuSTVkdzZxY1ZaaWVRYWdQdkUyVi9mZ2VoRHBUZUFuMXdWbHgzUGN6K0J1bktQR1ducDExN2hkaGowQ05NQzg3NUNBUEVIbElpRW9ncGh4U3JxNXBDSVl0dUx1UTBUeU9ZN1l3S0F2MVk4RkpNTDZxMDZkRnVtdGlsVHVHdVVwTzBCV3pldFR2cU9rOGhFRHc3cjRTak9aalFUbThKZHI4VmZtbHRYNXRSV2wrUnc3Nm42cXZvb0NNd0IrWGI0Wm9MNEpnNEVvb21wa3M2dXdOa0RtcG5WMS9HTFpISzIvbFpzN3ErTjhUU0pCQmJLWVNsQzBpZWluL2JqSlpyVk9QME9xalJIRU1DcVNDbTZockZZemlWMWs0ZXV4bnZEVmlWdVdNb21STTBnTS95UDhrbFlZbFhwK0t6K3pzQy9yQ3FrM0hBMDE2cGFHOHBwZ1YvK2FBeHBjRkJpZmowK0dDZzNtZDVPbFZUM2dDOUszWWxxMUtOY2R6MnIwekZwK0h6VVNDc1g1emxDWW1vVTZtSzl0U1JqR1ZPSkFva0JsMDY3WUhhRGFzNmlSVldianNCbFU5QnAxTzNIcVh5M3VkTWdaVk9QclpxTnZpUW43cWFLQ1pLNHpjbUYwK1grdFNpblQ2dUhlR3ZLeTJGSHMreGNHWHJDaDZYeE5lUlgzbVcrT0oxT0Y0eFFlckIySEJiZ1R2em9NWW5hdlBOQ2hPSG9RRUJIOE9UNGtEZm5NWHFheFc3SFp6RytycVgxaUpyYVpuNWZDeFpSQnhkMFNOYlhWK3JEQ0p6bVlJbjI4L25uUFVObUVZdm5XNXlKN3pUMUM4aW00TGZlMVlLTFdOZWhLaUJJa1NMY2xmNFNtUWVhdVJlUWRyWkRxNTc3dDNSYWdINTg0eTJhM2JKdzdDTU1DM3VIc0NtNEFWOVRNOWtYejgvcjVnT3ZsY3VVVzk2YnlkZzB5Y1pYS1lMRXl2QXQrSExkTi9UbDhCL1paZVA3OElvOWRSZXdOMG5FYmN5ZjB0Z2g4YmE5UVN3dU50bVRwdkNsWkR5UGRsUlJVMmtDaWkzNXpCdTZ6QUZ2Myt1NUJ1SlZ1dkUvWUZLdEJBT3hHZnhZTUpKNkdUZ2UxOU1pbFVrN3BtckVLVkpFdk1IbVlraU5vNXRISW1uYmtxNFRRakJ1STBza1FKcFc4aUpoLy91cFQ0S3JrSmV3ek1jTDl6UTFDbWhZYUttWG1EL0ZSMTVqejhUQjhZVitHdlFDUUIvSlFXdGU3SFlGODRyUGFOeVRuemd5ZkZiTlVyTkxPZlRFcmRkclVKWlMxMSttN0JzV1NhOGxPWWt6eUdqUDFnUXJJNkVUQmRPZDlIMGxTNWVlU0ltTElXTFdJRUhVZ002VU5qSGdBK3QvY21DRVl0ZFZOdG1FVCswdk1MQ2V5Y1Y3UmVnYTlhUkxSbHJGN3hwb1MvcG50SmszZGtVZmYrU25JQUh6Z1ZKRU1xaXhnWjNYSHlZS2NwckFJdGdYbm1LMDBBRzJ3RHNBR1A0RlR1aWlGQit5OE1vQXJ4cFQ0UXlLaXdFM0FYNXdFcTU3QWtNM1hoUGErd3g0WStoNmVmaWxkaWg0c2IwQ1lJbFlMQ2FQa0k1Rkl5VFZZeTBNYkpobTZSMWlWREE2WVJ2cEVkTjFnazd6TFFYQnhZU0JtNXllVUxwOHhHdVV4LzFaQXEwNitaMUpldVZxYmZFNVNSQTF0bDhqZzVCYUp4R3A2TTFHTkJTOW95eGhPRTYyQks0bWNuakd4aVdpb2o5Wm9tcFFZMnBuM0thSmtrZTFCSzkvVy96aVp2NUdCdkdKSFRhQXcxOFZmWnl3WDdlOTdkZnRFR1luWGYyTHRWbk9qTWRuVDdRTFFTMm85VVRkaE1SMW8rWStuU01DMmtsZHBGTnVvYlk4RVM3T3VCeHF3SFFIOXE3Q3FXNVpuSjd4bTg0M0ZLdXpIS0RkYjJvVGlDVDZUcTI5OGVwRDRzb2huQnBiK3FQd000RGljOHJrbXFJNGd1NStTWTZLdGEyeCtxcVc4M1NHUDQyVEs2SlNJaCtQdFhUTmtNQ00xdnF5YWNIL3Ftd1YzZHBpU0JlaUJDUVJwTHVvM0NVOEdxTnJyZGc2YnVlRE84clplRTA4dXJwVTVqQ2oyaU84MXh0U0dHMlBaQkZybjZUSWErNzBkUzltVFhxd05qajZINExPVkN1L0o3SFA5OEJ0N0NGbDVSdURSM28xRitoNWhzV1hDMWZTb0xxVTZpR1dMY1FBMkhic2Z0TmkwK2ZtTjg4UEdNZnU4dCtpODVFSlg1b2tqb00rNm1uSVVaRDh5Uy9KdzgxV1RxSlY3SmFtYkFDdW9TZHptclJPbjYwalBNN3dvemd3c29Sa1Mrb1BtWm1sQXRpNHE3bEpMMFk2bDUvYkptMWNqc1hFa3pVc2E5K3IwNW1pUEpweUVGenR6WUZHMVlFSHpzUVVtbXVxQzlzZjUwRWdneno0OUJpcklqZzR6djg5SDNibXdSQ2svZWdUVHB2NUZOVG5KYlFoNldzMzA3SW83STZ5OUVoQStGRGNxR1BGcXZXNGVCSERLbmRjWlh4Zk52eWxxTmdQdDhEc2xpZ3dEcm9BNVRmZmFVeE8vMXB2SU1CYWwvNjVEc3dsQ1c3THQzUHJwUFJYUE0wMVpySkw4NWR0emMxVUdNZEI0NVNqc0lLYitmQ2JKUThMMThmUExsbkhRckxrSWRBL1MwOVVVWU1yc3lhS1I5eDlmaVMvakRGTXFDOWlGblVveTZCMWpJMEhkU3plUk5oZkNVc09qODIvdHRsUW93VU5nNXgrVnU1dnpKS3E5MGVnZnhZTFh0ZHVXT1R2ZnAxaWxNOThDZlIyMVZ4Z0Q3VGFTSFJTUXAxVXRjUGRMeVJ3eERTT2hYNmdSUDhBcG1ZMXFyb1EwL0pqaE5Qdy9FMVVONnN0RXVLZnlBTVN1S2FWUHg5amg0anN0L0RlL0Z0aGV1R1hxQ2Z0K2Q0SjFSQjF5UnVQYVFVYUNYeDJESEdQT3JtU1Q4TUNMYTkzTnYrL0JGQ1U5Uzd5ZkxSdzNZclpSMjd3L2gxQURwT0d2b2h2amlBM09IaWcrdzArNExsRk1odzRTaSsvbWNaN2ZWU0xCaE5iRjdxWEFOcy8wUkZ2djhMMEd3WThtZktUUm5OZ3VycEZOdVdIYkQxVlZUK2VBNmVka2F4Z2NvL3JOY1VBdXBleHR2MHd2c1h6RXRXWHUyeXN3L3Q3Q3p6cFZsMTZueHkyOXBCdThCbDRyYlVhUTlyanBXMWw1Z0R2Uis2OU85UXI4QUNvY2NWdTVqS0MwSjdjak1PN0E0WG5MUkNEQWhHTUNFQ3Z2ZkRNMEhUbmRmSHZlSmlyMjJ6YkhmaWg3OFRYdFplNU94VjFVc3pSUmtpelpkdmdFSFJZaytMMU9SYXkzZzQ2WkM4YW50WTcwdWhtRmNSMEZXbzNkWnI0MWZvUjVFb3cyakJWNVVsNEcxWXEvU3E2Y3U5TGZRSDRveGRHQ1h2bzVxdjlFd0p4Q2pXbFdFYzhhbEg2REVIQnRBUjcrMEtCUmVqc2JSMlNxL1o3TUdlNnAyaWhXOGU3NWpHR0lwR21CcklpNjY3emFrdVBQM29rNi9BTFlMUW55OXBsMVB1N0pxZFNKb0hYdHhvdlBVb0IvMzNaTWtzaHFkdkErMFJRMmkvUXpMTE5TZGY5dWpCS3J4TkpRVzVTTGtTeHlRVURqNEdDUHBaajFIQU9nems3b1FxNGxSZGtTZzRWRTM2bEI3RmVpbFJnd1IvT05UTzVVSmpVZi9CVDlhRytvUGJWNjdPcjhSZXl4OTFlMkh6TStYVzBsV3lpYTBmZGI1R1J1aWNHNDlUeHVRc1VsSm1IYlpuTlRpc3F1WGlmdDE4Q3VsRnNRR2xLL1JmeUt1bHZhRUM5SHg5akxUbjBjU2RSMUpHUVE2czZGc1pWOUV3TVRMdkZ5MDhqZVlBL05hc0s3WTFMTlRnLzc5NWxobnZTRTJJMnFZaUUvQ0FSc0pRQllWa3VCSEgwSEtLVUlDL0VWdmZzL0RaVUh4SFNrb3kwem9idGtDVGFMaG9nVTMrZ0N0UHY0NUNndkdwSlpzSHRjVUJ3bXN0ZG5vVytaL0taRWFBcXgyTGYzZVpqOFhFNmsxQndzOGppY1Y1ZExReTd2bjVtakZLRnBtVXNGMmwyTjY1cktMZVhYaks1K2w2M0NyTDcvQk8zcUJMcmFXZzhXMDZlNnRWTjJ3b1ZMYmVPWGY2RkxFZGpUdk8wVjFsKzVEc0pnSGk3VU9PTDVMb2dyaXFJaTNOZlVHZDQxYmVqWk4rOURDOW96ejdFTFlSQkFwSjJJcmhBUUp5MkF3UjdPRnpxRlBRQXRWcjZPTG55VTJnczVPS2hscy8rUWtkbnBWZG9PSTlXVy9MTm5qeUxJMHpnTmxzNVlvWHZ5aVFQMnBna29ZTml6bFo4U203VXAyb3FodDdpSHZjNTN0Sk5JQzNucndzU00rRVY4cEtsOXNjTGhiQk5HTm9JcElTQWw5ZHBiNlpaaXdIMGRTNk5nVERad1FBbWdwOCtpcENyVmZFYVFYSkthakVFY1VSREJETy9CeEpoNDZmck1OMllmRTFVbk9yOXNZVDMrczc1RUQzc1UwL3JyWGV5VkxjVjh4c3FZMEVKYlZZMk9tbFJjcEgzc1NnTCtuSGNQNzI3dXQyWVFCdUtEaHFnMklMTFZ6WHJWVmQ3RWdIWmZObDI0UkQzMnpCYzNJOEt1cUlNWGNqa3dJZW9zWVRnQzdDQXZlSkNuOE01OTBwdEZRVGZSR205K3kva1lIcEExcmpkZUZkWVMyZnNBQUpSc3l6NzVXOEVIb1pmRm50Rm9Cd3Z5eFY3ZHdWRHBBOEVZTDNTdmxuRGRpR1U1emh3Uk5NVjlGVHl4Y2djT0pyWDExSlQ1bElkMjhRa0xzWHp4RlcwQ3hPWTdTWGZid3NnbmIwTi9UazVPVnFGUWhEOUR5dFhuTWlFdEU1a09teFZjMlp6Yzgwa2xWdlJaeEQwOTdkUVg0VGU2ME5qWlZucWYvMk5DdUtvNGFidU40Zk9XL21MQ1BBcEYweUdWT20rQnJvdHhpQ1Z5Q1o4MjV5dzBMek1obmtaRWNZY0xDOExidUc2QXBoR3lwNmVuRjRwd01xcWpyQysyY1dOa3kxeTU3anVDeEJnbGpFQkhsTCtORlkrNG9sb1lEWjFDcGdPZ0N0UVo1KzN0eTZMNU5aR2o5SytaKzRVdFVRZE9RbmhURS82Zkd1eHVxeXd5U3dwOHdYMUtRL04vL0dndnlOUll4YnZWdzR1aUxPaG5sdmpwRmEranorMGczSzBnazZBbHUvQ3haSS9jRENuVHhrSXRyTXBLYnoxeUVZRWQxQ0dab3VLY1c4T1NSTjFpZUpYMmM1WGw5dXQ4SVJ6cVcrajExWStQSUFlaHNoMnVNamxVUFNEY2s5NDZlYTR4Z3N3VjRJaHRjOGRlOHFmTkJLdXVEbjJVSHZ0QTRXZjA5M0NpSWRNUFhUdEwxM0s2Uzd3UXlaNXN3VnVQLzFuWXVreURBWUI0MGRKemRISHNsY2Jqd0UwTExSSkhINXRWcmRxZ2RHWVdSZGgvdWNPeUoxM1liTWc0OFRNT3lIRkxSSXd4a0RCd21hSm5GbEwxM1JrM3FjczYrS29rVVlINit2cDRVdXE1Q3dweTR0N2M0WGloODJsZVNJZWFXUGxvYVBJZS9rK2VwbEl0Z1JUbGovWnlRMzVZOEhVMHgwSFdHcHlHeWNUcHgrTEJsWUZYQnFBSFFPdnhtZXRzeVBvRVIyejBqcWRSU3FvWjZGTkNGZUdXTUxJUjhLOW1pTWhHRU5zVWJRemQweWR1ZXVHNVltMjF6ZEVYNU1GbElab2t2cytYMnZ2c1l0K3ppQzd4c2hjb3FGNEpFdDJXZTNjTjAyRkFTeGJlZkVMM09qNitPMWxYTmxYQ1d1MzgyM2NxdXozNkFnU3NtSXc5eGptaVNKcDdTRXJvTXB0RWs4NWtIei9vcFdjNkpIN0d6S0d3KzhjeHcwYW9pUTNMa1prRFprRVB0YU1UUXhSMCs5TlpRUmhvYTVDYmozYVJxQ2VDQzkramVuRjk2L3EyMEFoWEM0QTArazZPcStTWDFIMHhOd3dPdFJzSVRsSW1haFltSWJDaDlidkFaNW5uZkE3cDBDcldqY0w2eFZ5SFVqa0hVZG9QRXNsUjBwSVIycTZhRkpSaTQ4MEc4bzZUNEpuVUk3SVY4V3JGVjVXc0dhV2hQK3NSdlVOL2JINWN4K08xNmNCL2laUXIrRERXWnRMTC9HM2l2WmlZcCtqMjFYT2tRSmU5cktjRVJCa1psVHM2UlJKZUZYUXN5NkZJVzhBVE01TlpWN0NJVC8xaDN1b2pOVUYydHArR1lmQUFoQW9sckdIYjBkSSttaUhITEhGNG40cGxDWERtRkhJaG1ibk5CaEV4b2JjQWx3MXNyRjhCWXdUVzdxRDdJcm5uUWMxMUV5dERyTFRwYkduaHBXM1p2OEYwdCtUd1poUFl1Tks1UDhReDhrczQxakVKTXVna0tNekdGZVdzaktpc3o4S3pPY2MxRG41TlYvNFAraDFYZlE4MUI2RzFiTEZzMjM5UFI4bGtQNnBzRVViVHlaZ2RUNDNXNENyeW1KcG93ZTFVdERFZ1FBNUwvWkx6ZGFYYUFjaE0yKzZoVGlZQ25SeGJkSDhQYURDWDFnSGd2VVRFbUs5TGt0dlJpQ2daWG5kbWl3ZEk3Y2Q2MUE0VDRmUytZUkExYW9CQ0JXdkJpeUpEOU1jcVhuUHZYV0kzdWZlbVRXOFZTWUZIWDVOYSs3VHdCSXl4OVRSZVF5Y3l5RWthZ3Z4UVpZcXZkTWliMjFWdzFPbWcyNnZJUFNQeWVqcmx2TDVPemtXb3JhMHpQeUF4R29kSjRhaXNOZENxdEJQWXhzalZNWU9FOXIzSTRQb1J6OWZBTEpyRTh2cEtuelJhcGJhVGIzTGhDcCs5UnpVSWY2ejNhbDAzdG15UjBlU1d3UHFNZXErVmZzMi9NdVFBSWVpM1ZhY1NCZ2ZFYThlWW96VzUvSDhlem5HeFNPR1dJcitsUERXUlhmWHJpSTRDMmRhNnd2N3R1aUNiYkloT0taNFcvdit4THArNW14QkdHd1FqUmRqK1pRUTFkMjZSL0VGTUZPZ1hJNVNTMGdmRVZTY2V0aFlWV1h1aTRZMUY1bmNpbllwdXB5M3p3eEdCTXNQd21zSUYvUEplNmsrUFN0b1kySXEzenlnS2h4Wkc5bURmTzcvZ3FzSlJHbitXMGZsV3Jwemp4ekFKdnZKcDF1cVBXTGplYWdwV0ppbUlTYnp4V0NuVkloa3lSUTFPbkZOQWRKTjZTVFJUODhqK1daQU82OWVDV1ZzcDdzcnRVUXd5dVJDbVFMOGM4bDlqZk9jUzFMTG40NFd2THVNb0xpM3hsN3dxajIrT2V0UUYzWDg1d01lWnhKbTU0dE0wendaREY0Z042YVBDdXJDTFg3aTdYckNVYnVFRHA2cTZ6M1dxS0puaGk3VkJQQ2tmalVIbEhsbzFYUEtoazgySzZ6QkF6RXB4Rkh4ZGgzKzRJd0k1cGRZSFdDL3Vlb1BFck91N1ZvbDYraU5GeHNBazM4dEh4NjRyUUthR0ZHN3J6SzAwRU1FRURwWjhkbFdPVFlzd0FDbGZwMllDaXNzeldoT1lZZUVncWVEUnA3a2lsSjJmYmNPZFNNbXppY1JOMmJ4NEtTV0U5bkpoalZ3TjBmakNSeHlrQW5HYjZTeWtxZ1ppY3lRT3JZUVBMN0c2Rm9QR09ZcTJISGRmbUFVRTJFZ29kWGZOellHYzZ2Z3NuYW5KQ0FhSzlyWXBqMFVFYlBTanhwejN4aWZtazlUMnh4aUJHSmRueW05NFNuWHZ3ZFBPQmdvL3dGQVhJYXpMRHZnUllvVFk4Zm9abmdsTnJuSGVSL0lwemNQdUNPRFB5SVdNRE9NL2l3eDZzcERBRWQrb2NOZVdOdGVuZVRUb1VtZWgxOTM0WDg0MmJXenN5MXExN29GT2daVnJPRWZhNktGd1Y2MFVxbGJxNXhtQUJIaGh6QjBVY29NcFlHamdpT3ZwL01YVjJxVDJNaFlqVyt1UVJUcDArTm5UYkpFZjlLbmw3NDVwZUNuVWNGS1JSSWliTVQwSmVLTUdOY1doQWV0bjlUNVJuK012QndpYVdBMkJRL241QVEvSCtkTTZJYW8rM3V5VldaTWVrVTFGa1VyT09MaUpWdXJXY2RMQnNXUjZrQndxVzluMDBSa0dNV1VlK0tsMDNZblp4RS9EdSthbGZtZ3ZpYU54VWpnTjYvYlluRnNmQ3Urd3dWMDJrVkxEYlhSbEg4cGFkRHE3cDlYZ2FaTjJwcXV5VzArcHpMenNjVDhpUVIyTHVKOVZ4aU15aUhPVG5QN2t1Wmt0RmxQbHBKUGxSK2FxaDlzQ2FxMXFlMlZJcWFmTUM1UlhVYVhZS2l0NFU0bThBMUswU2doODJGUWloRkw4clhjRlVoTXdmTVFSSzN0QU90V3RTVzhZRVNwUjUxVUpNMEhKMXphWnNvMURYSVVxelR5ZEF6NENnaU95Y1dlUFpmbEp1OUZlM2tRZ05Kd0hnZ05RMzNDUnV2OGs1NURZR1JKK2RNTnhZK3gxY0pxZXhKUitJdG1OM2wyYjNqc2hNd3l2bWJ3MldnRHJEVlRGcjF2dXY5bmhOd2Jnc3BRTS9zczd6Q05iMVJtaGcxSTVTdzd3dUlVU2ljT0NpSGZXYzJZUWNJVzlJTVJKMUJ1b085em1FL2dUY214VURBazdiV29GWC9tcWxkWTV6ZXEzTnFFMENieStyUmJjeVMvTkFsdkFTUWNSWlNPWTV4aEZDNThNM29xd0t4QW5yaEdZQ3JSUVhldzFBa3l0aDhtYU91TzFMTTBGRHBpQ2NIM3RLSE1PYnZNSUFXT1RZZ1piUVpudDFKWUFiQ0JWVDl5VjFUN0xIam1CSDNOclhDY0VOSDNpNytXMnNCTjVQQ3dDOFl6dlFXdWVySFU1TWhiK1ExVVFPMWU4NmVRbUNHc3l4V1o4SjNZaDUvd01ESmFmaHFmU3VpUEcyK2Q4MVFTMGpwRGIvNUViQVhRY2xoS1owNXZQTWpFZFQ4NEF2RVFNdWg5RXFoNS9WMDBKWjlCdEtpQ1NUaUVOTEgrWlNTZFBpV09DYXZhNjl6YkhkUlpWT0EyMUxqVm5qeDdLeDhlOE9vOHhVQW9pMWxDbXFqbjBDTFRkYmxwVEdFcy94Vm5TZFNrVWcwSVF4aGNIbGhObHZaTzFGT0hrLzY1V0RSeW5UUDdSM1I2YnBCWlpzNXAvUndidEdOdGlwbkNEQkZmRGJSWU5XamROYklKWjJ2UGorZVRRWUZELytacHpaamI4bnNQSmdPQ21OUWNXdEVXVmFaRGtkVUFheWVubnF0RTIrWExHajZLOUhKYW15T3NVRUdncm5XN1NENWRFaWlpSlN1QlQxclAveFZpRENITVUySFBaRndNejBVelpuejg0alcxdzNuaUpuYklaNXZ2ZjlRaWtTSXlHMWRZUkdzaG9iUU1yeXRVY01BbkJCR3ZzUjhHNnV3MC9odTQ2RGJUa3N1WFBSOUcyMEZLVmlXYWpKOWNTTWkyRlJxTlByZHRmcTdvb1VWVUhuaGpWZ0NRaHdtdncvVGNWVzVaT2lqYnY1cWE4S1J3TmR4YWJxTFFsUG5TZEd6YVV4ejZiTE4xOURkb0lINGlwd0UzLzhFanBSZnFZdmVQbUNTQk1sc3dXYjdEclpCbzIrMnZrZFVsUWtIUU91bGUydk4vaGcwV2NJclZjYmY3RVUrNUYxNVBxcE4vajNHZXVrdWxDUUVPYWh6My9KcTNsN2RNcThEUmNNaDI4cFRZMDhHTXVnOEwycGVucUtKcm1QZ0R2VUNhbnBuNG1ybHFnNm15SjE4NnluNmhiRjlNZ01ZKzNOMlhmaWtraUJuVitwYnFtNCsrMlNSRTV0V0J2amJsWlZyRTdwZTdKVGM5L2dleGh6RmpDUDd3N21RLzU1dVdUdWZOWExjcWkzOXdUY0c2cnFsQUdkd1dsL3dqQWZ3MXlLVE51dGVtVjZFUXFUcmdrcmI3eDlhV0VRN2NyUjgrTUdROFVzQTUrN0dlakdIRlBISk1tejF0N3BIRHFHckxhcW1ySnRaV3A0c1JOTFNOQWdtamZ6SmtvbUVlZFJsRk9ydDgybytCWDg0TXoyYlNtaWRGQ001V2FiL1pnUGRiTlQxYUtNc0hmY2o4eUN2ZDFLRC8xaDVsMUdDeER0aytpdFYvQlVSYzlOVWRGRDNSZ1Z2UkYzZXcxWXRRODVLS2QzNHdQN0s4UGFsOUEyd3k3M3NGUlY0aE9NNHlZRityenB5OG1McHU5Nnlzb2pDaGZZazhjZEw2WU9UUTBZa3drMUJuemRiY2FuejJ3dW5xamlBOXNHWERtMEhyY3VGWTIvejUyQlRLQ3IrOTZvQWM2RkRDNlc4MkowRWVXdzJteUcxZ3YwTDQ2R1JvQllmOXhlWUlsWGVCbzhsMWhxQTFpNUEzdW4rVjdOS2ExM1ZXNVczTkxpOXV2NTJKRzFhYXJhNXhhVm1CbUtuMThDYVdOMy9lU0gxaDU3MGxWNURzZDZTbzdUc1czWjBmUmtDVkt6VWJlTGVka21RYmpmWi9GQzBFWGxpU2hYSTUrVEppM1M1dDZVR3grd0ZjWDYxajhjMS8wR3RpSE9RbDVUeTR3SjlhaThybXJBWWtodzQ4eHVSL29vVnpBUzhMVHRXUmtQVmJhYmcrbGtocGxNT3d4NFdHVFg2R2p5ckgzOUFGVEZQQ1FwUnJycmRFNDEwYlRNYWRQQjQ4U0NhTnB1bFZNaFV3blJXSnFyblNRRFhaSERZU1NiUVo1dTJDQXNEdk45S2pHaGEyMzdJUGlOVFVzOTYwc0hEVU1hNUp0M0lOODNIbUNXNm1NekJqZjRqYlkwOUZYRjZ6MlR2UjFwVjBxZXRqbjdpUmFFeHY5RGpvVm5iTEZXT2JQN2ZKTEZkTVAzWUY1QnhhVTBYdmNqUVQ1a0U5SEtmWHJTQWdKcmtwdWdUTXl5RGNreUpabzVBd002d3ptN1dVVVRNVEZzWFEzd1lpbXJnTVIyNVh4V3ZUMm0yTFEraG9rQkdvM01wM2tIVDVPa0Z2eWdMcytCY0oxMEwzTmZUOFB1VTRleFM0enZheFZUM0NOVXEzbEpTYjBuOS9wS2dsU2gxMmNnSVJGQjM3UzJod2syU2Y0S2ttYnFxSE1nbnBJZDZyMEQ4Tk1GY3lxd0pnZGRuWjY0ckNPNWdpMnd6UlhEUmE0NTY1c3FwTGIvWGFtSmliUDhlS2JzWEl5ZkpwMnhDSzRaSTFuWDFhOERhbGNGWWRURktVaG1SYzhNTDUvR045TUZSUUh4OGdYL1RzTmk4dXRNZ2lqYW9FalZnaHpBTzJ6ZUhtUkhiT2UrbDRudFpGRkZsVEx3aFU4Unk4SlZSMkY5Qk5ZM3hjSllVZjF4SGE4RzJuYXdsSTBOMUdvMW5hRWhEUHZxM3hldlY0OG5NREtRNFAxUjNtSTQxMlFKLzVjbVNibTRlOEtMWnluR2U1NXpnUG9EKzJVL3pPS2tMSlJtQzVhbzh3U0pWU203NjQ1MGp3UnF5NEUwN1E3WXVVM3BQZ2ZpK1dYV3h2Zlh2R1htY3ZwcHI0eU5uK2tNYytnVmN1L0pWQU5BdFpSZncrWFhxVU94UDhFQ0VsakE3RHI4cWNmczloZGVCMXh1ek9XdXpCTHcvblQ4ZHV0a2wwMW5nR3V3U1I3a0tQZUNIZHV3d0pxamlwY3IyMGVsNVEwVU5sNHB6Uk5MQURoZDNMN3FNRlVxREJWdHdZNVRDZGJJdFZDdU5pckw3ejV0RXdlR3AyRTNEQVNUSG9zMjhWTFdKNVJqSFg0UHRMVTFxL3VnQUYwV3NBMzNPUm1YQi9zUjlSQnVMbHhsbXN2VmlSeHNZSkxYaWJYNVZ2REwzRmpWL29QeXBKUC9kYXA3ODl4b1h0VnJ6ZHVrTjNBN3hWR0hSL2hHSlNoTWVBR1NMaDVya2UyZytzcFlhbkZTMzAvR3dxU3E5RDlGdGxnRzN2UENkY0J5cjJ5ZUM2UTkxZG9UYnAvL3VVM2lOVExFYU9KOUNuUUU2QkliMWN2d2xWdjJiMXNkUFU4S3l2cUhNT3hVZVRnSHc0YWhINGR1RHpYQUQ0d2kvY3pRVkgzNlJabkE1SzRnZU5oYVNGOWFmbS81Q291cmdOaytSZUlkZ1R4UGoxSGFIVU5UMUV5SytUbExNU3Y0dmgzLzlnMVlWd25MR3F0OWdLNnBmNG8vNHRENlA0SnIycnRFb0FYSm1vZHlOTDhXUU9uM1BpNVI0SXR1dUo4Z3RZaTJMZjF2MGNvSDZPT1JCRWtxRjNiWGo3ZUtVN3NWajNLZGF4ZXJiWEJtVzk5ZlM1cjZJbFIvWHJ4YnczNVN2SUZMZmlvSEFlaFF6VjYyTWk3Z1BVWXV0aDZhQ0owNk1DSXhnRUQwenFZYTZHbVBPWU1PV1VpbkEyU1lsdGtIcE8vbjlwekFnU3p6TVdiblB1dm0xNUpVOUYrb05JakFXbkRtb3lwUnJWRGw1a2hGSDVISkdQQ0lFOElTNGtOUHpsdjFVdEU5RnZ5V1FQM2pmS3l6dU9kbG9qbElPbXBsZ0xXRVlTai9HWEhXTjl1ZzZFdFY5TEkrMWJrNmVFdE5lanp6YW53YjdVL09jSE16VU1tOHphUDk0aXZFZk5yVThpbWRZZG1uWGVOejdQOWo0YjRWY3REdkFwQTBKbElJR205TXhoSHg2eHdrSGFCOVAyb3I2c2hBVDJZNzVhc1lGVnBDdVh1elYrWE1iWGUvdjdURlhIN1c4TGZmeWZCazdhQUdBWGhnQ2J3N2lsTE43ZENScVExRm85WE13VXd2ekxCUkU4QktQQTd2L21VZkJ5UXVCRXhncmVyQXZZeHpPd3ZlaHRvRVcrU0lKY0ZJTjdiWC9tU2FoWkdHSGZIK1BVb05xMDkzaC9IZXdnSUdXanMreFlFNm5TNllvamhLSEVUZmsyQnV5VCtKSjl5bEpGVEFYVUNHYWMzYzVKSnhJT1htb09aMSszOHN2RFcyR1VxOThYclVaa3c3UjNhbXlRNFZLTjdld0lXb1ZwaUxjWGlYQ0Z2TjN3dFFoTDZ3Z3M0YUhUVUhYS1BHTjFVTDJXL2MzWHlZc3h0Vk5PVCt2blI3YW5BVmJLNDlETzFNREc5M2RqTGJvVXhaVDZpdi9yNm91dmM0R1o2RzJYakhVc2IzajZzTXRVZEVmdW5uMFdHM2dqNHNhcURHTzlCSitUVCt2Qk16VWFIVmZqYi9wZjI1Nkd2ODUxTlEvWnZ1a2x6V2c1empIbmpZaXcrbGxDaThEL05pK2dvWFJrUDc4U3dJUVlUT3A5WjJYZWhvNFkvWjRuNGNpa3FFUWlnY3pCUHpXM0psQkQya3NsaUlWLzNWWTR3Q2c3M3VkYzQ0QmZReHB5ZUkvR29kK2tTbEU4Ynh0bVJ4Q1Foa0VTaG5aclNHZjJ0dHZtb2VNMGlkWS93a0FacHZtOXBoaGFkeWhjbWJERnJIMmZqM2lZZkgxaUJYWUtmeVE4dU5IUUprbHVsd2h1QUt4Ykh4NmhxMzIweGpQb3hrTkJtQm0vdkJFTFFvQ0NPajN0dmdyV3lTdDgyOTZJMW5iVDdIVlJkTkVHSlJ3cElTVjlNL1hvdkMxc0tkQ080TE1ab1FlK1JrS1k4aEZaYWs4ZlAyUjR1TnhoY051aGNUcVFzR0dhSWRhTi9CanFKSnhiYW5CK0thN3F2aXlBWU1iNlNlLytpTmFVWDNJSjVKSnhvbHJhTnJjS1Fzc0ZJRzdwYlc3eWpYaUQ2bWZ2RWtzM1RMZG16cDBEMGhoeGk1ZGF3WVZiQk5jR0FYZVlpVXZ5VmxIMmNwcXpubkFoamtLRm5SeUZ5b0hCZTMvOUZVZmFwMWxjRW5QNG9taEtzMk05dGNnZkdkNVZ5dmdneFBxOUJhbXN2djJ5OTRCU21vb2drL0VDTlFVRDM2QWtqekR0R0I4eWx4aXlmWUl3MDh1UTVEdXNMQ3c1ZkFLeTY2NU1jT25jQUliSDBNd0NsRjR2eUJFeVRTSVEwVTlSRTBUVFdaUTZPUzZIZ3JLQW1Hcys0ejJXSVZudmRFeHA0endocldZS3BSSGhHK1ExaVdWVGdnRFZGUVYzZnpxTzJBVUo1cDhGNUxJVTlJR081dUx0SkhZcm9JMkIxcEsxTW1jcVdST0hXbHZQSlNyK3JreEMyWk45ZkN5K1lVeGRrZWdaYWxETlhrWk5XUEt4MytydXhmb0JDN1dYeFl0ZlVyeWY0QU1OdkZVMGQ3ZmdXTEUwTW9Sb1djc1M3RHVxazNiUllTcVQ1WTF6ZkF5a3E5VS9FYVZobzVvRXFYRUFJVXJ2THgzNEMwNTdSUUVZSUIrQWc5LzN3UVJjZGlROWpwQ25WZVphd2V0azBaekp6NkRiY3F4WWRNdzM3cmxqNXhrSHZQS3JLTDhsOGVkOWFGV0VoUTgzcC80Q1dMMWlmeVlBMjVtWWROUFE3dlBYU1RiSFQ4QzNPTDJKMS9Hend3SHdtRWFhMHBSMkVzZkczREZMTTZCa1hjY05jSUx3bmltZFZzcm00YStWYVZDVm1HZHV2WW13QjZUNGJyZUxaajVLY2Q2dVBQYUxMRjZITjhacElXcE5XeklDbjR3eU0xdFFhay8wTDJqaGQ4N01oeVlzc3REQjArcUVnbXR2K0FmbWZvNHhIb0xpNjI3ekxkUnlELzFjTHVXc2Q0RjJhMHNZR0xaTXB6UkFIeHBPeHliTUhwYzZuVUFab2ovTDJmNmRuYVdxSjUwd0tVR3pKUW9LeWNqenBQakFic2dKZ0Nmb1gyaHoweFdIUlVLVlY1VE56T3M1SmJzUGM4a2hvT3FwTHkxclVUcjJnQzNEbzFQdEgwMXZWdVBMOGpjNktoMzRtQkJRNmgrNXNVdDREd0JHMTFPRU14SWVCQjBKZzF5QTF6NWtxcDVhK0VEOUhISnNUNDlnKzNKQktIOGlVekFJRzkyc1BnN1BWVkNYWEFqeWV0Rlh0dXU0UVZTc2lybmRlYTVvdVlzUHd4dXphL0JtUzM0UFBybGFpT2M4UkhDeVBmc24wMnFzTFNRcHFWNVcwc2hNL2dKYi95S01NSWlPczRNc29CK3I4RjJjRmdGK0lGRWRWZnhsZlF1WmRGNzQ3blhPaFpIMFB4VXgvVmcrUGIrTEprVzd5d21HS0M4cHY2c0hFaFhkY0p1L0s1d3pyVnlsYlg4cThIWUdoL0ZhbUtZYWlsb3VmYTVET2hGUjZ6OUVoeWd5cFBsZU1LU0lwQ2hLbHgrWGVDb3g2YTFDV0srZU1oSHF5dGdzdjUxZUVyWG9NaE0rcDdTbEJNelJCVDJ6ZVFpaWczbHF1WVFnVDlpVVVMQkRyQjVKc2tDUEplc2I3V0liL1JkeUkwemN4MkxHTERvYmJaeWNFSGwvRGdib2ZkZ2o0RSt5aVp2U0prc1Q5SXp4dThnVUMrYlMyYytPS1FUeko2M3R3NElBSjM3c1phbnZmYmNBU3Z2UkZ6VGFnQ2NPVjBMbkZMeElwWXlwZS84RXpTdWJ2ZHhmdVIwQXFXUzhwdnR4UjVjRVhwb29zcTAzeEs2bUFOeXhTMFZVWGRNOWVrUk5yRHpVajhwUExFczV6WlptVUMzYjdwbXpxMWo3eG1HZXliejFZdkpuN1g5NGJiM0l4UCtxc042elVpTUdqb3ZxTXUwNEdrZnRPZis3WVBmejZleDljTkRodmEyRzhZRExTNzc3cVVCWUU3cWdRVko2RHhRb3llcXdiSXg3TDg1b0pYZDBmWnJuV2Ricm9vOVpWRE9GQ1BRRC85YzNDejJuN2k2TkV0MTFNVnZrbW9GclpSeGNiNGxPY0c3TFBjVEg5aVJHNXZJS2hEczdYeW1qQ1czdXB1bnZkbENDME81YWNIc1lnaUNqZnZaQ1F3U0FzMzhqRWloTWd0VjRyT1NlQ0xMcWZ5M3pGNDRwMFd4NERzNkFRWHc0MG42S1hYYjllWG8xRjZGZWRFS1duQWhxSTduUnUyaEZMcDJCQXJ4d1pyeDhEMmlVdU5HSWR4ZlA3d3RCY051czY0TitTbkJvYlgvK1lEVXhSM2ZGQXlSWEc2bnpGWDRSQk1hOVo1U2F3OU1yRXFHU3pGZnRRa3c5Z21yY1V5NjdHZ1pObW5KU1NkbjNYeFY4bmhrY292Z0hTMy91dkI0OWZOMEIzbFlNMVZBL0VJUCtlUDA0bFpGMVhOVFgzeFFRZHZjVWlZNEgxbEpFZy9rMDRkZVo5SkZTNDZUTGNBVFhHREpmV0Q5MDNpVC9ELzZPL1JFMHd6OGtMUSt5VkxFWXlHRXhOMTlYejc3NWlJdVRYekF5R1lINllzR1NGWmxaajZQMkkvRlg0WTdMUzRzZFFsRUhMRG9VRlpMZEF5VmJEMTJ3YU12eXhyTDV0dkl5M0ZaUG45d294d3dCdldkdTZPMHJ0STRraG9XeFhsUUhIZ3VQaUNjSFRNWlRuNXNtTnRSWjJOLy8xZ2NUbitFc1dlb1g5Zmo1aVdqeVI2dWVmeEtGNjhyZmNQWWIvOEc0L3FtUGdBcmxGbUFsL1liTHFicElTYzFuYndvemt4ekNNLzhadzNzeCt1Mlp0VEIwRjRJNC9xeTZSeHFPTWx4aTFRVFUzbE5pakF6Rzd6Uks3aU1aTHF6Z0FLcVNmNDdQdldvdEl4L1Z6TUhBazFtNVcyTkFyVm1BRGYrR0ptQXdteHZ2cjlCbXJ5NTd0SHRCR2V3THhldmxEbVY1OE5UOWxORTlHMDdnRGM0SHVINUNXK0tPVjZKZVJncVFQT3lVQ2dYZGVNZnUrdCtsTW9GQVp1czYwMWtpaGZOcDk5SmJQOEtNQkUzb0dEb2Y1M3hzS1F0NlVieTNZSlNZT0pURTZmVDNvUEZWNXcwaTBmcC9lSUpRSnBCR3hCT0diNU10U1FTajNFb1UrazY4YkRRcXpTNlR2aGNJbzhHaGhacjlLeUFjcUxDdVN1b1M2V1ZIN0xCLzg1b0FuS2hTS0xmNTRoNnlzc04rMFJUcTdobFV1U0drSElDWWdKbmFmZUpxeFFpSC9MZS83RVNDelNaQVFyWVF6MFZ3cUV3dmdyOER6VHMrSzRsRmZrS010S01EdkZOc0JCSzd5YlJHanVVVjdVTTZiTGNDM0M3SHIxVGxzdDFDb2QzMS9OTGRDMzJGYU8yR3RZdUE1cDE2dlVjZ2owVjUvSHI5UE1yT0czdWZoQ3pPMzl3SnRzTHdPZzZ4aE11TnZqT0RSdmVHVkhGZlJKR1JkN205S0p4WlhJRzhxcklzSGVsM3ZjYzJCMkI0V0dVdkgxak9IRTliTXRhVlBnZmQyNk1TZ3ZKdEI4bmh2b3JqZEM4YVNMdWg0UzI2T29tNVZCOVlseG5FR2txM3dPZGh6b0hoSk1SWkdiRGZvMDR2SVlpSnpKVVltWEdmSGVlRDFsOVBvK1IrcWIzbGpBc1MrRENpWFBxaHJiMVBQMVBPQVZCOThMQy9iM0ZOcGhOQUtwbkZzS1BHSE9qY3FpTitwdXBLdUxhbk91alVnSHIvMmRBMmpNeFlidnNHKzhWZjFFRG9kV2pFZ0ZiVVIvbWRVMmVoWCsyc01OQ0t3SkFpZUppMnVmR0ZwTzlPNHYvd1U5dWFHdy9yYnVLUUI0L3JjcXpXUnJQZHJBQXFySW9NaFRyTXY3OHNtNWZsZ09pN2hQU2owNk8wazZLdFlRMERYcWg4UWZhbzRaOHpQdGl2STJDa1NCUjFxSzJpS3FzUGc3c2VhZFVOSDkzQUE5dlF1RGNpUUprWEZmUDJJcGRucFRiTld0TWgyM29GcU5Pd2FZcXgyby9zZHlaVWZBajZYY0lnVUlBN3I1bHp0QmNCTERxYjh0emNzRDJuMzh4R05JajFTNnVDejhwZUtvSHYzUFJrMXRWM1owMjVCa1ErYWhFRkV6aTJXTzFlYXREN3FzM3cxaG50cXFmSlhFZEJPbmlvby9udWNIZlN6d1VmRlZyS0pjMXNzcnh6OG9WT2dCQ2VRa204aGZKbnVBWjFnWGpja0F0czNIajVKUkdqcmc4M0RLQWZ1Tmo5ZHpSbWdvM0UzRmFnVG9DbFk5ZVpWaXhjUFMwZU1saUVJdEdoWnp5WG9aVjhqVzNnSmo5YmEvbmN5UnBodEtpakRKK2dHRGlnWG5CcERGWWxsT3lTMEh2UTV2dEVpV29uSFM3RVMvb0NSS2FNbFlUbTA5Und3YTRjcjk2M01BaHRndTFDSEZNelorUmpMUGlLUks2TFpyOXdOSytPRThkTjh1aCtJT0RISU05V2t0RFVzRW9qbnpXajFwc1NMUDFjUndqdjBaOHhrSEdNSTJQaEgyRTRYd3J6SC8zMTFqWWE3cUY1N1NKVjhmWEJmWkp2SFBxU3BoT2w0TUU1eFhWalZiUVBENFU2VDh3cDZiOGJUMFl0WER3enQ3TEJsNTJVdEZUMmJYcjdpSWNhekd1ak1vVmQ5OEhGOXFiNktDMC9hckgyS3AvVkgvRHFtL0wyWWw2Z0xsNzFsSy8zRUZuNENmRDYrVzNhOTZsNUhxM1RtL3JmamZrOEpRemFDNjNYUnMvUmZuRm1pU0c0Nit1MjVIcUVBUHpYQ3pXNklZcm03SForQjBVSC9GTy9ERHBja3Z2RmhDMjJ1TnpsN0crbFR5blYvdTFKcytoaEd6MUhnU0lDbnNncm42bjJQdk5JSTRKalh0bkpJa3g4N2hIemZiZ3lMajdqVDFnMFpTdFFYb25IUkovMisvNU4wTy8yUVlRSkJQMWgrUDNYa3FWWlBNZ2NnOUp3dks0eVp2M0RkbXpldFBmdTBqUERTQmNvV3YrQ0daWG14RnZkSUJja0NvSTYvN1JsanBGVUNJdXIrMXhDL0V4cVEya1p2NGRhYk5YdmhDaldneng1Qm52bWhaS1Jlbk1WSEhJazYxNmI1RjRpZzkrUEt3TU10N3c0ZE5icC9IelQ5TVhMMllEWEp2Z3NldVp4ays3U3dyQnZnTkU2TTdWZnliVlB3ZTRmY29BUkFZNFEwTENvT05XWmtTR0Y4S0UvS1NUNmc4TElCUkVSa1NlYThHT1FaUExyYmFoZVlxbGUvOXg4U3NQUldrNUNkMUFxSUJHNnhVMk9vYlNEc09wUW1wZXcyRVpNUjJOaXN2NGt1Z0RvQXE4cktncWR4T3pyR3lUUEgzUFhDT2luMVZLNzJjM1lKUmJYQlArclI3MGxUNDhheUZGZ0hCT1ZrSTNuUmZiOW9UOEpBTlppNVUvNDVtcWkwSnRNUGptcFp2dlNteElJb1c5Y0JxWmNIT3hyaWdyY3QrVDZIc21Pc2draEVsdGRBOXlwdk5WdUlEYmlCUFNNd3RZR0VhOUIvVWdleGlRUHNtZUJtbUZnVkNOcWtDMU4vd3g5SXlUaHMrYTRYKzJBRVV4cE9JdXVOQXo3U3NXdk5JZ3p1cXJBRWgxc3ZtYWgwTFNSSVdadTFQNElPNWFPVm5yNXpleW44VUIweWlrSWE0U0NiZEVvVEIxd1lmOVhaR2hoLy9BSFBxUTdVNU9EcjU3TWJJcVhNUjhBbmhwUW0zZUNZNjhleVdyZFhPK1ducUlrMWUwWWVlSUFTZytlMXlJMEhrRkM3SG12ZXdkOWNTWExNRTQ3aElqY2tTYlhGZWlPWXlQU3h1amI4TnJnUlZmek9TYTFyOXI0blVNTHI1NWRNY1hvVjV4VVJnMG5nQnlGUmswc0RoUFFtUFQ0QXZKcnhWY04vbS85bWxZZUdTTnhubFowYkkvK2dSZnE1MFoyR2RTRXBpeGFtV0szTW9CRXFVSHNWd3p5dVR1MFVHMzh2aUl5cENhWlB2czRMdlY5RDdYWGdXZnJIRVFxbjY2bEI0YVZvQldvNzRYL1JCRFNWQURTL0lSNWVsZHMxUWZwWVU2SHRINWZHZExBNnBhNS9RRDlJSmtQbEphVHYyR29NcFY5KzFwSFovdkN2NkkxYUdnRjRrNURiQmUvM0xRelI1alpJaXloZmtsTklwaVh0Q0JWV2toR0s1dUE1dGJ0STltTnBKYTNKckhwbWl3bXV2Wk1uNURFcVU5TFVFNmhxNDJiSkxyL3Y3SWRlemZMUGZRWi9GQ1E1OVk5OWNDMjRYb0hEZGZPemJheXBxdmxoNHkwamRBTkRueXBtb2UyWUJrRHd6ZEZHeFpoQUtKTlprZGpYK05vSktZVnhQbStnTU9sdXFialJOWXRQOWlkdGZRSjkzSXl3RllsYUdRdEF1YTJ2dGhxV3NDbW1Nc2xRa3lOZWZiTlY0Nngvaks5RktocngwMVJQTUxac2pRY1U5bWRGQldvdGVLNFgrVDFVdHJINnNkZXd4VnVZc3Vhd2E5TEowajd0Szg0TzhUMUo3enJvODBtVmhiREYvNkdXUGQ1K2NzMzFZRzBFN1gxWFpaZjFHOCtyUTQ3YmtnN0Jya1RrQkFZS2lTTkdjU3Q4ZVN4M2Z0eUI4YXZVUVU4UnJXUFBxUkZoeWQ0cnA2NnZud0RsUnJYT0hZeVRoYWFxVU5wL3JwRGdSQUFXUlN4aUxNNEd0akFMRHpKMURkb1VkcVJOb280NXBGTGZjYjYxaWVmMWsrbW1JNkN5azlRSnZhZFVubzI3RUtNQjBkNFFjUGtVTmd5aHFSNUw0UXc2YmxYUlA2MldrZ0NGZHFzdS8yVSs0UG1KejhVT0RaNlZQMElPK0hXcVdOd1Q1K3dqK0Z4c2hYenAxdUs3RDBhSlZzUDJsWFpsSXhOYThSWC9PblliVGZCVWlVYXpOeVhESnNla1B5ejlvWUFmejF6dUozYmtEL2lrWW9YRlBhSXlxUk1JcldrNmVibTRXWEd2SEFMVS91Vi8rT3YwclhKQ3BRZXBraW91SFJtQzZBWGNjRUtOdmdoRDA1OEI0WU80OVd5ZS9hTFYrQTJyVW1lQ0pwNSs2Zk8yWFlZOWNwL0cvL081R1VSdlRxZTVOVXdaSGk3UEpuSTZnb0FmVDJiMFQyRzVzNWd5QTREMzdVODFvMXI5OEloVVYvOXZYWi9iUmd4QlhnVlpiWU0wc2Fwckd1OGRqUTRScklUZ29ycW9DRUdudlVib05zMUJ6bVdTSW9STy9HTjcvNlJsSmkrR0NWeStyOU43VzF6TjlrazhxbWFVU2pyaWw4OUFOSUpVdlBLdjJGVDlhOE1ZeFF2UnR2bmR3WVVqODhXU0tWakNkb2x3b09JT01hTVlaMGlQTTBPSGFkQkE4Z0wwVzFXK1o2OHUxeklQbTFYeWNLWms4TXJoRkNzang5YmY3S1ZlNkV2SzV1R09CRDRhY21uUEo5OXZDMk5aSFNjT0c2N2RRanlKY29Pcm5jVWI0UytFTGdNeEc4Zk1LTnI1MFZvWExDcllnd21DU0RESzFvWlJaeVlLNEJTZ0ZaUTFMUE1uSnN4dXZKOEZjcDlvUk90RmFZaTlpQmNsbjBjaWp1ZEJPSE16MWVCR1d2U1hIUmFQaEdaR284YVVQMnd1VUU4UlNZQ0syYnlZRGI3ZXREd1JPU0pPTXZ4bjJhZks1dnVIakhtQWFERFZPVmlKSmF3c3dDa2tvaGVYTVY1b0lscXNLQWExSHJyc2c5eGhCejRJNzZyKy90OXRQYk5QMHZ2YjhweW9DYjlBRzk3WGtHNVc2bW1vYlVqQXp1NnQ5eE00alYwVk9Pamd5eHVna2dKY0YvR2FOUjB3ODJiamNjZDBoQnU5S3J4dEd3ZjByMExYUEZuZzM3cE5URVlMUkZ6T1A0bWVwOUFBd0hVUmxBNGZ3NkRIaS8zNGpBc09HMU9CR1M5U2ZPVHNqTXJ5NmtYVi90dGdBenVxTHozU1EyQm9RZ1JZVDF0eUp1RjhxcWkvRnIwY0piMUlzb3l1R1djZ3FXazlLWW55ajluM0ViNkhoMkhOSHFBbFEwVjZSZ3dJTk0zclZKZk8yczdrM2FsN1N0c1g1aXJFUTlUMmVxZktLdkFwZDh1b0tZSmlhQTNvTEloV1NrbCt5QnRWdDhuZFp3c0JPckwwNHlHRzJwZHgySE4yMWJIUHBJeDlaRXZxVTlkTUZ6WWUvdjRNWUZCbDJtK1lNQm1zczdWUTdFeGkvZENTRnJZNzNQVnE1REVMTkRrUmc1UUhXY2psY3hCOHhraFd2SEQvMk9SaGJybksrMUJTQVhGajF4TDR6dEVMZEswWnI1U05VeFR1aHpTSFRlMmdUdlVXU0hJYkRqcmg2V2VIY3QrN0tMN2pPdC9Zd1F5ZEc5RHdyeTZtUWJsTmhBenRrNDl3MUZqSnZoODFNVnlWK0t1U3hXRkRMSkxkdEVMM1paWEtsUkYwZ2ppOUdXRy9GQklJOWNYY1hxR0ovalI0ODd6TFRxUE1OaTNrR2R0eXdEQVg1T1JpTXFuNEZ2YUs3ZGFEbGtSbHdxUk9tcjEzMHlKK2piRmoxYkVFL09kM1RpVUJVVUtTMDJYdm04bXprbnR0NDUvem81MUswRGhWdTRUUnRlSFd0cE1UWXBqR2QzL3I4QnRoc3hYczhhbTR3empEa1FzRXBIU1hBYndIVFpJcWREY1JIVDdsNGl1M2w2OWVsbU0zQ2V0V0JTbzBaVUw3TTYzL1NDdW1DeEpPbnFjVUFXWlBRY2Q3TXlkRHVablUvYld5NitOa0dFSDBnVVM0SDIyS0d3UG9neXJwSHQyTVZ2RTc2UHhWSkRtY215NEhBRU1TMVhNZUJqbVE1bWFqK2pHVGxNd25OVzRLSitMWUZOa1h0VFVxa0IzNVh3cWhUVXRqK2FXRjZIdU4rQmFha2YybTBTU2VabzY2aGdGcVB5b3RvRlJWMkdTcXEwSmhSR25HdmdCRjUvM05sOFZLSERpK243ZnhlKzQwZ1VtcjdiVEw2QUxXektnSHo1MCt6RlQxMWgraXRabG53QTlGSS9zUGFnaElkVTZDdjZ5TFZBVEIvMWJmVGhyN0ExSE82SndGWXFFQ2wrdFJnSk5YNmpTVjVhdXovUFJmbjZUcVg0SzN6ek52S1N6SkMycm5ydytoalBRZGxLV1lIckNHakROY2xxTkN0OEFuM2lWZ0RaVVI2SFVYc3VJUi9tL1pqRFB3WStZbDRxWk51b2h3WmtQTU00ZDNyQWNrMEdIVURkYlVZazN4MUFTQ3JLY2dkZlhNaW1uSlUwV28vN09sSGZWRDRUYk8zWTRXVmlEbXk5c0M5U21tWHBoZWovdmdjdlZrbExsNU96KzJXZ2FBR0wyTVduSHY2ZFN1UHdQWnZDWWRPaW9nUFhoVlhrbW1tdklVM1VCQldnbE1iUmViY3BiUDFNS3BSM1N3T2M2dG9Zdi9PaUhqZHMwdjY3SXF4eG9lNVd0aTZibkgxTHpzajljYzR5Z0xiWjc3dkFEUEg1NFFmUTVobWR4ODJ4bjdTTmVFL0d1TWRIZElnNlJyMGFLU3lXYW90TjlwUllSN29TMm9MRzZQMXdyK0RreHRQVXE5S3ZHMm1YUVFjd2JNZE5sZGFFQmx6RVllUTFadWJJN09wbnNyOFBTTExNVlo3WjNOZ2p2YzdsN1IvNjZLYlZsQ0N5U2hya0pkU3cxczc4aHlYR3RvMENmK2RFTmE1aU5lNHZpT2tUdE56RnB0VUJDS1IxK1pJQldBai9OVE1NVjc4aWpNb21yVkFQMkNKdmJWWHVvYXpmSnNwOW85aThyVW01WFhGWlIxbTZPY21zSEJjTVBQNThtdHZySmFNOHVOMGxPOW1ldS9IaWQxWTdrM0wyNmM2Vnk0WW5sRWF4SnlVK2VrRVE2dDhOYmNTa0RBbGtvUDcwK1BoVEJZdVkyc2VXN1FNMC9LeTRLOWE0M0tJYzFSOVJiNGM0UXdqR2dRRGtsVy9aYnl1cDB1Rk1raFRKUG5aS0lTRU1aT2pIdzJ0Tzh6U05ROTFnR1dDLzBOYmx1Mm5VU1F2N0ViWFFqS1p0bHRUVWhVTkw2OUNiVUJ6dkcvZWhPVERGNUd2ZGdibWlUNWtiRUtmZk1BQS9RdDZsWjRpWnJydUVJY1lDbi94Nlc4SThYYzlUV2hDalRaQ0gwN0dLV25CU3BRSmhjeGkrTWJWbVBQQnBTMC8zb014YmhvYmVhUy9FNzNGWStzVWRTM0haS1JVaXVXS2FDazZIcWV1cEYvOFpPcWkvNUVFWFUxSGtZWnh0VDN4OXFjZ1lvMnBuRnNxVy9lZ01RaFQ1aWlwUjZ4cWVnQVdySlVyQTcrVHFTaTIrNDZhb2trQXpXY0NtQWlxQVdSZEVqSnV2Zm1OcmF6SksyVXNjOW52VTJIQ3dNNEo3OW5HTFh2ZEN3SEdFaUw2TlpWejc5bGRuZTZzRnlhYTRxeGM4MjlMSUZ6SVZBcGlHLyt6d0t3Nm9hRzQ4UlhscUEwR3dyNHYxM01oa1dqMFUrMzRQMXJlRmljZXZoK0tuYzh1N1Nnd1BHSFp5eVU2UERwQVUzZDFqdnU0cVExSjBOTWNjclp0TGdBcHFFVUhFYUhvbDB5WkJtU0FmTU1uZWgzMkxzUUZER2hTQ1JUMnJYRW8wSzR6andNUktzc1ByYVh3cEVpeHRRUnB1TnlwTk8wREhpRXo3QnpZZy8wZUVXSlIrQ2ZJdDRUMTZkd21VZFU3MjhOWlhoVnBNYlcybVY5aUJXeWdZb1NCdTFzSkVwbkw3cTYyQWhYbjZxTDB6N2Ircm5xVDEzOTVPM1k3V3RBcjEyRjlxcUpQNENOWnA3bjF1a25xMWtnWit5cG5UMTVsYm5pWmpDcWZnRFV0MUhMTGNoSlNycnZ6dVdXUFVxQVI5a2dOeHR3K3M3SStSTTNINmEzTkNCVU1ZSGR5T2FaZEw4czh4UWJQQm9yUUE4ZURKUGJyVVZNaGRWZUMwU0hJd0xCZ2pLa2doTEJBRVU1K1g4akRVd2Nqb2R6R3NXNmVqMzkrcGRSTjNRYUtoZ3FzT3UrdWpPcTJUNzBOc1hKNWxxcnIwNWVaWWZBdG9rTG1ESExZL1BlTkZjRC9YakxrSFZVQytmTzYxWE9JMmxnVjhNQkpONjFBTEViM1JuREpHb0Rta1JnV3d6VzlsNCt2U0tEc3plWE1DVmtzNTBDUWdzNXBUaHMwdmdaaWZjem9VTkQrQ3F6cmtIK2kzazA5SXlldXViM2JqZThPUXNTUGJHVXFrWXN0NXJDZFBnNE5WUmpwbXptWnVVN3hCSTByV2VQcmlia0FaOTkvYWdONWR3QnFLUGwvc0djSXdES3IwTEw5Z3YvL0J4bWZTVTdaRG5yWTR6S0Q1Zy83UzgrQ2FJbU05WUxXeUVpQ2FnNkZUR3Q5bE9sWlh6bEMvTDZhSGxwNXVZV2xXdklnenMvQWgxMlBsOEwrejM1dUJDZUZEZEdDQktaNVVyQU90OHBsZEJtVWdVT25HY1ZUVW5ZR2lZc2F4V2ZCZVlQQVp6bFRuZVR0bllzNFJxTnhWVCtMa0w5ZXFVa2xUeDJWd3h0SVh3KzNUTnNzU3I2VEsrWXpkcGZBNDhKY0xkbWh2WnBlWVg5ZFo1TTl6SGVqM2pRSVNZbjQ4ZVhpakJHV2tnY3dmWGpUb2hScG1jRlNXRkVYZTluQkpOUmxRVUNGMk50RmlueUxBMEdyTVc5Qkg5SmkzUWZDMWFVeTFWbXNPTisydU1JYnE0Yk9RMVdCU2xzclZEVW42RjUwRlRxV21FWm5LZkwyUkxpaklQQWNTbmxNbVY1My9aaExBSUlmY3I3enY1WmdURGRiODFzQTdWMDBPSS9QN2RQV09ValZKeXhpaTczL1VYdmJHYjlURE1FQ2NBbFExRUlIR0dCUDMvZEwvYTdyVnFTWEcwL2kxTDRGenJqSTZKUWs2UTcrVVN0ODVWT2kwTm1kTDNMZmVPLzNlZVovcXh5aWxQUXBmVW9Pam0reGxSaG45b3hGME5OVi9tVERRcHRWT1N6T3B3cFFIaW5BWHpYZktEL1NLdDJUTnhXYWMvYlJvZE9jTXYweWNFejB3L2xad1RXeXp5YWp6U2REWlFENml0NmVLY0dLdGpZNkRiWEs5UmFjcWVLaGt2MVdTVmFOOXR2Y2ZuVURwb0w1RmJvQXJmZGVHTVZLZ0N3WkhPQmpMWXJNM1hnQlBHY3ZsYmlCK3BtL1BSem1NeFhFWnkzZVRWVERCMmlLWFhzanB0WkRIc3BNbU41QkxpN0hGWkZDOEpmcHJyMFlZbXdMZ1ZQSjNtMkErYlVCYzdZdXduZ2RqS1UzY2JZUGZZRVdzYjRHVXA4V1FITE82RjZ2aStxQklwUVZCRG5vL2NaK3FGdmZyV0hNV3E2aFpnU1hiUWRZQ2I3SlhlODVzU3IyZ1crY0FwcFM0ZkVmSkJaNzVqeXoyZFdQU08za2U3SFdCN0t0QVQrYkk5ZUZKUVd4ZElYUUtRN0ZjQy94ajNUL3NQVWdvV1pWWnQ4S1RqRFhVb2ZiSVczZzV6eUltREVaeHRBQ2I5MWY1bmJwMktybTBTekswVlJqUHlYS0VsdlY2MnBVYnJyYUk1VlR2ekw3bmM5UWpiU05yN0dzblZya0N5VWxLYTUwbWJxZ3ZES0pzNGhpYVZwR25jVllTWE12QTJxeDdFSVVqKzh2NUNEcHFUTm1UdS8zanorQWU5VUllQ011emYvU2M3aWwxdzhDOHBmMVZMUUxJSWNFeGdKS0VTNlBTaktwbE01TVoxZHhZL2M5SW00cVhoazhZZWdTdlAxTXNYdWFRNCtVVmFjeTNUYi81VG55WjhGUzVNbklpb3F1OEhuWTVxdGhSLzVjMXJndnVrZWRNOThmTjZqTHZyaStSM3U0WmZPUEdBaENpWGdaU3pxRG0well3MVlTL1c2MUtiNklmeHdRUzZPdTJNOGNRd3dhaVYxRzJFSS93YnE4UVF5QnFSazBWNXhLZlpsZDJkU2VFbHlPVG1aZVFuT1dqRjF4T3VTL3NXZUVzbzFPZ3ZoUmtyb2FzMnhON1ZHN1NaRElvdWpDSTdwZWRIVm96dzNYb1dqZkpXMENUN3hvWkd5ZmZHcVU2a1FJRkxiakd3eVZCR1RPZmM3S2U3c3VyTy9TdlBpMGtwK05OZ09QRHpmTGhJV1h3d01wK3ZIQ2pOYzY0L3czOXhwOU9zbGVHc0V6dkFlWFJkN1p6aVZaYnIyck5oR3lVZEZsY09iS1ViUzJFWlVLN2RRZjk1VlJUUXBRVENoYUNwb2ZqSjlrQVAwVElaaUlVZVdzT2hHQWNEQ2pxVEZkak44UEZPUTA0TnVvTldPUktaREhaMGdIMTd6RGtXOXRLclVFRnhXZW9vbXpEOUNZMldhTGJVWHp6a3RPV01DMy93QjBJdE1NQ0RUZUwyT0RZTjYzVTFxRHZONXhPOTdtSEpsQVpPV0VhZ3pCUXJ0S29wV1dNNk52THFhc0tJWGxPcUhPNmFpUEJ0NVlxbkdiOHpnb0ZYTDNIL0ZqZ0g5SWc2ampWTXNrS2duWjVRU01FNFRYMEJadTh0ZGJOYXhsMDBianRGd0dEd2hjZjkrNTh5bUY0YS9YSkNIb2NaMm1FZmhNcldMVllaYldxazU4SHE4Tnd0YW94R01VV1RmSWJUdDNkd1NPdDlVeUVlRzdhQlVyN2t1VGp4YWp1emxKOHliRkkxeG56c0c4czVpRFhiT3dwaEd3dTZjK2kyZjlsWT0="
+    }
+  },
+  {
+    "timestamp": "2026-01-01 22:37:29.18406",
+    "type": "chat_response",
+    "message": "The bug is caused by a conflict between **lazy loading** and **atomic persistence**. When a conversation is modified (e.g., moved to local storage or renamed), `Workspace::persist` calls `Storage::persist_conversations_and_events`. This function:\n\n1.  Identifies that the conversation has changed (`is_modified(id)` is true).\n2.  Deletes the old directory (including `events.json`) to \"move\" the conversation.\n3.  Writes the new metadata and events to the new directory.\n\nHowever, since events are loaded lazily, if they haven't been accessed during the session, the `OnceCell` for events is empty. The persistence logic currently skips writing `events.json` if the in-memory stream is missing, but because it has already deleted the old directory, the data is lost.\n\n### The Solution\n\nFrom an architectural standpoint, the `Storage` layer must ensure that it doesn't lose data it is responsible for during a move/rename operation. Before deleting an \"unused\" conversation directory, it should eagerly load any missing data from disk if it's about to be written to a new location.\n\nI will modify `crates/jp_storage/src/lib.rs` to load the event stream from disk during persistence if it's not already in memory and the conversation is being moved or renamed.\n\n```rust\nimpl Storage {\n    // ... inside persist_conversations_and_events ...\n}\n```"
+  },
+  {
+    "timestamp": "2026-01-01 22:37:29.18406",
+    "type": "tool_call_request",
+    "id": "fs_modify_file_2",
+    "name": "fs_modify_file",
+    "arguments": {
+      "string_to_replace": "ICAgICAgICAgICAgbGV0IGRpcl9uYW1lID0gaWQudG9fZGlybmFtZShjb252ZXJzYXRpb24udGl0bGUuYXNfZGVyZWYoKSk7CiAgICAgICAgICAgIGxldCBjb252X2RpciA9IGlmIGNvbnZlcnNhdGlvbi51c2VyIHsKICAgICAgICAgICAgICAgIHVzZXJfY29udmVyc2F0aW9uc19kaXIuam9pbihkaXJfbmFtZSkKICAgICAgICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgICAgIGNvbnZlcnNhdGlvbnNfZGlyLmpvaW4oZGlyX25hbWUpCiAgICAgICAgICAgIH07CgogICAgICAgICAgICAvLyBPbmx5IHJlbW92ZSB1bnVzZWQgY29udmVyc2F0aW9ucyBpZiB0aGVpciBJRHMgaGF2ZSBjaGFuZ2VkLgogICAgICAgICAgICBpZiBjb252ZXJzYXRpb25zLmlzX21vZGlmaWVkKGlkKQogICAgICAgICAgICAgICAgfHwgY29udmVyc2F0aW9ucy5pc19yZW1vdmVkKGlkKQogICAgICAgICAgICAgICAgfHwgaWQgPT0gYWN0aXZlX2NvbnZlcnNhdGlvbl9pZAogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICByZW1vdmVfdW51c2VkX2NvbnZlcnNhdGlvbl9kaXJzKAogICAgICAgICAgICAgICAgICAgIGlkLAogICAgICAgICAgICAgICAgICAgICZjb252X2RpciwKICAgICAgICAgICAgICAgICAgICAmY29udmVyc2F0aW9uc19kaXIsCiAgICAgICAgICAgICAgICAgICAgJnVzZXJfY29udmVyc2F0aW9uc19kaXIsCiAgICAgICAgICAgICAgICApPzsKICAgICAgICAgICAgfQoKICAgICAgICAgICAgZnM6OmNyZWF0ZV9kaXJfYWxsKCZjb252X2Rpcik/OwoKICAgICAgICAgICAgLy8gV3JpdGUgY29udmVyc2F0aW9uIG1ldGFkYXRhCiAgICAgICAgICAgIGxldCBtZXRhX3BhdGggPSBjb252X2Rpci5qb2luKE1FVEFEQVRBX0ZJTEUpOwogICAgICAgICAgICB3cml0ZV9qc29uKCZtZXRhX3BhdGgsIGNvbnZlcnNhdGlvbik/OwoKICAgICAgICAgICAgbGV0IGV2ZW50c19wYXRoID0gY29udl9kaXIuam9pbihFVkVOVFNfRklMRSk7CiAgICAgICAgICAgIGlmIGxldCBTb21lKHN0cmVhbSkgPSBldmVudHMuZ2V0KGlkKS5hbmRfdGhlbih8dnwgdi5nZXQoKSkgewogICAgICAgICAgICAgICAgd3JpdGVfanNvbigmZXZlbnRzX3BhdGgsIHN0cmVhbSk/OwogICAgICAgICAgICB9Cg==",
+      "new_string": "ICAgICAgICAgICAgbGV0IGRpcl9uYW1lID0gaWQudG9fZGlybmFtZShjb252ZXJzYXRpb24udGl0bGUuYXNfZGVyZWYoKSk7CiAgICAgICAgICAgIGxldCBjb252X2RpciA9IGlmIGNvbnZlcnNhdGlvbi51c2VyIHsKICAgICAgICAgICAgICAgIHVzZXJfY29udmVyc2F0aW9uc19kaXIuam9pbihkaXJfbmFtZSkKICAgICAgICAgICAgfSBlbHNlIHsKICAgICAgICAgICAgICAgIGNvbnZlcnNhdGlvbnNfZGlyLmpvaW4oZGlyX25hbWUpCiAgICAgICAgICAgIH07CgogICAgICAgICAgICAvLyBJZiB0aGUgY29udmVyc2F0aW9uIGlzIGJlaW5nIG1vZGlmaWVkIChlLmcuIG1vdmVkIG9yIHJlbmFtZWQpIGFuZAogICAgICAgICAgICAvLyBpdHMgZXZlbnRzIGFyZSBub3QgeWV0IGxvYWRlZCBpbiBtZW1vcnksIHdlIGxvYWQgdGhlbSBmcm9tIGRpc2sKICAgICAgICAgICAgLy8gYmVmb3JlIHdlIHBvdGVudGlhbGx5IGRlbGV0ZSB0aGUgb2xkIGRpcmVjdG9yeS4KICAgICAgICAgICAgbGV0IG11dCBzdHJlYW0gPSBldmVudHMuZ2V0KGlkKS5hbmRfdGhlbih8dnwgdi5nZXQoKSk7CiAgICAgICAgICAgIGxldCBsb2FkZWRfc3RyZWFtOwogICAgICAgICAgICBpZiBzdHJlYW0uaXNfbm9uZSgpICYmIChjb252ZXJzYXRpb25zLmlzX21vZGlmaWVkKGlkKSB8fCBpZCA9PSBhY3RpdmVfY29udmVyc2F0aW9uX2lkKSB7CiAgICAgICAgICAgICAgICBpZiBsZXQgT2socykgPSBzZWxmLmxvYWRfY29udmVyc2F0aW9uX2V2ZW50cyhpZCkgewogICAgICAgICAgICAgICAgICAgIGxvYWRlZF9zdHJlYW0gPSBTb21lKHMpOwogICAgICAgICAgICAgICAgICAgIHN0cmVhbSA9IGxvYWRlZF9zdHJlYW0uYXNfcmVmKCk7CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KCiAgICAgICAgICAgIC8vIE9ubHkgcmVtb3ZlIHVudXNlZCBjb252ZXJzYXRpb25zIGlmIHRoZWlyIElEcyBoYXZlIGNoYW5nZWQuCiAgICAgICAgICAgIGlmIGNvbnZlcnNhdGlvbnMuaXNfbW9kaWZpZWQoaWQpCiAgICAgICAgICAgICAgICB8fCBjb252ZXJzYXRpb25zLmlzX3JlbW92ZWQoaWQpCiAgICAgICAgICAgICAgICB8fCBpZCA9PSBhY3RpdmVfY29udmVyc2F0aW9uX2lkCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIHJlbW92ZV91bnVzZWRfY29udmVyc2F0aW9uX2RpcnMoCiAgICAgICAgICAgICAgICAgICAgaWQsCiAgICAgICAgICAgICAgICAgICAgJmNvbnZfZGlyLAogICAgICAgICAgICAgICAgICAgICZjb252ZXJzYXRpb25zX2RpciwKICAgICAgICAgICAgICAgICAgICAmdXNlcl9jb252ZXJzYXRpb25zX2RpciwKICAgICAgICAgICAgICAgICk/OwogICAgICAgICAgICB9CgogICAgICAgICAgICBmczo6Y3JlYXRlX2Rpcl9hbGwoJmNvbnZfZGlyKT87CgogICAgICAgICAgICAvLyBXcml0ZSBjb252ZXJzYXRpb24gbWV0YWRhdGEKICAgICAgICAgICAgbGV0IG1ldGFfcGF0aCA9IGNvbnZfZGlyLmpvaW4oTUVUQURBVEFfRklMRSk7CiAgICAgICAgICAgIHdyaXRlX2pzb24oJm1ldGFfcGF0aCwgY29udmVyc2F0aW9uKT87CgogICAgICAgICAgICBsZXQgZXZlbnRzX3BhdGggPSBjb252X2Rpci5qb2luKEVWRU5UU19GSUxFKTsKICAgICAgICAgICAgaWYgbGV0IFNvbWUoc3RyZWFtKSA9IHN0cmVhbSB7CiAgICAgICAgICAgICAgICB3cml0ZV9qc29uKCZldmVudHNfcGF0aCwgc3RyZWFtKT87CiAgICAgICAgICAgIH0K",
+      "path": "Y3JhdGVzL2pwX3N0b3JhZ2Uvc3JjL2xpYi5ycw==",
+      "replace_using_regex": false
+    }
+  },
+  {
+    "timestamp": "2026-01-01 22:37:29.18406",
+    "type": "tool_call_response",
+    "id": "fs_modify_file_2",
+    "content": "RmlsZShzKSBtb2RpZmllZCBzdWNjZXNzZnVsbHk6CgpjcmF0ZXMvanBfc3RvcmFnZS9zcmMvbGliLnJzLg==",
+    "is_error": false
+  },
+  {
+    "timestamp": "2026-01-01 22:38:20.174906",
+    "type": "chat_response",
+    "reasoning": "**Verify the Fix**\n\nI've implemented the fix within `crates/jp_storage/src/lib.rs`. My next step is to confirm its effectiveness. I plan to add a targeted test case to `crates/jp_storage/src/lib.rs`. The test will specifically address the scenario where a conversation is moved before all its events are fully loaded.\n\n\n**Refine the Logic**\n\nI'm making sure my fix interacts correctly with existing directory cleanup. Specifically, I'm verifying `load_conversation_events` can still retrieve events from the \"old\" directory even though it might get deleted later. I've examined `load_conversation_events` and confirmed it searches through the appropriate paths. This confirms the logic and prevents the deletion of required content. The next step is to examine this logic under the conditions the previous test failed to pass.\n\n\n**Analyze Persisting Behavior**\n\nI'm now investigating the edge case where `persist_conversations_and_events` is called. It gets a mutable reference to the `Conversation` struct. My focus is on how the system handles the modification of the `user` flag. I've confirmed that changing the `user` flag within the `Mut` object from `jp_tombmap` correctly marks the conversation as modified. This ensures the change is eventually persisted. I'm carefully reviewing the interaction with `remove_unused_conversation_dirs` to understand potential race conditions related to directory deletion.\n\n\n**Examine Active Handling**\n\nI'm now certain the fix applies correctly to both active and non-active conversations. I've re-reviewed the logic surrounding `Workspace::load` and confirmed that the active conversation's events are correctly loaded on initialization. This also ensures that the issue raised by the user, concerning non-active conversations, is resolved.\n\n\n**Isolate the Bug**\n\nI'm zeroing in on the interaction between `jp c edit --local=true` and how non-active conversations handle event loading. I've re-traced the code execution path and the data flow. Specifically, I'm examining where `maybe_init_events` is called or missed. I'm noting that `edit` doesn't trigger event loading for non-active conversations if it only changes the `local` flag. This gap leads to a persisted `OnceCell` without initialized events.\n\n\n**Assess Potential Issues**\n\nI'm now focusing on a potential edge case. I've identified that `v.get()` might return `None` in the described scenario, leading to the deletion of the old directory before `events.json` is written. My fix involves loading events from storage before deletion if they're missing but the conversation is being moved. I'm now running a `cargo check` to ensure there are no syntax errors within my solution.",
+    "metadata": {
+      "google_thought_signature": "RXE0dENxc3RBWExJMm55TnpXYWhrVDNpNFRKSkVxVkdDZ1VsK2pwUy9vUXJuOHJwaDlYanlqTnVYV0xER1lHZ0dTaGIwZG1WanNPdkJkdFM0alVTcG5neGl2ck5BRFhqaGtxdHlSc2VGK3Arb29lVkt2bGF5Z0FlYlJTUGV2eDh0UkVmdENDazM3bk5zR0E2U0YzRjAwN2hubm81cEhxb2IrMTB0cm13SHJDL0FjZmNzbVF3dEc4bUNLRTVma0E3UUFIUmFzYzg2a1ZJT3lUVDV3RTBGTm8vTVFJWVFuTDZaazBhc1ZKZi9pYVM0OWd6MmQyb3FTV25kdVNubjRjemo5M0gyeWtpM2kyTTFydEs5bnFrbFZBTnFSQ2hhRUdFYmF0R3dmbXVnZUk3ekVrcXo0cm1IUUFVZGh3OUNwNlZSZE5iVkFpaEJWU0tPYmZwY3BvNUJ5UEQ2K1ZNdHBrbVJ4bnNqTHpGSGNtVTF3aGxkUnpITUpUcXZXNnJQb1dIQU5YVkVWV3FqYVNFZmI5OHA1WVJsTEhXaUc3dnhhN3ljUXVVem9aaHR4NmJzNDV6REg5QzJSVmczM01VZFdpQTM4cUdkSThiWjkxOWVuWFhvc1VzR0E3cVBRQzhnMGhWRWg3cmpaTU15UXhtOU9qQ3Y0VmRCL3dFYlhvSGMvN25VSDJlRFJtdW5rc0NhSXhJSmpXK01MTzdscTZOWDhJeUE3SnhQYTVQaDltQ3RZQUlNc3JGWldhTURPTjAwRHlkMWo1cVZnQTRDdXNBS255UzdDL1NsMWR4ajdPU1hLT3BCZTR2WklkdFpqRjdlb3d0d0tQbFloNlo4Z1A5SnFnVy9QUFpua0xuclVCRGFoVW4wWC9WSnRLM0hQM2hna2hqSmR4TTA2ZDVNemVlQnRWb2dLelRTTnBmZjdDL2RtbGJXNXlRcGE0YlFWdExQcDlRZzE4TFhlMVAwQnZWTllJRVVpS1JtdW5aUnNlZW5ha05PNDRuaThHWFBpd3ZaRlZab2ZaL0crdjJoN0xHY3JpZ29TaXN3cDk2SlhNY29Vb0hqNytSNkovdndzbTlKSnEyUitnWTQ4QUVVQUUvclVtVmVzMFhVSXFiRlFNQmx1RXlXK0w4empVMmhHdEJudzNOMTlKbkFBKzNLKzMyWUgzWnBsR1ZWZGdoK296V3hyd3pEcEtyak42UnRZeVBUQmtIR0htYVhUcXMwWDBrRUx0R0MzSndtSjNKYVpVUVhVRkRtQllwUTZxTTBFc0hadzlIclpxNWwyUkh1MGsrS2I1bDRGMGN4a3IzcXlMTmpLdWYvOGR1cWhEQytUMlp4dFptVjZ2RWMzaTlNVUwzQWg1dmNrOXNWUGxFeVZuTjlMdGhZSWZVYVV4UXRUakVKMWtRMmZCc0hvekpwUFNQM2Q2ejFFSldSUER5WitKWkk4SlpuOU9Ccm5sZHV6eEc4TGE4WU91eVBTeVNMTE5Va3B3eXB1U2JUM2daSlErS2V1N1RudVpadVloMjkvcUljeGQwNUY1cGJ3cHhrV2s1SDlEaUNRc2krYllUYUFOS1ByM1JFU2dhd0tldEZaZzJEVkJzbXVoY0E4VnBlSGpMU1hEWGJ2dDhTcDZiK2RuQ0Mvb1h3MHYxZExWVDdBcE5MZGZwc0FDbnZLTnoyZXhjNkVoV0FyYndIK2txSWloRGIxK01nM1VmcDRUZ2k1YkVHNS9aS2xMS1ZmeEdLL1R5cWRYeHVCOVNNNUs5YUdibHM4WlN2eHhoWE5EMW9rdU9peUJMUG5vdFpDUURWbTN2QzZCaUU1dVRtMTJjc294dkF0WXR1bnZSdkJkdHhHOWZ4SmozeWpwSSs4QkRMc2xzdDRrNGQ5NEhlRzhBVnJsN2FJNlBCdldwSDU5aTRZNWQ2OGV3UWd3N2NONUE2bk5IN3pDeXQzR3pvQXhJTHNSeG01QzV3QytxTXNzbXJGS1NqWFlRa25TUEI3WTJoT1p0YUc1UVlOZEtVaUZxRVJpUmtDYXRqcmlKYVN0UFBnenl6SEVhelJIWkhVUkViYUQ0VGQ0VytjM3B2T3pkdFRUMnpvWEtnZmorQngzbStUUWc2Ry9yTDNwZ1g2SWdhMEYrRDgrUjMxVzNYUXlyYkJJQkV6SkF6QkluamZvekRTRkpFa25uSENkVlIrUkNGMWg5ZDV5d0VZWTdvSWRTYlgwWmFXeEphV3paVHFIUGJNMkF1c2wzVVJIQWdFcGM1bTZzUjQ3WUhuWkE4T1NDYjRMbEF5S3lsNkJZK2tURnZWbDZTYWJLUGlQdW8xNkt1akhCZ0wva0U4Mlp1ZTVjbHBpM3kyRWZMOWJLNFNxQ0NiRWdwZG9QL2poYm9oWTJJcDBGU0UvNjNYMXJPWVo1WkpZT2toN0RnWjhJNXRCWk9Idm8rWmNMRkhFeGRrVWpCdVhCSG5jOWx0QktBOFFCNGhQaXV2Sm9hUXc3Wnh2UGJuTkRGaW9aNDcrbThIQktNQUFEM1hubkMrdGFnOVpjQ0tGM3F6aUpkMnNmMTNUbU5MM1hDR0tsMno2bTM5dERHbk80OWw2cXpLcjdCVk84OENuam1MRGsvMHNHTjVKc2NPQWIyNm96SDJUUU9SMS8remtGcm9NeFVISUdteTUweVNVbmF4MFJVZnptNDlKWWhFcmQ0YU9ZTEpoYlVEY2pZZFFKckFiMmFwRzdjdzJFaVdsZk03elNvZi9EZUx5YVdneU0xSmJydm5oV3pMYzZqN0lwWEcyeTR6b1laREVHclp3bFpwRklhS0Q0QWUyd0tMeithU2FMcDZPV2xnd3QzYnZQakUvcmd1V2VIaUl3eGtoSExhbXZGOHpOeW15UExNbGtFRWlzbXJ3YVlaSkF0bCtlUU5UdXRsaU53RUNaRExYbi9vOXVaek96cU1pUU5KK1FjU0dKdVI0ckNiNFozem91ZmUzSXZhdGFSVWVJTEpCMnVHcnp2ZmM3Y1NlL1JvUUVnN0NXTlNOYmMrdWpIRWMvbmpQclVsYk5QbFl2aGppV1Q1Wi8rR0tSV01uY3ZyNU94a0wyZWxiYVhxa3NHTHRJVHNYeThaVTlGZldHcVFYMk45Q21NNFQrRDFjZWl5SDkxOUUvVVcxUWkvaWhpTWIzY1V6VUR5MXBHbnhyTGkvek1zbW83aGJzUGpEeWUvWEpjSG1mT3UyV0xNMzFkbWIrUDZENHRJVTJXWFc5YmE5L1RNcFEvd1loYWV3OEhuOXRXbDdnL3JhbVZOa29kMFJEMlgrN1UwOEtSbFgyZDlLKzhoT1piT3k2dnJtSkpZYThwMEJWdWFjaVQwYXhTaDJxUittZlpKbENUNFNnb0UzdXl4YStXOWVNTzdvYlM1QmNFVmNpWmpuRUF0NW9BdnBYa0RjUnBlcEpWNThGcGs1TFltUDJPSWlHbkdXWDdDMnJpRmRYNDl1L284V1dNcGJkbXlDeFUrbzRiam1FeUJpdkZtT1YyVzk0aVpndVlxbEw2RTdOc2p6UFZPUkU4OXpHVWQrYy9DQWNPWVo5UFRsSDcxcmpSV1BJREtnRGJvZWRBS1FsMDFySGZuT2RPcVM4aWxkT1BlQkwxOEs5OUp2c3N2L3lpZ0pMQVlwdWIzZUdqN2ZTd0Jkc2s1SDl2QlIvN1REYUd3YlhCdzBiRnpTQ20vdlVQaDRlYkpGZUViZkp1SEIzOVVnZHNEdGxKZ2c4UWlyUHlGVHV2eVZuRnBVVzU2OVI1RVNaOTV1aTJRQmxkSjN4ZUlOQXZNQTI1aGM1SEZMMG80d0VSZlhlWDgxWDd0dzQ4TWtNRGlpQUp0V2xEdmhNNTM4SlFScTlaSDFzZ2NHbzQwbXJjeWlhSEtxTHBFQUlzeGR6bjE5eWRCcjNSYng5V3lIV0trVlA0eHFXL2FKWUdDaEwreWExWjJIVENFR1B2R2xTUW13aElkMFEvekVIZmluWUhGNEFUZTZwVnNJaHFVeU13ZnN6bmtUeVBvQ1dyaXJwQ1JDTVIzbFdNYkNaTzF2UlZ0c3Y0TVE2Yjhyd3UxVW5qQjg0MU9qcGtxeURJYS83NGFwYjB3cFJteUZJV1RIQ0RzaHh6cVM1YVNCZTJqZjlqaWxpWHVXY1ZVeTlRNEQ5d0NhbE1qZ2NqNVJVdjJxenRadFZLakVKaU56REE0MHZyUkdjZGFwOVJ4SmVwT1d6ZU1ZS1lsZ2gxejBEMFVjbW5iek5pcldyMXJMcHFCWGtwb1JBWTdTbk9aZVVNaEVYMm5oVk5OZDNoOXA4UEYxYk1ha3pTclAxdXJ5ZWlvTUNmTEdEWmRPOWVad3F3QWlHc3lIL2pYa2VhYlpieXNob09UUHBRd3ZGTXltOHF4Wm1yeXkvNmFUQmVHVDQ2OXFwSGY1OVhBWDV5aEFOQ0ZDak9zUiszNHBxZ3ExelF4cGFWazJjakE4VCswNHFtYXNJRjN6cTdreStNUGN0NXd6NUxVbER4N2FRbkI5bjVIUlZ1SUJjTFgzMUI1UkRHUE1MN09zZDRWOFZ4R29aTzZ1QW5yb2hzTENpL0xsUEQwcDN5RVUxVS9vK1VwQmxRNEZZT2d2R2N0MlZtUWNTMEE3MHVqLy96enJ4YWk3T1dYVVFweklDeVRYK0lCSjY3eHVLMldkVkVzb2IxVFpEVjBIRkhNLzNlb1lXUFdJMmxlM3VxaHNRUmFGdDRqZldlZ3l2cnZ0aldMdWxZSWRmeFA2SHhMaml4NXoxT25OQ2FxN2ptRUl3RzJicVdvU3VOSG5mNVVFa2FqL09KNkxKak5EcTRrMlA5MERVRTlUcHo3MHdMcUZUMHNTb0JuaWRWVkxHTjJCSkRlTGFSd0d1S0hZWVdVYnZhdW5abXp3SUhBNDJyV296QmlCVy9lRDdVQjRqdE41UXlzTW0vdTloekVzNkNuQjN0MXl4SmdOL0d5YUZORUgweGZpT0JDQ1BSY1drUkdrR2RDT2pmZnB6azNQd0h6cHYxZWhvSGQrL0lqZXNDY1hFQWk2ekYvWjQ2TEJOSHBMbFNuQW9ldyttdmVSbkRjc3dQbk85Sm9GMW5TQWFLeDZQM0Y3NXlIUFBUVE8xdkpIVklvVnJoNVFWUDRuQS9GUXR4anlpNDJ1NWZqS2JEdkxyYlArME5ocW5QM2FvQkpiNFdoSlNkS2dXMDdKdjRGQ2dnY1M0eGNxdzZ3SXFydmgwbjFQQ04rbGQ1disxQTJtZ1VUcnBjaDVBNXlQQ251dkZnSUFpcjlLSmJNS2tKN0R4b3ozTlhobjAzbGFkM2xMejNvR2JvVDBzZUVXL0lNWnRhd1QxMkt3VDhnbkNEVDFyOGJ0QVlhQ1l3emlBeWVJZG1HRGtKczVSTzNqSUFiaENTZVo2a0NxVUdLcHZPVUJOMUx4UndLNEtkclZOeWpxV1V2RkxIOCtSWlFYazN3ZEZHemlBVUp0M1BFNTZTSHA0RmdHam9YckF3Z05keXcxNjZFRjBNUVdNejhKTFZPQ2NFeENidlk3dFZSV3NBZkRvVkk3YkkrSjRnUiszb3Q5ZkU5eFppOU9VOEc4YmVGZkloU3NrTmd3MFdBY1pqdkYvcEU1dTAxT094SFlocm5nUVM4NXdnWHhKOFZqd2hIbnM3WXVyMFRSTzd0MGcxcHZrQ3o5WEZ0ZkxyeG5WbVZPVm42MnZ1WHhyK0k5bkw5QThGdGtscjNoRFNhRjFMWUtXdDE0MDNpY3pLRTgvSkJzM1FMMm41TmhFVlBEdkJ6bXhwS0I2a0U1MVZrajFpUkhSN2laeUxyYXd0Y2dvYytJbGllVitpQ0UxYzh4Q2hOS0ZuYWVsN0F1eDViSWNDRDQwQWNRU1hqUEZSZTAvam9GZWFnbm5kcW5KbFdpL1J5OHI2NmdQMGg5a2ExaFNYK3BqT2puaTBKclZIYUxwMU10VzNPMlJ0czFEUDk5RERuR1ozOEZycUpMYU9MZ0YzdmU1dWJpVGNFbTduL0tSckVoWENGQWF2a1NIc1JkeFlVdTFNb0FYbHJFVUJCd0FZMjZLSEN3ajZwdXJWVTl1aGloSUFHd2dzZDZqRmRuWUhFVXRoZ0NJZHVSWXBIUFVZQjdxNGZDZzFkU3dTR0VkUkd1VVpNenRKbTlJeVBnZXlCTitJNW05VS9ybUxQNFFxVVgzWjFIYkxjSENKM2FhenY2dTB1RlFRYjNjNC9JenYxdG0yRU90TlhJbTU3VXpFRUNCcVZBTC9VMU1wdzlPYzA3UjJUallkUXJDaXZxSnNERUxaakF6all6MUJZUWQ1QXFkdWJ4WitTOXhZLzQ3Y3ZhbndZL1M1RzF5eDA1akhYWjFIUHl1RllvTmVaSGpSRG4wZ3Z6a1dDdUhZMzJWQWp6dkZ0MDZvbGFvK0pLeURxZDVxdkxISzEwRllOZVZ0dVdYamgvb2xBOVRTYTFRQjFQN01jQVJ6ZG5nbDBtK3BvejJyeWdoVWpFRDhJZkxLWXVYSW1OZE1EWUlYaGhUaEw5UlhidzRSQmpWV2ZFbFk4K3VockdxNFQyR3pKUTA4MlZob3oxeGxKMUw0K3RJSER5VmhaSElYTStHY0Ixem9MRkJ2RkFDNTBhbUlNOUVCeTJ3VUlwMDBacno2cDNJaE0vZ2VOYTFhWU9CSHRYNmUweG1VRktTSVpJdFJmb2pXNWo2MFZzOGdUNzBFclFhdmtMZ0txWXlPUEU1VlVGNm84bFNxaWtNWXhEa0dJZHBXY3U1bFVaTythN2d4SkJIWFFsWTBqNzEzSElKUFEvcEx1ckpxWkRTOStVTkVGRjU5MEZLUWVGVlVuMVJaTEtnbWRUaUYvY2U0dUpNNGtoWHRUbEZaam9VT3pSRTk5bTZ0ZU1CWnoweHd2TFh2a1c0cG01dXc2SC9TamlCOWlVU29UdGZxdXVDbUFMQ1pMUjVjOHBBTUZLV3dENUxEYWxVR1k1RGdrRnRPV2FIQnMxL0hUelhuMkM5UWxrODFKN0VQZWJ1MFZXZ3FZOFZaY1NsaVJCSVQ2QlVNK0RIUjFING94aEFZVHRSRzNMUkdxa2JIaWlIUzJ5cWdDVW9WVDRqR0Rrbk5HK2lPcTE3ZVM1VHJtZ2I2NXlRdXRDd3ZJUmpQeE9DcENNSUI0dmEwMHo1L2VzMmJ1NFhzZE82WVhHL3B6OVNaQ2Y1RHlCVUI1QkNEV3hwUFlvSlJhcTRlM1c4UEd6eWNVUnhFV3pIbnp1dWZzT04wWUdKREMwZC9KL2tNM0pncUhnUGV6UDFGRjJKR08wbjJneGhsdkRJQlZaYkdaMXVCcytnbHQ3TGdubE0xSWlrVTZUdExZSzZVcXpRZlBFVWx3cmZQWWY3UDRXSzVhaHJsUE9JbGcwdExrdXM3bVE2ZGR3VWVQU3kxcjROZ29IZGhBZEpFbkJUZ2pZdnFVcDVqQVd4ai9mOVplZUdMVm83YlJScHNpTWZudHBKVW1mUWJJQkZncG1Qd3dmc21kdGIvcnFNRnZDaUxWcUdKYlpOdHRNdy8yNGlkeThFaW9uelZXNjBwdzhNK1dWZjE2QTNLQlVpWWxQRk1qUmhGUmRaNUo4eTh5RVdJK1R1b00vMUlWd2lZUlp3Nlg5N3NlSU1FUkdKSkl5L1VSZWhvRU5sT3ZpSVRMSUZJL0hIVlAyNktEWVpTa2xkc2FZQXl3SDY2M0VibW81Z2Y4YTJYdWFQdDRGRnVZZXVWVEd5d1ZzdVFMcXZLdDJjVEZBWTVkS0hpSEJmVERtVktvK3BJUE1YaVJidXExeHcrTmVLMXVMeHFObXBhS2J3alUrM2JoMFkvd04xL1hIWUZRczg0WVFNU3hPNU9MMEE4RmoxL3VUSnk5RFgwK0ExWlhiZlNYSDcreXFacnoySDdCSmJsbURmRW5QT2l3RmpJeUM4OHZVMmdkSkZKOVFoNGRjTHh2bjY0aklBdXl6OWZTd29vbHE1bjNaMVFZY0lXRW8xWEQ2K29tZy9mVFpSemlCRStkSVBFaWpEWkI3OCtrQjdySlJjREhibFBoOEsydEo3dXY3U0d3aTZkZkg3SnN1Z0tjcFl0VVBWdTdSS3RpKzMyTGo4cnBRa2tjUjlwaFFpMWErbkdJbHdsWVZEeGpSQ1AwNHdtdlo2MVVENzdERGpYUWZ4R1ZmSzZWak9DUzlCU1hFcitObEhOMmlHWWVxWmdrTEFTNGgvUGZTc1gzQzFodXM3YU8rb0dGYkgxeHI4dDROUnJVVTBDbEEwYytKQlErZE51OFRZd3IraGFCQ09nODhuWjhIcUVyUTJmZkphcG1BQnI1TUZodU51S1BmcSsySlRwVisxNWVKajgwTVJMOVR5WnhMOUlGYzRoUEl6ZUJnZGhBOTlocWxxMW1Td0N3bzh6clMvaWNLS0JpbUJ5emVicEdKRkRZKzEvbFMvS2VqVWRkUDhGZWZCUnl0Ykh5UFNVM0Zzam1qQ3BMak1wTHdmNklPdW5DTk5hQjY1c2JwdEJteDJwNy9HUjNOL0toMlE0Szl2K1BOM3laajNtcjczZjJEem9OS0VxQnZBZ0NONk45SVpXaHNMMk9pVzlIdkFBS3luNENTNFhmeDB5NzM3b09FUXZIclY5NXNvRnpvWlEwZW5WTTBRZTVJWlExbURVQTJmTnpxeUxnTmFpczYxR01iY3ZXWjY2cVdTVFVYZTFjNnE5YTlwOFBPcGdLQmsyNklYNFRNUURhM0Q0MThXMzQyaUhuQjh1ZFpBSno5a3RhbHpySTFtaCtkNGxDK2NoTSsxVFJNUVhWUjNQUVVzRlVEdk5ua0lEc0xqU25jbmkybklVVmM5b0U1OWZhczlCbDByZlZFczg0UUxramJTU1cybzB2emN0Y05IQXFlQ0hEenZyaEIzWFlnT2dzOTkxVkwwYSswVUFPNzlTUkpjUnEyZmVGc1BqZzkwVkk3NHdwdU5QQ0t1VTNrTHdMTWhLenZrQnpPUFJhRjBsNXAyWUVuZHlUN2xOeHhtTEF0UVEvZmNMNlRPYk1FNFMrWDRMMFJKSmRKMWMyK1ZmaTZ2V1JrSzdFaGdKb0dWZTQ5ck9XZlZicm94WnhDWE0wYktKLzlnazdka3B0aWgwMTZnWEFpcUo1TWxuV0E1Q3RhcmhpeW5qSWNuUGdQMGsvS2F3aW4vdGtiVFRTZEx2ZVVlNHpGbU5Yb080cEh2V0x0RWVqbUR3QkpOYTZOTWUvUmljUUIwWXk4aHFqdEw2SjJvZ3RtWXJWZEZQRDAyV2VCcTA5VDc2eVFTYStjSXFSVzNTUG4zSnE3dVg2eDlvNkRYM2d0eDRNWExnRk95NGdnUGtqSjlRQWNHOFFNMnhYZzh6eXJZbEl5d2R1NndIUS9lL3gwaDdNZDRpUGxEVGRtNW5OamVJeWFmTU9QNWNDeDd2R0haeDVNa1FKZFJkNnd0bWNrWVg2L2JtRDV4VC9kRkIrZ1RQbzVFd0RFVXh1UE9PR2pxbXVoOCszN3ZTRWVHVWNBYWRRU2dYdnNXdU5vU3d3Ti9CZ09qUjVPMDVpZUt3M2c4dCtXaXFFWXoxb0dsVHA0aWlrM3FsdndyTzF2YlE1RnRQWHprUjlFbGFFOVpHMFNvcUFCZmp6bW1IOE1STGpsRXA1Q0dsbWYySzFNME9TKyszeEd3N3BvR0xRYkYxMWYxbTNkL3hYOEFGWVZrZHlmdTJWcURRZ28wZnF6R1d0bjJiZWlOQUtjNGMzcUpSc0UzU1lPZkNRbU9lclZGdDdjekpYVDBmSDhaVFdNZTduMzAwOGdRRkV5WG52Y0Z6MFkvd0J2Njl5TFMybVBQUFFZbitzYlQ1MWZJamVpeVBNRGErRXV4Vkt1UnVuRmlzY3RVQlNObDIzaW5zNHhvcjZHZ1pRMTBQc0hkaFZkand2WjkyN3Q2ZVVwUmM2S0pSTVQzZmc1M3Vadnk2VEZkVDFRTVF5V2FGUWdSQ3BlM3h0MWIzM1JFaWlpVTB4M1lrVmdOTjJTenoySWdaT2l3U1JMeXdBcDdQZlZVWVdXMDI0WDFnQTRzQnptdWpUOEJJYjNZUkdzaUR6OTdMeGp4MUJKUC9mdzBIcXhwSUFXdDdkbGtMZjQveGI5SmNlQnpsN094TVdwOW1PekRsd1VoVUJKWmF0dDRxTStOUGNTUWMwbjN5cndKVHZ2T215TzJIUHFLWmpDSEsxRmxrQTExN1YvekR4QlN3ajVENmhVZlVEbWZ5cFlGWGRCY2hid25CK3orQTVjMUpPT3NxSDZhT0FsV2pqQnpXNFF3WTB6c1RvTU0vZjh5Vnh1VHNGbEJTZjRXWWp0TjdnPT0="
+    }
+  },
+  {
+    "timestamp": "2026-01-01 22:38:20.175082",
+    "type": "tool_call_request",
+    "id": "cargo_check_1",
+    "name": "cargo_check",
+    "arguments": {}
+  },
+  {
+    "timestamp": "2026-01-01 22:38:20.175082",
+    "type": "tool_call_response",
+    "id": "cargo_check_1",
+    "content": "Q2hlY2sgc3VjY2VlZGVkLiBObyB3YXJuaW5ncyBvciBlcnJvcnMgZm91bmQu",
+    "is_error": false
+  },
+  {
+    "timestamp": "2026-01-01 22:38:29.185251",
+    "type": "chat_response",
+    "reasoning": "**Verify Lazy Loading Impacts**\n\nI've addressed the initial issue; the fix is in place. Now, I'm digging deeper to ensure this type of data loss can't happen elsewhere. Specifically, I've adjusted `persist_conversations_and_events` to eagerly load events when a conversation is modified or active, preventing any potential lazy-loading mishaps.\n\n\n**Examining Data Persistence**\n\nThe modification flag on the `TombMap` entry is critical when moving a conversation between storage locations. I've been tracing the `conversations_mut` method and how it interacts with the `TombMap`. I'm verifying the fix correctly handles the case where the storage location, workspace or user, changes. I'm satisfied that `is_modified(id)` is being correctly set during the modification process, thus triggering the correct data persistence actions.\n\n\n**Validate Data Preservation Strategy**\n\nI'm now deep in the weeds of the conversation directory deletion logic. Specifically, I'm verifying the `remove_unused_conversation_dirs` method operates as intended following the event loading in `crates/jp_storage/src/lib.rs`. I need to ensure the order of operations guarantees all necessary data is preserved, particularly after a modification or move event. The key question is whether events are loaded before the directory deletion. The code shows events are loaded prior to directory removal, so this looks correct.\n\n\n**Clarify Edge Case Scenarios**\n\nI'm focused on the directory deletion logic, particularly the `remove_unused_conversation_dirs` method. I've pinpointed a crucial edge case: modifications to events without corresponding metadata changes. I'm verifying that even if the events are modified without an accompanying metadata change (like `user` or `title` alteration), the data is correctly persisted. My analysis of `persist_conversations_and_events` confirms that if events are modified, they are loaded into memory and written to disk, thus persisting the change. I need to run tests to confirm no regressions.",
+    "metadata": {
+      "google_thought_signature": "RXVFZkN0NGZBWExJMm53aHNpa2tTVHFaUW5acEJZU2JlV21jYjR3M0RHRWZQbW84UnlWMDYwdzUyUmJEaE5BM2JoSEVBVkZPZVdhY0Nycm96cU9IVjBkSzlEYjVlQm1XeWRybTc4dUtzaGM5WTVvNXg1dXBxT2VkaDArQTVRbTAyc0JkOXh2RzNQVVVTZ1Jvd0xwYVBRb1hRNXFvZnEyblBYVFBkS2d4OTBtUm5zV3VlVkJxanh0ZXRKN2dQYmpIQ1FRWWFHRXFYOG4rbTY4Qm1vT0pEQlZPazZUV0hKZVJSWTJlK21saUdqVmFCSlk2R2haT1pFSU5hbHplejNtUjJDbERCalpiME85ZEpIWlFUTStQVFhxODBWUmVub1R5QjBhSXFlMzN3OUxlb2hOMld5eTgrd3BaTEJ2TEdCeFpEZUdiSzVPUWkzZVFZYml2TytxU3VpVWpoVUpXZSt1MkdJS3JieGRESWlBZ3g1RlpjZFhDYnY3enNiZ084RGR2T2tKeGlQZks2aVUrNjdsUVpabkI0N3NKSjBUNkM2TUFHUnNyckNFUXZvVFBTd09kU3BEUVEyTHNheUFxRUFqV003Y3BHcy9rTlB2eG4xdkduSFkrc3RxR1ZQUjVEQTB3MXUyRk5Mc29JWXZmckE0a2ZXS1FOU0xwajdwR1MvSUl2WjZnemRzVVBrY2VveURhSHZvWklXZ3M1QVFRTkNlb0hNa0pJUEtoZTc1SktHRFh2YjNtdUoyUGlMdm5QWlVWbE5WNk41MFZhYS9qV0dicVhha2d5MmEzUmZVSmVUVUVicW9kOE5YNTV0czdFYVlqRWRBbEh6UVNCc1pnbjRwMDBMWFh3dDh2VURaam1CSUR0OW9TZkNQVDlBWExXODViUVF0TldkeWpsVHZ1NXI3OU5XaGlMYjQyTDRUVng1YkI0WlFBRzhvblkzOXNtV0I3ak5aY01mK2VnQTdwckRHVytpd29vSWdyZlAxaHJqdmdjRE5xZkc0RW84bVZKbjdIbEtjcGcvUG1wa1doUTlSMXZ1R3hRZEwrMmxMeEZnUVg5OTluc1lYT0JuTTRleWVPb1RDbmlkMi9ad0QySE9iOFlQVEtqTzVDTGR3SFBURmplV0l3c3ZZdFN6alNtQXoxTjk4VjNiNTZTc1JLMm84OE1VR0RqUThZb1crb3d5VnhacDNuczgvaU85TlV2dGZyOWJJeWhneXQ3cW02RVFSdGI4cnpLcTZtbnFoS05FdGpVZUtLZEZ1ZngvbDQvWWZNNVcydksvdFdOczFCZjM1ckozZ2ZjSEhGS3huNENucXo3Y1F2cDlXMmU3c3ZVWVJmOUhJOStpM0NDOTIvQWhtSHVjK2pJendpTkVKUzkzb2JRYWlrbFhjRHFKdU11WlVkUk1zSFd4a0xTdkU2Yy9mSDF6bzFyWGhsZit6ODN5ckVLWE1xcDE3U0RGNmwwOFhuM0F3dkJ3YkQ2dy8vanhaa2ttT1hQanJCWldTRmtmWU5Rc3dIN2ttLzRJLzErakQ5Z2M2T0lHMjZnR2NOY1psQVg4UWVHREpqeDI4cE5BelVEOXowTS9oVFZkZTViaWlKL1pOcDcrcEJHK1BTZHdFNjZORUdUYVEwVUNMK096ZlZBM3ZlMEFmWFU5enloaWlCaUV0Y0NGOWkwMTE4QXlpMmNPRXl5aDB1RlN5MjREcGVGSmNhTUdhYkVIeTM0ZUdCcTh3S1RzajNVT1UxOGRkQ2k2Zmp4SlViS3JXU1JGR1J3b2FzeEh1QkF5cmt2Vlp6RGZRTDVSaitOTE12Mk55d1lsNWw0QXk4TFA3TVhVczVrZkFreHBHTFBnbnl3WVZTZVdBT3drbDRJYjBGN2l1blFncnNZeS9MNW1ZY1hnRUFKSEF3dFhHOXgxNzQ4SnNMM0tuQ3QxWjU0c0JtalU3TE44L3FMUHArdnBEeXpmVDJqeEREcmJDaXpRQ3VqQ1AwdGMzOUV6OUZzMmdTeHFPY2hOYXpMdnV1ZExuTlVNeWZyNTlBME8zSldUanY1cFNidlNIQis0S21sclZtTE1xdzFpdmZHNElSVnRGR1pUUmVzam5DZGFFNTFGOW0yMWkxc0ZGL2JIMjdIMlo1bHBQcVNBR3Z5bGUybWtiT0dhWTlHRUY3QzBjUjFuNExMZlcxRXhsdWpJNzg5NTA5NThhbmFVb1VBVUxmZDR2RnE4U2lQa08wbG41OFVwOXVaL2VsY0d1VVpzZC9YNzNwMDh4NEZHanBudWlzTmJpbURmMTlQakJjeVhQS015V2hCV3hMRkIrQUJ2T0NaUkVEQWlHTjFJNHB0UEhqS29IREsvYlVqZVN1Vm5WWmhzNkJLZHNrR1pxODZ5K0V1UENRTXJyMWQ3c0kzY1RWMEU4LzJYeWZqUDZKZnA5R2Q2OHFtOHBXTlZZY0ZlMWdsM0JNajk3Q1dXTFFJREpGSTZWLytONnMweTlscGE0OS9PaUMwUVZOMjQrcnNtdlFkMEZhT3FHU1dpNVZQNWdjRnh6b29zWWRDYUg5ZCtuZzU5RU02WVVoNzljZnJLTEI1YVpzMTJ4a2JkeTJoeWtqdmFQNDZQR3Y1NUl5Y1lDeHVmK1FZWnUrNElkbnN6b3ZUd3dTRU1tYWJGSDRiN1AvMmIvY2ZLRXpvWDRxbUZ3TzBnQ3FUcDRLM3NKTVc1UE1IcHdENnBEVGtsOExqb1J0RlpsazBTUWk3Y1I2U3U5QzUzR0lRM0dsekZBZDY5RTV1bngzNmpyaHR0alVLNHNTWEovV2V6MGdNb3M2TFBob09Eb1JNenJlcFlPK3UvVEUrTkw4dkRQWDdxQnRIRHBPNW9FRG5DWGZNdS81ODBzeW9GU1JsU050OGNYenNjSG9IUDBickdWNU0yZnRzT0dVOFJ4YTZZODZkWUp1UC9CUGdiaUIzQ2Zybnlsdk50MW5QK2tCTDQ1cFBrZW1Ba2VTMW9zTU5HZ0JtVlBiQ1UyWUNESHRQMklMQ0dtOTREQUhsdnBKakw0TEl1LzdCWHBqT0pBN1JLYkVGZ1JzcktjTnBwRS94aFNrQUsrN05HYjgxMFFEbExCQzJkUFEreW1KQ3Z2TGdqSkVrZVhyOUkxTC9IRXBlZUVlRWxHdkNKemkxY1AzSjdkQUlpMkJwOEFnVndMb08rRytMSDNScjI2M3BjcHkvYnhtZEV5QTR6RzBUOWh0NUNxYmwvZGVJK1YyTXI0eWZLZzducmNOMnZVczkyNHdNSEwyWnAwNG5CT1BRd3ZFZWJqR003TlRWaEhIcE9nMERYR0t3dzQxclAyMzFyMzluT3VNMk40VWt2REhOeGVNNm1GUStuNjZQcVB1M01FMTJ3QTR5d09yYlNyNWdsWHdqeHNGYVprTm5GYjdWVDdtMHJPYStjWUtEbmFIME9aYXlIRnF1ODN0UEpFVUg5Rmh6emgzdmNYNkJMMzhYc0ZzanBNc3Fld1BMbDBya0FRaGxGRHd0dmcwRVFYTlZRaUhWb2gvRkwxQzBqd3BJR0VWZXFGckdPSG9LWjZPemRLbElIRUFhZVpmRkU0d1lUVTBnNndBb1I0ZXYybnFZS1Z1bDhIdDZITUhISUx0bmtqSU9SWW4zNlFOSnZDQTZIQjdPUGNHbGZFSU9YeHVmREhXNkZaU05tdUtxTkYzdzJZY2xSNnhhWUJqZFlUekdnUENqR1NtTFZiRlo4Um4rbno3V0ZndEZUVFQ3UTBWMGEzNmk1QTNwYXZ4OXViWGUyVkQ1YUJ4STdZRmFyRVZCZmVQSHNUbFRxRUQ1TC85QkFlZk1icU5Kd1QzV01tazcrUUlTQzBvOGJjU2RBL2kzM2x2RU45UnlaSlJmbzkyVmFsWEJSUC9xZThpbkgzMUVuWXRIQTBYVWpoL1Z0M0JSU2w3ejI3ZGlFeEc4eUhyTDlXZjdreTBJeSt6NUVVNyt5QWFuRHdMZy9jS3pjS0k1Yyt2SmJDSEE5VEo0b2EvZU9Fb3pybHFQS1Fldnp6VituM3Rjb0VxM04zb2tWNGg3OTZTTnN0bGhrL2dMNVFRT2VCSklUN3JiM29OY01NSFRORThUWU9IcnIxbVc2amdDdEVWZ0tIeis2cTZJbVM0V3JsZTNFM09HLzRGeDVBSlBlSmhqWERBU0F3Z2JwUlR4ZllnNUNyM2ViQk12WWcyaXZteFZmZDZKTENWVVRNTDFObUJtcjFJeUNvQWR1dlBBSllJZmdXakJiZ1lJWEl5V2E2Qi9WRTRxdnNLWDZMYXNqTUNJMS80b1J1Ymlla2ZNbW9uTGQrbGJtMW1CcFlVblczQ215bW1BbnNWVTVsUVp1dXB4UUFxSFV0eUwzejM2dUFoYVVoaHdQSTJKL1cvS2hUUUw0QmJIREFtODQvRHJ3ZXAvZS9yUjZQMmhlNWdLelRxZHpGSDg1bjI3azJyc0hncDRsRVBMY3Y2NndJRXJHNUJpN1RsekhlUGdDdDU1TGdsVENpS0FMeWRhQmR5Vk1IMEZFakRxMUcrNys1NEZIc3ZrYkhhSTcxUEZHMG4ySUtKMVlodk81aVluZjdJN3BpQzgxSkVnaUkvQ0VsYVhRTmdlbFd0UHF1SUhHR1grTjMySUR1Q1NVUE9kL21DNjRDUVc5UEN6cEd6VHhYZ2l3TmoraE5XYUM1cW01bmgzMDd5R3RadGVMZ2lPNVVKZ0dwZ0NESjJ5QVd0TEkrdzVKcnNQNWtlYkJyeVpmY3BXR0FMeWRqTVcvZmVKb29RS0J1L0VBNmswUWpQYkl6R2tJMzRvclFsRGlTRU1CQzE3UTBPNEtXSkxSWjNrZHRESWlBWWgyUzVzc0RDeG5JbHNSSmVRUGdIdzl4TTk1bUk3VC9UNHI0YVBOMDFaL25yVncyM1ZSdmR5bVJ4NVVmWk5tYWZXL0QwdEtKeFBxSmZYbW9qem50dFVhb0FSTmpHbDB6Sy9za1hkV2Fya202cTQ0Q1JidlhLYXNKTTB3WjNOVlhCNVpiOU9TN0M1V3ExSm5Oc3VGZVJXV1d3TU9KMk9SaUR2RlN3ODQ0S0FVNTh1NjlZR2dIb2R0OUVtTW50S01IeHRxS0gyZDJSS1A1Z2l3VHJKWVBFUnBjUElHb0dISEFXNmJXaGZlNy9DaDV2djJwSHQrc0F5ZFR6Zk1KWlFnZEtVUFV3WGF0S2xXaW1qYTMxL05xcUphSFo4Y0pmOFc1eHVkV3E4NlZnOUd2QllENFJuTmFmclZjRnVRVzBxTFE2dGpONkxyVVdqWFltQUVlcWQ2Q1VnTVJicXlLVG50Z2hwWWhDOTdFbXkrYXJhb3hGSktkQ1ZCcUpyMjBiSVkzd1kwZVJNeGVJUHY1ZVhXd0RjQnR6dFNuYmxIMHZENmhjNHFmK2RVeFJ4Zm9qOVhPSC9XbDVNTWMxNjhNaElZY3p3ZU5FZkxiZjlpT0pHQnJUTDlIdlNBN3lpOGlqVlFwdkgwc2YzeWFwamFnZnFVT2pwaUdJTXlNUlNIRlI4QmozNFZ4UmNYMnhud0VwRFA4UkRPTUVVMXhmd1JsNm44QUQrYUpMb2ZoNm41QzZSQ2RPcHlEZjZDT0NxL0JCd1V3U1VvU1BXcHMvVm1HV2ppcHQrKy94Tk1vWlBZb2J3OUlQYzE0TmtHTkhKalRCb2xkMWg5a3lkcHVjK2ZCV2ZIUmtxUjh0RnpGWFNMM3lwU1BOUmQ4Y1dNeEdHRGxUT3doZi92SndOcjByOUliL2dhTVowd3ZrR2dMcWN6MktidHA2VnZwLzk4WFAvYjB0bVhOc1FCeEh0cmZhRzZGZHpwOG9lU3QvMnF1WVpLM2NuODBmRndEekxoeFJsSFdnSXJqN3pKZmtxREgvaG95alpHTUF6TmErbHdwV3FyQ3VCZXIrMnlIZGhVRjFpSW9tNU0yOGNrZWN4dG43Y25JV0c1M1c3MmtCdElubHlBOXN2QUlBbC9SZlhreHlZakVCdDNRNmZtMjg5NFdTNGR0Y2xIR2djVk1Ga2dPV3F5YTdpMTZ6ejZLYlRWTjlUd3FxbkRjMkZZdGlTUnJ1Uy9YVXE5THpHWWJERFFTVC9jeGViUTZhQm8zeVVlcnIxbmQvT2VYOWtDOHNqWFRYSXVPRTJzUHZwTE51Tit1YVd5dnZjKzhNRURLS1dWaVNBZVNCamVSTnp3QnR5WGlab1ZXOFFoL3B3UjZSOGNnWG9BRzJPaWJHc3NXdHVlMEtHbGgyN3lNdHNONjR6UnFBMk8xRXdOMXNhamwyV1NvWGQrMXdCV0JDL0owejFlTFVHNE5Ma00vSFVWeFVlWDBqVFBpN3ovYlNLSTVscU94R0N1RE95UGVXeUtEUjBJQ1dwMXl3RTc5eTV1Mi9ZQlA0WUJLc08ySEpQYmIwNlFQcFYwcGlzSnB2bXhwSVBLMHV0RHQ0eW1EZ3o0V01sOWRUYjRxRjlpcEpYYlc4Z1VFa21ERUgyZVpvcld0N0ZBeWl6b3p4MzA1MlBBT21ZVXIwL05GTG1JTU1xUUlVYzQrTEpEaEVJbTl0NUZYbVhlTGRrM0lURlhVWjJPRUk2WmRiMW9SQ2FKUXQ4SVQzQjBSSVZxZXpGVmZFNktiVGlqY0RSVzluQjRDL2RZakxlWXE0Z2hyc0IrQW9QRVQ5c3hwbHZLVktZNVJuNFdqeDk0N1FKUUxtODF1TGM2eXZpOE00d1Nud3FCYU5nbllETTdkU0p3UW53VmpXZWUzaWVMaFIveVpUQzBiUFhCMTIvZ00xOTllbUJ4OHh5YStybk0yUFZRY2xQKzhSNCtmT3ZPemxiSWJ2VFB1YUUrWExSQ3REeDNTeG8rU1NSbk4rbWRFY0hNc3Z6NjAzWEpKV0RrdDRMUDBYUWtvZ0ZVN2N5ZWcrdGo1eVMzYW1OS1lDOFNNNGV3ZCsxUWVwSUhLS25rekpkcW1ZRksyTmxUVUVCVzVxMXJwWGI2UkhWWXRhVGRLalFQYjM0TjE4T09HeStPdU5xaWJSdGYvUVRhVzh4cHY1ODVGdklDVnQ5cjhCaVV3T3lCL0FDc29PaGR2MklqLzNuQ2lndXR5SFJiWm52UDNaaVJ5RTNIWm5aZmYxc2ZjY2pVa1h3OElDMTI3TWNpVnVtZ1BxMExWOCt4V3ZyT0lyY3ZOZ2tZZ3NUcWU2bEtIZEZwTDJaNkdZbkoxcmxvYVFqaGRrNmNDQUY4d3UvYmFQbTREWlAvWGFCcWQ1"
+    }
+  },
+  {
+    "timestamp": "2026-01-01 22:38:29.185468",
+    "type": "tool_call_request",
+    "id": "cargo_test_1",
+    "name": "cargo_test",
+    "arguments": {
+      "package": "anBfc3RvcmFnZQ=="
+    }
+  },
+  {
+    "timestamp": "2026-01-01 22:38:29.18547",
+    "type": "tool_call_response",
+    "id": "cargo_test_1",
+    "content": "UmFuIDEyLzEyIHRlc3RzLCBvZiB3aGljaCAwIGZhaWxlZC4K",
+    "is_error": false
+  },
+  {
+    "timestamp": "2026-01-01 22:38:37.411559",
+    "type": "chat_response",
+    "reasoning": "**Addressing the Bug's Root**\n\nI've fixed the bug in `persist_conversations_and_events`. I've verified the fix with `cargo check` and `cargo test`. Essentially, the old directory was being deleted before the events were written to the new one during conversation moves or renames. Now, the events are written *first*.\n\n\n**Enhancing Event Preservation**\n\nI'm now focusing on ensuring event data is always preserved, even if lazily loaded. I've implemented eager loading of events from disk when a conversation is slated for moving or renaming to prevent data loss. I'm also re-evaluating the `is_modified` check within `TombMap` to confirm its sufficiency in tracking conversation state changes, especially considering the `edit --local` command's interaction with the conversations iterator.\n\n\n**Validating Data Persistence**\n\nOkay, so I'm now examining the `is_modified` check in `Storage::persist_conversations_and_events`. It's crucial that this accurately reflects all necessary updates before writing to disk. The `Mut` objects returned by `TombMap`'s `iter_mut()` seem to correctly trigger this flag. Specifically, I'm verifying the interaction between the `Mut::new_untracked` call for the active conversation and `OnceCell::get_mut` for others. If a conversation's `metadata.json` is modified, but its `events.json` wasn't loaded, this flag should still be true, which is good. There's a slight wrinkle, since I'm checking `is_modified` *after* a potential lazy load.\n\n\n**Confirming Persistence Logic**\n\nI've just revisited the condition for loading events: `stream.is_none() && (conversations.is_modified(id) || id == active_conversation_id)`.  This ensures events are loaded *before* a potential move or rename, even if they haven't been accessed yet.  The check covers both the active conversation (always a candidate) and any conversation that has been mutated. I'm satisfied this accurately prevents data loss from unpersisted changes.",
+    "metadata": {
+      "google_thought_signature": "RXY4YkN2d2JBWExJMm54Q3RhOHpUdU5QSnpOZmRPQzgyVlVsZnQ1N0Y5aVMrRzlYdXpxTlJkSlFaNE9ha1BqRUl1cEYvSzFUd3hqZU9uem81M1dDSWFySTN0c3RZWkZ0NS9RbjRyYmlUellpbDh5ZWhlSEtXdUcxdVJ3Tkc4RFVTVmc4a05adUtpdU9yemxSQlJhSnN1c1czc1ZHY1hDUjVNYzBvODhPL2twLzY3WkpuSml3cm5oUkdtRDh0TUpzVEhrSmJNWWI4WVRPM25DMlRYN1lJTG5paklmM2pCQzM0cmhrRkQ0Zmh0eE1YaUViekl2MGxNV2lKUWV4cm4yajVOSk1lcWIwemJVNXFOc2hFb213OSszQXB1VEtmMUhIUWFwT081ekRCK0lZaHlsL29jSVJKcm80b25GVjlvcnJmR1dVU3RzcHJDZEgxQUM4b3BnNU1KVFlaL21GUDhVUmc5K1ZodU54SVFLQyswME1IcG5xSmt6MEp6MGg1bmdTNXZ6dnd0Z05CTXM4NFYwWnpETVk5ZTBKZ05FODdINUgyYXF2eW9KQ0k1STZsVERCOHNoMzBuZFMvREZJc3BxNzk0bWkzMjdKUXprUXIzMHNnWkR0TFdXUVQvaEtlaWxCU2ZacVhnL2EwcTZZV0NGL0J2Z1ZtM2h6LzFsNkhqK2U1Y1cxTGIxNVh3R0ZydUovd3hZcjN0RGxnd0RvdFJtSDg0TmVuZFRWa0dpQ0hmMG1DSnlMVmRlSStjSGlDdHdjdSt5ZGN4QnU5WDdvc1lacTRqRVhUWUVLL2liTFkzeG5ld2FxaHllQUV0RmFtY2lQYzI2RldxSEZNQkdsV1lUbUMvU3ZIMExsREczdnJMclVVMndmVDNWalFsOTBjNWRVc3hDb3BXTGpheVVHd1Jkd0FQdnhVeGlXSHdBUVFyMEhlZCtib2xpYUIvbkVDMzVaQXJldVRYTnRkWHpXYTh3Z29CeFM1YjBnN3p1bURpUjVYaHdRTDBqOUVuc1hVTDh1dkx3SFVJRE9aOFlwMnlaM0ErdTNEYlNKcWpZNHBRSXlZL2lFS0pvUGRlSHJsaUVvUEtKUENyWWpYQ2I1K0p2dGh2MWQzVG5hZCtQSzJCTUZPMTVHYmpTL0lGSlFJSUdGbWVZSXBKdzNHUTkxT0JjQUNNcHBHRllZY3pMOXA3S1NZcmdZS01vcTV2L2Zqai8yOUJDUFV2MDZ0UmZJTk1pSW9nZ01qWFpTR05tVDJtaGoyanFhRldiR09WTEdaYjYxRXdFNW1Db2ZyWEpoK1EybmtBMm9WOWRvWGJhS0Zza0ljVVR4RVpKL2tvWnFxRDY5QVdqbmo0alNUVTVqbE5uVzZLWGcwSHdxV0dISWxYSWZ0dk52S25YQVBPbzVpVml6dnphZ0syamp6cDZHejA4UGdMdmhxY2lHUlV3Y1NkZkllalpWNzhsZFl1OFVCYmdMY1crQjRVVGNYdlU3Q0tpZ2hhcC8xQTFXVDJEMDlhaVNPSFBSNys2TitMUXZOMFpGZFJmc1l4QTJoMEtWdng3ZzZpWVF5dFRHMWxaL1JUb3c5V2RMbUFsWVBpeVVMWXFWMzFFak13OXRvMjg1WVJiS3o5cUxWams1M0x0UGRBYlpESm5zOUxkcDNSSXFTbzVONmFXYTlZNEZ6Qm9FeGYzUWJLREZBNDhQRTVtc1BlaE9YNGJhUk1hMnIvVGpzVlBHMG83THArZjhSakNrZWZsQjNtWXl5QmhsdnRvUlhjSEdwODloTktqVlg1SzFlK05tbUh2RzlOWHE3SGU1RmEzY01MMHc1WmF5aFNyNXpPUWVyemVld2lBa0pJUlprM3BrdXlzRldXdHFJdUxaV0hJbzNMbEx0WEJjSGNVUzUzUDlKY2F0bUQvdExUWTlGSjJJZTJpWDFHZE9xVUx5M3hqN2ZJOE5CMGNYa0VKOElsSDJkL1pnVkFaZWxnQlcrNGFUcllKUERyTnhhS2t2ejRuUngwUkh5ZDNVeWVueU9RRXhySDUvMk0zUzV6bnR1ZGprNXBNdVNkY1YrT2dxdGlCVUZKNUZkMG5RUWtZRkc0K3Yxd0dpejhaa2FHK1lVRUh3VGlsdW5oZVliazZzaTZiMjBZK1ppSG5hWnQwU2d0a1RDSEliZ0dhS3JmZng0MjFPY0JDQmxJTW9CODI0dElUWG9DS1NCQkdDR2hYRWNFNlUwM1EzNDgxUkZ4UHR1VjNxZHR6OTR4S3N0ODU4M0E5RzRuMWJSU1NreVdlcUtzTlRzMisrMlh3NEl1bmhwbFErU0tNd0hDYTZzWHE5QTlmU1RlTEkxVkFFeldCSnpzbzEzN2FxWnI0cU4xbFRpbXRKR1R4QUp6K1VkN2ZCSEI3VmVFNlpkV0NiZStxUEpPN2c5eFVWcVR1dzRpbUR0VjZQajQ0Q2JRc2QzYVBKZEJrZzNOVkdWZWZjcloybUVtSUV5UWR2eEpOVExwWkVnQk80OWpLUmE4QUZ5Ky9GUno2UlhWNlM3cWtDaFV1aTJLNWdPMXFpM3Bad1h5aCtTNGlHRzgvK1N3bCtMc09yb1dJbHdxeWVCTHY5TDgyWFhNc2pGZzAwYWpmOWtBUzhGYk9lWTlFUGpJSVlDZWk0UmF0Qnd0WDhrMUdieVNNaVY3RkJrSmw1ZjRpS2NsUjNQMEtPeVJpSDlpbXRSdCtaSzVwQmt2bW1FbGloZm5iTmgyd3JkZWhLZEVPMTlUZFh5YVZmRjZEOFpiZ2NqYW1vcmRzUldpSVRCQThDb0hmcW96RjJnb2ZyVHF5L3dyT0hPSGEyQzNBV0tpbnhEQWNrRDlNWlBJdm91Y3hRUUE4UHoxMDZ2VU5oTHI3QzFLVmE2OWVkbEt1UFVMdCtjL1NxUGZlWUhGUWJGVklySFVseWZ2NkVLZVV0eFZEYWI5a0E2ZWRDTENhSENIaTNHZ1dnVlJkNTMvZWdlRGdNNmhRNHdwRFRYZmZrM2JCUXlOVHRGOVB2OE1Td2F6UUMrdng1SlkrREMrZk8rSXpJdXV5MUFueURYVW83ckFQT0VWR2N5Y0JzTHl6LzNzR1NQY3JnekxHUXg5eVV3bkR3MTIxTHVPZU12dXdjTXgyVTA5MVFiaTZVNXhUZzQ1a2FiMDNxT01DdjJuYlcxWTJ4REhnN2I5K1VzRU52OVV6TldINTF4VGx0K01PNGNTRDJUWmk5U2drUWNGQ2t5RlhOR1lpUFVnTTBlQlR6S2h0S2tCRjgveTVKMUs1MUlxZmxGS1NUYXIrMzEyVkdSUHpwdDNFZnVpMk5NU0hGZ1IwVTViT0xYbmVxU0lJdk5xZ212RHJ0M0xTNjRjNW5HZXZWTm1ZSDM1YUNoMVVoZWZSa0l6VGR4TXVFL3VTd1VmWVljcFpFcmJGMXFuZUhlVTBhS1hZbG9TMmtrT1pkQ1N1RGloUzhlLzBzNmdzYmxPYmwwNWdsN0VSaENDUHVVb3E4cW5WUFlUbG5lQjBWYVBhRzQvUkdFa3RUdytnK0VjOExuTkoxRjNwdy9kOW9BdVVDTE4wL0YvbTg3QkhXWTMrbVk0bWVucTNPT1RGdS9BUjREdm1ZdkY1R0ZNQ1hISnB5dWF6MUZjQ21UZlBFSXYvREpad1ZNU0pKbUFZQzZLR1BpWkNTVk90ZFNBQlVmckhZQmxPcFVJOC9Ybml5RnIyODdmcnFzSGsxWk1LNnRURks3d0RhOXp0Q05nRzFmRWRDb3RWTDlTK1BNajlHdEl3YjNua2FtNklzQTdwUkZMY3VCWUhJV2dvTkVaT0g1R1B4eXJTNmpsTjNYVW9Vdkh0cmZCRlZNSDhWSjAzYVlXbFlodzdiTWZSRExyMWdGZ1Uxa1FOTVVmS25XU2RqMlJFU2RRb3JYNkpJbFkrL2lzQW5pOE9Fak9mRGVoWm8vMlludk9VQVFVUlVXRWg5SmZsMGh6YnZQeXdLd24xcjlJZ1c5YVgyZElXVTBza3Ywb1hiZXl6Y2FZNUhVNW5ENVRDd054Q1lLWWx6RkJFaWJVZE40Z0swRjZQTjcrbERUem92ajR2bWxBcWdNY0JFdm91OFRxcVFkMk11aUdocTRMZzlZcEQyM1RndlVjc1JUWFRmQkJFZHc5dEhHL0NoRjk0K1VpQW93US8wZFJLS2pTWjJvRUJQVlAvbWhyRHRJNWt0a3JzcXl1MjFLUytrWWhSUS9TTmtsZStBM3FSSGJoaGVGdm45Sm5GUk9ZdExoZDV5OWVFbmJQTFRTQ095WmJXQm9kNXVhNmVNTzFGRVRVUm1nNG55WG1YVGo5dld6ZUIwYzJCRWxMa2FrU09SRmxoVFJHdUNxdFFIMHQwSlAvQWVTWkEyZUhzZzJxcTdkbkl6eWtkOFRleHdIYnh5UnJZUlMwc2JRNjhkYU5HNjJianV3UXNiN3VjMlNXY0VuOUhZSk1DLythUDJkbU9aU1lJeFAwZ0RpYVpScitzUkNVTDlnSWZ3Q1VIemJDS3lIblpJQlI2enRGT3FLMlhjWUpHbCs1eE02NXVkRmFBQ2JhOWZDRDFEdGNTZUhjdDVXcExsVUhveGxka05GTEZwYXkyL0NmVWNQdnUxNHc3bWNHZi9UODNmWjU3YnluOHZLb2xxcmI4aEtPVUV0c0Q4OHBjUVZ0Mmt1TWtYU0VVRkNQV0YyOXJSbXBtSllwQ1AwYXFhWlVrM1JoK3VvQ1FyRGlmY1FXU0FLUDRrSVlEWGdYZDBJMCtVTHY1R2VNMWdhYWtVR1M5Q3FkYjZiV2c2WkFwNUREVWZxRXdUd1J5ZUZSaFEyL3o0S2NpTlZQbkZiWDdjZHFlMG82d3FKZkRYT1NyaEwvMkNoZkhhOG5VSmFmT1paNG16TFdkak1OVUlKWjdEWWRJVHA2OHpIT2cwQmNOcXBxdVJmZFNKU3BIa1B1MlJXTjR6S1FiUDg5d3QxdDBOUEtKU0ZMRXR1YlFZWUNDR2pnNGxPcXljWHI0cnI0eVVwdytsRENQamdQUjlqMUZXOTg2SzFsRXZKcWQ5Yks1eFBEZ0l2M2NleXVkZk9DY1d5N05TV0wvdndXT3RjOEpmb1A3am16TjJIdzhjalFOa2xISmFNNSt0Z2I4WDZlc0pEMFlJbndtZjZGWFNrTEJVeXlpY0FEbjBiS3ZLd0ZKWjBuaXZHY0VXekIyYUpVR3ZmeXlIbExaUHBZQ09NNHcvRkE1RkxuWkNYR05RazBnb0tsSndUZGVsZkoxeWNFaDg0bWF5Nks1clBjSDRtNjlaY3ZWS2NwRUhIMzdaZ3RDeXVmSkhaUldqMTBMM2hFREhqN0xTQlp3M0NRcnBiWUhaaWYyZ0NETWl2ZEFXbTl0RG9ZZ2VOTmRRQTRGaWV0R2g0dkpTMzlzRy9QbSs1eFFhQktac1VLSmxhbFl5SnJ6dFhvTUJONGcvdkdNVlQ2cERQdlVINTRXbTdlTnFPQnFscTZwZXlFQWVhbExFSUdsc1pocnFrVGNJU0FSZkxLWms4aDgxV0xpQlY2Qi9WV1VKNVNPQ0NZYjg5dXNaQU9OeUVTV25DRmxyTzBpa3FVNGFwWGdyMjMyOW5CaThBbWhiQkZpZU4yYlIwdWRFYUc0S0wxVCtDUmd1dEtOL2pOaytsYjZ0MmdwYU12c0NxdTF5dUUyMzlndi9Hblh4MnZTa1MvYUVLRVJoUUZNZHRHV2RVVS9ZYjZlcnB1U1V0S0tQTjVvb0pZTGxBbm1kR0hYWVJHYkZueVF1ZDFyaU5JdTFmS0lLQzJUNGtxU3JIUnEyNmJ0QldKVHpnZUZkQ1FUblJQWm9ReTUrYzFBZEdsVW1xRlRFTHRBWE9ndFNtR1QyWHk3YUZIWUFNcnBCWTdkcit6WEdYZjVHR1p2NzhPdWlHL3dIa1VMb05QU1BzbHlCaXNvMVJ6UjVPV3RsZDNpTG90cVpmeGs0QzExd0k5blpFTVFNalpEZmtHa1F2c1JGUmNOb1JlMVJabUZqc1VmTFZmVkduQ2hMNVljTWtidyt5RTEzYTZuWU9LUjZmajFUT2toaEYxSTBzVzVlaUdGRERGZm90Qk9JSGNKWUQ0MTVsSkJNa2JwREU5eWxRMno1a2FFMFQ4bkd1VXFjdnFmWlVYejFhVndKZGpldzdPekorZTdKTWx3aER0NkRML2FOeWhVUzkwY3FGL01lTXlsN1hUeUVsTmVtSWNOck9KRG5KaGcySHRHV3c0bzc2SDdIU2hxZFgyM0o1SVpZNHJ3NW93ZjltQmdzOXE2K0tsQy9TRHVRUzRCUkdhdHpVR1RmUml4dnl5bVVVL2VmQ2gzOHFsOWkxelNqV0J6NUQ0clJSd2FYTjQwenI5ZFVjMDZDRUxpSDJnPT0="
+    }
+  },
+  {
+    "timestamp": "2026-01-01 22:38:37.412364",
+    "type": "chat_response",
+    "message": "The bug was caused by a conflict between **lazy-loading of events** and the **atomic move** logic in `Storage::persist_conversations_and_events`.\n\nWhen you toggle `--local`, the `Conversation` metadata is marked as modified. During persistence, the storage layer:\n1. Calculates a new directory path (if the scope or title changed).\n2. Deletes the old directory to perform a clean \"move\".\n3. Writes `metadata.json` and `events.json` to the new path.\n\nHowever, if the conversation was not the active one and hadn't been accessed yet, its `events.json` was never loaded into memory. The persistence logic would see an empty event stream and skip writing the file, but since the old directory was already deleted, the data was lost.\n\n### Correct Solution\n\nThe storage layer must ensure data continuity during a move. If a conversation is being moved (modified) or is the active one, and its events are not yet in memory, we now eagerly load them from the old location before the directory is removed.\n\nI have updated `crates/jp_storage/src/lib.rs` to handle this:\n\n```rust\n// crates/jp_storage/src/lib.rs\n\n// ... inside persist_conversations_and_events ...\nlet mut stream = events.get(id).and_then(|v| v.get());\nlet loaded_stream;\n// If the conversation is being moved/renamed and events aren't loaded, fetch them.\nif stream.is_none() && (conversations.is_modified(id) || id == active_conversation_id) {\n    if let Ok(s) = self.load_conversation_events(id) {\n        loaded_stream = Some(s);\n        stream = loaded_stream.as_ref();\n    }\n}\n// ... proceed to remove old dirs and write new files ...\n```\n\nThis ensures that `events.json` is preserved even if the conversation details were loaded lazily."
+  }
+]

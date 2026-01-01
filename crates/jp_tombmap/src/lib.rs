@@ -415,7 +415,8 @@ impl<K, V, S> TombMap<K, V, S> {
         self.modified.iter()
     }
 
-    /// Returns true if the key has been modified since insertion.
+    /// Returns true if the hash entry for a given key has been modified since
+    /// insertion.
     pub fn is_modified(&self, k: &K) -> bool
     where
         K: Eq + Hash,

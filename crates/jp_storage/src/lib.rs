@@ -300,6 +300,19 @@ impl Storage {
                 conversations_dir.join(dir_name)
             };
 
+            // If the conversation is being modified (e.g. moved or renamed) and
+            // its events are not yet loaded in memory, we load them from disk
+            // before we potentially delete the old directory.
+            let mut stream = events.get(id).and_then(|v| v.get());
+            let loaded_stream;
+            if stream.is_none()
+                && (conversations.is_modified(id) || id == active_conversation_id)
+                && let Ok(s) = self.load_conversation_events(id)
+            {
+                loaded_stream = Some(s);
+                stream = loaded_stream.as_ref();
+            }
+
             // Only remove unused conversations if their IDs have changed.
             if conversations.is_modified(id)
                 || conversations.is_removed(id)
@@ -320,7 +333,7 @@ impl Storage {
             write_json(&meta_path, conversation)?;
 
             let events_path = conv_dir.join(EVENTS_FILE);
-            if let Some(stream) = events.get(id).and_then(|v| v.get()) {
+            if let Some(stream) = stream {
                 write_json(&events_path, stream)?;
             }
         }
