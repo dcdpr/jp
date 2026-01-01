@@ -691,7 +691,7 @@ mod tests {
             &dir1.join("metadata.json"),
             &json!({
                 "last_activated_at": utc_datetime!(2023-01-01 00:00:00),
-                "ephemeral": UtcDateTime::now().saturating_sub(1.hours())
+                "expires_at": UtcDateTime::now().saturating_sub(1.hours())
             }),
         )
         .unwrap();
@@ -705,7 +705,7 @@ mod tests {
             &json!({
                 "title": title,
                 "last_activated_at": utc_datetime!(2023-01-01 00:00:00),
-                "ephemeral": UtcDateTime::now().saturating_add(1.hours())
+                "expires_at": UtcDateTime::now().saturating_add(1.hours())
             }),
         )
         .unwrap();
@@ -718,7 +718,7 @@ mod tests {
             &json!({
                 "title": title,
                 "last_activated_at": utc_datetime!(2023-01-01 00:00:00),
-                "ephemeral": UtcDateTime::now().saturating_sub(1.hours())
+                "expires_at": UtcDateTime::now().saturating_sub(1.hours())
             }),
         )
         .unwrap();

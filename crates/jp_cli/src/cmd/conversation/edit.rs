@@ -26,11 +26,11 @@ pub(crate) struct Edit {
     local: Option<Option<bool>>,
 
     /// Set the expiration time of the conversation.
-    #[arg(long, group = "edit")]
+    #[arg(long = "tmp", group = "edit")]
     expires_at: Option<Option<humantime::Duration>>,
 
     /// Remove the expiration time of the conversation.
-    #[arg(long, group = "edit", conflicts_with = "ephemeral")]
+    #[arg(long = "no-tmp", group = "edit", conflicts_with = "expires_at")]
     no_expires_at: bool,
 
     /// Edit the title of the conversation.
