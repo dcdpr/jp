@@ -373,34 +373,49 @@ impl Storage {
 
     /// Remove all ephemeral conversations, except the active one.
     pub fn remove_ephemeral_conversations(&self, skip: &[ConversationId]) {
-        for (id, conversation) in self.load_all_conversations_details() {
-            if conversation
-                .expires_at
-                .is_none_or(|v| v > UtcDateTime::now())
-                || skip.contains(&id)
-            {
+        for root in [Some(&self.root), self.user.as_ref()] {
+            let Some(root) = root else {
                 continue;
-            }
+            };
 
-            let path = self
-                .root
-                .join(CONVERSATIONS_DIR)
-                .join(id.to_dirname(conversation.title.as_deref()));
+            let path = root.join(CONVERSATIONS_DIR);
+            dir_entries(&path)
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .filter_map(|entry| {
+                    let id = load_conversation_id_from_entry(&entry)?;
+                    if skip.contains(&id) {
+                        return None;
+                    }
 
-            if let Err(error) = fs::remove_dir_all(&path) {
-                warn!(path = %path.display(), %error, "Failed to remove ephemeral conversation.");
-            }
+                    let path = entry.path();
+                    let expiring_ts = get_expiring_timestamp(&path)?;
+                    if expiring_ts > UtcDateTime::now() {
+                        return None;
+                    }
+
+                    Some(path)
+                })
+                .for_each(|path| {
+                    if let Err(error) = fs::remove_dir_all(&path) {
+                        warn!(
+                            path = path.display().to_string(),
+                            error = error.to_string(),
+                            "Failed to remove ephemeral conversation."
+                        );
+                    }
+                });
         }
     }
 }
 
-fn load_count_and_timestamp_events(path: &Path) -> Option<(usize, Option<UtcDateTime>)> {
+fn load_count_and_timestamp_events(root: &Path) -> Option<(usize, Option<UtcDateTime>)> {
     #[derive(serde::Deserialize)]
     struct RawEvent {
         timestamp: Box<serde_json::value::RawValue>,
     }
     let fmt = format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond]");
-    let path = path.join(EVENTS_FILE);
+    let path = root.join(EVENTS_FILE);
     let file = fs::File::open(&path).ok()?;
     let reader = BufReader::new(file);
 
@@ -423,6 +438,38 @@ fn load_count_and_timestamp_events(path: &Path) -> Option<(usize, Option<UtcDate
     }
 
     Some((event_count, last_timestamp))
+}
+
+/// Get the `expires_at` timestamp from the conversation metadata file, if the
+/// file exists, and the `expires_at` timestamp is set.
+///
+/// This is a specialized function that ONLY parses the `expires_at` field in
+/// the JSON metadata file, for performance reasons.
+fn get_expiring_timestamp(root: &Path) -> Option<UtcDateTime> {
+    #[derive(serde::Deserialize)]
+    struct RawConversation {
+        expires_at: Option<Box<serde_json::value::RawValue>>,
+    }
+    let fmt = format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond]");
+    let path = root.join(METADATA_FILE);
+    let file = fs::File::open(&path).ok()?;
+    let reader = BufReader::new(file);
+
+    let conversation: RawConversation = match serde_json::from_reader(reader) {
+        Ok(conversation) => conversation,
+        Err(error) => {
+            warn!(%error, path = %path.display(), "Error parsing JSON metadata file.");
+            return None;
+        }
+    };
+
+    let ts = conversation.expires_at?;
+    let ts = ts.get();
+    if ts.len() < 2 || !ts.starts_with('"') || !ts.ends_with('"') {
+        return None;
+    }
+
+    UtcDateTime::parse(&ts[1..ts.len() - 1], &fmt).ok()
 }
 
 fn dir_entries(path: &Path) -> impl Iterator<Item = fs::DirEntry> {
