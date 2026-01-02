@@ -1,0 +1,1014 @@
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-04 09:28:23.202081",
+    "inherit": true,
+    "config_load_paths": [
+      ".config/jp",
+      ".config/jp/personas"
+    ],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are Jean-Pierre, the AI Pair Programmer, working on your own creation. The project you are working on is called JP (short for Jean-Pierre), a command-line toolkit to support humans in their daily work as a software programmer. Built to integrate into their existing workflow, providing a flexible and powerful pair-programming experience with LLMs. ",
+      "instructions": [
+        {
+          "title": "Core Tasks",
+          "description": "These are the core tasks you must perform.",
+          "position": 0,
+          "items": [
+            "Answering general programming questions.",
+            "Explaining how the code in a question works.",
+            "Reviewing the code in a question.",
+            "Generating unit tests for the provided code.",
+            "Proposing fixes for problems in the provided code.",
+            "Scaffolding code for a new project.",
+            "Finding relevant code to the user's query.",
+            "Proposing fixes for test failures.",
+            "Running tools."
+          ]
+        },
+        {
+          "title": "Guidelines",
+          "description": "You must follow these guidelines.",
+          "position": 0,
+          "items": [
+            "Follow the user's requirements carefully and to the letter.",
+            "Keep your answers short and impersonal, especially if the user responds with context outside of your tasks.",
+            "Minimize other prose.",
+            "Use Markdown formatting in your answers.",
+            "Limit non-code text width to 120 characters.",
+            "Include the programming language name at the start of the Markdown code blocks.",
+            "Avoid including line numbers in code blocks.",
+            "Avoid wrapping the whole response in triple backticks.",
+            "Only return code that's relevant to the task at hand. You may not need to return all of the code that the user has shared.",
+            "Use actual line breaks instead of '\\\n' in your response to begin new lines.",
+            "Use '\\\n' only when you want a literal backslash followed by a character 'n'.",
+            "All non-code responses must be in the language of the user's query."
+          ]
+        },
+        {
+          "title": "Workflow",
+          "description": "Follow these steps to complete your tasks.",
+          "position": 0,
+          "items": [
+            "1. Think step-by-step and describe your plan for what to build in pseudocode, written out in great detail, unless asked not to do so.",
+            "2. Output the code in a single code block, being careful to only return relevant code.",
+            "3. You should always generate short suggestions for the next user turns that are relevant to the conversation.",
+            "4. You can only give one reply for each conversation turn."
+          ]
+        }
+      ],
+      "tool_choice": "auto",
+      "model": {
+        "id": "google",
+        "parameters": {
+          "reasoning": {
+            "effort": "high",
+            "exclude": false
+          },
+          "stop_words": [],
+          "other": {}
+        }
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": true,
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "claude-3-5-haiku-latest"
+            },
+            "parameters": {
+              "reasoning": "off",
+              "stop_words": [],
+              "other": {}
+            }
+          }
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "osc8"
+          }
+        },
+        "crate_readme": {
+          "source": "mcp.bookworm",
+          "enable": true
+        },
+        "crate_resource": {
+          "source": "mcp.bookworm",
+          "enable": true
+        },
+        "crate_versions": {
+          "source": "mcp.bookworm",
+          "enable": true
+        },
+        "crate_search_items": {
+          "source": "mcp.bookworm",
+          "enable": true
+        },
+        "crates_search": {
+          "source": "mcp.bookworm",
+          "enable": true
+        },
+        "web_search": {
+          "source": "mcp.kagi.kagi_search_fetch",
+          "enable": true
+        },
+        "web_summarize_content": {
+          "source": "mcp.kagi.kagi_summarizer",
+          "enable": true
+        },
+        "cargo_check": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Run `cargo check` for the given package, validating if the code compiles.",
+          "parameters": {
+            "package": {
+              "type": "string",
+              "required": false,
+              "description": "Package to run check for, if unspecified, all workspace packages will be checked.",
+              "enum": []
+            }
+          },
+          "run": "unattended",
+          "style": {
+            "inline_results": "off",
+            "results_file_link": "full"
+          }
+        },
+        "cargo_expand": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Expand the auto-generated Rust code for the given item.",
+          "parameters": {
+            "package": {
+              "type": "string",
+              "required": false,
+              "description": "Package to find the item in, required if working with a workspace.",
+              "enum": []
+            },
+            "item": {
+              "type": "string",
+              "required": true,
+              "description": "Local path to module or other named item to expand, e.g. os::unix::ffi",
+              "enum": []
+            }
+          },
+          "run": "unattended",
+          "style": {
+            "inline_results": "off",
+            "results_file_link": "full"
+          }
+        },
+        "cargo_test": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Execute all unit and integration tests and build examples of the project.",
+          "parameters": {
+            "package": {
+              "type": "string",
+              "required": false,
+              "description": "Package to run tests for, if unspecified, all workspace packages will be tested.",
+              "enum": []
+            },
+            "testname": {
+              "type": "string",
+              "required": false,
+              "description": "If specified, only run tests containing this string in their names.",
+              "enum": []
+            }
+          },
+          "run": "unattended",
+          "style": {
+            "inline_results": "off",
+            "results_file_link": "full"
+          }
+        },
+        "fs_create_file": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Create a new file in the project's local filesystem.\n",
+          "parameters": {
+            "path": {
+              "type": "string",
+              "required": true,
+              "description": "The path to the file to create. The path must be relative to the project's root.\n",
+              "enum": []
+            },
+            "content": {
+              "type": "string",
+              "required": false,
+              "description": "The content of the file to create. If not specified, the file will be empty.\n",
+              "enum": []
+            }
+          }
+        },
+        "fs_delete_file": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Delete a file in the project's local filesystem.\n\nThe file must exist, be a regular file, and have no uncommitted changes.\n",
+          "parameters": {
+            "path": {
+              "type": "string",
+              "required": true,
+              "description": "The path to the file to delete. The path must be relative to the project's root.\n",
+              "enum": []
+            }
+          }
+        },
+        "fs_grep_files": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Grep files in the project's local filesystem.\n\nIf misused, this tool can return *A LOT* of matches, making it difficult to\nparse the results. It is recommended to use search patterns that are as specific\nas possible to the content you are looking for.\n\nIf the number of results exceeds 100, the `context` option is disabled, and 50\nmatches are returned without context. You can re-run the tool with a more\nspecific pattern or limited to specific paths to narrow down the results with\ncontext.\n",
+          "parameters": {
+            "pattern": {
+              "type": "string",
+              "required": true,
+              "description": "Regular expression to filter the results by.\n",
+              "enum": []
+            },
+            "context": {
+              "type": "integer",
+              "default": 0,
+              "required": false,
+              "description": "Number of lines of context to include before and after the matching lines.\n",
+              "enum": []
+            },
+            "paths": {
+              "type": "array",
+              "required": false,
+              "description": "Optional list of files or directories to search.\n\nIf unspecified, all files in the project will be returned.\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            }
+          },
+          "run": "unattended",
+          "style": {
+            "inline_results": "off",
+            "results_file_link": "full"
+          }
+        },
+        "fs_grep_user_docs": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Grep the project's user documentation.",
+          "parameters": {
+            "pattern": {
+              "type": "string",
+              "required": true,
+              "description": "Regular expression to filter the results by.\n",
+              "enum": []
+            },
+            "return_entire_file": {
+              "type": "boolean",
+              "default": false,
+              "required": false,
+              "description": "Whether to return the entire file contents.\n\nIf enabled, the tool will return the entire file contents of any files matching\nthe pattern. If disabled (the default), only the matching lines and 5 contextual\nlines above and below the matching lines will be returned.\n",
+              "enum": []
+            }
+          },
+          "run": "unattended",
+          "style": {
+            "inline_results": "off",
+            "results_file_link": "full"
+          }
+        },
+        "fs_list_files": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "List files in the project's local filesystem.",
+          "parameters": {
+            "prefixes": {
+              "type": "array",
+              "required": false,
+              "description": "Optional list of path prefixes to filter the results by.\n\nIf unspecified, all files in the project will be returned.\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            },
+            "extensions": {
+              "type": "array",
+              "required": false,
+              "description": "Optional list of file extensions to filter the results by.\n\nIf unspecified, all extensions will be returned.\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            }
+          },
+          "run": "unattended",
+          "style": {
+            "inline_results": "off",
+            "results_file_link": "full"
+          }
+        },
+        "fs_modify_file": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Modify one or more files in the project's local filesystem.\n\nThe files must exist, be a regular file, and have no uncommitted changes.\n",
+          "parameters": {
+            "path": {
+              "type": "string",
+              "required": true,
+              "description": "The path to the file to delete. The path must be relative to the project's root.\n\nThe path may contain glob patterns, e.g. `src/**/*.rs`.\n",
+              "enum": []
+            },
+            "string_to_replace": {
+              "type": "string",
+              "required": true,
+              "description": "The string to replace in the file. The string may span multiple lines.\n",
+              "enum": []
+            },
+            "new_string": {
+              "type": "string",
+              "required": true,
+              "description": "new string to replace the `string_to_replace` with. The string may span multiple lines. If empty, the `string_to_replace` will be deleted.\n",
+              "enum": []
+            },
+            "replace_using_regex": {
+              "type": "boolean",
+              "default": false,
+              "required": true,
+              "description": "Whether to treat `string_to_replace` as a regular expression.\n\nIf `true`, `string_to_replace` is treated as a regular expression and the `new_string` is treated as a replacement string, which may contain capture groups.\n\nIf `false`, `string_to_replace` is treated as a literal string and the `new_string` is treated as a literal string.\n\nWhen `true`, replaces all non-overlapping matches in text with the replacement provided.\n\nAll instances of `$name` in the replacement string is replaced with the corresponding capture group name.\n\n`name` may be an integer corresponding to the index of the capture group (counted by order of opening parenthesis where `0` is the entire match) or it can be a name (consisting of letters, digits or underscores) corresponding to a named capture group (e.g. `(?<name>exp)`).\n\nIf `name` isn’t a valid capture group (whether the name doesn’t exist or isn’t a valid index), then it is replaced with the empty string.\n\nThe longest possible name is used. e.g., `$1a` looks up the capture group named `1a` and not the capture group at index `1`. To exert more precise control over the name, use braces, e.g., `${1}a`.\n\nTo write a literal `$` use `$$`.\n",
+              "enum": []
+            }
+          }
+        },
+        "fs_read_file": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Read the contents of a file in the project's local filesystem.\n\nYou can use `fs_grep_files` to search for specific patterns in the file\ncontents, before reading the entire contents of a specific file using this tool.\n",
+          "parameters": {
+            "path": {
+              "type": "string",
+              "required": true,
+              "description": "The path to the file to read.\n",
+              "enum": []
+            }
+          },
+          "run": "unattended",
+          "style": {
+            "inline_results": "off",
+            "results_file_link": "full"
+          }
+        },
+        "git_commit": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Commit the staged changes to the local git repository using the provided\nmessage.\n",
+          "parameters": {
+            "message": {
+              "type": "string",
+              "required": true,
+              "description": "The commit message to use. Can be multiline.\n",
+              "enum": []
+            }
+          },
+          "run": "unattended",
+          "style": {
+            "inline_results": "full",
+            "results_file_link": "full"
+          }
+        },
+        "github_code_search": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Find code matching a query in any GitHub repository.\n\nThis tool returns a list of matched files, to fetch the actual code of a\nfile, use the `github_read_file` tool.\n",
+          "parameters": {
+            "repository": {
+              "type": "string",
+              "required": false,
+              "description": "Repository to search for code.\n\nIf unspecified, it defaults to the current project's GitHub repository.\n",
+              "enum": []
+            },
+            "query": {
+              "type": "string",
+              "required": true,
+              "description": "Search query to find code.\n\nGitHub code-search supports:\n\n- Bare terms (`http-push`) and quoted phrases (`\"sparse index\"`)\n- Boolean ops: implicit AND, `OR`, `NOT`, parentheses\n- Qualifiers: `language:rust`, `path:/src/**/*.rs`, `symbol:MyFunc`,\n  `in:file`, `in:path`, `filename:Cargo.toml`, `extension:rs`,\n  `size:>10k`\n- Regex – wrap in `/.../` (`/^impl.*Display/`); escape quotes/backslashes (`\\\"`, `\\\\`)\n- You must include at least one term when using qualifiers (e.g. `helper language:go`)\n- You can't use the following wildcard characters as part of your\n  search query: . , : ; / \\ ` ' \" = * ! ? # $ & + ^ | ~ < > ( ) { } [\n  ] @. The search will simply ignore these symbols.\n\nExample: `json in:file filename:package.json NOT path:tests/\n",
+              "enum": []
+            }
+          }
+        },
+        "github_create_issue_bug": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Track a new bug in the project's GitHub repository.\n\n- MOST IMPORTANTLY: Avoid fluff, and focus on the issue at hand. Do not add more\n  text than is necessary to explain the issue.\n\n- Use markdown to format text.\n\n- Explain the motivation for creating the issue. You can include a comparison of\n  the current behavior with the expected behavior in order to illustrate the\n  impact of the issue.\n\n- Use the body to explain what and why vs. how.\n\n- Wrap the body at 72 characters.\n\n- Use backticks (``) to format code or crate references.\n\n- Add optional references to related issues or PRs in the body.\n\n- Link to relevant code, documentation, or other resources in the body, using\n  proper Github links.\n\n- Use a narrative style to describe the issue in one or more paragraphs, avoid\n  using lists, unless they are necessary to convey details about the issue.\n",
+          "parameters": {
+            "title": {
+              "type": "string",
+              "required": true,
+              "description": "The title of the bug to track.\n\nShould be a single line, not include any markdown except for backticks (`) where\napplicable. Keep the title short and descriptive.\n",
+              "enum": []
+            },
+            "description": {
+              "type": "string",
+              "required": true,
+              "description": "A clear and concise description of what the issue is about.",
+              "enum": []
+            },
+            "expected_behavior": {
+              "type": "string",
+              "required": true,
+              "description": "A description of the expected behavior.",
+              "enum": []
+            },
+            "actual_behavior": {
+              "type": "string",
+              "required": true,
+              "description": "A description of the actual behavior.",
+              "enum": []
+            },
+            "complexity": {
+              "type": "string",
+              "required": true,
+              "description": "Complexity of the issue.\n\nThis is used to estimate the effort required to fix the issue.\n",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "reproduce": {
+              "type": "string",
+              "required": false,
+              "description": "Optional notes on how to reproduce the issue.\n\nThis is only needed if the combination of `description`, `expected_behavior`,\nand `actual_behavior` is not sufficient to explain the issue.\n",
+              "enum": []
+            },
+            "proposed_solution": {
+              "type": "string",
+              "required": false,
+              "description": "Optional proposed solution to the issue.\n\nThis should be a high-level, SHORT description of the solution you would\npropose. It should be brief, not go into too much detail, and IF code is added,\nit should be limited in size, and optionally be pseudo-code to avoid making the\nsolution obsolete if the code is later changed.\n",
+              "enum": []
+            },
+            "tasks": {
+              "type": "array",
+              "required": false,
+              "description": "Optional tasks in the order they need to be done in to resolve the bug. Include\nlinks to specific lines of code where the task should happen at.\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            },
+            "resource_links": {
+              "type": "array",
+              "required": false,
+              "description": "Optional list of resources relevant to the issue.\n\nThe links should only contain the path to the resource, not the full URL.\n\nThe following resource links are supported:\n\n- issue: issues/{issue number}\n- pull: pull/{pull request number}\n- commit: commit/{commit hash}\n- file: blob/{commit hash}/{file path}\n\n  relevant files for this issue. This will help people navigate the project and\n  offer some clues of where to start.\n\n- lines: blob/{commit hash}/{file path}#L{start line}-L{end line}\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            },
+            "labels": {
+              "type": "array",
+              "required": false,
+              "description": "Additional labels to add to the issue.\n\n- The issue will always be assigned the `bug` label.\n- If unspecified, no additional labels will be added.\n- Only labels that exist on the project can be added, non-existing labels will\n  result in an error with a list of valid labels, so you can retry again.\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            },
+            "assignees": {
+              "type": "array",
+              "required": false,
+              "description": "Assignees to add to the issue.\n\n- You should only add assignees if explicitly requested by the user.\n- If unspecified, no assignees will be added.\n- Only collaborators on the project can be added, non-existing assignees will\n  result in an error with a list of valid assignees, so you can retry again.\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            }
+          }
+        },
+        "github_create_issue_enhancement": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "File a new enhancement request in the project's GitHub repository.\n\n- MOST IMPORTANTLY: Avoid fluff, and focus on the enhancement at hand. Do not\n  add more text than is necessary to explain the enhancement.\n\n- Use markdown to format text.\n\n- Explain the motivation for creating the issue. You can include a comparison of\n  the current behavior with the expected behavior in order to illustrate the\n  impact of the request.\n\n- Use the body to explain what and why vs. how.\n\n- Wrap the body at 72 characters.\n\n- Use backticks (``) to format code or crate references.\n\n- Add optional references to related issues or PRs in the body.\n\n- Link to relevant code, documentation, or other resources in the body, using\n  proper Github links.\n\n- Use a narrative style to describe the issue in one or more paragraphs, avoid\n  using lists, unless they are necessary to convey details about the issue.\n",
+          "parameters": {
+            "title": {
+              "type": "string",
+              "required": true,
+              "description": "The title of the enhancement to track.\n\nShould be a single line, not include any markdown except for backticks (`) where\napplicable. Keep the title short and descriptive.\n",
+              "enum": []
+            },
+            "description": {
+              "type": "string",
+              "required": true,
+              "description": "A clear and concise description of what the enhancement request is about.\n",
+              "enum": []
+            },
+            "context": {
+              "type": "string",
+              "required": true,
+              "description": "What are you trying to do and how would you want to do it differently? Is it\nsomething you currently you cannot do? Is this related to an issue/problem?\n",
+              "enum": []
+            },
+            "complexity": {
+              "type": "string",
+              "required": true,
+              "description": "Complexity of the enhancement request.\n\nThis is used to estimate the effort required to implement the enhancement.\n",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "alternatives": {
+              "type": "string",
+              "required": false,
+              "description": "Can you achieve the same result doing it in an alternative way? Is the\nalternative considerable?\n",
+              "enum": []
+            },
+            "proposed_implementation": {
+              "type": "string",
+              "required": false,
+              "description": "Optional proposed implementation for the enhancement.\n\nThis should be a high-level, SHORT description of the implementation you would\npropose. It should be brief, not go into too much detail, and IF code is added,\nit should be limited in size, and optionally be pseudo-code to avoid making the\nimplementation obsolete if the code is later changed.\n",
+              "enum": []
+            },
+            "tasks": {
+              "type": "array",
+              "required": false,
+              "description": "Optional tasks in the order they need to be done in to implement the\nenhancement. Include links to specific lines of code where the task should\nhappen at.\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            },
+            "resource_links": {
+              "type": "array",
+              "required": false,
+              "description": "Optional list of resources relevant to the issue.\n\nThe links should only contain the path to the resource, not the full URL.\n\nThe following resource links are supported:\n\n- issue: issues/{issue number}\n\n  These could be issues related to the current enhancement request, either bugs\n  or other enhancement requests. This can also include issues with similar\n  feature requests.\n\n- pull: pull/{pull request number}\n\n  Any pull requests related to the current enhancement request.\n\n- commit: commit/{commit hash}\n- file: blob/{commit hash}/{file path}\n\n  relevant files for this issue. This will help people navigate the project and\n  offer some clues of where to start.\n\n- lines: blob/{commit hash}/{file path}#L{start line}-L{end line}\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            },
+            "labels": {
+              "type": "array",
+              "required": false,
+              "description": "Additional labels to add to the issue.\n\n- The issue will always be assigned the `enhancement` label.\n- If unspecified, no additional labels will be added.\n- Only labels that exist on the project can be added, non-existing labels will\n  result in an error with a list of valid labels, so you can retry again.\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            },
+            "assignees": {
+              "type": "array",
+              "required": false,
+              "description": "Assignees to add to the issue.\n\n- You should only add assignees if explicitly requested by the user.\n- If unspecified, no assignees will be added.\n- Only collaborators on the project can be added, non-existing assignees will\n  result in an error with a list of valid assignees, so you can retry again.\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            }
+          }
+        },
+        "github_issues": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Find one or more issues in the project's GitHub repository.",
+          "parameters": {
+            "number": {
+              "type": "integer",
+              "required": false,
+              "description": "Issue number to get information about.\n\nIf unspecified, a list of all issues will be returned, without the\nissue contents. You can re-run the tool with the correct issue\nnumber to get more details about an issue.\n",
+              "enum": []
+            }
+          },
+          "run": "unattended",
+          "style": {
+            "inline_results": "off",
+            "results_file_link": "full"
+          }
+        },
+        "github_pulls": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Find one or more pull requests in the project's GitHub repository.",
+          "parameters": {
+            "number": {
+              "type": "integer",
+              "required": false,
+              "description": "Pull request number to get information about.\n\nIf unspecified, a list of all pull requests will be returned, without the\npull request contents. You can re-run the tool with the correct pull request\nnumber to get more details about a pull request.\n",
+              "enum": []
+            },
+            "state": {
+              "type": "string",
+              "required": false,
+              "description": "Filter pull requests by their state.\n\nIf unspecified, all pull requests will be returned.\n",
+              "enum": [
+                "open",
+                "closed"
+              ]
+            },
+            "file_diffs": {
+              "type": "array",
+              "required": false,
+              "description": "List of changed file paths to get the diff for.\n\nIf unspecified, only the list of changed files will be returned, but not the\nactual diff. You can re-run the tool with the correct file path to get the\ndiff.\n",
+              "enum": [],
+              "items": {
+                "type": "string",
+                "default": null,
+                "required": false,
+                "description": null,
+                "enum": [],
+                "items": null
+              }
+            }
+          },
+          "run": "unattended",
+          "style": {
+            "inline_results": "off",
+            "results_file_link": "full"
+          }
+        },
+        "github_read_file": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Fetch the contents of one or more files\n",
+          "parameters": {
+            "repository": {
+              "type": "string",
+              "required": false,
+              "description": "Repository to search for code.\n\nIf unspecified, it defaults to the current project's GitHub repository.\n",
+              "enum": []
+            },
+            "path": {
+              "type": "string",
+              "required": true,
+              "description": "File path to get contents of.\n",
+              "enum": []
+            }
+          }
+        },
+        "web_fetch": {
+          "source": "local",
+          "enable": true,
+          "command": "just serve-tools {{context}} {{tool}}",
+          "description": "Fetch the contents of a web page over HTTP(S).\n",
+          "parameters": {
+            "url": {
+              "type": "string",
+              "required": true,
+              "description": "The URL of the web page to fetch.\n",
+              "enum": []
+            }
+          }
+        }
+      },
+      "attachments": [
+        "file:///crates/jp_llm"
+      ]
+    },
+    "style": {
+      "code": {
+        "theme": "Monokai Extended",
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "tool_call": {
+        "show": true
+      },
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ]
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "aliases": {
+          "anthropic": {
+            "provider": "anthropic",
+            "name": "claude-sonnet-4-5"
+          },
+          "claude": {
+            "provider": "anthropic",
+            "name": "claude-sonnet-4-5"
+          },
+          "sonnet": {
+            "provider": "anthropic",
+            "name": "claude-sonnet-4-5"
+          },
+          "opus": {
+            "provider": "anthropic",
+            "name": "claude-opus-4-1"
+          },
+          "haiku": {
+            "provider": "anthropic",
+            "name": "claude-3-5-haiku-latest"
+          },
+          "openai": {
+            "provider": "openai",
+            "name": "gpt-5"
+          },
+          "chatgpt": {
+            "provider": "openai",
+            "name": "gpt-5"
+          },
+          "gpt": {
+            "provider": "openai",
+            "name": "gpt-5"
+          },
+          "gpt5": {
+            "provider": "openai",
+            "name": "gpt-5"
+          },
+          "gpt5-mini": {
+            "provider": "openai",
+            "name": "gpt-5-mini"
+          },
+          "gpt-mini": {
+            "provider": "openai",
+            "name": "gpt-5-mini"
+          },
+          "gpt5-nano": {
+            "provider": "openai",
+            "name": "gpt-5-nano"
+          },
+          "gpt-nano": {
+            "provider": "openai",
+            "name": "gpt-5-nano"
+          },
+          "o3-research": {
+            "provider": "openai",
+            "name": "o3-deep-research"
+          },
+          "o4-mini-research": {
+            "provider": "openai",
+            "name": "o4-mini-deep-research"
+          },
+          "codex": {
+            "provider": "openai",
+            "name": "gpt-5-codex"
+          },
+          "gpt-5-codex": {
+            "provider": "openai",
+            "name": "gpt-5-codex"
+          },
+          "codex-mini": {
+            "provider": "openai",
+            "name": "codex-mini-latest"
+          },
+          "google": {
+            "provider": "google",
+            "name": "gemini-2.5-pro"
+          },
+          "gemini": {
+            "provider": "google",
+            "name": "gemini-2.5-pro"
+          },
+          "gemini-pro": {
+            "provider": "google",
+            "name": "gemini-2.5-pro"
+          },
+          "gemini-flash": {
+            "provider": "google",
+            "name": "gemini-2.5-flash"
+          },
+          "gemini-lite": {
+            "provider": "google",
+            "name": "gemini-2.5-flash-lite"
+          }
+        },
+        "anthropic": {
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": [
+            "context-1m-2025-08-07",
+            "interleaved-thinking-2025-05-14",
+            "context-management-2025-06-27",
+            "structured-outputs-2025-11-13"
+          ]
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      },
+      "mcp": {
+        "github": {
+          "type": "stdio",
+          "command": "github-mcp-server",
+          "arguments": [
+            "stdio",
+            "--read-only",
+            "--toolsets",
+            "issues,pull_requests,repos"
+          ],
+          "variables": [
+            "GITHUB_PERSONAL_ACCESS_TOKEN"
+          ],
+          "checksum": {
+            "algorithm": "sha256",
+            "value": "7400a3f4b8ba04bef50b83687338560cb5a3769c83c52985c8365f8d8af17510"
+          }
+        },
+        "kagi": {
+          "type": "stdio",
+          "command": "/Users/jean/.cargo/bin/uvx",
+          "arguments": [
+            "kagimcp"
+          ],
+          "variables": [
+            "KAGI_API_KEY"
+          ],
+          "checksum": {
+            "algorithm": "sha256",
+            "value": "8ff70dc528c434469b43a1b05f752f46d8abe41c010edcbff6e5f3cc3131f2f3"
+          }
+        },
+        "bookworm": {
+          "type": "stdio",
+          "command": "/Users/jean/Projects/Personal/modelcontextprotocol/bookworm/target/release/wrm-mcp",
+          "arguments": [],
+          "variables": [],
+          "checksum": {
+            "algorithm": "sha256",
+            "value": "926deec34ed4f84aa3e99cd931d98165df68125321c17014b7ee2773647e0696"
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2025-12-04 09:28:23.202081",
+    "type": "chat_request",
+    "content": "I want to refactor the current `jp_llm` implementation such that `jp_llm`\ncontains only the core `Provider` trait (and the core types such as `Event` and\n`EventAggregator` etc), and then I introduce new crates such as `jp_google` and\n`jp_anthropic` which depend on `jp_llm` and are then used in the main `jp`\nbinary.\n\nFor this to work, I don't want a root-level `Providers` enum or any other code\nthat \"glues\" different LLMs together, I want it to be dynamic, and I should be\nable to slot in a new llm provider implementation without changing large chunks\nof code.\n\nHow would you propose we do that?\n\nI am thinking of making this as flexible as possible, so that external parties\ncan hook up their own providers.\n\nTwo possible avenues I would like to explose:\n\n- WebAssembly (WASM) based: allow placing a compiled wasm file somewhere in a\n  directory which is responsible for communicating with the external LLM and\n  JP then passes data back and forth between the WASM binary and our main crate.\n\n- Interprocess Communication (IPC), potentially using JSON-RPC, to have the\n  providers be their own binaries, JP sends a \"request\" to one of those binaries\n  depending on the configured provider to use (we would have some form of\n  convention that the llm binaries are named `jp-llm-<provider-id>`), and then\n  that binary \"streams\" back the data as it gets it from the LLM. We would\n  essentially use our current `Provider` trait with the request objects and the\n  response objects, but split it out between separate binaries."
+  },
+  {
+    "timestamp": "2025-12-04 09:29:15.260417",
+    "type": "chat_response",
+    "reasoning": "**Defining the Architecture**\n\nI'm currently focused on the overarching architecture for the refactored `jp_llm` library. The primary goal is to establish a clear trait that defines the core functionality, allowing for flexible integration of different language model providers. I'm exploring the best approach to encapsulate provider-specific details, such as Google, OpenAI, etc. I'm particularly interested in how to model the distinct features and idiosyncrasies of different providers within a common interface.\n\n\n**Considering Provider Integration**\n\nI'm now delving into the details of provider integration. My analysis is comparing two mechanisms: WASM and IPC (JSON-RPC). WASM offers portability, sandboxing, and performance, while IPC provides process isolation and language flexibility. I'm leaning toward WASM because it seems simpler to manage and offers a good balance of features. I'm focusing on the intricacies of the communication interface for WASM modules.\n\n\n**Evaluating Dynamic Provider Loading**\n\nI'm now comparing WASM and IPC (JSON-RPC) for dynamic provider loading, focusing on the finer points. My analysis suggests that WASM is portable and offers good performance, making it the superior option. I'm exploring the nuances of interfacing with WASM modules, specifically how environment variables and API keys can be passed in. The serialization overhead is something I'm actively assessing as I design the communication interface. I've noted that debugging WASM modules could be tricky.\n\n\n**Deciding on Implementation**\n\nI'm now zeroing in on the best implementation strategy. After weighing the advantages and drawbacks, I've concluded that IPC (JSON-RPC) offers significant advantages in extensibility and simplicity. While WASM has appeal, the need for sandboxing and complex serialization make IPC a more straightforward solution. My focus is now on designing the communication protocol and handling process management within the `jp` binary.\n\n\n**Focusing Implementation Details**\n\nI'm now fully immersed in the IPC/JSON-RPC design. While the core ideas are settled, I'm working out the precise details of how processes are managed and how the communication protocol will work. My current priority is to ensure smooth error handling and efficient data serialization in this inter-process setup. I've begun to design the API and the data structures necessary to implement the core trait via JSON-RPC calls.\n\n\n**Designing the Communication Protocol**\n\nI'm now fully immersed in the details of the JSON-RPC implementation, focusing on the interface between the core `jp_llm` library and the language model providers. My focus has shifted toward building a robust and efficient communication protocol, including data serialization and error handling. I'm prioritizing flexibility and clear structure to accommodate the evolving needs of the system.\n\n\n**Defining Message Handling**\n\nI'm now deep in the design of the JSON-RPC message handling. This is crucial for seamless inter-process communication. I'm focused on defining the exact structure of requests and responses to ensure robust error handling and effective data transmission. The precise message formats, along with considerations for streaming responses, are taking center stage.\n\nI've also begun to explore the best way to handle asynchronous streams.\n\n\n**Designing the Protocol Flow**\n\nI'm now fully immersed in the details of the JSON-RPC implementation, focusing on the communication flow. My top priority is to design the request/response cycle, particularly for streaming. I'm focusing on ensuring robust error handling and effective data transmission in this inter-process setup. I am considering best practices for implementing async streams to handle all use cases.\n\n\n**Designing the Communication Protocol**\n\nI'm deep in the implementation details, focusing on the interface between the core `jp_llm` library and the provider plugins. My focus has shifted toward building a robust and efficient communication protocol, including data serialization and error handling. I'm prioritizing flexibility and clear structure to accommodate the evolving needs of the system.\n\n\n**Designing the Protocol Flow**\n\nI'm deep in the implementation details, focusing on the interface between the core `jp_llm` library and the language model providers. My focus has shifted toward building a robust and efficient communication protocol, including data serialization and error handling. I'm prioritizing flexibility and clear structure to accommodate the evolving needs of the system.",
+    "metadata": {
+      "google_thought_signature": "Q2lVQmNzamFmTlJBMFhPeGkvVjhKN01Ed1ptMkFycEtzdklMRU5hYkEvbUZNYjJGWng3VENtb0Jjc2phZlBhcFRjVDkrR3lyT3JBaEZWTndKdHFHTm1kY0ptMmdmQ2tGWElBRDdDcE9EanZUT2psK3dxWXp6dGxGZGJlRTJXcVcwUXJKdVdYQWNNRzRPcWhyZUhQRnNJMGJmckJLTGlmY1NTalRwMlkyNnFOcFowb09zSUlUb012dnE2MjFjVkFucXA3MENtMEJjc2phZk42ZnRBV0dUMDdDVHNReXUrMXlpVGw0N3AwZWk2NWFGdVFWT1ErcUpoL1NsZnpZMlhKajZPU3kyNDdDKzc2NWxZNmFmaUtoaG5kczZLZEtVZVUvWTZFQlNwZ0pkMXpVK3NUcUJtM3ZPd2dFRXVidmNhOWpOdVFKcmpGZG5YcUVxYmlESTZNc1Rnd05DcHNCQVhMSTJueSs2aHNhYnoyY3ZVSDE2MW05L1dHeFdOOHFrWjdycjNhMmR6cmwwY040eC9KazJIYVNpY2FFVmRBY1BTeFhDdXp6Mk5pNlRIa2tLdDJ2d3VxQzlqS0FrdXY5U1ZJb2lnMStDa2ZOTzBRVXFDQ056MS91ZS9BSWpCUi9WVWVrTVhlbDQxNFdkblhPMDAwbGdZaGp3aDhEZFM2VmVIWWczcDVNSG54VnFORHlwSVIyL0UwalpnODNlZTkyMHROellOd3pOZXdtU2V3S2RBRnl5TnA4YnN3cC93VS9NRG82NjZWSUcyaDk2VWlJZk9McmM3MEZSaTFYckZ1SDJ4NTdYWm1yLzNWc2lTZEF6N0tYZW8xN05zblV6RGxKcXVoaks1bWJWVmw1a2hjZmlxMCtCU1dnOGtaNVVud1ltc3IyZEV0K0xMc0FRSzVhbU5mVEVUd0JnN3NrZ2ovcFR4aGtDS1JySWpFZ0NuUUJjc2phZkR4R3ArUWI2WnN6NWY0NTM5TDFDQWFrbExpbXZuTm9PNDR5eHVMWjl1SnRkNnpFbXhJWS9QdTQ0ZWVGTTAyd0ZuT3pmYzFsSk9wNWhYa3FuWEM1RCtLM3JtZDhsNDhFc0dtN0pWcWlSNWhWdHREd2s5ampBZDVGbTBySlV1cC8reTJLQTVtNFR6VlcySlkyRmFsMjVBcCtBWExJMm54WDE2d3ZiemJkZndvemlNUlVDYi9MV090Nk9GOFE4aXZGN0FrbDFWRms4NlVqcGVRSW0xQmNGVEx2L1dmZlFiZCtySXZxcVdFVkMyUFJFOU9nRlVZT2I1d2RXbkRadTZUL01RZEY0RTQrbUZJQVlHVTdMNS84aTl0SVNTVG1aNHd6Y0RFMTZGRVBnV25KazV2M3ZESCtTcWQ1Vk80a3lXNXBDcG9CQVhMSTJueU1XSmlDUWFqNUZYY1NKSGtVOUZxWWNQenQ3eWdFY0N5VW5YTHRlRWY2SGw0T1FIUWZycjhFckc2OC9zUUhGUDgvL3lQOFZDNDRucEMwL2IzQmY5bjJOcXBxOVRhMENReVVkSWtYM3JOV2tMVWV0VkVhZ3YvT0UyUjdIM3k1ZERKTlZuSHlaMGI0KzFBbVFWdTNUVVZWcWVHVHZ2bmZiOXoyaFg2dDRjc2FjVGI5U0puSVlPNDloeFhkUHJ1Z0paMCthUzVXNlFxQkFRRnl5TnA4U2o5Q2dZbytaNEd3SjU2K2RScllhYnRsYTBQSWVteEZZVUtIQTRvSGlOVWtSWkdnV1IyWHcxTVQ2SE8rNVZoRER6ZU4vbU02ZW81S211ZE9SMlRLaTd4cEpxVlUvOWlsWGlITjZnV3NuUFVHMTNMREVrWTN6UUVSNmVCQys3azFzZFZOcEdSS1hUenl4TnlZRDZ2ZVpUUm1NczN6NFdiWWl2OGhCQXFNQVFGeXlOcDhhVGlDZ0hRWFptT0x6dlBMeVdtV3d3YUZvUFRiUFQ3SnBDRkp2bUNZaWx4N1J5eXVXd2J3ZmFwTy8yV2NXUFFPemt4Rk1Ic0lPOTU0UStmNTlNVkwyekxqOWQwMmJuNmQySHIwTS9FcVNPNjBJTGtmOFh4elhPQ0tKU2wwSWQ4WGxRSk1FbEIwYkxLdUx4b25iV2pJaFZqUEJkdFhtVGFsZFZDRVBqakxjNVBTOVV5L1MvS0pDb01CQVhMSTJueldiNUQwTFhndncwVVBZS3BYNGdFaGhsKzN5T1ZCdkNOWmRGaTNpUHVWYXg3MmsvRnBIa2NNditSc2cyenVVcksvRy91dEV4cExaa2Y0V0tSL1dGWHRtTmRoQk5QUDdDZW5rd2RNZEFwQkV0L2VQM2xRN3NRZTV3Z044R1BSN0FBSndVOUNIa0NsRDc4NTh1TGVNMVJvS3JjTkU3SnZ1S3IvZWhmY1ZYc0tnQUVCY3NqYWZENXJQMDd2bWFvZmJVak1YNnBqOFVVa01WUkdvSFBKTWs0bFhydVNuUnZsLzQzbVZ1M0ZrWnZrWlV3eU9Ea3pudmJmOFE3cERiT3MwSDBrYVVpQU15WEZQNTlMeS8rMlRGQ1U1R3dIUXNIbi95cFdPbGlsWElMNFJkRlg5bVJ5UnNwOTB0cHVseEk4WHBDbE1nUjRDUVpFN3ZiQXFyT09uNld3UWdxWUFRRnl5TnA4OGpDaitHcWNaeXZ0b3plTG85VWh6VDBDeHpwQ1dVUU5ua1ZuT1dSOW5VbGZXa3RxOXBuZFBsdWZVcVlkZDdhaHlJUDB2RGx5TWdYdmlUNmRodUZucWNaVXU5blEzVWN3ZVB4d0FpWWJzOGs5ZktRdy9XNHFtVVNuK2hSVndFL1RGZVNqTjYwRGJZL0xNOTNwNjlFZ2dmM1ZpUDB3UkZpSkFFUXJVeWVhUm1jWG5RSmQyWGtVYStPT3laZU0xY2ZxS0ZoM0NwVUJBWExJMm53bjA4NTFXbW9sTm1ITFh3Z1RCbHh3dzM1RkhQVlAyUTZJcjVEbXc3c2JhQjlDQWJrYTc1TE5sQmJqVXFVdlcraHBMUTg3ODBrc1J0NnE3Z1laeE9jR0ZRMzZqZ0lNdUFZZHRadU9WeDFJbWl3emkzRmo4SlNTQkZiNUpDa0t6RWxVL2Z1VWhEOXQxVERoY1BQTC9MMUptQXVzMXEwajFSRjZvTHpMK052djc0WjlzY2JrV1lmMjcvQUpWN3FEbGQ0S2V3Rnl5TnA4TG1TbEpzcjl6Mk5EbWdSSFN2RjFZcFZZeDVKWFVNSStsWEdUMlh0aEc5aGhoVTVEQTNzZ2dzUU9iVlVZNFh1TElTcngrRkgxcGl4azl6ZEkwcDhDQnp3NFdVaTlyalhLUW10dlZ2cHVDcEM2N3FkN2t0YkozamJJRWc0SDhzS2dRbmZoUi9ET1JEUVFhMEhtd1ZxZXg4a2UvOStBM1FxdkFRRnl5TnA4NXMxcTdmVkRXc1NjdGp0NUk3SW1RNXJSNXNrKy9BREg1TWpiZkZoa0lIbHNFT0xQcjRFdVh4amZlWjQ1c1daNDcrUFJ0Z3NBdFFhVUM4NVRWbjI3MllhcUNodGc1ZStGOHFtSWJDYTJTdFZmU0dqUmRrYTYyL0M2UUdrT2xOZ3FIN2VVeFdnRzIzb3IzZUhDb2M5dStOOHhqNXZnWjFGeXdHd0I4TFJJbTJleHdpMTY3TGZ4OVNlME9DR01sVWoxZ2pTVW50NTh6WjhEdjdYaVlCL0Fwc1VlU29MRGFGcndpNWNLalFFQmNzamFmRFM2cElKZ25QLzBvaEVSUnhkeHlpNDE1RG91eDdmSXQyK0VMWWh2VjhaVWxLVnhPRE95NzRHdk5sYWVmWS9ZeXR5Nmd1S2R3OS8yRnJXZWJSbnExajZnbVdiNHZxU1hmRTRtNmZjUnNjdGdPU0tYc2ZiRGhaNjUyNElOTklUZ1QwSTczbFhYTUk2Q3czWW5uTFVyUXJtUFBaZlRWQzBOWldkeDVCY2ozUVphM3ppcGdEdis2OGdLb2dFQmNzamFmQ1IxZUx0bVZjbTZRMjhkak4zS0ZjaFU5aVNUNVVRcXdpR3NUQjMxUitsbGtBOFNNNkw3NmpQSjJ6aEZDaTI5MzFndVljbWdQdnppdVVRNFZkQzc5ejE2WGlIUW5Uazl1ckw1a0FQaVZzQVpsamNxdmVEMGhub2JhdUpQUmVRK0M4R1RpZU9yU3pHaDA2SmtOVHQzSkt0TnhhNjB4UWZOeFQ0U2FEb09YT1BmdkdxN3g3bUN0cEMwcjFFK3pUNmFoSjlhRkpOVWRSaHI0RDV5bVBrS21BRUJjc2phZkl1NlZ2VkYzeCtGU2VEYlppcms1bE5aa1hjSXhoMUY3MGtxMWhVZnl2WW0vVWFRbVN0MzBZYjEvNERrNmlUOWRHLzVnN0VVM2xtZ1dSUGNGenB1NURXS0lmUk80SXFMRVY3Sld3VUprTkZYdjlzYm5pcTJHYnhqVnpVU0c0TkZKd2Nha1FadERwTExWWWVYWjIyWU5nR2s3THlubk05RmR0N3JtUHNTSFM0M1hLWTJzWm1oVjNpWjVZNVJ3MEJMeXF0dndRcWhBUUZ5eU5wOHphMlRsdWtEVVp4N2dWNElrbFRYNkwwZzJ3K1JWQlpKVEZ1b2E2d2VVb2laZjJYdHB6cktGMG5JYnUzR1lxKzYyVVVMODFRb0ExVnFab01kU1NSUzJDR2U5OUZJaWNrUjdPQjhnTFpJRUtMUVhFTlg5OUg5MWdNYVl5UzBab3A2V0RsWTg5OEFQQ0JYWExHOHU4V1BhdHY5bndlcndiV2F1Q1Q4MDBtVWVqL01xTFZHbVFTeHFYZFBnMlZFdXZaM2x0WkljZDhVZFJkNENHSHpDbzRCQVhMSTJud0RZU2ZoOXgwN2U0YlhkSHU5UmZYTHdiWXRLOGU4dnozclRBVlhtQkhiWVpLbkRUK01CTHFMdlgxQmpPY2xoMXQzcHU0UE92WVFYMWV0SDJFamdmQ0NjSWJ1OTM0M0JXc3VDOEc2eTJGQ3Y5N3B5dzcwVUZ3QXdLbmNEUlhoUkwzaXFJY3BiK2NIUGZwbDJqOXZDNmNZWWt5cG5tSTd2QmRHYnRJVzlUNEdPVXJuelJmR1JSYmtBUXFBQVFGeXlOcDh6N1RmLzArYk9tcVJmeTVNdnFxQWJNVlV3Q0dqeVRWWDQ3M2NtMjNtVTlGSlI1KzNHNkdTSGJLNzlQTlZIbTNYc253S0x4cFllM2V4QmthcDZUdENGd0o3c00wR3dCRVl3OCsvTXg1MHV4djA1bE1zNkpDWkFJbHV2d3JtYUNvd0pwU3l2OVdNYVpuU3gvLzdwcUFvTXRBT3RpZTRETFlPYm1IcUNvQUJBWExJMm54QnZ4d2JWYUZ5ZTBiOWlIK1Z5dE9va0QvRzduOEUvNEtFaVVDWGZzNjJRV1BsYXc5R1dDZjBHRSt1TVZub0pTSk5xWlZhQk10UTdPS2pweXJ5WjI0eVdzWVlya0MzQ1MzMWdvTG9yVnNRY09wV2J0STFlUFVEZUVJKzFreGlSZXlmRVJJMVorRkFIWndYTXFuTTNyRlhPSnBsdnh3SlZLZXE0M1lLcWdFQmNzamFmT3U2ZFhCTlhnZFFWS2tUR3M5TmxzOVRLb0d5OHVkVDZQSVFJSTQrQ0VCVC9RU2NpbzJ1YWkxSGQwWXNJRGNHb3czbmZHRVg2Zm12RXB4THIzU2hPV0lzVmVEclIwS0JXM1BsNGEwbTRkQVhESnVFbS9XSUNDcTBzWjhFSFkwb3VldDNLZ21uclplRzVnYkpaV0Q1U253MVJKaWd0dFZjRzVJZWFUZmhhNnhhNGE5SS9PeldIeDVHU0xUUXIwQS9FTmlVZm1XcmZTbkM5dkYyQ1BGSkdjeWd6eDZFMWdxYUFRRnl5TnA4Wk9OcnJUcG1Fa2pEekwyVWRlZ0xHeXlnb0ZZd1hYY3VQZUNHU1dvNW5Fb0tZUlNXVDZaUjB0TGVYRnN0ZjF6NWpJNlF2cWRDWEJnK1JsVEhtdXJZNnJ1MWFSSmlFanl6bzlWYmRBOUlTSlhXN3Rxb2ZkSm9kMUlaOWRYSDNGVVRHdEc5KzRyRUh2bElOZjJtSW5VR3VYOS9La25IMmVhdnJtTktxdTlvVml0RGdKRmJUeXJnZlhNZlZqUUZiKzA4MlFsTi9PTUttd0VCY3NqYWZJMG0rcjJMK3J6SlA0UjNKSHFkbGUxck1YekFOelpkdzA2TE1LNFhTNkVldmRqZVE2LytLMzZXZGZFTXhmUy9hTTlKQWIyZWk4UE5tYXdxUVdBNDlPZkpLWE1Nb0RNcnlNRVllRlVDVklGMXgxT3BPd1BoN2hhaUhYeXB4ZUpHeVN0UWlhckVtL1Y4MUpFbklSMnVzdW1kMFV1REhTVERzaGpzNkxqOW5uV3hYTVNKVERPb3R0ZWFjTEZzN1dzelA2T21JbEhrQ0FxVEFRRnl5TnA4STBqY1pPZFZnRTdKV0gvb0pwU0tPcC9QejNaKzRGRDQyRHZISGZnU3dSaFNEMjN6c1M5S1dCRE1sTjgxWCt6MFVaQTF5LzNLT2hOWVRyTUNKVmFkbWoyWlR1Nm8zTWVMenZvbEdubGtIbjRlM2ozNFkxdnZSTHhyZXNTeThIWkNTNk9nUE5QRmJBY0dydnh6QTU5MUc3S1UzZU1nNngvaHYyL3U4UHljZlNHZDVNKzBjODl2ekZGU0sxZ2I3Z3FWQVFGeXlOcDhHdlNtMlRNeXU4YUsyaUJJczQyOVRFaFp4aVNTaHczYStmWTdIMmVXbmJRdENhSTdlNmlkYUJEYXpVSUIyZ2tHbjJmbjFMUnI2VVNmek14V3RjUUhNTUg2L2cwV0UvanJXMXFRYm1wb1BKWXhiY09MNm02c1N1YlJBWWxreTJnbVBtSmRhUW9iZ0VJWUZteW5hUVN4MjhGWVRhU2sxd1cwL3k4UkhzeXRjeWxhRmxjK1dHUG5jbDNSTHY4K1Nmay9DcUlCQVhMSTJud3FnWGJpUXZZSVdabGZFemFoOS9wbVpZL2NwU2hyMzBVWXNZYk9mREpuajFWQ3RPK0VCTTlrRXRxZS9nR3drV2xibFlrRDd6a2k4SXNocmgzTzBRUTN3UVJpZksvY0M5d2xpNXJETEFIeGM4U2tSalFuMW9MczgwQjBYVno0WEk1YkhMVUorRllyT0tnZjZkOER1UjBRcG5IK3lkWENSSmc1U0RXZDN3QVQ2akh6N2NncXNZTG9CZjRoUjRQd0pRZkJBVFF0ZFJLa09zYi9xMTdXQ24wQmNzamFmSjJnMU9ZcmNXOXZnLzh5U2pRWXpkUVFERE1BdTVaelFpVmpLNnYwM3hsVDAzbFowYVdWQ0pndDNDR3ptRHlYdmI3aTYzNWdjRFhZdWh0NjZveWJ5ZjYvdHRTRTNZaHgxOUlOdmJQZUVVUVVKUFJhUERYTDQrQVN6SHFHUHlxYUZhUU5KN2pNcmhmWDIyY25yRGwyZTdjVHNqYjN4UnlEa0FxbEFRRnl5TnA4Y0RkVWdvR3Y4YjhhZ3VSd0k0SGVXMkFRRDkraStXOVBTbStKdDV3cWEwa01SdlU0OHBOVUxKVUJNTDMvL1lyMGRkaUlTRXB2cUwyU1lEZHZEY0xiVnZJV1J3a2hCZFlyYTVlT1grSDZVMlhXNmtlMzg2d1pQZHV2TUJPcmJ5NHU2UWxLa0NoRk1uWEtaQVFKQ3pDd2t1anVzYlQ5aGlSSE1aeWxlSHQxZS9EalpTUjVDbm54RTgvQ0NVYlNtSUwzbUVWL3I3MWpieGlHa3c1aUNBZnRaQXFMQVFGeXlOcDhNRER6eHAvSUI2TmZRNng4dlUzVDFqMjYrT1QzdDJmdTIybVlwNmRVb0ZCZ3B5TlAyN2dYaTNjTUNiQzBWZU91b0F3Q1ZvNkRVcFErQjRSaGJIWVFGRnB6K2pYdHpJcExweGt5bVVNY0FYa3AzRmpFbU9qemhaLzlSSVUyTFhSK0M2b0ZIcGV0T1ZmWmdpWThNZjBBOTZXZ1pHS2FMYnY2bHBaZ0ZRU0gzb0k3SXBpOVJwUUtaZ0Z5eU5wOHZKSlNPSmVMRFFpb2YxcnVCUWZFcGR2YUR6MUVCK0RwNjhaMjFQR3YvUU0wY1VlSWFVWHZlUi9IUExVV096eHBBa3ZnMmZ6ODJOSEVtZkRENVFtc3NGUzZqOTc0bHRVcGZyOVFQOGpyTmo3amQwSTIvRm1Qb25vOFJLc1FWdDljTlFwM0FYTEkybnpTRTFORUtwcjJWSTliUG9PdTNTWkQwamtjb0ZVN3hiYWZyOGQxby8wYUwyL1paUjQybjhBT2k2S0VmdXRiR3BpL3lNMThBblFoYlRzUGEyZ2xHYlREWTljTllkaWV1UTVRMnVsWVhETFFLRkp2K1hLcjFBSjhJRUtHbmVVRkI4cXplckMwdHBZM0JEZU5lVG1NT25YNElna0tuUUVCY3NqYWZKSUxjOUZLQzFqb2tlRjFKUVpBWDNWZFVMYm16eG9nVlNNWXdneDZ2QmM3b3RBVWwvMHRvTE5PaHBaQTFUbWRNMCtxVTM0RjI0ZFRjblh0cVRra2h2RDk3RW56WnBaKytxZ1l0eHhKdDI1RDNxN1hpYUl1bDkvbzlMZEV1QWpDNWwyczZRUDN3TGhhVWZVZWYrZXBRMEcyQUdjSE9sVWtTQmNwdzdnR1lNVkkxdEZrb1VIQVBuS09YNnNJWjRWeUpIT2g0MHU4ZmJTT0NwNEJBWExJMm55UTZkbjVwN0cwbzNrM00rMmdjM0NGQXdGdHpMMjJqSTBMMzV4SXFsNVJWa2RBMndCOGROSFVlRWpCN1NqYklYVXBEYkxPUkxoOTVscnNkdCtkTm9LQ2pmejVwSURsSGdKNmZUUDU0RzZ5VzBYZTJLeTBGLzNkRXNJc3QyQ24rTWxhNGE4OUV6dk1Dd2NLMWVSZDUxZGg1RUZUZTBSVUZnajI0Vlp2bHBMQ0l6VmR2d254QThxUmNMWStQYk9VZENMRFROT0FWMWc4WmRJS3RBRUJjc2phZkxkdlVLdHZNaHlYRnpkeEVFMmF2c25QTTNvVUkvblY4WVJLaCtvbjRWUFlXejRCTEhLdE1RR2NLbnVkbmF6YVRzZG5tZy80TGhSN3ZtRE5IM1pEMERUYVhtbis5QXZPNWxuTUVBbGtBdkt6Q0ozVUNGZW5KcFYxM2NTalRUZDc0Nmc5bHlSWXljeHJaakZDeXgrdXE2ampVQy94Vk9kVDdQUXBWbFNpSWxKTzZYV3lsTEY1Snh3anZPRzc3d3Q5d1g1OXJWdnhoMHc4RHVUblUvdUFoVzNxMURXdUhHNGVSYmdyYzJBZWgyNEtuUUVCY3NqYWZPNWpwUXdMT251ek1OUGxxdnJPbTVPSjNMWXJRaWZYcnFJTWhzQ25DWVJSeHo3aXlDbjRSQlRMVkIydVMxRnBWbk5pVzBnRldzanR3ODZSajF3dDFBOHhmaEEyMkxuaHVGbldsL0I5UVhuOXp3N2lHYTNhcy9rT0N4dUZGdStvdEt2aTA5djA5cFNuNmdjUDdHTmNPeU1lM1NlK3k1eG9LUWhoYk1leXBqdmhoTTNac1dkNE95b0hsTGN2OFpqSFRsSEROWWprdVUxN0NuMEJjc2phZkJjVVdlK3l1ZWZZRDhRaXhXWlN3ZjRoTlpBQitRdVluMUpHVU16L2xUWENnZ2lVaHRoQXY2ZW5kLy94MXVVRVRBaThmUHNnYUt4UzRMK2lFVkRJSG9KZExqVzA5UDA5Wkt5eittNGx3SDRoUjV0VnRLTnBkWWZBUVZRcHV0SmxKU09yc0tqOFBqUjBuUkRib1RwWXJpK1ZzRUQ1UVYvMXV3cWhBUUZ5eU5wOEpNQjQzQ2VMQkl3bHdvMmRncDNNWkVaK1h4emdsdjRwUFh5MGxja2tENG9lMTU1ZzBWZnhIMTJHZkg1MmNYSmFETXBYSHlieU9Nd0c0c3FoQ0g5VTZuVCtYck5lYnN1UVY5eEZiUzFMWGxGNXFEdGFIVHlkMmFNbHQ4OXo0cktaeTRHdGVJclJOWVVhbGlvVE9CVklSMDZjenNDWVB4U1l6RGdLbXZMZDNMU29uNGo0cU8zYS8rWExEeFdYTE9hN2lhbnRwbWlac05jaExLVDdDbm9CY3NqYWZOZUR2THVLWEZINWVjb1FBTHdMdWNRT0kzS3BrR3ZOaWFDVFd2N29VUXpESzhFTERwR09vNFBwNlE3RmQvSHRNZ3hZRDc0MndFQ0t0WlpBTXlmUlcvT0hQRk56L0p5WFczeFVOMHgyRXZ4Y25FTmdqQk5OM2ZFSFR1VDE4b0xBc01iTENNanlvVXFUa2Z5ZHh6dno1dEVrcHV5NUxRcHFBWExJMm54Zkl4UDVwc09ScWpLZkc4ckp6YWlZNTFqbTFnNzJNUzRkaWtKNStLSlg0emZycW5XL2VramhXVzBsOGRpbXkxLzgyQlRvZnNxY2VTOUZjZC9jT1FGMVNvbnZaUnEraTJOYW5Db1VFRWpRREdMalh3TlZXS3ZiMlBMUks1U09sREdweGJEYlVRcU5BUUZ5eU5wOEFBdnQ5a1o3eTRpMU5sN1FTeXRxV1JQRlFDeThiMWhTUUREcTc1VVBoMm1zOG1rajRmNWgyUTZMSGhCd0ZlaDVqdDQwajd4TXE3TENJTERjTGZkVE1pMEJKNE1tM0hrWHVQSEthMzJVZk1jQnhtMDBNWjZTZC83WlpLZ0FQeVd2Vzc4U2FEL2owVDR2cnlhaEtRdUh5Wll5V2xuVmxnbloraExYVmVWSFIxSlBxYnYrSTdFSzd3cVFBUUZ5eU5wODhqTWxqNXc5VHVKc2IzcXdCRjljRk5BY2IxcHZmM1AyQXlmV2ptYUVZdVkxZFhuZ0ZnblFoeUpLSFpNR01IMXRBanVkb1BnTVJ3c0JRTFN1aHJ4aWJMbUhjNXU5eE1SeGIrbFVaQ040QnZrYzRFa1ZhTkllVU1yMnBxYlZGWG9DVk5Pb2xEbTBEZFZHZ2tMZFN0K2xvcFQ2ZG4wenN2SEQzamZGV2dUbFF5YThZMldaTmVpTDViQ2hRQXFCQVFGeXlOcDgyV1hMVnhVOGJhWGo0eXVSVzZqcVdUeEY2ZzBBNkUzUmF2VkdjSUcyUmxBK2RERlUxOGlYZm1nU1V5VjN5WVBNNEFZbnhEUTJwZnprajFiL2lSczJjYW5yM3EwVGt2K2VCbVVjODRLbFZjVWxSWXNvM0tpa1EwLzBsN0lSWWNVdE1nZUczMWFoMk53K2c3RVU5b2ZiSjkzVEZKQzM4M0NJNlg1VS9BcUlBUUZ5eU5wOE9KeGljSDcvZitKcFc0cnNtck9mQVFPdTJaZGd3ZW51SXRPRzlFTWU3dWYyeVpiSnJYdjRFcnROZVVCbndHWUFuL0pHUG80aVF6NzY3TWkrTnRGeFpCc3NUeU5FeC9VR3ZrV3JDeWF2STdmMDZNQ0RHNk9yeHhFVWprWklVTHI0TWZ0RTZDZjVWZm40dVgwVnY0SUQrYWpNd2NmV3pEc2JNSWFaeFRlUWZib0VmTmNLa3dFQmNzamFmTjVJRmRPWStVb3lNRnQzckUxVitDT01hcldjbXA3dXQxdkxoUE9NNzR2b3IyTWdFdzUyWWxGT2M1V1FrZy9rYWRZdXhXd2t6THNRdmJJaDBXNklGUFU0SWZmTzd2cEhhbEhITkd2enZ2cGhUN3gyakMydE5JVUNTSzY2UDZpaHd2RitsQW1YdUlTUjVsdzM4Z2h4VTZqazAwK2RPeGxCK3dDSGQ3MTB5V08wVzdFMTZlNU5LZ3ZlM0ErTTFiZ0tlUUZ5eU5wOFY2Ri94UStHVFVXRHRHQWx5a1RjR05zQUgrZXRZYnB3VHpPTTB3cERFVzVubnNXaHUzZjJnbkpxYXNPVUR3M3A5RCsrWktYVjAxMDR1dm1aMExhemFqM2VVMUNlYXV1SnJOdzRRZWdTUitOeVp1bFlzRkhEL1h1ODJYVE4xTzYrQlRTVFZqdXdpZ0t2ZlZDc2g3czV6endlbmhZS21RRUJjc2phZktscVJsR2NNY0luV0VWeWVqVVdWOXhtNmZhaXowa2tXdE01MmZYT21aYVZPN1pNZVZkVmYrMmhJR05iNjdaODE3NlBiSWJwakMyTFpqTmFHR0QwMmdGWUc4dmNWdjEybkNGMW9mQ21LVG9TNERFOHJ5ZDh5QXZ6bURvb1M5aXFJSkQrUGcrbk05UmxRMWI5ak9YQnBjTDJjQ25McEJaaldUUngyZG5QZHh5TEc3Wjk2OGlkQzlNeHJjZDJtZ1NHZjRCbUI3TUtlUUZ5eU5wOHMrWTZ2QnBUVVFuQUFra1BaL3RXQXUrZTFBcEZEVDVnVjEzR3duVFFVTkJVVzZHc0JmK052aUNCeWhXOGt0Umw1bVRSVmJtbTlXZVFIY1AvVFZ1UXMrbjhhTHBXTTFINmRQSVk4bW5hekxuOHNXTTVXOGdkRkdtZE5FSStxZUtqOUp0S2t0TTRnRERhVHQxc0E2M0ZiZWNOaDFRS2VRRnl5TnA4L2U4bytQYk55VjVKOE0xTmozNE1LdExacHNNOVZ1QkVZSnByZExSSVAzcnI5ZjN1bkltaVV1YThXc1J0ZXFRUS9WOU1zWmFxRkdHaUV1Y212RUpDKzI4TmZaeERPNERFN3lkVUdBNkZtcHA5TjVza1paOVRkODhTNnZlalM4b0M4MFhBei9BQnFOZ1VUdVBZM3dBUU9FMFEvdjRLZlFGeXlOcDhDT2N0N1BDVDYrVGdtUGF0V1Zab2Qrdi9zd0p4NnJCU1BOR1Vza0NVSGR2b2didVI4SG9nd2NRQ1c0WXVFcndLRHJZUFFaNCtmSVN4WlFHbVNZZTloVkN0U0lKNHFhRCtQV3pPRTdVYlcwOGx6Ky9HaE5TbUhCeCswMEZVWEc3eGs0MG1NUFNZcmJ6RHRydTg1a0lTdTdiUFl4SnJqbGlFQ28wQkFYTEkybndNR1FvNUM0cHZqSHFDajRCdWlmYnI4SlFGci9GUlZzT24vcjhrZUNMUEd4TElXamxBc2xWb0VLc1lNd2R2Vk9TR2FJZThnRE15Ylcxd1JwU3FzbXBGWjdQZWJkdEFzenViWURNN3QxWnZTVFNiTWE2eTk3NVJMT2VIa0xhU0xwNGYwZi80N3NjWkYxeDMrMXlOVHM2aVVCejdKb0NmQTMwb3JiZ2ozQzR2dXAwaHdBTzFhL2pjQ21JQmNzamFmTWt1dE5ET0gzZzcyMW8xNEdTcDJ3MFBrUUVwVWRsN0tHWS9FcDlZNjlPKzNObTFiNDBzMkJ0WDJ5WlRzZ0NubER2ZEtweHJheEhQeTFIZi9RMTJmS2Eram1sdDdlRkhoUUlRbVJuNGlpL1REalNueEJ6aXVOV1NVNEpueFFwNkFYTEkybnlMSERFeDQvbVh5Qm53TUMwc2FYOVZ1Yk9nOE1iR1dKMW8zV2xCcFA3dXdrRDJ2U1ZuTXdraDE3NHF4Z3J6aktQTzVtKzFLa2QvT1JGVmk4dnFPZmovd01sYlh6Q2VzelpXc1cxSWVnTElONkZDQlQ1VXlRVTY1TVlNL0ttSm5KTnFEb0NRT3N3M0pONDRrcjV1TTVFRlpTL2NEVkFLaEFFQmNzamFmREVpWEJSMHV2b2QwNU1oc0gvVDJmUXZyTnd4TnRiWDZQYWhwOTV6R3dZWnNSWlB6V1FrM3RHV1lNSTBOR0JTcHdEdCtxSHFtZG9uTTFoMzB2dTJ6Y3d1Q2FUQ0NuaG0xcW92Kzdya0orZThMQWJvMjYwV2xDdlF5RXl2b2hCUGFTcUJzUElNejhrd2R1QlZzU2hiZlhVcURITzZFWUdmWDZYV3dwZTlua2tLaHdFQmNzamFmS0cvUG45QXhXMVRvcXJtZ2Q4Sk5PeFpGK29QVDNaNVo0QjNuVWpIVkg1TGI4MG81RWxGdGRmRHZxSGtjZXBQVmFBN1pBT01tdXQrN09SZ2pTNUYrUld4ZXlIRGdpK0E5bTl4RlRiUzdDd0FKMWVhajlpTWdIbElFc3dHUGR0aEl1U2RkdmRLZzkxcXkwTUxOZEFKUVNIUklRRWFnc3d1UmdrZ0NabVovdnd1cFFnS2dRRUJjc2phZkcxMkhLZm5aNklqaFNuOW5PNWNuMngzeWxiTHN2WXZrRkJBQ2xxd0UxdDhya0lXNTY5M25jRHYvWGRPeWIvL0pac3M1YmNRalpQZHZ0Yk05WUlnVlYrekVNY0tuZ0hiMDNjYWVkS2RFTFQ5Z0xVaTNPV2I0SjBzd2hPRFRrTjkwdlNycE16aXRKVWl6bzdUN1hwMjdtUTZCWnFOQUZhZG9JVlljQ1FLaUFFQmNzamFmRmNMRGRxZHVVQkY3OUtLREl1emw2SXBjTVY1Q3ZXcGpIQjl2ZU1KckpHa0VIRTUxdVhwdDNKWTc0Z0psem5oSGFnT1Y2RVBwWVZyMWJGajRNQXJ1SExnU1pZZy8rb3dGWWN4TXMrQWJiV3Z1WVBUOURMVEVDdnV2dENPWFAvWmZHRm11V3lUQkhpTTY0RFk1cXlldnNuVk41K3R6aHAzMWpRSHZvcnIzamsyZGRzS0Nua0Jjc2phZk01eEVNWnhmZjV4VEM5V3lwZ0RoOERUWkIyNnFRM2FNQUQ1aFRJdldHQ3dXaUZZUnh5MUoyRHI4MktQeVUvbVFUaWJMcDJoekRLeHhIVkZYMmtoS1Z4allseWJHb0xob0FybEZSV0dQKzQ0aUdVaVdKZEtMVGlleTRKZDZtUElibEROY01tSTVtZ2NFTVd5ZjJmbG12bU81UXprQ25rQmNzamFmSkRvOTIvcVprVFlZWEFDQWlqYXI2Ukx5aEtPV2ZYN3VLU2hqSzRNRXRNa1UvSnRtbkRJREpGVStmUjl1UUxBUTlKNTA2REkvWWl0cW9BamJrcTZvVzQySmlmSE5qZ05xRy8vOTQ0dFlGVzFwVGxZTkVhVkZGNFNxNGs5NUdFTWpyWldXdE5JbUdZb2YxSjJRVGFlOWw2WGFzQTFDb1VCQVhMSTJudzlEN3ZZaHlzUWtKZVBCUkFEcnF1eFVzWTFrZUpsSmc0dHpzMWxSTjVJZm5Bem5lbkIwcjNldWE3cWZtekJKVGFWYWdrQml3Z3d4QkFKeHl0VTJlSGtGV3pGSVozcnBWbWhqWFJNemRiVSs3aHBYcGdhQk5tVjIvYjdBeUNRU1pibkNXNEZnNWx5aTI3UTkweXY5MG1BcElNbk16dFh5a1BJaCtyd05Oa0RKd3A2QVhMSTJueUxDekcwYkRFUGdZV2VLNlE5ZmZWMnVEQjExdXdwcWI3TEZzTWExTHRXY2xyWVd0VmdiZkp3MVIzS2RjZUcrdTFtcFVYMXRENWxUOWFMMmNCQkJST1VaTmRaOFZTTVgxK29jR09JWEx3akRxRW9FN2tUSlV5VGxxc2hBU2NEelVjOEZhYXpQem0xczRFeWFMcm1kN1J1bjl1L1VxZ0tuQUVCY3NqYWZKTjlYVFJpcjF3aE1EcUJvY3oydnZtUE5NLysycjRwOEhjNjlSNVlvL05WWFEzOU1uSy9aaHhEQ2xoaEZRLzlINWhETjd4cktPTDNsL2VLc1VuRDdFUnVreXo1RmU3ZUgwRlJYQ3FmZGdWNFpIc2ZCczJ6STFPaG9GZnUyc2pmN0lNaG50bEU4WFVneUM0MVh6aUJWN2NTYUlBVU1WeU5xSjZKbnhhcHdSWDdWSGEzVnphaUIzRVltb1AvRXpkb0owMk5pTXRlRHNBS2Z3Rnl5TnA4REhiM2lWNmlLZSt3VEJ5clh6ME9RRWFqR0dnYzI3Y2w2c3E0YUMwTDFEZXFlUEwrK2Zaa09VUnpidnBiRkF3dkZSMTBVYUJBekpDNnQ2YnVoV3FVVFBnaHFxdUlUZTBOMVRZZlF0elNnMnIzZXBHM0ZQY09YcTFXUFlyeVJFNDBYbG9ZbjlWdHJETVdIOEtESUVXRWwrTzgvQWFTY1k5UGxrb0tqZ0VCY3NqYWZIcUU4Snl4NmdvTUFoR0FjeUlhSlk5UTAvZ3FBNFczRHl2Q05RMTlpVGVWRDhpRmRObDQxVzFpenNDN3lieUdXcG1ldVBNcGZGUjhYMi8zQlAwZC92azErVUxYZytzenRJR0NZakhwZU1XZ1VUenV6UkhSVEFWdndvWXo0OE9tcmJZRHV0WHFwVy9qNkN3cFhoT050NTFWSW1KdXpBdjBTNjlkNDFLUnV1dlY1bFBDdHJJdy9PcUtDb1FCQVhMSTJuekZISXhKMC9Dbm5qR3FsNUpvbDMwc0NoWEl5Lytrc1Jua2NKcW1TY3VLR1VONUd2ZWZNaThINlRlV2t4VnNWTjZkZUMxRUV0NnZWTURmQ0JyWUgrSHlCL2pFSy9Oc0FwNTVyYmw3V2RiQzVsb1NTdEt0NUVTVUtNUVlNdG1hQWtVelA4TUI2SHpUWUhhZXZtZU42TG5SZndxU1Q4d3YzZldzZ1VVQmVsSHpDcDBCQVhMSTJudzZzZVdUclphUWtPTnd1RWc1N013ZHB5QmtsQnFvQ2ZXKzQzbElrallQTGtmVUFEcUxiTlBwTlc0SXlRTG9rTnlJWXZWanc2WEd2aThwMEl0cXovL2RiYWlkZG1qU2ZPZHk5ditYekxmallBNlhQSFF3TlcrZlljT2toei9ldkptWlhTR1hKeG0xSG9RK3FIVGFDQ015QU1XQkRxNTFvN004Qi9zUlc1Q1BUVHl2cXlsanZoOTI4NmpRZVdWTVNtcFhrWDEwdVdidGpBcUZBUUZ5eU5wOGwxbm9GWG9BNkF2T1ZrZ3pDQ0xlK296NElMUTBDR2JKTzVhUElCblB0ZUlYOEFzK0JJM2NJY0RGRzVkMXVxc3JWUHdVd1RNZUFjd2dNZGZVVEZtOWZtUHZvdG4zdzZqTHNkRGxpR3pGWkFzbzVTM0ltWG4wYkdtTWFkcURMQStFU1NMSlRMVVBxUzFqbG1aVldxVkJ6eGtVeGxWM1U4SW1kTW8rM2FPUEdFd0tid0Z5eU5wOGJDNjFXYWhXOGF2L3FQa3lSaURxM3FDS2szclVSZWVxdmpMNytUR2p1Um8wY3RnWFllWFdYcFRMbDBzY1lHdWFYcFFWNjV3MjkzU3MzMUYwWkliMXJzOTQ1ZG1XQlVtOC81cGxFRHhMWnlEbXBYY2k3OFU2OUJRVnB6eEhlODhvYy8ycUNkcS9wak9uVUFwMUFYTEkybnlMa3V5STRXaHR2dndDTWVDVi9rM2s4Rlh5R2hjZ3FQUDhRR3FqVVMwaUkzTis3ZzJRYzZtVEErR2JmU1p1ZktzWVBFWndUQjU1aGJFUCsydjJnNDNtYUUvcnVuUmZPS1owVHJKOSt5WWZXOFJDN0VjZUFneWcxUEkrMHJQQWF6K1A5YTA3a3ZBMFY3ZGRGaGViTjcyNkNuY0Jjc2phZk42ekhEQ1JsSmU4N2FCWGhFZDJlN3Bzd0VJQWgwZG81TTRFaVhpQVlNR1VUTkg3bEVqVFRFbjZ5TFpNSDlFQjRPZzhNVjZHNnBnK1F5bG1vWjZGdkVRNGhRS2RHbkZCQzl4Wis2d1piU0MrR3cxb1BPY2kzQ2FlQTROMmlMQjc0ODd3RWlGa201dHpXRTFzKy93bTBpaFYwUXA3QVhMSTJueUhUUDNOUnQvL2VVSVRhdkhKSnc2Y0l2MTY2QWRiSFArWmxIVjRlcWNxakJQNzI1Q2FCWEtTTWx5ZXJ2MkQyR2xqU2tJRDZBMTZucGZPUm9ieEdRNXlhNTdMSWFsU2FkTkNNbzV5UjJpRzFDRzBLZnVtTm8ybFRYUDBTTzFGWTlkRUd4eTA5UlMzdWw3djBOeXc0QlJxVDFOb1FMNmZDbklCY3NqYWZEV3JnSzVvdkVrMnY4cUorQ242Tzk1RDlFU1NDNFdzOElMT2tWbXVjV0c2ZGtkYVREVmRGc2RjcG9Jc09xaDQyOVlKUzZobi9YbDdrSS83b05hbFByUTVpYTlYenJJWGxTT1VTa3c5R2dzaFJwS1JpRllxV3pzUE53citJOFRIZ3pscE1peTlxZVdhTm1tQ3VHc0tsQUVCY3NqYWZLcWRidVBZL0Z3Q0Q3TVRRTzVURW1OeWNERXN0cjJXWitIcU16WDRVMHZ5N3U1SzhPeDZSckpKWWd6V1p0NHYvQVpyWmVpMlBFZGFONHhHWmlvYzhkNkt6SXRjMmpYay81bld6Yk5WSCtBbHdNN1dqQ1VyMkt0RjdZdHMwaWpUVDJHREFPdFhhSjl1S2NPMWZCbzhsLzNwdlhJNXdEdVpqOWlUSTdwaEt0WjhkQ0FubUFGVjFFN0VoMjh5SnZZS0NwY0JBWExJMm56MWF1QkI5WEVMeFMwSWpwMVJ2S04rTEwzT2ZOdmJEbHJFR08rQ2RIb2l2N1ZHT3ZLZVhUUnhRRCt6c0dSZ0JMdHY3TXBnVFlVNGdlRHYva21WbmlGam5pZmVtZFAwQlg5SXJUS0VPcnU1UzBGK2RlKzA4ZVZQTGgrS1FKVEpDQXQyZzFZajFPM0JxUmtVUjJKUktCRVBydFdib2pSL3k3NWZ6TCt1M2dlSUozU282MWx1eWpGUUl6aHJ1SzZCSUFqTzJncVhBUUZ5eU5wOHlHb1lYZWwyQktiWlhUc3RyTGVQUkE2czg0UGFldVRuNmMvVllrUys1OVJxMUFBb3V1NUk2TDMzNGVlMnEzdEhuRnVMNmNMMWFZN1ZMblE4T0VCQXYwZTNrd2NheVBDOExnVDVsYW1IWnp6a3FsYmpXNTUvOXNqQXZudVloME5ZM1N0ZWxERlNvdWJ6UWF2TzZBWC9xeHZYUGt6ajNUcDRPZVZLcEZSYnF4WjRJMElYaWVCclo3OW5WMm9ONHVLYVlaMEttd0VCY3NqYWZQOGVVSmtjdDN0SzlmQU9hNUVYMlVWSjJIeDQ1Si9EQ2p2aW5CVjE5L3cxZEhHcGkvOTN0N0IwL3J0OER0N2RvcW5ScDZ3Wm84bHlTcGZESWQzajk5SlZ1aWFqeTBaWGVwcGNpN0ZBM1VyY1l3dUE3Y1NycWZmY281SFJ6RGlRcXQ4UWhRVklvVXl0UzhVcEMxY3hEMHpoQXdjMENMSVNVcmJtR3FZRDJySi9lcjVSOHlLWnpuSDBmaVArTG5KM3doNHhqajB5dFFxRUFRRnl5TnA4SHBsVHJlM2xqWVArMUFpUm8yWXpQb3AzMlJ0bkpweG9oZmZsOVpzeEpTamFHd3g3TDhXbk8rd1MveDJYTW03OHZoWU5jMkUyYkMyRWdEVHhOUXcxek42bzlrTkFEMWg1Y084WUZFajFiQUVMUGVsMkV5aVlDeHp5c2c3QjNaTjl3dDFPZTVOWkx4VFhlWWNGRzQxNjJYOGZDZDNZUVNuN1lXdzRIZ1dtaFFwd0FYTEkybnhxaHI0U3Fkckg3ckxBYVVoNE9JTERHTVJON3lPVk9mN2hPbGVzakV1R0ZwakIzQXU1UWw1bnpZcmVSTm5UUjZPZGQ1bFQ5ZW5jdHZteUUvcnFIUWpHbCt0VHFWWXlGUG01YkNyLzFXemdQWG5Ham01L1JWZnJSRXRwYndLdWhaQW82eExIY1p6ZFY1eVN5Z3FPQVFGeXlOcDhGWHI5aW1WWmlZbVRqUjdTcWVJM0J1L2dmN1Y5OFlMS1ROd3M2cTZuQ0FRRjllMWdjTjNnUk9nSG15aGN3T2s5YlM5WlBRdUVreXF0YnQyTnplYUJJRENsOEVaWWJyV0M4UWNUbU41ZzF1OWRVWHBaZHJML29QV0xLbWZXL1orREl4L3hvTUlWTWZyclJrNG5MWE91N2xYUE9YSmk1dVVPVE1JeUlyZ05vdlp1bjRXV3dwMzFPQjBLWkFGeXlOcDg4cXAxL09lKy9XWnBQVmcxODN6TWREQ3JoUTZVMndHSm1BYWlWWXU5U2tXSWNaQUoyVGw5dkhhakJoMVhBQU1xdis0c3llWWkxK0ozMXdUc0dlWm9iamxQUWsrOS84WXVoSFppb3F3amlTdWdESi94aXJaTTZNdDFoVGtFVyswS2hnRUJjc2phZkFVdVZzaENKZnV1ZDU4cGg0bk9NaHQ1eVg5WUJONWJPcGpHOXY5cVp5Ry9KOFBUbktnRnBPdzYyM2FMaUwrdm4vK2w0Rng4akRYWXQ5N09ZTUVDMHprd2pTTmdueG9rSFpmZ1k2SFVCRk9aQ0Y4a0x1N3AzTG1QZWxHZDdlUVNYbVN2MFZlK3NzWFBqNmRtZjlSeHpkait3SXlmVlFKSGh6VFNUcmtPM0FhVmdBcWNBUUZ5eU5wOENpeEFTdlp3b052d0JIU1NTT0pDNkhJSTdUTkFPdWNPZFEvTmR2ZUNpOCtyQ2xod2RhNkFTSFg5K0UwQ0VvR0xiS0E1VG84WWE2UUdrMWFrZjVKWGFTRE94a2JWU0Q4ZXVqUk05cWNWUDhoSEtnUkhQeFo0dXh3RmI4TEVXY2NLQkJIS3pDTC9YY2lSbUdzV3FlT2NFV3IybE9KeWhpeWlGeUxmQ3hsMUxQU3lhSmEyQ2cwK3daT3UxbWtHeU5ONXNJVGlYaUlSZ1FxWUFRRnl5TnA4RkluQktrdSs4aGJxTVRkeW90eWNuYlk0ckRETjMzanFIdytPTGMva0JZbXhTVlNsMklIUERYSWU0T25WUzU4NDVPMzdJRUw4Z0RiOXFjd1cwRHNycitSZDM3aTZaWXdwbWRFamFLaVpkWTJFZVdPMVpGV1ZZdm9ZY1g3Q3dMVG1mOWd1aGhwSVhFckljQkdnVlJpVk1Qd0xqTnJlY3NYZ1RGcUdqQ2VuK0RlZGtxRHpzRnVQNkpnY005WXRGRy9MN21OMUNvTUJBWExJMm53STc5WUVkREtML0E3Vk1SWjFsVjBlTFdqK3VzZ203UVVIcDVPSm9qdGNCZXJxU3E3Tms2Z3I5M1YwaDRoM0gra2tnam9FOVJGZlkxL2hVKzgwNmNtb2ZueUxYRGxGTEIvcTA2SXowMkJVVlo1ZzJHMFJwcnRBMy9TVW81VTM4WWxsSG5vZHlya1JxUy9KMnhIbU85MWdCSlE0NFdSZDRtNEUzV3V5cGV3S2ZRRnl5TnA4Q3JwdjFUZXVNNnF0MkVhelIwMlpoZ2VXRnFIOU5xdFBnK1pWZVB6WG9UeEh1c1ArNDBFMjc1Q2NQWkFwUWtudmRCUnpYQTA4U01Bb25ETmo3R2QwSGEwZTl4TVN4Q29xRHlHVCtmMzRwQ01CZTlvSDNNa0ZTOWVEeWJTMmtLMUhzanAxa0JTNmphdk90MjVtdDZWekNUU2JpeDdKVUdxMENuY0Jjc2phZkdoUUVvaWhFd3pTSWwyVnBRSHRsMVB1UldwMTNITkVERXFXQjQ1TjRHNVZqQkxYTFZYcE9STlFhVndlOVhIODVpTU9mdUpJNlh2VTVsSTJ2eUdaQllET2ZqTm5NRi9ZSVFvUDJyb0JrZmdCVFBMdFMvQTQ3ZTNtZE5TcFIyY2JFOHUwYkt2OC9qNnVnb0ZtLytpM1ZNM0pXQXFaQVFGeXlOcDh2Qi8venlSSUpTRTc0OGk5QXNXNHZxWTk5K3VNTWZvaEcvcklnZml1bXNzQnFLanBYK05WNzRIL3JKZHUrcEZjcDB6QTRacm9WMFlNMTJYc0c2TUlpQXUyQmYxblc4OGl6VWlYSVNPb0RobHV1bm53RGtGSVk5MUErVzBjek5QMHlkZjd5cU0rMzUzV3NIRVdObnpDbUp1RkpIY1ZGcXZZUjR6NVNlMnJYeGlUQzl3UnBNUFlmaEgybE80eHR2aVc5dnJzeGdxTEFRRnl5TnA4Q0VGMThJdEhsdGp4TmhndWFFZjBNQ2Nkb0doUEUyaEtWK0ZWdGdHNU9lS1hLN3YzWFFHZ2tVRXJwcmd4MUpxN0VicDJJQ3p1RVN4bzIzeG9pdWh4dXYwRlB6WTFyL1BYQWdkRXNMc0lRdEwraUxtcmZZRE9id1J5cWFYNU9zMDF5VGhSa2dVYXhzZmRwTCs4MXZ1dmRia2lUU1NOM0NrUGdMR3J6dm9vOVdVTmlac2IyQ3NLdFFFQmNzamFmSk4veVpQSVp3VEFLdlJmMnJDOGttTUg0ZUYyV0pMaFFzN3U3VjBmYU5nMGxOR2lrVzZ2VDdFQ1p0NnBrL3pWZ1M3empUUDVUL1BOeVBJNkRML2ZqU3ZvTG5ZTUI4RWI2eGU4ZURoZGpYemxrL3kxa2lTVG90N2MvZXQwK1oxNklmai9MM2RoNjVtck5YdFFCRGJrdzU2RmtRR1I1NjM1YUxqMkZBV1IvbTlCTjVrNXU2a210UzdOYm1GbjAwbFI2NlFocnA4bkJLVE4wTFFyYjVMVDV5Y3QwR0taYmU4a242NC8rT0t0MkdUdkNwUUJBWExJMm54L2wzV3I3NGd2NVJ6TzNRRXNjWU4yZ3J3amdhMkN5RUNLV3pBbE1GSFFYRWcwd1RNcUdFQkdyRUViL25WRVgvOFl4RUZoWVlPQVBCTkFBWSt3cm1GRnQvY09HOWVMSnNldm4zMlU1NkFvRytlemxQb09OMGZVT2VFOSsrTkRESjdzUmNYV3A2UXRGVEJqMnMwWW9wNTl2aWJxc3JDZmk1bkRpdVdHa3M1NWpkRGdMVVpOQmV5eUNQNTJmaE8zL1FxR0FRRnl5TnA4ZEhITldEZE9uNno4eVZ2alQwT0tJTmJUMC9LTDl0MEFjeTlBRU41eWx5RUlrR1dUUElVeTZUcFJGZjBraU5XTUtHeDU5RDhJT3E3K0syTmpyWW95b2kzYmVkSzEwT3AyT1lTV0d6eE15dGZOb2F1dkVnek5kcmptVzFnNEZzcU9zTEFSWklhRndhNzVXd0JZUmg4cG5sTzdMN2M3RzI0eVROWnpuam9DM0pUMA=="
+    }
+  },
+  {
+    "timestamp": "2025-12-04 09:29:15.261075",
+    "type": "chat_response",
+    "message": "Excellent. This is a forward-thinking refactoring that will significantly improve the project's modularity and extensibility. Both of your proposed avenues, WASM and IPC, are valid plugin architectures. Let's analyze them and then I'll propose a concrete plan based on the most suitable one.\n\n### Analysis of Proposed Avenues\n\n#### 1. WebAssembly (WASM) Based\n\n*   **Pros:**\n    *   **Portability:** A single `.wasm` file is easy to distribute.\n    *   **Security:** WASM provides a sandboxed environment, which is great for running third-party code safely.\n    *   **Performance:** Near-native execution speed, with low overhead for calls between the host (`jp`) and the guest (the plugin).\n\n*   **Cons:**\n    *   **Sandbox Restrictions:** The sandbox is a double-edged sword. By default, WASM cannot make network calls, access the filesystem, or read environment variables. For an LLM provider plugin, this is a major hurdle. It would need to access the network to call the LLM's API and read environment variables for API keys. This requires using the WebAssembly System Interface (WASI) and explicitly granting these capabilities from the host application, which adds significant complexity to both the host and the plugin.\n    *   **Complexity:** The build process for both the host and the plugin is more complex. Data exchange across the WASM boundary for complex types can also be non-trivial, often requiring serialization to a common format like JSON anyway.\n\n#### 2. Inter-Process Communication (IPC) / JSON-RPC Based\n\n*   **Pros:**\n    *   **Simplicity:** Each provider is a standalone executable. It can be developed, tested, and debugged independently.\n    *   **Flexibility:** **This is the key advantage.** A provider plugin could be written in *any language* (Python, Go, Node.js, etc.), as long as it adheres to the JSON-RPC protocol over `stdin`/`stdout`. This dramatically lowers the bar for third-party contributions.\n    *   **No Sandbox:** The plugin runs as a native process and has direct access to the network and environment variables, which is exactly what's needed for this use case.\n\n*   **Cons:**\n    *   **Performance Overhead:** There is a performance cost to spawning a new process and serializing/deserializing JSON for every communication. However, this is likely negligible compared to the network latency of the actual LLM API calls.\n    *   **Deployment:** Users would need to have multiple executables (`jp`, `jp-llm-openai`, etc.) in their `PATH`. This is a common pattern for tools like `git` and `kubectl` and can be managed with good packaging.\n\n### Recommendation\n\nI strongly recommend the **IPC/JSON-RPC approach**. It provides the greatest flexibility and extensibility, especially for third parties, and is simpler to implement for this specific network-bound use case than the WASM approach.\n\n---\n\n### Proposed Refactoring Plan: IPC/JSON-RPC Architecture\n\nHere is a detailed plan for how we can achieve this.\n\n#### 1. High-Level Design\n\nThe main `jp` binary will act as a client. The individual LLM providers (`jp-llm-openai`, etc.) will be standalone binaries that act as servers. Communication will happen over `stdin` and `stdout` using line-delimited JSON messages.\n\n1.  **Discovery:** When `jp` needs a provider (e.g., `openai`), it will search the system `PATH` for an executable named `jp-llm-openai`.\n2.  **Execution:** `jp` will spawn the `jp-llm-openai` process.\n3.  **Communication:**\n    *   `jp` sends a JSON request object (e.g., `ChatCompletionRequest`) as a single line to the plugin's `stdin`.\n    *   The plugin (`jp-llm-openai`) reads the line from its `stdin`, deserializes it, and performs the API call.\n    *   For streaming responses, the plugin writes a series of line-delimited JSON objects (e.g., `Event::Part`, `Event::Flush`) to its `stdout`.\n    *   The plugin will write any logs to `stderr`, which `jp` can capture for debugging.\n\n#### 2. Crate Restructuring\n\nYour current `jp_llm` crate will be split.\n\n1.  **`jp_llm` (Core SDK Crate):**\n    *   This crate will **no longer contain any specific provider implementations**.\n    *   It will define the core data structures that form the communication protocol: `ModelDetails`, `ChatQuery`, `StructuredQuery`, `Event`, `FinishReason`, etc. These are the \"nouns\" of our API.\n    *   The `Provider` trait will be removed. Its methods will become the basis for our JSON-RPC requests.\n\n2.  **New Provider Crates (e.g., `jp-llm-google`, `jp-llm-anthropic`):**\n    *   Each of these will be a new binary crate (e.g., `[[bin]] name = \"jp-llm-google\"`).\n    *   They will depend on `jp_llm` to get the shared data structures.\n    *   Each binary will contain a `main` function that implements the server-side logic:\n        *   Read a request line from `stdin`.\n        *   Deserialize it into a request type (e.g., `ListModelsRequest` or `ChatCompletionRequest`).\n        *   Call the appropriate provider-specific logic (which is currently inside `jp_llm/src/provider/`).\n        *   Serialize the `Event` stream into line-delimited JSON and write to `stdout`.\n\n3.  **`jp` (Main Binary):**\n    *   Will now contain the client-side logic for discovering and communicating with the provider plugins.\n    *   It will define a `struct DynamicProvider` that implements a new, internal `Provider` trait.\n    *   This `DynamicProvider` will be responsible for spawning the correct process and managing the IPC communication.\n\n#### 3. Refactoring Steps\n\nHere's a possible sequence of changes:\n\n**Step 1: Adapt `jp_llm` to be the Core SDK**\n\n-   Remove the provider-specific modules (`google`, `anthropic`, etc.) from `jp_llm/src/provider.rs`.\n-   Remove the `get_provider` function and the `ProviderId` enum (or move `ProviderId` to `jp_config` if it's still needed for configuration parsing).\n-   The types in `jp_llm::event`, `jp_llm::model`, and `jp_llm::query` are already well-suited to become the protocol definition. We can keep them as they are. The `Provider` trait in `jp_llm/src/provider.rs` will be removed.\n\n**Step 2: Create a New Provider Plugin (e.g., `jp-llm-openai`)**\n\n-   Create a new binary crate: `crates/jp-llm-openai`.\n-   Its `Cargo.toml` will depend on `jp_llm`.\n-   Move the code from `jp_llm/src/provider/openai.rs` into the new crate.\n-   The `main` function will loop, reading from `stdin`, deserializing requests, calling the OpenAI logic, and writing line-delimited JSON `Event`s to `stdout`.\n\n**Step 3: Implement the Dynamic Provider in the `jp` Crate**\n\n-   In the main `jp` binary's code (where you currently call `get_provider`), create a new module for handling the dynamic dispatch.\n-   This module will have a function like `fn get_provider(id: &str) -> Box<dyn Provider>` which:\n    1.  Constructs the binary name (e.g., `jp-llm-openai`).\n    2.  Finds it in the `PATH`.\n    3.  Creates a `DynamicProvider` instance that holds the path to the executable.\n-   The `DynamicProvider`'s `chat_completion_stream` method will:\n    1.  Spawn the provider process.\n    2.  Serialize the `ChatQuery` and write it to the child's `stdin`.\n    3.  Create a stream that reads `stdout` from the child process line by line, deserializing each line into an `Event`.\n\nThis refactoring completely decouples the core logic from the provider implementations, achieving your goal of a flexible and extensible system.\n\nHow about we start by refactoring the `Provider` trait and its related types out of `jp_llm`? This seems like a good first step to creating a clear separation of concerns.\n\nHow should we refactor the code?\nDo you want to start by creating a new `jp-llm-openai` crate?\nWhat should we name the new crate that will contain the `Provider` trait?"
+  },
+  {
+    "timestamp": "2025-12-04 09:57:30.852975",
+    "type": "chat_request",
+    "content": "I'm actually thinking I might like the WASM approach more.\n\nIt allows us to strictly only allow network access (maybe even scoped to a\nspecific endpoint?) and perhaps we can also restirct a specific environment\nvariable that can be read for the access key?\n\nAlso we could have our own `XDG` path in which we store the\n`{google,anthropic}.wasm` plugins (e.g.\n`/path/to/xdg/jp/plugins/llm/google.wasm`).\n\nThen, when doing `jp q --model my-provider/my-model` we could have some kind of\nlookup that sees that `my-provider.wasm` doesn't exist, then ping some kind of\nglobal registry that we host (e.g. on github.com/dcdpr/jp) to see if we have a\nknown WASM binary for `my-provider`. If we do, we ask the user if we should\ndownload it, if we don't we inform the user that `my-provider` is not a known\nprovider, and point them to documentation on how to solve the issue.\n\nThe one thing that we do need to figure out (I assume it's possible) is\n\n1. Can we have native types sent back and forth between the client and host\n   using `wasmtime` instead of using JSON-RPC?\n\n2. Do we use a long-lived \"connection\" to send the request and get a stream of\n   response `parts` back, or, defined as a question: how does the provider\n   plugin deliver event `part`s to the JP host?\n\n3. How do we handle updates to individual llm provider plugins?"
+  },
+  {
+    "timestamp": "2025-12-04 09:58:25.938991",
+    "type": "chat_response",
+    "reasoning": "**Revisiting WASM Approach**\n\nI'm grappling with the user's shift back to WASM. Their specific queries are insightful, and I'm meticulously addressing them. My focus now is on formulating a clear, updated proposal that directly answers their concerns.\n\n\n**Formulating the Updated Plan**\n\nI'm now completely immersed in this WASM-focused direction. The user's points are incredibly pertinent, especially regarding scoped permissions and the discovery/distribution strategy. I'm building a proposal that integrates their ideas seamlessly, addressing the core questions. I'm focusing on Rust struct passing, efficient streaming of `Event` data, and a clear update mechanism.\n\n\n**Tackling Streaming Challenges**\n\nI've been drilling into the streaming data question. Synchronous WASM function calls are the norm, so I'm investigating how to stream `Event` data. My current focus involves exploring long-lived connections as a possible solution. I'm also considering the feasibility of utilizing a host-provided buffer for the plugin to write to, and then providing the host with the size of the written data. I believe a clear and efficient mechanism for streaming is crucial.\n\n\n**Exploring Streaming Solutions**\n\nI'm now zeroing in on the streaming dilemma. My current working hypothesis is that utilizing long-lived connections can serve as a suitable solution to the problem. I'm also entertaining the possibility of having the host pre-allocate a buffer for the plugin to write to, and then passing the written data's size back to the host. I'm actively assessing the trade-offs of both approaches to craft the most effective implementation.\n\n\n**Synthesizing Updated Proposal**\n\nI've been meticulously analyzing the user's detailed considerations. Their questions have led me to refine my WASM approach significantly. I'm now crafting a detailed proposal, addressing their concerns on native types, streaming solutions, and plugin updates. My focus is on presenting a clear, efficient design that aligns with their desired scoped permissions and the proposed discovery/distribution strategy, while considering the technical limitations of WASM.\n\n\n**Solidifying WASM Implementation**\n\nI've been meticulously analyzing the user's detailed considerations. Their questions have led me to refine my WASM approach significantly. I'm now crafting a detailed proposal, addressing their concerns on native types, streaming solutions, and plugin updates. My focus is on presenting a clear, efficient design that aligns with their desired scoped permissions and the proposed discovery/distribution strategy, while considering the technical limitations of WASM.\n\n\n**Crafting Updated Architecture**\n\nI'm presently building out a comprehensive plan. Addressing native types, I'm proposing a strategy involving serialized data. For streaming, I'm leaning toward host-polled chunks with pre-allocated guest buffers. I'll also integrate the user's plugin discovery scheme for updates, solidifying a practical design.\n\n\n**Crafting Refined Proposal**\n\nI've been meticulously analyzing the user's detailed considerations. Their questions have led me to refine my WASM approach significantly. I'm now crafting a detailed proposal, addressing their concerns on native types, streaming solutions, and plugin updates. My focus is on presenting a clear, efficient design that aligns with their desired scoped permissions and the proposed discovery/distribution strategy, while considering the technical limitations of WASM.\n\n\n**Refining WASM Strategy**\n\nI've been analyzing the user's detailed considerations. Their questions have led me to refine my WASM approach significantly. I'm now crafting a detailed proposal, addressing their concerns on native types, streaming solutions, and plugin updates. My focus is on presenting a clear, efficient design that aligns with their desired scoped permissions and the proposed discovery/distribution strategy, while considering the technical limitations of WASM.",
+    "metadata": {
+      "google_thought_signature": "Q2lrQmNzamFmTlduWUM1Q0RXa1NUdEg4N0RhNTVoZWxURm45L0ZHWDQ1ZlRaZDZLREx1UEgzOWpyQXBhQVhMSTJueVhMYXBGT3h3RzhVTE53NCtKVngxVG5RZjRrRjZzc1JQOVBJVks1amNVOW1EZjJ4RTFHZGVTUU56T2FhSHhlRElXRW1OWjA4NzlZbnY1QW44T1dCTEF6c2hGUFpFNTlaQnJtTHhpRFZWOENqMDBSSTVFQ284QkFYTEkybnd6NVRja3UwQkg3eXE5RHhpMUVnRXhiUWhBUi9BcjVxQWV4Rktyd3QxUlpkVGxCOE5xek9Rd3dBY2N6cU9SbmpicG1lR2hZYzBGdkRCWS9QWW01MG1pNnBvYVRkV1ZlaVhmbThrdWgvQXROaHdHb2paNk5HZnRTLzdRL2NKOW1vVW5xeloyYWoyUHZXME12d2VDaU52OUF2K1pSNmV5THdZQ3QvSlhiaUdGSi9HRjBDaGRyb0JtbVRJS21nRUJjc2phZlB5VTh2TTI1bEVFNTBhMEpGQ2JoVi9NTXpBa011YkVpRkZmcE9IdGdRUlJjeUh0THBFODZYS0lHSndqME9xY1ZSdzFCQzBWeWFTTzROVVc4bFdsdHdManBrbk85QllRM3pKamEyWDRBMUE2WVdaTVhBMllNRW9YbU95T3V4SW51eERNZFdPODNWRzV4Yit6aDJkSnM3cGlpMTB5YlNUL0pXdmptRzFrK1JsYXI1QlF6bElKTEkyYk9uK2wyM3EzWjhVQmdnN2JDb1lCQVhMSTJud1FDb1NTWlM5QUVoZDdLaXZVc2NmRmNBNExtaVlEcWFjY0UyaE96WWtReCtaUVRSQlNDZXVTL0tVdTV2UnlVREtwb2dHQk9wLytSd0JRa1pvN1IwZ1EwKzFXMEcrVDU4VEppdlJGZmNxTEZZRUVwV3NMWDkrRVV2dHNnVXlIZ21VcXRndFZjZTl5dUVJVmFoSmVsQjB5aDlvemJNVmozU2tieUFRMTVpcW94MmtLc1FFQmNzamFmTDd1Y0hKNzU5eWlzUFBzcmxhOEdIdXg0VVZMYWZJT0tMbUFxa1FMc3NnUk92TDRoNmJCUTBCZndrV1lZakFOOWFJMVhOdXBVUzdDK2xUM0htNmEzOXRpekphMThqMGRHYkczRUpTb3pReUtuSDAwVkt0K3FCMUppVjRGQTlMWUxnaklFV3RhVG15WmJaRS9jV2lnN1E5anI0djhzYXdoaXUyNlRxMUdWdlN6R2FISDJiL21sYWpwcWI5a1JLZGhRaXBzQ1o1MDdENEU4eEFZdm1oUkhZRzBMdEU2dFFhZXZkSVQ5NlVLZ1FFQmNzamFmRmRYM0ZaVTgzY1AyWVBTS1BERXZ2L0p6c1FyZUtpMTN1WURCRzc3Uk1oNmYxVmZXUzY5dVU5SnU3Z1V4cncxdkphcXFDOEZvVjN5Y3FMWCsvZ1hSWW00N29iOEswaXVZT3luMUU4ZnR3OGNBcWFBaENESGhzVjgxOXVNNlZ4RU8yZ2szNVlhTDBFb1dCVXFhQlFESEEzelZac1JZN0xJRU51azIzZ0tpd0VCY3NqYWZId2Z0aHVHR3RvelpSeUppeFlOaEN1NHdCeGwyL0hjVW1sUEh1WjdITk9hSWhaOXhJU2FnL2tUK3c4bmRZelFibm01MTVvcDFhcXUvU2p3LzJibFRxb2tnbndDQTJ1dWhtbDFrczlVNVFhaGNGNWZhRElyMlhOR1Y3aVhTejVycnpWVmpxanYzbWliNnlYcExTMkFFSngzTXMwTDcxVndqZ1B5ZE84VldMZDhTdi9lMTdRM0NtMEJjc2phZklrT0RSc2lxYzlOT3lCY29xUG1GK3ZHOGJhd3RmN1B0U3dxRUVENTlaZ0o5MXBkNHcvdEk1QkVMTUNnc1JIdkZCaStzRzQzdWEyM3VoL2JvMEJzc2tudlV3eVAwNUp4M21VYUJlY1dUcWhRMzBYNVFkK3RZaWFKTkNCNWtRRWpUWjhnTG93UXFyWktDcUVCQVhMSTJuemF6VzFSWEdKQ1YxZHlmWmEwUmt6a2lRbi9BbkhEMVZwSktsTW4yRHZsa1RGUnhNcHZrYlFVSU5ET3V4Vm9VL3FWZlFLajhySWw5b2g2UUpZTWdaT2NtbEFaV3FscEEzUDV4R01FRHFBNmlRN1FTRE9GWEtESytFRTdVYjV5amRSNWxCU3VaY245VGw3Sk9PbVI1QnoyYmloNWVmRUJCRDk5OXRmTXN4Z2NWUlJ6cFI2U2JqTW5JMEtqMTZlMUQzMXpCeEJVRE93Y0h0NWVXZm9LZ2dFQmNzamFmQklzU2ZZT08wQXZabHljTlVOQTNSQkkvd3IxWWNKd2MwRHlhckRkV1drRW5sSEI4ek1Fbzh1ZnZZeTFWOTF0a2wvd1JYcUlGY0IwRTlkWjJMdmo4ditzdTMvemJvMFlheXRwM25Vc0xHZkJIY0U5OW5peG56UDdYcUNPNjBLUWtxYkN0YUtDQm00cmhsUkQ5U1JDZStnV1JBd0o1eFNTMXdBdCtqdnZDbzhCQVhMSTJuekJvN1c2RDMvYlNzRVBLZTJEd1A5RU90SkphU1dsdCs2RTljTTkyNXZMNE9CcGErQkdwaGhCbmhjV3NyalNyYXJvTk5QdXJ6R0xyWnZyYU1sR2pGeEw1cnJWcFhtMjVXTDkyZGtQNVNtZkhDdU56ZmJDUkVMZWduVitXWmZ5RXRBVGJoQVl6SkVFWnV1dEpTRXFyNlBsTWRULzJ1UHJFT09BcE1MUlVvV3R5Y0RZaFNtZUFPQ2pabUFLZFFGeXlOcDh1SzI5OXZsZmVEamczWGFXeEFybVQzN1hZc2ZuMWZVTEk1a1NMalM4SUlRWGJySEZra3JMVGIzakZEbEF5UnU0SGJKS1BNVmVvajVEcVRQRUtGZ01mTVB6TkJpMUtMVVI2cEM2SW52bkJIMDVtdWFKRUtnRmxINkg5aWxvbDE0V3FyS0JkNXprRWg2cFZaZExuMDFseXdxV0FRRnl5TnA4eHFkTXV2MExmSFdpS2RyM1lZbVFoc2thOGRyckdPVnFkdlBnSytNeWMzTzMvWFR2dXptWU9tZm5XektXRGUxWWFKTTBkUVRuWmNBOXpMN3BQcmErM1FNZWp2S0NaR25oVGVzOTdjckFoeGRVTHEzR2lKMkVsYjN1WDd5SHlrdXprODNkVmEvNjFYNU1icEgzZlk1T0hySFRzUUU4dUNXdU1UcVIyWHF2ei90LzdnOEtuaHdhdk5RS0ZRajZLbk9walFwK0FYTEkybndQaGVicE14MWdvZkZWekNPaXd3Q2ZCcmgwdjN4aC9yUmdHZFlVQWp6VXFFaVFHTHVqVzZkaG9nTzRNSE95UVRxcUwyYm9hYXN4eUJzUUxyMFZGZDdZa3BkbVRIMFJiU1RyK0YrUitFRFhwa1Rxczc0SXB1NFNuM3V5c1dacHpKeVNqdmwrd04zN0FGVDBHbkFoZ0Y5V2hZOEgrNFVjNlB3U0NsZ0Jjc2phZkxSdGtxTVBvWVJuckNkN2F5TDhCYUxqUlVmdHpoaEU1M3dod0owU2JUU2thSEdXb3pUTk4xb1B3bk9IQmVrRWxCbVN4aU0xYTZIbmRLcFExQVZWZlJ2VnZGbUoydy9ISzFiOStRMVRQWGhGMUJkb0NvRUJBWExJMm56Yk00VTVva21kcjhGWlN5V3pNaWxxNE5HQWROTGVScE5MaWlSeGdpK1R3RnFxTk5MdHhmR0JCaTRzVVBiMXZTa2pPbGFOemMzc2dEMklNVkZhdnF2djR3WWtEMFZyL2ExOXYrUUxuM2I3NjIveEpyQnd6RlY4V2tWUUZITFZyVG1sYzkzek51dTZCYmROaUg2NkxyRTBVQXh4dHk1R1dzdWJ6L0lkQ280QkFYTEkybndqOXBVZ1pVdGpjWEFURldIN0RObUZlWW1wNmZaL0ZaUHdtQWRBS0t3QTRhVmlSemxSWWdLUTl1ZUsvbk1iYnJ1d3puVURxTHRUYzlzSjRvRUVIOUdvVk5VT1hTZWNvTVRpZVVrVG9Zc2tNQTRpT25pUVRwUTBNTHdSUzBPZGtFclFvMFkzTmpvZ3Mzd1pZRXpEaVVqL2ZRODQwaTJoL1NJSHc0YW9QMklFVnpKTm1JRE5GSU5Id2dxQ0FRRnl5TnA4QjJYNlVpcUMvV2RNOVlydUFzMzZxVjBycFRWcm82T0E5dWVqS2lNcTFURDJaRGVwWXNhMU4ydEpVVFMvZ0k0MGlZOEZLYXQ4eTZkcjc3clJaWFZ3clduVm1nbWVKZk82ajN6dXA4S1EvSVZIcmxZRWdSQ1NvSUIrZTAyYWVMUFFUSE4xVEo5RXBjWHdKWWI1UGRQempxbW8zNGEvYjVEdUFBTWRLcm9LalFFQmNzamFmQVBiZzhUNGFhL1E1MWliUVhzdUFCa05sTCtsMDcwSVY0c1ZQMUtpaUYvL2ZWZkhuMk8rcTN0OWhxNWlpVld1cEhkSXBZK3BVcFhUMkFaZ0JSSEwxd0habzNOZlJ0R3NnOGdZT1J5RG1rOEpPVWIxTWdHaHBNK0xkNGUySk1iaU0xWk9DT000cVllaUxUU3NhQnJHaFpUWjkvdzlIS1ptYnV3Z09kUFM3UEk5OWNJRE1lYnNVUk1LaWdFQmNzamFmTCs0TSt1ZFZ0R1RCQ0EvRjhkcFY1Z1d4RUJJOE5IMUg1cTk2ZzZLZUMvQWtQMnhNd05jak1HdmtTeFd5dXdrblZzWFNqRW1SSmFONTBITVcwUlJJZzg1aTZsYjljYnY0RGZIdWlhUG1RZlBBT1Q4dXVVSG8wWmF3UnhTcU8xZ1NFanh3aU52cGM5bWJzUzR2MG1UY1hHdjZrMUpIK053anl2bGhOblhEYWFsdm1nMDMzWUtpQUVCY3NqYWZBZnRPQ2hhZ1RRZGFQaFIzaGRBWUFKVGFtaFdzVVVPRmJEQ1NPTTJEeG5OZmZCc1RQdEQwRkRIOGxGSVJEYXk0dVh5YS8zZHhOM3lPUXF0cEdQaUJ1TzkxNGtDeE9jbEI3aHRGTU0rZ0hBUWxJdG5VNmU5OWxvcWU4QWJlU3Avbk84SHVnS3E1cHBvR1pHeTZiZW1YcUdHYUYvZC8yTU05K3ZlSzJWNDBjV0RpdTJTQ3AwQkFYTEkybnhiR3hpMGVXdUtMSmt5OXc5S3NoS2dzT3dpUDZsNSsrZS9iUk12Q016YWlOTEJjUWgyWDRTSWRZZG9RenBndUVGWjl3OXArdCtLbTF4bWplNXNTQlFCQkhJZDlRaURGd2phQVF1QUpMcVlMMFlhVXBMM3MvdFZWQUUzUXZzS09UTys0b1dFK2M5ek90VmswVUZ4dUVicWMrellNVDJtVENpUHZld214VldxMWgvbkkwR0hrd1lyN2FGZndhUEszTEVnV2tBRFlyaS9VZ3FLQVFGeXlOcDhNYlBnVHV2WlBlMFk1VTVpUytrbkFOVzZmak9NYzhXTVhHZFEzc0ZkSXB0NlROeVNrd2diTWgvZW5kM3BsUGs2TFh5Y0hhak9WVEJ6ZndiM0ZyWjhDNWhKbTRmM2hLUjJnU3FLSWo3TVl0Umk0K3JhdmROb000ckJ0a09na2wzWFF1VFpuN084OTdCWEM5aDFXd3NHUVZIUEVRYU00Nld2ZmlqSHNLYTNkcG9oc29nRzh3cDlBWExJMm53WEVQcmlkRDNSYTU2RmJlSE5jd1F2T0dUTm4xL1RqeXNia3Y3cVN6VHpMV2ozdWhFNzBSRTFhK2plUEJXSk5oRXBVbzVyRnJVOTdLNU1va3JTbmp2R2w3SHQ1V2FrdHZ3SmV4cWpRN1pvY3h4ckdWT292bDlxeU45OFFBZXE4R0pHdERQZ0hYUWh6ck1Qc3diTWhWMGc3bURDYWZVUFJFY0tpQUVCY3NqYWZCSGQrZ3FlTUJqM2Z4dzY0c0NOS3VnZklsM3FxZGR1UkxtOTFKR1IzcHdSRHkweFhIUVNuQlFjNTliU05sMkJMQ2ZJc2FWQ0sra2ZiTjBrbzdBY0hlck1HcktRMGFzQkhZTzlDbHNSSHRteFoyNlZUcnlucE1LWXI0YUJ5NkRTZ20rd1JNWjkwYWI0SEppNE1PNTBmWGtrR0tVYVJuME1XMEY5dVpxcTkwN1Q2L0tEQ3BZQkFYTEkybng5VlEyRWhyUDV3a1h2a0YyTGhYYTcwRmxvTDZpR1dVUDIvNUhuQjh4ckVaYmRXYU5wRjY5cDBEUnRWTFBPTUpZaEJGZU5sVktNODk3S1ZoekZvN3FxSU93dm1hUFJVMTV3RVhLd2dTa3lCNko0ZjlEU1J4cnFqRFI4T0pZUnIzb01pWHBZVU8zMDFLTmpVRVdZR01IelJBRjZERGtuMFVlTGZyR2hSNy9Tck9qc1RLMmE0dnZOdVlWeWFoUFdkWFlJQ29ZQkFYTEkybnlpaFNRUlFsbHlPVXFkVFdoTHZ0ODBJb2RnSGwwWDdVODI2OFVEYy92V0ROK3F6VFJRNnF1cHUyOUU2U21iSlQ5TUZHVG9uNmp0UUdLSUdOcUt4STZlRHhJQUJZSERyeWoweWdDRG15bmdnSU54ODF4K2xPblZINTk4ZlN0bEs1NW03TTcyZ211MjMrdGNDUEM2TXd3NzVkNldnckdzSEpoTnpCdFczczFRSWY4S2dnRUJjc2phZlA2Rld6OXp0cHRCUVg2VnZETVJ1UzV6OXQxOHlHUWx6ZmVOQ3duQnViQVFXTUdwRWZTbk8yZFdwTmFZck1qWm9mdWw1MS8rWlZSUlBaa0lLWi9ZVm5ld3ZMbUprQVkrTXhDQ01pVmF4dmh6TkRBU0FUNzlmMlc0NkJYT3BhNnp1TGNUZzVsTjh5T05aV1dXVWI5bzZKaVR5QkRPQmdrbHl3RHZ2TERuQ3B3QkFYTEkybnc1ZTZQMDZlNG1EbmlWOUdVeDFITFBQSC9MOFZnUkNQRjZmQlVDNHkyWjdOYW9OQ3FtS0RUcUV1U2hIUFU0VkpZZFF1WmM4YkdhUVFucFMwclFMUXlmbWFodEI2ZFY0WlFYZW81d2RRSDhoTmx2MnBPUmFjaHVjNmNOUHRSbG50Sk5uRXEyNHl3Q2YvRWUxR3FOakNYUWUzN2V2aHF3WGlCbCtJY3BhQWpOVmdRWUpHR0l4dDZjYWtQNk1Jb1dnRkt2WENhS3IzY1ZDb1FCQVhMSTJueHBaZHQxdTRxMjdTaUN3U1YySDZGVEFKSTRRUEREVDl3UE5Ia1p6NmdiTUJjYnkxbnBrMHB2anIzNW92d1l4OHNnN3Q4NlhvbEI3eFR3a1lEWS92RTVteDRJNk5VbC8rdTdrRDRmeWM0ZTRaN21xbjNpaU1GOCs0cllGWkNOcjZWUHR2M1VVR1FQV0w3aHp3SThoUWN4SUpIbGlrZWQ5MkR6Y2xHaCtLaUJDcGdCQVhMSTJueTNvNlJld0pIa3NwRkNOQmxOdXo1WnlZcjdnRE4ybG91RTdtMGlkRWNZSHFVVXFHSjQ1eGRLS3AyZnZSWVpZT2J6bjk1SEd5NXBJQnpPNUJYQVY5NTZ0c3pBcFVsNU5TK1RxUGtiSldEMnRPOGc1REJ6RytFMWpFOGFFUGNiQVRvRDZYWVNJc2x1MVpjNndXOWg0dzlhWngzb00ydGxCZmFiTmN1dmdxRkNSZnRqbnNoaVdXdVBuTEJObDErelozRTUvVTRLY2dGeXlOcDg0Um9UNGlnNjgzZnlPeFNma2VtZEtHcU9Ka2d4a25FdXlUbVZYMllWVkUxTGdMTk1RSGMxSEhaTVkvQ3NQVDR1bGhsVVZvYzUvSkRabTNlbEJ0aVdSRHVuYnVYbmNZVlk0cThpdVA3dGtSWlNibDk1VGtNQXNaZEJiLzdRVWJZcU9DN1pYMUQvc3ZGeWlqcHBpZ3BrQVhMSTJueEVYQVhxVFNYSG5IdGo3bFhrWnk0dDFMK3FIYW9YRWVMVStTZ1Q3c1pUOUpwUW5pRU1CdDB4M2ZNUDhNVHlLYU1OSm1tcHJqOGtuVjN0OGczaUtpa1gyTTc4cGxVRXZNWkhZd294M3JpdzJwY2hHdWRCc2hKdzBRRXZQWG4rQUFxUkFRRnl5TnA4dEFheXpwd3RZVEtjY0FPeXFydEFMWlhWV21wTldPSUQzbm44TDM3UGo5M0twdzQvSHMxZ2xBRDE1VWwzYzNacm16cDNJK2l0ZmJrK0ppeUg1UGtJem1ETzBudFhXMWJBeTQ2T29LVTJ4NVM5VlhxdUF1OFo3VHZCSXJDTkErTDI0ZC8vbllFSFpsTGtHbDBHRWV4R1dIK05BdU5HRTVsWkJndHJSTnV5SlB1a3FSNkh3QVVsU1VTeEZtOEtod0VCY3NqYWZBRCtWWFNyTnVNSFFPYjB5Q05UcVlyaTZPNmkwdXRQdktzZjY3aG1uVDRvSE9zQmZOMGVoOGRNaGVMaTkrQmJobnYweFlzVy9KRWhQeTRFcWhudjIrOWxPd0NudDN6ZkZ0MnlBakF2Yy9ZbEs4aExzek9Ob0daU0ZzaGNxbDVLWFJzckdjMktxTUZJald1WXlLRFFRK2JmNjZFU0t1SDBWSmdZbHV6YWJxdVhQRTBLZndGeXlOcDh0L1J6bGtCUHBiOUtlTm1veE9ZYml5ZjdxbzJKdVA1OEN4TSs3SERVT2tJUVc5Q2ViSFBhUkMrTDBNZ0plN1FaU2NwVWxuRFZ0WERLQmh2Q2JQS0h2Y2V2cjBIbnlVRzVQa0dmU01HN3REbHJLdGRvUzVsN1RUekJCVDhVSXh0NWFHSVMzM0RVQUJUSldJQXdsZEVGcCs4K2FHdTV0aWlQdllRS2tnRUJjc2phZkF0UEZreEtlTlNFYlZabUZZQTMrZUtwVVVEbllrMVZvR1J5YmtoSmFzamJBSlRiZWp6MTlqRi9PRTZvZ2FBRFhLZFczN0RYUFBkNU0rTE8ySUUwOXdhbWJXL1ZFcllpanB2UWhIWjd2VmVJbjhFSExwRnRZZzBiQ2RKbjFaRHM2bkxkRm1UTzFjUU52RGhpcUFVQ1R0azhiaGZkaGozWG9aN080dUJEb01GQkJwZmZDdVFyUzREY0s5QVM3d3FCQVFGeXlOcDh0VGk2YklBSFcvYndFM2J4VjloSmo3Y29YQTRrUElQT2xyc3dBdURXVElhem8zeUpyN0N2NHgrZTcwQUFvTGtZdHR6VmUxanhzRGxBWnBIOFJSRDJ4VEJ2WEowZUIwbzlpRzRKRG1wMmg2RVZ5V1pnQ1J5QmQ2NkdxbloyYnVNMmg0K1BLSnZLN3EyM3ZLZk9SSFJIbHpEa3BnbUZjUGpNTzJEWWxBcUJBUUZ5eU5wOEh0MTFwakxZUUpqQmoycG1icUszV0M0b3lhb1FhZGU5b0taT1JmOWxVVjB1ajMrczJLZWk0TGdieDc3VVhJRjlYZWZNd3MvNWRvWS9zNUh2NGN5L1IxTTk5RFh3WmpKdnA5L3YzS2dHU25jeEhTT2lSUlpPT0hqc1F1VEdEVWJPc2FmdFBEenRtbk9yNmtKN3h0Tjl3Mk9IaG1xaWRndUYwQ0kxQ2dxTkFRRnl5TnA4ZXpkYktRZExXUFJnMW5wSkhMaUNiekp3emFTL0hIbXhHV0QwM0RWVVl3aHhZRjhvWCtuakdKbjhFZ0toS2Iyc0FQdEk2Ymx5c3QvcU5ZUERKM21LRTZWdVRGTEtYWStvN3dBeWxIa0pjSEhpV2xPL29LRlRnUTArUXM3WXBXS09FMExzL0lIemEzMDYwajYwU213UDlRNzRzZ0pidnVhQ0JyeUZYYTBPenk4cEF5VnM4a1pGQXdxZkFRRnl5TnA4emdsK3BTaE0xWUNsT1FUcUxUWWZkeDV4eVFBNXZaRy9SemZ1K3NFODAyWXNud3pDWHZPWDkrZVZJaXd5bEw0NkZ3djJQRlpLNVIxL3lBRFVua3RzMHg5YkZKUHBWblB3ZUhNZUxPeCtSSHhIYWx0K2xZTzQ1OS81V2FQOWVIcjhIL3hHT1IxSUlrWHBKSDkzSExTUDFsbHRSRDlHYTkrTjdQSmtZaWFBSkFsLzNPTzl3c05JbzBmLytoaDQvN0pyOXdRSnduZTFxMnhkSUFxT0FRRnl5TnA4Smx6Rk9DQis3WjdWaURqeUxFNE95VUt1VFZMVGFyaU01YzVFSmNGN0Y1cTVZK0JuNlpLUkdOd3B5dUJsWmVvUVVqQmtxbVhNQWF2bEJoMDRSdGdOSjNveDE0UG5WdGZhZk9lazhrT2tpNVBpMHEzZ3M3Ny80UEhzb2dyNFo5eWYvWHdiZEpQdnEyMzdxdzJNeE02VjY4bVNUUXRnOHJNb0svT0RSZ0JuZ1RsWjVCc0tiVGpxNFh3S2ZRRnl5TnA4OUQ0bmdYOFRNSUZRa2xpMXY4NGc4U0RSQlFkdUJuNStQSFR6VTlzZ1lmQ0N3SS9SZ3RYU0FDYmdrMFFEVzFydDE2bThmR3cvbmlBOEV0ZjRZNm50MnZhVDVRWnFZMjZ4M0QzME81R0wwTVY1T1Z1dDJMSXNRZmYyb2YyQVFObFlsdlBsR2hxN1Z2T2FWa3poNks4VkIxdjJlUTVIT1NvN0NwSUJBWExJMm53VVkvOStwTXlkWjRJdEgxbWZBSWVlS1k4cjVJOGhkU3BSNjBZMmp0OGRETW9sZmhmSDNMc2xPczVlVzZOUEFnTW9DSTNaRmtxNkJQd2w1TkI0RTFHQ0l4WkphNWpmb25XK2VXcE9WM043YjliQ3BNZDlMMythOSt2RmFaa1Q4WmsxUlVYQ0ZvQXF4N3VscUdHQlNpYTN6VUdSV0ZWZCtKTnQrMUl2NGhrSlZ3azhyNmZ4RkVEM0NKd1NpendLakFFQmNzamFmUGVZL0U5blRvS0N5dVYrY0hlcDNqaXF2bldxTWdOY0xOVk9LaVgvYUZza0w0K0VobzJJM0RoWkRlZDZGekNIaG5QWTlSL2hYbXdoR3EyZ3RUbjhoZmVhTk11MkF2WGNQUExQK0RWVjlIL1RMdnA3MHoxSFIxSEZpbTZyNC91amFMemNrVm9tYlVpZmRDcGI4WDlWQ083WWZJVVM3RE9DUnFFZW1yMzNPN0ZxZzFOZURHbnIvd3F5QVFGeXlOcDhIT2JNNUQ5cTRoU2pRYWZaRTlXVUc2VXhKMXY0dk1Ga3hBak9id2pSWW9SUnNDc3o1Sm43YzRjVFMwUktiaHM1NFFVY29USFgzdm95TUNGTmZzWlpLWm9aSlBvam5MWlB5NmgxOFM2bEFjckpjc3U2OEhZWlRVak5GWHNqUVJBaytrdjE1QlVqYWZXNlVlcTJnZTUzRTA4VElEbTJ4czNqWXFxYzJCMk9GdTIzUlVXd1NQK3ZrUjRwc01xemlTblB3NXozZjUyVVVvSGZDNGdMTDByREFpdjV6V3FoSUNXQUFrcGhLSm9LblFFQmNzamFmRjZTZ0FnZzBWbG9ua2xWRUt0NWNKQnlGUk9ldlE3dyt4Wjc4WUlCUmNpd1VRY2QwQm5qQk9zQUxhTFpjZDk0ZmtUcEw0NVg4TW1iTXdQSFlsa2R2UFdEN0NueStReVRoU2RBcTR3T1A4ek8vNTN3TmlST3FxNjN2TkkraHQ2VnBZSElrTnVINDFkVmU0dGwvMVRaUFJtNHpNckRrK3hmcnVzdmlaQ0QzOVpxNm90a1hzOW1wbEZGcUhKNkVPOSticnBzaEhKQTBhRWlDb1FCQVhMSTJud3Vjd2pRVXlMK1psTkpkVnF4ck9DaFFQZU90czBOSUJZKzgzb05FMUpuQWZqblpEd0pVdnk2Yms0aGlpOW5IVFpraTVKU2NTN0dQaWpCS3dPZEFZSFhtNHhheDM0Y2Q5QUNLSTcxL2dsRmRjNVRISUFhSXpRbG5oMUxmeENnWUdaZENZMHU4MGtqd2N0RytUN25yTnpORC8zOG9kZWJWMTRQeURGNjZUdFpDb0lCQVhMSTJud1NMN05vMlU0bTNVSXhnUzAwbXpyYnJPa25laVdxT2FzUWp3L254K0NpeE4wbXZuVzBMN2M4Z0I2YTJ0dXRoOVZtanZhdnZXN2puY1FiK2NneWFQT0FKSytlY1lCanBCOUk5UmdORVY5VHE0a1RLbGVZMlBmTVVDZkpSanFkV25RQmw1SzVzellkNjN5dC9VdThIbTA4K3VHVGYyZUluQW5qcEljVlN3cUZBUUZ5eU5wOE5rMGhEWlNYWjFWUVVqaWtHVVZiNVBzcUNzRHY5SlVDdTIzVHZYU1VvMTRvTHV5OHhHM2tVU3pHT0tteHI5SkJZR0ludnhLMDBKUkJnKzBpRmtDMGg5NVZ2L1BLT1Q2LzczS2UxT1lNVE9OUDVvcjM1MVpMMzZHUnprOTZwcHpncXpVT1V6NnYrK2E5V2JTOHpBUzVzZkxvdmQwNnZRZnBUWkMrV2FWRXV6b0tlZ0Z5eU5wODNVQ0Q4ZHNVMVg2a2tha1NaZWh4L3hTWFoxU09jTnUxeXYrVUhSVWR0UlUrcWVyVkhGK0dKZk85QjMwZGJ1MEE4NVdXT0F6c1RDVDlDajJvcGlhSklZa3dNMWdQTitPcktGaElZdDFtNmRqVXVoTXdjNVgzc0JYUDFIWThkWDhwNGhxcmdmQldFYzRLUTlRSHh4Nm9rQVFuRm9uV0NuY0Jjc2phZkRVOGNCZXVFa2dVU29mNGU5YkZtUklidTlidHM4a0Y1aFVNUndOYXBJZlBEdXhlc3BkMkoyRFdSVzFDLzY4NkkwZlZOZGJWUVVCdHhjcHBDNHZVY1dhb0FoRUJjWE5mWXdFeW9OeE5nNzVIV09UZ3dVWHhnaGF4LzI1Yk5EOUp1WVROenZrOGxKTW4zV2dwbk9PWWFlRmlJZ3AwQVhMSTJueUY0Q1JVZmlrQS8xb0dvOXVCY09jeld6RGRIVklXZXFqbktlME02Z0lhM0NROHVLbm00a2QwNFQ0bFY0blZhcmE5dFl5U0ZkVEhKOEJDOHBEbDNEZmhFYjZqVFJZdjlnNGE5bHZOT21PZVFpKzNkbGxva1k3Vm9sZkhTb0hkV1p6M0k2VEV2UlJTWFBqOVdjd1E5aGdLcVFFQmNzamFmRDl5d1A4ZzdWb3hBdlBLNFNnR2hYMllSNzNvb3c0a2x5UFdjMzNRamZPQVYrK1h1eGpHeGYyc1Fid1NCQXNDNEhKdE5aRlJjOUpoL3FONjRXUzgyamdoRDg1Tmw4eTFnN3IwRFJRTXRpZGMvUXRxb0J4RjVwMVpnOVl0ekNEd2MvV2F3OEhsckZpbmlXNmFTK2tZVDgwN1NpYVhXTmFGdHFTSUs2REVvaCtTZzhUVWFqNHhRS01ROVZYVy8vSG1IZ0RTVU45aFJVNHZnSlRrTUdHdnNkYy9ubmhMQ21VQmNzamFmQ2U0QWZFYWcyemtxOTFWQ1lXWFpnd1dFdi9NN2lIU3c2Njg3RXNCNWhxVG05dVV6Zm5SdEVTdUNybk93RUxjc1pPRXZCOEp3Tk1tbndyMzlaQjBvckxlK0FqZnRwWkFadGhuVURNNVJlazBxNUZzMlF2bXpOZE1SZGVIYkZzMFFRcUZBUUZ5eU5wODdTL1pDZHA5TmVvSUd6RkExSlJ0WkdkQ3FRNXhEMzNkY1RudUN4bVBXbzJlYlFWdjNwcXlETCt2aldsMzZZa2g3dG5ab205OUdKbUdMU0NuemdiOGV6MUFQQU5zZW9kVEw0cDRoVSs5SXRIY1pOUGFYdGVkWjVQOXhnRGJRenN6SnNKcTNyb2RZWExQWmhSbmZCLy9FVFl0UER1M3N2N3E5cFBPQjV2ZkplOEtkZ0Z5eU5wOHB2NEpuTFY1SkhzMzZYVng2QUxjNHlnSDA3V09CQVJsNmpjaWVNL2E1NDJraHlUeDNOQXBiT0ZrbDFrVko0blE1MmFjRjdrTGczYWh4R2ZNN09iS2ZoU2JYK295WTBQMHBpODVuTkdKb1Bpa093RURYckpQRHdaYk1yYWFiZGJSNlF6S0JsbFRwMy9CS20rK2kwMWJ5UjhLY0FGeXlOcDhxNVVSUEtQTmRHa1oyQ2g0bWNyUTNVZlUwK3dvd09SYVEvQ0FWOTgvRzl3dUpucnpxdXVBdStJbDdSVWNTVmpGYUtxM1orMjJaRW1NbTY2TldWQkRhU2ZHdnJaaWhlakwxM0p5d0xwWmNXa2VEcnBVbVMyVEh3bWd2enJ1VUxFT0M0Y1VIdnozTE1Deit5WUtnQUVCY3NqYWZCbnZidHJOZmlHSGROZ3d6aG1tbEgxMkJ6UFlxeE9SZVpRc2pSRkZhR3JtMi9VZWhRNDVpT0IrZWhMVzdVZFJJZ05kV3VJSkIycERzT0JmSVY5c1dLMnhVaW1BbVhoc3J4N3krbDVNOGlXSzVhWWJyNGdpMGFDQlhTcFRDYi8zUnZadDNmUlB6bTcvY0NDb1pkcmNCeU8zNnJQZzlOKzRhbmpLYWdwNkFYTEkybnp5TUNCUzlmMWMrNmltV0ZmMGRHMlA5ZVBlWGhkQWI3a2pNTEdyRGVDbUMwQkZuWS9WeFk0Q0t3NGtkNlRRbXdaMHM2c3QzSld3OWp6Z3JZcnovYVR2R1BFaFVXaDVlVTdLeWhHdFlZdG5VRGwzVFZQQjRKYkNXOERXZk1zRDF4RjlwazVGVnQwa3VQUEFid01mZTRCK3RFdDV5WW9LZEFGeXlOcDhtd3dSZWE4a3I3RzBhRVFlNEVheG5UdzJydDNEV2Zsa3hiclAyaXkyMTRYN0JtY1lsVTdOYTJUMkxuR2V3TzZRN0RBTEJXSVN2UVd3Sk9NTjN0dWh3aUFKak9WbXBka2lkd2FNTDhINk52SzNQeHRGRXBidHlWMktLMlZkSWFpNW03cU9KOW5DYlJYN3BKT3krLy9FQ29JQkFYTEkybnhLMFpMNVE0QUF4OFFmb3lXeFRCSS90ajlSQmx6Z2IzQkQ2SjBnclJUWjB3b01CcFBZWmZtMk12SXlQS29UTEtjemFwRjV4L0RwRmc5Ris0cis4dWFsRVl0SXhLVEpHekNGN1pGRnV6VVhpQkFwUmtuWHUzcndiR2tOeTQralBrakZrTzZacS9IY3NXV1pIajZFT2h5U2lmbGp1VVpob1dUVzNqUzc3UXBWQVhMSTJueFRaR3NTZFFuS2FjZFJpOUlsbjFDbko3S3h1UUxRWnBuaExUNGpBRjljRTdRTUYwRUV0RCtXQWtoWTVPcTdjc0MzT3BkMzVLbEFuNlM3RDJwQ3pHeloySmpMdzBwejVDdDM2cDZvZlY4NWx3cVFBUUZ5eU5wOHVsNHBrcDAxcWtsSmZEV29na01NV09xSDRVVDQ3aE54SXFOK0wzRnJOYjRBVTI5QzNROXA4dlFXSlNDOUdYTEdZR0tuRzV1RGppaHpqSG1RR3pya0J3aWptSUZ0cEttZUp6NHpCb3FNdyt6S2Y4QjNPK3YvRFBFcGJZZ2ZZU1p0c2xLVEF6UVdCem8wMTBKMmZ3dk1uSEYySHMwbU5CUC9KUENSYVlIUjJ5R1BOcWxoU1ROSlpxd00rQXFPQVFGeXlOcDhYcDRHUWVxeXlaSzhkekpQSGpQeHlLM2tQY0NSeFJJdFA5QzR5VGZ1dkZ4RHFNVHlIcjBJMUptcUFQWHFDKzl4TmkyZ014WkRvUVFaMUFHT1F6c2pKYk15d0RldXdQQ1FBL2RiWktmUjZXdUtha090QzZzR29HQkdGL2ExMFNqanNhOU1UNnFhNVhQYXdocXREQzdDMGF1dk41ZGs3YysrVkpZRng4STNjYklmL0VwMXo5UDZJMzRLYlFGeXlOcDhBSTgvU3FVdGd0bWtHRUFjYk1YUkVOOUIxd1l3WnFVb0dsQlRtMXpjazNjM1lFRlR1WG16bjlLc3kyc3duNXpuUlB1c045MkIxOVdsVUxyQllHaG9DTVlFK0RnR0tWejc1eVJULzh0clZycmZYMlAwMUNhWFVyV3FkUExsRjJMNUJ4MkZhRmErMlNZS2l3RUJjc2phZkxhakZLeWJsbXpOeFREMjlTWFlKOE5YQzNEaytaNytnT3NxY3djdHRwOW5Qd3YzZVRRMnh0aDJYM0VLVTZUbEE0TjgybzVvMnc5ZTdENklJZDNXRVV2TndObTNrMXF3c0oxMTJNZ3FHV3dXSng1emdiMk9tMWp0LzRwZHRvOUx0V1lncVpNZERTaVlqcWt3ZnNyeXhkdG03V3BPL1NLblZKWDhXdm4rMjRUNTFCdGlud0ZrQ204QmNzamFmQ25lYklscU1LTXhUMEVrRVYxU1MrMjc3MTF2WlprVTZUUWtaeTRxREtGRzAvTkRUZXVJTmQ0MTl3Y2lUSGNpdDltNXdZSXRGL2R3c3U3NFN3VEw0cTdYWll1SGlVVEE1K3BKcW03NUhSTFVBdkNmRS83K09aK2JYQmJnc3Z0dWxVVnY3QzYrU0VvdG1VMEtpUUVCY3NqYWZFNDY4b3FVTlI5eVNNMU5DeEVxMlRxSGNtUUlHKzIxTmFlRExva25uV3BWY0I2NnNKUXlFUjgrSHdsSkI4K0Z0dVhLeE1UUERMNTB6ZWpqbHJCc1ZlV1EvWlQ0LytDR2F0Qy81R2pHckhkVHdVR3plbUtTODZnY2ZGL1FxckhFbjlDTG9Va3YwZzI4R3Z4MWxSVDVBazY3L0N2dkhCdThVaUFlUHFFbnIvM1VEdmRXVXdxUEFRRnl5TnA4ZnNPMmp4bHdxUWgwSWE5RXMzc3U0NzNNQy9SV3ZlQVRNUXlpa1VOOEtpMGxZaDVxaXpBY1dnMDdjUjVsY0VKTDZaa2hmN290WFJSeXhtcjBvUzk4MG1vcTV0Rk95QXc0N2JobVRRQXFhcDh1aTdJZmdteTdZSnk4RnpicGtTaGNIbUJnUXplRkdWRDRZMk9hQVRLR3FPanoyNlo5Rkx0UVhBZmpsVWlpQlgwSjUrc0pxWWorcEFtdUNvWUJBWExJMm53ZjMyck1JT0JqWUlCNnRWR3hWaUtuS2w5TTdiNDVOaGFPL2M5OUltL3UzYlphQTNYMklZZWZwUXVWWU9zY0NXS3JBRmJ2V3JraE93Z1JxRmQwM3hLMjd2MjJlei9icEtMZWJrck1GMTZqTy85VlRVaERwTlFnZUJFU285Z1pFV3hjcnVZNGtQZkNoQnE2TGFCRlU0MDROUCtvQ0ZBSklUeloybUxleG4zc3d2a0tnZ0VCY3NqYWZFcW1vdWMwSzZhYWRlenlHekYzcCtaWDJsN0Y0QnY2YktUeUI3ZmY5WEh5TVB5dXIvWG5NV2kwRjVWWlJSTng4N2V6ckpYVFVyUkNXby95d3VNMjJlNm9mYVg5d29VK1NvYTZtSWlZeDVCM0RkV21FWm9KR2JxdnZhWXd0YS82TlBkUFlFQ1dZanVtd2dEM2Y1UkQyclVhSVMreGtiUUljdFZFVndhUkNwTUJBWExJMm55WXdtaGtjMjJ1Z0E5YVQ4WjRUbnFIT3lGOVBXL1N0OVlqN2RheDBMOW1Wb2ZDazZRM0hvSDZ0UVhZbjhFUitmWW5tQTl3azZzV3hqN3lSeHFSOVFWa3FaVi9uYzdWV0tyMi9WQjNrTElZbUlkMzlweXZ1RHA0d2UyVlZsMk44YW4vd2trV0pRZWozTTFxUTVvZ3JGdDBHWXVnQllQbXhkdVVCL1g2dzJuT2l2TjJ0clNkTHdoK2dqMm03aUpOQ29zQkFYTEkybnk5TjQ3em5SS1ExbUNaNitWNzJGLzU0N2xJZVdKYkNTeC9kOUloNHhObFMvamNtZGEzd0VEd01MVGVFMDdKbVF4dThMZndNUlVzRnpQeDVWWUZDVWFqZHhnc2E3dkR1TzRCa1NmWVlicnVRVGk5MTRieFRmdXMvem9LUWIzWVNjZXlLWWdkTlVTNlMwSzdUNjZLTTFBVnpkanpwUWRnQnJtYkdVN2lEN1BpWGczVlRiTmNCUXFUQVFGeXlOcDhJMFhqdXY1REhVZWQzTFFFTmwrYkpIdWYyb0R1eHNPRlRjNG82cGNTcVhvQzllaWlsQy9rT3doNHJJM2NkazZFUlZJbEhITWR5NjVnMjVTemN4aHd3NDFtSldXTDJkVmc3bkVUWitzL1pIdlExNDMxekxlQUhRNnhFcjBqSWpjcHdscWFzdXRSUG9lMWJtN0VYSFhzYVQvWTZvZFlxNDNSck4rS2U1dUN3OGpnRTJPWStMUm1oSXlCUXRBTUhBcUpBUUZ5eU5wOHNJK21RSU5EWmRES1d4bko4aXJ6eXFDZkJObDVERURVSlVEYStJbWFIVTgxSXg5SEgrQmoxUFR4djRRdkVoZkt1N0JNbEtUWHZ2TmFiTHRGd0dyWnljRDhGZGRzaktoRlY0Qk9iM3lZTERFLytKRTdwMWRQTE5NbU5rcTVLYVpIc3VFa1d4SXpTbTAxQ2N6V2R5NFViVlM1VTFaYmxwWnRVbDFMeHh2ZmlITjRvNVQ4Q3FnQkFYTEkybnpqY0Nyci8vNGxDLzdQUkNmTDh5bDZXbFlaVWJUd0todldiekdwUHVYYVdXR3NDR1FpcWhyNlVBdVBNNkZqbTI1YlZVUDJHUU5hbFlJOHZWTlFtaVlIYVJJVVk5alRYQjJHRDZSTjdCdCtGcTM0NXdzS0xhWWg5UXJxQnlNTTdlV3g2NUY3cVpxamNzSW90S2h4NnFnN3FoNlFIRDJyWmxBK3VHY05melJnVURxMXQ3bENYdG9obmFia2ZRVXhRRW9qVFF1U3hFSnBkNFd2NklPOXRLVGQ4VlQzQ29BQkFYTEkybnh6MzFNSTI3S0NnZnNDTHFxbmlEeURDS2xiRjFwbW1VR2l1TEgvUm1DdU95WVUvWGF2TnA2NXYrNVhsSnE1eTBQUm16UW1pbzBldGZ0WlJPTUd3SmtmSDhyMGN3alVaZkxYb0liclpJU1FRaW4yd0tPYWJZK3huamJEMVRIK1Zrc3Rha28vTytPdjR3N2xCc0NrcTVGSFVudFpZTmM4dHNXY1piOEtRd0Z5eU5wOGsrSW84YWxlbDBtTWhabXJLaCt3czJzMGdjTC9BVjZnTVBmS3hkOHVNVFhEM0JHQ3NRT1NCWFM0aTRmSFpZaWpQYmJDcXE3aFdxRlZpUmtvQWQ0PQ=="
+    }
+  },
+  {
+    "timestamp": "2025-12-04 09:58:25.93931",
+    "type": "chat_response",
+    "message": "You've hit on some of the most compelling reasons to choose a WASM-based plugin system. The sandboxing, scoped permissions, and streamlined distribution/discovery model are powerful advantages. It's a more complex path than IPC, but it offers a more integrated and secure experience.\n\nLet's dive into your questions and then lay out a concrete architectural plan for this WASM approach.\n\n### Answering Your Key Questions\n\n**1. Can we have native types sent back and forth instead of using JSON-RPC?**\n\nNot directly. The boundary between the host (our `jp` binary) and a WASM guest is restricted to simple numeric types (`i32`, `i64`, `f32`, `f64`). You cannot pass a complex Rust `struct` like `ChatQuery` directly.\n\nHowever, we can achieve something very close to it. The standard method is:\n1.  The host serializes the `struct` into a byte array (using something like JSON, MessagePack, or Bincode).\n2.  The host tells the guest, \"I have written N bytes for you at memory location X.\" It does this by calling an `allocate` function exported by the guest to get a memory buffer, writing the data into that buffer, and then calling the main guest function with the pointer (an integer offset) and length.\n3.  The guest reads those bytes from its own linear memory and deserializes them back into the native `struct`.\n\nThe reverse happens for return values. So, while we can't avoid serialization, we can hide it behind a clean API. JSON is an excellent choice for this because it's human-readable for debugging and flexible.\n\n**2. How does the provider plugin deliver event `part`s back to the JP host?**\n\nThis is the trickiest part of a WASM plugin system. A standard WASM function call is synchronous (call -> block -> return). It doesn't natively support yielding values like a stream.\n\nThe idiomatic way to handle this is a **host-driven polling mechanism**:\n\n1.  **Initiation:** The host (`jp`) calls an exported function on the guest plugin, like `start_chat_stream`, passing the serialized `ChatQuery`. The guest starts the asynchronous network request to the LLM API and stores the resulting stream future. It immediately returns a unique identifier (a \"stream handle,\" e.g., an `u32`) to the host.\n2.  **Polling Loop:** The host now enters a loop. In each iteration, it calls another exported function, like `poll_chat_stream`, passing the stream handle.\n3.  **Guest Work:** Inside `poll_chat_stream`, the guest checks its internal stream.\n    *   If a new `Event` chunk is available, it serializes it to a buffer in its own WASM memory and returns a pointer/length pair to the host.\n    *   If the stream is finished, it returns a special value (e.g., `(0, 0)`).\n    *   If no new data is ready yet (but the stream isn't finished), it can return a different special value to signal \"try again later.\"\n4.  **Host Reading:** The host reads the data from the guest's memory, deserializes it into an `Event`, and processes it. The loop continues until the guest signals that the stream is complete.\n5.  **Cleanup:** The host calls a final `drop_chat_stream` function with the handle to allow the guest to clean up any resources.\n\nThis creates a \"long-lived\" interaction, but it's driven by the host repeatedly calling into the guest, not a persistent TCP-style connection.\n\n**3. How do we handle updates to individual LLM provider plugins?**\n\nYour idea is perfect and aligns with standard plugin architectures (like `rust-analyzer` or VS Code extensions).\n\n*   **Registry:** We maintain a simple JSON file in our main GitHub repository (`dcdpr/jp`). This file will act as our global registry, mapping provider IDs to metadata:\n    ```json\n    {\n      \"openai\": {\n        \"latest_version\": \"0.1.1\",\n        \"url\": \"https://github.com/dcdpr/jp/releases/download/v0.1.1/jp-llm-openai.wasm\",\n        \"checksum\": \"sha256:...\"\n      },\n      \"anthropic\": { ... }\n    }\n    ```\n*   **Update Command:** We'll implement `jp plugins update [provider-id]` and `jp plugins update --all`. This command will:\n    1.  Fetch the registry JSON.\n    2.  Compare the `latest_version` against the version of the locally installed `.wasm` file (we can embed the version in the WASM binary itself).\n    3.  If an update is available, download the new file, verify its checksum, and replace the old one in the XDG directory.\n\nThis makes updates seamless for users.\n\n---\n\n### Proposed Architectural Plan (WASM)\n\nThis is a significant refactor. Here’s the proposed crate structure and a plan of action.\n\n#### New Crate Structure\n\n1.  **`jp_llm_sdk` (New Crate):** This will be the heart of the plugin system.\n    *   **Purpose:** Defines the shared contract between the host (`jp`) and any LLM plugin.\n    *   **Contents:**\n        *   The core data structures: `ChatQuery`, `Event`, `ModelDetails`, etc. These will be serialized across the boundary.\n        *   The `extern \"C\"` ABI (Application Binary Interface) definition. This is the set of functions every plugin *must* export. We'll use macros (`wit-bindgen` or similar) to make this easier.\n        *   Helper functions for serialization/deserialization within the WASM guest.\n\n2.  **`jp_llm` (Refactored):** This will become the **host implementation**.\n    *   **Purpose:** To discover, load, and run WASM plugins.\n    *   **Contents:**\n        *   The `WasmProvider` struct, which will be our new, primary implementation of the `Provider` trait.\n        *   Logic for using `wasmtime` to load and instantiate `.wasm` files.\n        *   The host-side implementation for calling the `extern \"C\"` functions, managing memory, and running the polling loop for streams.\n        *   Logic for discovering plugins in the XDG directory.\n        *   Logic for fetching the registry, downloading, and updating plugins.\n        *   Configuration of the WASI context to grant sandboxed network and environment variable access.\n\n3.  **`jp-llm-openai`, `jp-llm-anthropic`, etc. (New Binary Crates):**\n    *   **Purpose:** Individual LLM provider plugins.\n    *   **Configuration:** They will be `[lib]` crates of `crate-type = [\"cdylib\"]`.\n    *   **Contents:**\n        *   They will depend on `jp_llm_sdk`.\n        *   They will contain the provider-specific logic (moved from the current `jp_llm/src/provider/` modules).\n        *   They will implement and `export` the required `extern \"C\"` functions defined in the SDK. This is the glue that makes them a valid plugin.\n\n#### Action Plan\n\nThis is how I propose we tackle the refactoring:\n\n1.  **Create `jp_llm_sdk`:**\n    *   Create a new crate `crates/jp_llm_sdk`.\n    *   Move the core, provider-agnostic types (`event.rs`, `model.rs`, `query.rs`, `stream/aggregator/*`, `stream/event.rs`, `structured.rs`) from `jp_llm` into this new SDK crate. `jp_llm` will now depend on `jp_llm_sdk`.\n    *   Define the initial WASM ABI in the SDK. We can start with a simple, non-streaming function like `list_models` to prove the concept.\n\n2.  **Refactor `jp_llm` into a Host:**\n    *   Rip out all the provider-specific code from `jp_llm`.\n    *   Create a new `WasmProvider` struct in `jp_llm`.\n    *   Implement the `wasmtime` logic to load a `.wasm` file and call its exported `list_models` function. We'll hardcode the path to a test `.wasm` file for now.\n\n3.  **Create the First Plugin: `jp-llm-openai`:**\n    *   Create a new crate `crates/jp-llm-openai` and configure it as a `cdylib`.\n    *   Move the OpenAI provider logic into it.\n    *   Implement the `list_models` function, exporting it with the correct ABI signature from the SDK.\n    *   We will compile this to `jp-llm-openai.wasm` and use it for testing the host.\n\nOnce we have this basic \"list models\" flow working end-to-end, we can incrementally add the more complex streaming logic for chat completions.\n\nThis is a significant undertaking, but it will result in a much cleaner, more robust, and future-proof architecture.\n\nI'm ready to start. I'll begin by creating the `jp_llm_sdk` crate and moving the core data structures into it. Does that sound like a good first step to you?"
+  },
+  {
+    "timestamp": "2025-12-04 10:28:39.983835",
+    "type": "chat_request",
+    "content": "A few thoughts:\n\n- Let's have a shared `jp_sdk` crate that is the base for *any* plugin built for\n  JP. We'll use Cargo `feature`s so that you can specify which type(s) of\n  plugins your binary supports. F.e. you can do `jp_sdk = { version = \"*\",\n  features = [\"llm_provider\"] }` in your provider plugin crate to use the SDK\n  specifically to build your own provider implementation.\n\n- It's interesting to consider this document about WASI, which indicates that\n  preview 3 will actually have futures and streaming, which is what we need. So\n  we would use a stop-gap solution for now, and then later transition to a\n  built-in solution:\n\n````markdown\n# WASI Preview 2\n\n## Introduction\n\nWASI Preview 2 represents a major milestone for WASI. It marks the moment\nwhen WASI has fully rebased on the [Wit IDL] and the [component model]\ntype system and semantics, making it modular, fully virtualizable, and\naccessible to a wide variety of source languages.\n\nWASI Preview 2 is also known as “WASI 0.2”, and corresponds to versions\nnumbered `0.2.x` in Wit packages and related identifiers. It is also known as\n“WASIp2”, where the “p” stands for either “preview” or “point”.\n\n[Wit IDL]: https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md\n[component model]: https://github.com/WebAssembly/component-model\n\n## WASI Preview 2 Contents\n\nWASI Preview 2 contains the following APIs:\n\n| Proposal          | Version |\n|-------------------|---------|\n| [wasi-io]         | 0.2.8   |\n| [wasi-clocks]     | 0.2.8   |\n| [wasi-random]     | 0.2.8   |\n| [wasi-filesystem] | 0.2.8   |\n| [wasi-sockets]    | 0.2.8   |\n| [wasi-cli]        | 0.2.8   |\n| [wasi-http]       | 0.2.8   |\n\n[wasi-io]: https://github.com/WebAssembly/wasi-io\n[wasi-clocks]: https://github.com/WebAssembly/wasi-clocks\n[wasi-random]: https://github.com/WebAssembly/wasi-random\n[wasi-filesystem]: https://github.com/WebAssembly/wasi-filesystem\n[wasi-sockets]: https://github.com/WebAssembly/wasi-sockets\n[wasi-cli]: https://github.com/WebAssembly/wasi-cli\n[wasi-http]: https://github.com/WebAssembly/wasi-http\n\n## WASI Preview 2 Implementations\n\nThe portability criteria of the WASI Preview 2 proposals were met by the\nfollowing implementations, which were demonstrated to be interoperable by\neach passing [Wasmtime's WASI Preview 2 test suite][test-suite].\n\n[test-suite]: https://github.com/bytecodealliance/wasmtime/blob/main/crates/test-programs/README.md\n\n* [Wasmtime]\n* [JCO]\n\n[Wasmtime]: https://github.com/BytecodeAlliance/wasmtime\n[JCO]: https://github.com/BytecodeAlliance/jco\n\nWe plan to promote the Preview 2 test suite to live in the [wasi-testsuite]\nproject soon, and add more interoperable implementations to this list when\nthey are complete.\n\n[wasi-testsuite]: https://github.com/WebAssembly/wasi-testsuite\n\n## Proposal requirements for inclusion in WASI Preview 2.\n\nTo be included in Preview 2, a proposal must:\n\n - Reach phase 3 in the [WASI Subgroup Phase Process]\n - Satisfy its own [portability criteria]\n - Be voted for inclusion by the WASI Subgroup\n\nProposals may be added to WASI Preview 2 at any time until WASI Preview 3\nis launched.\n\n## Witx and Wit\n\nWitx files can be derived from Wit files according to the Canonical ABI. Wasm\nengines can implement single-module components using just these derived Witx files\nand their existing Witx machinery.\n\n## Looking forward to Preview 3\n\nThe component model is expected to add `future` and `stream` keywords, which\nwill provide integrated and composable `async` functionality. WASI Preview 3 is\nplanned to be a major revision of the Preview 2 APIs using these new features\nin place of wasi-io's streams and polling interfaces. It's also expected to\nincorporate lessons learned from implementation and user experience with\nPreview 2.\n\nWhen Preview 3 is launched, implementations may continue to support Preview 2,\neither by implementing Preview 3 along side it, or by virtualizing (polyfilling)\nPreview 2 in terms of Preview 3.\n\nThe release criteria of Preview 3 will include that performance will be measured\nand addressed.\n\n[WASI Subgroup Phase Process]: https://github.com/WebAssembly/WASI/blob/main/CONTRIBUTING.md#the-phase-process\n[portability criteria]: https://github.com/WebAssembly/WASI/blob/main/CONTRIBUTING.md#2-feature-description-available-wasi-subgroup\n[worlds]: https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md#wit-worlds\n[launch criteria]: #wasi-preview-2-launch-criteria\n````\n\n3. I think for our plugin system, we need to think broader for future plugin\n   types, and thus we should focus being able to load \"a\" plugin, and then that\n   plugin always supporting a bunch of calls, such as `version`, and\n   `capabilities`, in our case, our provider plugin would return for\n   capabilities something like `[\"llm-provider\"]` and then that lets the host\n   (jp) know how it should interact with the plugin (e.g. it then expects the\n   plugin to have the relevant methods exposed that allow jp to send queries and\n   poll for data)."
+  },
+  {
+    "timestamp": "2025-12-04 10:29:19.567106",
+    "type": "chat_response",
+    "reasoning": "**Prioritizing Feedback Integration**\n\nI've been meticulously analyzing the user's feedback, especially the insightful points on architectural improvements. Currently, I'm focusing on incorporating the suggestion to generalize the plugin system through a shared `jp_sdk` crate. This approach seems highly promising, and I'm actively working to understand its implications for other areas.\n\n\n**Incorporating Future-Proofing**\n\nI'm now integrating the user's insights regarding WASI Preview 3 and native async/streaming. Recognizing the polling mechanism as a temporary solution is key. I'm actively updating the design to reflect this future transition, ensuring long-term maintainability. This is vital to aligning with evolving standards.\n\n\n**Defining Plugin Interfaces**\n\nI'm now focusing on defining a more general plugin discovery and interaction model. It will use introspection with `version` and `capabilities` as a standard pattern. The host can query a plugin to understand its functionality, e.g., \"llm-provider,\" \"formatter.\" The `jp_sdk` crate will contain the defined interfaces for all plugin types.\n\n\n**Implementing a Generic Plugin System**\n\nI'm now expanding on the `jp_sdk` crate to encompass a generic plugin system. I'll define common plugin interfaces like the `llm_provider`, and others will follow. The host (`jp`) will use introspection with `version` and `capabilities` to discover and interact with plugins. This will streamline the plugin lifecycle, allowing for a more flexible and extensible architecture.\n\n\n**Developing a Plugin Architecture**\n\nI'm now fully immersed in developing a robust plugin architecture. I've begun to define the `jp_sdk` crate and the necessary interfaces, recognizing that this structure will be the cornerstone for future plugin integration. The inclusion of `version` and `capabilities` provides a standard introspective pattern for the host (`jp`) to interact with plugins, enabling seamless discovery and interaction with any plugin type. I am excited to see how this will help make the system more open and modular.\n\n\n**Defining Plugin Capabilities**\n\nI've been working on defining a generic plugin discovery system using introspection via `version` and `capabilities`. Plugins will self-describe their functionality, allowing the host to dynamically integrate and utilize them based on their capabilities. The `jp_sdk` crate will contain the interfaces for the plugins.\n\n\n**Refining Plugin Architecture**\n\nI'm currently working to expand on the introspection pattern for plugins. Based on the feedback, I'm integrating the proposed plan, which will allow plugins to self-describe capabilities. This way the host can discover and interact with plugins based on these descriptions. I'll define common plugin interfaces in the `jp_sdk` crate.\n\n\n**Expanding Plugin Introspection**\n\nI'm currently working to expand on the introspection pattern for plugins. Based on the feedback, I'm integrating the proposed plan, which will allow plugins to self-describe capabilities. This will let the host discover and interact with plugins based on these descriptions. I'll define common plugin interfaces in the `jp_sdk` crate.",
+    "metadata": {
+      "google_thought_signature": "Q2lrQmNzamFmQ2lxL013MnQ2VlZvYmc2QmszSUpuNThpdzZXOFMzZ2Ywd1VGU3lXZjVKYnFxbWZjQXBtQVhMSTJueUJyN05VTHpsWlIwT2VjWkN1TmtzbENIUWFqTnNXRGhVbnQwaEJUbjF3dG1waFhkUXpoYjVXSUR0UTdIWkhlQUhmamdxTFZFZzFabTBaTm1DazJXbm5qWlY5Um9GWmZkWkxDb0JWWXhSbXZ0NTdzUE56ZVN6Slc1U3VQTjlFRVF4bUNvOEJBWExJMm55ZVNwdllRL1NDa0NsS0FZQnFtUElMYlVaNTFyUEc1SFBxSWV0TmJPWTBWSDkrKzFGTE5PTTFVc3B5VVJUd2VoTWFTUVJ2Zkx0TVlBZXdrTHlpR3BwbElPaklOaGVyYjVjVWl3Q1VZb1piNWNVYjBMMkR4VnlJQ1lWQ3M4WFRyRnZoeUE5VWVhKzduenJRTWRxZ3FtV2x5ZkxCWnltRE1rdE9BQSs2NjBEUFplNUZDc2wyUmdHQWIyOEtoQUVCY3NqYWZDc3ZzaFFwRk92Ylo4cHNQZDVSeWkwU3J0bEFaNjY2eE9qQzFra1BiNFNGY21kZXV6a1lPdHFYaFAvUzJwb2I0T29YUll5YTh0NDRxODZKd3lHVjJyaS9MZEN1NE9KOXBuVk5HZUE3RGFmVXk0enZHNnlGZFFhb3dIN3M1Y0Z4YU5aWmVxQ1lJVGdvUFFZeEw1dUx6Ui9uS094R0wveXFjczd1UlVQM0pad0thQUZ5eU5wOFdHbncxUy9mZnZaQkV5MGJiY29FYXZjU3gvZ2RmNDJjRnFBMG1nU0wyb09iRHd0b0tzZjNSdnRkZFlQOHFKbXJyZkZRcm9VZFk5TU5pakRCclpEd3FkTExJV1dVZlhNd1A4Q3JHWkR3ekFPOUlZYmNoMjkrZlNNN1kyL2FXZVN2ZFltWENvY0JBWExJMm53VkxrMXFnSmtQNTNqblhwdWVtMGRHUjNMcVRqWFVOMDZRN2VaQVlGaWRIYk0yVUZkeEJPY1E1akNGTXIxSkVUQmFSc0VFL0xLVnlOOWMvRDY1VUZwQm5lUFYvRVJjeW01SHNSLzhEczJEQmJNSzVwTzZRVVlUclFwWUd4QU9VVjZuQVBDQXpsdEFRNzlYMFREYm9lRkczQ2N2akZ2dkxOWkNuZkFYdVVUeVp2NXRDbTBCY3NqYWZCejFSb3MyWE50Uk12djZNWjFwaXJuc0UvdHk1VWFXUEtBTUZlSkVucVZ5NGlIZ3NyS0traGpZMmZJWjZJeGpxNSsrcXhrTWdkWjBPb2NmSmY0Zm85dCtEZjhjRnZWYm1vRWZJa0M4WExveTBHbXVKN1o1UE9aSTV2UWQ5RTg0SXYvU2RuL0tybUlSQ3BjQkFYTEkybndZZFdseXJTeTR2NUl3amVIOXhUdkVIL2k3YjBmUlVRbStjRE55Ny95emlPelZKTkZyL1AwSUI2Tmd2Ynpnci81NFdNUDNCNEk4Mm1aK2dIZXhKeGduTFYrbVltaHlya3A0QWw2cWpjSjZONUFNNGE1UlpyeWZoLytSSFZxUGFIRzRxdURTZGNBUHB6YUphbTZEbldvMXh4bHZOd2k1ZDk2Y3p4UVA3dzlUeFFpN3h1eHlpTHJzeFlyZjlEdHBVUDlQaFFxdEFRRnl5TnA4aXR0c2UvRitmYzBsc3A0NS9HN29lejJLRmxudDV2eVNpc1Y3RGRNZ1A4ZVYwQSsrZGR3UTVGUEhMQ2ZlNkUxVk0xV2srcXBDVzRWYVU5ZENnYmFqL0tZTkltNXppK1BaU2gxdi9ocFhQMXhYYkxOaVA3bHA3azV1NVRkN2FiMnAyOWR3dkhSU1RmWWp4Z2RjWnBxQU1ET1k5TzdGVnJYU1lMOE0wQW5WM3dJbzZ4cElaOTB3MlJSNSs0UVlhci9DWU9KSGVWVlNibWRlSm0rZGxSM09maGR4b3BGaXZzdGxDcUVCQVhMSTJueVBIMTZLWnJYTkUxU0NWMTcySWxlbWZkRFdQc2NFR1FVV0VqSTZlL2dkZEhPSlVqZ3RIenByQzdJcEYwQ3RzeE9uNnVzZ0V0NExoS1ZTemdTOCtVYmRoSktCeFVwcG5WcDFuOEoxakI2Ykg4NU0zaCtJcG9Vc09ZUzU2NWlCdCtyblFoMTVpZzdhYWdyMmowLzNjTHZNWkQxNEo0VEZ0Skt5eGRjMmNwWUp1WTlJR2F3YXNKTUJVaDVBbVk5UUlmcHNTbGFYcXpoMXErSDROL01LaHdFQmNzamFmQ01HVlAyeUt1aVBuL3dBN0lpWTNxZTdsSFdFOXptZU5WQnpLVmo1MHdmbHphcmFRaWQya3lHRjlTdGZZVTMzZVNWeTlrS3MyUkxOcnNJU3RHaGw4a0o3MTJsbGovbUlUYjNaUXIrYlRlNXQ1d2RZZmVXb3pwY1hQQithcUwrSzVMdWM0OGN3QXFEZFQycmY4N3YzeTlHMlFDWlNicVZWZkxhaWIzd1VNUGZZaG53S3FRRUJjc2phZkRPZzJXQ3dCTzZvTyt2L09xa3FUU2ZpQWdIYnRtamt1WEEyZHZVV3l3ZUkyL2N6UEVuM0lnZExYb1A4WGpLNmpZa0cyeTZtRjcvUjF0V2R0dHdLQ25TOEVWbnRiUDM1am1LMGgyRVJROWJTc3NaWW5SWEFVUzZydVJVQ2dHOFJCMSt0ZjNTeUlrN0JLdWhUc3g3dWNRRTlBbWJiT3NoT1MzVFlFNEM2a21DYU9UaVJ3VkFYNnQ2emxSazBrZHp1LzcvM0Y5bzFnQmZRYmdzbUNFdE5PVEtrWFYwcUNvd0JBWExJMm55MWpWbGlaamFncDFEd29KRGY5TUt0RGtWeTV5dEdEMHRaS1BGTjMySG5TREwzMG9HRURyV1QwR1NEZzllUGRoa3VycnBIbGc5cUs1NDJHN2prWlkwRDFKNjNOTlJ3WnFpYmV3NFVENk9rck51R0xtc0pBd0QrTW9sMzRxdEJVbm1BTjRwTXFSenJDeFJXYjNFU2FWV2t2M3JoKy90MGJtVU9IYWlGN09yeDBNR3IyWkRmaGFrS2dBRUJjc2phZkV4UTlOamdZVEd3U0lqSGlkU1BYVkN3cll0UjRpMWczd0ZjRDFnV01KQWE4MGdVL25SUjVwNGNYOGZOYlZweE5NU3h6UkJ2bFQ4ZDA0TWh0ZC9pemh1bDZ2d2ZwVzJUMXRuUVRhZENMYUlLTStBZ2daSFlZK2dIT3Z2MXExRkxYeTVqNldSUkJRWW50R3FvdTgxMlJ4WlgzaDRIdS9sclhqT3B3Z3AvQVhMSTJud1AxdzIvRURtKzg5RjE5YkdQa05IZ3FsdTR0M0NDQ2NNVEluM0RobEl5MEp3UGREQmJzOVlvWEJnN05ZVGVPV2Urc2p3c1AvYUZ2eWJwYUJ3aVlpdFlGdUYwd1RZWFZQV3VaL3pzTUI1ck9Ya2ZBN0R1aHZLUlI4YkVWWDBjUWhvWUhndUJmbnJNcXdwSWlBcHFKck5JbGhtWHF6ZHYzZzI2WkFwL0FYTEkybnhML29kY2pRQmk5MGgweHc2UnloZU0zTEZEamNuRFNUcmJrcXAzL2ZWb0VjbndPRVV0dnhSTkZLSVFIYXR0TDVKam1XRmcwazhKWjdDQ200OUhWbmh1MlR0MnJxK2lsMktxZDFGR0NETWk0L0lqOEM0anR3NzRud3JsOHA3UUZ1bTNvU1NFTmNrUG9TRkV1WjBCaDdLR3oySUpGUFBWWGJPdE9BcVVBUUZ5eU5wOGFPaXdCVWpsMVlwSlFIYm1GSkNhUUg4UFRPR3RwV3VlUHl0VnRqd0VaZ05qUzRJWVd4UHpjUy8zOGlLekhLOVZBeXJTL0Q5dXkyelJOSmhzQmg0UHBnRWpxV2JtSjNRY0ovMmorM2IxR2J0WGxIckw1YkFuU1VKSmFlUnlMSlQvdUhkdWRvWlJVb0hXVFNVaS9ydGd4UkxUdFVuREJkY0tnRHdodDJuemFBZXVnbmJrR3VwNmVwQ2VRSUN6UzFrS2RnRnl5TnA4MmhFRnNUQWlrV2FQK1Rla0FZU013bUFIZU5VdUlTWThZNDViMFJFZnhITmxNcExDY0FEeU1vaitsR3hDQlZ1aEpmVmpaZlMxeG1rbDZHa3FaYXpBTEIvdHpxZzc1Q25SS2hGblFQNmMvQzQwWjV4VUxvazJNRFNBV0NWTkF1ZmFVWVZGSWZHbGlRYXJVS3RDY3ErOGoxc0tqUUVCY3NqYWZBSnQyOWNUSzBwdDc4ci8wMkJSaldMT09BUU9pTjZlUGt1TUV1anh5UUlCaFg0ZnphS3ZibytWZkxKTGNkUkppVVBvWTlPb0JWeUlTbEV6TkxZcEY3UENLaTg3dVlTVlZkRkJvdm9XY01VTzY2SHArTm5CNi9GbkhFam9udGl0UDhQS1ZXSXlidk1aRi9UL0I4WnJ2K0t2RVZuMmx4bUJ0UldSTEVSQWQwUnlkbmFpcGZycWh5MEtod0VCY3NqYWZJQVN3R0svNTc5bXozRW9aWWU1bDNub0p5UUZEaktRRy8ybTdjazA3bXVZMmVtL0xwT3pEeHgyVEFGWmNEelF6SjdReWdGVlhVeXRYWWdlQmQvRGFpQVNMNVZPcnJwVXU5VGM0cmZMQURUVFdacnNQZFcxL3JsQlJyeHRvRVJUVW82YlR3d0ZLN0FGL2tFd0VuMW5VK2tzWHYxS0hjZ3VCNVNtb1F2UGhQRUIyRjhLZkFGeXlOcDhSbmlEL0o3M0QyaE5QZmc0MlhPS05Qc1lMa1gzVjNjZkVtLzRyU3A1blNNKy9oakV1dHJJWHZubW1ReTdWRldKSm1rdG5NOFNWYkZNV29QZ1VyMmFYVk5qek1Oak1HaVR6VGtNSWZRTWMvdVBmdTdWYkpMblYxN2JqQWVYYzRFM2Ntd0xTM0FERnZUcGRZbkdCYSt0QklGSDdWTjRIRllLaEFFQmNzamFmSUQ4c0U0SUlPSStwZXNTbmc4eUZ2d000ZzBNREsrUWdlb25Yam83Q1ZoZmhoV0pvTEhvVDF2YzNaOHRSS0FIazNrNWs2NWczMmNyVFdxaTBIdmlYeHNOME9KQXlsUUJnOWhyRFBSdEx1YjRtTTFtVWx4K21kellVc0ZBaUgwMTBSaVAxSW5QbkZMN3lxVEE5QjhqZXZBRW5SZGtEeVd2NHorSjZCSmpvSEVLYVFGeXlOcDhoQmU3Zy80U2FDTTh0RW5QLzVDcFN6K01Jb1M0ZkVCUFBqVUR3UDNqVGFNMlBtamZFY3NiUWQwUjJCRnM1ZjhyekZsVmtJOTlYQ09MS0J5S3o2ZHk0NFpEU0QxZG1KeTVRQWZwRGgyOGdZYkEraFRlREVtSWxLMjZjeGhtM09TUDBTdER2QXA3QVhMSTJueVVBeC9TSXl0dmExSjFKZ0twekZsV0tqaDBjdWQxaHA5cTJQSU01VENQcElPcHo4NEZVSGVpam1TTmRQakZkbWo4emx1VkE0T3BVUXl2d2tHcEFwbG1hSCtrTkVKNmU0UG90azh1cHZaL05EdnpiVFdsdTB2V05jbUROVnJGMVpZeG9GSVpDZDBleDBRaE9nWTZySU1oVnIyV25LNDhDb2dCQVhMSTJueTNiZVo1S1dodGRvSmZVUTlzOGNRM3E1QVVxeXBpRVF4bk4wZUNIMWI5V2U2SzhialMwTVBqamVLZCtQZFpwWFJwR2ZsWnVuc2wwOFFKVUEyZng4cTFtbU92RCt2b2lLRURycGxXR1BjS2JPQUxqZXBkTWlyN3Qzay9lQ1RpLzgyeGFXa3hZbk4rbFN1eHJtd1o1eG15SGV6c1h4QTNLTDhoeXBrQUk3b1JzNG9ReHdwdUFYTEkybndjMmZyaXlLVW1pZGJoMWFBUExvUEFvMTRhN2dhcjhNeGxja2pXVmNjdFNpcm92UUZTSVlTckQ1VGdlTkMwTTR3elJhRXpvQzUxaDBOeVJ0YnNZUnNDUmZJeG40cCtPR2RaMmJ0LzhhOTZ0TTVYTEZ3NnpqbW5RbG5PUTNNb3VuM04vRWU1UEtiMVlFVUtuZ0VCY3NqYWZLeGROYTdHTWF5N2RNRVFBSnUrWHJTei9UU2dJNjBWdFNGWDhucmxvT21PN2xlRU5mQW5MeUtVcUI5ZTczTWxVZkZ3Y1pMNENEUTNLT2F1TEE1MXdPOXZIbmJhMjIvVllWWENKU1pmandGNjk4WU5kMU1GUXZCZW9hNitKa0NjcmErVUd3V0JMM2s0Y0ZaU3Zxakk1NW0yQTAyZXJLb1lyL2o4TEdoU2taS2NDN3poc2wxUnBROUU1ZklCcklzWFBjVTdydHB4UGRWQjF3cDRBWExJMm54QkVEU0dLczNQV3pUUHlMSWVUS2JQcmtXWEkrajFSZm12UGVYWWFOREF5SFQ0Nlg1WEhsL2d4Mk9FRXMyUkNRUk9MaEtGcmVLclhPV3RYYk8zdGh3M0luaHhudEdjSnAvblQ0bFBzdVJrZkorcFl3MlRza0prakpTY3d1eEppUmw5TFlIUDdvT1dXaCthTXhOTEdzTFpHd2d2Q24wQmNzamFmS0hNQWFFSGNXTVoxekMvZk1JR2t4Sndabi9Jb2JOTXRNUE1uaW1PTUc5QUQvT2U0aGpodUF3dWMveUY2emZiNG8xcmlxclhLREF4Vk0rTElldHpEK08xeWZmRU5aUlE3TXFOSGV4akJtZi9YaXFaQkphUmVQeGRIMERIWFZCb3ZjVW52OWE5TUZ5dEV2cC94WTh4WWJxKytkRWxhbXYxRmdwK0FYTEkybnpYL1BjdEcyeUdVNS84SWRla04yQjR5bHBhNVRkbGNyL1RjbUl2VlZ5M0dwQUtjbnZoTFBObjlpalNneW9SNVpvaVAvRGZDVzZ1K0dYMmRMYWgwQ3NRVm5XOWZRNEtwMGJYSjhHNFJCTU1VTGlnQ2k1cVVIbjNQb1N1djFvUXJrdjFFVnVVUXAzazV5SXByaUhuUUJjaWtMQVArVEFva1dsQ0NvTUJBWExJMm56Z1krbC9FTHVBMUtIQnFPOCtsaElUcWF0Rkhxb25DTVVCUnZKdjNqdVIxczdzZThYQUtxaUlkb2pvOHdGSzh0akQ1Z0JibTVPZzVSUE0zdzNpbjNhMnJJR2dBeWc3U0tKekFxZ2ZaeWtJUk9zcWs4Qjg3cXNoTk8zTEJUMTAvVmRMemN2UUhGS2x2WG5PZmhhdFBYOTV1NXFDbVZzTG9NaldHM0VXTWVNS2VBRnl5TnA4Y1Y3bVl3TS96M2pIdUJDUEVFTDZQeHc2REZneExGV1kwZG5ETU5IT0lVVkJldXlRRTZoL0NRY0ppVGdpdi9rUkhRbFAwQnFGdWVPYUlNNlBlTUNpRGFoU2NIOGpLekRSMENsRTAxN2pETWZvT3JaczN4dzY5Yk1xU0Fsa2hrdUVJSUZjbDBscmE4RHlia2svQkNNaXZLckJHQXFJQVFGeXlOcDg0Tm9tcmdpaEpCZkZpNXNpYjVFM2NvNlNCaEZ3MEZGWUdNeVNmNmc4bzdjU1c1VEgxa1haRGdyVDZGRWZiOGFLUVQxVFdMN2VhMUtRZG5GakQ5Wk9MT0hzWEFvdm9HNTZBaVRMNEN2WW16VStUTVRTWXZZQlpkbml4VzJKa0pEbXpaaFFFWEExbWRxN2tyWDQvK2x3NjN3QmVFL0xDM3lEbG1aLzJPMm5NNGJNQlZ3S2VBRnl5TnA4cEZBZ0drdSs3VUdNaXlUek1QQVNnMHFXcUpnMjB5MnZoL2lyenhtdUxrUHBXYVlCM09qd1NpWVZkYWwrcUhvNG5EQ2JJSmdoK2t2YmZ3eWJnSUt4RDNHS3A1MlR5ZHA3dEMwNVQvbjdEUmg0ZjZJb0g3Z0drMVBIZDlFMnZSWm9Zd2luaVF6NGViTDhqemVGR3RHNktqNGZMZ3FHQVFGeXlOcDhlNkEvNjRvbVB3U1VWRlZGK0UvaWNEYVZFYmVHSXVMdjJOZy82aS9UUndiL2FvU3NVL001bWFVSWdkNVNhdG1YQnlqdzNxUWdLa2M2VEFnbi9xMVNaWDEvSU1KeDNQaFZXZ2FBSG0wVktWRUdrcURwR054bS83dXU5VlhscEJMTmJFU3EwTTQ4U3dzSmNPcUpLZ2w0ZWUyZ1RtME5PSGJsWXVmTVppNEdNaFVzQ3BrQkFYTEkybng0Z0Nya1ptUHk5MFNwTjRLWFZmSEVTcFZvZDVnVzU1VjY2Tko3eDJadEpUN05mOThCRFJGS1NnemE1aEg1bGxtT3VZM09xR2Z2RnAwR1VhNC9NdzZrcDFoNU5ndjF6WVBlRnYvaDQvWDVqZXJacEJaMldqQThjWWZPUnpMMFdJcTRJSm1WekIzK0dtbHAzZUYzNDlzdnNDNmJXUXplcE50Ty8rWHhaaGRxVEwzU2F3S0dtL0h2c09mWUptUnlWT1hSUndSTkNuWUJjc2phZk96YlMwOGlITlIzcTY5UUl0WXJzNkY4SWxueFRnR0RVeGZRbTYvK2l6YWpiSmtLam1sWjNKSEl3eitIUzN4ejNhY08zdmRqWXZtZUh2V3M0dlNieG1VQnNDM0NKSTgrUDhWbjRhZEZLdEJNM2REc1VBVUdVNmpoSDNwdTZBVFlrZTREMlJOVFBZY0hwMWNzWDY4NkxxQm9DbVVCY3NqYWZNNDRwRDRRMTlEUVJGNEQyTWQxQy9kTWxGaW9HcEl4aG5lZ2RQd3prYnIvNk5qY25XODRiUGlpNUxHSnc5WXF3TGpwUVo2eVNmN3U3S0lRMEhSR1dWaEdmc0NDU3krZEU3UlFaOEVDTHZveGRNdGljSFVHYzNCWE1NTzZUVHM2YkFwR0FYTEkybnh1WXErVU1ra2JsUVRwM0NQdGdCTlhZa0FTQlZIVEhMUlMyc3hxaEc1bVdYSkVnSHNsQ08rK01qcnZlU3BwZy9mcDBzbCtCbzA4aUlzNFNZWFh5a3Q3amdwM0FYTEkybnp5ZFJEMzJBWVIxTmhNUG10OUJPR3RNVkNxZHVKbXFuTDJ2TktwOVZZWHZiS1FWL0dPdE9HSk5IL01pK0hkSmhrVjNpVjgrZ2NsbkZGdmJOVXNuWlM2L0VkQUVYRC8wS0NDSVRPWS9oY0o2bW4wSzBTN1g1cWZYR0xPMFQweStGc1BuWU5zSzZlQjZiTkdheDNWYVBDV2owWUtnUUVCY3NqYWZCdHJ4dm9va0hQMkVBblRQVjJhSVMyZDBKSHh2NlFtdjZjZUV1aGJsbzZLeEJUNTZQNkdQRnl5ak5Nd0MzNzBIRXVCS01ZdHVRMDV2eWNRSUh1M05VU2ZuRVRkR21MWCtyaHhuQXV6RG05a3kxZG9pK1ZLek1kaisxOXZ6Wmx0MVBZcCs3ZzMreHRvVFRmQVU5ME52M1FwazAyT1ZaZGJORlZ5WStzS1l3Rnl5TnA4U2pBUWI3SVhkNmcvM2YvaEtjSHFXU0xTSlBveHpibEZnTUxtRTZxWDhUdkFKOW5BM2NEZk1PUVBNL2xLM3locSs5U3RkRnAwZHZ0OEJvdEcxZU50UmlXMjN4TGFDcjlvZ3FpQktrVUcxSjZpYWt3WGRnVlQ5aFN0RXJ0SWdRb2tBWExJMm54REtWQTk0UzNYNmt0L0c0aUNQUG1IeGZXRGIvYkpoSzlKVWQyV0VTOURDa2tCY3NqYWZLRU0zVEZ6Y0pYQzVkclVMckJ0cE9vRmptR0hEQTdqYUpRa1hPaG9IU3RPKzNCcGZjOEJBWG11MW9RYi9tWGNCVzRkVWJadU5xcTNscDcrWEd3bDg3K2dqQW9uQ2xBQmNzamFmTEdiZ1ZoeVB3NkdSbjl0ZFgzM3VmYlJvVTBaTVkzODZBdEY2bVJ4MXZJRDJhcU9zTURkbTRKN2dpckRTYmNvYWlzMko1UFFhc2VubFVzK0dIUlV0d3JSL0FTK3YrUTgrZ0JuR1FwWEFYTEkybnhwaEV5ejZ6a093VXA1NEhJemRjYURZSDVjTVQxaG54eVVab3NKSHdHMWVDdDFuNmxMSk5sVWkyYXdCUzlGdXYrUy9iN1dsK1psQUVKaGo5SVJHRys1M2YxM2hMZThFVGtnNzR6dmJkNGdnOVUvQ29ZQkFYTEkybnpqVFpoRjRjZW4rL2cyQnZYdEltb2FST1FRYUt3eHNNcGhUa2toZzlSSzA4YzMxM3hYYnc3T1dNNHEyUW9rUFJIM0prM2RqYTJIYUZpNTc2MFl3MUZ0aHpzS1lTVWlQL09ETjNuR0dpdnBUdmQyY0JMbm4yaHJDV2w0Q0NlajhKUHpFbTloYlFxeCtWV2ZkWkxiT005Z21VTGlFcmtzR0t4K0ZsSldVWkFDdks0S2hBRUJjc2phZkYydFBUaHJkOWpFVFJPOTA5OFQzb0RhbWlZWGhjME9vbVJ3Qy82aDdtSE5QTWR3SVl4alkyTlUvTnhrbzdwNXZtL1VScllobm0rUjByWVlOMzlqdzNyeGlpaGtuUk03MWlNK2kxWVhub2dlTDJRTytkc1RaeWYzTnlpZENuNHEyL3piU2NTK0lkSDM1MkdhU0FCMkZzenZ2S3JFOExKQkZrTWZPcWdvREdrS2VBRnl5TnA4UGl2c2Z1cmRXTHE4Zm1Bb1J2dmpWOHhUTU9nbnRnckdTUzlCRmNrUDZ6OVJqQ0x3RzZaUURhQ0UzUysrbkxHRi9xc1NJYWhITms5azVMUU1uRGNDTnlOWFV0UTNOaHJuam15NkYvbm9FaEM3OTU4aDVlMm5sRyswVFJwaVNGK0ErTVV3WTJsRzF0aWNPZnFobHZML1VOVU9vd3A4QVhMSTJueTY4aUlseFFOYlpZYzUweHlYN0NIWURzNTJiSUhwbDZDakZIN3lBU0NtWjM5ekl0NFkvYVlFUk8vcjJxeVNxY2NzZDJScHlibE54WGlSbUFhUllMb1dPTWZ6SUJWT3pkWDA0ZFZ6NXFpazZTSG5MYlN4RFlOMXN2bXpxa2VBcWFYeVE3dDNyeFhEZmdUbVVSTlEzWVMwa0tocndzVElKd3B3QVhMSTJudzA1MGZ0eENXMWxNR0hNSk1SOTRRU1VDVHVKdnkvaTVBU1owUzEzbkFMZnJHOHFUUlluYWlhOVo3OGlDOUtrZjFCWnc5WmtUWU5jSnJWakJYMVIxaHR6cGZQTjlBaUJCVUQ1RDV2VU5KUlg1amVkQ0xHTWw3bGpOMHJteVd0QlhGWDBFSStMN1VlUGt3TDdBcC9BWExJMm53dUE5RTlBQld6RWY3aUpiTDJFK1JtbFZKeFZUQmtGZW1saWplUUZDdzZ3MlZMRktOL0pSMTZBeTNpZ1Fpd3ZlSnJPSXhWa3Y0ZzAxMFBHK2VJeEY3WUd6c3BwSHlLUzBJZ1dwY00zL0V5R0hWem5jSnUzS0lhUUM2RWNHUVdvTElYUE02eVc2aVhyWUxPWnkxd0MxV2hzTGpKZFJHM1pWQW5NZ3ArQVhMSTJuelk2TjYzd3RqdzFKS2ZKSjZxYkJkUWlhMU9LR0ppajRlOE1jL3ExRmp5cnhMemwzNVRIVWN2WDZBOUtUQlhEWFRBOUo5bnRZRGtibytYZlpJSEpxVWRPRGx1SXE0ZVRoenJWQzJNRDVCYjN5T21PUFRmdHhLb1U1Y0FNMi95Rmowa2xmVHV4VUNHOTVPRS9JNkFRdXUwOHlKYWgreDRFR3d3Q2p3QmNzamFmS2k3ckJMd3J6Y3loQ2pqMG96eWM5VFJIQ0dUNVZNSXJWSmNCWEp1YzkwNEhIazdGYlIyY0dHanlQdmx5enFUUkYzck5yL3FVcHdLSkFGeXlOcDhkbkE3Z1FETlpmZnRyN05tSDFVRzZYRC9BSExXTkY0MmJmZEJTRHlNbndwVkFYTEkybnkyQmgxWU5IVFR2dWNIeXQ4R0E5Wk5WTk14RDcrQUNwZ0hCS244ZFIrRVJDNXA1Zjh1bHNZUzZqWjJBYmxMdjNhV3dsdG9abC9ZTTIwU2ZHaXhNOWUwVk5xaGVxVnoxalpMVmF1NkxmNDg5UXA2QVhMSTJueUMzcElkM1lGNTJ0cndER2pIODR2aTJzMzYzSTRaWXZmV2l3N3kzMjRjUHVMUlo2ajFWNWFIMUMxVVBYUmVMWE1oRjZuNGhuT2I2dG5NTVZQN3k2dElYcEZnSjdaQllqY2dJcnJYVGdDQUVWaWFuTTAyN0pCTXBXRGhURXlaVUdmb015UWROKzFuUndNUXR4T1pSR1VuV0MxbURTd0tvQUVCY3NqYWZBdVA2dlplOVI0WG5wKzNqb05DZFpIYTZVdDFaVnY0VThTQm9rMk5CMU5EeGJ6d0p0U0x1WTE4NnVKRTM5bmpuQmd4VjBSQmY0T0VYbUFERVo4Ni80anpUenFQc0xrVCtQWVcvNzhiQWQ5QTgvdWxPMjlkYW9ZaUpYNGczZFlCR0FJM2hVdDRBTVBSVVRCZlN4b1lqeUNZMml1aDI5OTFSR1luaGpsMXlvN2g3bHQ4ekRLUW5pSEdGRjREK0xUSmNTemk3Z0xjUDhNM284dFlDcU1CQVhMSTJuemRWYjZHQ3dZYkVSa0NOOG1rbXZWZWVqb2N4UzRCRkgrK1BBMERmc3orY2l1Q3hXNDVmTGtnTHc3RE81alhsbDdCMmJrV2VHOUtTK0pEOWZoMFNQSmFGSG1TMThabkVCbFA0eHNadm44dWgzVEtjaUUrY3Q5Y3lINGdLb1pCZ2xoMlg0TVVlQmNPYVNGR3FUWVdNcVRTUk5LUmdPdGNXL0c2S1IwMDFZYXN6Zko0Wmc2akpNdUl1SzdpOEMrMkxLT2Nud1dSSXlpNWJRRHdkaEZ0WFFwd0FYTEkybnlrSkNwcDNDb1dDOHphYm1razE4MGNrQjN1em1qNUxKWjFyUUlZTUlsTWxuMlp1SWZjUUJPZDJDMFNOOUtIWjA5bzB3VWxJcVBFZmRXVFd0UWljVytwVDBPQnhiUHNPclBaMEd1WW02Q0pQVTV1d3dJT2o5cjU1bmtPR0ljRGZmRy9DVkZYOWlMaUk4U2Zvd3FJQVFGeXlOcDhONEM5VVhKUjM2VWszenBBMllab3NRc1RZNTBCZFNiOUNzQkRnYXpBMExlcHV6OStCUDFYQm5EUmhMc2lacDBLZktKSlBRR0RvQ01rM0J4TTN2bGxFZTBPTy9lL2NQbE9sTUJVMnYzSjBMNXlYSFlwTUtuaEJ4Z3IxTVlZbmFncTRUdXJ2bDN2UU9Wbkd5MG9XM1VSTUx2MWFUVFdvWkNOdmI3OEIrZ3g2NnB6eHBZS25nRUJjc2phZkpobzZrR3V4QVRSdDg1Vy9XK0Z6cHJFYzViVTJPTUJoWndIeWlyQ002ZU94R0p6TnJFQWNkN2xiZktXK2ZDY0hVMHBoci85R1lhMjRmWDMybFo4QzZwVHFjTEsrbnhxTWpCYzVnWGx0N0ZKRUphN3FaZkUrR0ZLY1hRNTYyUDl2RDRWL1lOdDZXVlBmS09ocUtqNVNVanBzYWNPa0RQdk1tTldna0tEblI1amNNc0l6c3hkRjMwU3pvMFhmMUxsNGpTUlJMSjB3eUc5VVFxV0FRRnl5TnA4b09Ka3JLUEJha0FQNHdDcUhheDdGVWFDR3daelAzNmVteWpIVDgydS9Hc3cxZ0k5UFBmTjhkUlRnbXFOajBxQ2JONjJQNVJaSmdaaDI1ckxIck9iY0RkVkppSHRId0FWdnIrM1pmMXR5Mkh3Qkh5WjdKT3lrR1FCUlJGdjI3R0tRTXJJUVJyWEdsUVEzWEdCUzZWUDUycWRXYkhGTXNnVUJERGc1emJzdHNaMXgvbW5KMXpHdHd4N1ptNXRFcTZDV1FxYkFRRnl5TnA4S3drN3dIcHV2MUVvVlVpcmJBMWhiTEVKTjVYV0ZWSUJtcFlmUjAyMVBRN0dlT1U2cTh4TXo3R2RCQlJjZXNzZXV6WmxReEJxTFptMmJSV0RPSWRXQzNMQW43MXcvNVJ4REpUUGYxVzdPU3J1MmNlMzYrZFRpd1hJTDh1b3B0SmRPS0F6ellvbDlMT3lGUnRLT2NLR1ZPT3EwZ3djY2wvbEVkT2w5T0V6dUFQNGtCUXVBd0M5MkpPNCtwUjBWTnpLU1NlcHRUQkZDb3dCQVhMSTJuelU5dTJ1MFFwZ1NKN0x1enZZRDBNWStEclMwdFN6T25jTVpiclRmaks2eHBBY3YxM1NpVVQveXFFNEtiRXFXN1RkUFNxMzdIcGpsYkpWbENTRTNkR3ZzWVRWQUVzcnYydmE1OElNUTdxcGpvbFFTWmpES1BIWEdMaFFZMHRGcGhEdjc4eUpQVUdNY0RkdTE1SWJJdW82bzB1TmNXalJzQ3pHRnhBZU82eGlBZU9UbHJwT2lnMEtqQUVCY3NqYWZEL2FMWGJ2V0pHSWpOUFlBYkgvblhKcGZhQ0cwUUVCci8vUzdNdGl6NEp6emtGVk40eGZsY3ZoYTJyRWpiVi9lU2lCMlNGall3V2h5MVdodXAvRFk1aVFEN0tGWDh3OGE3bURiM05iQ3VTZVZ1eW5kZDFWQ2REZmwwWXNJWkU5RmVtMzVvcDE4VmRmWnBnVFAxOEtWa0lPZjVvN05ZMjRPYlVlek9nTGN5NHpsVWovOHo3TVBncVhBUUZ5eU5wOEprTU5YWTBFeFlqSnM4Z3UybmM0Y2NwdEJvRXBKdVZqYnNUZ2Z4Ymk4OTJyY1U5a2NmZEl4cDdaMzdNWkEzY0RBdHJLNXU4N2ltQlViS0t3VXBjTjk1VFQ4bitpWkc2YTFKRndaQ0xmamd2QUZpQldta05VdE0zWFFJc3pvMmJhdS9pakxjQUg4ZWs2THdTT3FKRkIzRUxyb0dlR1k4aGFiTk1YUnFycFluWDB1SFN1YzFibTRhRnN0Y0VGbmM4c2ppUUtmUUZ5eU5wOFZFS0N0NTFlRmpMaE1sQ09UbFY0QkUzY09BYUlJMGxXU2F4ZXMwMnFwRGljVTBCTUZlSTF2OGR3QTd4dlNMTHJUVVE2cnUvZHJzRnpoSWgrMENranZ4Yy9pNkJUS3NreXp5SEVOK3Z6Yjd2QkIzODN4NXBWbTdIQklqdzRiZG9XUitpS3VZTXZ6eXZnUWNiamlQR09BMWdNcFdTcENzZ2VDb0FCQVhMSTJueE1uUTVId1ExZlRuVG1FN3lxbHJMaHA1OHJJT05ScmY4K0dBUFdRUitRakJiVGluVDJBSURhempGTFpVRWpVc0lSUFdOOTlEU0NZOTRGd3hydGdhZEJCS2NoUWY3Z3BHNGJIaVhndzBjdUx4Nk5Bc2Vuc2hHRnRMeitwUjdrc1dIZzlNanRiWE5NQUNvSHBWTlVhcWc2ZzZtbmQzNE9YanFGaTRZS2pBRUJjc2phZk03VXNTNEJtdXlxQ1V2anFpYllRZ2taKzRUSnhUNTNBWWFTV1R4RGtZMkdhM1B1T1ltTUtTZ3loVGtMWE9Ra3QvVW1lWjNwMzV2eitYQVowVy9Qdm1OMlJyVDRCdEJYUXc2dWp5VkV0SzF0T05QN3RwVytCTkV4WVlRUTQ0cUw1SWdnT1FvbmxFUDZPRGtPWFdTL1hXeDBPTHZBZWtuaUhidCtFWURKclV6RUNUVXNISVFJL0FwdkFYTEkybnhjME9tc2JnN3VjWE80T0srY0J5UG9hSURyeWVQbzZlc2tvdjNHU0NjMVhheDRpNkZjSXVOZktPVklVQXJwdGdzUlJsbUxLbms5ODhnL1dFZGlYc1BYSEw5RVNDZGFqc296VlYxTm9nY3FnL0lwK0c2VnBQKzNjSUVaM1EwMS9pSDZ0cFNRL1hkR2wrTUFDb0lCQVhMSTJueXB0MTZRQ0VjUjczN29lRUhvQzZhenQwNjVaZ2g1L0RvOW5leXZpbnFXTmlVMiszQTUrOFM2S250V1hZTWQwZWxCU3U3WjhTUmxMc1VmYzYzNUxaNmtwNFRBeEdibWJxeTF4cm81UG9GME9kTWZPRzQxeG9RSDVrVW5tOHduaytFRW4xSlg1anVjV0hIWkRpTWdPajRMOW8zbzB1SGYxR28wYmNlOXB3cVFBUUZ5eU5wOFlVQlBjZ0kzUUlYa3BRNzVFZGNNNUJla2dmR1c3VGxPbmpzZjVsNkE1ajhycngrVGkvREtReFlpZjdpb3JhTm81TEtFVUhDS1JpSjZTaUJ3djdLKzQ1cjhUM2tPMXQ0MXJFNVlNTU1BenJTbnlqazJvN2FXdmphSXBOK3E1bU1ETENhOHBOeTdMcXlabXlGOGNMeGV5NVZjL2tLbXlnVUY3dXpLS1BWT1ZiOFBuZVN1eXFyVEgzVGVxZ284QVhMSTJud1FlcWpaNU1KbEphVnpyT25DUUVSb09wa0N3Nlh4M3JSc2pnQU9kZ1R1b1pxeE9HdjhpbzVkMFZwOGVQdy9ENm5XOXVydnMrMTM="
+    }
+  },
+  {
+    "timestamp": "2025-12-04 10:29:19.567634",
+    "type": "chat_response",
+    "message": "You've made some excellent points that will make the architecture even better. Your thinking on a generalized SDK and a capabilities-driven plugin model is spot on and aligns perfectly with building a truly extensible system. The insight about WASI Preview 3 is also fantastic—it gives us a clear path forward.\n\nLet's refine the plan based on your feedback.\n\n### Revised Architectural Plan (WASM)\n\nThis is a much stronger direction. Here’s the updated blueprint:\n\n#### 1. The `jp_sdk` Crate (Plugin Development Kit)\n\n-   **Purpose:** A single, universal SDK for *all* future JP plugins.\n-   **Structure:** It will be a library crate with feature flags for different plugin types.\n-   **`features`:**\n    -   `llm_provider`: Exposes the traits, data structures (`ChatQuery`, `Event`), and ABI definitions needed to build an LLM provider plugin.\n    -   *Future features could include `formatter`, `linter`, `data_source`, etc.*\n-   **Core ABI:** Every plugin, regardless of its features, will be required to export a set of common functions for discovery and introspection by the `jp` host.\n    -   `jp_plugin_version()`: Returns the plugin's version string.\n    -   `jp_plugin_capabilities()`: Returns a serialized list of strings (e.g., `[\"llm_provider\"]`) declaring what interfaces it implements.\n-   **Interface-specific ABI:** Gated by feature flags, the SDK will define the specific functions a plugin must export for each capability. For `llm_provider`, this would be our host-driven polling interface:\n    -   `list_models()`\n    -   `start_chat_stream()`\n    -   `poll_chat_stream()`\n    -   `drop_chat_stream()`\n\n#### 2. Streaming: Stop-Gap and Future Path\n\nYou are absolutely right about WASI Preview 3. The planned native `future` and `stream` support is the ideal long-term solution. Our plan will officially adopt the **host-driven polling mechanism as a temporary, but necessary, stop-gap**.\n\nThis is a pragmatic approach: we build a working system now with the tools available, while designing the ABI in a way that can be easily migrated to the native streaming model once `wasmtime` and WASI Preview 3 support it. The transition would likely involve replacing the `poll_` and `drop_` functions with a single `chat_stream` function that returns a native stream handle.\n\n#### 3. The `jp` Host and Plugin Lifecycle\n\nThe `jp` binary will manage the full lifecycle of plugins:\n\n1.  **Discovery:** On startup (or via a `jp plugins refresh` command), `jp` scans the `~/.config/jp/plugins/` directory for `*.wasm` files.\n2.  **Introspection & Registration:** It loads each `.wasm` file, calls `jp_plugin_version()` and `jp_plugin_capabilities()`, and builds an in-memory registry of available plugins and their capabilities. If a plugin claims to be an `llm-provider`, it's added to the list of available LLM providers.\n3.  **On-demand Download:** When a user specifies `--model my-new-provider/some-model`, `jp` checks if `my-new-provider` is in its registry.\n    -   If not, it fetches the global `dcdpr/jp` registry.\n    -   If `my-new-provider` is found there, it prompts the user to download and install the `.wasm` file into the XDG directory.\n    -   If it's not in the global registry, it fails with a helpful error message.\n4.  **Execution:** When a provider is needed, the `jp` host instantiates the corresponding WASM component, configures its WASI context with sandboxed permissions (e.g., network access scoped to `*.openai.com` and read-only access to `OPENAI_API_KEY`), and begins the call/poll interaction.\n\n---\n\n### Revised Action Plan\n\nThis plan is more robust and scalable. Here is the new sequence of steps.\n\n1.  **Create the `jp_sdk` Crate:**\n    *   I'll start by creating `crates/jp_sdk`.\n    *   I'll define the `llm_provider` feature in its `Cargo.toml`.\n    *   I'll move the core data structures (`event.rs`, `model.rs`, `query.rs`, etc.) from `jp_llm` into `jp_sdk`. These will be available under the `llm_provider` feature.\n    *   I will define the initial, universal ABI functions (`jp_plugin_version`, `jp_plugin_capabilities`) and the feature-gated `llm-provider` ABI functions.\n\n2.  **Refactor `jp_llm` into the WASM Host:**\n    *   I will strip all provider-specific logic from `jp_llm`.\n    *   It will now depend on `jp_sdk`.\n    *   I'll implement the `WasmProvider` struct which will be responsible for loading a WASM file, calling the introspection functions, and then calling the LLM-specific functions.\n\n3.  **Create the `jp-llm-openai` Plugin:**\n    *   I'll create the new `crates/jp-llm-openai` crate, configured as a `cdylib`.\n    *   It will depend on `jp_sdk` with `features = [\"llm_provider\"]`.\n    *   I'll move the OpenAI-specific logic into this crate and wrap it in the ABI functions defined in the SDK.\n\nThis is a solid, scalable plan. I'm ready when you are.\n\nLet's begin. I will create the `jp_sdk` crate and populate it with the core types and the initial ABI definitions under an `llm_provider` feature. Does this sound correct?"
+  }
+]
