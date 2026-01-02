@@ -1,0 +1,1066 @@
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2025-12-24 05:53:40.595084",
+    "delta": {
+      "inherit": true,
+      "config_load_paths": [
+        ".config/jp",
+        ".config/jp/personas"
+      ],
+      "extends": [
+        "config.d/**/*"
+      ],
+      "assistant": {
+        "system_prompt": {
+          "value": "You are Jean-Pierre, the AI Pair Programmer, working on your own creation. The project you are working on is called JP (short for Jean-Pierre), a Rust-based command-line toolkit to support humans in their daily work as a software programmer. Built to integrate into their existing workflow, providing a flexible and powerful pair-programming experience with LLMs. ",
+          "strategy": "replace",
+          "separator": "none",
+          "isDefault": false
+        },
+        "instructions": [
+          {
+            "title": "How to respond to the user",
+            "position": 0,
+            "items": [
+              "Be concise",
+              "Use simple sentences. But feel free to use technical jargon.",
+              "Do NOT overexplain basic concepts. Assume the user is technically proficient.",
+              "AVOID flattering, corporate-ish or marketing language. Maintain a neutral viewpoint.",
+              "AVOID vague and / or generic claims which may seem correct but are not substantiated by the context."
+            ]
+          },
+          {
+            "title": "How to respond to the user",
+            "position": 0,
+            "items": [
+              "Be concise",
+              "Use simple sentences. But feel free to use technical jargon.",
+              "Do NOT overexplain basic concepts. Assume the user is technically proficient.",
+              "AVOID flattering, corporate-ish or marketing language. Maintain a neutral viewpoint.",
+              "AVOID vague and / or generic claims which may seem correct but are not substantiated by the context."
+            ]
+          },
+          {
+            "title": "Core Tasks",
+            "description": "These are the core tasks you must perform.",
+            "position": 0,
+            "items": [
+              "Answering general programming questions.",
+              "Explaining how the code in a question works.",
+              "Reviewing the code in a question.",
+              "Generating unit tests for the provided code.",
+              "Proposing fixes for problems in the provided code.",
+              "Scaffolding code for a new project.",
+              "Finding relevant code to the user's query.",
+              "Proposing fixes for test failures.",
+              "Running tools."
+            ]
+          },
+          {
+            "title": "Guidelines",
+            "description": "You must follow these guidelines.",
+            "position": 0,
+            "items": [
+              "Follow the user's requirements carefully and to the letter.",
+              "Keep your answers short and impersonal, especially if the user responds with context outside of your tasks.",
+              "Minimize other prose.",
+              "Use Markdown formatting in your answers.",
+              "Limit non-code text width to 120 characters.",
+              "Include the programming language name at the start of the Markdown code blocks.",
+              "Avoid including line numbers in code blocks.",
+              "Avoid wrapping the whole response in triple backticks.",
+              "Only return code that's relevant to the task at hand. You may not need to return all of the code that the user has shared.",
+              "Use actual line breaks instead of '\\\n' in your response to begin new lines.",
+              "Use '\\\n' only when you want a literal backslash followed by a character 'n'.",
+              "All non-code responses must be in the language of the user's query."
+            ]
+          }
+        ],
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "anthropic",
+            "name": "claude-sonnet-4-5"
+          },
+          "parameters": {
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": true,
+            "model": {
+              "id": {
+                "provider": "anthropic",
+                "name": "claude-3-5-haiku-latest"
+              },
+              "parameters": {
+                "reasoning": "off",
+                "stop_words": [],
+                "other": {}
+              }
+            }
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "osc8"
+            }
+          },
+          "crate_readme": {
+            "source": "mcp.bookworm",
+            "enable": false
+          },
+          "crate_resource": {
+            "source": "mcp.bookworm",
+            "enable": false
+          },
+          "crate_versions": {
+            "source": "mcp.bookworm",
+            "enable": false
+          },
+          "crate_search_items": {
+            "source": "mcp.bookworm",
+            "enable": false
+          },
+          "crates_search": {
+            "source": "mcp.bookworm",
+            "enable": false
+          },
+          "web_search": {
+            "source": "mcp.kagi.kagi_search_fetch",
+            "enable": false
+          },
+          "web_summarize_content": {
+            "source": "mcp.kagi.kagi_summarizer",
+            "enable": false
+          },
+          "cargo_check": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Run `cargo check` for the given package, validating if the code compiles.",
+            "parameters": {
+              "package": {
+                "type": "string",
+                "required": false,
+                "description": "Package to run check for, if unspecified, all workspace packages will be checked.",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full"
+            }
+          },
+          "cargo_expand": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Expand the auto-generated Rust code for the given item.",
+            "parameters": {
+              "package": {
+                "type": "string",
+                "required": false,
+                "description": "Package to find the item in, required if working with a workspace.",
+                "enum": []
+              },
+              "item": {
+                "type": "string",
+                "required": true,
+                "description": "Local path to module or other named item to expand, e.g. os::unix::ffi",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full"
+            }
+          },
+          "cargo_test": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Execute all unit and integration tests and build examples of the project.",
+            "parameters": {
+              "package": {
+                "type": "string",
+                "required": false,
+                "description": "Package to run tests for, if unspecified, all workspace packages will be tested.",
+                "enum": []
+              },
+              "testname": {
+                "type": "string",
+                "required": false,
+                "description": "If specified, only run tests containing this string in their names.",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full"
+            }
+          },
+          "fs_create_file": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Create a new file in the project's local filesystem.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to create. The path must be relative to the project's root.\n",
+                "enum": []
+              },
+              "content": {
+                "type": "string",
+                "required": false,
+                "description": "The content of the file to create. If not specified, the file will be empty.\n",
+                "enum": []
+              }
+            }
+          },
+          "fs_delete_file": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Delete a file in the project's local filesystem.\n\nThe file must exist, be a regular file, and have no uncommitted changes.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to delete. The path must be relative to the project's root.\n",
+                "enum": []
+              }
+            }
+          },
+          "fs_grep_files": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Grep files in the project's local filesystem.\n\nIf misused, this tool can return *A LOT* of matches, making it difficult to\nparse the results. It is recommended to use search patterns that are as specific\nas possible to the content you are looking for.\n\nIf the number of results exceeds 100, the `context` option is disabled, and 50\nmatches are returned without context. You can re-run the tool with a more\nspecific pattern or limited to specific paths to narrow down the results with\ncontext.\n",
+            "parameters": {
+              "pattern": {
+                "type": "string",
+                "required": true,
+                "description": "Regular expression to filter the results by.\n",
+                "enum": []
+              },
+              "context": {
+                "type": "integer",
+                "default": 0,
+                "required": false,
+                "description": "Number of lines of context to include before and after the matching lines.\n",
+                "enum": []
+              },
+              "paths": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of files or directories to search.\n\nIf unspecified, all files in the project will be returned.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full"
+            }
+          },
+          "fs_grep_user_docs": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Grep the project's user documentation.",
+            "parameters": {
+              "pattern": {
+                "type": "string",
+                "required": true,
+                "description": "Regular expression to filter the results by.\n",
+                "enum": []
+              },
+              "return_entire_file": {
+                "type": "boolean",
+                "default": false,
+                "required": false,
+                "description": "Whether to return the entire file contents.\n\nIf enabled, the tool will return the entire file contents of any files matching\nthe pattern. If disabled (the default), only the matching lines and 5 contextual\nlines above and below the matching lines will be returned.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full"
+            }
+          },
+          "fs_list_files": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "List files in the project's local filesystem.",
+            "parameters": {
+              "prefixes": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of path prefixes to filter the results by.\n\nIf unspecified, all files in the project will be returned.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "extensions": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of file extensions to filter the results by.\n\nIf unspecified, all extensions will be returned.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full"
+            }
+          },
+          "fs_modify_file": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Modify one or more files in the project's local filesystem.\n\nThe files must exist, be a regular file, and have no uncommitted changes.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to delete. The path must be relative to the project's root.\n\nThe path may contain glob patterns, e.g. `src/**/*.rs`.\n",
+                "enum": []
+              },
+              "string_to_replace": {
+                "type": "string",
+                "required": true,
+                "description": "The string to replace in the file. The string may span multiple lines.\n",
+                "enum": []
+              },
+              "new_string": {
+                "type": "string",
+                "required": true,
+                "description": "new string to replace the `string_to_replace` with. The string may span multiple lines. If empty, the `string_to_replace` will be deleted.\n",
+                "enum": []
+              },
+              "replace_using_regex": {
+                "type": "boolean",
+                "default": false,
+                "required": true,
+                "description": "Whether to treat `string_to_replace` as a regular expression.\n\nIf `true`, `string_to_replace` is treated as a regular expression and the `new_string` is treated as a replacement string, which may contain capture groups.\n\nIf `false`, `string_to_replace` is treated as a literal string and the `new_string` is treated as a literal string.\n\nWhen `true`, replaces all non-overlapping matches in text with the replacement provided.\n\nAll instances of `$name` in the replacement string is replaced with the corresponding capture group name.\n\n`name` may be an integer corresponding to the index of the capture group (counted by order of opening parenthesis where `0` is the entire match) or it can be a name (consisting of letters, digits or underscores) corresponding to a named capture group (e.g. `(?<name>exp)`).\n\nIf `name` isn’t a valid capture group (whether the name doesn’t exist or isn’t a valid index), then it is replaced with the empty string.\n\nThe longest possible name is used. e.g., `$1a` looks up the capture group named `1a` and not the capture group at index `1`. To exert more precise control over the name, use braces, e.g., `${1}a`.\n\nTo write a literal `$` use `$$`.\n",
+                "enum": []
+              }
+            }
+          },
+          "fs_read_file": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Read the contents of a file in the project's local filesystem.\n\nYou can use `fs_grep_files` to search for specific patterns in the file\ncontents, before reading the entire contents of a specific file using this tool.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to read.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full"
+            }
+          },
+          "git_commit": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Commit the staged changes to the local git repository using the provided\nmessage.\n",
+            "parameters": {
+              "message": {
+                "type": "string",
+                "required": true,
+                "description": "The commit message to use. Can be multiline.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full"
+            }
+          },
+          "git_diff": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "List the differences between the current state of the git repository and the\nlast committed state.\n",
+            "parameters": {
+              "paths": {
+                "type": "array",
+                "required": true,
+                "description": "The paths to diff. Can be a single path or a list of paths.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "cached": {
+                "type": "boolean",
+                "required": false,
+                "description": "If `true`, the diff will be computed against the cached state of the git\nrepository. If `false`, the diff will be computed against the last committed\nstate of the git repository.\n\nIf unspecified, it will default to `false`.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full"
+            }
+          },
+          "git_stage": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Stage a file or a specific patch to the index of the git repository.\n\nWhen providing one or more paths, all changes of those files will be staged. If\nproviding one or more patches, only the changes of those patches will be staged,\nallowing you to stage individual \"hunks\" of a changed file.\n",
+            "parameters": {
+              "paths": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of paths to stage. Can be a single path or a list of paths.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "patches": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of patches to apply. Can be a single patch or a list of patches.\n\nThis is useful if you want to stage individual \"hunks\" of a changed file.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full"
+            }
+          },
+          "git_unstage": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Unstage (restore/reset) one or more staged files, undoing the effects of `git_stage`.\n",
+            "parameters": {
+              "paths": {
+                "type": "array",
+                "required": true,
+                "description": "List of paths to unstage. Can be a single path or a list of paths.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full"
+            }
+          },
+          "github_code_search": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Find code matching a query in any GitHub repository.\n\nThis tool returns a list of matched files, to fetch the actual code of a\nfile, use the `github_read_file` tool.\n\nNOTE: Code search always searches the repository's default branch (usually\n`main`), it is not possible to search in a specific branch or tag.\n",
+            "parameters": {
+              "repository": {
+                "type": "string",
+                "required": false,
+                "description": "Repository to search for code.\n\nIf unspecified, it defaults to the current project's GitHub repository.\n",
+                "enum": []
+              },
+              "query": {
+                "type": "string",
+                "required": true,
+                "description": "Search query to find code.\n\nGitHub code-search supports:\n\n- Bare terms (`http-push`) and quoted phrases (`\"sparse index\"`)\n- Boolean ops: implicit AND, `OR`, `NOT`, parentheses\n- Qualifiers: `language:rust`, `path:/src/**/*.rs`, `symbol:MyFunc`,\n  `in:file`, `in:path`, `filename:Cargo.toml`, `extension:rs`,\n  `size:>10k`\n- Regex – wrap in `/.../` (`/^impl.*Display/`); escape quotes/backslashes (`\\\"`, `\\\\`)\n- You must include at least one term when using qualifiers (e.g. `helper language:go`)\n- You can't use the following wildcard characters as part of your\n  search query: . , : ; / \\ ` ' \" = * ! ? # $ & + ^ | ~ < > ( ) { } [\n  ] @. The search will simply ignore these symbols.\n\nExample: `json in:file filename:package.json NOT path:tests/\n",
+                "enum": []
+              }
+            }
+          },
+          "github_create_issue_bug": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Track a new bug in the project's GitHub repository.\n\n- MOST IMPORTANTLY: Avoid fluff, and focus on the issue at hand. Do not add more\n  text than is necessary to explain the issue.\n\n- Use markdown to format text.\n\n- Explain the motivation for creating the issue. You can include a comparison of\n  the current behavior with the expected behavior in order to illustrate the\n  impact of the issue.\n\n- Use the body to explain what and why vs. how.\n\n- Wrap the body at 72 characters.\n\n- Use backticks (``) to format code or crate references.\n\n- Add optional references to related issues or PRs in the body.\n\n- Link to relevant code, documentation, or other resources in the body, using\n  proper Github links.\n\n- Use a narrative style to describe the issue in one or more paragraphs, avoid\n  using lists, unless they are necessary to convey details about the issue.\n",
+            "parameters": {
+              "title": {
+                "type": "string",
+                "required": true,
+                "description": "The title of the bug to track.\n\nShould be a single line, not include any markdown except for backticks (`) where\napplicable. Keep the title short and descriptive.\n",
+                "enum": []
+              },
+              "description": {
+                "type": "string",
+                "required": true,
+                "description": "A clear and concise description of what the issue is about.",
+                "enum": []
+              },
+              "expected_behavior": {
+                "type": "string",
+                "required": true,
+                "description": "A description of the expected behavior.",
+                "enum": []
+              },
+              "actual_behavior": {
+                "type": "string",
+                "required": true,
+                "description": "A description of the actual behavior.",
+                "enum": []
+              },
+              "complexity": {
+                "type": "string",
+                "required": true,
+                "description": "Complexity of the issue.\n\nThis is used to estimate the effort required to fix the issue.\n",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "reproduce": {
+                "type": "string",
+                "required": false,
+                "description": "Optional notes on how to reproduce the issue.\n\nThis is only needed if the combination of `description`, `expected_behavior`,\nand `actual_behavior` is not sufficient to explain the issue.\n",
+                "enum": []
+              },
+              "proposed_solution": {
+                "type": "string",
+                "required": false,
+                "description": "Optional proposed solution to the issue.\n\nThis should be a high-level, SHORT description of the solution you would\npropose. It should be brief, not go into too much detail, and IF code is added,\nit should be limited in size, and optionally be pseudo-code to avoid making the\nsolution obsolete if the code is later changed.\n",
+                "enum": []
+              },
+              "tasks": {
+                "type": "array",
+                "required": false,
+                "description": "Optional tasks in the order they need to be done in to resolve the bug. Include\nlinks to specific lines of code where the task should happen at.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "resource_links": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of resources relevant to the issue.\n\nThe links should only contain the path to the resource, not the full URL.\n\nThe following resource links are supported:\n\n- issue: issues/{issue number}\n- pull: pull/{pull request number}\n- commit: commit/{commit hash}\n- file: blob/{commit hash}/{file path}\n\n  relevant files for this issue. This will help people navigate the project and\n  offer some clues of where to start.\n\n- lines: blob/{commit hash}/{file path}#L{start line}-L{end line}\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "labels": {
+                "type": "array",
+                "required": false,
+                "description": "Additional labels to add to the issue.\n\n- The issue will always be assigned the `bug` label.\n- If unspecified, no additional labels will be added.\n- Only labels that exist on the project can be added, non-existing labels will\n  result in an error with a list of valid labels, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "assignees": {
+                "type": "array",
+                "required": false,
+                "description": "Assignees to add to the issue.\n\n- You should only add assignees if explicitly requested by the user.\n- If unspecified, no assignees will be added.\n- Only collaborators on the project can be added, non-existing assignees will\n  result in an error with a list of valid assignees, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "github_create_issue_enhancement": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "File a new enhancement request in the project's GitHub repository.\n\n- MOST IMPORTANTLY: Avoid fluff, and focus on the enhancement at hand. Do not\n  add more text than is necessary to explain the enhancement.\n\n- Use markdown to format text.\n\n- Explain the motivation for creating the issue. You can include a comparison of\n  the current behavior with the expected behavior in order to illustrate the\n  impact of the request.\n\n- Use the body to explain what and why vs. how.\n\n- Wrap the body at 72 characters.\n\n- Use backticks (``) to format code or crate references.\n\n- Add optional references to related issues or PRs in the body.\n\n- Link to relevant code, documentation, or other resources in the body, using\n  proper Github links.\n\n- Use a narrative style to describe the issue in one or more paragraphs, avoid\n  using lists, unless they are necessary to convey details about the issue.\n",
+            "parameters": {
+              "title": {
+                "type": "string",
+                "required": true,
+                "description": "The title of the enhancement to track.\n\nShould be a single line, not include any markdown except for backticks (`) where\napplicable. Keep the title short and descriptive.\n",
+                "enum": []
+              },
+              "description": {
+                "type": "string",
+                "required": true,
+                "description": "A clear and concise description of what the enhancement request is about.\n",
+                "enum": []
+              },
+              "context": {
+                "type": "string",
+                "required": true,
+                "description": "What are you trying to do and how would you want to do it differently? Is it\nsomething you currently you cannot do? Is this related to an issue/problem?\n",
+                "enum": []
+              },
+              "complexity": {
+                "type": "string",
+                "required": true,
+                "description": "Complexity of the enhancement request.\n\nThis is used to estimate the effort required to implement the enhancement.\n",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "alternatives": {
+                "type": "string",
+                "required": false,
+                "description": "Can you achieve the same result doing it in an alternative way? Is the\nalternative considerable?\n",
+                "enum": []
+              },
+              "proposed_implementation": {
+                "type": "string",
+                "required": false,
+                "description": "Optional proposed implementation for the enhancement.\n\nThis should be a high-level, SHORT description of the implementation you would\npropose. It should be brief, not go into too much detail, and IF code is added,\nit should be limited in size, and optionally be pseudo-code to avoid making the\nimplementation obsolete if the code is later changed.\n",
+                "enum": []
+              },
+              "tasks": {
+                "type": "array",
+                "required": false,
+                "description": "Optional tasks in the order they need to be done in to implement the\nenhancement. Include links to specific lines of code where the task should\nhappen at.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "resource_links": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of resources relevant to the issue.\n\nThe links should only contain the path to the resource, not the full URL.\n\nThe following resource links are supported:\n\n- issue: issues/{issue number}\n\n  These could be issues related to the current enhancement request, either bugs\n  or other enhancement requests. This can also include issues with similar\n  feature requests.\n\n- pull: pull/{pull request number}\n\n  Any pull requests related to the current enhancement request.\n\n- commit: commit/{commit hash}\n- file: blob/{commit hash}/{file path}\n\n  relevant files for this issue. This will help people navigate the project and\n  offer some clues of where to start.\n\n- lines: blob/{commit hash}/{file path}#L{start line}-L{end line}\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "labels": {
+                "type": "array",
+                "required": false,
+                "description": "Additional labels to add to the issue.\n\n- The issue will always be assigned the `enhancement` label.\n- If unspecified, no additional labels will be added.\n- Only labels that exist on the project can be added, non-existing labels will\n  result in an error with a list of valid labels, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "assignees": {
+                "type": "array",
+                "required": false,
+                "description": "Assignees to add to the issue.\n\n- You should only add assignees if explicitly requested by the user.\n- If unspecified, no assignees will be added.\n- Only collaborators on the project can be added, non-existing assignees will\n  result in an error with a list of valid assignees, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "github_issues": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Find one or more issues in the project's GitHub repository.",
+            "parameters": {
+              "number": {
+                "type": "integer",
+                "required": false,
+                "description": "Issue number to get information about.\n\nIf unspecified, a list of all issues will be returned, without the\nissue contents. You can re-run the tool with the correct issue\nnumber to get more details about an issue.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full"
+            }
+          },
+          "github_list_files": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "List all files in a GitHub repository. Can be combined with `github_read_file`\nto fetch the contents of a file.\n"
+          },
+          "github_read_file": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Fetch the contents of one or more files\n",
+            "parameters": {
+              "repository": {
+                "type": "string",
+                "required": false,
+                "description": "Repository to search for code.\n\nIf unspecified, it defaults to the current project's GitHub repository.\n",
+                "enum": []
+              },
+              "ref": {
+                "type": "string",
+                "required": false,
+                "description": "The name of the commit/branch/tag.\n\nIf unspecified, it defaults to the repository’s default branch (usually `main`)\n",
+                "enum": []
+              },
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "File path to get contents of.\n",
+                "enum": []
+              }
+            }
+          },
+          "github_pulls": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Find one or more pull requests in the project's GitHub repository.",
+            "parameters": {
+              "number": {
+                "type": "integer",
+                "required": false,
+                "description": "Pull request number to get information about.\n\nIf unspecified, a list of all pull requests will be returned, without the\npull request contents. You can re-run the tool with the correct pull request\nnumber to get more details about a pull request.\n",
+                "enum": []
+              },
+              "state": {
+                "type": "string",
+                "required": false,
+                "description": "Filter pull requests by their state.\n\nIf unspecified, all pull requests will be returned.\n",
+                "enum": [
+                  "open",
+                  "closed"
+                ]
+              },
+              "file_diffs": {
+                "type": "array",
+                "required": false,
+                "description": "List of changed file paths to get the diff for.\n\nIf unspecified, only the list of changed files will be returned, but not the\nactual diff. You can re-run the tool with the correct file path to get the\ndiff.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full"
+            }
+          },
+          "web_fetch": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Fetch the contents of a web page over HTTP(S).\n",
+            "parameters": {
+              "url": {
+                "type": "string",
+                "required": true,
+                "description": "The URL of the web page to fetch.\n",
+                "enum": []
+              }
+            }
+          }
+        },
+        "attachments": [
+          "file:///crates/jp_config/src/internal/merge/vec.rs",
+          "file:///crates/jp_config/src/types/vec.rs",
+          "file:///crates/jp_config/src/assistant.rs"
+        ]
+      },
+      "style": {
+        "code": {
+          "theme": "Monokai Extended",
+          "color": true,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": true
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": [
+          "JP_EDITOR",
+          "VISUAL",
+          "EDITOR"
+        ]
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "aliases": {
+            "anthropic": {
+              "provider": "anthropic",
+              "name": "claude-sonnet-4-5"
+            },
+            "claude": {
+              "provider": "anthropic",
+              "name": "claude-sonnet-4-5"
+            },
+            "sonnet": {
+              "provider": "anthropic",
+              "name": "claude-sonnet-4-5"
+            },
+            "opus": {
+              "provider": "anthropic",
+              "name": "claude-opus-4-5"
+            },
+            "haiku": {
+              "provider": "anthropic",
+              "name": "claude-haiku-4-5"
+            },
+            "openai": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "chatgpt": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "gpt": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "gpt5": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "gpt5-mini": {
+              "provider": "openai",
+              "name": "gpt-5-mini"
+            },
+            "gpt-mini": {
+              "provider": "openai",
+              "name": "gpt-5-mini"
+            },
+            "gpt5-nano": {
+              "provider": "openai",
+              "name": "gpt-5-nano"
+            },
+            "gpt-nano": {
+              "provider": "openai",
+              "name": "gpt-5-nano"
+            },
+            "o3-research": {
+              "provider": "openai",
+              "name": "o3-deep-research"
+            },
+            "o4-mini-research": {
+              "provider": "openai",
+              "name": "o4-mini-deep-research"
+            },
+            "codex": {
+              "provider": "openai",
+              "name": "gpt-5-codex"
+            },
+            "gpt-5-codex": {
+              "provider": "openai",
+              "name": "gpt-5-codex"
+            },
+            "codex-mini": {
+              "provider": "openai",
+              "name": "codex-mini-latest"
+            },
+            "google": {
+              "provider": "google",
+              "name": "gemini-3-pro-preview"
+            },
+            "gemini": {
+              "provider": "google",
+              "name": "gemini-3-pro-preview"
+            },
+            "gemini-pro": {
+              "provider": "google",
+              "name": "gemini-3-pro-preview"
+            },
+            "gemini-flash": {
+              "provider": "google",
+              "name": "gemini-3-flash-preview"
+            },
+            "gemini-lite": {
+              "provider": "google",
+              "name": "gemini-2.5-flash-lite"
+            }
+          },
+          "anthropic": {
+            "api_key_env": "ANTHROPIC_API_KEY",
+            "base_url": "https://api.anthropic.com",
+            "chain_on_max_tokens": true,
+            "beta_headers": [
+              "context-1m-2025-08-07",
+              "interleaved-thinking-2025-05-14",
+              "context-management-2025-06-27",
+              "structured-outputs-2025-11-13"
+            ]
+          },
+          "deepseek": {
+            "api_key_env": "DEEPSEEK_API_KEY"
+          },
+          "google": {
+            "api_key_env": "GEMINI_API_KEY",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta"
+          },
+          "llamacpp": {
+            "base_url": "http://127.0.0.1:8080"
+          },
+          "ollama": {
+            "base_url": "http://localhost:11434"
+          },
+          "openai": {
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://api.openai.com",
+            "base_url_env": "OPENAI_BASE_URL"
+          },
+          "openrouter": {
+            "api_key_env": "OPENROUTER_API_KEY",
+            "app_name": "JP",
+            "base_url": "https://openrouter.ai"
+          }
+        },
+        "mcp": {
+          "github": {
+            "type": "stdio",
+            "command": "github-mcp-server",
+            "arguments": [
+              "stdio",
+              "--read-only",
+              "--toolsets",
+              "issues,pull_requests,repos"
+            ],
+            "variables": [
+              "GITHUB_PERSONAL_ACCESS_TOKEN"
+            ],
+            "checksum": {
+              "algorithm": "sha256",
+              "value": "7400a3f4b8ba04bef50b83687338560cb5a3769c83c52985c8365f8d8af17510"
+            }
+          },
+          "kagi": {
+            "type": "stdio",
+            "command": "/Users/jean/.cargo/bin/uvx",
+            "arguments": [
+              "kagimcp"
+            ],
+            "variables": [
+              "KAGI_API_KEY"
+            ],
+            "checksum": {
+              "algorithm": "sha256",
+              "value": "8ff70dc528c434469b43a1b05f752f46d8abe41c010edcbff6e5f3cc3131f2f3"
+            }
+          },
+          "bookworm": {
+            "type": "stdio",
+            "command": "/Users/jean/Projects/Personal/modelcontextprotocol/bookworm/target/release/wrm-mcp",
+            "arguments": [],
+            "variables": [],
+            "checksum": {
+              "algorithm": "sha256",
+              "value": "926deec34ed4f84aa3e99cd931d98165df68125321c17014b7ee2773647e0696"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2025-12-24 05:56:15.045006",
+    "type": "chat_request",
+    "content": "I need to redesign the vec merging set-up to support setting \"default\"\ninstructions that are replaced if merged with other instructions.\n\nSpecifically, currently we have a list of `default_instructions`, but if the\nuser forgets to set their new instructions as `MergedVecStrategy::Replace`, then\nthose defaults are kept in the final merged vec.\n\nAt first I thought perhaps I should add a new `MergedVecStrategy::DropIfMerged`\nthat instructs `prev` instructions to be dropped if they are merged with other\ninstructions, regardless of the `MergedVecStrategy` of the other (next)\ninstructions.\n\nBut I do worry that solution is confusing, as the other two strategies apply to\n`next`, not `prev`, but in this case `DropIfMerged` is the only strategy that\napplies to `prev`.\n\nAny alternatives?"
+  },
+  {
+    "timestamp": "2025-12-24 05:56:53.935115",
+    "type": "chat_response",
+    "reasoning": "Let me understand the problem:\n\n1. There's a `default_instructions` function that returns some default instructions\n2. These defaults are currently wrapped in `MergedVec` with `MergedVecStrategy::Replace`\n3. But if a user adds instructions without explicitly using `Replace`, the defaults stick around\n4. The user wants defaults to be automatically dropped when user-provided instructions are merged in\n\nLooking at the code:\n\n```rust\nfn default_instructions(_: &()) -> TransformResult<MergeableVec<PartialInstructionsConfig>> {\n    Ok(MergeableVec::Merged(MergedVec {\n        strategy: MergedVecStrategy::Replace,\n        value: vec![PartialInstructionsConfig {\n            title: Some(\"How to respond to the user\".into()),\n            items: Some(vec![...]),\n            ..Default::default()\n        }],\n    }))\n}\n```\n\nAnd the merge function:\n\n```rust\npub fn vec_with_strategy<T>(\n    prev: MergeableVec<T>,\n    next: MergeableVec<T>,\n    _context: &(),\n) -> MergeResult<MergeableVec<T>>\nwhere\n    T: Clone + PartialEq + Serialize + DeserializeOwned + Schematic,\n{\n    let mut prev_value = match prev {\n        MergeableVec::Vec(v) => v,\n        MergeableVec::Merged(v) => v.value,\n    };\n\n    let next_is_merged = matches!(next, MergeableVec::Merged(_));\n    let (strategy, mut next_value) = match next {\n        MergeableVec::Vec(v) => (MergedVecStrategy::Append, v),\n        MergeableVec::Merged(v) => (v.strategy, v.value),\n    };\n\n    let value = match strategy {\n        MergedVecStrategy::Append => {\n            prev_value.append(&mut next_value);\n            prev_value\n        }\n        MergedVecStrategy::Replace => next_value,\n    };\n\n    Ok(Some(if next_is_merged {\n        MergeableVec::Merged(MergedVec { value, strategy })\n    } else {\n        MergeableVec::Vec(value)\n    }))\n}\n```\n\nThe core problem emerges in the merging logic. When a user provides instructions without specifying a merge strategy, the default instructions are automatically appended. This means the default instructions persist even when the user intends to override them completely.\n\nThe current implementation treats unspecified instructions as an append operation, which contradicts the user's likely expectation of replacing the defaults. This subtle behavior could lead to unexpected instruction combinations.\n\nTo resolve this, we'd need to modify the merge strategy to respect the original `Replace` strategy of the default instructions, ensuring that user-provided instructions can fully replace the defaults when no explicit strategy is set.\n\nA clean solution involves introducing a new variant specifically for default values, which would have clear replacement semantics during merging. This approach provides explicit intent and prevents unintended instruction accumulation.\n\nThe merge logic becomes straightforward: when a default variant encounters any other variant, it gets completely replaced. This ensures that default instructions can be cleanly overridden without complex conditional logic.\n\nBy treating default values as a distinct category with simple replacement rules, we create a more predictable and intuitive merging mechanism. The proposed strategy allows users to specify default configurations that can be easily and unambiguously replaced by subsequent instructions.\n\nThe implementation would prioritize user-provided configurations while maintaining a clear mechanism for specifying initial, fallback values that can be cleanly superseded.",
+    "metadata": {
+      "anthropic_thinking_signature": "RXVZbENrWUlDeGdDS2tEN1hjTGJFWTRld3Q2Qnh2NWppZWtrWGtiMjZZREdEbXdxbDY1ZzRnMkprTHBlU1UzUHVBd0tJbEFjL0NvRUF1Y2VPMnF0NkFOQ0hTeTFIMWtuSU5PcEVnd1huNzFEZXhhY3JmSjBLZWdhREZlV00wd1l5cExqaFVIRkdDSXdhZGY1bmwyMGlUTFFJSjNzYzBqYndCM2FhNitkdlV1SWlJbUFRSW5qZThSbk9XNmlWWTlvVUx6ZEpMblpRWE1MS3Mwa2dHS2llc1c5eHFiVnZiSFNjOXdVdDRHWTBSSzcyZ25GcDB6T3NrSUl0amhROFFZcmFZc0hMWFlCV25qMW0rSVNudUNldHVGLzVFZHRUbHhnL001UDlpVE44TVN2TWFwRnJpVzdzYU9rbDFBNVdudXhFekJCajJiNjZyK3ViZ0IrOGRlNmV1YUpLbWZ4cVVNTDRpSTZhWmRIMWJNMDdLdUVSTC9FY0ZZS0hldjBEa1EycGxmOVpxUWdON05xQXFsNFpQanNvSVFzK1dMQUlrb3l5eWwzc2l6Q283cWwveHg1VHhMMWEyeElvUDZBN0RzMWVTbXNMdGNTUzRBYXBOdEFjSTE3UkQ4R1ZlY0h0QmR2Y3Rub3BwOHFWRVg4Y3ZRbXBGK3l3bjBtcEFjT0VqZ0tFSEdjNHNtM0ZmTW5HaFBTcFFUdXdNa3FRTUdIc1g3dUFpQWpxRGd2ZlhLUEZKTU4vaHB0aEZEQzNQazRYRVBiMkUxczY3ZU83TXVZc3VTUlFpbUE3THpteHBnbXdsT1NHd1pLNGJqYWdTR1BWbStNNVA5QlZKc3FLQ0JPcUk1bXh3cGpqY2k1ZkF6K05kR0FRdVlCK0pmdlZFRXNCOGlKRFNUNEFTTWFESERXejl0b2xON0JCWmRKa2tIS2RrTmQzclQxeVh4N2FWUFVSNTVrWjA4S096bU1Pa0p6R3NteE5oSWg5N29IYUdndjZXeXVWa0wyM2hNSEh6ZFdVR3IvSitrd0hoUEN0ZzlSMlZ4MC9ianp6bjZ1cVhHc25XRmk5cHQrRlIwbnVOS2Z1ajdidVdmSk1mdkthdVJEazJWSk1VQkJJdE84R1diZ1BHNHlWODNKeGtQYWdJKzZxRW1XY2k4akZYK0hYOExzaDliRjdwRS94M2tPUk9DS1lLUTJqNWZxaHBoWHJkWjdHUk5Cc1MxSVlDcFc5QmdjeDVOUkRrUUxxY0dUQ1phcjJWcmtwNHpkMXR6djR3ckMrZXliVWJVVjcycm1ZVndhOHVLSkpWODR2M01iVVVPRXFFaGY3N1orM2drbXorbExrR3gxaUlQNHJ2dTZHellwcmorWXdkTGNZUXlVVFpUMks5eDhnMHV4TEZ3dHdVRFB0cEVRWWVGU3lUVXNQQmJBcVZ2UTlVSENNa3Nyc3B0OFAxSjhQVTcvNC9YRGZZSjJaQVNOQ0UyZVE3MmdsM3JmZUdpRUM4bDVrOTYwQktSUEVYSDhNNXp2Z1ovRjMvaHlwV2pKNkJ5aThnTGZpUlFJVGpOOHlCUm5EZDZvc0piVGRsQmduOVFRb3R3K29pblVFTDBrd09aS09UZ1ZteTM1clI5ZXRuSTF5Q3lOTjNSc0xtSVBmbjFsdTgvSjdja3Y1VG02QzNIZGxIbnZHZkVhY2NsUExrTEFTZktkRjB2UkxtU2I1YjdtTlJiNTY1MjE4UC9RV3Q5MzVvOEh2MGgyZHcrZGdpRVEwdUQrSGo2Mkk4VUw1MXcyM2MvNXpLUVdnN01yOFdlK1BkdVFyc3RnNnFhWXJlYkFHRFVsaGxMTWJNRVp1aXVJREQybHR2NVkwdEdoSHh1aE9xbldINUhxY3RxSjZXcU1hM0krNGtRN3VZODNieVpzeE0xQ2dRMnRrUTVuSkdiMjJvMnFvTFdNdkRVTWRxU3hIOWtMU1FOQWVlSkR3Q1hLbGM3QWUwSXQxWHZIZDI5dHBNRExxWUxnb3EyVjc1bUhmWE5CWFdZLy9XQ2duSG5BektXWlYwb3lhc3BXNXJBTXBNd0xqMkwzb1VMZmpySGh4SU4wNzdIVUR1REwxajZ5Nm8wdDU5UHFQaytud3lJcWZjVTJXcVhSK3ZSaW95TVF3RG05V1FiV0o5ak5YS2ZkQU5JOTErUlljWGZZR05DYzNVdG1TaUkwSCsvbElnRUdtSWo1eW5rd3VzdFpxV1R3cEo4T2o5bnpYYXZsSnlreFJRcG1tMjRZR0RDYXBBNUtKbjhRVlVqaER4aVVtM3Z6TnJJQmxXUmd4VEo3SWkyMExGelpCRFB3bHhOOXYvNXBqY2F3T0VpVko2QnFhaTh4bDJVeG1xVHJwbGhVYzkrcGE5Q3F4elJjM2VCbEU3Z3ROK0p2ZDZhZlNPT1pIemVkeXh6b2hEVVVIbDR6MlZTUU9URm9GRHZQSm1maU4wdGtIVjE5elNHcm0vUVh6ZzRVdkVHVVRDVjdwSVBRSW1VcXdWVEZLVEk2c3NwSUdXa2NPV1A0WVhHdHVWMkJrVmZGTTBZWVkxN3BPem1iY0lQVUlmQ3V1QW93UEo1cUs5dnBWREtVZUtPUWUxZmVGV2ErcjRqNmtMaWh4dVV4QmFSdm5iZjFxV2R5eVJHWGJpOHk3SDgyc1BlbTJzdk9uUmNjSlh2MUpUYTNoQlJ4NzlKNUVxMHJjRG1UVWozMy9MRjhqeEhxQmQrd3djTmd3MnFJdTc3ek93d085R1M3REsvQ2pEMFRFdGgzUlRBelU2dkRCYkkyUXltVWZ4aU9YMkJxbEowUExxSjcwTnhDOWxEMkFhQ2M4b3FWUEQ5S2ZsdkdadnBnT0VGNkpmMEhLS0hLa2F2THduZ1dBQmtEQmNVVlZFeGdENDU5RkY0OG05NGhzTytqM2dWVEVWRzdPeE5yNnpQS2NTOWhhY1FEMXZYUEZmQTVhSHZLQU1weUkwODBCMHVqU21WOVBpcXRuN1drVThYVjhtc0tMYTEzVURIZ2w2KzNHWU96cWQ5c3VuUVFTbVgzSUhBSWRZbC9ZTW41ODYrYVZLSzdmUHlVM0R4d1VCSUhJQVdYRzNzVHppbklZckp1ZTFHVTlmQ1p0K2tOUnFhRitjd0hjNHBKUGhOTkNFQUhiK0x4azcweUNPcWp6MVJ5UjNNQUhnYVlzdHVoOCt2WlBnaFI5cnFNMXVxMlY3RGtla0Y1a2RWdEFVRmJWZzJjeENHNERpTGF3OU1UUVl5TGFJbER2UDV3ZVpsSFdvVWlXT1dQeHV0WG45c0sybkt4dUVvaGhPelBEdHlYelNzNHl0NnhkajIwQTFHdEZHNXl5RzJDa1c5NWIrVS94Sk9rMVhVSUFTUk4wcnVqQnFET1A2UkxTVmFJS3FKeno3TWFKQVgxalprSW9XbE8yaElIYlE4TkN2UDlQTnRXaVVYSnltT1J2VzI1RkpJa2tnSVdXM0hkVHdzcUxadE5hcFYvemxvY003N3ZPRlFHTHpaakN5Y0t2TnZZMFJtNEthRm1EdG5xVXNSN25XRkdVYXp4SEVWejFJbjFhakFjWXViNTJRN2psNDJkcjdZd0xGVEp5VUJzbnE1dzgxbjc3WUV2MUk0Sm80aGIzakIzRHgvbHNFUE45aU9wUllLSXBzTEhtdSsyNkdZQ00zM0xUUFprdmE3YWZVQjhSekdJVzNMbUFqMitGV29wNWtRamR3ZzRtQUZURC91VGdLNmVEM3I0bmptc1llTHN0aEMvaGxnZWRwQXRFTjRGRm1NK25TQTlUckhTRzgxZVNsTXJLMHNYOStJelVBZnBocW9XYTlhYjZxR1pZSlAvZnV6WEZFUE5zVitVM0xYb3FZQ1pMQW1sZjM4b01RTVduTjE5eFMxNFFVaW1ZU3I1RjJiSFJsSmJRUHJPZjVSdlNVdktSQXhjMlh0dkpZUldhbUFmN1dIV3Z2dEV0UE42cVYvS0N2ZTB4ZWNsdTFmSEw5MDZlKzBIUTlsenpFdDFWWWJPSW9aVmhoSmI4S3FEaUVJcDQvWEVoYXlkS1V6bW5CVEJ0eVV2ZmlRQ1RJc3dUMVVLY0tUVmxtRXIzTG1lM09iajhBcU1weFZqR29qZ2ZaRFkya05WdzFOQVR2blFKUXMyTUF4MERzaVJTRWlWMWE0NjZHRUZWaS9FK1FLTm1NQTk0OElka1R6cjJsUGdYcm1NbEI1UnhFTDZDMThPK2pDdmloZ3AyaW5XcUlmQUFZUnovdXVSTFlnTEhsTjlrbjUwb1dGb2tScFBuYjZVaUtlc0RjY1poZnJCMllidkcvTzNVM3d1ck9VTG5UVjkwVkE3WkFZeWIzV2U1S2dDaFU0Ni9Kak5UZGNVY05UdUhibzZXZlkxMExvdlNKQ0ZBRXZ6cWNCdjA5THVxc0hHNFpFcXpQVklTdWtvSm9uUVFzNG0vY2cxTWEwdE9RTkdIRmVCTk9zOUMrTGtnMWtWd0dxQVBxVGs2UDREcDZkT0FISWZHUU8vZU5DT0NmZWhETVZLMGFJdVEyNDFVRHZvaHRTRDdKS002M0xxSW91ZUhKakdUeTI0Nm81WXNRR1B0SFR4RFZMY1kzVC9VSnhCKzBoczBJeGZPcEQwN3VpM1ZkOFFQY1VFejViS3drZ25vTG1RWi9EQVBWZXEyRVVrN251V25nazBlYnk3VW1LK2lNb0Rjd01oTGxiZ0hhM2UvUEZycFd2WnBjNGpZcnRTTkxSZVc0dFhMS2xsdWF5eC93VWFLS1NVd2tVZVd1cDRsM0hUdVhqeVRLRWw0Zk93WmVsdEN0dVNaMm9hTlVQK3EzVklxZzlBMW81dFI3d1FwU1k3YlBYMTZuNDZjQlFCWE9SM2lac0k1aUlKc0djRkxObXZJV0VMMXBCVFI5aWdBbUdVaThyTWlxNGZTWXRFdDVkWTRUdHoweVYxaXV2a3A3N2p6WlRvKzhob3hhQUJhcklVSGFwbkt1QWJNR3o1VDlqMDMwMU41QXBFbmFhYU9vdHp4VElRc3pHZm92MEQ3MXlDcFYrRlhiZ0ZnZS9aMENMa3k3UDU3S2dCUE1qQTlYY0tZd0FnMDVEZ1hsQ2NjNUdWT0k4WVExeG8waHlVK3lJZFhzYXc5aGRhQUIvVXNDSi9ueGgvTnBxS0xIR0kwL1B0UHY3MUhHVXpsaWRzSjQ5QzQ2bzNTU2NmaWhoZkp4VitnR2J3aXArdXl0OWlNakxyb0VZZ0Zpc2RPbzRqamMydzNRUENTdStaRktDSkM0bUFwWS9pNW91SFBhc0JkQ1BvRXI4Lzk3WTZtZDhaY1M3aEJZLytLZFFzTDcxYlFmbnh0SWQvd1NZWGVMbG1nOFJMYkt0WnowNXdTc05KRG5aL3Z6TVAxeTB6MlB1QnVjRGwzTzlZUlAyM3FFNzJuQ0s4elRFYUhzUVRFL0VCT2RLOHZaWnFRN3lpQTJwWS9WOG8vemxPWWZIUHJjYmg0Q0p2ZzJsOUJ4b1VzanhZcWNMVktFMG8yaW83ajZ4TnJUU2NmUEpaa3I1b2NHeFNOVFY5OGFXZDdNVXZPYTg2L2lsSzFRbDlKaTRMSm93c0RLVnB4VnU5WUZoa1FhT2VhM0JzNG5XNjBreWdyVlFuVlJLR1FURlVzUDVlT0JJbStyWlEwQllYQkdzTnlFSWMvamRnV1B2VjR3a05URkFtSFZvMWxCc2tuN2ZMelBrU3pwaEpLa2xrMUw3bzllbDVIa01kcEZyb0E0S1liTkdTT0ZCY2hqS3p1akRpTXVzOHkxYmEyd3hZVEVFVjU3UzFrUExnYXZWNDdUVm13NnhRRnAzWUFYMkNFZ2FSYlV4N1ZYQlJrY1NOelg3NEt3bnFIUXB3eTlKOVhXempLSFFHSzYxM0RRekxrdFJyRWgvS0MrNjF2cHRCNHNIKzFMZkh0bUFINnhBZVVkR29OZ28zTFlMN1hPZzVlM2Rla3pUeWIzVEFuSFBNN2Ntd25ob3FoSW1IK3ZtYzBvSS9pRnIrcGJOcVNodWFQaE9YaEFzMXVTR1hWMzNqTFd2YmJKQUx6R3QrL1ByV2FzRU9XbHIyMXJPOFdZN3M5TDVyb3I2M1g4SXVFMTdsWHhHRTNYVFI3aTNUYWlOcVY3eUc5Ry9JS0Jmd3lYbVlMaXhuWTUrSFY1ZGFmQm0zZGk3K1ViVFdnSWdaS1J0cllxTnIwMzBaVXlCd25qZzJRRXdESVZZQVZrOXRxVWUxeWlmbEk1TEFNekhsVlNNMjRSOENqQTgwbDBhREpLejd1OHlua0hHdjMyZUdoUzFsSjlZdWphYzluOFJYRW43ODJUZGR5SGxBaGl0Z3BHZ1ZYZTJKc2xPbUdLR2xVUU5nMDU5b094UDIxckN6Zmxsdm1zbXFrSWlVczFOU3pXbDhKdDl5NGE2QzA2STl1VWRFNlJMTWhaQytzV3ZKdjZCVnVRdGRoRGlTVWNHa09hNUxIbjliVGY3V1l2YTk5YVlhZkN5T2tMQm0yaWtKNUVSUEN2QVN0dTNNY1A5U1RFZUhYdlU3N3NaVlI4NFYxVmpEVlRndkE1VWU1UVpoQnZ4OVZqYXZ5MTBNR3E0Z1M4VThadWtCZWd2R3A0VVpuV0JpVVM4YUh2Y2hXWnQ5enRFR1dDcU45UHRwdEQvY2JNR1RhYnpQNzBGVDExaEIyelFEQ3hiU3QvVnNKcU54RWtURThKTmRxOFF5d1RuNkErWnF2cnNoZGV1YkxLRDIxRDVQNzVqSUJ6aVNNMUQ4ZFdsTVE5QjJoQ0NSZVlGN2ZkSHFGdjVUMS9GZk9oTjh0RStUR1JHNzRkMDNkb3VnRzdsUVU0QThUeEJtSG9Zckl2NlBMeEwrejA5MDdLb3E4ZldGaVhJRFdJL1BEeTUwN2dHdlg0VVlvbGYyOFZDNnZWZXlwVzJLa0Vkdm8zWUMvM0tHVTVIM3NXYVd3OTVTdzR5MVZPNjJzbnNwZmIvQ0lMYSt2b2RWZHNMc2wyOFRIckhGSFpTQzRaaFlyOC9kSzVTSFBYdVJSSWVnQklHeWExRjZzdS9vTXBNSVN6UFpaVzlrYUttNXJTcjJLZWRqMnB0QU1HalJGZGwzVTdZWHlvQlBlVnlqTmI1a3kxL2tOWUI2UytuY1JwZjYxMmtNbzhZa3lhbS9XUXlyT1pRVHdyY056UUI1c1BNRTllN3k5eGM1M2tXbVY3QWpEeDdKV0VoZnlsT3JOMnZYMElRTVU2cVhRSHowYTUvRlpOY2ZrYmZUckwzRVZOVUtDSTNjMmRndlNHM254SEZyRGZORjhrZllNamVoaWp5N0xFLzg1VVhSS2VhdDZPWVRVMXBydnEvL1lCb0tSb0tuMEZ3dllJcDBMc0xwMDNUSkM0eEs0NFlEM2tRYnc3enphekl3elJSc2xvektsUUVycmhiTndrNWN1ZTBiQVd6aVZtbmJRR2haZ1ZmdUxIM0tYUmhSaTN5M2dYTE1NcXRVdHF6ODNJbVBoK3hUcVhGb0VldGpxaTA5ckFxcmpiSE5zNStTb3haZUY2SUlTMUwzTmROSk4xUFYrd0UyL1JZYkRDeC9SKzM4ZlgwamMzcWYySzY2L1J3Z3JJeHU4WnBiSThEUjdaV0lCd2I2OWV3aDNLOGZNdEFZY1dBSFRYbDM4eDJoWm9VU0R2NnE0cEluWTJySXJSZkRNOGtwb3ZPaGVjMmdkdEh4T0RXMmQ2THJCWk1sWDQ5Z0RVUzliOEJHSUFjeUdBWXNwd0kreURFWi9TdzJ0MnhBaWtvOTR3a1YxaVpKZ0o1UExKdWRZaHJvZU1Id2c2dHBpY29uUXN3Z0thY0tLYnBWZHpGbGViTW9nWWQwcnpUaU9paU45T2phRmc2Y3dzRy9FOVQrSnJMeWhDRkIwUUZtWGNOMUkvRFhIV2d3clVYN2ZwcU94NWk1WEhlYmZVLzFVcGZTNGhjek0zY2huTFJkalZWbGFhRFMyWDd4ZjM1T1ZNaWN0d3hPWlEwMVBzdkFwbW5UR3ZjS1pvaGRkL1JpaCtNaEkzY1ZUdEpUMk5ReHFGSEx1OThIYktaaEgvTWhTSSsxNEE0S0dJUUU0c0dGUG84c1IyTXNJL09FTXA5dWRqZ3R1bDVLUStZT3kxWHBRTElTQ2hWcW9jZFczYjQ2VE9iQmQ4cER6bTBJMzFieWF3c3BqeFBoMGxXejNkc01xTHVVQjE5TVRrV0huaDVMR2toaG9zWFJtb1hpN2doa3ZHSmxqaVZlcVJwWVcvazFpc1JGbjN1Y2paWVpsUGFkZnBCdUxSalZka0FmZjNzRGdJUUwvOXNpQXlPYTMxQUkvRWdiTTJiYzRDRDhteVRYM3FZVGJzMmpVV3NTYTI3TTMwYzZOemdiczJxeUVjYktlNy9DVkV3ZmdtNHZBUU1EdlFyMEowRTg5ZytsSnJTMGprZHZtc2pHOXZhQW5adVUxamJtOTIybzNGeGNLV0g5NVRqMnRpeElINjN2ZEZXZ3N2OU92SW45eUNBSTZYM1p0LzdxOThzR1lpKytOcFpwekFNK1hXckVRQ2hMdDJGTWlSRFZRUFdPNHpWckhpVnBwai8wNWUwWVVmUzJIQTRZQVE9PQ=="
+    }
+  },
+  {
+    "timestamp": "2025-12-24 05:56:53.936005",
+    "type": "chat_response",
+    "message": "The `DropIfMerged` approach is indeed confusing since it breaks the mental model where strategies describe what to do with `next`.\n\nHere are some alternatives:\n\n## 1. Add a `Default` variant (cleanest)\n\n```rust\npub enum MergeableVec<T> {\n    Vec(Vec<T>),\n    Merged(MergedVec<T>),\n    /// Default values that are replaced by any user-provided values\n    Default(Vec<T>),\n}\n```\n\nMerge logic:\n```rust\nlet value = match (prev, next) {\n    (MergeableVec::Default(_), next) => return Ok(Some(next)), // Defaults always replaced\n    // ... existing logic for other combinations\n};\n```\n\nThis is explicit and clear - defaults are a special case that always get replaced.\n\n## 2. Add `is_default` flag to `MergedVec`\n\n```rust\npub struct MergedVec<T> {\n    pub value: Vec<T>,\n    pub strategy: MergedVecStrategy,\n    #[setting(default = false)]\n    pub is_default: bool,\n}\n```\n\nMerge logic checks the flag and drops `prev` if `is_default` is true and `next` is non-empty.\n\n## 3. Invert the problem - use `Prepend` strategy for user values\n\nInstead of marking defaults, mark user values with `Prepend` strategy and have defaults use `Append`. Then user values always come first, and you can deduplicate.\n\nBut this is awkward.\n\n## Recommendation\n\nI'd go with option 1. It's the most explicit and follows the pattern you already have with `MergeableString` having multiple variants. The name `Default` clearly communicates intent, and the merge behavior is obvious: defaults are placeholders that disappear when real values arrive."
+  },
+  {
+    "timestamp": "2025-12-24 06:02:16.360202",
+    "type": "chat_request",
+    "content": "I cant use option 1 because we use `#[serde(untagged)]`, and I dont want to\nchange that to avoid making the serialization logic more complex."
+  },
+  {
+    "timestamp": "2025-12-24 06:02:39.139981",
+    "type": "chat_response",
+    "reasoning": "Ah right, with `#[serde(untagged)]`, adding a `Default` variant would be problematic because serde would need to distinguish between `Vec(vec![...])` and `Default(vec![...])`, which is impossible without tags.\n\nLet me think about other options:\n\n1. The `is_default` flag in `MergedVec` - this could work and wouldn't require tags. You'd just have:\n```rust\n{\n  \"value\": [...],\n  \"strategy\": \"append\",\n  \"is_default\": true\n}\n```\nOr if you want it to be optional:\n```rust\n{\n  \"value\": [...],\n  \"is_default\": true\n}\n```\n\n2. A new strategy like `ReplaceDefaults` - this would be on `next`, meaning \"I want to replace defaults from prev\". This is still somewhat confusing but at least it's about the next value.\n\n3. Use a wrapper type that only exists in the Partial form, not in the final Config. So users never see it, it's just for internal merge logic.\n\n4. Make the default instructions be `MergeableVec::Vec` and have special logic in the merge function to detect if `prev` is from defaults. But this is hacky.\n\n5. Add a new strategy like `ReplaceIfPrevIsDefault` or `ReplaceDefaults` - this is on next and means \"replace the previous value if it's a default\". But then you need to mark prev as default somehow.\n\nActually, looking at the code more carefully, I see that `default_instructions` returns a `MergeableVec::Merged` with `MergedVecStrategy::Replace`. So the defaults are already marked as \"replace\". But the issue is that if the user provides a `Vec` (not `Merged`), then the merge logic uses `Append` by default.\n\nSo the real issue is:\n- Defaults: `MergedVec { value: [...], strategy: Replace }`\n\n\n- User provides: `Vec([...])` which becomes `Append` strategy\n- Merge: The user's vec is appended to defaults, not replacing them\n\nI'm leaning towards an explicit `is_default` flag as the most straightforward solution. It clearly communicates the intent without adding complexity. The flag allows precise control over how default values are handled during merging, providing a clean and intuitive mechanism for distinguishing default configurations from user-provided ones.\n\nThe implementation would be simple: when merging, check the `is_default` flag to determine whether to replace or append. This approach maintains clarity and avoids introducing convoluted merge strategies or complex type wrappers.",
+    "metadata": {
+      "anthropic_thinking_signature": "RXVJUkNrWUlDeGdDS2tDR0ZTeGZGMFczMEZzdHk0T0h2dG8yQ0g4TUF5bHJPS2ppR3dxalFiZzJPT3lhVk9HWnN4R0RvVWRCa2pISjdURUVVSElBVVh5V0xYbGViK0VFSmhuN0VneGpIbVNUdHRGVE04bS9KY0VhRExHWGJYNXppcFdNWTFoRGR5SXczUllVbWNOMU04WlEycEN6aGZoYXR2aEZXcHRWVFV3TEo3NlBPWFpLaFd6VHlIK2pDVHZlMi9DYnNuZit4R0lnS3NrUTF2Y0xpL0kzSlM1VHBVd21UczA0UGI5cG14dllROHA3enN1UnBZMWNpdGV4bEFUUEV1amZqamxQTDdWMzE1QktuK2x2TjNJQVV3QzdLNmFaa2I3aGhQOE5ibitVZHM3YkxSelNyb1pCQjZGd3RzWXhwQWIrUHY3a3B3VWkxaC9JS004RWd1UFNwaUVqZjhBQ0tla2JOZVdxZEhyT1VpWHVONCtTZ0R0Y0l1Nlp1MEp2MFR4eHFvY0dHcElFV2NoYUNNVW83WHJaMUtuS1RodHdxRTk3cnZxQVp2K1M0bFpucVdSbi96WVhnbUY0WDU4WktDakJCQWFxNkVlVFNjUWNMVDRxNW41UWtXYm01cUtoN3M5a3lSaUVEQ0JkVVpWZXB3S3ZzajRsZ3BWakN0YXhuem1ERzFjQU8xQmVPU2R2azNvWC92RTdQekRoeGZITDFhVERXcFVpS29XWDVxM1pOYjJRRUtzYTd0TmNFaUtqVkg3SFo1YTJTWnEycHBnUG1wU3lWR0ZxcUVxcGpaTWROaUhxZFRlaE5xS2pEbG5TOHdQaXZpelpHSnZ3dXQ4UjBHbDZTbHRhMC9vY3NsU3FMU2djRjZRdGZ6WHQxeUp4VGovWFk4Q0VLSE9ldVlMK2xvdk05U2s5SHBRRGs1VXdrK1RhR3N2UCtXRXVCSE9Falpjbk53b3gvakcvRnBHVWU2clhNVmNkN2RBbzlIU2lUV2ZHaW0zcU1ZK1l6cng5cE5tOVNid0RBMC9VaEJaN1Mya3AzTnBjSVl0OG8yNjl0Y2pxRE0xTysvbG8rSHhpY3lucXR5T1VyMmRzZVp3dE5sQy9TNm9UZitDQThTOHZBcU82RXZjTnBZVlJ3TCsrdysrQ3Jramd3QksyN2JoQUUzVzVYemNpK1hGTFQ2aHlRWlRGUS9NZGZnNVFHK0hpMzRVejJaSTdGZm1oTlYvTHJGQ2MwemJlcS9SVWt6TnFyT2VYUmhvOVhKWS8zakZHN0l5QlVXa3NHYlc3Vy93UTVKUzNWaHNwUUcrM082YldPdnhZbjJhSU83QWp0bmNhcndaNVRXSDRaZDNwai9XL2dmUkcwU2lWc0l3UUFmK3JsTDFwS0h4ODM3bDJOLzZJYmRyY0R6N3U3S2JqZm14b1ZOZ1BPbXpTc01wbis3aWZkUGVGTHRGM2hsVlJ1YjVrMFdCUXNDNkVCSTlMSG01bEMwK2MxM24rYUdHQ3ozSUhXWVZQNWlpcGpNajBkU0x1Tyt6SWJ4Qy9najBMZ3dnYlA1Rk5xalkveFBCMTNVS1NLaHp5TkMrU1ZCVjdWdHdtbWpZU1pVQ1c0bEh1S0gvaytTa2lTUE9kOG9QR2g1YzlZWUdRQWxSM3pONUNOdlAvSzZxZTlRaHJjVEQ1Tkkvd3lEWGh1QktDTk5ibTI3K1pLSy9PcGtxK01ZT2M1eCtuQmpYRlhrK0tNL0lMcWliQW9UYWJSMTNxUkhicTBuV29FaEVGYmRHWkRJdlpvUllza04vMCszVnBUSUJXWTd3ZktNWVRsR3drT0I1MkVscjEvZmlCY29sRFI2dFg0b085NmJGSWJsTEp2L1J1VXByYXd4VlhVNm9kUW5KS3U3dXlsZ3lseDcza2VxbFE2dUloL1MzTUtTVmw3dWpRRi9DekJaVUZmYTAwWi9QL2swTlVETXk5djBIUy9ZWEd3cGlIbGpEcmxOU2dpNndDdjRvR3REUkUzcnZweDNiZjVVeG9HdXM3NysydHhiejhEQVFieXRxby9QS2toSHhmNjdYZUJpSlFRNmIzbFMvOTBtQ2VIV1pmM2Y2VTNkck01bk5TVjNLTXViYlpwM3I2T09GWFphVEdoK3hpemcyVE9rTS80RWlNTHNXNVVTZ0JxQkFrdFgzNjlSbWh2MjBIZlJkQjNTTXhkVUlxWS9MTEg1dWpXSldTZXBnMmwxbEtDUnRHKzExZi9zSkNhL0VmNUtsWlpyVDg3dUp3NU9pQ0s1dlVqTW9ISURsZXZQNU1UR1dhR01IcEMxNEM1UmJxdHMrNmthWTNDYWo3SUlrMG00Tk5tS0VYVVdIQ3I0UEZKbi8vemN4YllzczRCbFdSRHREWVFYUmptdW5HdHZXUjBleFQvdVpYbnhETTdkWXZPb0NsRTVJU1E4OHEzV2dEc2xzY3hmd21SY0R0Y0h3YUM2ajV0eXFmMXhWQW5ieENiYnVNd1FsRG5iS2pUWkEyWDhGM3F2bkRCTWJuM1ZvMmtUZGxLNTdMK0Y5N3ZWZnl0QUxuQmJBOXVBRUJCWEdDd0h1UFl6Nm5UWWZYbUhCNHdjQ0lxdERZYmVCb3R5dVJoWnJydVJmUEJiYkNqMjMrTk1TdDdSNjBtV1FGbVJaTlB6WXN6dHNIdjQxempMajZZY0lyU292L2xJWE9QYVdyRXNpa3B6TmFJcHBOZUNOQk1GOXRMbG5KQmdzUkVhMDJVU3hxcG5aRHlOalhhMXgyWXdXMU9oTkFFWFZ6aTBzZk5RTk5JQXJnUmRWQWgyTkpDNklwc0xhMzhnM2ZaaVduTkZ3WnRvakxldmpZVnlrVm5hdjF2OVJrNUhUVDlCYjI3ZnBhL0diWVJqcGU0Q0dkRUh1WGR1Z0xQbHNzaUJVZTNvQmE1ZEJkZzYvaTRoVU9RaHJQWFUxM05BY2RJL09DZ1NPeXhIK24vMFBGWHRMQkJ6TzdESmR5ZE9sWk5WVnd1TlpROWV1a1pNeUl2cUdLeUI4azZVd2toaHhqb0JKQkdJQS9FMnJYT0prTHVNVUNVUHp4QXZSV2ZDam5aV2tnaUxYMkh3L2g3UWZBV2ZPd0hockxnWjRQU3E2TUdISW1nR3U3UGdtYXRPT2cwUFNlUVlXRDZUM3lHSlhTWnh2eFR6MUhaUjh3UGwxcTI2VGV1S2JRMzBEMWpsclh4ZEUra0xmZ0JEcHFUek5yZUltTHEyM3drWjUySkdqeHZDaHAxb2o1UmtJaEhMNkVmM0pLSUlSR29DSllNU29EZEJnOFBhL1R4TWwzRHluOWJTM04yUGVsaDAzd2RGMFQ2M0FMQUZWOXJvUkxnaHVpNVZLMDlxQmhWZGV3d0NKUU9RVkdNOFl5MnFOTHpKS2hQMEpER3N0NHpZNU9ZK2xSUXhXeUdMWU9MeVdYSlNvbGhNTUVWNTBMdkJpc3d1czE2RnYzRVpTS05RVXk0SE56WVNhRSt2d24zMEdieGtWY3dXT0VpZ1c2QUVsN2J6U0ZSWFVreWVLMFpTdURPRHk0QTl4TldtNW1iQTJGT2dOQ0NKYmNZU2NwajlBdGN6UTlMcUdEL3NLeTZJRDkyWE5reUIrL1p6QW9FRm1CcTdZb29VNFNNdXN3dWRTVkZPMUNaV08xY2ZsY1ovTUdBdVhScFNzODRZaG1kUk9HTFBRaG1BNjc0VWJCR3ltOU5uZFNzTlpWd01NTGJWNUF2Zy9yN25lZ0hrSDNpVHVSZzYxOXR1d3dIUXQ2WU9ZdC9Ha09jTnErSUE5UC9kL291STJ6R1M2OEcvUVFxaldpK2p6T29vVmxLbzFhVFp2TFFhTzZnYjRuVnRJREFFZG9ZaXA3a09TSHY4VjVjcjdNbHROZ1hIWDlOL3oxQVNPcXp6SUFJT3MwV2x1anAvU0xTOXJjMWUyTkxNSE1QeThLWUZaelFUU3hqNVU3bGtVUk52QVYxZElxQ1NJRWZWaTc1SCtaWldoWXp5S01Sc0ZGcjJCbmZNMXlXU2FxWEpxRWQySm0yQllUR0FFPQ=="
+    }
+  },
+  {
+    "timestamp": "2025-12-24 06:02:39.140827",
+    "type": "chat_response",
+    "message": "Right, `#[serde(untagged)]` rules out adding a `Default` variant since `Vec<T>` and `Default(Vec<T>)` would be indistinguishable.\n\nGiven that constraint, I'd go with **option 2 - the `is_default` flag**:\n\n```rust\npub struct MergedVec<T> {\n    pub value: Vec<T>,\n    pub strategy: MergedVecStrategy,\n    #[setting(default = false)]\n    pub is_default: bool,\n}\n```\n\nThen in merge logic:\n\n```rust\npub fn vec_with_strategy<T>(...) -> MergeResult<MergeableVec<T>> {\n    let prev_is_default = matches!(prev, MergeableVec::Merged(v) if v.is_default);\n    \n    // If prev is default and next has content, replace regardless of strategy\n    if prev_is_default && !next.is_empty() {\n        return Ok(Some(match next {\n            MergeableVec::Vec(v) => MergeableVec::Vec(v),\n            MergeableVec::Merged(mut v) => {\n                v.is_default = false;  // Clear the flag\n                MergeableVec::Merged(v)\n            }\n        }));\n    }\n    \n    // ... existing merge logic\n}\n```\n\nAnd update `default_instructions`:\n\n```rust\nfn default_instructions(_: &()) -> TransformResult<MergeableVec<PartialInstructionsConfig>> {\n    Ok(MergeableVec::Merged(MergedVec {\n        strategy: MergedVecStrategy::Replace,\n        is_default: true,  // <-- Add this\n        value: vec![...],\n    }))\n}\n```\n\nThis is explicit, works with untagged serialization, and clearly communicates that these are \"default values that disappear when merged with user values.\""
+  },
+  {
+    "timestamp": "2025-12-24 06:12:06.126064",
+    "type": "chat_request",
+    "content": "In this:\n\n```rust\n// If prev is default and next has content, replace regardless of strategy\n    if prev_is_default && !next.is_empty() {\n        return Ok(Some(match next {\n            MergeableVec::Vec(v) => MergeableVec::Vec(v),\n            MergeableVec::Merged(mut v) => {\n                v.is_default = false;  // Clear the flag\n                MergeableVec::Merged(v)\n            }\n        }));\n    }\n```\n\nAny reason why we would set `is_default` to `false` when merging? Wouldn't that\nbe confusing if the user meant an instruction to be set as default, even if it\ngets merged with another default?"
+  },
+  {
+    "timestamp": "2025-12-24 06:12:20.290308",
+    "type": "chat_response",
+    "reasoning": "Good point. Let me think about this:\n\nIf the user explicitly sets `is_default: true` on their instruction, they're saying \"this is a default value\". If we then merge it with another default, why would we flip it to false?\n\nThe logic should be:\n1. If `prev` is default and `next` is NOT default → replace with `next` (keep `next`'s `is_default` as-is)\n2. If `prev` is default and `next` is ALSO default → still replace, but keep the flag as `true`\n\nThe current code always sets `is_default = false`, which loses information.\n\nActually, thinking about it more carefully:\n- If user explicitly sets `is_default: true`, they want their value to be treated as a default\n- When merging two defaults, we should keep the \"default\" nature\n- We should only clear the flag if we're replacing a default with a NON-default\n\nSo the logic should check if `next` is also default:\n\n```rust\nif prev_is_default && !next.is_empty() {\n    return Ok(Some(match next {\n        MergeableVec::Vec(v) => MergeableVec::Vec(v),\n        MergeableVec::Merged(v) => {\n            // Keep is_default as-is from next\n            MergeableVec::Merged(v)\n        }\n    }));\n}\n```\n\nOr we could be more explicit and NOT clear the flag at all - just return `next` as-is. The flag on `next` already says what the user wants.\n\nYeah, the user is right - there's no reason to modify `is_default`. We should just return `next` as-is and let its `is_default` value be whatever the user set it to.",
+    "metadata": {
+      "anthropic_thinking_signature": "RXNzTUNrWUlDeGdDS2tBblE4R2ZIKzhhdW4rWU5ocFQxSHZjMnNOQ0trOTJmU3lKeitCdm5LZUhFZXFhY2I5aVJHSmZ4T25rUWdnVGxac2diRFR0QTlGeCt1Tm5IcDM1bklkbUVneVlvL25zTzZKSjlGcWpXUWdhRFBqaXlaMDAyeEtyVzQvUFJpSXdPdEFPU1Bleng0Z0JpQ0ZIcWxYRXN4bXJPRzBuSy8ybGNOVm1jd05DNGxtVVM3UUZwV2RuNUhDcFpaOStRRDJtS3JJTHdBd3M3SHZzcitHUDBuUUVWUmtVOTlxNFVIUUVZNDBlb0JyVkRteVMrM1VuamxxN2RpRGhwOFBhSlpHcldqa2NyRWR2MjdJNU90ZmgzSXRwSjI5M0ZZblRTVVVVeUxhVE8vaFY1OGpCbklDTWM1SElMWEtmeUdHNStvWVRZelBXL29MMGgrVFRkd0U3WUpTL05sU1lRRUx4SjhYSDgvVzJmamNBRHdFZ01FTVc2YzJycHFNbHJ1Yk0vc24wU0dObko5VnRwL2pRVGtCYzJHdTVHNElEUHJMVC9oRWRNRkhGNUVDQXEraEMzd2NsTXNlQ0lsc21ORUQyZUh6K3R2WlFBelRMemp2enJoS0dDZWxzWGt6SGlENmpXc2pWbWdOOFZxWENCanVXb091ZHhmbWJ2MDZzeXFQTkE0akxQc2l4SmUzMU9tcllGOXRxS1dPNTFTMmUvZU5PcGZUQXZSNDU0bmRhTm5ZVHUxMS9Wb2N6cGJNdjBGRS9LNFo5V0xHSEhydlJYTFJOT1l6WFcvUzA2WkhySC93THB0NWtnb1dXNVFCRXc4dnZsREZaODNFT3cyU2gvLzcyRXJFakpFTUFBWCszZHJ3R3ZUenFlWVJUZ1cwTlJidVB4R3pCNHRBbVk4aUs5MjF3eXlNYzF3RlpyZ0ZaSWRZejhTUjFweHJ1ek5acW12c2hoVGVkc0l5TC9sYUFldFc1S3VWQ2x3SnJQNUM1UkFRK2t6dkhKWnVwMC9ZQzNvcVIwUU54UW9vOTArWGxxSUIwQjZzeExLUUdCUjhoZkMraTkwYklTTnhnU3cyQ3VNS3ByS25HNjhseXZXTWxPMXhyeVBaNHRneVhHaTR1UkRuZ1h0U084YUJPbWloeFNjeEwydXljcFFrVVg5MEFQSW90dUVzN24rUncxekZlRWt2UnRvbURDWUQyOGVyWldGTFFHRWdxWGlOcDI2MXZXcXJSM1Q3eFJpaWFTc2NZTmJNM0tjL2l6OFdTcXJuZXNhdWYzV0xqWUFBRVhLeFZNT1RiVlhod2I0SkNSMnd5WlVIbk1Vdnk0VVdGN21tVjBvb1FsL1pndCtUU3pGVk40b1FMWDNOaUhuUi93L1Q1MXFCMlNrcGZHWUJnUll4TEhhT0dqb1Z2SDFScUpjc0NHNllydmR2N2Iyd3I4RTBrWVdKc2Y0aVNrQ3A5WHpKbDhVamtDSDFSN09lVE5QUDRCOEFHUnh4UzZ3N1Q4ZUVuQzlCdFhIRmwyYkt6MGhHb3Q4QnlzMWtJd1lnTnlxcFpWVUV0NGd6aUh6ejVDWTJEazV1bHhCbFY5NU4zbGdmR1V6ajlLcTM0VDlOUmZNbGNQME51ajhnUzY4SGNzWHQwcHR0cytGQ3VMRDgrVWpUc3FkRVZISUJMenBEL0VrQnBjbWZmQXdaMUFQemI1ZzlFWFhvbjlYWDh6aWlnaTZueGFZMkpyYW5LdTlVaDlRYXQwWHljQ2Y1MVRUa1huTWhhd25NZEVFcm1iY3FGMXBCVTZnenFaNXdSVGM2S3dTUDM2RW9kamhHUXdCejBrS3NPY29BQWQ5OTY2V2xoTWhuRmtqTURZVUxndXVXd0FUSThoQXF1eFlkeitKOThLOE0vREFkdmRVcXFhRmoyaGFHTllQMlR1R3E0VU91bXNiZUduNXhmbW1rbVViWmxaVEJLVXU5bHFDaUVzdU93c1ZCazRMS1Z4dzdxV1YrZFJFUmJMT1VrcG9FUytUb0l1MW5FRW1WSEFUaXlxMFFoOW5vaEQ4NHVlZ1lEQWZFUmYrWUlqbHo0RUhYSU5CMTVDb0ZWQ0ovd2tuUW5JbU9jVVY2UkJ2aElaM1FrSVlHak55b3RuZDR3ZVZ2NFFMZFEyMzBYYzFHbllTYjlnSFBwOHJDbzFYZ2N3M0M5bEQyaHNDRjFobU1zdGVBemRiZGJsN2xlaFNXVDdYb1h3UCtMRHlaaU9QWTUyWGJwVU1JMEY1TjB5OW8wNEI2Sks5SXpiOGJtdU9sbWJ0eFJxREZDSFhEb0MzOTY1Vk1ZYnN5aDU2czRDbEpNTTNrcklOdm1vT2E2ZW5KL2RBNU1wSVZSc0hLQUZCSDhqTzBmRExVTTJmVmY3ZVhFQmhkU1ZibDh2aXVESGJjTWpkenlJK3N3c3RhTjkzSk11KytNazJKVER2V2l4RHNQRzdPWnhVdWJzMnErS0t5UEppTjlxOTVscHZBczRjS1hhdXdDaTk0QU5TR1h6VlhaUmFodEc5blZjVk9XeWNTc1dKTXZDQTdodWhTTG9Ea243R3NvdGlmODhwa3ZWYkFwQ0VwajZuTXE4SHFNQWJ6Mzljb2RIVFQ4RTZSQmtUZkdMVVo2VTNkYTNMdHVVakRuTi8wOTBwOXNCSHZUSm1nT3VuUkpMblNYNG9uS3ZYWXY5ZmUyOFBlU3BhRXV6K3kwRU5TbzBlTHdaOUM4QmpCSFVyYXA5SWZURGxDVXkwL3Y4LzhuUXl1MjYwMnA1cjk4OE42ektYZDJqdTh1Vmw0MnhLRFlJVDVkRDM1eEMwTW5RQVE4R211ZGRIbU5HSmdvYVE3bG0zTlI0QXZVeUxJZ0dBRT0="
+    }
+  },
+  {
+    "timestamp": "2025-12-24 06:12:20.291812",
+    "type": "chat_response",
+    "message": "You're absolutely right. There's no reason to modify `is_default` - we should preserve whatever value `next` has.\n\nThe logic should just be:\n\n```rust\n// If prev is default and next has content, replace regardless of strategy\nif prev_is_default && !next.is_empty() {\n    return Ok(Some(next)); // Just return next as-is\n}\n```\n\nIf the user sets `is_default: true` on their instruction, that's intentional - they want it to be treated as a default. If they merge two defaults together, the resulting value should still be a default (and replaceable by future non-default values).\n\nOnly when merging a default with a non-default should the \"default\" nature disappear, which happens naturally by just returning `next`."
+  }
+]
