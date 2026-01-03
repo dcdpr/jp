@@ -2054,16 +2054,10 @@ name = "jp_attachment_http_content"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "crossbeam-channel",
- "glob",
- "ignore",
- "indexmap",
  "jp_attachment",
  "jp_mcp",
  "reqwest",
  "serde",
- "tempfile",
- "tokio",
  "tracing",
  "url",
 ]
@@ -4732,6 +4726,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar",
+ "strip-ansi-escapes",
  "tempfile",
  "test-log",
  "time",

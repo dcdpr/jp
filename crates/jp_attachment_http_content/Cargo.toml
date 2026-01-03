@@ -17,18 +17,10 @@ jp_attachment = { workspace = true }
 jp_mcp = { workspace = true }
 
 async-trait = { workspace = true }
-crossbeam-channel = { workspace = true, features = ["std"] }
-glob = { workspace = true }
-ignore = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
-
-[dev-dependencies]
-indexmap = { workspace = true }
-tempfile = { workspace = true }
 
 [lints]
 workspace = true
