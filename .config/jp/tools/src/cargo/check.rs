@@ -32,7 +32,11 @@ pub(crate) async fn cargo_check(ctx: &Context, package: Option<String>) -> Resul
     }
 
     let content = String::from_utf8_lossy(&result.stderr);
+
+    // Strip ANSI escape codes
+    let content = strip_ansi_escapes::strip_str(&content);
     let content = content.trim();
+
     if content.is_empty() {
         Ok("Check succeeded. No warnings or errors found.".to_owned())
     } else {

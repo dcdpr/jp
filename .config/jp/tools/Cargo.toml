@@ -45,6 +45,7 @@ reqwest = { workspace = true, features = [
 serde = { workspace = true, features = ["std", "derive", "alloc"] }
 serde_json = { workspace = true, features = ["std", "preserve_order", "alloc"] }
 similar = { workspace = true, features = ["text", "unicode", "inline"] }
+strip-ansi-escapes = { workspace = true }
 time = { workspace = true, features = ["serde-human-readable"] }
 tokio = { workspace = true, features = ["full"] }
 url = { workspace = true, features = ["serde", "std"] }
