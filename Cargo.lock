@@ -2050,6 +2050,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp_attachment_http_content"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "jp_attachment",
+ "jp_mcp",
+ "reqwest",
+ "serde",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "jp_attachment_mcp_resources"
 version = "0.1.0"
 dependencies = [
@@ -2084,6 +2097,7 @@ dependencies = [
  "jp_attachment_bear_note",
  "jp_attachment_cmd_output",
  "jp_attachment_file_content",
+ "jp_attachment_http_content",
  "jp_attachment_mcp_resources",
  "jp_config",
  "jp_conversation",
