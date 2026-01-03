@@ -4726,7 +4726,6 @@ dependencies = [
  "serde",
  "serde_json",
  "similar",
- "strip-ansi-escapes",
  "tempfile",
  "test-log",
  "time",
