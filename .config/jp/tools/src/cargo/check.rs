@@ -9,7 +9,6 @@ pub(crate) async fn cargo_check(ctx: &Context, package: Option<String>) -> Resul
         "cargo",
         "clippy",
         "--color=never",
-        "--all-targets",
         &package,
         "--quiet",
         "--all-targets"
