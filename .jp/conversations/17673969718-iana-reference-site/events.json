@@ -1,0 +1,1047 @@
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2026-01-02 23:36:11.839424",
+    "delta": {
+      "inherit": true,
+      "config_load_paths": [
+        ".jp/config",
+        ".jp/config/personas"
+      ],
+      "extends": [
+        "config.d/**/*"
+      ],
+      "assistant": {
+        "system_prompt": {
+          "value": "You are Jean-Pierre, the AI Pair Programmer, working on your own creation. The project you are working on is called JP (short for Jean-Pierre), a Rust-based command-line toolkit to support humans in their daily work as a software programmer. Built to integrate into their existing workflow, providing a flexible and powerful pair-programming experience with LLMs. ",
+          "strategy": "replace",
+          "separator": "none",
+          "isDefault": false
+        },
+        "instructions": [
+          {
+            "title": "How to respond to the user",
+            "position": 0,
+            "items": [
+              "Be concise",
+              "Use simple sentences. But feel free to use technical jargon.",
+              "Do NOT overexplain basic concepts. Assume the user is technically proficient.",
+              "AVOID flattering, corporate-ish or marketing language. Maintain a neutral viewpoint.",
+              "AVOID vague and / or generic claims which may seem correct but are not substantiated by the context."
+            ]
+          },
+          {
+            "title": "Core Tasks",
+            "description": "These are the core tasks you must perform.",
+            "position": 0,
+            "items": [
+              "Answering general programming questions.",
+              "Explaining how the code in a question works.",
+              "Reviewing the code in a question.",
+              "Generating unit tests for the provided code.",
+              "Proposing fixes for problems in the provided code.",
+              "Scaffolding code for a new project.",
+              "Finding relevant code to the user's query.",
+              "Proposing fixes for test failures.",
+              "Running tools."
+            ]
+          },
+          {
+            "title": "Guidelines",
+            "description": "You must follow these guidelines.",
+            "position": 0,
+            "items": [
+              "Follow the user's requirements carefully and to the letter.",
+              "Keep your answers short and impersonal, especially if the user responds with context outside of your tasks.",
+              "Minimize other prose.",
+              "Use Markdown formatting in your answers.",
+              "Limit non-code text width to 120 characters.",
+              "Include the programming language name at the start of the Markdown code blocks.",
+              "Avoid including line numbers in code blocks.",
+              "Avoid wrapping the whole response in triple backticks.",
+              "Only return code that's relevant to the task at hand. You may not need to return all of the code that the user has shared.",
+              "Use actual line breaks instead of '\\\n' in your response to begin new lines.",
+              "Use '\\\n' only when you want a literal backslash followed by a character 'n'.",
+              "All non-code responses must be in the language of the user's query."
+            ]
+          }
+        ],
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "google",
+            "name": "gemini-3-flash-preview"
+          },
+          "parameters": {
+            "stop_words": [],
+            "other": {}
+          }
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": true,
+            "model": {
+              "id": {
+                "provider": "anthropic",
+                "name": "claude-3-5-haiku-latest"
+              },
+              "parameters": {
+                "reasoning": "off",
+                "stop_words": [],
+                "other": {}
+              }
+            }
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "osc8",
+              "parameters": "json"
+            }
+          },
+          "crate_readme": {
+            "source": "mcp.bookworm",
+            "enable": false
+          },
+          "crate_resource": {
+            "source": "mcp.bookworm",
+            "enable": false
+          },
+          "crate_versions": {
+            "source": "mcp.bookworm",
+            "enable": false
+          },
+          "crate_search_items": {
+            "source": "mcp.bookworm",
+            "enable": false
+          },
+          "crates_search": {
+            "source": "mcp.bookworm",
+            "enable": false
+          },
+          "web_search": {
+            "source": "mcp.kagi.kagi_search_fetch",
+            "enable": false
+          },
+          "web_summarize_content": {
+            "source": "mcp.kagi.kagi_summarizer",
+            "enable": false
+          },
+          "cargo_check": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Run `cargo check` for the given package, validating if the code compiles.",
+            "parameters": {
+              "package": {
+                "type": "string",
+                "required": false,
+                "description": "Package to run check for, if unspecified, all workspace packages will be checked.",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "cargo_expand": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Expand the auto-generated Rust code for the given item.",
+            "parameters": {
+              "package": {
+                "type": "string",
+                "required": false,
+                "description": "Package to find the item in, required if working with a workspace.",
+                "enum": []
+              },
+              "item": {
+                "type": "string",
+                "required": true,
+                "description": "Local path to module or other named item to expand, e.g. os::unix::ffi",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "cargo_test": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Execute all unit and integration tests and build examples of the project.",
+            "parameters": {
+              "package": {
+                "type": "string",
+                "required": false,
+                "description": "Package to run tests for, if unspecified, all workspace packages will be tested.",
+                "enum": []
+              },
+              "testname": {
+                "type": "string",
+                "required": false,
+                "description": "If specified, only run tests containing this string in their names.",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "fs_create_file": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Create a new file in the project's local filesystem.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to create. The path must be relative to the project's root.\n",
+                "enum": []
+              },
+              "content": {
+                "type": "string",
+                "required": false,
+                "description": "The content of the file to create. If not specified, the file will be empty.\n",
+                "enum": []
+              }
+            }
+          },
+          "fs_delete_file": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Delete a file in the project's local filesystem.\n\nThe file must exist, be a regular file, and have no uncommitted changes.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to delete. The path must be relative to the project's root.\n",
+                "enum": []
+              }
+            }
+          },
+          "fs_grep_files": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Grep files in the project's local filesystem.\n\nIf misused, this tool can return *A LOT* of matches, making it difficult to\nparse the results. It is recommended to use search patterns that are as specific\nas possible to the content you are looking for.\n\nIf the number of results exceeds 100, the `context` option is disabled, and 50\nmatches are returned without context. You can re-run the tool with a more\nspecific pattern or limited to specific paths to narrow down the results with\ncontext.\n",
+            "parameters": {
+              "pattern": {
+                "type": "string",
+                "required": true,
+                "description": "Regular expression to filter the results by.\n",
+                "enum": []
+              },
+              "context": {
+                "type": "integer",
+                "default": 0,
+                "required": false,
+                "description": "Number of lines of context to include before and after the matching lines.\n",
+                "enum": []
+              },
+              "paths": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of files or directories to search.\n\nIf unspecified, all files in the project will be returned.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "fs_grep_user_docs": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Grep the project's user documentation.",
+            "parameters": {
+              "pattern": {
+                "type": "string",
+                "required": true,
+                "description": "Regular expression to filter the results by.\n",
+                "enum": []
+              },
+              "return_entire_file": {
+                "type": "boolean",
+                "default": false,
+                "required": false,
+                "description": "Whether to return the entire file contents.\n\nIf enabled, the tool will return the entire file contents of any files matching\nthe pattern. If disabled (the default), only the matching lines and 5 contextual\nlines above and below the matching lines will be returned.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "fs_list_files": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "List files in the project's local filesystem.",
+            "parameters": {
+              "prefixes": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of path prefixes to filter the results by.\n\nIf unspecified, all files in the project will be returned.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "extensions": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of file extensions to filter the results by.\n\nIf unspecified, all extensions will be returned.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "fs_modify_file": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Modify one or more files in the project's local filesystem.\n\nThe files must exist, be a regular file, and have no uncommitted changes.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to delete. The path must be relative to the project's root.\n\nThe path may contain glob patterns, e.g. `src/**/*.rs`.\n",
+                "enum": []
+              },
+              "string_to_replace": {
+                "type": "string",
+                "required": true,
+                "description": "The string to replace in the file. The string may span multiple lines.\n",
+                "enum": []
+              },
+              "new_string": {
+                "type": "string",
+                "required": true,
+                "description": "new string to replace the `string_to_replace` with. The string may span multiple lines. If empty, the `string_to_replace` will be deleted.\n",
+                "enum": []
+              },
+              "replace_using_regex": {
+                "type": "boolean",
+                "default": false,
+                "required": true,
+                "description": "Whether to treat `string_to_replace` as a regular expression.\n\nIf `true`, `string_to_replace` is treated as a regular expression and the `new_string` is treated as a replacement string, which may contain capture groups.\n\nIf `false`, `string_to_replace` is treated as a literal string and the `new_string` is treated as a literal string.\n\nWhen `true`, replaces all non-overlapping matches in text with the replacement provided.\n\nAll instances of `$name` in the replacement string is replaced with the corresponding capture group name.\n\n`name` may be an integer corresponding to the index of the capture group (counted by order of opening parenthesis where `0` is the entire match) or it can be a name (consisting of letters, digits or underscores) corresponding to a named capture group (e.g. `(?<name>exp)`).\n\nIf `name` isn’t a valid capture group (whether the name doesn’t exist or isn’t a valid index), then it is replaced with the empty string.\n\nThe longest possible name is used. e.g., `$1a` looks up the capture group named `1a` and not the capture group at index `1`. To exert more precise control over the name, use braces, e.g., `${1}a`.\n\nTo write a literal `$` use `$$`.\n",
+                "enum": []
+              }
+            },
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full",
+              "parameters": "just serve-tools {{context}} {{tool}}"
+            }
+          },
+          "fs_read_file": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Read the contents of a file in the project's local filesystem.\n\nYou can use `fs_grep_files` to search for specific patterns in the file\ncontents, before reading the entire contents of a specific file using this tool.\n",
+            "parameters": {
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "The path to the file to read.\n",
+                "enum": []
+              },
+              "start_line": {
+                "type": "integer",
+                "required": false,
+                "description": "The line number to start reading from.\n",
+                "enum": []
+              },
+              "end_line": {
+                "type": "integer",
+                "required": false,
+                "description": "The line number to stop reading at.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "git_commit": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Commit the staged changes to the local git repository using the provided\nmessage.\n",
+            "parameters": {
+              "message": {
+                "type": "string",
+                "required": true,
+                "description": "The commit message to use. Can be multiline.\n",
+                "enum": []
+              }
+            },
+            "run": "ask",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "git_diff": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "List the differences between the current state of the git repository and the\nlast committed state.\n",
+            "parameters": {
+              "paths": {
+                "type": "array",
+                "required": true,
+                "description": "The paths to diff. Can be a single path or a list of paths.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "cached": {
+                "type": "boolean",
+                "required": false,
+                "description": "If `true`, the diff will be computed against the cached state of the git\nrepository. If `false`, the diff will be computed against the last committed\nstate of the git repository.\n\nIf unspecified, it will default to `false`.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "git_stage": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Stage a file or a specific patch to the index of the git repository.\n\nWhen providing one or more paths, all changes of those files will be staged. If\nproviding one or more patches, only the changes of those patches will be staged,\nallowing you to stage individual \"hunks\" of a changed file.\n",
+            "parameters": {
+              "paths": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of paths to stage. Can be a single path or a list of paths.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "patches": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of patches to apply. Can be a single patch or a list of patches.\n\nThis is useful if you want to stage individual \"hunks\" of a changed file.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "git_unstage": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Unstage (restore/reset) one or more staged files, undoing the effects of `git_stage`.\n",
+            "parameters": {
+              "paths": {
+                "type": "array",
+                "required": true,
+                "description": "List of paths to unstage. Can be a single path or a list of paths.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "full",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "github_code_search": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Find code matching a query in any GitHub repository.\n\nThis tool returns a list of matched files, to fetch the actual code of a\nfile, use the `github_read_file` tool.\n\nNOTE: Code search always searches the repository's default branch (usually\n`main`), it is not possible to search in a specific branch or tag.\n",
+            "parameters": {
+              "repository": {
+                "type": "string",
+                "required": false,
+                "description": "Repository to search for code.\n\nIf unspecified, it defaults to the current project's GitHub repository.\n",
+                "enum": []
+              },
+              "query": {
+                "type": "string",
+                "required": true,
+                "description": "Search query to find code.\n\nGitHub code-search supports:\n\n- Bare terms (`http-push`) and quoted phrases (`\"sparse index\"`)\n- Boolean ops: implicit AND, `OR`, `NOT`, parentheses\n- Qualifiers: `language:rust`, `path:/src/**/*.rs`, `symbol:MyFunc`,\n  `in:file`, `in:path`, `filename:Cargo.toml`, `extension:rs`,\n  `size:>10k`\n- Regex – wrap in `/.../` (`/^impl.*Display/`); escape quotes/backslashes (`\\\"`, `\\\\`)\n- You must include at least one term when using qualifiers (e.g. `helper language:go`)\n- You can't use the following wildcard characters as part of your\n  search query: . , : ; / \\ ` ' \" = * ! ? # $ & + ^ | ~ < > ( ) { } [\n  ] @. The search will simply ignore these symbols.\n\nExample: `json in:file filename:package.json NOT path:tests/\n",
+                "enum": []
+              }
+            }
+          },
+          "github_create_issue_bug": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Track a new bug in the project's GitHub repository.\n\n- MOST IMPORTANTLY: Avoid fluff, and focus on the issue at hand. Do not add more\n  text than is necessary to explain the issue.\n\n- Use markdown to format text.\n\n- Explain the motivation for creating the issue. You can include a comparison of\n  the current behavior with the expected behavior in order to illustrate the\n  impact of the issue.\n\n- Use the body to explain what and why vs. how.\n\n- Wrap the body at 72 characters.\n\n- Use backticks (``) to format code or crate references.\n\n- Add optional references to related issues or PRs in the body.\n\n- Link to relevant code, documentation, or other resources in the body, using\n  proper Github links.\n\n- Use a narrative style to describe the issue in one or more paragraphs, avoid\n  using lists, unless they are necessary to convey details about the issue.\n",
+            "parameters": {
+              "title": {
+                "type": "string",
+                "required": true,
+                "description": "The title of the bug to track.\n\nShould be a single line, not include any markdown except for backticks (`) where\napplicable. Keep the title short and descriptive.\n",
+                "enum": []
+              },
+              "description": {
+                "type": "string",
+                "required": true,
+                "description": "A clear and concise description of what the issue is about.",
+                "enum": []
+              },
+              "expected_behavior": {
+                "type": "string",
+                "required": true,
+                "description": "A description of the expected behavior.",
+                "enum": []
+              },
+              "actual_behavior": {
+                "type": "string",
+                "required": true,
+                "description": "A description of the actual behavior.",
+                "enum": []
+              },
+              "complexity": {
+                "type": "string",
+                "required": true,
+                "description": "Complexity of the issue.\n\nThis is used to estimate the effort required to fix the issue.\n",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "reproduce": {
+                "type": "string",
+                "required": false,
+                "description": "Optional notes on how to reproduce the issue.\n\nThis is only needed if the combination of `description`, `expected_behavior`,\nand `actual_behavior` is not sufficient to explain the issue.\n",
+                "enum": []
+              },
+              "proposed_solution": {
+                "type": "string",
+                "required": false,
+                "description": "Optional proposed solution to the issue.\n\nThis should be a high-level, SHORT description of the solution you would\npropose. It should be brief, not go into too much detail, and IF code is added,\nit should be limited in size, and optionally be pseudo-code to avoid making the\nsolution obsolete if the code is later changed.\n",
+                "enum": []
+              },
+              "tasks": {
+                "type": "array",
+                "required": false,
+                "description": "Optional tasks in the order they need to be done in to resolve the bug. Include\nlinks to specific lines of code where the task should happen at.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "resource_links": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of resources relevant to the issue.\n\nThe links should only contain the path to the resource, not the full URL.\n\nThe following resource links are supported:\n\n- issue: issues/{issue number}\n- pull: pull/{pull request number}\n- commit: commit/{commit hash}\n- file: blob/{commit hash}/{file path}\n\n  relevant files for this issue. This will help people navigate the project and\n  offer some clues of where to start.\n\n- lines: blob/{commit hash}/{file path}#L{start line}-L{end line}\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "labels": {
+                "type": "array",
+                "required": false,
+                "description": "Additional labels to add to the issue.\n\n- The issue will always be assigned the `bug` label.\n- If unspecified, no additional labels will be added.\n- Only labels that exist on the project can be added, non-existing labels will\n  result in an error with a list of valid labels, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "assignees": {
+                "type": "array",
+                "required": false,
+                "description": "Assignees to add to the issue.\n\n- You should only add assignees if explicitly requested by the user.\n- If unspecified, no assignees will be added.\n- Only collaborators on the project can be added, non-existing assignees will\n  result in an error with a list of valid assignees, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "github_create_issue_enhancement": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "File a new enhancement request in the project's GitHub repository.\n\n- MOST IMPORTANTLY: Avoid fluff, and focus on the enhancement at hand. Do not\n  add more text than is necessary to explain the enhancement.\n\n- Use markdown to format text.\n\n- Explain the motivation for creating the issue. You can include a comparison of\n  the current behavior with the expected behavior in order to illustrate the\n  impact of the request.\n\n- Use the body to explain what and why vs. how.\n\n- Wrap the body at 72 characters.\n\n- Use backticks (``) to format code or crate references.\n\n- Add optional references to related issues or PRs in the body.\n\n- Link to relevant code, documentation, or other resources in the body, using\n  proper Github links.\n\n- Use a narrative style to describe the issue in one or more paragraphs, avoid\n  using lists, unless they are necessary to convey details about the issue.\n",
+            "parameters": {
+              "title": {
+                "type": "string",
+                "required": true,
+                "description": "The title of the enhancement to track.\n\nShould be a single line, not include any markdown except for backticks (`) where\napplicable. Keep the title short and descriptive.\n",
+                "enum": []
+              },
+              "description": {
+                "type": "string",
+                "required": true,
+                "description": "A clear and concise description of what the enhancement request is about.\n",
+                "enum": []
+              },
+              "context": {
+                "type": "string",
+                "required": true,
+                "description": "What are you trying to do and how would you want to do it differently? Is it\nsomething you currently you cannot do? Is this related to an issue/problem?\n",
+                "enum": []
+              },
+              "complexity": {
+                "type": "string",
+                "required": true,
+                "description": "Complexity of the enhancement request.\n\nThis is used to estimate the effort required to implement the enhancement.\n",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "alternatives": {
+                "type": "string",
+                "required": false,
+                "description": "Can you achieve the same result doing it in an alternative way? Is the\nalternative considerable?\n",
+                "enum": []
+              },
+              "proposed_implementation": {
+                "type": "string",
+                "required": false,
+                "description": "Optional proposed implementation for the enhancement.\n\nThis should be a high-level, SHORT description of the implementation you would\npropose. It should be brief, not go into too much detail, and IF code is added,\nit should be limited in size, and optionally be pseudo-code to avoid making the\nimplementation obsolete if the code is later changed.\n",
+                "enum": []
+              },
+              "tasks": {
+                "type": "array",
+                "required": false,
+                "description": "Optional tasks in the order they need to be done in to implement the\nenhancement. Include links to specific lines of code where the task should\nhappen at.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "resource_links": {
+                "type": "array",
+                "required": false,
+                "description": "Optional list of resources relevant to the issue.\n\nThe links should only contain the path to the resource, not the full URL.\n\nThe following resource links are supported:\n\n- issue: issues/{issue number}\n\n  These could be issues related to the current enhancement request, either bugs\n  or other enhancement requests. This can also include issues with similar\n  feature requests.\n\n- pull: pull/{pull request number}\n\n  Any pull requests related to the current enhancement request.\n\n- commit: commit/{commit hash}\n- file: blob/{commit hash}/{file path}\n\n  relevant files for this issue. This will help people navigate the project and\n  offer some clues of where to start.\n\n- lines: blob/{commit hash}/{file path}#L{start line}-L{end line}\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "labels": {
+                "type": "array",
+                "required": false,
+                "description": "Additional labels to add to the issue.\n\n- The issue will always be assigned the `enhancement` label.\n- If unspecified, no additional labels will be added.\n- Only labels that exist on the project can be added, non-existing labels will\n  result in an error with a list of valid labels, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "assignees": {
+                "type": "array",
+                "required": false,
+                "description": "Assignees to add to the issue.\n\n- You should only add assignees if explicitly requested by the user.\n- If unspecified, no assignees will be added.\n- Only collaborators on the project can be added, non-existing assignees will\n  result in an error with a list of valid assignees, so you can retry again.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "github_issues": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Find one or more issues in the project's GitHub repository.",
+            "parameters": {
+              "number": {
+                "type": "integer",
+                "required": false,
+                "description": "Issue number to get information about.\n\nIf unspecified, a list of all issues will be returned, without the\nissue contents. You can re-run the tool with the correct issue\nnumber to get more details about an issue.\n",
+                "enum": []
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "github_list_files": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "List all files in a GitHub repository. Can be combined with `github_read_file`\nto fetch the contents of a file.\n"
+          },
+          "github_read_file": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Fetch the contents of one or more files\n",
+            "parameters": {
+              "repository": {
+                "type": "string",
+                "required": false,
+                "description": "Repository to search for code.\n\nIf unspecified, it defaults to the current project's GitHub repository.\n",
+                "enum": []
+              },
+              "ref": {
+                "type": "string",
+                "required": false,
+                "description": "The name of the commit/branch/tag.\n\nIf unspecified, it defaults to the repository’s default branch (usually `main`)\n",
+                "enum": []
+              },
+              "path": {
+                "type": "string",
+                "required": true,
+                "description": "File path to get contents of.\n",
+                "enum": []
+              }
+            }
+          },
+          "github_pulls": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Find one or more pull requests in the project's GitHub repository.",
+            "parameters": {
+              "number": {
+                "type": "integer",
+                "required": false,
+                "description": "Pull request number to get information about.\n\nIf unspecified, a list of all pull requests will be returned, without the\npull request contents. You can re-run the tool with the correct pull request\nnumber to get more details about a pull request.\n",
+                "enum": []
+              },
+              "state": {
+                "type": "string",
+                "required": false,
+                "description": "Filter pull requests by their state.\n\nIf unspecified, all pull requests will be returned.\n",
+                "enum": [
+                  "open",
+                  "closed"
+                ]
+              },
+              "file_diffs": {
+                "type": "array",
+                "required": false,
+                "description": "List of changed file paths to get the diff for.\n\nIf unspecified, only the list of changed files will be returned, but not the\nactual diff. You can re-run the tool with the correct file path to get the\ndiff.\n",
+                "enum": [],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "run": "unattended",
+            "style": {
+              "inline_results": "off",
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          },
+          "web_fetch": {
+            "source": "local",
+            "enable": false,
+            "command": "just serve-tools {{context}} {{tool}}",
+            "description": "Fetch the contents of a web page over HTTP(S).\n",
+            "parameters": {
+              "url": {
+                "type": "string",
+                "required": true,
+                "description": "The URL of the web page to fetch.\n",
+                "enum": []
+              }
+            }
+          }
+        },
+        "attachments": [
+          "https://example.com/"
+        ]
+      },
+      "style": {
+        "code": {
+          "theme": "Monokai Extended",
+          "color": true,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "tool_call": {
+          "show": true
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": [
+          "JP_EDITOR",
+          "VISUAL",
+          "EDITOR"
+        ]
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "aliases": {
+            "anthropic": {
+              "provider": "anthropic",
+              "name": "claude-sonnet-4-5"
+            },
+            "claude": {
+              "provider": "anthropic",
+              "name": "claude-sonnet-4-5"
+            },
+            "sonnet": {
+              "provider": "anthropic",
+              "name": "claude-sonnet-4-5"
+            },
+            "opus": {
+              "provider": "anthropic",
+              "name": "claude-opus-4-5"
+            },
+            "haiku": {
+              "provider": "anthropic",
+              "name": "claude-haiku-4-5"
+            },
+            "openai": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "chatgpt": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "gpt": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "gpt5": {
+              "provider": "openai",
+              "name": "gpt-5.2"
+            },
+            "gpt5-mini": {
+              "provider": "openai",
+              "name": "gpt-5-mini"
+            },
+            "gpt-mini": {
+              "provider": "openai",
+              "name": "gpt-5-mini"
+            },
+            "gpt5-nano": {
+              "provider": "openai",
+              "name": "gpt-5-nano"
+            },
+            "gpt-nano": {
+              "provider": "openai",
+              "name": "gpt-5-nano"
+            },
+            "o3-research": {
+              "provider": "openai",
+              "name": "o3-deep-research"
+            },
+            "o4-mini-research": {
+              "provider": "openai",
+              "name": "o4-mini-deep-research"
+            },
+            "codex": {
+              "provider": "openai",
+              "name": "gpt-5-codex"
+            },
+            "gpt-5-codex": {
+              "provider": "openai",
+              "name": "gpt-5-codex"
+            },
+            "codex-mini": {
+              "provider": "openai",
+              "name": "codex-mini-latest"
+            },
+            "google": {
+              "provider": "google",
+              "name": "gemini-3-pro-preview"
+            },
+            "gemini": {
+              "provider": "google",
+              "name": "gemini-3-pro-preview"
+            },
+            "gemini-pro": {
+              "provider": "google",
+              "name": "gemini-3-pro-preview"
+            },
+            "gemini-flash": {
+              "provider": "google",
+              "name": "gemini-3-flash-preview"
+            },
+            "gemini-lite": {
+              "provider": "google",
+              "name": "gemini-2.5-flash-lite"
+            }
+          },
+          "anthropic": {
+            "api_key_env": "ANTHROPIC_API_KEY",
+            "base_url": "https://api.anthropic.com",
+            "chain_on_max_tokens": true,
+            "beta_headers": [
+              "context-1m-2025-08-07",
+              "interleaved-thinking-2025-05-14",
+              "context-management-2025-06-27",
+              "structured-outputs-2025-11-13"
+            ]
+          },
+          "deepseek": {
+            "api_key_env": "DEEPSEEK_API_KEY"
+          },
+          "google": {
+            "api_key_env": "GEMINI_API_KEY",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta"
+          },
+          "llamacpp": {
+            "base_url": "http://127.0.0.1:8080"
+          },
+          "ollama": {
+            "base_url": "http://localhost:11434"
+          },
+          "openai": {
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://api.openai.com",
+            "base_url_env": "OPENAI_BASE_URL"
+          },
+          "openrouter": {
+            "api_key_env": "OPENROUTER_API_KEY",
+            "app_name": "JP",
+            "base_url": "https://openrouter.ai"
+          }
+        },
+        "mcp": {
+          "github": {
+            "type": "stdio",
+            "command": "github-mcp-server",
+            "arguments": [
+              "stdio",
+              "--read-only",
+              "--toolsets",
+              "issues,pull_requests,repos"
+            ],
+            "variables": [
+              "GITHUB_PERSONAL_ACCESS_TOKEN"
+            ],
+            "checksum": {
+              "algorithm": "sha256",
+              "value": "7400a3f4b8ba04bef50b83687338560cb5a3769c83c52985c8365f8d8af17510"
+            }
+          },
+          "kagi": {
+            "type": "stdio",
+            "command": "/Users/jean/.cargo/bin/uvx",
+            "arguments": [
+              "kagimcp"
+            ],
+            "variables": [
+              "KAGI_API_KEY"
+            ],
+            "checksum": {
+              "algorithm": "sha256",
+              "value": "8ff70dc528c434469b43a1b05f752f46d8abe41c010edcbff6e5f3cc3131f2f3"
+            }
+          },
+          "bookworm": {
+            "type": "stdio",
+            "command": "/Users/jean/Projects/Personal/modelcontextprotocol/bookworm/target/release/wrm-mcp",
+            "arguments": [],
+            "variables": [
+              "WRM_LOG",
+              "WRM_LOG_FILE"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2026-01-02 23:36:11.839699",
+    "type": "chat_request",
+    "content": "tell me what this website is about?"
+  },
+  {
+    "timestamp": "2026-01-02 23:36:15.043994",
+    "type": "chat_response",
+    "reasoning": "**Determining Website Purpose**\n\nI'm currently analyzing the HTML source code of the example website. My primary goal is to succinctly determine its purpose for the user. I'm focusing on key elements like the title, meta descriptions, and any prominent text content. I'll need to filter for clues about the site's main function.\n\n\n**Identifying Domain's Role**\n\nMy latest analysis of the website's content confirms its designated role as an example domain. The `<h1>` and `<p>` tags clearly define it as such. I've successfully extracted the core purpose: to provide a safe space for documentation examples. The reference to IANA further solidifies this function. The content's directness and simplicity ensure clarity, keeping technical jargon to a minimum and staying neutral in tone, conforming to guidelines.",
+    "metadata": {
+      "google_thought_signature": "RXFvS0NxY0tBWExJMm53SFZHTzlOREtKS1hZbnZZVnBCMWl0R2wzMzV6aWp0bHY1NXBUR2NVbmd1aWtrUUR6YkNONE80Q2QxV3hWN0NPdkNucjF1aFVIaGIwS3RPeGNHd2ZqVDUyYk05Z3EwUlhYQTVpcVVKU0RzK0p1WDNXRlNva0srb2dLNTZNQTB2VGZRY3lDWDA5UzllVUxhd09hSFFvYWs0bjZ0ODlDZHFMaC81T0tIL01pNnZnWWxBWFpPaUFCcnlMaVVxdG1LbDluc2pHUVpRWHZoN1I3RU9pM01hd3ladkk4bTM0TzVBTXNyalF2a2dENTg1eGd6ak9TVVhYa21xa3k2NVprRUtWcGhuZERLSDMwU0RlTjVrNUtWZ2U3UG1Xb3JZdjAzN2YyK0xyajYxOXk2a2RVdDdNbUNneW1MUmNZQTVmUVBoc2pwWDNKQnl3eURxZ2Z6MTF2aUNZR0E3T0RKVFBYQW84dCswOGJZQ1hOSVNlZ0hnb09Lb2FySHlzN0w5MkdNbitqZ1JMZys5L0RPT3Fjc0FhcENMRHV2MHA4a0NkNm5ORVRvZzAwUFBXUVM0UHlXc3FmQ1h6STBpazJNWDNESG9kOXY4MEhyN1ZtM0VQSGRRWXRjR3dEb2dkNjZTbVFOZDRkL3BmWVI5N1EzQTRtT3QrdE5Jb2tVZmt6MWlGd2FUVVppd1V6NEROOERtVHVXTFJMVUJUYlBWUmdvUzUwZnRaUm45ZlZaZnZGZXFoZjJENldoOEVpUVlkakNHckxCOVdwSWxvVGZxZ0VBZ3gvOWVYZnJnaTZmcG9OdmFTTkphR0VqbytYOFlpdENxWitrWmhsN2ZHL3NqanBwVnJMMFJxTzlvQ20vUHRrV1hRUWx1REsxTDlLMkxjWW5LbSt4NEZlMUhqK29DTzJUUnFWMXQybzZnd1BBUC9sTHRqcFoxZy96WXE0azZhLzV6RnlMUTJ5YXpGdWwwV2dDREx2R1EwdU5Mb0o3azlxRGl1NGtsTU1KRk9lUkNzZzVNYjJpTmxiWmRKdUgyYjVyN043V2dxcFNoMXc2REliMWpyWlo5MWcxNlhIb0l3dnV4aXV3RjNwZHQ0MTN6R0ZTUCtHMW8vei9nVGdjWWZRTGdNR1Y2bXljQXlVdlJLVXlaUXJDUWVndzZwSEd0OWZiWnVIQi9OSW9qekRaUm1hbUdDOFBlYlNtcHR6WldxSmpjRjNnZzBpdHFZRWE2ZVBmTzdBRVVqU1cwNFBkMktibzRPZXlRcmNzRXBLcFdTOEVOaEkzN2ZmSmNIVFZLYU9xN0N4VHF6Y2ZzVnpGODVuQ09UTU54ZmdiL0U5Y3BVUU1PRUIybHRNeTVNcEJaZTZPQy83eTBFQ2dnSC9FdDZzODZRblUxZzRXUVcwVFFlU21VU25reFJjbjF2K2t1TW8xbmNoVUFjUUlYMWpoNWdSSTR0ZTVyajBHdjJGaDJ2d01aYzhtTzR5QjNRcWcrbm5xSVFVa2hxamc3dGlFZ2FqdlhXMHBGMU1pTDdUTFFUVVFRbDZhdnFYQUV4azJRVkNPeWM5WllHTFBSQXVoYlRFOXcrbkxhWnBPTWsrVHhQSTc0UnZYY2ZydVlxZEhseU5qRWhlR3dTd011VDdUMHdqR29wWnhnV1hFRWhvbDF3ZDlTWU4vaXdEWHIraG1sa212QmMrZjBRQ2RRWnhyTkhuNEZNcmtXYU0wVzgvV3M3VkcvNDNjcTVyNUFsY2dmUHRnRHVFdHEvZE9nTXpxZ1VEU1h4a25BMjdXR0oxTmNTODc1dzlZVThCYmdvbDAwRzY3RlUxcmE0NzdqUFVjdjlxajZKc0o2QzE2TENoU1djVnhDVit1Zjkzckh1STF4dmErK0oxV2J4VUJqWWlGNTEzTWhZUUFzUzQ0bXlLVm8vVVV4VUs2TjV0eTRGVHdjYmZiUHF2Smw2Z1RYdlRCRjF0d0VLSGRmbDNIU2tlNGQxZWFtZUcrOXhzdVNxM2hpRXZpOWI5ZnYzT0VMbGUvV29qRkNUTXhEVk9Hd3VnUTdqK1pUUFZoRzhieldWaERvZE9LT3VqdTFST1lNcThPWmN2Wi9ucHk0cXdkcDdReXhrSXEvNHdSSFVaOE9BTDN5N0tqdS90REg5d1QxVzV0MDlrRGs0MzhvT1hnajd0eFQvbkoxR3JvYSszcjZKVTBybmZRVEpWVGtQMFpCaEtucXY1M2dsYUJiQlBZd1BxUVlvYjA3K1ZwdE9LK0YwSWw1VUhGQmZBTXRkT1pDYmJBUnM4UytHUE1zd1ExTXdQSjlBQnVjVVhXblNNOWxHNE1IYUQ1L1g4UElwclhjTkoyUlVjPQ=="
+    }
+  },
+  {
+    "timestamp": "2026-01-02 23:36:15.04443",
+    "type": "chat_response",
+    "message": "The website is the **Example Domain**. It is reserved for use in documentation and illustrative examples, as managed by \nIANA. It ensures that public examples do not point to real, operational websites or services."
+  }
+]
