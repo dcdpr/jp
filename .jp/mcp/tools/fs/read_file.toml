@@ -18,3 +18,15 @@ required = true
 description = """
 The path to the file to read.
 """
+
+[conversation.tools.fs_read_file.parameters.start_line]
+type = "integer"
+description = """
+The line number to start reading from.
+"""
+
+[conversation.tools.fs_read_file.parameters.end_line]
+type = "integer"
+description = """
+The line number to stop reading at.
+"""

@@ -45,13 +45,18 @@ pub(crate) async fn cargo_test(
     .dir(&ctx.root)
     .env("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1")
     .env("RUST_BACKTRACE", "1")
+    .stderr_capture()
+    .stdout_capture()
     .unchecked()
-    .read()?;
+    .run()?;
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
 
     let mut total_tests = 0;
     let mut ran_tests = 0;
     let mut failure = vec![];
-    for l in result.lines().filter_map(|s| from_str::<Value>(s).ok()) {
+    for l in stdout.lines().filter_map(|s| from_str::<Value>(s).ok()) {
         let kind = l.get("type").and_then(Value::as_str).unwrap_or_default();
         let event = l.get("event").and_then(Value::as_str).unwrap_or_default();
 
@@ -86,7 +91,9 @@ pub(crate) async fn cargo_test(
     let failed_tests = failure.len();
 
     if ran_tests == 0 {
-        return Err("Unable to find any tests. Are the package and test name correct?")?;
+        return Err(format!(
+            "Unable to find any tests. Are the package and test name correct?\n\n{stderr}"
+        ))?;
     }
 
     let mut response =

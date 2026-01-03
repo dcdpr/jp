@@ -212,12 +212,13 @@ fn apply_changes(
     root: &Path,
     answers: &Map<String, Value>,
 ) -> Result<Outcome, Error> {
-    let modified = changes
-        .iter()
-        .map(|c| c.path.to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-
-    for Change { path, after, .. } in changes {
+    let mut modified = vec![];
+    for Change {
+        path,
+        after,
+        before,
+    } in changes
+    {
         if is_file_dirty(root, &path)? {
             match answers.get("modify_dirty_file").and_then(Value::as_bool) {
                 Some(true) => {}
@@ -244,10 +245,30 @@ fn apply_changes(
 
         let absolute_path = root.join(path.to_string_lossy().trim_start_matches('/'));
 
-        fs::write(absolute_path, after)?;
+        fs::write(absolute_path, &after)?;
+
+        let diff = similar::TextDiff::from_lines(&before, &after);
+
+        let unified_diff = diff
+            .unified_diff()
+            .context_radius(3)
+            .header("before", "after")
+            .to_string();
+
+        let mut lines = vec![];
+        for line in unified_diff.split('\n') {
+            lines.push(line.trim_end());
+        }
+
+        modified.push((path.to_string_lossy().to_string(), lines.join("\n")));
     }
 
-    Ok(format!("File(s) modified successfully:\n\n{}.", modified.join("\n")).into())
+    Ok(modified
+        .into_iter()
+        .map(|(path, diff)| format!("File modified successfully:\n\n{path}:\n{diff}"))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+        .into())
 }
 
 struct Line(Option<usize>);
@@ -306,6 +327,7 @@ mod tests {
     use std::fs;
 
     use indoc::indoc;
+    use pretty_assertions::assert_eq;
     use tempfile::tempdir;
 
     use super::*;
@@ -321,57 +343,188 @@ mod tests {
             output: Result<&'static str, &'static str>,
         }
 
-        let cases = vec![
-            ("replace first line", TestCase {
-                start_content: "hello world\n",
-                string_to_replace: "hello world",
-                new_string: "hello universe",
-                final_content: "hello universe\n",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
-            }),
-            ("delete first line", TestCase {
-                start_content: "hello world\n",
-                string_to_replace: "hello world",
-                new_string: "",
-                final_content: "\n",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
-            }),
-            ("replace first line with multiple lines", TestCase {
-                start_content: "hello world\n",
-                string_to_replace: "hello world",
-                new_string: "hello\nworld\n",
-                final_content: "hello\nworld\n",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
-            }),
-            ("replace whole line without newline", TestCase {
-                start_content: "hello world\nhello universe",
-                string_to_replace: "hello world",
-                new_string: "hello there",
-                final_content: "hello there\nhello universe",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
-            }),
-            ("replace subset of line", TestCase {
-                start_content: "hello world how are you doing?",
-                string_to_replace: "world",
-                new_string: "universe",
-                final_content: "hello universe how are you doing?",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
-            }),
-            ("replace subset across multiple lines", TestCase {
-                start_content: "hello world\nhow are you doing?",
-                string_to_replace: "world\nhow",
-                new_string: "universe\nwhat",
-                final_content: "hello universe\nwhat are you doing?",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
-            }),
-            ("ignore replacement if no match", TestCase {
-                start_content: "hello world how are you doing?",
-                string_to_replace: "universe",
-                new_string: "galaxy",
-                final_content: "hello world how are you doing?",
-                output: Err("Cannot find pattern to replace"),
-            }),
-        ];
+        let cases =
+            vec![
+                ("replace first line", TestCase {
+                    start_content: "hello world\n",
+                    string_to_replace: "hello world",
+                    new_string: "hello universe",
+                    final_content: "hello universe\n",
+                    output: Ok("File modified successfully:\n\n```diff\n--- before\n+++ \
+                                after\n@@ -1 +1 @@\n-hello world\n+hello universe\n\n```"),
+                }),
+                ("delete first line", TestCase {
+                    start_content: "hello world\n",
+                    string_to_replace: "hello world",
+                    new_string: "",
+                    final_content: "\n",
+                    output: Ok("File modified successfully:\n\n```diff\n--- before\n+++ \
+                                after\n@@ -1 +1 @@\n-hello world\n+\n\n```"),
+                }),
+                ("replace first line with multiple lines", TestCase {
+                    start_content: "hello world\n",
+                    string_to_replace: "hello world",
+                    new_string: "hello\nworld\n",
+                    final_content: "hello\nworld\n",
+                    output: Ok("File modified successfully:\n\n```diff\n--- before\n+++ \
+                                after\n@@ -1 +1,2 @@\n-hello world\n+hello\n+world\n\n```"),
+                }),
+                ("replace whole line without newline", TestCase {
+                    start_content: "hello world\nhello universe",
+                    string_to_replace: "hello world",
+                    new_string: "hello there",
+                    final_content: "hello there\nhello universe",
+                    output: Ok("File modified successfully:\n\n```diff\n--- before\n+++ \
+                                after\n@@ -1,2 +1,2 @@\n-hello world\n+hello there\n hello \
+                                universe\n\\ No newline at end of file\n\n```"),
+                }),
+                ("replace subset of line", TestCase {
+                    start_content: "hello world how are you doing?",
+                    string_to_replace: "world",
+                    new_string: "universe",
+                    final_content: "hello universe how are you doing?",
+                    output: Ok("File modified successfully:\n\n```diff\n--- before\n+++ \
+                                after\n@@ -1 +1 @@\n-hello world how are you doing?\n\\ No \
+                                newline at end of file\n+hello universe how are you doing?\n\\ \
+                                No newline at end of file\n\n```"),
+                }),
+                ("replace subset across multiple lines", TestCase {
+                    start_content: "hello world\nhow are you doing?",
+                    string_to_replace: "world\nhow",
+                    new_string: "universe\nwhat",
+                    final_content: "hello universe\nwhat are you doing?",
+                    output: Ok("File modified successfully:\n\n```diff\n--- before\n+++ \
+                                after\n@@ -1,2 +1,2 @@\n-hello world\n-how are you doing?\n\\ No \
+                                newline at end of file\n+hello universe\n+what are you \
+                                doing?\n\\ No newline at end of file\n\n```"),
+                }),
+                ("ignore replacement if no match", TestCase {
+                    start_content: "hello world how are you doing?",
+                    string_to_replace: "universe",
+                    new_string: "galaxy",
+                    final_content: "hello world how are you doing?",
+                    output: Err("Cannot find pattern to replace"),
+                }),
+                ("replace issue", TestCase {
+                    start_content: indoc! {"
+                        impl TextWrapper {
+                            /// Create a new text wrapper with the given width.
+                            const fn new(wrap_width: Option<usize>) -> Self {
+                                Self {
+                                    wrap_width,
+                                    current_column: 0,
+                                    at_line_start: true,
+                                    consecutive_newlines: 0,
+                                }
+                            }
+
+                            /// Reset line state (after a hard break).
+                            const fn reset_line(&mut self) {
+                                self.current_column = 0;
+                                self.at_line_start = true;
+                                self.consecutive_newlines = 0;
+                            }
+
+                    }"},
+                    string_to_replace: indoc! {"
+                        /// Create a new text wrapper with the given width.
+                        const fn new(wrap_width: Option<usize>) -> Self {
+                            Self {
+                                wrap_width,
+                                current_column: 0,
+                                at_line_start: true,
+                                consecutive_newlines: 0,
+                            }
+                        }
+
+                        /// Reset line state (after a hard break).
+                        const fn reset_line(&mut self) {
+                            self.current_column = 0;
+                            self.at_line_start: true;
+                            self.consecutive_newlines = 0;
+                        }
+                    "},
+                    new_string: indoc! {"
+                        /// Create a new text wrapper with the given width.
+                        const fn new(wrap_width: Option<usize>) -> Self {
+                            Self {
+                                wrap_width,
+                                current_column: 0,
+                                consecutive_newlines: 0,
+                            }
+                        }
+
+                        /// Reset line state (after a hard break).
+                        const fn reset_line(&mut self) {
+                            self.current_column = 0;
+                            self.consecutive_newlines = 0;
+                        }
+                        "},
+                    // FIXME: Is this correct?
+                    final_content: indoc! {"
+                            impl TextWrapper {
+                        /// Create a new text wrapper with the given width.
+                        const fn new(wrap_width: Option<usize>) -> Self {
+                            Self {
+                                wrap_width,
+                                current_column: 0,
+                                consecutive_newlines: 0,
+                            }
+                        }
+
+                        /// Reset line state (after a hard break).
+                        const fn reset_line(&mut self) {
+                            self.current_column = 0;
+                            self.consecutive_newlines = 0;
+                        }
+                            self.current_column = 0;
+                                    self.at_line_start = true;
+                                    self.consecutive_newlines = 0;
+                                }
+
+                        }"},
+                    output: Ok(indoc! {"
+                        File modified successfully:
+
+                        ```diff
+                        --- before
+                        +++ after
+                        @@ -1,17 +1,19 @@
+                             impl TextWrapper {
+                        -        /// Create a new text wrapper with the given width.
+                        -        const fn new(wrap_width: Option<usize>) -> Self {
+                        -            Self {
+                        -                wrap_width,
+                        -                current_column: 0,
+                        -                at_line_start: true,
+                        -                consecutive_newlines: 0,
+                        -            }
+                        -        }
+                        +/// Create a new text wrapper with the given width.
+                        +const fn new(wrap_width: Option<usize>) -> Self {
+                        +    Self {
+                        +        wrap_width,
+                        +        current_column: 0,
+                        +        consecutive_newlines: 0,
+                        +    }
+                        +}
+
+                        -        /// Reset line state (after a hard break).
+                        -        const fn reset_line(&mut self) {
+                        -            self.current_column = 0;
+                        +/// Reset line state (after a hard break).
+                        +const fn reset_line(&mut self) {
+                        +    self.current_column = 0;
+                        +    self.consecutive_newlines = 0;
+                        +}
+                        +    self.current_column = 0;
+                                     self.at_line_start = true;
+                                     self.consecutive_newlines = 0;
+                                 }
+
+                        ```"}),
+                }),
+            ];
 
         for (name, test_case) in cases {
             // Create root directory.
@@ -542,11 +695,18 @@ mod tests {
             .await
             .map_err(|e| e.to_string());
 
-            assert_eq!(
-                actual,
-                test_case.output.map(Into::into).map_err(str::to_owned),
-                "test case: {name}"
-            );
+            match (actual, test_case.output) {
+                (Ok(Outcome::Success { content }), Ok(expected)) => {
+                    pretty_assertions::assert_eq!(&content, expected, "test case: {name}");
+                }
+                (actual, expected) => {
+                    assert_eq!(
+                        actual,
+                        expected.map(Into::into).map_err(str::to_owned),
+                        "test case: {name}"
+                    );
+                }
+            }
 
             assert_eq!(
                 &fs::read_to_string(&absolute_file_path).unwrap(),
