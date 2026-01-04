@@ -1,0 +1,12 @@
+---
+source: ".config/jp/tools/src/fs/modify_file.rs"
+---
+File modified successfully:
+
+```diff
+--- test.txt
++++ test.txt
+@@ -1 +1 @@
+-hello world
++
+```

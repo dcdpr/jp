@@ -52,6 +52,7 @@ url = { workspace = true, features = ["serde", "std"] }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
+insta = { workspace = true, features = ["colors"] }
 pretty_assertions = { workspace = true, features = ["std"] }
 tempfile = { workspace = true }
 test-log = { workspace = true }
