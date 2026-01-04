@@ -114,7 +114,7 @@ impl StreamEventHandler {
             return Err(Error::NotFound("tool", call.name.clone()));
         };
 
-        let editor = cfg.editor.path().ok_or(Error::MissingEditor)?;
+        let editor = cfg.editor.path();
 
         self.tool_calls.push(call.clone());
         let tool = ToolDefinition::new(
@@ -191,7 +191,7 @@ impl StreamEventHandler {
                     mcp_client,
                     tool_config.clone(),
                     &root,
-                    &editor,
+                    editor.as_deref(),
                 )
                 .await
             {

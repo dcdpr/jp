@@ -96,7 +96,7 @@ impl ToolDefinition {
         mcp_client: &jp_mcp::Client,
         config: ToolConfigWithDefaults,
         root: &Path,
-        editor: &Path,
+        editor: Option<&Path>,
     ) -> Result<ToolCallResponse, ToolError> {
         info!(tool = %self.name, arguments = ?arguments, "Calling tool.");
 
@@ -267,7 +267,7 @@ impl ToolDefinition {
         arguments: &mut Value,
         source: &ToolSource,
         mcp_client: &jp_mcp::Client,
-        editor: &Path,
+        editor: Option<&Path>,
     ) -> Result<Option<String>, ToolError> {
         match run_mode {
             RunMode::Ask => match InlineSelect::new(
@@ -300,13 +300,23 @@ impl ToolDefinition {
 
                     question
                 },
-                vec![
-                    InlineOption::new('y', "Run tool"),
-                    InlineOption::new('n', "Skip running tool"),
-                    InlineOption::new('e', "Run tool, but first edit arguments"),
-                    InlineOption::new('r', "Skip running tool, and tell assistant why"),
-                    InlineOption::new('p', "Print raw tool arguments"),
-                ],
+                {
+                    let mut options = vec![
+                        InlineOption::new('y', "Run tool"),
+                        InlineOption::new('n', "Skip running tool"),
+                    ];
+
+                    if editor.is_some() {
+                        options.push(InlineOption::new('e', "Run tool, but first edit arguments"));
+                        options.push(InlineOption::new(
+                            'r',
+                            "Skip running tool, and tell assistant why",
+                        ));
+                    }
+
+                    options.push(InlineOption::new('p', "Print raw tool arguments"));
+                    options
+                },
             )
             .with_default('y')
             .prompt()
@@ -316,6 +326,10 @@ impl ToolDefinition {
                 'n' => return Ok(Some("Tool execution skipped by user.".to_string())),
                 'e' => {}
                 'r' => {
+                    let Some(editor) = editor else {
+                        return Ok(Some("Tool execution skipped by user.".to_string()));
+                    };
+
                     return Ok(Some(format!(
                         "Tool execution skipped by user with reasoning:\n\n{}",
                         open_editor::EditorCallBuilder::new()
@@ -353,13 +367,15 @@ impl ToolDefinition {
         })?;
 
         *arguments = {
-            open_editor::EditorCallBuilder::new()
-                .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
-                .edit_string_mut(&mut args)
-                .map_err(|error| ToolError::OpenEditorError {
-                    arguments: arguments.clone(),
-                    error,
-                })?;
+            if let Some(editor) = editor {
+                open_editor::EditorCallBuilder::new()
+                    .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
+                    .edit_string_mut(&mut args)
+                    .map_err(|error| ToolError::OpenEditorError {
+                        arguments: arguments.clone(),
+                        error,
+                    })?;
+            }
 
             // If the user removed all data from the arguments, we consider the
             // edit a no-op, and ask the user if they want to run the tool.
@@ -417,7 +433,7 @@ impl ToolDefinition {
         &self,
         mut result: ToolCallResponse,
         result_mode: ResultMode,
-        editor: &Path,
+        editor: Option<&Path>,
     ) -> Result<ToolCallResponse, ToolError> {
         match result_mode {
             ResultMode::Ask => match InlineSelect::new(
@@ -449,21 +465,24 @@ impl ToolDefinition {
             ResultMode::Edit => {}
         }
 
-        let content = open_editor::EditorCallBuilder::new()
-            .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
-            .edit_string(result.content())
-            .map_err(|error| ToolError::OpenEditorError {
-                arguments: Value::Null,
-                error,
-            })?;
+        if let Some(editor) = editor {
+            let content = open_editor::EditorCallBuilder::new()
+                .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
+                .edit_string(result.content())
+                .map_err(|error| ToolError::OpenEditorError {
+                    arguments: Value::Null,
+                    error,
+                })?;
 
-        // If the user removed all data from the result, we consider the edit a
-        // no-op, and ask the user if they want to deliver the tool results.
-        if content.trim().is_empty() {
-            return self.prepare_result(result, ResultMode::Ask, editor);
+            // If the user removed all data from the result, we consider the edit a
+            // no-op, and ask the user if they want to deliver the tool results.
+            if content.trim().is_empty() {
+                return self.prepare_result(result, ResultMode::Ask, Some(editor));
+            }
+
+            result.result = Ok(content);
         }
 
-        result.result = Ok(content);
         Ok(result)
     }
 }
