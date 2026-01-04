@@ -22,7 +22,14 @@ pub async fn run(ctx: Context, t: Tool) -> std::result::Result<Outcome, Error> {
             .and_then(to_xml)
             .map(Into::into),
 
-        "read_file" => fs_read_file(ctx.root, t.req("path")?).await.map(Into::into),
+        "read_file" => fs_read_file(
+            ctx.root,
+            t.req("path")?,
+            t.opt("start_line")?,
+            t.opt("end_line")?,
+        )
+        .await
+        .map(Into::into),
 
         "grep_files" => fs_grep_files(
             ctx.root,

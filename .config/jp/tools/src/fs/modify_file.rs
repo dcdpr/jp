@@ -8,13 +8,14 @@ use std::{
     fs::{self},
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use crossterm::style::{ContentStyle, Stylize as _};
 use fancy_regex::RegexBuilder;
 use jp_tool::{AnswerType, Outcome, Question};
 use serde_json::{Map, Value};
-use similar::{ChangeTag, TextDiff};
+use similar::{ChangeTag, TextDiff, udiff::UnifiedDiff};
 
 use super::utils::is_file_dirty;
 use crate::{Context, Error};
@@ -200,8 +201,12 @@ fn format_changes(changes: Vec<Change>, root: &Path) -> String {
         .into_iter()
         .map(|change| {
             let path = root.join(change.path.to_string_lossy().trim_start_matches('/'));
-            let diff = file_diff(&change.before, &change.after);
-            format!("{}:\n\n```diff\n{diff}\n```", path.display())
+
+            let diff = text_diff(&change.before, &change.after);
+            let unified = unified_diff(&diff, &path.display().to_string());
+            let colored = colored_diff(&diff, &unified);
+
+            format!("{}:\n\n```diff\n{colored}\n```", path.display())
         })
         .collect::<Vec<_>>()
         .join("\n\n")
@@ -212,12 +217,14 @@ fn apply_changes(
     root: &Path,
     answers: &Map<String, Value>,
 ) -> Result<Outcome, Error> {
-    let modified = changes
-        .iter()
-        .map(|c| c.path.to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-
-    for Change { path, after, .. } in changes {
+    let mut modified = vec![];
+    let count = changes.len();
+    for Change {
+        path,
+        after,
+        before,
+    } in changes
+    {
         if is_file_dirty(root, &path)? {
             match answers.get("modify_dirty_file").and_then(Value::as_bool) {
                 Some(true) => {}
@@ -242,12 +249,28 @@ fn apply_changes(
             }
         }
 
-        let absolute_path = root.join(path.to_string_lossy().trim_start_matches('/'));
+        let file_path = path.to_string_lossy();
+        let file_path = file_path.trim_start_matches('/');
+        let absolute_path = root.join(file_path);
 
-        fs::write(absolute_path, after)?;
+        fs::write(absolute_path, &after)?;
+
+        let diff = text_diff(&before, &after);
+        let diff = unified_diff(&diff, file_path);
+
+        modified.push(diff.to_string());
     }
 
-    Ok(format!("File(s) modified successfully:\n\n{}.", modified.join("\n")).into())
+    Ok(format!(
+        "{} modified successfully:\n\n{}",
+        if count == 1 { "File" } else { "Files" },
+        modified
+            .into_iter()
+            .map(|diff| format!("```diff\n{diff}```"))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    )
+    .into())
 }
 
 struct Line(Option<usize>);
@@ -261,15 +284,32 @@ impl fmt::Display for Line {
     }
 }
 
-fn file_diff(old: &str, new: &str) -> String {
-    let diff = TextDiff::from_lines(old, new);
+fn text_diff<'old, 'new, 'bufs>(
+    old: &'old str,
+    new: &'new str,
+) -> TextDiff<'old, 'new, 'bufs, str> {
+    similar::TextDiff::configure()
+        .algorithm(similar::Algorithm::Patience)
+        .timeout(Duration::from_secs(2))
+        .diff_lines(old, new)
+}
 
+fn unified_diff<'diff, 'old, 'new, 'bufs>(
+    diff: &'diff TextDiff<'old, 'new, 'bufs, str>,
+    file: &str,
+) -> UnifiedDiff<'diff, 'old, 'new, 'bufs, str> {
+    let mut unified = diff.unified_diff();
+    unified.context_radius(3).header(file, file);
+    unified
+}
+
+fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
+    diff: &'diff TextDiff<'old, 'new, 'bufs, str>,
+    unified: &UnifiedDiff<'diff, 'old, 'new, 'bufs, str>,
+) -> String {
     let mut buf = String::new();
-    for (idx, group) in diff.grouped_ops(3).iter().enumerate() {
-        if idx > 0 {
-            let _ = writeln!(buf, "{:-^1$}", "-", 80);
-        }
-        for op in group {
+    for hunk in unified.iter_hunks() {
+        for op in hunk.ops() {
             for change in diff.iter_inline_changes(op) {
                 let (sign, s) = match change.tag() {
                     ChangeTag::Delete => ("-", ContentStyle::new().red()),
@@ -297,7 +337,6 @@ fn file_diff(old: &str, new: &str) -> String {
         }
     }
 
-    buf.push_str("".reset().to_string().as_str());
     buf
 }
 
@@ -317,59 +356,43 @@ mod tests {
             start_content: &'static str,
             string_to_replace: &'static str,
             new_string: &'static str,
-            final_content: &'static str,
-            output: Result<&'static str, &'static str>,
         }
 
         let cases = vec![
-            ("replace first line", TestCase {
+            ("replace_first_line", TestCase {
                 start_content: "hello world\n",
                 string_to_replace: "hello world",
                 new_string: "hello universe",
-                final_content: "hello universe\n",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
             }),
-            ("delete first line", TestCase {
+            ("delete_first_line", TestCase {
                 start_content: "hello world\n",
                 string_to_replace: "hello world",
                 new_string: "",
-                final_content: "\n",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
             }),
-            ("replace first line with multiple lines", TestCase {
+            ("replace_first_line_with_multiple_lines", TestCase {
                 start_content: "hello world\n",
                 string_to_replace: "hello world",
                 new_string: "hello\nworld\n",
-                final_content: "hello\nworld\n",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
             }),
-            ("replace whole line without newline", TestCase {
+            ("replace_whole_line_without_newline", TestCase {
                 start_content: "hello world\nhello universe",
                 string_to_replace: "hello world",
                 new_string: "hello there",
-                final_content: "hello there\nhello universe",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
             }),
-            ("replace subset of line", TestCase {
+            ("replace_subset_of_line", TestCase {
                 start_content: "hello world how are you doing?",
                 string_to_replace: "world",
                 new_string: "universe",
-                final_content: "hello universe how are you doing?",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
             }),
-            ("replace subset across multiple lines", TestCase {
+            ("replace_subset_across_multiple_lines", TestCase {
                 start_content: "hello world\nhow are you doing?",
                 string_to_replace: "world\nhow",
                 new_string: "universe\nwhat",
-                final_content: "hello universe\nwhat are you doing?",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
             }),
-            ("ignore replacement if no match", TestCase {
+            ("ignore_replacement_if_no_match", TestCase {
                 start_content: "hello world how are you doing?",
                 string_to_replace: "universe",
                 new_string: "galaxy",
-                final_content: "hello world how are you doing?",
-                output: Err("Cannot find pattern to replace"),
             }),
         ];
 
@@ -397,19 +420,24 @@ mod tests {
                 false,
             )
             .await
+            .map(|v| v.into_content().unwrap_or_default())
             .map_err(|e| e.to_string());
 
-            assert_eq!(
-                actual,
-                test_case.output.map(Into::into).map_err(str::to_owned),
-                "test case: {name}"
-            );
+            let response = match &actual {
+                Ok(v) => v,
+                Err(e) => e,
+            };
 
-            assert_eq!(
-                &fs::read_to_string(&absolute_file_path).unwrap(),
-                test_case.final_content,
-                "test case: {name}"
-            );
+            insta::with_settings!({
+                snapshot_suffix => name,
+                omit_expression => true,
+                prepend_module_to_snapshot => false,
+            }, {
+                insta::assert_snapshot!(&response);
+
+                let file_content = fs::read_to_string(&absolute_file_path).unwrap();
+                insta::assert_snapshot!(&file_content);
+            });
         }
     }
 
@@ -505,14 +533,17 @@ mod tests {
                 string_to_replace: r"(\w+)\s\w+",
                 new_string: "$1 universe",
                 final_content: "hello universe\n",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
+                output: Ok("File modified successfully:\n\n```diff\n--- test.txt\n+++ \
+                            test.txt\n@@ -1 +1 @@\n-hello world\n+hello universe\n```"),
             }),
             ("delete", TestCase {
                 start_content: "hello world\n",
                 string_to_replace: "h(.+?)d\n",
                 new_string: "$1",
                 final_content: "ello worl",
-                output: Ok("File(s) modified successfully:\n\ntest.txt."),
+                output: Ok("File modified successfully:\n\n```diff\n--- test.txt\n+++ \
+                            test.txt\n@@ -1 +1 @@\n-hello world\n+ello worl\n\\ No newline at \
+                            end of file\n```"),
             }),
         ];
 
@@ -542,11 +573,18 @@ mod tests {
             .await
             .map_err(|e| e.to_string());
 
-            assert_eq!(
-                actual,
-                test_case.output.map(Into::into).map_err(str::to_owned),
-                "test case: {name}"
-            );
+            match (actual, test_case.output) {
+                (Ok(Outcome::Success { content }), Ok(expected)) => {
+                    assert_eq!(&content, expected, "test case: {name}");
+                }
+                (actual, expected) => {
+                    assert_eq!(
+                        actual,
+                        expected.map(Into::into).map_err(str::to_owned),
+                        "test case: {name}"
+                    );
+                }
+            }
 
             assert_eq!(
                 &fs::read_to_string(&absolute_file_path).unwrap(),
