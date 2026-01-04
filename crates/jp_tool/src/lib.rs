@@ -14,6 +14,17 @@ pub enum Outcome {
     NeedsInput { question: Question },
 }
 
+impl Outcome {
+    /// Returns the content of the outcome if it is a success.
+    #[must_use]
+    pub fn into_content(self) -> Option<String> {
+        match self {
+            Outcome::Success { content } => Some(content),
+            Outcome::NeedsInput { .. } => None,
+        }
+    }
+}
+
 /// A request for additional input.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Question {
