@@ -10,22 +10,40 @@ shear_version    := "1.6.0"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
+alias r := run
+alias i := install
+alias c := check
+alias t := test
+
+alias bc := build-changelog
+alias co := commit
+alias st := stage
+alias sc := stage-and-commit
+alias ib := issue-bug
+alias if := issue-feat
+
 [private]
 default:
   just --list
 
+[group('build')]
+[no-cd]
+run *ARGS:
+    cargo run --package jp_cli -- {{ARGS}}
+
+# Install the `jp` binary from your local checkout.
 [group('build')]
 install:
     @just quiet_flag="" _install-jp
 
 [group('jp')]
 issue-bug +ARGS="Please create a bug report for the following:\n\n": _install-jp
-    jp query --new-local --tmp --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
+    jp query --new-local --tmp --cfg=personas/po --hide-reasoning --edit=true {{ARGS}}
 
 # Create a feature request issue.
 [group('jp')]
 issue-feat +ARGS="Please create a feature request for the following:\n\n": _install-jp
-    jp query --new-local --tmp --cfg=personas/product-owner --hide-reasoning --edit=true {{ARGS}}
+    jp query --new-local --tmp --cfg=personas/po --hide-reasoning --edit=true {{ARGS}}
 
 # Open a commit message in the editor, using Jean-Pierre.
 [group('jp')]
