@@ -1380,7 +1380,6 @@ fn string_or_path(s: &str) -> Result<String> {
     Ok(s.to_owned())
 }
 
-#[derive(Debug)]
 struct Line {
     content: String,
     variant: LineVariant,

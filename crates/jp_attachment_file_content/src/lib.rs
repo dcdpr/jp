@@ -197,8 +197,8 @@ fn sanitize_pattern<'a>(mut pattern: &'a str, cwd: &Path) -> Cow<'a, str> {
     }
 }
 
-fn build_attachment(path: &Path, root: &Path) -> Option<Attachment> {
-    let Ok(rel) = path.strip_prefix(root) else {
+fn build_attachment(path: &Path, cwd: &Path) -> Option<Attachment> {
+    let Ok(rel) = path.strip_prefix(cwd) else {
         warn!(
             path = %path.display(),
             "Attachment path outside of working directory, skipping."

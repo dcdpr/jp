@@ -20,7 +20,7 @@ impl Rm {
 impl IntoPartialAppConfig for Rm {
     fn apply_cli_config(
         &self,
-        root: Option<&Workspace>,
+        workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
@@ -29,7 +29,7 @@ impl IntoPartialAppConfig for Rm {
         let to_remove_attachments = self
             .attachments
             .iter()
-            .map(|v| v.parse(root.map(|w| w.root.as_path())))
+            .map(|v| v.parse(workspace.map(|w| w.root.as_path())))
             .collect::<Result<Vec<_>, _>>()?;
 
         for attachment in partial.conversation.attachments {

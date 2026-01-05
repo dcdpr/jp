@@ -28,12 +28,12 @@ impl Add {
 impl IntoPartialAppConfig for Add {
     fn apply_cli_config(
         &self,
-        root: Option<&Workspace>,
+        workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         for uri in &self.attachments {
-            let uri = uri.parse(root.map(|w| w.root.as_path()))?;
+            let uri = uri.parse(workspace.map(|w| w.root.as_path()))?;
             validate_attachment(&uri)?;
 
             partial.conversation.attachments.push(uri.clone().into());
