@@ -100,7 +100,8 @@
                   "lines": 10
                 }
               },
-              "results_file_link": "osc8"
+              "results_file_link": "osc8",
+              "parameters": "json"
             }
           },
           "crate_readme": {
@@ -139,7 +140,8 @@
             "run": "unattended",
             "style": {
               "inline_results": "off",
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           },
           "agentic_shepherd_run": {
@@ -173,7 +175,8 @@
             "run": "unattended",
             "style": {
               "inline_results": "off",
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           },
           "cargo_expand": {
@@ -198,7 +201,8 @@
             "run": "unattended",
             "style": {
               "inline_results": "off",
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           },
           "cargo_test": {
@@ -223,7 +227,8 @@
             "run": "unattended",
             "style": {
               "inline_results": "off",
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           },
           "fs_create_file": {
@@ -292,7 +297,8 @@
             "run": "unattended",
             "style": {
               "inline_results": "off",
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           },
           "fs_grep_user_docs": {
@@ -318,7 +324,8 @@
             "run": "unattended",
             "style": {
               "inline_results": "off",
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           },
           "fs_list_files": {
@@ -349,7 +356,8 @@
             "run": "unattended",
             "style": {
               "inline_results": "off",
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           },
           "fs_modify_file": {
@@ -401,7 +409,8 @@
             "run": "unattended",
             "style": {
               "inline_results": "off",
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           },
           "git_commit": {
@@ -420,7 +429,8 @@
             "run": "unattended",
             "style": {
               "inline_results": "full",
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           },
           "github_code_search": {
@@ -633,7 +643,8 @@
             "run": "unattended",
             "style": {
               "inline_results": "off",
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           },
           "github_pulls": {
@@ -670,7 +681,8 @@
             "run": "unattended",
             "style": {
               "inline_results": "off",
-              "results_file_link": "full"
+              "results_file_link": "full",
+              "parameters": "json"
             }
           },
           "github_read_file": {
