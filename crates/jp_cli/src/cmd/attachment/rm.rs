@@ -1,13 +1,11 @@
 use jp_config::{Config as _, PartialAppConfig, conversation::attachment::AttachmentConfig};
 use jp_workspace::Workspace;
-use url::Url;
 
-use crate::{IntoPartialAppConfig, Output, ctx::Ctx, parser};
+use crate::{IntoPartialAppConfig, Output, ctx::Ctx, parser::AttachmentUrlOrPath};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Rm {
-    #[arg(value_parser = parser::attachment_url)]
-    attachments: Vec<Url>,
+    attachments: Vec<AttachmentUrlOrPath>,
 }
 
 impl Rm {
@@ -22,14 +20,21 @@ impl Rm {
 impl IntoPartialAppConfig for Rm {
     fn apply_cli_config(
         &self,
-        _: Option<&Workspace>,
+        workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         let mut attachments = vec![];
+
+        let to_remove_attachments = self
+            .attachments
+            .iter()
+            .map(|v| v.parse(workspace.map(Workspace::root)))
+            .collect::<Result<Vec<_>, _>>()?;
+
         for attachment in partial.conversation.attachments {
             let url = AttachmentConfig::from_partial(attachment.clone())?.to_url()?;
-            if !self.attachments.contains(&url) {
+            if !to_remove_attachments.contains(&url) {
                 attachments.push(attachment);
             }
         }

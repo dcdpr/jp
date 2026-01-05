@@ -47,6 +47,7 @@ clap = { workspace = true, features = [
     "usage",
     "wrap_help",
 ] }
+clean-path = { workspace = true }
 comfy-table = { workspace = true, features = ["tty", "custom_styling"] }
 comrak = { workspace = true }
 crossterm = { workspace = true }
@@ -59,8 +60,8 @@ indoc = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
 itertools = { workspace = true, features = ["use_std"] }
 minijinja = { workspace = true }
-path-clean = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
+relative-path = { workspace = true }
 reqwest = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }

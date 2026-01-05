@@ -1,5 +1,6 @@
 use std::{env, fs, path::PathBuf, str::FromStr as _};
 
+use clean_path::Clean as _;
 use crossterm::style::Stylize as _;
 use duct::cmd;
 use jp_config::{
@@ -8,7 +9,6 @@ use jp_config::{
     model::id::{ModelIdConfig, Name, PartialModelIdConfig, ProviderId},
 };
 use jp_workspace::Workspace;
-use path_clean::PathClean as _;
 
 use crate::{DEFAULT_STORAGE_DIR, Output, ctx::IntoPartialAppConfig};
 

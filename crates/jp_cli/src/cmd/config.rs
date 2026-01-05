@@ -86,7 +86,7 @@ impl Target {
         } else if self.cwd {
             loader.file_stem = ".jp".into();
             loader.recurse_up = true;
-            loader.recurse_stop_at = Some(ctx.workspace.root.clone());
+            loader.recurse_stop_at = Some(ctx.workspace.root().to_path_buf());
 
             loader.load(std::env::current_dir()?).map(Some)
         } else {

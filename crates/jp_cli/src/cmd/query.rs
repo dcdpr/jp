@@ -44,7 +44,6 @@ use minijinja::{Environment, UndefinedBehavior};
 use response_handler::ResponseHandler;
 use serde_json::Value;
 use tracing::{debug, error, info, trace, warn};
-use url::Url;
 
 use super::{Output, attachment::register_attachment};
 use crate::{
@@ -53,7 +52,7 @@ use crate::{
     ctx::IntoPartialAppConfig,
     editor::{self, Editor},
     error::{Error, Result},
-    parser,
+    parser::AttachmentUrlOrPath,
     signals::{SignalRx, SignalTo},
 };
 
@@ -116,8 +115,8 @@ pub(crate) struct Query {
     local: bool,
 
     /// Add attachment to the configuration.
-    #[arg(short = 'a', long = "attachment", value_parser = |s: &str| parser::attachment_url(s))]
-    attachments: Vec<Url>,
+    #[arg(short = 'a', long = "attachment")]
+    attachments: Vec<AttachmentUrlOrPath>,
 
     /// Whether and how to edit the query.
     ///
@@ -295,7 +294,7 @@ impl Query {
         let root = ctx
             .workspace
             .storage_path()
-            .unwrap_or(&ctx.workspace.root)
+            .unwrap_or(ctx.workspace.root())
             .to_path_buf();
 
         let conversation = ctx.workspace.get_conversation(&conversation_id);
@@ -382,7 +381,7 @@ impl Query {
                     &cfg,
                     &mut ctx.signals.receiver,
                     &ctx.mcp_client,
-                    ctx.workspace.root.clone(),
+                    ctx.workspace.root().to_path_buf(),
                     ctx.term.is_tty,
                     &mut turn_state,
                     &mut thread,
@@ -984,7 +983,7 @@ fn get_config_delta_from_cli(
 impl IntoPartialAppConfig for Query {
     fn apply_cli_config(
         &self,
-        _workspace: Option<&Workspace>,
+        workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
@@ -1022,7 +1021,7 @@ impl IntoPartialAppConfig for Query {
             tool_use.as_ref().map(|v| v.as_deref()),
             *no_tool_use,
         )?;
-        apply_attachments(&mut partial, attachments);
+        apply_attachments(&mut partial, attachments, workspace)?;
         apply_reasoning(&mut partial, reasoning.as_ref(), *no_reasoning);
 
         for kv in parameters.clone() {
@@ -1259,15 +1258,23 @@ fn apply_tool_use(
 }
 
 /// Apply the CLI attachments to the partial configuration.
-fn apply_attachments(partial: &mut PartialAppConfig, attachments: &[Url]) {
-    if attachments.is_empty() {
-        return;
-    }
+fn apply_attachments(
+    partial: &mut PartialAppConfig,
+    attachments: &[AttachmentUrlOrPath],
+    workspace: Option<&Workspace>,
+) -> Result<()> {
+    let root = workspace.map(Workspace::root);
+    let attachments = attachments
+        .iter()
+        .map(|v| v.parse(root))
+        .collect::<Result<Vec<_>>>()?;
 
     partial
         .conversation
         .attachments
-        .extend(attachments.iter().cloned().map(Into::into));
+        .extend(attachments.into_iter().map(Into::into));
+
+    Ok(())
 }
 
 /// Apply the CLI reasoning configuration to the partial configuration.
