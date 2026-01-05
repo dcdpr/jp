@@ -32,7 +32,7 @@ pub struct Workspace {
     /// The root directory of the workspace.
     ///
     /// This differs from the storage's root directory.
-    pub root: PathBuf,
+    root: PathBuf,
 
     /// The globally unique ID of the workspace.
     id: id::Id,
@@ -94,6 +94,12 @@ impl Workspace {
             state: State::default(),
             disable_persistence: false,
         }
+    }
+
+    /// Get the root path of the workspace.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     /// Enable persistence for the workspace at the given (absolute) path.
