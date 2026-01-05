@@ -76,6 +76,10 @@ pub enum ReasoningDisplayConfig {
     /// reasoning.
     Static,
 
+    /// Similar to `Static`, but additional dots are added to indicate that the
+    /// assistant is still reasoning.
+    Progress,
+
     /// Reasoning content is displayed as it is generated.
     #[default]
     Full,
