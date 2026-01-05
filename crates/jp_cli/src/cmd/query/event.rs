@@ -48,9 +48,9 @@ impl StreamEventHandler {
                     {
                         Some("reasoning...".to_owned())
                     }
-                    // For progress display, we start with `reasoning...` and then
-                    // append a dot for each new reasoning chunk, to indicate
-                    // that the reasoning is still ongoing.
+                    // For progress display, we start with `reasoning...` and
+                    // then append a dot for each new reasoning chunk, to
+                    // indicate that the reasoning is still ongoing.
                     ReasoningDisplayConfig::Progress => Some(".".to_owned()),
                     ReasoningDisplayConfig::Full => Some(reasoning.clone()),
                     ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => {
