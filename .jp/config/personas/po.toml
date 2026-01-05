@@ -1,7 +1,7 @@
 [assistant]
 name = "Product Owner"
 
-[system_prompt]
+[assistant.system_prompt]
 strategy = "append"
 separator = "paragraph"
 value = """
