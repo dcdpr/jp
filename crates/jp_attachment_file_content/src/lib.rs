@@ -1,7 +1,6 @@
 use std::{borrow::Cow, collections::BTreeSet, error::Error, fs, path::Path};
 
 use async_trait::async_trait;
-use clean_path::Clean as _;
 use glob::Pattern;
 use ignore::{WalkBuilder, WalkState, overrides::OverrideBuilder};
 use jp_attachment::{
@@ -95,9 +94,10 @@ impl Handler for FileContent {
         //
         // We also check if the path is a directory, as those will have to use
         // globbing and respect `.ignore` files.
-        let (includes, paths): (Vec<_>, Vec<_>) = self.includes.iter().partition(|p| {
-            p.as_str().contains(['*', '?', '[']) || root.join(p.as_str()).clean().is_dir()
-        });
+        let (includes, paths): (Vec<_>, Vec<_>) = self
+            .includes
+            .iter()
+            .partition(|p| p.as_str().contains(['*', '?', '[']) || root.join(p.as_str()).is_dir());
 
         attachments.extend(paths.into_iter().filter_map(|pattern| {
             let pattern = sanitize_pattern(pattern.as_str(), root);
