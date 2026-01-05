@@ -43,9 +43,15 @@ impl StreamEventHandler {
             ChatResponse::Reasoning { ref reasoning } if !reasoning.is_empty() => {
                 let mut display = match reasoning_display {
                     ReasoningDisplayConfig::Summary => todo!(),
-                    ReasoningDisplayConfig::Static if self.reasoning_tokens.is_empty() => {
-                        Some("_reasoning..._".to_owned())
+                    ReasoningDisplayConfig::Static | ReasoningDisplayConfig::Progress
+                        if self.reasoning_tokens.is_empty() =>
+                    {
+                        Some("reasoning...".to_owned())
                     }
+                    // For progress display, we start with `reasoning...` and then
+                    // append a dot for each new reasoning chunk, to indicate
+                    // that the reasoning is still ongoing.
+                    ReasoningDisplayConfig::Progress => Some(".".to_owned()),
                     ReasoningDisplayConfig::Full => Some(reasoning.clone()),
                     ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => {
                         let remaining =
