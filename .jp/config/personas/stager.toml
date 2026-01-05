@@ -65,12 +65,15 @@ params.arg = [
 [[conversation.attachments]]
 type = "cmd"
 path = "git"
-params.description = "List of newly added files"
+params.description = "Newly added files (excluding test fixtures)"
 params.arg = [
     "ls-files",
-    "-o",
+    "--others",
     "--exclude-standard",
-    "--full-name",
+    "--",
+    ".",
+    ":^crates/jp_llm/tests/fixtures",
+    ":^.jp/conversations",
 ]
 
 [style]
