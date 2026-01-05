@@ -2041,7 +2041,6 @@ name = "jp_attachment_file_content"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "clean-path",
  "crossbeam-channel",
  "glob",
  "ignore",
