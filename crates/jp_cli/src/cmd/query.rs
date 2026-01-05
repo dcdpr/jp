@@ -381,7 +381,7 @@ impl Query {
                     &cfg,
                     &mut ctx.signals.receiver,
                     &ctx.mcp_client,
-                    ctx.workspace.root.clone(),
+                    ctx.workspace.root().to_path_buf(),
                     ctx.term.is_tty,
                     &mut turn_state,
                     &mut thread,
@@ -1263,7 +1263,7 @@ fn apply_attachments(
     attachments: &[AttachmentUrlOrPath],
     workspace: Option<&Workspace>,
 ) -> Result<()> {
-    let root = workspace.map(|v| v.root.as_path());
+    let root = workspace.map(Workspace::root);
     let attachments = attachments
         .iter()
         .map(|v| v.parse(root))

@@ -450,7 +450,7 @@ fn load_cli_cfg_args(
                         .config_load_paths
                         .iter()
                         .flatten()
-                        .map(|p| p.to_path(&w.root))
+                        .map(|p| p.to_path(w.root()))
                 });
 
                 let mut found = false;
@@ -576,7 +576,7 @@ fn load_workspace(workspace: Option<&WorkspaceIdOrPath>) -> Result<Workspace> {
 
     let workspace = Workspace::new_with_id(root, id)
         .persisted_at(&storage)
-        .inspect(|ws| info!(workspace = %ws.root.display(), "Using existing workspace."))?;
+        .inspect(|ws| info!(workspace = %ws.root().display(), "Using existing workspace."))?;
 
     workspace.id().store(&storage)?;
 

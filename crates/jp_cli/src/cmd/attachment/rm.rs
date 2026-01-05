@@ -29,7 +29,7 @@ impl IntoPartialAppConfig for Rm {
         let to_remove_attachments = self
             .attachments
             .iter()
-            .map(|v| v.parse(workspace.map(|w| w.root.as_path())))
+            .map(|v| v.parse(workspace.map(Workspace::root)))
             .collect::<Result<Vec<_>, _>>()?;
 
         for attachment in partial.conversation.attachments {
