@@ -294,7 +294,7 @@ impl Query {
         let root = ctx
             .workspace
             .storage_path()
-            .unwrap_or(&ctx.workspace.root)
+            .unwrap_or(ctx.workspace.root())
             .to_path_buf();
 
         let conversation = ctx.workspace.get_conversation(&conversation_id);

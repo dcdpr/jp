@@ -103,7 +103,7 @@ pub(crate) async fn register_attachment(
 
     attachments.extend(
         handler
-            .get(&ctx.workspace.root, ctx.mcp_client.clone())
+            .get(ctx.workspace.root(), ctx.mcp_client.clone())
             .await
             .map_err(|e| Error::Attachment(e.to_string()))?,
     );
