@@ -115,7 +115,7 @@ pub(crate) struct Query {
     local: bool,
 
     /// Add attachment to the configuration.
-    #[arg(short = 'a', long = "attachment", value_parser = AttachmentUrlOrPath::from_str)]
+    #[arg(short = 'a', long = "attachment")]
     attachments: Vec<AttachmentUrlOrPath>,
 
     /// Whether and how to edit the query.

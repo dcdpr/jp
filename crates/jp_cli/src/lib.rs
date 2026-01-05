@@ -155,7 +155,7 @@ struct Globals {
     /// The workspace to use for the command.
     ///
     /// This can be either a path to a workspace directory, or a workspace ID.
-    #[arg(short = 'w', long, global = true, value_parser = WorkspaceIdOrPath::from_str)]
+    #[arg(short = 'w', long, global = true)]
     workspace: Option<WorkspaceIdOrPath>,
     // TODO
     // /// The format of the output.

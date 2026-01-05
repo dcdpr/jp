@@ -1,5 +1,3 @@
-use std::str::FromStr as _;
-
 use jp_config::{Config as _, PartialAppConfig, conversation::attachment::AttachmentConfig};
 use jp_workspace::Workspace;
 
@@ -7,7 +5,6 @@ use crate::{IntoPartialAppConfig, Output, ctx::Ctx, parser::AttachmentUrlOrPath}
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Rm {
-    #[arg(value_parser = AttachmentUrlOrPath::from_str)]
     attachments: Vec<AttachmentUrlOrPath>,
 }
 

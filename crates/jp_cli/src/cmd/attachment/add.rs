@@ -1,5 +1,3 @@
-use std::str::FromStr as _;
-
 use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 
@@ -15,7 +13,6 @@ pub(crate) struct Add {
     /// added, otherwise the attachment type can be added as a prefix.
     ///
     /// For example, to add a `summary` attachment, use `summary://<path>`.
-    #[arg(value_parser = AttachmentUrlOrPath::from_str)]
     attachments: Vec<AttachmentUrlOrPath>,
 }
 
