@@ -7,7 +7,6 @@ use std::{
     env, fs,
     io::{self, BufRead as _, IsTerminal},
     path::{Path, PathBuf},
-    str::FromStr,
     sync::Arc,
     time::Duration,
 };
@@ -143,7 +142,7 @@ pub(crate) struct Query {
     model: Option<String>,
 
     /// The model parameters to use.
-    #[arg(short = 'p', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append, value_parser = KvAssignment::from_str)]
+    #[arg(short = 'p', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append)]
     parameters: Vec<KvAssignment>,
 
     /// Enable reasoning.
@@ -1380,6 +1379,7 @@ fn string_or_path(s: &str) -> Result<String> {
     Ok(s.to_owned())
 }
 
+#[derive(Debug)]
 struct Line {
     content: String,
     variant: LineVariant,
