@@ -38,6 +38,7 @@ bat = { version = "0.25", default-features = false }
 clap = { version = "4", default-features = false }
 comfy-table = { version = "7", default-features = false }
 comrak = { version = "0.41", default-features = false }
+clean-path = { version = "0.2", default-features = false }
 crossbeam-channel = { version = "0.5", default-features = false }
 crossterm = { version = "0.29", default-features = false }
 dhat = { version = "0.3", default-features = false }
@@ -70,7 +71,6 @@ open-editor = { version = "1", default-features = false }
 openai = { git = "https://github.com/JeanMertz/openai", branch = "tmp", default-features = false } # <https://github.com/rellfy/openai/pull/57>
 openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs", default-features = false } # <https://github.com/m1guelpf/openai-responses-rs/pull/6>
 paste = { version = "1", default-features = false }
-path-clean = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
 quick-xml = { version = "0.38", default-features = false }

@@ -6,8 +6,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use clean_path::Clean as _;
 use directories::ProjectDirs;
-use path_clean::PathClean as _;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 

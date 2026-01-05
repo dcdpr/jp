@@ -70,14 +70,14 @@ pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
 
     /// Return all the attachments handled by this handler.
     ///
-    /// The `cwd` parameter is the current working directory, and can be used to
+    /// The `root` parameter is the root working directory, and can be used to
     /// resolve relative paths.
     ///
     /// The `mcp_client` parameter is the MCP client to use for fetching
     /// resources from MCP servers, if needed.
     async fn get(
         &self,
-        cwd: &Path,
+        root: &Path,
         mcp_client: Client,
     ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>>;
 }

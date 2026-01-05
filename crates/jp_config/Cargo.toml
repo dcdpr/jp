@@ -15,6 +15,7 @@ version.workspace = true
 [dependencies]
 jp_id = { workspace = true }
 
+clean-path = { workspace = true }
 directories = { workspace = true }
 duct = { workspace = true }
 duct_sh = { workspace = true }
@@ -27,7 +28,6 @@ minijinja = { workspace = true, features = [
     "serde",
     "unicode",
 ] }
-path-clean = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 relative-path = { workspace = true, features = ["serde", "alloc", "std"] }
 schematic = { workspace = true, features = [

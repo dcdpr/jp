@@ -1,6 +1,7 @@
 use std::{borrow::Cow, collections::BTreeSet, error::Error, fs, path::Path};
 
 use async_trait::async_trait;
+use clean_path::Clean as _;
 use glob::Pattern;
 use ignore::{WalkBuilder, WalkState, overrides::OverrideBuilder};
 use jp_attachment::{
@@ -76,7 +77,7 @@ impl Handler for FileContent {
 
     async fn get(
         &self,
-        cwd: &Path,
+        root: &Path,
         _: Client,
     ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         debug!(id = self.scheme(), "Getting file attachment contents.");
@@ -94,24 +95,23 @@ impl Handler for FileContent {
         //
         // We also check if the path is a directory, as those will have to use
         // globbing and respect `.ignore` files.
-        let (includes, paths): (Vec<_>, Vec<_>) = self
-            .includes
-            .iter()
-            .partition(|p| p.as_str().contains(['*', '?', '[']) || cwd.join(p.as_str()).is_dir());
+        let (includes, paths): (Vec<_>, Vec<_>) = self.includes.iter().partition(|p| {
+            p.as_str().contains(['*', '?', '[']) || root.join(p.as_str()).clean().is_dir()
+        });
 
         attachments.extend(paths.into_iter().filter_map(|pattern| {
-            let pattern = sanitize_pattern(pattern.as_str(), cwd);
-            let path = cwd.join(pattern.as_ref());
-            build_attachment(&path, cwd)
+            let pattern = sanitize_pattern(pattern.as_str(), root);
+            let path = root.join(pattern.as_ref());
+            build_attachment(&path, root)
         }));
 
         if includes.is_empty() {
             return Ok(attachments);
         }
 
-        let mut builder = OverrideBuilder::new(cwd);
+        let mut builder = OverrideBuilder::new(root);
         for pattern in includes {
-            let pattern = sanitize_pattern(pattern.as_str(), cwd);
+            let pattern = sanitize_pattern(pattern.as_str(), root);
 
             // We are hiding hidden files or directories by default (see
             // `hidden(true)`). If you were to add a pattern such as
@@ -147,7 +147,7 @@ impl Handler for FileContent {
         let overrides = builder.build()?;
 
         let (tx, rx) = crossbeam_channel::unbounded();
-        WalkBuilder::new(cwd)
+        WalkBuilder::new(root)
             .standard_filters(false)
             .hidden(true)
             .overrides(overrides)
@@ -164,7 +164,7 @@ impl Handler for FileContent {
                         return WalkState::Continue;
                     }
 
-                    let Some(attachment) = build_attachment(path, cwd) else {
+                    let Some(attachment) = build_attachment(path, root) else {
                         return WalkState::Continue;
                     };
 
@@ -197,8 +197,8 @@ fn sanitize_pattern<'a>(mut pattern: &'a str, cwd: &Path) -> Cow<'a, str> {
     }
 }
 
-fn build_attachment(path: &Path, cwd: &Path) -> Option<Attachment> {
-    let Ok(rel) = path.strip_prefix(cwd) else {
+fn build_attachment(path: &Path, root: &Path) -> Option<Attachment> {
+    let Ok(rel) = path.strip_prefix(root) else {
         warn!(
             path = %path.display(),
             "Attachment path outside of working directory, skipping."
