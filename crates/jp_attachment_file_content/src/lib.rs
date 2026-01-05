@@ -76,7 +76,7 @@ impl Handler for FileContent {
 
     async fn get(
         &self,
-        root: &Path,
+        cwd: &Path,
         _: Client,
     ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         debug!(id = self.scheme(), "Getting file attachment contents.");
@@ -97,21 +97,21 @@ impl Handler for FileContent {
         let (includes, paths): (Vec<_>, Vec<_>) = self
             .includes
             .iter()
-            .partition(|p| p.as_str().contains(['*', '?', '[']) || root.join(p.as_str()).is_dir());
+            .partition(|p| p.as_str().contains(['*', '?', '[']) || cwd.join(p.as_str()).is_dir());
 
         attachments.extend(paths.into_iter().filter_map(|pattern| {
-            let pattern = sanitize_pattern(pattern.as_str(), root);
-            let path = root.join(pattern.as_ref());
-            build_attachment(&path, root)
+            let pattern = sanitize_pattern(pattern.as_str(), cwd);
+            let path = cwd.join(pattern.as_ref());
+            build_attachment(&path, cwd)
         }));
 
         if includes.is_empty() {
             return Ok(attachments);
         }
 
-        let mut builder = OverrideBuilder::new(root);
+        let mut builder = OverrideBuilder::new(cwd);
         for pattern in includes {
-            let pattern = sanitize_pattern(pattern.as_str(), root);
+            let pattern = sanitize_pattern(pattern.as_str(), cwd);
 
             // We are hiding hidden files or directories by default (see
             // `hidden(true)`). If you were to add a pattern such as
@@ -147,7 +147,7 @@ impl Handler for FileContent {
         let overrides = builder.build()?;
 
         let (tx, rx) = crossbeam_channel::unbounded();
-        WalkBuilder::new(root)
+        WalkBuilder::new(cwd)
             .standard_filters(false)
             .hidden(true)
             .overrides(overrides)
@@ -164,7 +164,7 @@ impl Handler for FileContent {
                         return WalkState::Continue;
                     }
 
-                    let Some(attachment) = build_attachment(path, root) else {
+                    let Some(attachment) = build_attachment(path, cwd) else {
                         return WalkState::Continue;
                     };
 
