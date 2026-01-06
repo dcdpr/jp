@@ -872,6 +872,9 @@ pub enum RunMode {
 
     /// Open an editor to edit the tool call before running it.
     Edit,
+
+    /// Skip running the tool.
+    Skip,
 }
 
 /// How to deliver the results of the tool to the assistant.
@@ -887,6 +890,9 @@ pub enum ResultMode {
 
     /// Open an editor to edit the tool call result before delivering it.
     Edit,
+
+    /// Skip delivering the results of the tool call.
+    Skip,
 }
 
 /// Tool configuration with global defaults.

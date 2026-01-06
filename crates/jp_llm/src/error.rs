@@ -152,6 +152,9 @@ pub enum ToolError {
         error: serde_json::Error,
     },
 
+    #[error("Tool call failed: {0}")]
+    ToolCallFailed(String),
+
     #[error("Failed to open editor to edit tool call")]
     OpenEditorError {
         arguments: serde_json::Value,
@@ -182,6 +185,9 @@ pub enum ToolError {
 
     #[error("Needs input: {question:?}")]
     NeedsInput { question: jp_tool::Question },
+
+    #[error("Skipped tool execution")]
+    Skipped { reason: Option<String> },
 
     #[error("Serialization error")]
     Serde(#[from] serde_json::Error),
