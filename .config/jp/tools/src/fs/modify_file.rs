@@ -18,7 +18,10 @@ use serde_json::{Map, Value};
 use similar::{ChangeTag, TextDiff, udiff::UnifiedDiff};
 
 use super::utils::is_file_dirty;
-use crate::{Context, Error};
+use crate::{
+    Context, Error,
+    util::{ToolResult, error, fail},
+};
 
 pub struct Change {
     pub path: PathBuf,
@@ -112,23 +115,23 @@ pub(crate) async fn fs_modify_file(
     string_to_replace: String,
     new_string: String,
     replace_using_regex: bool,
-) -> std::result::Result<Outcome, Error> {
+) -> ToolResult {
     if string_to_replace == new_string {
-        return Err("String to replace is the same as the new string.".into());
+        return error("String to replace is the same as the new string.");
     }
 
     let p = PathBuf::from(&path);
 
     if p.is_absolute() {
-        return Err("Path must be relative.".into());
+        return error("Path must be relative.");
     }
 
     if p.iter().any(|c| c.len() > 30) {
-        return Err("Individual path components must be less than 30 characters long.".into());
+        return error("Individual path components must be less than 30 characters long.");
     }
 
     if p.iter().count() > 20 {
-        return Err("Path must be less than 20 components long.".into());
+        return error("Path must be less than 20 components long.");
     }
 
     let absolute_path = ctx.root.join(path.trim_start_matches('/'));
@@ -137,15 +140,15 @@ pub(crate) async fn fs_modify_file(
     for entry in glob::glob(&absolute_path.to_string_lossy())? {
         let entry = entry?;
         if !entry.exists() {
-            return Err("File does not exist.".into());
+            return error("File does not exist.");
         }
 
         if !entry.is_file() {
-            return Err("Path is not a regular file.".into());
+            return error("Path is not a regular file.");
         }
 
         let Ok(path) = entry.strip_prefix(&ctx.root) else {
-            return Err("Path is not within workspace root.".into());
+            return fail("Path is not within workspace root.");
         };
 
         let before = fs::read_to_string(&entry)?;
@@ -190,23 +193,23 @@ pub(crate) async fn fs_modify_file(
     }
 
     if ctx.format_parameters {
-        Ok(format_changes(changes, &ctx.root).into())
+        Ok(format_changes(changes).into())
     } else {
         apply_changes(changes, &ctx.root, answers)
     }
 }
 
-fn format_changes(changes: Vec<Change>, root: &Path) -> String {
+fn format_changes(changes: Vec<Change>) -> String {
     changes
         .into_iter()
         .map(|change| {
-            let path = root.join(change.path.to_string_lossy().trim_start_matches('/'));
+            let path = change.path.to_string_lossy();
 
             let diff = text_diff(&change.before, &change.after);
-            let unified = unified_diff(&diff, &path.display().to_string());
+            let unified = unified_diff(&diff, &path);
             let colored = colored_diff(&diff, &unified);
 
-            format!("{}:\n\n```diff\n{colored}\n```", path.display())
+            format!("{path}:\n\n```diff\n{colored}\n```")
         })
         .collect::<Vec<_>>()
         .join("\n\n")
