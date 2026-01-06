@@ -167,12 +167,7 @@ impl StreamEventHandler {
                             };
 
                             self.tool_call_responses.push(response.clone());
-                            return build_tool_call_response(
-                                &cfg.style,
-                                &response,
-                                &tool_config,
-                                handler,
-                            );
+                            return Ok(None);
                         }
                     }
                 }
@@ -204,6 +199,20 @@ impl StreamEventHandler {
                 Ok(result) => {
                     self.tool_call_responses.push(result.clone());
                     return build_tool_call_response(&cfg.style, &result, &tool_config, handler);
+                }
+                Err(ToolError::Skipped { reason }) => {
+                    self.tool_call_responses.push(ToolCallResponse {
+                        id: call.id.clone(),
+                        result: {
+                            let mut msg = "Tool execution skipped by user.".to_string();
+                            if let Some(reason) = reason {
+                                msg.push_str(&format!("\n\n{reason}"));
+                            }
+                            Ok(msg)
+                        },
+                    });
+
+                    return Ok(None);
                 }
                 Err(ToolError::NeedsInput { question }) => {
                     // Check answers in priority order:
@@ -353,7 +362,9 @@ fn build_tool_call_response(
         _ => content.lines().count(),
     };
 
-    if handler.render_tool_calls {
+    if handler.render_tool_calls
+        && !matches!(tool_config.style().inline_results, InlineResults::Off)
+    {
         let mut intro = "\nTool call result".to_owned();
         match tool_config.style().inline_results {
             InlineResults::Truncate(TruncateLines { lines }) if lines < content.lines().count() => {
