@@ -10,17 +10,59 @@ pub enum Outcome {
     /// The tool succeeded and produced content.
     Success { content: String },
 
+    /// The tool failed with an error.
+    Error {
+        /// The error message.
+        message: String,
+
+        /// The error trace.
+        trace: Vec<String>,
+
+        /// Whether the error is transient and can be retried.
+        transient: bool,
+    },
+
     /// The tool requires additional input before it can complete the request.
     NeedsInput { question: Question },
 }
 
 impl Outcome {
+    #[must_use]
+    pub fn error(error: &(dyn std::error::Error + Send + Sync)) -> Self {
+        Self::error_with_transient(error, true)
+    }
+
+    #[must_use]
+    pub fn fail(error: &(dyn std::error::Error + Send + Sync)) -> Self {
+        Self::error_with_transient(error, false)
+    }
+
+    #[must_use]
+    pub fn error_with_transient(
+        error: &(dyn std::error::Error + Send + Sync),
+        transient: bool,
+    ) -> Self {
+        let message = error.to_string();
+        let mut trace = vec![];
+        let mut source = error.source();
+        while let Some(error) = source {
+            trace.push(format!("{error:#}"));
+            source = error.source();
+        }
+
+        Outcome::Error {
+            message,
+            trace,
+            transient,
+        }
+    }
+
     /// Returns the content of the outcome if it is a success.
     #[must_use]
     pub fn into_content(self) -> Option<String> {
         match self {
             Outcome::Success { content } => Some(content),
-            Outcome::NeedsInput { .. } => None,
+            Outcome::NeedsInput { .. } | Outcome::Error { .. } => None,
         }
     }
 }
