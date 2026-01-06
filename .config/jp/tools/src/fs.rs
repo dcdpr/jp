@@ -22,14 +22,15 @@ pub async fn run(ctx: Context, t: Tool) -> std::result::Result<Outcome, Error> {
             .and_then(to_xml)
             .map(Into::into),
 
-        "read_file" => fs_read_file(
-            ctx.root,
-            t.req("path")?,
-            t.opt("start_line")?,
-            t.opt("end_line")?,
-        )
-        .await
-        .map(Into::into),
+        "read_file" => {
+            fs_read_file(
+                ctx.root,
+                t.req("path")?,
+                t.opt("start_line")?,
+                t.opt("end_line")?,
+            )
+            .await
+        }
 
         "grep_files" => fs_grep_files(
             ctx.root,
@@ -49,9 +50,7 @@ pub async fn run(ctx: Context, t: Tool) -> std::result::Result<Outcome, Error> {
         .await
         .map(Into::into),
 
-        "create_file" => {
-            fs_create_file(ctx.root, &t.answers, t.req("path")?, t.opt("content")?).await
-        }
+        "create_file" => fs_create_file(ctx, &t.answers, t.req("path")?, t.opt("content")?).await,
 
         "delete_file" => fs_delete_file(ctx.root, &t.answers, t.req("path")?).await,
 

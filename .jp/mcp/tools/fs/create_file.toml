@@ -6,6 +6,11 @@ description = """
 Create a new file in the project's local filesystem.
 """
 
+[conversation.tools.fs_create_file.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "off"
+results_file_link = "off"
+
 [conversation.tools.fs_create_file.parameters.path]
 type = "string"
 required = true

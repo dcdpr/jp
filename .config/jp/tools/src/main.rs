@@ -16,16 +16,16 @@ async fn main() {
         Err(error) => return println!("{error}"),
     };
 
-    let format_parameters = context.format_parameters;
     let name = tool.name.clone();
-    match run(context, tool).await {
-        Ok(Outcome::Success { content }) if format_parameters => println!("{content}"),
-        Ok(outcome) => match serde_json::to_string(&outcome) {
-            Ok(content) => println!("{content}"),
-            Err(error) => handle_error(&error, &name),
-        },
-        Err(error) => handle_error(error.as_ref(), &name),
-    }
+    let result = run(context, tool)
+        .await
+        .unwrap_or_else(|error| error_outcome(error.as_ref(), &name));
+
+    let json = serde_json::to_string(&result).unwrap_or_else(|error| {
+        format!(r#"{{"type":"error","message":"Unable to serialize result: {error}","trace":[],"transient":false}}"#)
+    });
+
+    println!("{json}");
 }
 
 fn input<T: serde::de::DeserializeOwned>(index: usize, name: &str) -> Result<T, String> {
@@ -45,19 +45,17 @@ fn input<T: serde::de::DeserializeOwned>(index: usize, name: &str) -> Result<T, 
         .map_err(|error| format!("```json\n{error:#}\n```"))
 }
 
-fn handle_error(error: &dyn std::error::Error, name: &str) {
-    let mut sources = vec![];
+fn error_outcome(error: &dyn std::error::Error, name: &str) -> Outcome {
+    let mut trace = vec![];
     let mut source = Some(error);
     while let Some(error) = source {
-        sources.push(format!("{error:#}"));
+        trace.push(format!("{error:#}"));
         source = error.source();
     }
 
-    println!(
-        "```json\n{:#}\n```",
-        json!({
-            "error": format!("An error occurred while running the '{name}' tool."),
-            "trace": sources,
-        })
-    );
+    Outcome::Error {
+        message: format!("An error occurred while running the '{name}' tool."),
+        trace,
+        transient: true,
+    }
 }

@@ -1,18 +1,18 @@
 use std::{ffi::OsStr, path::PathBuf};
 
-use crate::Error;
+use crate::util::{ToolResult, error};
 
 pub(crate) async fn fs_read_file(
     root: PathBuf,
     path: String,
     start_line: Option<usize>,
     end_line: Option<usize>,
-) -> std::result::Result<String, Error> {
+) -> ToolResult {
     let absolute_path = root.join(path.trim_start_matches('/'));
     if !absolute_path.exists() {
-        return Err("File not found.".into());
+        return error("File not found.");
     } else if !absolute_path.is_file() {
-        return Err("Path is not a file.".into());
+        return error("Path is not a file.");
     }
 
     let ext = absolute_path
@@ -36,5 +36,6 @@ pub(crate) async fn fs_read_file(
         ```{ext}
         {contents}
         ```
-    "})
+    "}
+    .into())
 }

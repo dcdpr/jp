@@ -1,4 +1,17 @@
+use jp_tool::Outcome;
 use serde::{Deserialize, Serialize};
+
+pub type ToolResult = std::result::Result<Outcome, Box<dyn std::error::Error + Send + Sync>>;
+
+#[expect(clippy::unnecessary_wraps)]
+pub fn error(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> ToolResult {
+    Ok(Outcome::error(error.into().as_ref()))
+}
+
+#[expect(clippy::unnecessary_wraps)]
+pub fn fail(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> ToolResult {
+    Ok(Outcome::fail(error.into().as_ref()))
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]

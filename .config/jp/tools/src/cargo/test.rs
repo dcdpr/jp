@@ -29,8 +29,7 @@ pub(crate) async fn cargo_test(
         "nextest",
         "run",
         package,
-        // Twice to silence Cargo completely.
-        "--cargo-quiet",
+        // Once to still print any compilation errors.
         "--cargo-quiet",
         // Run all tests, even if one fails.
         "--no-fail-fast",
@@ -92,7 +91,8 @@ pub(crate) async fn cargo_test(
 
     if ran_tests == 0 {
         return Err(format!(
-            "Unable to find any tests. Are the package and test name correct?\n\n{stderr}"
+            "Unable to run any tests. This can be due to compilation issues, or incorrect package \
+             or test name:\n\n{stderr}"
         ))?;
     }
 

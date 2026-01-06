@@ -2,12 +2,16 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-style.parameters = "just serve-tools {{context}} {{tool}}"
 description = """
 Modify one or more files in the project's local filesystem.
 
 The files must exist, be a regular file, and have no uncommitted changes.
 """
+
+[conversation.tools.fs_modify_file.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "off"
+results_file_link = "off"
 
 [conversation.tools.fs_modify_file.parameters.path]
 required = true
