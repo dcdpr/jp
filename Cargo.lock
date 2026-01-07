@@ -2204,7 +2204,6 @@ dependencies = [
  "comfy-table",
  "crossterm",
  "jp_conversation",
- "jp_id",
  "time",
  "timeago",
 ]
