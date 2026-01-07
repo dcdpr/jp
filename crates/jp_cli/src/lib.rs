@@ -76,7 +76,7 @@ pub struct RootOpts {
     pub threads: Option<NonZeroUsize>,
 }
 
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 struct Globals {
     /// Override a configuration value for the duration of the command.
     #[arg(

@@ -42,6 +42,7 @@ use jp_workspace::Workspace;
 use minijinja::{Environment, UndefinedBehavior};
 use response_handler::ResponseHandler;
 use serde_json::Value;
+use time::UtcDateTime;
 use tracing::{debug, error, info, trace, warn};
 
 use super::{Output, attachment::register_attachment};
@@ -273,9 +274,10 @@ impl Query {
     pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
+        let now = ctx.now();
         let cfg = ctx.config();
 
-        let previous_id = self.update_active_conversation(&mut ctx.workspace, cfg.clone())?;
+        let previous_id = self.update_active_conversation(&mut ctx.workspace, cfg.clone(), now)?;
         let conversation_id = ctx.workspace.active_conversation_id();
         if let Some(delta) = get_config_delta_from_cli(&cfg, &ctx.workspace, &conversation_id)? {
             ctx.workspace
@@ -487,6 +489,7 @@ impl Query {
         &self,
         ws: &mut Workspace,
         cfg: Arc<AppConfig>,
+        now: UtcDateTime,
     ) -> Result<ConversationId> {
         // Store the (old) active conversation ID, so that we can restore to it,
         // if the current conversation is aborted early (e.g. because of an
@@ -517,7 +520,7 @@ impl Query {
                 "Creating new active conversation due to --new flag."
             );
 
-            ws.set_active_conversation_id(id)?;
+            ws.set_active_conversation_id(id, now)?;
         }
 
         Ok(last_active_conversation_id)
@@ -1313,7 +1316,7 @@ fn cleanup(
     info!("Query is empty, exiting.");
     if last_active_conversation_id != conversation_id {
         ctx.workspace
-            .set_active_conversation_id(last_active_conversation_id)?;
+            .set_active_conversation_id(last_active_conversation_id, ctx.now())?;
         ctx.workspace.remove_conversation(&conversation_id)?;
     }
 

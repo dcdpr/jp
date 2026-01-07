@@ -34,7 +34,11 @@ impl Use {
             return Ok(format!("Already active conversation: {id_fmt}").into());
         }
 
-        if ctx.workspace.set_active_conversation_id(id).is_err() {
+        if ctx
+            .workspace
+            .set_active_conversation_id(id, ctx.now())
+            .is_err()
+        {
             Err((1, format!("Conversation not found: {}", id_fmt.red())))?;
         }
 

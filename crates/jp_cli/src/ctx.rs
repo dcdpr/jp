@@ -7,6 +7,7 @@ use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
 use jp_mcp::id::{McpServerId, McpToolId};
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
+use time::UtcDateTime;
 use tokio::{
     runtime::{Handle, Runtime},
     task::JoinSet,
@@ -33,6 +34,9 @@ pub(crate) struct Ctx {
     pub(crate) signals: SignalPair,
 
     runtime: Runtime,
+
+    #[cfg(test)]
+    pub(crate) stubbed_now: UtcDateTime,
 }
 
 pub(crate) struct Term {
@@ -68,7 +72,26 @@ impl Ctx {
             task_handler: TaskHandler::default(),
             signals: SignalPair::new(&runtime),
             runtime,
+
+            #[cfg(test)]
+            stubbed_now: UtcDateTime::UNIX_EPOCH,
         }
+    }
+
+    #[cfg(not(test))]
+    #[expect(clippy::unused_self)]
+    pub(crate) fn now(&self) -> UtcDateTime {
+        UtcDateTime::now()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn now(&self) -> UtcDateTime {
+        self.stubbed_now
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_now(&mut self, now: UtcDateTime) {
+        self.stubbed_now = now;
     }
 
     /// Get immutable access to the configuration.
@@ -157,13 +180,5 @@ pub(crate) trait IntoPartialAppConfig {
         merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         Ok(partial)
-    }
-}
-
-impl Drop for Ctx {
-    fn drop(&mut self) {
-        if let Err(err) = self.workspace.persist() {
-            eprintln!("Failed to persist workspace: {err}");
-        }
     }
 }

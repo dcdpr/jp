@@ -85,6 +85,13 @@ impl Conversation {
         self.expires_at = ephemeral;
         self
     }
+
+    /// Sets the last activated at timestamp.
+    #[must_use]
+    pub const fn with_last_activated_at(mut self, last_activated_at: UtcDateTime) -> Self {
+        self.last_activated_at = last_activated_at;
+        self
+    }
 }
 
 /// ID wrapper for Conversation

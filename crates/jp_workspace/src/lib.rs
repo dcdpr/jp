@@ -23,6 +23,7 @@ use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::Storage;
 use jp_tombmap::{Mut, TombMap};
 use state::{LocalState, State, UserState};
+use time::UtcDateTime;
 use tracing::{debug, info, trace, warn};
 
 const APPLICATION: &str = "jp";
@@ -127,6 +128,7 @@ impl Workspace {
 
         self.storage = self
             .storage
+            .take()
             .map(|storage| storage.with_user_storage(&root, name, id))
             .transpose()?;
 
@@ -226,6 +228,8 @@ impl Workspace {
     }
 
     /// Persists the current in-memory workspace state back to disk atomically.
+    ///
+    /// This is a no-op if persistence is disabled.
     pub fn persist(&mut self) -> Result<()> {
         if self.disable_persistence {
             trace!("Persistence disabled, skipping.");
@@ -235,7 +239,9 @@ impl Workspace {
         trace!("Persisting state.");
 
         let active_id = self.active_conversation_id();
-        let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
+        let Some(storage) = self.storage.as_mut() else {
+            return Ok(());
+        };
 
         storage.persist_conversations_metadata(&self.state.user.conversations_metadata)?;
         storage.persist_conversations_and_events(
@@ -264,7 +270,14 @@ impl Workspace {
     }
 
     /// Sets the active conversation ID (in memory).
-    pub fn set_active_conversation_id(&mut self, id: ConversationId) -> Result<()> {
+    ///
+    /// The old active conversation is either moved to the end of the list of
+    /// non-active conversations, or removed entirely, if it has no events.
+    pub fn set_active_conversation_id(
+        &mut self,
+        id: ConversationId,
+        activation_timestamp: UtcDateTime,
+    ) -> Result<()> {
         // Remove the new active conversation from the list of conversations,
         // returning an error if it doesn't exist.
         let new_active_conversation = self
@@ -273,7 +286,8 @@ impl Workspace {
             .conversations
             .remove(&id)
             .and_then(|mut v| v.take())
-            .ok_or(Error::not_found("Conversation", &id))?;
+            .ok_or(Error::not_found("Conversation", &id))?
+            .with_last_activated_at(activation_timestamp);
 
         // Replace the active conversation with the new one.
         let old_active_conversation = std::mem::replace(
@@ -301,7 +315,9 @@ impl Workspace {
             .and_then(|v| v.get())
             .is_some_and(|v| !v.is_empty())
         {
-            // Guaranteed to not be initialized.
+            // Guaranteed to not be initialized, because this conversation ID
+            // was previously stored in the `active_conversation_id` field, not
+            // in the `conversations` map.
             let _err = self
                 .state
                 .local
@@ -405,8 +421,16 @@ impl Workspace {
         conversation: Conversation,
         config: Arc<AppConfig>,
     ) -> ConversationId {
-        let id = ConversationId::default();
+        self.create_conversation_with_id(ConversationId::default(), conversation, config)
+    }
 
+    /// Creates a new conversation with the given ID.
+    pub fn create_conversation_with_id(
+        &mut self,
+        id: ConversationId,
+        conversation: Conversation,
+        config: Arc<AppConfig>,
+    ) -> ConversationId {
         // This can only fail if `ConversationId::default()` is called multiple
         // times within the same nanosecond, which is highly unlikely, and not
         // an issue if it does happen.
@@ -427,7 +451,7 @@ impl Workspace {
             .entry(id)
             .insert_entry(OnceCell::new())
             .get_mut()
-            .set(ConversationStream::new(config));
+            .set(ConversationStream::new(config).with_created_at(id.timestamp()));
         id
     }
 
@@ -516,6 +540,14 @@ impl Workspace {
     #[must_use]
     pub fn id(&self) -> &Id {
         &self.id
+    }
+}
+
+impl Drop for Workspace {
+    fn drop(&mut self) {
+        if let Err(err) = self.persist() {
+            eprintln!("Failed to persist workspace: {err}");
+        }
     }
 }
 
@@ -718,7 +750,9 @@ mod tests {
             Conversation::default(),
             AppConfig::from_partial(partial).unwrap().into(),
         );
-        workspace.set_active_conversation_id(id).unwrap();
+        workspace
+            .set_active_conversation_id(id, UtcDateTime::UNIX_EPOCH)
+            .unwrap();
         assert!(!storage.exists());
 
         assert_eq!(workspace.persist(), Err(Error::MissingStorage));
