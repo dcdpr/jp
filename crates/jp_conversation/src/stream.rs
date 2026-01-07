@@ -130,7 +130,7 @@ pub struct ConversationStream {
     events: Vec<InternalEvent>,
 
     /// The timestamp of the creation of the stream.
-    created_at: UtcDateTime,
+    pub created_at: UtcDateTime,
 }
 
 impl ConversationStream {
@@ -176,6 +176,12 @@ impl ConversationStream {
             .iter()
             .filter(|e| matches!(e, InternalEvent::Event(_)))
             .count()
+    }
+
+    /// Return the base configuration for the stream.
+    #[must_use]
+    pub fn base_config(&self) -> Arc<AppConfig> {
+        self.base_config.clone()
     }
 
     /// Get the merged configuration of the stream.
@@ -426,6 +432,16 @@ impl ConversationStream {
                     .map(|event| ConversationEventWithConfig { event, config })
             });
         }
+    }
+
+    /// Retains only the [`ConversationEvent`]s that pass the predicate.
+    ///
+    /// This does NOT remove the [`ConfigDelta`]s.
+    pub fn retain(&mut self, mut f: impl FnMut(&ConversationEvent) -> bool) {
+        self.events.retain(|event| match event {
+            InternalEvent::ConfigDelta(_) => true,
+            InternalEvent::Event(event) => f(event),
+        });
     }
 
     /// Clears the stream of any events, leaving the base configuration intact.

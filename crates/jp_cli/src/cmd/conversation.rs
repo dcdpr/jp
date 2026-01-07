@@ -2,6 +2,7 @@ use super::Output;
 use crate::ctx::Ctx;
 
 mod edit;
+mod fork;
 mod ls;
 mod rm;
 mod show;
@@ -21,6 +22,7 @@ impl Conversation {
             Commands::List(args) => args.run(ctx),
             Commands::Use(args) => args.run(ctx),
             Commands::Edit(args) => args.run(ctx).await,
+            Commands::Fork(args) => args.run(ctx),
         }
     }
 }
@@ -46,4 +48,7 @@ enum Commands {
     /// Edit conversation details.
     #[command(name = "edit")]
     Edit(edit::Edit),
+
+    /// Fork a conversation.
+    Fork(fork::Fork),
 }

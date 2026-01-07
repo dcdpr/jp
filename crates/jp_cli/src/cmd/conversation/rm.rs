@@ -107,7 +107,8 @@ fn remove(ctx: &mut Ctx, id: ConversationId, force: bool) -> Output {
                     .create_conversation(Conversation::default(), ctx.config())
             });
 
-        ctx.workspace.set_active_conversation_id(new_active_id)?;
+        ctx.workspace
+            .set_active_conversation_id(new_active_id, ctx.now())?;
     }
 
     if let Err(err) = ctx.workspace.remove_conversation(&id) {
