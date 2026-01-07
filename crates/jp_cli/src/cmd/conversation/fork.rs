@@ -75,10 +75,6 @@ impl Fork {
             .try_get_events_mut(&new_id)?
             .extend(new_events);
 
-        // TODO:
-        // 2. Then fork the current active conversation
-        // 3. Then ask LLM to implement `Printer` struct
-
         if self.activate {
             ctx.workspace.set_active_conversation_id(new_id, now)?;
         }
