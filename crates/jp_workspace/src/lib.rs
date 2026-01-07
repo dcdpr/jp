@@ -755,7 +755,8 @@ mod tests {
             .unwrap();
         assert!(!storage.exists());
 
-        assert_eq!(workspace.persist(), Err(Error::MissingStorage));
+        // Persisting without a storage should be a no-op.
+        workspace.persist().unwrap();
 
         let mut workspace = workspace.persisted_at(&storage).unwrap();
         workspace.persist().unwrap();
