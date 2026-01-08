@@ -15,7 +15,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 pub async fn run(ctx: Context, t: Tool) -> Result<Outcome> {
     match t.name.as_str() {
-        s if s.starts_with("cargo_") => cargo::run(ctx, t).await.map(Into::into),
+        s if s.starts_with("cargo_") => cargo::run(ctx, t).await,
         s if s.starts_with("github_") => github::run(ctx, t).await.map(Into::into),
         s if s.starts_with("fs_") => fs::run(ctx, t).await,
         s if s.starts_with("web_") => web::run(ctx, t).await.map(Into::into),
