@@ -1,9 +1,9 @@
 use duct::cmd;
 use jp_tool::Context;
 
-use crate::Result;
+use crate::util::{ToolResult, error};
 
-pub(crate) async fn cargo_check(ctx: &Context, package: Option<String>) -> Result<String> {
+pub(crate) async fn cargo_check(ctx: &Context, package: Option<String>) -> ToolResult {
     let package = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
     let result = cmd!(
         "cargo",
@@ -23,12 +23,11 @@ pub(crate) async fn cargo_check(ctx: &Context, package: Option<String>) -> Resul
 
     let code = result.status.code().unwrap_or(0);
     if code != 0 {
-        return Err(format!(
+        return error(format!(
             "Cargo command failed ({}): {}",
             result.status.code().unwrap_or(1),
             String::from_utf8_lossy(&result.stderr)
-        )
-        .into());
+        ));
     }
 
     let content = String::from_utf8_lossy(&result.stderr);
@@ -38,13 +37,14 @@ pub(crate) async fn cargo_check(ctx: &Context, package: Option<String>) -> Resul
     let content = content.trim();
 
     if content.is_empty() {
-        Ok("Check succeeded. No warnings or errors found.".to_owned())
+        Ok("Check succeeded. No warnings or errors found.".into())
     } else {
         Ok(indoc::formatdoc! {"
         ```
         {content}
         ```
-    "})
+    "}
+        .into())
     }
 }
 
@@ -79,7 +79,7 @@ mod tests {
 
         let result = cargo_check(&ctx, None).await.unwrap();
 
-        assert_eq!(result, indoc::indoc! {r#"
+        assert_eq!(result.into_content().unwrap(), indoc::indoc! {r#"
             ```
             warning: unused `std::result::Result` that must be used
              --> src/main.rs:2:5

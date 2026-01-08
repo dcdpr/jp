@@ -157,29 +157,14 @@ pub(crate) async fn fs_modify_file(
         let after = if replace_using_regex {
             contents.replace_using_regexp(&string_to_replace, &new_string)?
         } else {
-            let (start_byte, mut end_byte) = contents
+            let (start_byte, end_byte) = contents
                 .find_pattern_range(&string_to_replace)
                 .ok_or("Cannot find pattern to replace")?;
-
-            // Check if pattern is followed by a newline
-            let followed_by_newline =
-                end_byte < contents.len() && contents.as_bytes()[end_byte] == b'\n';
-
-            // If followed by newline, consume it
-            if followed_by_newline {
-                end_byte += 1;
-            }
 
             // Replace the pattern with new string
             let mut new_content = String::new();
             new_content.push_str(&contents[..start_byte]);
             new_content.push_str(&new_string);
-
-            // If we consumed a newline but replacement doesn't end with one, add it
-            // back
-            if followed_by_newline && !new_string.ends_with('\n') {
-                new_content.push('\n');
-            }
 
             new_content.push_str(&contents[end_byte..]);
             new_content
@@ -517,6 +502,73 @@ mod tests {
         .map_err(|e| e.to_string());
 
         assert_eq!(&fs::read_to_string(&absolute_file_path).unwrap(), result,);
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_issue_with_newlines_at_end() {
+        let string_to_replace = "use crossterm::style::Stylize as _;\nuse inquire::Confirm;\nuse \
+                                 jp_conversation::{Conversation, ConversationId, \
+                                 ConversationStream};\nuse \
+                                 jp_format::conversation::DetailsFmt;\nuse jp_printer::Printable \
+                                 as _;\n\nuse crate::{Output, cmd::Success, ctx::Ctx};\n";
+
+        let new_string = "use crossterm::style::Stylize as _;\nuse inquire::Confirm;\nuse \
+                          jp_conversation::{Conversation, ConversationId, \
+                          ConversationStream};\nuse jp_format::conversation::DetailsFmt;\n\nuse \
+                          crate::{Output, cmd::Success, ctx::Ctx};\n";
+
+        let source = indoc! {"
+            use crossterm::style::Stylize as _;
+            use inquire::Confirm;
+            use jp_conversation::{Conversation, ConversationId, ConversationStream};
+            use jp_format::conversation::DetailsFmt;
+            use jp_printer::Printable as _;
+
+            use crate::{Output, cmd::Success, ctx::Ctx};
+
+            #[derive(Debug, clap::Args)]
+            pub(crate) struct Rm {
+                /// Conversation IDs to remove."};
+
+        let result = indoc! {"
+            use crossterm::style::Stylize as _;
+            use inquire::Confirm;
+            use jp_conversation::{Conversation, ConversationId, ConversationStream};
+            use jp_format::conversation::DetailsFmt;
+
+            use crate::{Output, cmd::Success, ctx::Ctx};
+
+            #[derive(Debug, clap::Args)]
+            pub(crate) struct Rm {
+                /// Conversation IDs to remove."};
+
+        // Create root directory.
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path().to_path_buf();
+
+        // Create file to be modified.
+        let file_path = "test.txt";
+        let absolute_file_path = root.join(file_path);
+        fs::write(&absolute_file_path, source).unwrap();
+
+        let ctx = Context {
+            root,
+            format_parameters: false,
+        };
+
+        let _actual = fs_modify_file(
+            ctx,
+            &Map::new(),
+            file_path.to_owned(),
+            string_to_replace.to_owned(),
+            new_string.to_owned(),
+            false,
+        )
+        .await
+        .map_err(|e| e.to_string());
+
+        assert_eq!(&fs::read_to_string(&absolute_file_path).unwrap(), result);
     }
 
     #[tokio::test]
