@@ -115,6 +115,7 @@ impl StreamEventHandler {
         turn_state: &mut TurnState,
         call: ToolCallRequest,
         handler: &mut ResponseHandler,
+        writer: &mut dyn Write,
     ) -> Result<Option<String>, Error> {
         let Some(tool_config) = cfg.conversation.tools.get(&call.name) else {
             return Err(Error::NotFound("tool", call.name.clone()));
@@ -173,13 +174,9 @@ impl StreamEventHandler {
                 }
             };
 
-            handler.handle(
-                &format!("\nCalling tool **{}**", tool.name),
-                &cfg.style,
-                false,
-            )?;
-            handler.handle(&args, &cfg.style, raw)?;
-            handler.handle("\n\n", &cfg.style, false)?;
+            write!(writer, "\n\nCalling tool **{}**", tool.name)?;
+            write!(writer, "{args}")?;
+            write!(writer, "\n\n")?;
         }
 
         let mut answers = IndexMap::new();
@@ -193,6 +190,7 @@ impl StreamEventHandler {
                     tool_config.clone(),
                     &root,
                     editor.as_deref(),
+                    writer,
                 )
                 .await
             {

@@ -8,7 +8,7 @@ use termimad::FmtText;
 use super::{Line, LineVariant, RenderMode};
 use crate::Error;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct ResponseHandler {
     /// How to render the response.
     pub render_mode: RenderMode,
@@ -18,6 +18,8 @@ pub(super) struct ResponseHandler {
 
     /// The streamed, unprocessed lines received from the LLM.
     received: Vec<String>,
+
+    pub printer: Arc<Printer>,
 
     /// The lines that have been parsed so far.
     ///
@@ -40,11 +42,18 @@ pub(super) struct ResponseHandler {
 }
 
 impl ResponseHandler {
-    pub fn new(render_mode: RenderMode, render_tool_calls: bool) -> Self {
+    pub fn new(render_mode: RenderMode, render_tool_calls: bool, printer: Arc<Printer>) -> Self {
         Self {
             render_mode,
             render_tool_calls,
-            ..Default::default()
+            printer,
+            received: vec![],
+            parsed: vec![],
+            buffer: String::new(),
+            in_fenced_code_block: false,
+            code_buffer: (None, vec![]),
+            code_line: 0,
+            last_fenced_code_block_end: (0, 0),
         }
     }
 
@@ -62,16 +71,6 @@ impl ResponseHandler {
         self.handle_inner(line, style)
     }
 
-    pub fn handle(&mut self, data: &str, style: &StyleConfig, raw: bool) -> Result<(), Error> {
-        self.buffer.push_str(data);
-
-        while let Some(line) = self.get_line(raw) {
-            self.handle_inner(line, style)?;
-        }
-
-        Ok(())
-    }
-
     fn handle_inner(&mut self, line: Line, style: &StyleConfig) -> Result<(), Error> {
         let Line { content, variant } = line;
         self.received.push(content);
@@ -79,12 +78,12 @@ impl ResponseHandler {
         let delay = match variant {
             LineVariant::Code => style.typewriter.code_delay.into(),
             LineVariant::Raw => Duration::ZERO,
-            _ => style.typewriter.text_delay.into(),
+            LineVariant::Normal => style.typewriter.text_delay.into(),
         };
 
         let lines = self.handle_line(&variant, style)?;
         if !matches!(self.render_mode, RenderMode::Buffered) {
-            stdout::typewriter(&lines.join("\n"), delay)?;
+            self.printer.print(lines.join("\n").typewriter(delay));
         }
 
         self.parsed.extend(lines);

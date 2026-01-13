@@ -97,6 +97,7 @@ impl ToolDefinition {
         config: ToolConfigWithDefaults,
         root: &Path,
         editor: Option<&Path>,
+        writer: &mut dyn Write,
     ) -> Result<ToolCallResponse, ToolError> {
         info!(tool = %self.name, arguments = ?arguments, "Calling tool.");
 
@@ -117,6 +118,7 @@ impl ToolDefinition {
                 config.source(),
                 mcp_client,
                 editor,
+                writer,
             )
             .await?;
         }
@@ -139,7 +141,7 @@ impl ToolDefinition {
         };
 
         trace!(result = ?result, "Tool call completed.");
-        self.prepare_result(result, result_mode, editor)
+        self.prepare_result(result, result_mode, editor, writer)
     }
 
     fn call_local(
@@ -268,6 +270,7 @@ impl ToolDefinition {
         source: &ToolSource,
         mcp_client: &jp_mcp::Client,
         editor: Option<&Path>,
+        writer: &mut dyn Write,
     ) -> Result<(), ToolError> {
         match run_mode {
             RunMode::Ask => match InlineSelect::new(
@@ -319,7 +322,7 @@ impl ToolDefinition {
                     InlineOption::new('p', "Print raw tool arguments"),
                 ],
             )
-            .prompt()
+            .prompt(writer)
             .unwrap_or('n')
             {
                 'y' => return Ok(()),
@@ -340,7 +343,7 @@ impl ToolDefinition {
                         options.push(InlineOption::new('c', "Keep Current Run Mode"));
                         options
                     })
-                    .prompt()
+                    .prompt(writer)
                     .unwrap_or('c')
                     {
                         'a' => RunMode::Ask,
@@ -378,6 +381,7 @@ impl ToolDefinition {
                         source,
                         mcp_client,
                         editor,
+                        writer,
                     ))
                     .await;
                 }
@@ -389,7 +393,7 @@ impl ToolDefinition {
                         InlineOption::new('s', "Skip (Don't Deliver Payload)"),
                         InlineOption::new('c', "Keep Current Result Mode"),
                     ])
-                    .prompt()
+                    .prompt(writer)
                     .unwrap_or('c')
                     {
                         'a' => *result_mode = ResultMode::Ask,
@@ -407,11 +411,16 @@ impl ToolDefinition {
                         source,
                         mcp_client,
                         editor,
+                        writer,
                     ))
                     .await;
                 }
                 'p' => {
-                    println!("{}\n", serde_json::to_string_pretty(&arguments)?);
+                    if let Err(error) =
+                        writeln!(writer, "{}\n", serde_json::to_string_pretty(&arguments)?)
+                    {
+                        error!(%error, "Failed to write arguments");
+                    }
 
                     return Box::pin(self.prepare_run(
                         RunMode::Ask,
@@ -420,6 +429,7 @@ impl ToolDefinition {
                         source,
                         mcp_client,
                         editor,
+                        writer,
                     ))
                     .await;
                 }
@@ -456,6 +466,7 @@ impl ToolDefinition {
                             source,
                             mcp_client,
                             editor,
+                            writer,
                         ))
                         .await;
                     }
@@ -467,14 +478,16 @@ impl ToolDefinition {
                         // the input invalid, and ask the user if they want to re-open
                         // the editor.
                         Err(error) => {
-                            println!("JSON parsing error: {error}");
+                            if let Err(error) = writeln!(writer, "JSON parsing error: {error}") {
+                                error!(%error, "Failed to write error");
+                            }
 
                             let retry = InlineSelect::new("Re-open editor?", vec![
                                 InlineOption::new('y', "Open editor to edit arguments"),
                                 InlineOption::new('n', "Skip editing, failing with error"),
                             ])
                             .with_default('y')
-                            .prompt()
+                            .prompt(writer)
                             .unwrap_or('n');
 
                             if retry == 'n' {
@@ -491,6 +504,7 @@ impl ToolDefinition {
                                 source,
                                 mcp_client,
                                 editor,
+                                writer,
                             ))
                             .await;
                         }
@@ -507,6 +521,7 @@ impl ToolDefinition {
         mut result: ToolCallResponse,
         result_mode: ResultMode,
         editor: Option<&Path>,
+        writer: &mut dyn Write,
     ) -> Result<ToolCallResponse, ToolError> {
         match result_mode {
             ResultMode::Ask => match InlineSelect::new(
@@ -521,7 +536,7 @@ impl ToolDefinition {
                 ],
             )
             .with_default('y')
-            .prompt()
+            .prompt(writer)
             .unwrap_or('n')
             {
                 'y' => return Ok(result),
@@ -556,7 +571,7 @@ impl ToolDefinition {
             // If the user removed all data from the result, we consider the edit a
             // no-op, and ask the user if they want to deliver the tool results.
             if content.trim().is_empty() {
-                return self.prepare_result(result, ResultMode::Ask, Some(editor));
+                return self.prepare_result(result, ResultMode::Ask, Some(editor), writer);
             }
 
             result.result = Ok(content);
