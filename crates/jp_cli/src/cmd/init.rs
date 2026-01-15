@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf, str::FromStr as _};
+use std::{env, fs, io::Write as _, path::PathBuf, str::FromStr as _};
 
 use clean_path::Clean as _;
 use crossterm::style::Stylize as _;
