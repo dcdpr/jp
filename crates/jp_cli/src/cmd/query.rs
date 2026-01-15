@@ -691,6 +691,7 @@ impl Query {
                             thread,
                             &tool_choice,
                             &tools,
+                            &mut response_handler,
                             &mut event_handler,
                             &mut metadata,
                             conversation_id,
