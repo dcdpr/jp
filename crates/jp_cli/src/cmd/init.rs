@@ -51,9 +51,9 @@ impl Init {
                 printer.out_writer(),
                 "Using model {}",
                 id.to_string().bold().blue()
-            );
+            )?;
             let note = "  (to use a different model, update `.jp/config.toml`)".to_owned();
-            writeln!(printer.out_writer(), "{}\n", note.grey().italic());
+            writeln!(printer.out_writer(), "{}\n", note.grey().italic())?;
 
             config.assistant.model.id = PartialModelIdConfig {
                 provider: Some(id.provider),
