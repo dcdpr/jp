@@ -1,9 +1,9 @@
-use std::{fs, path::PathBuf, time::Duration};
+use std::{fs, path::PathBuf, sync::Arc, time::Duration};
 
 use crossterm::style::{Color, Stylize as _};
 use jp_config::style::{LinkStyle, StyleConfig};
 use jp_printer::{PrintableExt as _, Printer};
-use jp_term::{code, osc::hyperlink, stdout};
+use jp_term::{code, osc::hyperlink};
 use termimad::FmtText;
 
 use super::{Line, LineVariant, RenderMode};

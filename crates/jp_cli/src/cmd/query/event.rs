@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf, time};
+use std::{env, fmt::Write, fs, path::PathBuf, time};
 
 use crossterm::style::Stylize as _;
 use indexmap::IndexMap;
@@ -18,6 +18,7 @@ use jp_conversation::{
     event::{ChatResponse, ToolCallRequest, ToolCallResponse},
 };
 use jp_llm::{ToolError, tool::ToolDefinition};
+use jp_printer::PrinterWriter;
 use jp_term::osc::hyperlink;
 use jp_tool::{AnswerType, Question};
 use serde_json::Value;
