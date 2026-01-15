@@ -1,6 +1,9 @@
 //! Git-style inline select prompt implementation.
 
-use std::fmt::{self, Write as _};
+use std::{
+    fmt::{self, Write as _},
+    io,
+};
 
 use inquire::{CustomType, InquireError, ui::RenderConfig};
 
@@ -78,7 +81,7 @@ impl InlineSelect {
     ///
     /// Returns the selected option, or an error if the prompt was cancelled or
     /// another error occurred.
-    pub fn prompt(&self, writer: &mut dyn fmt::Write) -> Result<char, InquireError> {
+    pub fn prompt(&self, writer: &mut dyn io::Write) -> Result<char, InquireError> {
         let mut option_keys: Vec<char> = self.options.iter().map(|o| o.key).collect();
         option_keys.push('?');
 
@@ -119,7 +122,7 @@ impl InlineSelect {
                 submit_on_valid_parse: true,
             };
 
-            let _ = match handler.prompt()? {
+            let _unused = match handler.prompt_with_writer(writer)? {
                 '?' => writeln!(writer, "{help_text}"),
                 c => return Ok(c),
             };

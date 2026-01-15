@@ -108,6 +108,7 @@ impl ToPartial for MergeableString {
 
 /// Strings that are merged using the specified merge strategy.
 #[derive(Debug, Clone, PartialEq, Config)]
+#[config(rename_all = "snake_case")]
 pub struct MergedString {
     /// The string value.
     #[setting(default)]

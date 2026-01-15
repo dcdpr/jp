@@ -4,7 +4,9 @@ mod turn;
 
 use std::{
     collections::{BTreeMap, HashSet},
-    env, fs,
+    env,
+    fmt::Write as _,
+    fs,
     io::{self, BufRead as _, IsTerminal},
     path::{Path, PathBuf},
     sync::Arc,
@@ -36,8 +38,8 @@ use jp_llm::{
     query::{ChatQuery, StructuredQuery},
     tool::{ToolDefinition, tool_definitions},
 };
+use jp_printer::{PrintableExt as _, Printer};
 use jp_task::task::TitleGeneratorTask;
-use jp_term::stdout;
 use jp_workspace::Workspace;
 use minijinja::{Environment, UndefinedBehavior};
 use response_handler::ResponseHandler;
@@ -373,6 +375,7 @@ impl Query {
                 &mut thread,
                 schema,
                 self.render_mode(),
+                &ctx.printer,
             )
             .await;
         } else {
@@ -389,6 +392,7 @@ impl Query {
                     cfg.assistant.tool_choice.clone(),
                     tools,
                     conversation_id,
+                    ctx.printer.clone(),
                 )
                 .await
             {
@@ -580,6 +584,7 @@ impl Query {
         tool_choice: ToolChoice,
         tools: Vec<ToolDefinition>,
         conversation_id: ConversationId,
+        printer: Arc<Printer>,
     ) -> Result<()> {
         let mut result = Ok(());
         let mut cancelled = false;
@@ -686,7 +691,6 @@ impl Query {
                             thread,
                             &tool_choice,
                             &tools,
-                            &mut printer,
                             &mut event_handler,
                             &mut metadata,
                             conversation_id,
@@ -836,7 +840,7 @@ impl Query {
         thread: &mut Thread,
         tool_choice: &ToolChoice,
         tools: &[ToolDefinition],
-        printer: &mut ResponseHandler,
+        response_handler: &mut ResponseHandler,
         event_handler: &mut StreamEventHandler,
         metadata: &mut BTreeMap<String, Value>,
         conversation_id: ConversationId,
@@ -908,7 +912,8 @@ impl Query {
                                 is_tty,
                                 turn_state,
                                 request,
-                                &mut printer.out_writer(),
+                                response_handler,
+                                printer.out_writer(),
                             )
                             .await?
                     }

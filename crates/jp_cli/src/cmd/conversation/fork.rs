@@ -97,6 +97,7 @@ mod tests {
         Conversation, ConversationEvent, ConversationStream,
         event::{ChatRequest, ChatResponse},
     };
+    use jp_printer::Printer;
     use jp_workspace::Workspace;
     use tempfile::tempdir;
     use time::macros::utc_datetime;
@@ -420,6 +421,7 @@ mod tests {
                 Runtime::new().unwrap(),
                 Globals::default(),
                 config,
+                Printer::terminal(jp_printer::Format::Text),
             );
 
             if let Err(panic) = catch_unwind(AssertUnwindSafe(|| {

@@ -115,7 +115,7 @@ impl StreamEventHandler {
         turn_state: &mut TurnState,
         call: ToolCallRequest,
         handler: &mut ResponseHandler,
-        writer: &mut dyn Write,
+        mut writer: PrinterWriter<'_>,
     ) -> Result<Option<String>, Error> {
         let Some(tool_config) = cfg.conversation.tools.get(&call.name) else {
             return Err(Error::NotFound("tool", call.name.clone()));
@@ -196,7 +196,13 @@ impl StreamEventHandler {
             {
                 Ok(result) => {
                     self.tool_call_responses.push(result.clone());
-                    return build_tool_call_response(&cfg.style, &result, &tool_config, handler);
+                    return build_tool_call_response(
+                        &cfg.style,
+                        &result,
+                        &tool_config,
+                        handler,
+                        writer,
+                    );
                 }
                 Err(ToolError::Skipped { reason }) => {
                     self.tool_call_responses.push(ToolCallResponse {
@@ -226,7 +232,7 @@ impl StreamEventHandler {
                     } else if let Some(answer) = tool_config.get_answer(&question.id) {
                         answer.clone()
                     } else if is_tty {
-                        let (answer, persist_level) = prompt_user(&question)?;
+                        let (answer, persist_level) = prompt_user(&question, writer)?;
 
                         // Store turn-level answers for reuse across tool calls
                         if persist_level == jp_tool::PersistLevel::Turn {
@@ -250,12 +256,15 @@ impl StreamEventHandler {
     }
 }
 
-fn prompt_user(question: &Question) -> Result<(Value, jp_tool::PersistLevel), Error> {
+fn prompt_user(
+    question: &Question,
+    mut writer: PrinterWriter<'_>,
+) -> Result<(Value, jp_tool::PersistLevel), Error> {
     match &question.answer_type {
-        AnswerType::Boolean => prompt_boolean_git_style(question),
+        AnswerType::Boolean => prompt_boolean_git_style(question, writer),
         AnswerType::Select { options } => {
             let answer: Value = inquire::Select::new(&question.text, options.clone())
-                .prompt()
+                .prompt_with_writer(&mut writer)
                 .map(Into::into)
                 .map_err(|e: inquire::error::InquireError| Error::from(e))?;
             Ok((answer, jp_tool::PersistLevel::None))
@@ -268,7 +277,7 @@ fn prompt_user(question: &Question) -> Result<(Value, jp_tool::PersistLevel), Er
             }
 
             let answer: Value = inquiry
-                .prompt()
+                .prompt_with_writer(&mut writer)
                 .map(Into::into)
                 .map_err(|e: inquire::error::InquireError| Error::from(e))?;
             Ok((answer, jp_tool::PersistLevel::None))
@@ -276,7 +285,10 @@ fn prompt_user(question: &Question) -> Result<(Value, jp_tool::PersistLevel), Er
     }
 }
 
-fn prompt_boolean_git_style(question: &Question) -> Result<(Value, jp_tool::PersistLevel), Error> {
+fn prompt_boolean_git_style(
+    question: &Question,
+    mut writer: PrinterWriter<'_>,
+) -> Result<(Value, jp_tool::PersistLevel), Error> {
     use jp_inquire::{InlineOption, InlineSelect};
 
     let options = vec![
@@ -287,7 +299,7 @@ fn prompt_boolean_git_style(question: &Question) -> Result<(Value, jp_tool::Pers
     ];
 
     let select = InlineSelect::new(&question.text, options);
-    let answer = select.prompt()?;
+    let answer = select.prompt(&mut writer)?;
 
     match answer {
         'y' => Ok((Value::Bool(true), jp_tool::PersistLevel::None)),
@@ -303,6 +315,7 @@ fn build_tool_call_response(
     response: &ToolCallResponse,
     tool_config: &ToolConfigWithDefaults,
     handler: &mut ResponseHandler,
+    mut writer: PrinterWriter<'_>,
 ) -> Result<Option<String>, Error> {
     let content = if let Ok(json) = serde_json::from_str::<Value>(response.content().trim()) {
         format!("```json\n{}\n```", serde_json::to_string_pretty(&json)?)
@@ -372,7 +385,7 @@ fn build_tool_call_response(
         }
         intro.push_str(":\n");
 
-        handler.handle(&intro, style, false)?;
+        write!(&mut writer, "{intro}")?;
     }
 
     let mut data = "\n".to_owned();
@@ -401,7 +414,7 @@ fn build_tool_call_response(
             data.push('\n');
         }
 
-        handler.handle(&data, style, false)?;
+        write!(writer, "{data}")?;
     }
 
     let link = match tool_config.style().results_file_link {
@@ -423,7 +436,7 @@ fn build_tool_call_response(
     if handler.render_tool_calls
         && let Some(link) = link
     {
-        handler.handle(&link, style, true)?;
+        write!(writer, "{link}")?;
     }
 
     Ok(None)

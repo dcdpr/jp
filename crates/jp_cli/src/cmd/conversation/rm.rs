@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use crossterm::style::Stylize as _;
 use inquire::Confirm;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
@@ -78,14 +80,15 @@ fn remove(ctx: &mut Ctx, id: ConversationId, force: bool) -> Output {
             "Removing conversation {}",
             id.to_string().bold().yellow()
         ));
-        println!("{details}\n");
+
+        writeln!(ctx.printer.out_writer(), "{details}\n")?;
 
         let confirm = Confirm::new("Are you sure?")
             .with_default(false)
             .with_confirm_on_input(true)
             .with_help_message("this action cannot be undone");
 
-        match confirm.prompt() {
+        match confirm.prompt_with_writer(&mut ctx.printer.out_writer()) {
             Ok(true) => {}
             Ok(false) | Err(_) => return Err(1.into()),
         }

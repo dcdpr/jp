@@ -29,6 +29,7 @@ jp_llm = { workspace = true }
 jp_macro = { workspace = true }
 jp_mcp = { workspace = true }
 jp_openrouter = { workspace = true }
+jp_printer = { workspace = true }
 jp_storage = { workspace = true }
 jp_task = { workspace = true }
 jp_term = { workspace = true }

@@ -35,6 +35,7 @@ use jp_config::{
         load_partial_at_path_recursive, load_partials_with_inheritance,
     },
 };
+use jp_printer::Printer;
 use jp_workspace::{Workspace, user_data_dir};
 use serde_json::Value;
 use tokio::runtime::{self, Runtime};
@@ -249,6 +250,7 @@ pub fn run() -> ExitCode {
         Err(error) => parse_error(error, is_tty),
     };
 
+    #[expect(clippy::print_stdout, clippy::print_stderr)]
     if code == 0 {
         println!("{output}");
     } else {
@@ -256,7 +258,10 @@ pub fn run() -> ExitCode {
     }
 
     #[cfg(feature = "dhat")]
-    eprintln!("You can view the heap profile at https://profiler.firefox.com");
+    #[expect(clippy::print_stderr)]
+    {
+        eprintln!("You can view the heap profile at https://profiler.firefox.com");
+    }
 
     ExitCode::from(code)
 }
@@ -276,7 +281,8 @@ fn run_inner(cli: Cli) -> Result<Success> {
             let partial = load_partial_config(&cmd, Some(&workspace), &cli.globals.config)?;
             let config = build(partial.clone())?;
 
-            let mut ctx = Ctx::new(workspace, runtime, cli.globals, config);
+            let printer = Printer::terminal(jp_printer::Format::Text);
+            let mut ctx = Ctx::new(workspace, runtime, cli.globals, config, printer);
             let handle = ctx.handle().clone();
 
             let output = handle.block_on(cmd.run(&mut ctx));

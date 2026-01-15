@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::{fmt::Write, path::Path, sync::Arc};
 
 use crossterm::style::Stylize as _;
 use indexmap::IndexMap;
@@ -270,7 +270,7 @@ impl ToolDefinition {
         source: &ToolSource,
         mcp_client: &jp_mcp::Client,
         editor: Option<&Path>,
-        writer: &mut dyn Write,
+        mut writer: PrinterWriter<'_>,
     ) -> Result<(), ToolError> {
         match run_mode {
             RunMode::Ask => match InlineSelect::new(
@@ -322,7 +322,7 @@ impl ToolDefinition {
                     InlineOption::new('p', "Print raw tool arguments"),
                 ],
             )
-            .prompt(writer)
+            .prompt(&mut writer)
             .unwrap_or('n')
             {
                 'y' => return Ok(()),
@@ -343,7 +343,7 @@ impl ToolDefinition {
                         options.push(InlineOption::new('c', "Keep Current Run Mode"));
                         options
                     })
-                    .prompt(writer)
+                    .prompt(&mut writer)
                     .unwrap_or('c')
                     {
                         'a' => RunMode::Ask,
@@ -393,7 +393,7 @@ impl ToolDefinition {
                         InlineOption::new('s', "Skip (Don't Deliver Payload)"),
                         InlineOption::new('c', "Keep Current Result Mode"),
                     ])
-                    .prompt(writer)
+                    .prompt(&mut writer)
                     .unwrap_or('c')
                     {
                         'a' => *result_mode = ResultMode::Ask,
@@ -487,7 +487,7 @@ impl ToolDefinition {
                                 InlineOption::new('n', "Skip editing, failing with error"),
                             ])
                             .with_default('y')
-                            .prompt(writer)
+                            .prompt(&mut writer)
                             .unwrap_or('n');
 
                             if retry == 'n' {
@@ -521,7 +521,7 @@ impl ToolDefinition {
         mut result: ToolCallResponse,
         result_mode: ResultMode,
         editor: Option<&Path>,
-        writer: &mut dyn Write,
+        mut writer: PrinterWriter<'_>,
     ) -> Result<ToolCallResponse, ToolError> {
         match result_mode {
             ResultMode::Ask => match InlineSelect::new(
@@ -536,7 +536,7 @@ impl ToolDefinition {
                 ],
             )
             .with_default('y')
-            .prompt(writer)
+            .prompt(&mut writer)
             .unwrap_or('n')
             {
                 'y' => return Ok(result),
