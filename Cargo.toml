@@ -60,7 +60,7 @@ humantime = { version = "2", default-features = false }
 ignore = { version = "0.4", default-features = false }
 indexmap = { version = "2", default-features = false }
 indoc = { version = "2", default-features = false }
-inquire = { git = "https://github.com/JeanMertz/inquire", branch = "submit-on-valid-parse", default-features = false } # <https://github.com/mikaelmello/inquire/pull/321>
+inquire = { git = "https://github.com/JeanMertz/inquire", branch = "merged", default-features = false } # <https://github.com/mikaelmello/inquire/pull/321>
 insta = { version = "1", default-features = false }
 itertools = { version = "0.14", default-features = false }
 jsonschema = { version = "0.37", default-features = false }
