@@ -15,7 +15,7 @@ use jp_mcp::{
 use jp_tool::Outcome;
 use minijinja::Environment;
 use serde_json::{Map, Value, json};
-use tracing::{info, trace};
+use tracing::{error, info, trace};
 
 use crate::error::ToolError;
 
@@ -97,7 +97,7 @@ impl ToolDefinition {
         config: ToolConfigWithDefaults,
         root: &Path,
         editor: Option<&Path>,
-        writer: &mut dyn Write,
+        writer: PrinterWriter<'_>,
     ) -> Result<ToolCallResponse, ToolError> {
         info!(tool = %self.name, arguments = ?arguments, "Calling tool.");
 
