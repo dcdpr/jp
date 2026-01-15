@@ -270,7 +270,7 @@ fn run_inner(cli: Cli) -> Result<Success> {
     let printer = Printer::terminal(jp_printer::Format::Text);
 
     match cli.command {
-        Commands::Init(ref args) => args.run(printer).map_err(Into::into),
+        Commands::Init(ref args) => args.run(&printer).map_err(Into::into),
         cmd => {
             let mut workspace = load_workspace(cli.globals.workspace.as_ref())?;
             if !cli.globals.persist {

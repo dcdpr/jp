@@ -20,7 +20,7 @@ pub(crate) struct Init {
 }
 
 impl Init {
-    pub(crate) fn run(&self, printer: Printer) -> Output {
+    pub(crate) fn run(&self, printer: &Printer) -> Output {
         let cwd = std::env::current_dir()?;
         let mut root = self
             .path
