@@ -12,6 +12,7 @@ use jp_mcp::{
     RawContent, ResourceContents,
     id::{McpServerId, McpToolId},
 };
+use jp_printer::PrinterWriter;
 use jp_tool::Outcome;
 use minijinja::Environment;
 use serde_json::{Map, Value, json};
