@@ -78,8 +78,8 @@ impl ResponseHandler {
 
         let delay = match variant {
             LineVariant::Code => style.typewriter.code_delay.into(),
-            LineVariant::Raw => Duration::ZERO,
             LineVariant::Normal => style.typewriter.text_delay.into(),
+            _ => Duration::ZERO,
         };
 
         let lines = self.handle_line(&variant, style)?;
