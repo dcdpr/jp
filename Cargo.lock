@@ -2116,6 +2116,7 @@ dependencies = [
  "jp_macro",
  "jp_mcp",
  "jp_openrouter",
+ "jp_printer",
  "jp_storage",
  "jp_task",
  "jp_term",
@@ -2243,6 +2244,7 @@ dependencies = [
  "jp_inquire",
  "jp_mcp",
  "jp_openrouter",
+ "jp_printer",
  "jp_test",
  "jp_tool",
  "jsonschema",
@@ -2305,6 +2307,19 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "jp_printer"
+version = "0.1.0"
+dependencies = [
+ "bat",
+ "crossterm",
+ "indoc",
+ "insta",
+ "markdown-table-formatter",
+ "parking_lot",
+ "pretty_assertions",
 ]
 
 [[package]]
