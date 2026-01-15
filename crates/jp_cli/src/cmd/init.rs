@@ -68,7 +68,6 @@ impl Init {
 
         workspace.persist()?;
 
-
         let loc = if root == cwd {
             "current directory".to_owned()
         } else {
