@@ -135,7 +135,7 @@ impl StreamEventHandler {
         .await?;
 
         if handler.render_tool_calls {
-            let (raw, args) = match &tool_config.style().parameters {
+            let (_raw, args) = match &tool_config.style().parameters {
                 ParametersStyle::Off => (false, ".".to_owned()),
                 ParametersStyle::Json => {
                     let args = serde_json::to_string_pretty(&call.arguments)
@@ -312,7 +312,7 @@ fn prompt_boolean_git_style(
 }
 
 fn build_tool_call_response(
-    style: &StyleConfig,
+    _style: &StyleConfig,
     response: &ToolCallResponse,
     tool_config: &ToolConfigWithDefaults,
     handler: &mut ResponseHandler,

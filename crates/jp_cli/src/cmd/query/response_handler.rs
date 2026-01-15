@@ -258,30 +258,6 @@ impl ResponseHandler {
         }
     }
 
-    fn get_line(&mut self, raw: bool) -> Option<Line> {
-        let s = &mut self.buffer;
-        let idx = s.find('\n')?;
-
-        // Determine the end index of the actual line *content*.
-        // Check if the character before '\n' is '\r'.
-        let end_idx = if idx > 0 && s.as_bytes().get(idx - 1) == Some(&b'\r') {
-            idx - 1
-        } else {
-            idx
-        };
-
-        // Extract the line content *before* draining.
-        // Creating a slice and then converting to owned String.
-        let extracted_line = s[..end_idx].to_string();
-
-        // Calculate the index *after* the newline sequence to drain up to.
-        // This ensures we remove the '\n' and potentially the preceding '\r'.
-        let drain_end_idx = idx + 1;
-        s.drain(..drain_end_idx);
-
-        Some(Line::new(extracted_line, self.in_fenced_code_block, raw))
-    }
-
     fn persist_code_block(&self) -> Result<PathBuf, Error> {
         let code = self.code_buffer.1.clone();
         let language = self.code_buffer.0.as_deref().unwrap_or("txt");
