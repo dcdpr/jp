@@ -267,8 +267,10 @@ pub fn run() -> ExitCode {
 }
 
 fn run_inner(cli: Cli) -> Result<Success> {
+    let printer = Printer::terminal(jp_printer::Format::Text);
+
     match cli.command {
-        Commands::Init(ref args) => args.run().map_err(Into::into),
+        Commands::Init(ref args) => args.run(printer).map_err(Into::into),
         cmd => {
             let mut workspace = load_workspace(cli.globals.workspace.as_ref())?;
             if !cli.globals.persist {
@@ -281,7 +283,6 @@ fn run_inner(cli: Cli) -> Result<Success> {
             let partial = load_partial_config(&cmd, Some(&workspace), &cli.globals.config)?;
             let config = build(partial.clone())?;
 
-            let printer = Printer::terminal(jp_printer::Format::Text);
             let mut ctx = Ctx::new(workspace, runtime, cli.globals, config, printer);
             let handle = ctx.handle().clone();
 
