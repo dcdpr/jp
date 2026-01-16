@@ -1,10 +1,10 @@
 use std::{fmt::Write, path::Path, sync::Arc};
 
 use crossterm::style::Stylize as _;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use jp_config::conversation::tool::{
-    OneOrManyTypes, ResultMode, RunMode, ToolCommandConfig, ToolConfigWithDefaults,
-    ToolParameterConfig, ToolSource, item::ToolParameterItemConfig,
+    OneOrManyTypes, QuestionConfig, QuestionTarget, ResultMode, RunMode, ToolCommandConfig,
+    ToolConfigWithDefaults, ToolParameterConfig, ToolSource, item::ToolParameterItemConfig,
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_inquire::{InlineOption, InlineSelect};
@@ -13,7 +13,7 @@ use jp_mcp::{
     id::{McpServerId, McpToolId},
 };
 use jp_printer::PrinterWriter;
-use jp_tool::Outcome;
+use jp_tool::{Action, Outcome};
 use minijinja::Environment;
 use serde_json::{Map, Value, json};
 use tracing::{error, info, trace};
@@ -32,6 +32,12 @@ pub struct ToolDefinition {
     pub name: String,
     pub description: Option<String>,
     pub parameters: IndexMap<String, ToolParameterConfig>,
+
+    // FIXME: This feels somewhat hacky. I should investigate if there is an
+    // alternative to this field, before committing it.
+    //
+    // Maybe we can just insert it as an argument to the relevant method?
+    pub include_tool_answers_parameter: bool,
 }
 
 impl ToolDefinition {
@@ -40,6 +46,7 @@ impl ToolDefinition {
         source: &ToolSource,
         description: Option<String>,
         parameters: IndexMap<String, ToolParameterConfig>,
+        questions: &IndexMap<String, QuestionConfig>,
         mcp_client: &jp_mcp::Client,
     ) -> Result<Self, ToolError> {
         match &source {
@@ -47,6 +54,7 @@ impl ToolDefinition {
                 name.to_owned(),
                 description,
                 parameters,
+                questions,
             )),
             ToolSource::Mcp { server, tool } => {
                 mcp_tool_definition(
@@ -81,7 +89,7 @@ impl ToolDefinition {
                 "arguments": arguments,
             },
             "context": {
-                "format_parameters": true,
+                "action": Action::FormatArguments,
                 "root": root.to_string_lossy(),
             },
         });
@@ -94,6 +102,7 @@ impl ToolDefinition {
         id: String,
         mut arguments: Value,
         answers: &IndexMap<String, Value>,
+        pending_questions: &IndexSet<String>,
         mcp_client: &jp_mcp::Client,
         config: ToolConfigWithDefaults,
         root: &Path,
@@ -104,7 +113,7 @@ impl ToolDefinition {
 
         // If the tool call has answers to provide to the tool, it means the
         // tool already ran once, and we should not ask for confirmation again.
-        let run_mode = if answers.is_empty() {
+        let run_mode = if pending_questions.is_empty() {
             config.run()
         } else {
             RunMode::Unattended
@@ -181,6 +190,7 @@ impl ToolDefinition {
                 "answers": answers,
             },
             "context": {
+                "action": Action::Run,
                 "root": root.to_string_lossy().into_owned(),
             },
         });
@@ -237,11 +247,25 @@ impl ToolDefinition {
     /// Return a map of parameter names to JSON schemas.
     #[must_use]
     pub fn to_parameters_map(&self) -> Map<String, Value> {
-        self.parameters
+        let mut map = self
+            .parameters
             .clone()
             .into_iter()
             .map(|(k, v)| (k, v.to_json_schema()))
-            .collect::<Map<_, _>>()
+            .collect::<Map<_, _>>();
+
+        if self.include_tool_answers_parameter {
+            map.insert(
+                "tool_answers".to_owned(),
+                json!({
+                    "type": ["object", "null"],
+                    "additionalProperties": true,
+                    "description": "Answers to the tool's questions. This should only be used if explicitly requested by the user.",
+                }),
+            );
+        }
+
+        map
     }
 
     /// Return a JSON schema for the parameters of the tool.
@@ -254,7 +278,7 @@ impl ToolDefinition {
             .map(|(k, _)| k.clone())
             .collect::<Vec<_>>();
 
-        serde_json::json!({
+        json!({
             "type": "object",
             "properties": self.to_parameters_map(),
             "additionalProperties": false,
@@ -714,6 +738,7 @@ pub async fn tool_definitions(
                 config.source(),
                 config.description().map(str::to_owned),
                 config.parameters().clone(),
+                config.questions(),
                 mcp_client,
             )
             .await?,
@@ -727,11 +752,17 @@ fn local_tool_definition(
     name: String,
     description: Option<String>,
     parameters: IndexMap<String, ToolParameterConfig>,
+    questions: &IndexMap<String, QuestionConfig>,
 ) -> ToolDefinition {
+    let include_tool_answers_parameter = questions
+        .iter()
+        .any(|(_, v)| v.target == QuestionTarget::Assistant);
+
     ToolDefinition {
         name,
         description,
         parameters,
+        include_tool_answers_parameter,
     }
 }
 
@@ -895,6 +926,7 @@ async fn mcp_tool_definition(
         name: name.to_owned(),
         description,
         parameters: params,
+        include_tool_answers_parameter: false,
     })
 }
 

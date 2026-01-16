@@ -171,6 +171,7 @@ impl StructuredQuery {
             name: SCHEMA_TOOL_NAME.to_owned(),
             description: Some(description),
             parameters,
+            include_tool_answers_parameter: false,
         })
     }
 

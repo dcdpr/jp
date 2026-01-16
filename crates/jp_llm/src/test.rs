@@ -2,12 +2,14 @@ use std::{panic, sync::Arc};
 
 use futures::TryStreamExt as _;
 use jp_config::{
-    AppConfig, Config as _, PartialAppConfig, ToPartial as _,
+    AppConfig, PartialAppConfig, ToPartial as _,
     assistant::tool_choice::ToolChoice,
-    conversation::tool::{RunMode, ToolParameterConfig},
+    conversation::tool::ToolParameterConfig,
     model::{
-        id::{ModelIdConfig, Name, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
-        parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
+        id::{ModelIdConfig, Name, PartialModelIdOrAliasConfig, ProviderId},
+        parameters::{
+            PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig, ReasoningEffort,
+        },
     },
     providers::llm::LlmProviderConfig,
 };
@@ -85,22 +87,11 @@ impl TestRequest {
             model: test_model_details(provider),
             query: ChatQuery {
                 thread: ThreadBuilder::new()
-                    .with_events(
-                        ConversationStream::new({
-                            let mut cfg = PartialAppConfig::empty();
-                            cfg.conversation.tools.defaults.run = Some(RunMode::Ask);
-                            cfg.assistant.model.parameters.reasoning =
-                                Some(PartialReasoningConfig::Off);
-                            cfg.assistant.model.id = PartialModelIdConfig {
-                                provider: Some(provider),
-                                name: Some("test".parse().unwrap()),
-                            }
-                            .into();
-
-                            AppConfig::from_partial(cfg, vec![]).unwrap().into()
-                        })
-                        .with_created_at(utc_datetime!(2020-01-01 0:00)),
-                    )
+                    .with_events({
+                        let mut config = AppConfig::new_test();
+                        config.assistant.model.parameters.reasoning = Some(ReasoningConfig::Off);
+                        ConversationStream::new(config.into())
+                    })
                     .build()
                     .unwrap(),
                 tools: vec![],
@@ -118,20 +109,7 @@ impl TestRequest {
             query: StructuredQuery::new(
                 true.into(),
                 ThreadBuilder::new()
-                    .with_events(
-                        ConversationStream::new({
-                            let mut cfg = PartialAppConfig::empty();
-                            cfg.conversation.tools.defaults.run = Some(RunMode::Ask);
-                            cfg.assistant.model.id = PartialModelIdConfig {
-                                provider: Some(provider),
-                                name: Some("test".parse().unwrap()),
-                            }
-                            .into();
-
-                            AppConfig::from_partial(cfg, vec![]).unwrap().into()
-                        })
-                        .with_created_at(datetime!(2020-01-01 0:00 utc)),
-                    )
+                    .with_events(ConversationStream::new_test())
                     .build()
                     .unwrap(),
             ),
@@ -253,6 +231,7 @@ impl TestRequest {
                     .into_iter()
                     .map(|(k, v)| (k.to_owned(), v))
                     .collect(),
+                include_tool_answers_parameter: false,
             });
         }
 

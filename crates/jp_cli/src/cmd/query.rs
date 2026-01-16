@@ -943,7 +943,7 @@ impl Query {
                             .handle_tool_call(
                                 cfg,
                                 mcp_client,
-                                root,
+                                &root,
                                 is_tty,
                                 turn_state,
                                 request,
