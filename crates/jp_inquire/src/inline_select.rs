@@ -43,8 +43,9 @@ impl InlineOption {
 ///     InlineOption::new('q', "exit without completing remaining actions"),
 /// ];
 ///
+/// let mut buf = Vec::new();
 /// let handler = InlineSelect::new("Continue with this operation?", options);
-/// match handler.prompt() {
+/// match handler.prompt(&mut buf) {
 ///     Ok(ch) => println!("Selected: {ch}"),
 ///     Err(error) => eprintln!("Error: {error}"),
 /// }
