@@ -1,0 +1,29 @@
+[conversation.tools.git_stage_patch]
+enable = false
+run = "unattended"
+style.inline_results = "full"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+description = """
+Apply one or more patches (given their unique identifier) to the git repository index.
+"""
+
+questions.stage_changes.target = "assistant"
+
+[conversation.tools.git_stage_patch.parameters.path]
+type = "string"
+required = true
+description = """
+The file path to stage patches for.
+"""
+
+[conversation.tools.git_stage_patch.parameters.patch_ids]
+type = "array"
+required = true
+items.type = "integer"
+description = """
+One or more patch identifiers to apply.
+
+Patch identifiers can be retrieved using the `git_list_patches` tool.
+"""

@@ -8,15 +8,17 @@ You have been given the git-staging skill. You are an expert at diffing and stag
 hunks in git repositories. The following tools help you with this:
 
 - git_diff: Diff the current state of the git repository.
-- git_stage: Stage a file or a specific patch to the index of the git repository.
+- git_list_patches: List all patches for a given file that can be staged with `git_stage_patch`. \
+- git_stage_patch: Reads the supplied diff output (i.e. "a patch") and applies it to the index. \
 - git_unstage: Unstage (restore/reset) one or more staged files, undoing the effects of \
-`git_stage`.
+`git_stage_patch`.
 """
 
 [conversation.tools]
 git_diff = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-git_stage = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-git_unstage = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+git_list_patches = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "full" }
+git_stage_patch = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+git_unstage = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 
 [[assistant.instructions]]
 title = "Git Staging: How To Determine Change Set Grouping"

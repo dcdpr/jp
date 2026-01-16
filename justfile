@@ -70,7 +70,7 @@ stage *ARGS: _install-jp
     #!/usr/bin/env sh
     args="$@"
     msg="Find related changes in the git diff and stage ONE set of changes in preparation for a \
-    commit using the 'git_stage' tool. Follow your prompt instructions carefully."
+    commit using the 'git_stage_patch' tool. Follow your prompt instructions carefully."
 
     starts_with() { case $2 in "$1"*) true;; *) false;; esac; }
     contains() { case $2 in *"$1"*) true;; *) false;; esac; }

@@ -9,6 +9,7 @@ mod util;
 mod web;
 
 use jp_tool::{Context, Outcome};
+use serde::Serialize;
 use serde_json::{Map, Value};
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -20,7 +21,7 @@ pub async fn run(ctx: Context, t: Tool) -> Result<Outcome> {
         s if s.starts_with("github_") => github::run(ctx, t).await.map(Into::into),
         s if s.starts_with("fs_") => fs::run(ctx, t).await,
         s if s.starts_with("web_") => web::run(ctx, t).await.map(Into::into),
-        s if s.starts_with("git_") => git::run(ctx, t).await.map(Into::into),
+        s if s.starts_with("git_") => git::run(ctx, t).await,
         _ => Err(format!("Unknown tool '{}'", t.name).into()),
     }
 }
@@ -83,6 +84,15 @@ fn to_xml_with_root<T: serde::Serialize>(value: &T, root: &str) -> Result<String
         .map_err(|e| format!("Unable to serialize XML: {e}"))?;
 
     Ok(format!("```xml\n{buffer}\n```"))
+}
+
+/// Serializes a struct into an LLM-friendly XML format.
+pub fn to_simple_xml<T: Serialize>(data: &T) -> Result<String> {
+    util::xml::to_simple_xml_with_root(data, "root")
+}
+
+pub fn to_simple_xml_with_root<T: Serialize>(data: &T, root: &str) -> Result<String> {
+    util::xml::to_simple_xml_with_root(data, root)
 }
 
 #[cfg(test)]

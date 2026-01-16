@@ -6,7 +6,7 @@ style.inline_results = "full"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 description = """
-Unstage (restore/reset) one or more staged files, undoing the effects of `git_stage`.
+Unstage (restore/reset) one or more staged files, undoing the effects of `git_stage_patch`.
 """
 
 [conversation.tools.git_unstage.parameters.paths]

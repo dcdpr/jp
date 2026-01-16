@@ -8,6 +8,67 @@ Modify one or more files in the project's local filesystem.
 The files must exist, be a regular file, and have no uncommitted changes.
 """
 
+# questions.apply_changes.target = "assistant"
+questions.apply_changes.answer = true
+
+# TODO:
+#
+# We currently have `questions.apply_changes.target = "assistant"`. This allows
+# the `fs_modify_file` tool to ask the assistant whether the "diff" of the
+# to-be-applied changes is acceptable. This allows us to catch errors by LLMs
+# early, before the change is made and they have to do another modification to
+# correct the error.
+#
+# This works GREAT, but the one issue is that our "user in the loop" prompt
+# (`AskMode`) is triggered BEFORE the tool question is asked to the assistant.
+# This means the user likely already saw the error, and had to manually tell the
+# assistant to fix it.
+#
+# The `assistant_validation` flag is a potential solution to this problem. It
+# would allow us to *always* ask the assistant to approve the changes for the
+# given tool. We would use the `style.parameters` option (if present) to "pretty
+# print" the arguments, so that the assistant can better understand what the
+# impact of the tool call is.
+#
+# We would run this validation *before* the user is prompted to confirm the
+# changes. This would allow us to catch errors early, and avoid the user having
+# to manually fix them.
+#
+# It would require a bit of work to implement, as we have to add a new "special"
+# parameter to the tool definition, so that the assistant can answer with "yes".
+# We could also leverage the `tool_answers` parameter to pass some kind of
+# global `__confirm` flag, which would not have to be set by individual tools,
+# but we could leverage the existing q/a system for that.
+#
+# Alternatively, we make tool calling STATEFUL. Meaning, we have some kind of
+# "tool call manager" which keeps track of the state of tool calls, and instead
+# of asking the assistant to re-run the same tool call but with a "yes" value
+# added to the `tool_answers` parameter, we can instead either send a structured
+# query, or a special tool call that simply asks for confirmation to run a tool
+# with a certain ID. I don't know how well LLMs would handle this, since it
+# would be an unrelated tool call that tries.. ACTUALLY THIS CANT WORK, because
+# LLM providers require tool calls to always return a result, so we'll have to
+# answer the original tool call regardless. Let's stick with the design earlier
+# in this comment!
+#
+# # assistant_validation = true
+
+# Validation configuration.
+#
+# Validation allows for a tool call run to first be verified before it runs.
+#
+# This is useful for tools that perform mutable operations, such as file
+# modification. While the modification can ususually be undone after the fact,
+# it is more convenient to detect erroneous modifications beforehand.
+#
+# The validation can be performed by the user, or the assistant.
+# # [conversation.tools.fs_modify_file.validation]
+# # # Whether to ask the user or assistant for validation.
+# # target = "assistant"
+# #
+# # # The command to run to validate the requested tool call.
+# # command = "just serve-tools {{context}} {{tool}} validate"
+
 [conversation.tools.fs_modify_file.style]
 parameters = "just serve-tools {{context}} {{tool}}"
 inline_results = "off"
@@ -66,4 +127,7 @@ The longest possible name is used. e.g., `$1a` looks up the capture group named 
 capture group at index `1`. To exert more precise control over the name, use braces, e.g., `${1}a`.
 
 To write a literal `$` use `$$`.
+
+Note that `^` matches start-of-line and `$` matches end-of-line, whereas `\\A` and `\\z` match the \
+start and end of the string, respectively.
 """
