@@ -627,11 +627,6 @@ pub fn user_data_dir() -> Result<PathBuf> {
 mod tests {
     use std::{collections::HashMap, fs, time::Duration};
 
-    use jp_config::{
-        Config as _, PartialAppConfig,
-        conversation::tool::RunMode,
-        model::id::{PartialModelIdConfig, ProviderId},
-    };
     use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
     use tempfile::tempdir;
     use test_log::test;
