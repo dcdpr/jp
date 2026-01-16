@@ -884,4 +884,41 @@ mod tests {
             active_conversation
         );
     }
+
+    #[test]
+    fn test_workspace_persist_active_conversation() {
+        jp_id::global::set("foo".to_owned());
+
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let storage = root.join("storage");
+
+        let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
+        let config = Arc::new(AppConfig::new_test());
+
+        let id1 = ConversationId::try_from(utc_datetime!(2023-01-01 0:00)).unwrap();
+        let id2 = ConversationId::try_from(utc_datetime!(2023-01-02 0:00)).unwrap();
+
+        workspace.create_conversation_with_id(id1, Conversation::default(), config.clone());
+        workspace.create_conversation_with_id(id2, Conversation::default(), config.clone());
+        workspace
+            .set_active_conversation_id(id1, UtcDateTime::UNIX_EPOCH)
+            .unwrap();
+
+        workspace.persist_active_conversation().unwrap();
+        assert!(storage.is_dir());
+
+        let id1_metadata_file = storage
+            .join(CONVERSATIONS_DIR)
+            .join(id1.to_dirname(None))
+            .join(METADATA_FILE);
+
+        let id2_metadata_file = storage
+            .join(CONVERSATIONS_DIR)
+            .join(id2.to_dirname(None))
+            .join(METADATA_FILE);
+
+        assert!(id1_metadata_file.is_file());
+        assert!(!id2_metadata_file.is_file());
+    }
 }
