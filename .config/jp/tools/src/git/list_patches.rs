@@ -145,86 +145,95 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
     result.trim_end().to_string()
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use std::{fs, process::Command};
-//
-//     use jp_tool::Outcome;
-//     use tempfile::TempDir;
-//
-//     use super::*;
-//
-//     /// Helper function to run git commands in the test directory
-//     fn run_git(dir: &Path, args: &[&str]) {
-//         let output = Command::new("git")
-//             .current_dir(dir)
-//             .args(args)
-//             .output()
-//             .expect("Failed to execute git command");
-//
-//         if !output.status.success() {
-//             let stderr = String::from_utf8_lossy(&output.stderr);
-//             panic!("Git command {args:?} failed: {stderr}");
-//         }
-//     }
-//
-//     #[test]
-//     fn test_git_list_patches_success() {
-//         // Skip if git is not installed
-//         //
-//         // TODO: use DI to inject a mock
-//         if which::which("git").is_err() {
-//             return;
-//         }
-//
-//         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-//         let root = temp_dir.path();
-//         let filename = "test_script.rs";
-//
-//         // Setup
-//         {
-//             let file_path = root.join(filename);
-//
-//             // 2. Initialize Git Repo
-//             run_git(root, &["init"]);
-//
-//             // 3. Create initial file state and commit
-//             let initial_content = "fn main() {\n    {};\n    println!(\"Hello\");\n}\n";
-//             fs::write(&file_path, initial_content).expect("Failed to write file");
-//             run_git(root, &["add", filename]);
-//             run_git(root, &["commit", "-m", "Initial commit"]);
-//
-//             // 4. Modify file to create a 'dirty' state (the patch)
-//             let modified_content =
-//                 "fn main() -> () {\n    {};\n    println!(\"Hello World\");\n}\n";
-//             fs::write(&file_path, modified_content).expect("Failed to update file");
-//         }
-//
-//         match git_list_patches(root, vec![filename.to_string()].into()) {
-//             Ok(tool_output) => {
-//                 let Outcome::Success { content } = tool_output else {
-//                     panic!("Unexpected ToolResult: {tool_output:?}");
-//                 };
-//
-//                 let encoded_name = BASE64_URL_SAFE_NO_PAD.encode(filename.as_bytes());
-//                 assert!(
-//                     content.contains(&encoded_name),
-//                     "Missing base64 encoded filename ID"
-//                 );
-//                 assert!(
-//                     content.contains("<patches>"),
-//                     "Missing <patches>: {content}"
-//                 );
-//                 assert!(
-//                     content.contains("-    println!(\"Hello\");"),
-//                     "Missing removed line: {content}"
-//                 );
-//                 assert!(
-//                     content.contains("+    println!(\"Hello World\");"),
-//                     "Missing added line: {content}"
-//                 );
-//             }
-//             Err(e) => panic!("git_list_patches returned an error: {e:?}"),
-//         }
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use std::{fs, process::Command};
+
+    use jp_tool::Outcome;
+    use tempfile::TempDir;
+
+    use super::*;
+
+    /// Helper function to run git commands in the test directory
+    fn run_git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .expect("Failed to execute git command");
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            panic!("Git command {args:?} failed: {stderr}");
+        }
+    }
+
+    #[test]
+    fn test_git_list_patches_success() {
+        // Skip if git is not installed
+        //
+        // TODO: use DI to inject a mock
+        if which::which("git").is_err() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let root = temp_dir.path();
+        let filename = "test_script.rs";
+
+        // Setup
+        {
+            let file_path = root.join(filename);
+
+            // 2. Initialize Git Repo
+            run_git(root, &["init"]);
+
+            // 3. Create initial file state and commit
+            let initial_content = "fn main() {\n    {};\n    println!(\"Hello\");\n}\n";
+            fs::write(&file_path, initial_content).expect("Failed to write file");
+            run_git(root, &["add", filename]);
+            run_git(root, &["commit", "-m", "Initial commit"]);
+
+            // 4. Modify file to create a 'dirty' state (the patch)
+            let modified_content =
+                "fn main() -> () {\n    {};\n    println!(\"Hello World\");\n}\n";
+            fs::write(&file_path, modified_content).expect("Failed to update file");
+        }
+
+        match git_list_patches(root, vec![filename.to_string()].into()) {
+            Ok(tool_output) => {
+                let Outcome::Success { content } = tool_output else {
+                    panic!("Unexpected ToolResult: {tool_output:?}");
+                };
+
+                assert_eq!(content, indoc::indoc! {r#"
+                    <patches>
+                      <patch>
+                        <path>test_script.rs</path>
+                        <id>0</id>
+                        <diff><![CDATA[
+                    -fn main() {
+                    +fn main() -> () {
+                         {};
+                         println!("Hello World");
+                     }
+                    ]]></diff>
+                      </patch>
+                      <patch>
+                        <path>test_script.rs</path>
+                        <id>1</id>
+                        <diff><![CDATA[
+                     fn main() -> () {
+                         {};
+                    -    println!("Hello");
+                    +    println!("Hello World");
+                     }
+                    ]]></diff>
+                      </patch>
+                    </patches>"#
+                });
+            }
+            Err(e) => panic!("git_list_patches returned an error: {e:?}"),
+        }
+    }
+}
