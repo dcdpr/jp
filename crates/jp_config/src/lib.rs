@@ -237,6 +237,31 @@ impl ToPartial for AppConfig {
 }
 
 impl AppConfig {
+    /// Return a default configuration for testing purposes.
+    ///
+    /// This CANNOT be used in release mode.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new_test() -> Self {
+        use crate::{
+            conversation::tool::RunMode,
+            model::id::{Name, PartialModelIdConfig, ProviderId},
+        };
+
+        let mut partial = PartialAppConfig::empty();
+
+        partial.conversation.title.generate.auto = Some(false);
+        partial.conversation.tools.defaults.run = Some(RunMode::Ask);
+        partial.assistant.model.id = PartialModelIdConfig {
+            provider: Some(ProviderId::Anthropic),
+            name: Some(Name("test".to_owned())),
+        }
+        .into();
+
+        Self::from_partial(partial, vec![]).expect("valid config")
+    }
+
     /// Return a list of all fields in the configuration.
     ///
     /// The fields are returned in alphabetical order, with nested fields

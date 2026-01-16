@@ -74,7 +74,7 @@ impl FromStr for AttachmentConfig {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let partial = PartialAttachmentConfig::from_str(s)?;
-        Self::from_partial(partial).map_err(Into::into)
+        Self::from_partial(partial, vec![]).map_err(Into::into)
     }
 }
 

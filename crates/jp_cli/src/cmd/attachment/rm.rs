@@ -33,7 +33,7 @@ impl IntoPartialAppConfig for Rm {
             .collect::<Result<Vec<_>, _>>()?;
 
         for attachment in partial.conversation.attachments {
-            let url = AttachmentConfig::from_partial(attachment.clone())?.to_url()?;
+            let url = AttachmentConfig::from_partial(attachment.clone(), vec![])?.to_url()?;
             if !to_remove_attachments.contains(&url) {
                 attachments.push(attachment);
             }

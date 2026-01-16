@@ -209,7 +209,7 @@ impl ConversationStream {
             partial.merge(&(), delta.into())?;
         }
 
-        AppConfig::from_partial(partial).map_err(Into::into)
+        AppConfig::from_partial(partial, vec![]).map_err(Into::into)
     }
 
     /// Removes all events from the end of the stream, until a [`ChatRequest`]
@@ -468,6 +468,22 @@ impl ConversationStream {
         IterMut {
             iter: self.events.iter_mut(),
             front_config: self.base_config.to_partial(),
+        }
+    }
+
+    /// Return a default conversation stream for testing purposes.
+    ///
+    /// This CANNOT be used in release mode.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new_test() -> Self {
+        use time::macros::utc_datetime;
+
+        Self {
+            base_config: AppConfig::new_test().into(),
+            events: vec![],
+            created_at: utc_datetime!(2020-01-01 0:00),
         }
     }
 }
@@ -748,7 +764,7 @@ impl FromIterator<ConversationEventWithConfig> for Result<ConversationStream, St
             return Err(StreamError::FromEmptyIterator);
         };
 
-        let mut stream = ConversationStream::new(AppConfig::from_partial(config)?.into());
+        let mut stream = ConversationStream::new(AppConfig::from_partial(config, vec![])?.into());
         stream.push(first_event);
         stream.extend(events);
 
@@ -829,7 +845,7 @@ impl<'de> Deserialize<'de> for ConversationStream {
         match events.remove(0) {
             InternalEvent::ConfigDelta(base_config) => Ok(Self {
                 created_at: base_config.timestamp,
-                base_config: AppConfig::from_partial(base_config.into())
+                base_config: AppConfig::from_partial(base_config.into(), vec![])
                     .map_err(Error::custom)?
                     .into(),
                 events,
@@ -988,30 +1004,13 @@ impl<'de> Deserialize<'de> for InternalEvent {
 
 #[cfg(test)]
 mod tests {
-    use jp_config::{
-        conversation::tool::RunMode,
-        model::id::{PartialModelIdConfig, ProviderId},
-    };
     use time::macros::utc_datetime;
 
     use super::*;
 
     #[test]
     fn test_conversation_stream_serialization_roundtrip() {
-        let mut base_config = PartialAppConfig::empty();
-        base_config.conversation.title.generate.auto = Some(false);
-        base_config.conversation.tools.defaults.run = Some(RunMode::Ask);
-        base_config.assistant.model.id = PartialModelIdConfig {
-            provider: Some(ProviderId::Anthropic),
-            name: Some("test".parse().unwrap()),
-        }
-        .into();
-
-        let mut stream = ConversationStream {
-            base_config: AppConfig::from_partial(base_config).unwrap().into(),
-            events: vec![],
-            created_at: utc_datetime!(2020-01-01 0:00),
-        };
+        let mut stream = ConversationStream::new_test();
 
         insta::assert_json_snapshot!(&stream);
 

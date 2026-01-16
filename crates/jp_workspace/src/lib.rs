@@ -627,11 +627,6 @@ pub fn user_data_dir() -> Result<PathBuf> {
 mod tests {
     use std::{collections::HashMap, fs, time::Duration};
 
-    use jp_config::{
-        Config as _, PartialAppConfig,
-        conversation::tool::RunMode,
-        model::id::{PartialModelIdConfig, ProviderId},
-    };
     use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
     use tempfile::tempdir;
     use test_log::test;
@@ -738,19 +733,9 @@ mod tests {
         let storage = root.join("storage");
 
         let mut workspace = Workspace::new(&root);
+        let config = AppConfig::new_test();
 
-        let mut partial = PartialAppConfig::empty();
-        partial.conversation.tools.defaults.run = Some(RunMode::Ask);
-        partial.assistant.model.id = PartialModelIdConfig {
-            provider: Some(ProviderId::Anthropic),
-            name: Some("test".parse().unwrap()),
-        }
-        .into();
-
-        let id = workspace.create_conversation(
-            Conversation::default(),
-            AppConfig::from_partial(partial).unwrap().into(),
-        );
+        let id = workspace.create_conversation(Conversation::default(), config.into());
         workspace
             .set_active_conversation_id(id, UtcDateTime::UNIX_EPOCH)
             .unwrap();
@@ -818,18 +803,9 @@ mod tests {
         assert!(workspace.state.local.conversations.is_empty());
 
         let conversation = Conversation::default();
-        let mut partial = PartialAppConfig::empty();
-        partial.conversation.tools.defaults.run = Some(RunMode::Ask);
-        partial.assistant.model.id = PartialModelIdConfig {
-            provider: Some(ProviderId::Anthropic),
-            name: Some("test".parse().unwrap()),
-        }
-        .into();
+        let config = AppConfig::new_test();
+        let id = workspace.create_conversation(conversation.clone(), config.into());
 
-        let id = workspace.create_conversation(
-            conversation.clone(),
-            AppConfig::from_partial(partial).unwrap().into(),
-        );
         assert_eq!(
             workspace
                 .state

@@ -182,7 +182,7 @@ pub fn build(mut partial: PartialAppConfig) -> Result<AppConfig, Error> {
         "Configuration details."
     );
 
-    let mut config: AppConfig = Config::from_partial(partial)?;
+    let mut config: AppConfig = Config::from_partial(partial, vec![])?;
 
     // Sort instructions by position.
     config
@@ -510,7 +510,7 @@ mod tests {
         let error = build(PartialAppConfig::default_values(&()).unwrap().unwrap()).unwrap_err();
         assert_matches!(
             error,
-            Error::Schematic(schematic::ConfigError::MissingRequired(_))
+            Error::Schematic(schematic::ConfigError::MissingRequired { .. })
         );
 
         let mut partial = PartialAppConfig::default_values(&()).unwrap().unwrap();
@@ -536,7 +536,7 @@ mod tests {
         let mut partial = PartialAppConfig::default_values(&()).unwrap().unwrap();
 
         let error = build(partial.clone()).unwrap_err();
-        assert_matches!(error, Error::Schematic(MissingRequired(v)) if v == "provider");
+        assert_matches!(error, Error::Schematic(MissingRequired { fields }) if fields == vec!["assistant", "model", "id", "provider"]);
         partial.assistant.model.id = PartialModelIdConfig {
             provider: Some(ProviderId::Openrouter),
             name: Some("foo".parse().unwrap()),
@@ -544,7 +544,7 @@ mod tests {
         .into();
 
         let error = build(partial.clone()).unwrap_err();
-        assert_matches!(error, Error::Schematic(MissingRequired(v)) if v == "run");
+        assert_matches!(error, Error::Schematic(MissingRequired{ fields }) if fields == vec!["conversation", "tools", "defaults", "run"]);
         partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
 
         build(partial).unwrap();
