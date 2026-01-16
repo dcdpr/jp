@@ -41,8 +41,8 @@ pub struct TurnState {
 
     /// A list of pending tool call questions.
     ///
-    /// The key is the [`ToolCallRequest::name`], the value is a list of question
-    /// IDs that have not yet been answered.
+    /// The key is the [`ToolCallRequest::name`], the value is a list of
+    /// question IDs that have not yet been answered.
     ///
     /// NOTE: In the future we could swap this to use `id` instead of `name`,
     /// but that requires either the LLM to correctly return the ID of the
@@ -50,5 +50,7 @@ pub struct TurnState {
     /// track more tool call state, which is a bit more complex. Returning the
     /// name of the tool call is the simplest solution, and hasn't
     /// caused any issues so far.
+    ///
+    /// [`ToolCallRequest::name`]: jp_conversation::event::ToolCallRequest::name
     pub pending_tool_call_questions: IndexMap<String, IndexSet<String>>,
 }
