@@ -271,6 +271,7 @@ impl Workspace {
             return Ok(());
         }
 
+        let active_id = self.active_conversation_id();
         let Some(storage) = self.storage.as_mut() else {
             return Ok(());
         };
@@ -278,11 +279,7 @@ impl Workspace {
         storage.persist_conversations_and_events(
             &TombMap::new(),
             &self.state.local.events,
-            &self
-                .state
-                .user
-                .conversations_metadata
-                .active_conversation_id,
+            &active_id,
             &self.state.local.active_conversation,
         )?;
 
