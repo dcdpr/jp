@@ -363,9 +363,12 @@ impl Query {
 
         // Keep track of the number of events in the stream, so that we can
         // later append new events to the end.
-        let current_events = stream.len();
+        let mut current_events = stream.len();
 
         let mut thread = build_thread(stream, attachments, &cfg.assistant, &tools)?;
+
+        let root = ctx.workspace.root().to_path_buf();
+        let workspace = &mut ctx.workspace;
 
         let mut result = Output::Ok(Success::Ok);
         if let Some(schema) = self.schema.clone() {
@@ -385,10 +388,12 @@ impl Query {
                     &cfg,
                     &mut ctx.signals.receiver,
                     &ctx.mcp_client,
-                    ctx.workspace.root().to_path_buf(),
+                    root,
                     ctx.term.is_tty,
                     &mut turn_state,
                     &mut thread,
+                    &mut current_events,
+                    workspace,
                     cfg.assistant.tool_choice.clone(),
                     tools,
                     conversation_id,
@@ -581,11 +586,30 @@ impl Query {
         is_tty: bool,
         turn_state: &mut TurnState,
         thread: &mut Thread,
+        thread_skip: &mut usize,
+        workspace: &mut Workspace,
         tool_choice: ToolChoice,
         tools: Vec<ToolDefinition>,
         conversation_id: ConversationId,
         printer: Arc<Printer>,
     ) -> Result<()> {
+        // Append any new events to the end of the stream.
+        //
+        // By doing this in our `handle_stream` loop, we allow the in-memory
+        // state to be live-updated, which in turn allows us to call
+        // `Workspace::persist_active_conversation` in the loop, ensuring data
+        // is persisted even if the process is interrupted.
+        for event in thread.events.iter().skip(*thread_skip) {
+            *thread_skip += 1;
+
+            workspace
+                .get_events_mut(&conversation_id)
+                .expect("TODO: add this invariant to the type system")
+                .push_with_config_delta(event);
+        }
+
+        workspace.persist_active_conversation()?;
+
         let mut result = Ok(());
         let mut cancelled = false;
         turn_state.request_count += 1;
@@ -689,6 +713,8 @@ impl Query {
                             turn_state,
                             provider.as_ref(),
                             thread,
+                            thread_skip,
+                            workspace,
                             &tool_choice,
                             &tools,
                             &mut response_handler,
@@ -738,6 +764,8 @@ impl Query {
                     is_tty,
                     turn_state,
                     thread,
+                    thread_skip,
+                    workspace,
                     tool_choice,
                     tools,
                     conversation_id,
@@ -814,6 +842,8 @@ impl Query {
                 is_tty,
                 turn_state,
                 thread,
+                thread_skip,
+                workspace,
                 // After the first tool call, we revert back to letting the LLM
                 // decide if/which tool to use.
                 ToolChoice::Auto,
@@ -839,6 +869,8 @@ impl Query {
         turn_state: &mut TurnState,
         provider: &dyn provider::Provider,
         thread: &mut Thread,
+        thread_skip: &mut usize,
+        workspace: &mut Workspace,
         tool_choice: &ToolChoice,
         tools: &[ToolDefinition],
         response_handler: &mut ResponseHandler,
@@ -870,6 +902,8 @@ impl Query {
                     is_tty,
                     turn_state,
                     thread,
+                    thread_skip,
+                    workspace,
                     tool_choice.clone(),
                     tools.to_vec(),
                     conversation_id,

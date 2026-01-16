@@ -260,6 +260,33 @@ impl Workspace {
         Ok(())
     }
 
+    /// Persists the active conversation to disk.
+    ///
+    /// This can be used continuously while the CLI is running, to persist the
+    /// active conversation to disk without having to wait for the CLI to exit.
+    /// This guards against a long-running LLM conversation not being persisted
+    /// to disk at the end, if the CLI is terminated early.
+    pub fn persist_active_conversation(&mut self) -> Result<()> {
+        if self.disable_persistence {
+            return Ok(());
+        }
+
+        let active_id = self.active_conversation_id();
+        let Some(storage) = self.storage.as_mut() else {
+            return Ok(());
+        };
+
+        storage.persist_conversations_and_events(
+            &TombMap::new(),
+            &self.state.local.events,
+            &active_id,
+            &self.state.local.active_conversation,
+        )?;
+
+        info!(path = %self.root.display(), "Persisted active conversation.");
+        Ok(())
+    }
+
     /// Gets the ID of the active conversation.
     #[must_use]
     pub fn active_conversation_id(&self) -> ConversationId {
@@ -630,7 +657,7 @@ mod tests {
     use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
     use tempfile::tempdir;
     use test_log::test;
-    use time::UtcDateTime;
+    use time::{UtcDateTime, macros::utc_datetime};
 
     use super::*;
 
@@ -856,5 +883,42 @@ mod tests {
             workspace.state.local.active_conversation,
             active_conversation
         );
+    }
+
+    #[test]
+    fn test_workspace_persist_active_conversation() {
+        jp_id::global::set("foo".to_owned());
+
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let storage = root.join("storage");
+
+        let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
+        let config = Arc::new(AppConfig::new_test());
+
+        let id1 = ConversationId::try_from(utc_datetime!(2023-01-01 0:00)).unwrap();
+        let id2 = ConversationId::try_from(utc_datetime!(2023-01-02 0:00)).unwrap();
+
+        workspace.create_conversation_with_id(id1, Conversation::default(), config.clone());
+        workspace.create_conversation_with_id(id2, Conversation::default(), config.clone());
+        workspace
+            .set_active_conversation_id(id1, UtcDateTime::UNIX_EPOCH)
+            .unwrap();
+
+        workspace.persist_active_conversation().unwrap();
+        assert!(storage.is_dir());
+
+        let id1_metadata_file = storage
+            .join(CONVERSATIONS_DIR)
+            .join(id1.to_dirname(None))
+            .join(METADATA_FILE);
+
+        let id2_metadata_file = storage
+            .join(CONVERSATIONS_DIR)
+            .join(id2.to_dirname(None))
+            .join(METADATA_FILE);
+
+        assert!(id1_metadata_file.is_file());
+        assert!(!id2_metadata_file.is_file());
     }
 }
