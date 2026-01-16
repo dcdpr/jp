@@ -25,7 +25,7 @@ pub enum Error {
     Thread(String),
 
     /// Unknown conversation ID.
-    #[error("unknown conversation ID")]
+    #[error("unknown conversation ID: {0}")]
     UnknownId(ConversationId),
 
     /// Configuration error.

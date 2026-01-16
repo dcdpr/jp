@@ -185,6 +185,7 @@ where
 
 /// Strings that are merged using the specified merge strategy.
 #[derive(Debug, Config, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct MergedVec<T> {
     /// The vec value.
     #[setting(default = vec![])]

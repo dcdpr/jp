@@ -97,7 +97,7 @@ impl StreamEventHandler {
                 // If the response includes reasoning, we add two newlines
                 // after the reasoning, but before the content.
                 if !matches!(reasoning_display, ReasoningDisplayConfig::Hidden) && reasoning_ended {
-                    message = format!("\n---\n\n{message}");
+                    message = format!("\n\n---\n\n{message}");
                 }
 
                 Some(message)
@@ -503,7 +503,7 @@ fn build_tool_call_response(
     }
 
     if handler.render_tool_calls {
-        if !data.ends_with('\n') {
+        if !data.is_empty() && !data.ends_with('\n') {
             data.push('\n');
         }
 
@@ -571,7 +571,7 @@ mod tests {
                 handler: StreamEventHandler::default(),
                 chunk: ChatResponse::reasoning("Let me think..."),
                 show_reasoning: true,
-                output: Some("> Let me think...".into()),
+                output: Some("Let me think...".into()),
                 mutated_handler: StreamEventHandler {
                     reasoning_tokens: "Let me think...".into(),
                     ..Default::default()
@@ -594,7 +594,7 @@ mod tests {
                 },
                 chunk: ChatResponse::message("Answer"),
                 show_reasoning: true,
-                output: Some("\n---\n\nAnswer".into()),
+                output: Some("\n\n---\n\nAnswer".into()),
                 mutated_handler: StreamEventHandler {
                     reasoning_tokens: "I reasoned".into(),
                     content_tokens: "Answer".into(),

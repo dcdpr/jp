@@ -160,13 +160,15 @@ impl ToPartial for MergedString {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum MergedStringStrategy {
-    /// Append the string to the previous value.
+    /// Append this string to the existing string, using the `separator` value.
     #[default]
     Append,
 
-    /// Prepend the string to the previous value.
+    /// Prepend this string to the existing string, using the `separator` value.
     Prepend,
 
+    /// Replace the existing string with this one.
+    ///
     /// See [`schematic::merge::replace`].
     Replace,
 }

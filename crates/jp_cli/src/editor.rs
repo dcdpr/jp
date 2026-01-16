@@ -8,7 +8,6 @@ use std::{
 };
 
 use duct::Expression;
-use itertools::Itertools;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _, model::parameters::PartialReasoningConfig,
 };
@@ -272,19 +271,6 @@ pub(crate) fn edit_query(
 
 fn build_config_text(config: &AppConfig) -> String {
     let model_id = &config.assistant.model.id;
-    let mut tools = config
-        .conversation
-        .tools
-        .iter()
-        .filter_map(|(k, cfg)| cfg.enable().then_some(k))
-        .sorted()
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    if tools.is_empty() {
-        tools = "(none)".to_owned();
-    }
-
     let mut active_config = PartialAppConfig::empty();
     active_config.assistant.model.id = model_id.to_partial();
     active_config.assistant.model.parameters.reasoning = config
@@ -318,9 +304,9 @@ fn build_history_text(history: &ConversationStream) -> String {
             .unwrap_or_else(|_| event.timestamp.to_string());
 
         let options = comrak::Options {
-            render: comrak::RenderOptions {
+            render: comrak::options::Render {
                 width: 80,
-                unsafe_: true,
+                r#unsafe: true,
                 prefer_fenced: true,
                 experimental_minimize_commonmark: true,
                 ..Default::default()
