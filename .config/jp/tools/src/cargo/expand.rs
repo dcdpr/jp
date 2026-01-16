@@ -43,6 +43,7 @@ pub(crate) async fn cargo_expand(
 
 #[cfg(test)]
 mod tests {
+    use jp_tool::Action;
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -53,7 +54,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ctx = Context {
             root: dir.path().to_owned(),
-            format_parameters: false,
+            action: Action::Run,
         };
 
         std::fs::write(dir.path().join("Cargo.toml"), indoc::indoc! {r#"
