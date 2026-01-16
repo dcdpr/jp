@@ -181,6 +181,11 @@ mod tests {
         let root = temp_dir.path();
         let filename = "test_script.rs";
 
+        if std::env::var("CI").is_ok() {
+            run_git(root, &["config", "user.email", "you@example.com"]);
+            run_git(root, &["config", "user.name", "Your Name"]);
+        }
+
         // Setup
         {
             let file_path = root.join(filename);
