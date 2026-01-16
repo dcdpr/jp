@@ -13,15 +13,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-bat = { workspace = true, features = ["regex-onig"] }
-crossterm = { workspace = true }
-markdown-table-formatter = "0.3"
 parking_lot = { workspace = true }
-
-[dev-dependencies]
-indoc = { workspace = true }
-insta = { workspace = true }
-pretty_assertions = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true
