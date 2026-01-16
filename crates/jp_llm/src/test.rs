@@ -97,7 +97,7 @@ impl TestRequest {
                             }
                             .into();
 
-                            AppConfig::from_partial(cfg).unwrap().into()
+                            AppConfig::from_partial(cfg, vec![]).unwrap().into()
                         })
                         .with_created_at(utc_datetime!(2020-01-01 0:00)),
                     )
@@ -128,7 +128,7 @@ impl TestRequest {
                             }
                             .into();
 
-                            AppConfig::from_partial(cfg).unwrap().into()
+                            AppConfig::from_partial(cfg, vec![]).unwrap().into()
                         })
                         .with_created_at(datetime!(2020-01-01 0:00 utc)),
                     )
