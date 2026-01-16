@@ -91,6 +91,7 @@ impl TestRequest {
                         let mut config = AppConfig::new_test();
                         config.assistant.model.parameters.reasoning = Some(ReasoningConfig::Off);
                         ConversationStream::new(config.into())
+                            .with_created_at(utc_datetime!(2020-01-01 0:00))
                     })
                     .build()
                     .unwrap(),
@@ -109,7 +110,10 @@ impl TestRequest {
             query: StructuredQuery::new(
                 true.into(),
                 ThreadBuilder::new()
-                    .with_events(ConversationStream::new_test())
+                    .with_events(
+                        ConversationStream::new_test()
+                            .with_created_at(utc_datetime!(2020-01-01 0:00)),
+                    )
                     .build()
                     .unwrap(),
             ),
