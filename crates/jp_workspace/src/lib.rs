@@ -657,7 +657,7 @@ mod tests {
     use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
     use tempfile::tempdir;
     use test_log::test;
-    use time::UtcDateTime;
+    use time::{UtcDateTime, macros::utc_datetime};
 
     use super::*;
 
