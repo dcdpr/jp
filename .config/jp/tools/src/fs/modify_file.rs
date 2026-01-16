@@ -433,7 +433,7 @@ mod tests {
 
             let actual = fs_modify_file(
                 ctx,
-                &Map::new(),
+                &Map::from_iter([("apply_changes".to_string(), Value::Bool(true))]),
                 file_path.to_owned(),
                 test_case.string_to_replace.to_owned(),
                 test_case.new_string.to_owned(),
@@ -524,7 +524,7 @@ mod tests {
 
         let _actual = fs_modify_file(
             ctx,
-            &Map::new(),
+            &Map::from_iter([("apply_changes".to_string(), Value::Bool(true))]),
             file_path.to_owned(),
             string_to_replace.to_owned(),
             new_string.to_owned(),
@@ -591,7 +591,7 @@ mod tests {
 
         let _actual = fs_modify_file(
             ctx,
-            &Map::new(),
+            &Map::from_iter([("apply_changes".to_string(), Value::Bool(true))]),
             file_path.to_owned(),
             string_to_replace.to_owned(),
             new_string.to_owned(),
@@ -651,7 +651,7 @@ mod tests {
 
             let actual = fs_modify_file(
                 ctx,
-                &Map::new(),
+                &Map::from_iter([("apply_changes".to_string(), Value::Bool(true))]),
                 file_path.to_owned(),
                 test_case.string_to_replace.to_owned(),
                 test_case.new_string.to_owned(),
@@ -679,5 +679,83 @@ mod tests {
                 "test case: {name}"
             );
         }
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_modify_file_confirmation() {
+        // Create root directory.
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path().to_path_buf();
+
+        // Create file to be modified.
+        let file_path = "test.txt";
+        let absolute_file_path = root.join(file_path);
+        fs::write(&absolute_file_path, "Hello World").unwrap();
+
+        let actual = fs_modify_file(
+            Context {
+                root: root.clone(),
+                action: Action::Run,
+            },
+            &Map::new(),
+            file_path.to_owned(),
+            "World".to_owned(),
+            "There".to_owned(),
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(actual, Outcome::NeedsInput {
+            question: Question {
+                id: "apply_changes".to_string(),
+                text: indoc::indoc! {"
+                    Do you want to apply the following patch?
+
+                    ```diff
+                    --- test.txt
+                    +++ test.txt
+                    @@ -1 +1 @@
+                    -Hello World
+                    \\ No newline at end of file
+                    +Hello There
+                    \\ No newline at end of file
+                    ```"}
+                .to_owned(),
+                answer_type: AnswerType::Boolean,
+                default: Some(Value::Bool(true)),
+            },
+        });
+
+        let actual = fs_modify_file(
+            Context {
+                root,
+                action: Action::Run,
+            },
+            &Map::from_iter([("apply_changes".to_string(), Value::Bool(true))]),
+            file_path.to_owned(),
+            "World".to_owned(),
+            "There".to_owned(),
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(actual, Outcome::Success {
+            content: indoc::indoc! {"
+                File modified successfully:
+
+                ```diff
+                --- test.txt
+                +++ test.txt
+                @@ -1 +1 @@
+                -Hello World
+                \\ No newline at end of file
+                +Hello There
+                \\ No newline at end of file
+                ```"}
+            .to_owned(),
+        });
     }
 }
