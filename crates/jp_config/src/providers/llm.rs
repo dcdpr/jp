@@ -25,6 +25,7 @@ use crate::{
         openai::{OpenaiConfig, PartialOpenaiConfig},
         openrouter::{OpenrouterConfig, PartialOpenrouterConfig},
     },
+    util::merge_nested_indexmap,
 };
 
 /// Provider configuration.
@@ -32,7 +33,7 @@ use crate::{
 #[config(default, rename_all = "snake_case")]
 pub struct LlmProviderConfig {
     /// Aliases for specific provider/model combinations.
-    #[setting(nested)]
+    #[setting(nested, merge = merge_nested_indexmap)]
     pub aliases: IndexMap<String, ModelIdConfig>,
 
     /// Anthropic API configuration.

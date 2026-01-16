@@ -180,7 +180,7 @@ coverage-ci: _coverage-ci-setup
     cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info
 
-_coverage-ci-setup: (_rustup_component "llvm-tools-preview") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version) _install_ci_matchers
+_coverage-ci-setup: (_rustup_component "llvm-tools") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version) _install_ci_matchers
 
 # Check for security vulnerabilities on CI.
 [group('ci')]

@@ -681,7 +681,7 @@ impl Query {
                 biased,
                 signals.recv(),
                 |signal| {
-                    debug!(?signal, "Received signal.");
+                    info!(?signal, "Received signal.");
                     match signal {
                         // Stop processing events, but gracefully store the
                         // conversation state.

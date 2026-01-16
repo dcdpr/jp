@@ -211,6 +211,13 @@ impl Workspace {
         let _err = events
             .entry(metadata.active_conversation_id)
             .or_default()
+            // FIXME: This can fail without recourse, if the active conversation
+            // has a corrupt (or missing) events file. The user has to manually
+            // change the `active_conversation_id` in their user local storage
+            // to fix this state.
+            //
+            // Instead, we should perhaps track "bad" conversation IDs and skip
+            // them when retrying loading the workspace state.
             .set(storage.load_conversation_events(&metadata.active_conversation_id)?);
 
         self.state = State {

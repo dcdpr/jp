@@ -220,8 +220,8 @@ impl ResponseHandler {
                 let empty_lines_end_count = lines.iter().rev().take_while(|s| s.is_empty()).count();
 
                 let options = comrak::Options {
-                    render: comrak::RenderOptions {
-                        unsafe_: true,
+                    render: comrak::options::Render {
+                        r#unsafe: true,
                         prefer_fenced: true,
                         experimental_minimize_commonmark: true,
                         ..Default::default()
