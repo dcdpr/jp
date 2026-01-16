@@ -1049,7 +1049,7 @@ mod tests {
             ))
         );
 
-        let cfg = CommandConfigOrString::from_partial(p.command.clone().unwrap()).unwrap();
+        let cfg = CommandConfigOrString::from_partial(p.command.clone().unwrap(), vec![]).unwrap();
         assert_eq!(cfg.command(), ToolCommandConfig {
             program: "cargo".to_owned(),
             args: vec!["check".to_owned()],
@@ -1073,7 +1073,7 @@ mod tests {
             ))
         );
 
-        let cfg = CommandConfigOrString::from_partial(p.command.unwrap()).unwrap();
+        let cfg = CommandConfigOrString::from_partial(p.command.unwrap(), vec![]).unwrap();
         assert_eq!(cfg.command(), ToolCommandConfig {
             program: "cargo".to_owned(),
             args: vec!["check".to_owned(), "--verbose".to_owned()],

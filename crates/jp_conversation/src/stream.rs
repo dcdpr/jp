@@ -470,6 +470,22 @@ impl ConversationStream {
             front_config: self.base_config.to_partial(),
         }
     }
+
+    /// Return a default conversation stream for testing purposes.
+    ///
+    /// This CANNOT be used in release mode.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new_test() -> Self {
+        use time::macros::utc_datetime;
+
+        Self {
+            base_config: AppConfig::new_test().into(),
+            events: vec![],
+            created_at: utc_datetime!(2020-01-01 0:00),
+        }
+    }
 }
 
 impl Extend<ConversationEventWithConfig> for ConversationStream {

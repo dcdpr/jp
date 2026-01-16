@@ -88,11 +88,7 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
     use assert_matches::assert_matches;
-    use jp_config::{
-        AppConfig, Config as _, PartialAppConfig,
-        conversation::tool::RunMode,
-        model::id::{PartialModelIdConfig, ProviderId},
-    };
+    use jp_config::AppConfig;
     use jp_conversation::{
         Conversation, ConversationEvent, ConversationStream,
         event::{ChatRequest, ChatResponse},
@@ -406,15 +402,7 @@ mod tests {
         for (name, case) in cases {
             let tmp = tempdir().unwrap();
 
-            let mut partial = PartialAppConfig::empty();
-            partial.conversation.tools.defaults.run = Some(RunMode::Ask);
-            partial.assistant.model.id = PartialModelIdConfig {
-                provider: Some(ProviderId::Anthropic),
-                name: Some("test".parse().unwrap()),
-            }
-            .into();
-
-            let config = AppConfig::from_partial(partial).unwrap();
+            let config = AppConfig::new_test();
             let workspace = Workspace::new(tmp.path());
             let mut ctx = Ctx::new(
                 workspace,
