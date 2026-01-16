@@ -90,6 +90,10 @@ impl TestRequest {
                     .with_events({
                         let mut config = AppConfig::new_test();
                         config.assistant.model.parameters.reasoning = Some(ReasoningConfig::Off);
+                        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+                            provider,
+                            name: "test".parse().unwrap(),
+                        });
                         ConversationStream::new(config.into())
                             .with_created_at(utc_datetime!(2020-01-01 0:00))
                     })
@@ -110,10 +114,15 @@ impl TestRequest {
             query: StructuredQuery::new(
                 true.into(),
                 ThreadBuilder::new()
-                    .with_events(
-                        ConversationStream::new_test()
-                            .with_created_at(utc_datetime!(2020-01-01 0:00)),
-                    )
+                    .with_events({
+                        let mut config = AppConfig::new_test();
+                        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+                            provider,
+                            name: "test".parse().unwrap(),
+                        });
+                        ConversationStream::new(config.into())
+                            .with_created_at(utc_datetime!(2020-01-01 0:00))
+                    })
                     .build()
                     .unwrap(),
             ),

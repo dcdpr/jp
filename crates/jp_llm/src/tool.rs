@@ -33,10 +33,11 @@ pub struct ToolDefinition {
     pub description: Option<String>,
     pub parameters: IndexMap<String, ToolParameterConfig>,
 
-    // FIXME: This feels somewhat hacky. I should investigate if there is an
-    // alternative to this field, before committing it.
-    //
-    // Maybe we can just insert it as an argument to the relevant method?
+    /// Whether the tool should include the `tool_answers` parameter.
+    ///
+    /// This is `true` for any tool that has its questions configured such that
+    /// at least one question has to be answered by the assistant instead of the
+    /// user.
     pub include_tool_answers_parameter: bool,
 }
 
