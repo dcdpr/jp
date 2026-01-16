@@ -3832,6 +3832,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "490dcfcbfef26be6800d11870ff2df8774fa6e86d047e3e8c8a76b25655e41ca"
 
 [[package]]
+name = "seahash"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
+
+[[package]]
 name = "secrecy"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4736,6 +4742,7 @@ dependencies = [
  "pretty_assertions",
  "quick-xml",
  "reqwest",
+ "seahash",
  "serde",
  "serde_json",
  "similar",
@@ -4745,6 +4752,7 @@ dependencies = [
  "time",
  "tokio",
  "url",
+ "which",
 ]
 
 [[package]]
