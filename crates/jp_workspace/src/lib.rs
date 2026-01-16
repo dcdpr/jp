@@ -260,6 +260,33 @@ impl Workspace {
         Ok(())
     }
 
+    /// Persists the active conversation to disk.
+    ///
+    /// This can be used continuously while the CLI is running, to persist the
+    /// active conversation to disk without having to wait for the CLI to exit.
+    /// This guards against a long-running LLM conversation not being persisted
+    /// to disk at the end, if the CLI is terminated early.
+    pub fn persist_active_conversation(&mut self) -> Result<()> {
+        if self.disable_persistence {
+            return Ok(());
+        }
+
+        let active_id = self.active_conversation_id();
+        let Some(storage) = self.storage.as_mut() else {
+            return Ok(());
+        };
+
+        storage.persist_conversations_and_events(
+            &TombMap::new(),
+            &self.state.local.events,
+            &active_id,
+            &self.state.local.active_conversation,
+        )?;
+
+        info!(path = %self.root.display(), "Persisted active conversation.");
+        Ok(())
+    }
+
     /// Gets the ID of the active conversation.
     #[must_use]
     pub fn active_conversation_id(&self) -> ConversationId {
