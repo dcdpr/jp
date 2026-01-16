@@ -6,7 +6,10 @@ use jp_config::{
     assistant::tool_choice::ToolChoice,
     conversation::tool::ToolParameterConfig,
     model::{
-        id::{ModelIdConfig, Name, PartialModelIdOrAliasConfig, ProviderId},
+        id::{
+            ModelIdConfig, ModelIdOrAliasConfig, Name, PartialModelIdConfig,
+            PartialModelIdOrAliasConfig, ProviderId,
+        },
         parameters::{
             PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig, ReasoningEffort,
         },
