@@ -1,3 +1,5 @@
+pub mod xml;
+
 use jp_tool::Outcome;
 use serde::{Deserialize, Serialize};
 

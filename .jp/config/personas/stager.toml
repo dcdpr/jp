@@ -20,6 +20,9 @@ prioritize new changes according to the instructions.
 
 When finished, you should provide a summary of the changes that you have staged, why you chose \
 this set of changes to stage, and a list of files that you have staged.
+
+You MUST NOT print the staged patches verbatim, the user can check those themselves using `git \
+diff --cached`. A summary of what was staged and why this group was picked is enough.
 """
 
 [conversation]
@@ -35,11 +38,10 @@ params.arg = ["branch", "--show-current"]
 [[conversation.attachments]]
 type = "cmd"
 path = "git"
-params.description = "Diff of changed files (excluding test fixtures and Cargo.lock)"
+params.description = "Diff of changed (non-staged) files (excluding test fixtures and Cargo.lock)"
 params.arg = [
-    "diff-index",
+    "diff-files",
     "-p",
-    "HEAD",
     "--",
     ".",
     ":^crates/jp_llm/tests/fixtures",
@@ -50,7 +52,7 @@ params.arg = [
 [[conversation.attachments]]
 type = "cmd"
 path = "git"
-params.description = "Diff of current cached/staged hunks (excluding test fixtures and Cargo.lock)"
+params.description = "Diff of current staged hunks (excluding test fixtures and Cargo.lock)"
 params.arg = [
     "diff-index",
     "--cached",
@@ -77,16 +79,16 @@ params.arg = [
 ]
 
 [style]
-reasoning.display = "static"
-tool_call.show = false
+reasoning.display = "full"
+tool_call.show = true
 
 [assistant]
 name = "Git Stager"
-tool_choice = "git_stage"
+tool_choice = "git_list_patches"
 
 [assistant.model]
-id = "gemini-flash"
-parameters.reasoning.effort = "high"
+id = "gemini-pro"
+parameters.reasoning.effort = "auto"
 
 [[assistant.instructions]]
 title = "Git Staging: Research Changes First"
@@ -124,5 +126,23 @@ items = [
     """\
     Bug fixes are the most important, then enhancements to existing features, new features, \
     performance improvements, and then everything else.\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Git Staging: Surgical Precision"
+description = """
+Staging requires precision, often staging hunks of code is preferable over staging entire files.
+"""
+items = [
+    """\
+    ONLY stage changes in a file related to the topic of the commit.\
+    """,
+    """\
+    If a file contains multiple unrelated changes, use `git_stage_patch` `patch_ids` argument to \
+    stage only the changes you want.\
+    """,
+    """\
+    If a patch cannot be staged cleanly, report this to the project maintainer and ask for help.\
     """,
 ]

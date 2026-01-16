@@ -100,7 +100,7 @@ impl Content {
         let re = RegexBuilder::new(find)
             .case_insensitive(true)
             .multi_line(true)
-            .dot_matches_new_line(true)
+            .dot_matches_new_line(false)
             .unicode_mode(true)
             .build()?;
 
@@ -185,19 +185,24 @@ pub(crate) async fn fs_modify_file(
 }
 
 fn format_changes(changes: Vec<Change>) -> String {
-    changes
+    let diff = changes
         .into_iter()
         .map(|change| {
             let path = change.path.to_string_lossy();
 
             let diff = text_diff(&change.before, &change.after);
             let unified = unified_diff(&diff, &path);
-            let colored = colored_diff(&diff, &unified);
 
-            format!("{path}:\n\n```diff\n{colored}\n```")
+            colored_diff(&diff, &unified, &path)
         })
         .collect::<Vec<_>>()
-        .join("\n\n")
+        .join("\n\n");
+
+    if diff.is_empty() {
+        return "<before and after are identical>".to_owned();
+    }
+
+    diff
 }
 
 fn apply_changes(
@@ -205,7 +210,7 @@ fn apply_changes(
     root: &Path,
     answers: &Map<String, Value>,
 ) -> Result<Outcome, Error> {
-    let mut modified = vec![];
+    let mut queue = vec![];
     let count = changes.len();
     for Change {
         path,
@@ -217,9 +222,7 @@ fn apply_changes(
             match answers.get("modify_dirty_file").and_then(Value::as_bool) {
                 Some(true) => {}
                 Some(false) => {
-                    return Err(
-                        "File has uncommitted changes. Please commit or discard first.".into(),
-                    );
+                    return Err("File has uncommitted changes. Change discarded.".into());
                 }
                 None => {
                     return Ok(Outcome::NeedsInput {
@@ -239,24 +242,45 @@ fn apply_changes(
 
         let file_path = path.to_string_lossy();
         let file_path = file_path.trim_start_matches('/');
-        let absolute_path = root.join(file_path);
 
-        fs::write(absolute_path, &after)?;
+        queue.push((file_path.to_owned(), before, after));
+    }
 
-        let diff = text_diff(&before, &after);
-        let diff = unified_diff(&diff, file_path);
+    let patch = queue
+        .iter()
+        .map(|(path, before, after)| {
+            let diff = text_diff(before, after);
+            let diff = unified_diff(&diff, path);
+            format!("```diff\n{diff}```")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
 
-        modified.push(diff.to_string());
+    match answers.get("apply_changes").and_then(Value::as_bool) {
+        Some(true) => {}
+        Some(false) => {
+            return Ok("Changes discarded.".into());
+        }
+        None => {
+            return Ok(Outcome::NeedsInput {
+                question: Question {
+                    id: "apply_changes".to_string(),
+                    text: format!("Do you want to apply the following patch?\n\n{patch}"),
+                    answer_type: AnswerType::Boolean,
+                    default: Some(Value::Bool(true)),
+                },
+            });
+        }
+    }
+
+    for (path, _, after) in queue {
+        fs::write(root.join(path), after)?;
     }
 
     Ok(format!(
         "{} modified successfully:\n\n{}",
         if count == 1 { "File" } else { "Files" },
-        modified
-            .into_iter()
-            .map(|diff| format!("```diff\n{diff}```"))
-            .collect::<Vec<_>>()
-            .join("\n\n")
+        patch
     )
     .into())
 }
@@ -294,8 +318,15 @@ fn unified_diff<'diff, 'old, 'new, 'bufs>(
 fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
     diff: &'diff TextDiff<'old, 'new, 'bufs, str>,
     unified: &UnifiedDiff<'diff, 'old, 'new, 'bufs, str>,
+    path: &str,
 ) -> String {
     let mut buf = String::new();
+
+    // header
+    buf.push_str(&format!("         │ {}\n", path.bold()).to_string());
+    buf.push_str(&format!("─────────┼─{}\n", "─".repeat(path.len())));
+
+    // hunks
     for hunk in unified.iter_hunks() {
         for op in hunk.ops() {
             for change in diff.iter_inline_changes(op) {
@@ -306,7 +337,7 @@ fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
                 };
                 let _ = write!(
                     &mut buf,
-                    "{}{} |{}",
+                    "{}{} │{}",
                     s.apply(Line(change.old_index())),
                     s.apply(Line(change.new_index())),
                     s.apply(sign).bold(),

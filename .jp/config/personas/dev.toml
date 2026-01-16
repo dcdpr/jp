@@ -17,7 +17,7 @@ github_read_file.enable = true
 [assistant]
 name = "Software Developer"
 
-[system_prompt]
+[assistant.system_prompt]
 strategy = "append"
 separator = "paragraph"
 value = """\
@@ -29,7 +29,7 @@ and well-tested code that aligns with the project's standards.
 
 [assistant.model]
 id = "anthropic/claude-sonnet-4-5"
-parameters.reasoning.effort = "high"
+parameters.reasoning.effort = "auto"
 
 [[assistant.instructions]]
 title = "Coding Principles"
