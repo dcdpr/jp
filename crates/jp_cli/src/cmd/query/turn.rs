@@ -44,10 +44,11 @@ pub struct TurnState {
     /// The key is the [`ToolCallRequest::name`], the value is a list of question
     /// IDs that have not yet been answered.
     ///
-    /// [`ToolCallRequest::name`]: jp_conversation::event::ToolCallRequest::name
-    // FIXME: We CANNOT use `ToolCallRequest::id` as the key, because the
-    // follow-up tool call WILL have a different ID. We would have to have the
-    // LLM return the ID of the original tool call in the response, which might
-    // actually be a good idea to do?
+    /// NOTE: In the future we could swap this to use `id` instead of `name`,
+    /// but that requires either the LLM to correctly return the ID of the
+    /// original tool call in the response, which might be fragile, or for us to
+    /// track more tool call state, which is a bit more complex. Returning the
+    /// name of the tool call is the simplest solution, and hasn't
+    /// caused any issues so far.
     pub pending_tool_call_questions: IndexMap<String, IndexSet<String>>,
 }
