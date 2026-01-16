@@ -545,6 +545,7 @@ impl Workspace {
 
 impl Drop for Workspace {
     fn drop(&mut self) {
+        #[expect(clippy::print_stderr)]
         if let Err(err) = self.persist() {
             eprintln!("Failed to persist workspace: {err}");
         }

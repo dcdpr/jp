@@ -1007,7 +1007,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -1138,7 +1138,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -1892,7 +1892,7 @@ checksum = "f4c7245a08504955605670dbf141fceab975f15ca21570696aebe9d2e71576bd"
 [[package]]
 name = "inquire"
 version = "0.9.1"
-source = "git+https://github.com/JeanMertz/inquire?branch=submit-on-valid-parse#b85e8a83c81928e140a5e75f0fcc935164a509e9"
+source = "git+https://github.com/JeanMertz/inquire?branch=merged#c84710515dc4ee176bff9cae28f92d7b35ce310e"
 dependencies = [
  "bitflags 2.9.4",
  "crossterm",
@@ -2116,6 +2116,7 @@ dependencies = [
  "jp_macro",
  "jp_mcp",
  "jp_openrouter",
+ "jp_printer",
  "jp_storage",
  "jp_task",
  "jp_term",
@@ -2243,6 +2244,7 @@ dependencies = [
  "jp_inquire",
  "jp_mcp",
  "jp_openrouter",
+ "jp_printer",
  "jp_test",
  "jp_tool",
  "jsonschema",
@@ -2305,6 +2307,13 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "jp_printer"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
 ]
 
 [[package]]
@@ -3606,7 +3615,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -4346,7 +4355,7 @@ dependencies = [
  "fastrand",
  "once_cell",
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -5240,7 +5249,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]

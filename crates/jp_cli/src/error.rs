@@ -92,4 +92,7 @@ pub(crate) enum Error {
     // TODO: we should not have this error variant.
     #[error("Failed to inquire")]
     Inquire(#[from] inquire::error::InquireError),
+
+    #[error("Failed to write to buffer")]
+    Fmt(#[from] std::fmt::Error),
 }

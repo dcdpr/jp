@@ -5,6 +5,7 @@ use std::{
 
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
 use jp_mcp::id::{McpServerId, McpToolId};
+use jp_printer::Printer;
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
 use time::UtcDateTime;
@@ -25,6 +26,9 @@ pub(crate) struct Ctx {
 
     /// Global CLI arguments.
     pub(crate) term: Term,
+
+    /// The printer for output.
+    pub(crate) printer: Arc<Printer>,
 
     /// MCP client for interacting with MCP servers.
     pub(crate) mcp_client: jp_mcp::Client,
@@ -58,6 +62,7 @@ impl Ctx {
         runtime: Runtime,
         args: Globals,
         config: AppConfig,
+        printer: Printer,
     ) -> Self {
         let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
@@ -68,6 +73,7 @@ impl Ctx {
                 args,
                 is_tty: io::stdout().is_terminal(),
             },
+            printer: Arc::new(printer),
             mcp_client,
             task_handler: TaskHandler::default(),
             signals: SignalPair::new(&runtime),
@@ -180,5 +186,11 @@ pub(crate) trait IntoPartialAppConfig {
         merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         Ok(partial)
+    }
+}
+
+impl Drop for Ctx {
+    fn drop(&mut self) {
+        self.printer.shutdown();
     }
 }

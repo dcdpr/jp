@@ -1,4 +1,5 @@
 #![expect(clippy::too_many_arguments)]
+#![allow(clippy::print_stdout, clippy::print_stderr)]
 
 mod cargo;
 mod fs;

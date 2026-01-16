@@ -1,14 +1,15 @@
-use std::{fs, path::PathBuf, time::Duration};
+use std::{fs, path::PathBuf, sync::Arc, time::Duration};
 
 use crossterm::style::{Color, Stylize as _};
 use jp_config::style::{LinkStyle, StyleConfig};
-use jp_term::{code, osc::hyperlink, stdout};
+use jp_printer::{PrintableExt as _, Printer};
+use jp_term::{code, osc::hyperlink};
 use termimad::FmtText;
 
 use super::{Line, LineVariant, RenderMode};
 use crate::Error;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct ResponseHandler {
     /// How to render the response.
     pub render_mode: RenderMode,
@@ -18,6 +19,8 @@ pub(super) struct ResponseHandler {
 
     /// The streamed, unprocessed lines received from the LLM.
     received: Vec<String>,
+
+    pub printer: Arc<Printer>,
 
     /// The lines that have been parsed so far.
     ///
@@ -40,11 +43,18 @@ pub(super) struct ResponseHandler {
 }
 
 impl ResponseHandler {
-    pub fn new(render_mode: RenderMode, render_tool_calls: bool) -> Self {
+    pub fn new(render_mode: RenderMode, render_tool_calls: bool, printer: Arc<Printer>) -> Self {
         Self {
             render_mode,
             render_tool_calls,
-            ..Default::default()
+            printer,
+            received: vec![],
+            parsed: vec![],
+            buffer: String::new(),
+            in_fenced_code_block: false,
+            code_buffer: (None, vec![]),
+            code_line: 0,
+            last_fenced_code_block_end: (0, 0),
         }
     }
 
@@ -62,29 +72,19 @@ impl ResponseHandler {
         self.handle_inner(line, style)
     }
 
-    pub fn handle(&mut self, data: &str, style: &StyleConfig, raw: bool) -> Result<(), Error> {
-        self.buffer.push_str(data);
-
-        while let Some(line) = self.get_line(raw) {
-            self.handle_inner(line, style)?;
-        }
-
-        Ok(())
-    }
-
     fn handle_inner(&mut self, line: Line, style: &StyleConfig) -> Result<(), Error> {
         let Line { content, variant } = line;
         self.received.push(content);
 
         let delay = match variant {
             LineVariant::Code => style.typewriter.code_delay.into(),
-            LineVariant::Raw => Duration::ZERO,
-            _ => style.typewriter.text_delay.into(),
+            LineVariant::Normal => style.typewriter.text_delay.into(),
+            _ => Duration::ZERO,
         };
 
         let lines = self.handle_line(&variant, style)?;
         if !matches!(self.render_mode, RenderMode::Buffered) {
-            stdout::typewriter(&lines.join("\n"), delay)?;
+            self.printer.print(lines.join("\n").typewriter(delay));
         }
 
         self.parsed.extend(lines);
@@ -256,30 +256,6 @@ impl ResponseHandler {
                 Ok(lines)
             }
         }
-    }
-
-    fn get_line(&mut self, raw: bool) -> Option<Line> {
-        let s = &mut self.buffer;
-        let idx = s.find('\n')?;
-
-        // Determine the end index of the actual line *content*.
-        // Check if the character before '\n' is '\r'.
-        let end_idx = if idx > 0 && s.as_bytes().get(idx - 1) == Some(&b'\r') {
-            idx - 1
-        } else {
-            idx
-        };
-
-        // Extract the line content *before* draining.
-        // Creating a slice and then converting to owned String.
-        let extracted_line = s[..end_idx].to_string();
-
-        // Calculate the index *after* the newline sequence to drain up to.
-        // This ensures we remove the '\n' and potentially the preceding '\r'.
-        let drain_end_idx = idx + 1;
-        s.drain(..drain_end_idx);
-
-        Some(Line::new(extracted_line, self.in_fenced_code_block, raw))
     }
 
     fn persist_code_block(&self) -> Result<PathBuf, Error> {

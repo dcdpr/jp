@@ -1,15 +1,20 @@
-use std::{
-    io::{self, Write as _},
-    iter::Peekable,
-    str::Chars,
-    time::Duration,
-};
+//! Typewriter printing utilities.
 
+use std::{iter::Peekable, str::Chars};
+
+/// The state of the ANSI parser.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum AnsiParseState {
+    /// Normal state.
     Normal,
+
+    /// Escape sequence state.
     Escape,
+
+    /// CSI sequence state.
     Csi,
+
+    /// OSC sequence state.
     Osc,
 }
 
@@ -17,14 +22,17 @@ enum AnsiParseState {
 /// indicating if the character is considered "visual" (i.e., not part of an
 /// ANSI escape sequence or a non-ESC control character).
 #[derive(Debug)]
-struct VisibleCharsIterator<'a> {
+pub struct VisibleCharsIterator<'a> {
+    /// The underlying iterator.
     chars: Peekable<Chars<'a>>,
+
+    /// The current state of the ANSI parser.
     state: AnsiParseState,
 }
 
 impl<'a> VisibleCharsIterator<'a> {
     /// Creates a new `VisibleCharsIterator` for the given input string.
-    fn new(input: &'a str) -> Self {
+    pub fn new(input: &'a str) -> Self {
         VisibleCharsIterator {
             chars: input.chars().peekable(),
             state: AnsiParseState::Normal,
@@ -92,23 +100,4 @@ impl Iterator for VisibleCharsIterator<'_> {
 
         Some((c, is_visual))
     }
-}
-
-/// Print a sequence of characters to stdout, one character at a time, with a
-/// delay between each character.
-pub fn typewriter(buffer: &str, delay: Duration) -> Result<(), io::Error> {
-    for (c, visible) in VisibleCharsIterator::new(buffer) {
-        print!("{c}");
-        io::stdout().flush()?;
-
-        if visible {
-            std::thread::sleep(delay);
-        }
-    }
-
-    if !buffer.ends_with('\n') {
-        println!();
-    }
-
-    Ok(())
 }

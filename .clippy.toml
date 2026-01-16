@@ -4,6 +4,7 @@ disallowed-types = []
 
 too-many-arguments-threshold = 10
 allow-unwrap-in-tests = true
+allow-print-in-tests = true
 allowed-duplicate-crates = [
     "windows-link",
     "windows-targets",

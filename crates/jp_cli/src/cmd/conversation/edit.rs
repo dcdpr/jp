@@ -5,6 +5,7 @@ use jp_config::{
 };
 use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{provider, structured};
+use jp_printer::PrinterWriter;
 use time::UtcDateTime;
 
 use crate::{Output, cmd::Success, ctx::Ctx};
@@ -56,7 +57,9 @@ impl Edit {
             let events = ctx.workspace.try_get_events(&id)?.clone();
             let title = match title {
                 Some(title) => title,
-                None => generate_titles(&ctx.config(), events, vec![]).await?,
+                None => {
+                    generate_titles(&ctx.config(), ctx.printer.out_writer(), events, vec![]).await?
+                }
             };
 
             ctx.workspace.try_get_conversation_mut(&id)?.title = Some(title);
@@ -78,6 +81,7 @@ impl Edit {
 
 async fn generate_titles(
     config: &AppConfig,
+    mut writer: PrinterWriter<'_>,
     mut events: ConversationStream,
     mut rejected: Vec<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -105,14 +109,16 @@ async fn generate_titles(
     choices.push("More...".to_owned());
     choices.push("Manually enter a title".to_owned());
 
-    let result = inquire::Select::new("Conversation Title", choices).prompt()?;
+    let result =
+        inquire::Select::new("Conversation Title", choices).prompt_with_writer(&mut writer)?;
+
     match result.as_str() {
         "More..." => {
             rejected.extend(titles);
-            Box::pin(generate_titles(config, events, rejected)).await
+            Box::pin(generate_titles(config, writer, events, rejected)).await
         }
         "Manually enter a title" => {
-            let title = inquire::Text::new("Title").prompt()?;
+            let title = inquire::Text::new("Title").prompt_with_writer(&mut writer)?;
             Ok(title.trim().to_owned())
         }
         choice => Ok(choice.to_owned()),

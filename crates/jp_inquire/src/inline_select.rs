@@ -1,6 +1,9 @@
 //! Git-style inline select prompt implementation.
 
-use std::{fmt, fmt::Write as _};
+use std::{
+    fmt::{self, Write as _},
+    io,
+};
 
 use inquire::{CustomType, InquireError, ui::RenderConfig};
 
@@ -40,8 +43,9 @@ impl InlineOption {
 ///     InlineOption::new('q', "exit without completing remaining actions"),
 /// ];
 ///
+/// let mut buf = Vec::new();
 /// let handler = InlineSelect::new("Continue with this operation?", options);
-/// match handler.prompt() {
+/// match handler.prompt(&mut buf) {
 ///     Ok(ch) => println!("Selected: {ch}"),
 ///     Err(error) => eprintln!("Error: {error}"),
 /// }
@@ -78,7 +82,7 @@ impl InlineSelect {
     ///
     /// Returns the selected option, or an error if the prompt was cancelled or
     /// another error occurred.
-    pub fn prompt(&self) -> Result<char, InquireError> {
+    pub fn prompt(&self, writer: &mut dyn io::Write) -> Result<char, InquireError> {
         let mut option_keys: Vec<char> = self.options.iter().map(|o| o.key).collect();
         option_keys.push('?');
 
@@ -119,10 +123,10 @@ impl InlineSelect {
                 submit_on_valid_parse: true,
             };
 
-            match handler.prompt()? {
-                '?' => println!("{help_text}"),
+            let _unused = match handler.prompt_with_writer(writer)? {
+                '?' => writeln!(writer, "{help_text}"),
                 c => return Ok(c),
-            }
+            };
         }
     }
 

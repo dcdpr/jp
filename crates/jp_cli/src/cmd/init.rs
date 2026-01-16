@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf, str::FromStr as _};
+use std::{env, fs, io::Write as _, path::PathBuf, str::FromStr as _};
 
 use clean_path::Clean as _;
 use crossterm::style::Stylize as _;
@@ -8,6 +8,7 @@ use jp_config::{
     conversation::tool::RunMode,
     model::id::{ModelIdConfig, Name, PartialModelIdConfig, ProviderId},
 };
+use jp_printer::Printer;
 use jp_workspace::Workspace;
 
 use crate::{DEFAULT_STORAGE_DIR, Output, ctx::IntoPartialAppConfig};
@@ -19,7 +20,7 @@ pub(crate) struct Init {
 }
 
 impl Init {
-    pub(crate) fn run(&self) -> Output {
+    pub(crate) fn run(&self, printer: &Printer) -> Output {
         let cwd = std::env::current_dir()?;
         let mut root = self
             .path
@@ -46,9 +47,13 @@ impl Init {
 
         let mut config = default_config();
         if let Some(id) = default_model() {
-            print!("Using model {}", id.to_string().bold().blue());
+            write!(
+                printer.out_writer(),
+                "Using model {}",
+                id.to_string().bold().blue()
+            )?;
             let note = "  (to use a different model, update `.jp/config.toml`)".to_owned();
-            println!("{}\n", note.grey().italic());
+            writeln!(printer.out_writer(), "{}\n", note.grey().italic())?;
 
             config.assistant.model.id = PartialModelIdConfig {
                 provider: Some(id.provider),

@@ -4,7 +4,9 @@ mod turn;
 
 use std::{
     collections::{BTreeMap, HashSet},
-    env, fs,
+    env,
+    fmt::Write as _,
+    fs,
     io::{self, BufRead as _, IsTerminal},
     path::{Path, PathBuf},
     sync::Arc,
@@ -36,8 +38,8 @@ use jp_llm::{
     query::{ChatQuery, StructuredQuery},
     tool::{ToolDefinition, tool_definitions},
 };
+use jp_printer::{PrintableExt as _, Printer};
 use jp_task::task::TitleGeneratorTask;
-use jp_term::stdout;
 use jp_workspace::Workspace;
 use minijinja::{Environment, UndefinedBehavior};
 use response_handler::ResponseHandler;
@@ -373,6 +375,7 @@ impl Query {
                 &mut thread,
                 schema,
                 self.render_mode(),
+                &ctx.printer,
             )
             .await;
         } else {
@@ -389,6 +392,7 @@ impl Query {
                     cfg.assistant.tool_choice.clone(),
                     tools,
                     conversation_id,
+                    ctx.printer.clone(),
                 )
                 .await
             {
@@ -580,6 +584,7 @@ impl Query {
         tool_choice: ToolChoice,
         tools: Vec<ToolDefinition>,
         conversation_id: ConversationId,
+        printer: Arc<Printer>,
     ) -> Result<()> {
         let mut result = Ok(());
         let mut cancelled = false;
@@ -640,7 +645,11 @@ impl Query {
 
         let mut event_handler = StreamEventHandler::default();
 
-        let mut printer = ResponseHandler::new(self.render_mode(), cfg.style.tool_call.show);
+        let mut response_handler = ResponseHandler::new(
+            self.render_mode(),
+            cfg.style.tool_call.show,
+            printer.clone(),
+        );
         let mut metadata = BTreeMap::new();
 
         loop {
@@ -682,10 +691,11 @@ impl Query {
                             thread,
                             &tool_choice,
                             &tools,
-                            &mut printer,
+                            &mut response_handler,
                             &mut event_handler,
                             &mut metadata,
                             conversation_id,
+                            printer.clone(),
                         )
                         .await
                     {
@@ -699,7 +709,7 @@ impl Query {
         }
 
         // Ensure we handle the last line of the stream.
-        printer.drain(&cfg.style, false)?;
+        response_handler.drain(&cfg.style, false)?;
 
         let content_tokens = event_handler.content_tokens.trim().to_string();
         let content = if !content_tokens.is_empty() {
@@ -731,6 +741,7 @@ impl Query {
                     tool_choice,
                     tools,
                     conversation_id,
+                    printer,
                 ))
                 .await;
             }
@@ -751,11 +762,15 @@ impl Query {
             Some(reasoning_tokens)
         };
 
-        if let RenderMode::Buffered = printer.render_mode {
-            println!("{}", printer.parsed.join("\n"));
+        if let RenderMode::Buffered = response_handler.render_mode {
+            writeln!(
+                printer.out_writer(),
+                "{}",
+                response_handler.parsed.join("\n")
+            )?;
         } else if content.is_some() || reasoning.is_some() {
             // Final newline.
-            println!();
+            printer.println("");
         }
 
         // Emit reasoning response if present
@@ -804,6 +819,7 @@ impl Query {
                 ToolChoice::Auto,
                 tools,
                 conversation_id,
+                printer,
             ))
             .await?;
         }
@@ -825,10 +841,11 @@ impl Query {
         thread: &mut Thread,
         tool_choice: &ToolChoice,
         tools: &[ToolDefinition],
-        printer: &mut ResponseHandler,
+        response_handler: &mut ResponseHandler,
         event_handler: &mut StreamEventHandler,
         metadata: &mut BTreeMap<String, Value>,
         conversation_id: ConversationId,
+        printer: Arc<Printer>,
     ) -> Result<()> {
         let tries = turn_state.request_count;
         let event = match event {
@@ -856,6 +873,7 @@ impl Query {
                     tool_choice.clone(),
                     tools.to_vec(),
                     conversation_id,
+                    printer,
                 ))
                 .await;
             }
@@ -889,7 +907,14 @@ impl Query {
                     EventKind::ToolCallRequest(request) => {
                         event_handler
                             .handle_tool_call(
-                                cfg, mcp_client, root, is_tty, turn_state, request, printer,
+                                cfg,
+                                mcp_client,
+                                root,
+                                is_tty,
+                                turn_state,
+                                request,
+                                response_handler,
+                                printer.out_writer(),
                             )
                             .await?
                     }
@@ -908,7 +933,7 @@ impl Query {
             return Ok(());
         };
 
-        printer.handle(&data, &cfg.style, false)?;
+        printer.print(data.typewriter(cfg.style.typewriter.code_delay.into()));
 
         Ok(())
     }
@@ -1333,6 +1358,7 @@ async fn handle_structured_output(
     thread: &mut Thread,
     schema: schemars::Schema,
     render_mode: RenderMode,
+    printer: &Printer,
 ) -> Output {
     let model_id = cfg
         .assistant
@@ -1357,7 +1383,7 @@ async fn handle_structured_output(
     };
 
     if render_mode.is_streamed() {
-        stdout::typewriter(&content, cfg.style.typewriter.code_delay.into())?;
+        printer.print(content.typewriter(cfg.style.typewriter.code_delay.into()));
         return Ok(Success::Ok);
     }
 

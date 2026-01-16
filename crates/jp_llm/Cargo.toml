@@ -18,6 +18,7 @@ jp_conversation = { workspace = true }
 jp_inquire = { workspace = true }
 jp_mcp = { workspace = true }
 jp_openrouter = { workspace = true }
+jp_printer = { workspace = true }
 jp_tool = { workspace = true }
 
 async-anthropic = { workspace = true }
