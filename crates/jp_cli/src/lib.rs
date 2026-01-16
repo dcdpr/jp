@@ -303,6 +303,9 @@ fn run_inner(cli: Cli) -> Result<Success> {
                 )
                 .map_err(Error::Task)?;
 
+            // Remove ephemeral conversations that are no longer needed.
+            ctx.workspace.remove_ephemeral_conversations();
+
             output.map_err(Into::into)
         }
     }

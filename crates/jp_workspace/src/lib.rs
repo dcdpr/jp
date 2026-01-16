@@ -245,7 +245,6 @@ impl Workspace {
 
         trace!("Persisting state.");
 
-        let active_id = self.active_conversation_id();
         let Some(storage) = self.storage.as_mut() else {
             return Ok(());
         };
@@ -261,7 +260,6 @@ impl Workspace {
                 .active_conversation_id,
             &self.state.local.active_conversation,
         )?;
-        storage.remove_ephemeral_conversations(&[active_id]);
 
         info!(path = %self.root.display(), "Persisted state.");
         Ok(())
@@ -292,6 +290,19 @@ impl Workspace {
 
         info!(path = %self.root.display(), "Persisted active conversation.");
         Ok(())
+    }
+
+    pub fn remove_ephemeral_conversations(&mut self) {
+        if self.disable_persistence {
+            return;
+        }
+
+        let active_id = self.active_conversation_id();
+        let Some(storage) = self.storage.as_mut() else {
+            return;
+        };
+
+        storage.remove_ephemeral_conversations(&[active_id]);
     }
 
     /// Gets the ID of the active conversation.
