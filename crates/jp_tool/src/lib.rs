@@ -108,15 +108,8 @@ pub struct Context {
     /// The root path that the tool should run in.
     pub root: PathBuf,
 
-    /// Indicates a request to format tool call arguments, instead of running
-    /// the tool.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub format_parameters: bool,
-}
-
-#[expect(clippy::trivially_copy_pass_by_ref)]
-fn is_false(value: &bool) -> bool {
-    !*value
+    // The action that the tool is being run for.
+    pub action: Action,
 }
 
 impl From<String> for Outcome {
@@ -145,4 +138,29 @@ pub enum PersistLevel {
 
     /// Remember for this turn (all tool calls in this LLM interaction).
     Turn,
+}
+
+/// The action that a tool is being run for.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Action {
+    /// Run the tool.
+    Run,
+
+    /// Format the provided tool call arguments.
+    FormatArguments,
+}
+
+impl Action {
+    /// Returns whether the action is a run action.
+    #[must_use]
+    pub const fn is_run(&self) -> bool {
+        matches!(self, Self::Run)
+    }
+
+    /// Returns whether the action is a format arguments action.
+    #[must_use]
+    pub const fn is_format_arguments(&self) -> bool {
+        matches!(self, Self::FormatArguments)
+    }
 }

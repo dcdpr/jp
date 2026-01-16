@@ -177,10 +177,10 @@ pub(crate) async fn fs_modify_file(
         });
     }
 
-    if ctx.format_parameters {
-        Ok(format_changes(changes).into())
-    } else {
+    if ctx.action.is_run() {
         apply_changes(changes, &ctx.root, answers)
+    } else {
+        Ok(format_changes(changes).into())
     }
 }
 
@@ -333,6 +333,7 @@ mod tests {
     use std::fs;
 
     use indoc::indoc;
+    use jp_tool::Action;
     use tempfile::tempdir;
 
     use super::*;
@@ -396,7 +397,7 @@ mod tests {
 
             let ctx = Context {
                 root,
-                format_parameters: false,
+                action: Action::Run,
             };
 
             let actual = fs_modify_file(
@@ -487,7 +488,7 @@ mod tests {
 
         let ctx = Context {
             root,
-            format_parameters: false,
+            action: Action::Run,
         };
 
         let _actual = fs_modify_file(
@@ -554,7 +555,7 @@ mod tests {
 
         let ctx = Context {
             root,
-            format_parameters: false,
+            action: Action::Run,
         };
 
         let _actual = fs_modify_file(
@@ -614,7 +615,7 @@ mod tests {
 
             let ctx = Context {
                 root,
-                format_parameters: false,
+                action: Action::Run,
             };
 
             let actual = fs_modify_file(

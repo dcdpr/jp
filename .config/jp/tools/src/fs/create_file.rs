@@ -18,7 +18,7 @@ pub(crate) async fn fs_create_file(
     path: String,
     content: Option<String>,
 ) -> ToolResult {
-    if ctx.format_parameters {
+    if ctx.action.is_format_arguments() {
         let lang = match path.split('.').next_back().unwrap_or_default() {
             "rs" => "rust",
             "js" => "javascript",
