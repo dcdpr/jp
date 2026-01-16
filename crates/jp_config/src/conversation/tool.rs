@@ -221,23 +221,13 @@ pub struct ToolConfig {
     #[setting(nested)]
     pub style: Option<DisplayStyleConfig>,
 
-    /// Automated responses to tool questions.
-    ///
-    /// This allows configuring predefined answers to questions that the tool
-    /// may ask during execution (e.g., "overwrite existing file?"). When an
-    /// answer is configured for a specific question ID, the tool will use it
-    /// automatically instead of prompting the user interactively.
+    /// Configuration for questions that the tool may ask during execution.
     ///
     /// Question IDs are defined by the tool implementation and should be
     /// documented by the tool. For example, `fs_create_file` uses
     /// `overwrite_file` when a file already exists.
-    // TODO: We should add an enumeration of possible options:
-    //
-    // - Fixed answer
-    // - Prompt once per turn
-    // - Prompt once per conversation
-    #[setting(default = IndexMap::new())]
-    pub answers: IndexMap<String, Value>,
+    #[setting(nested, merge = merge_nested_indexmap)]
+    pub questions: IndexMap<String, QuestionConfig>,
 }
 
 impl AssignKeyValue for PartialToolConfig {
@@ -252,7 +242,7 @@ impl AssignKeyValue for PartialToolConfig {
             "run" => self.run = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
             _ if kv.p("style") => self.style.assign(kv)?,
-            "answers" => self.answers = kv.try_object()?,
+            "questions" => self.questions = kv.try_object()?,
             _ => return missing_key(&kv),
         }
 
@@ -287,21 +277,23 @@ impl PartialConfigDelta for PartialToolConfig {
             run: delta_opt(self.run.as_ref(), next.run),
             result: delta_opt(self.result.as_ref(), next.result),
             style: delta_opt_partial(self.style.as_ref(), next.style),
-            answers: match (&self.answers, next.answers) {
-                (Some(prev), Some(next)) => Some(
-                    next.into_iter()
-                        .filter_map(|(k, next)| {
-                            let prev_val = prev.get(&k);
-                            if prev_val.is_some_and(|prev| prev == &next) {
-                                return None;
-                            }
+            questions: next
+                .questions
+                .into_iter()
+                .filter_map(|(k, next)| {
+                    let prev = self.questions.get(&k);
+                    if prev.is_some_and(|prev| prev == &next) {
+                        return None;
+                    }
 
-                            Some((k, next))
-                        })
-                        .collect(),
-                ),
-                (_, next) => next,
-            },
+                    let next = match prev {
+                        Some(prev) => prev.delta(next),
+                        None => next,
+                    };
+
+                    Some((k, next))
+                })
+                .collect(),
         }
     }
 }
@@ -323,11 +315,11 @@ impl ToPartial for ToolConfig {
             run: partial_opts(self.run.as_ref(), defaults.run),
             result: partial_opts(self.result.as_ref(), defaults.result),
             style: partial_opt_config(self.style.as_ref(), defaults.style),
-            answers: if self.answers.is_empty() {
-                defaults.answers
-            } else {
-                Some(self.answers.clone())
-            },
+            questions: self
+                .questions
+                .iter()
+                .map(|(k, v)| (k.clone(), v.to_partial()))
+                .collect(),
         }
     }
 }
@@ -975,14 +967,83 @@ impl ToolConfigWithDefaults {
         self.tool.style.as_ref().unwrap_or(&self.defaults.style)
     }
 
+    /// Return the questions configuration of the tool.
+    #[must_use]
+    pub const fn questions(&self) -> &IndexMap<String, QuestionConfig> {
+        &self.tool.questions
+    }
+
+    /// Return the question target for the given question ID.
+    #[must_use]
+    pub fn question_target(&self, question_id: &str) -> Option<QuestionTarget> {
+        self.tool.questions.get(question_id).map(|q| q.target)
+    }
+
     /// Get an automated answer for a question.
     ///
     /// Returns the configured answer if one exists for the given question ID,
     /// otherwise returns `None`.
     #[must_use]
     pub fn get_answer(&self, question_id: &str) -> Option<&Value> {
-        self.tool.answers.get(question_id)
+        self.tool
+            .questions
+            .get(question_id)
+            .and_then(|q| q.answer.as_ref())
     }
+}
+
+/// Question configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
+#[config(rename_all = "snake_case")]
+pub struct QuestionConfig {
+    /// The target of the question.
+    ///
+    /// This determines whether the question is asked interactively to the user,
+    /// or sent to the assistant to be answered.
+    pub target: QuestionTarget,
+
+    /// The fixed answer to the question.
+    ///
+    /// If this is set, the question will not be presented to the target, but
+    /// will always be answered with the given value.
+    // TODO: We should add an enumeration of possible options:
+    //
+    // - Fixed answer
+    // - Prompt once per turn
+    // - Prompt once per conversation
+    pub answer: Option<Value>,
+}
+
+impl PartialConfigDelta for PartialQuestionConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            target: delta_opt(self.target.as_ref(), next.target),
+            answer: delta_opt(self.answer.as_ref(), next.answer),
+        }
+    }
+}
+
+impl ToPartial for QuestionConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            target: partial_opt(&self.target, defaults.target),
+            answer: partial_opts(self.answer.as_ref(), defaults.answer),
+        }
+    }
+}
+
+/// The target of a question.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionTarget {
+    /// Ask the question to the user.
+    #[default]
+    User,
+
+    /// Ask the question to the assistant.
+    Assistant,
 }
 
 #[cfg(test)]
