@@ -463,7 +463,7 @@ fn load_cli_cfg_args(
                                     path = p.to_string(),
                                     error = e.to_string(),
                                     "Not a valid UTF-8 path"
-                                )
+                                );
                             })
                             .ok()
                     })
@@ -723,6 +723,8 @@ pub fn num_threads() -> NonZeroUsize {
 
 #[cfg(feature = "dhat")]
 fn run_dhat() -> dhat::Profiler {
+    use std::path::PathBuf;
+
     std::process::Command::new(env!("CARGO"))
         .arg("locate-project")
         .arg("--workspace")
