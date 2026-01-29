@@ -1,5 +1,6 @@
-use std::{fmt::Write, path::Path, sync::Arc};
+use std::{fmt::Write, sync::Arc};
 
+use camino::Utf8Path;
 use crossterm::style::Stylize as _;
 use indexmap::{IndexMap, IndexSet};
 use jp_config::conversation::tool::{
@@ -77,7 +78,7 @@ impl ToolDefinition {
         name: Option<&str>,
         cmd: &ToolCommandConfig,
         arguments: &Map<String, Value>,
-        root: &Path,
+        root: &Utf8Path,
     ) -> Result<Result<String, String>, ToolError> {
         let name = name.unwrap_or(&self.name);
         if arguments.is_empty() {
@@ -91,7 +92,7 @@ impl ToolDefinition {
             },
             "context": {
                 "action": Action::FormatArguments,
-                "root": root.to_string_lossy(),
+                "root": root.as_str(),
             },
         });
 
@@ -106,8 +107,8 @@ impl ToolDefinition {
         pending_questions: &IndexSet<String>,
         mcp_client: &jp_mcp::Client,
         config: ToolConfigWithDefaults,
-        root: &Path,
-        editor: Option<&Path>,
+        root: &Utf8Path,
+        editor: Option<&Utf8Path>,
         writer: PrinterWriter<'_>,
     ) -> Result<ToolCallResponse, ToolError> {
         info!(tool = %self.name, arguments = ?arguments, "Calling tool.");
@@ -162,7 +163,7 @@ impl ToolDefinition {
         answers: &IndexMap<String, Value>,
         config: &ToolConfigWithDefaults,
         tool: Option<&str>,
-        root: &Path,
+        root: &Utf8Path,
     ) -> Result<ToolCallResponse, ToolError> {
         let name = tool.unwrap_or(&self.name);
 
@@ -192,7 +193,7 @@ impl ToolDefinition {
             },
             "context": {
                 "action": Action::Run,
-                "root": root.to_string_lossy().into_owned(),
+                "root": root.as_str(),
             },
         });
 
@@ -295,7 +296,7 @@ impl ToolDefinition {
         arguments: &mut Value,
         source: &ToolSource,
         mcp_client: &jp_mcp::Client,
-        editor: Option<&Path>,
+        editor: Option<&Utf8Path>,
         mut writer: PrinterWriter<'_>,
     ) -> Result<(), ToolError> {
         match run_mode {
@@ -383,7 +384,7 @@ impl ToolDefinition {
                                     reason: Some(
                                         open_editor::EditorCallBuilder::new()
                                             .with_editor(open_editor::Editor::from_bin_path(
-                                                editor.to_path_buf(),
+                                                editor.into(),
                                             ))
                                             .edit_string(
                                                 "_Provide reasoning for skipping tool execution_",
@@ -474,7 +475,7 @@ impl ToolDefinition {
                 *arguments = {
                     if let Some(editor) = editor {
                         open_editor::EditorCallBuilder::new()
-                            .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
+                            .with_editor(open_editor::Editor::from_bin_path(editor.into()))
                             .edit_string_mut(&mut args)
                             .map_err(|error| ToolError::OpenEditorError {
                                 arguments: arguments.clone(),
@@ -546,7 +547,7 @@ impl ToolDefinition {
         &self,
         mut result: ToolCallResponse,
         result_mode: ResultMode,
-        editor: Option<&Path>,
+        editor: Option<&Utf8Path>,
         mut writer: PrinterWriter<'_>,
     ) -> Result<ToolCallResponse, ToolError> {
         match result_mode {
@@ -587,7 +588,7 @@ impl ToolDefinition {
 
         if let Some(editor) = editor {
             let content = open_editor::EditorCallBuilder::new()
-                .with_editor(open_editor::Editor::from_bin_path(editor.to_path_buf()))
+                .with_editor(open_editor::Editor::from_bin_path(editor.into()))
                 .edit_string(result.content())
                 .map_err(|error| ToolError::OpenEditorError {
                     arguments: Value::Null,
@@ -611,7 +612,7 @@ fn run_cmd_with_ctx(
     name: &str,
     command: &ToolCommandConfig,
     ctx: &Value,
-    root: &Path,
+    root: &Utf8Path,
 ) -> Result<Result<String, String>, ToolError> {
     let command = {
         let tmpl = Arc::new(Environment::new());

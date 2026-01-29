@@ -21,7 +21,6 @@ pub(crate) struct Init {
 }
 
 impl Init {
-    #[expect(unused_assignments)]
     pub(crate) fn run(&self, printer: &Printer) -> Output {
         let cwd: Utf8PathBuf = std::env::current_dir()?
             .try_into()

@@ -341,7 +341,7 @@ impl From<crate::error::Error> for Error {
             .into(),
             MissingConfigFile(path) => [
                 ("message", "Missing config file".into()),
-                ("path", path.display().to_string()),
+                ("path", path.to_string()),
             ]
             .into(),
         };

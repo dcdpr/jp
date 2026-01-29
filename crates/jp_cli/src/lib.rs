@@ -10,7 +10,6 @@ use std::{
     fmt,
     io::{IsTerminal as _, stdout},
     num::{NonZeroU8, NonZeroUsize},
-    path::PathBuf,
     process::ExitCode,
     str::FromStr,
     sync::atomic::{AtomicUsize, Ordering},
@@ -168,7 +167,7 @@ struct Globals {
 #[derive(Debug, Clone)]
 pub(crate) enum KeyValueOrPath {
     KeyValue(KvAssignment),
-    Path(PathBuf),
+    Path(Utf8PathBuf),
 }
 
 impl FromStr for KeyValueOrPath {
@@ -177,12 +176,12 @@ impl FromStr for KeyValueOrPath {
     fn from_str(s: &str) -> Result<Self> {
         // String prefixed with `@` is always a path.
         if let Some(s) = s.strip_prefix(PATH_STRING_PREFIX) {
-            return Ok(Self::Path(PathBuf::from(s.trim())));
+            return Ok(Self::Path(Utf8PathBuf::from(s.trim())));
         }
 
         // String without `=` is always a path.
         if !s.contains('=') {
-            return Ok(Self::Path(PathBuf::from(s.trim())));
+            return Ok(Self::Path(Utf8PathBuf::from(s.trim())));
         }
 
         // Anything else is parsed as a key-value pair.
@@ -200,7 +199,7 @@ impl FromStr for WorkspaceIdOrPath {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        if PathBuf::from(s).exists() {
+        if Utf8PathBuf::from(s).exists() {
             return Ok(Self::Path(Utf8PathBuf::from(s)));
         }
 
@@ -457,18 +456,24 @@ fn load_cli_cfg_args(
                 // We do this on every iteration of `overrides`, to allow
                 // additional load paths to be added using `--cfg`.
                 let config_load_paths = workspace.iter().flat_map(|w| {
-                    partial
-                        .config_load_paths
-                        .iter()
-                        .flatten()
-                        .map(|p| p.to_path(w.root()))
+                    partial.config_load_paths.iter().flatten().filter_map(|p| {
+                        Utf8PathBuf::try_from(p.to_path(w.root()))
+                            .inspect_err(|e| {
+                                tracing::error!(
+                                    path = p.to_string(),
+                                    error = e.to_string(),
+                                    "Not a valid UTF-8 path"
+                                )
+                            })
+                            .ok()
+                    })
                 });
 
                 let mut found = false;
                 for load_path in config_load_paths {
                     debug!(
-                        path = %path.display(),
-                        load_path = %load_path.display(),
+                        path = path.as_str(),
+                        load_path = load_path.as_str(),
                         "Trying to load partial from config load path"
                     );
 
@@ -501,7 +506,8 @@ fn load_partial_configs_from_files(
     let mut partials = vec![];
 
     // Load `$XDG_CONFIG_HOME/jp/config.{toml,json,yaml}`.
-    if let Some(user_global_config) = user_global_config_path(std::env::home_dir().as_deref())
+    let home = std::env::home_dir().and_then(|p| Utf8PathBuf::from_path_buf(p).ok());
+    if let Some(user_global_config) = user_global_config_path(home.as_deref())
         .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
         .transpose()?
     {

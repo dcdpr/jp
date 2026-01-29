@@ -1,5 +1,6 @@
 use std::{fs, sync::Arc, time::Duration};
 
+use camino::{FromPathBufError, Utf8PathBuf};
 use crossterm::style::{Color, Stylize as _};
 use jp_config::style::{LinkStyle, StyleConfig};
 use jp_printer::{PrintableExt as _, Printer};
@@ -151,16 +152,13 @@ impl ResponseHandler {
                 match style.code.file_link {
                     LinkStyle::Off => {}
                     LinkStyle::Full => {
-                        links.push(format!("{}see: {}", " ".repeat(*indent), path.display()));
+                        links.push(format!("{}see: {path}", " ".repeat(*indent)));
                     }
                     LinkStyle::Osc8 => {
                         links.push(format!(
                             "{}[{}]",
                             " ".repeat(*indent),
-                            hyperlink(
-                                format!("file://{}", path.display()),
-                                "open in editor".red().to_string()
-                            )
+                            hyperlink(format!("file://{path}"), "open in editor".red().to_string())
                         ));
                     }
                 }
@@ -168,18 +166,14 @@ impl ResponseHandler {
                 match style.code.copy_link {
                     LinkStyle::Off => {}
                     LinkStyle::Full => {
-                        links.push(format!(
-                            "{}copy: copy://{}",
-                            " ".repeat(*indent),
-                            path.display()
-                        ));
+                        links.push(format!("{}copy: copy://{path}", " ".repeat(*indent),));
                     }
                     LinkStyle::Osc8 => {
                         links.push(format!(
                             "{}[{}]",
                             " ".repeat(*indent),
                             hyperlink(
-                                format!("copy://{}", path.display()),
+                                format!("copy://{path}"),
                                 "copy to clipboard".red().to_string()
                             )
                         ));
@@ -258,7 +252,7 @@ impl ResponseHandler {
         }
     }
 
-    fn persist_code_block(&self) -> Result<PathBuf, Error> {
+    fn persist_code_block(&self) -> Result<Utf8PathBuf, Error> {
         let code = self.code_buffer.1.clone();
         let language = self.code_buffer.0.as_deref().unwrap_or("txt");
         let ext = match language {
@@ -276,6 +270,7 @@ impl ResponseHandler {
             .unwrap_or_default()
             .subsec_millis();
         let path = std::env::temp_dir().join(format!("code_{millis}.{ext}"));
+        let path = Utf8PathBuf::try_from(path).map_err(FromPathBufError::into_io_error)?;
 
         fs::write(&path, code.join("\n"))?;
 
