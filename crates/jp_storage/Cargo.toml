@@ -19,6 +19,7 @@ jp_id = { workspace = true }
 jp_tombmap = { workspace = true }
 
 ahash = { workspace = true }
+camino = { workspace = true, features = ["serde1"] }
 rayon = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order", "raw_value"] }
@@ -28,7 +29,7 @@ toml = { workspace = true, features = ["preserve_order"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
+camino-tempfile = { workspace = true }
 test-log = { workspace = true }
 
 [lints]
