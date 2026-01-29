@@ -1,7 +1,10 @@
+pub mod runner;
 pub mod xml;
 
 use jp_tool::Outcome;
 use serde::{Deserialize, Serialize};
+
+use crate::Tool;
 
 pub type ToolResult = std::result::Result<Outcome, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -13,6 +16,11 @@ pub fn error(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Tool
 #[expect(clippy::unnecessary_wraps)]
 pub fn fail(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> ToolResult {
     Ok(Outcome::fail(error.into().as_ref()))
+}
+
+#[expect(clippy::needless_pass_by_value)]
+pub fn unknown_tool(t: Tool) -> ToolResult {
+    Err(format!("Unknown tool '{}'", t.name).into())
 }
 
 #[derive(Serialize, Deserialize)]

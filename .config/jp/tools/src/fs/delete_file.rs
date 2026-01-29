@@ -1,5 +1,6 @@
-use std::{fs, path::PathBuf};
+use std::fs;
 
+use camino::Utf8PathBuf;
 use jp_tool::{AnswerType, Outcome, Question};
 use serde_json::{Map, Value};
 
@@ -7,11 +8,11 @@ use super::utils::is_file_dirty;
 use crate::Error;
 
 pub(crate) async fn fs_delete_file(
-    root: PathBuf,
+    root: Utf8PathBuf,
     answers: &Map<String, Value>,
     path: String,
 ) -> std::result::Result<Outcome, Error> {
-    let p = PathBuf::from(&path);
+    let p = Utf8PathBuf::from(&path);
 
     if p.is_absolute() {
         return Err("Path must be relative.".into());

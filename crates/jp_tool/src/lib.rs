@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-
+use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -106,7 +105,7 @@ pub enum AnswerType {
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Context {
     /// The root path that the tool should run in.
-    pub root: PathBuf,
+    pub root: Utf8PathBuf,
 
     // The action that the tool is being run for.
     pub action: Action,

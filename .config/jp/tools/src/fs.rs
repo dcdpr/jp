@@ -1,4 +1,4 @@
-use crate::{Context, Error, Outcome, Tool, to_xml};
+use crate::{Context, Tool, to_xml, util::ToolResult};
 
 mod create_file;
 mod delete_file;
@@ -15,16 +15,16 @@ use list_files::fs_list_files;
 use modify_file::fs_modify_file;
 use read_file::fs_read_file;
 
-pub async fn run(ctx: Context, t: Tool) -> std::result::Result<Outcome, Error> {
+pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     match t.name.trim_start_matches("fs_") {
-        "list_files" => fs_list_files(ctx.root, t.opt("prefixes")?, t.opt("extensions")?)
+        "list_files" => fs_list_files(&ctx.root, t.opt("prefixes")?, t.opt("extensions")?)
             .await
             .and_then(to_xml)
             .map(Into::into),
 
         "read_file" => {
             fs_read_file(
-                ctx.root,
+                &ctx.root,
                 t.req("path")?,
                 t.opt("start_line")?,
                 t.opt("end_line")?,
@@ -33,7 +33,7 @@ pub async fn run(ctx: Context, t: Tool) -> std::result::Result<Outcome, Error> {
         }
 
         "grep_files" => fs_grep_files(
-            ctx.root,
+            &ctx.root,
             t.req("pattern")?,
             t.opt("context")?,
             t.opt("paths")?,
@@ -42,7 +42,7 @@ pub async fn run(ctx: Context, t: Tool) -> std::result::Result<Outcome, Error> {
         .map(Into::into),
 
         "grep_user_docs" => fs_grep_files(
-            ctx.root,
+            &ctx.root,
             t.req("pattern")?,
             t.opt("context")?,
             Some(vec!["docs".to_owned()].into()),

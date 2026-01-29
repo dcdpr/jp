@@ -1,4 +1,7 @@
-use crate::{Context, Tool, util::ToolResult};
+use crate::{
+    Context, Tool,
+    util::{ToolResult, unknown_tool},
+};
 
 mod check;
 mod expand;
@@ -11,12 +14,8 @@ use test::cargo_test;
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     match t.name.trim_start_matches("cargo_") {
         "check" => cargo_check(&ctx, t.opt("package")?).await,
-        "expand" => cargo_expand(&ctx, t.req("item")?, t.opt("package")?)
-            .await
-            .map(Into::into),
-        "test" => cargo_test(&ctx, t.opt("package")?, t.opt("testname")?)
-            .await
-            .map(Into::into),
-        _ => Err(format!("Unknown tool '{}'", t.name).into()),
+        "expand" => cargo_expand(&ctx, t.req("item")?, t.opt("package")?).await,
+        "test" => cargo_test(&ctx, t.opt("package")?, t.opt("testname")?).await,
+        _ => unknown_tool(t),
     }
 }

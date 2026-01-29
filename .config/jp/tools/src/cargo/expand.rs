@@ -1,79 +1,73 @@
-use duct::cmd;
 use jp_tool::Context;
 
-use crate::Result;
+use crate::util::{
+    ToolResult,
+    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
+};
 
 pub(crate) async fn cargo_expand(
     ctx: &Context,
     item: String,
     package: Option<String>,
-) -> Result<String> {
+) -> ToolResult {
+    cargo_expand_impl(ctx, &item, package, &DuctProcessRunner)
+}
+
+fn cargo_expand_impl<R: ProcessRunner>(
+    ctx: &Context,
+    item: &str,
+    package: Option<String>,
+    runner: &R,
+) -> ToolResult {
     let package = package.map(|v| format!("--package={v}"));
     let mut args = vec!["--quiet", "expand", "--color=never"];
     if let Some(package) = package.as_deref() {
         args.push(package);
     }
-    args.push(&item);
+    args.push(item);
 
-    let result = cmd("cargo", &args)
-        .stdout_capture()
-        .stderr_capture()
-        .dir(&ctx.root)
-        .env("RUST_BACKTRACE", "1")
-        .unchecked()
-        .run()?;
+    let ProcessOutput {
+        stdout,
+        stderr,
+        status,
+    } = runner.run_with_env("cargo", &args, &ctx.root, &[("RUST_BACKTRACE", "1")])?;
 
-    if !result.status.success() {
-        return Err(format!(
-            "Cargo command failed ({}): {}",
-            result.status.code().unwrap_or(1),
-            String::from_utf8_lossy(&result.stderr)
-        )
-        .into());
+    if !status.is_success() {
+        return Err(format!("Cargo command failed: {stderr}").into());
     }
 
-    let content = String::from_utf8_lossy(&result.stdout);
-
-    Ok(indoc::formatdoc! {"
-        ```rust
-        {}
-        ```
-    ", content.trim()})
+    Ok(format!("```rust\n{}\n```\n", stdout.trim()).into())
 }
 
 #[cfg(test)]
 mod tests {
+    use camino_tempfile::tempdir;
     use jp_tool::Action;
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::util::runner::MockProcessRunner;
 
-    #[tokio::test]
-    #[test_log::test]
-    async fn test_cargo_expand() {
-        let dir = tempfile::tempdir().unwrap();
+    #[test]
+    fn test_cargo_expand_success() {
+        let dir = tempdir().unwrap();
         let ctx = Context {
             root: dir.path().to_owned(),
             action: Action::Run,
         };
 
-        std::fs::write(dir.path().join("Cargo.toml"), indoc::indoc! {r#"
-            [package]
-            name = "cargo_expand"
-        "#})
-        .unwrap();
-
-        std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        std::fs::write(dir.path().join("src/main.rs"), indoc::indoc! {r#"
+        let stdout = indoc::indoc! { r#"
             fn main() {
-                println!("hello world");
-            }
-        "#})
-        .unwrap();
+                {
+                    ::std::io::_print(format_args!("hello world\n"));
+                };
+            }"#};
 
-        let result = cargo_expand(&ctx, "main".into(), None).await.unwrap();
+        let runner = MockProcessRunner::success(stdout);
 
-        assert_eq!(result, indoc::indoc! {r#"
+        let result = cargo_expand_impl(&ctx, "main", None, &runner).unwrap();
+
+        assert_eq!(result.into_content().unwrap(), indoc::indoc! {r#"
             ```rust
             fn main() {
                 {

@@ -16,6 +16,8 @@ version.workspace = true
 jp_tool = { workspace = true }
 
 base64 = { workspace = true, features = ["std"] }
+camino = { workspace = true }
+convert_case = { workspace = true }
 crossbeam-channel = { workspace = true, features = ["std"] }
 crossterm = { workspace = true }
 duct = { workspace = true }
@@ -52,11 +54,10 @@ url = { workspace = true, features = ["serde", "std"] }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
+camino-tempfile = { workspace = true }
 insta = { workspace = true, features = ["colors"] }
 pretty_assertions = { workspace = true, features = ["std"] }
-tempfile = { workspace = true }
 test-log = { workspace = true }
-which = { workspace = true, features = ["real-sys"] }
 
 [lints]
 workspace = true

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use camino::{Utf8Path, Utf8PathBuf};
 use grep_printer::StandardBuilder;
 use grep_regex::RegexMatcher;
 use grep_searcher::SearcherBuilder;
@@ -7,7 +8,7 @@ use grep_searcher::SearcherBuilder;
 use crate::{Error, util::OneOrMany};
 
 pub(crate) async fn fs_grep_files(
-    root: PathBuf,
+    root: &Utf8Path,
     pattern: String,
     context: Option<usize>,
     paths: Option<OneOrMany<String>>,
@@ -36,11 +37,11 @@ pub(crate) async fn fs_grep_files(
 
     for path in absolute_paths {
         let files = if path.is_dir() {
-            super::fs_list_files(path.clone(), None, None)
+            super::fs_list_files(&path, None, None)
                 .await?
                 .into_files()
                 .into_iter()
-                .map(PathBuf::from)
+                .map(Utf8PathBuf::from)
                 .map(|p| root.join(&path).join(p))
                 .filter(|path| path.exists())
                 .collect()
@@ -49,7 +50,7 @@ pub(crate) async fn fs_grep_files(
         };
 
         for file in files {
-            let Ok(path) = file.strip_prefix(&root).map(PathBuf::from) else {
+            let Ok(path) = file.strip_prefix(root).map(PathBuf::from) else {
                 continue;
             };
 
@@ -85,6 +86,8 @@ pub(crate) async fn fs_grep_files(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+
+    use camino_tempfile::tempdir;
 
     use super::*;
 
@@ -178,7 +181,7 @@ mod tests {
             },
         ) in cases
         {
-            let tmp = tempfile::tempdir().unwrap();
+            let tmp = tempdir().unwrap();
             let root = tmp.path();
 
             for (path, content) in given {
@@ -192,7 +195,7 @@ mod tests {
             let paths =
                 (!paths.is_empty()).then_some(paths.into_iter().map(str::to_owned).collect());
 
-            let matches = fs_grep_files(PathBuf::from(root), pattern.to_owned(), Some(5), paths)
+            let matches = fs_grep_files(root, pattern.to_owned(), Some(5), paths)
                 .await
                 .unwrap();
 

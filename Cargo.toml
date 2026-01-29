@@ -36,10 +36,13 @@ async-trait = { version = "0.1", default-features = false }
 backon = { version = "1", default-features = false }
 base64 = { version = "0.22", default-features = false }
 bat = { version = "0.25", default-features = false }
+camino = { version = "1", default-features = false }
+camino-tempfile = { version = "1", default-features = false }
 clap = { version = "4", default-features = false }
 clean-path = { version = "0.2", default-features = false }
 comfy-table = { version = "7", default-features = false }
 comrak = { version = "0.49", default-features = false }
+convert_case = { version = "0.10", default-features = false }
 crossbeam-channel = { version = "0.5", default-features = false }
 crossterm = { version = "0.29", default-features = false }
 dhat = { version = "0.3", default-features = false }

@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::Result;
 
-const INDENT_WIDTH: usize = 2;
+const INDENT_WIDTH: usize = 4;
 
 /// Serializes any Serializable type into a pretty-printed, LLM-friendly XML format.
 pub fn to_simple_xml_with_root<T: Serialize>(data: &T, root: &str) -> Result<String> {
@@ -16,22 +16,17 @@ pub fn to_simple_xml_with_root<T: Serialize>(data: &T, root: &str) -> Result<Str
 
     match value {
         Value::Array(vec) => {
-            // Case 1: Top-level Vector
             let tag_name = infer_array_tag_name::<T>();
             for item in vec {
                 write_xml_node(&mut output, &tag_name, &item, 1)?;
             }
         }
         Value::Object(map) => {
-            // Case 2: Top-level Struct
-            // We write the struct fields directly as children of <root>
             for (key, val) in map {
                 write_xml_node(&mut output, &key, &val, 1)?;
             }
         }
         _ => {
-            // Case 3: Top-level Primitive
-            // We just write the value indented once
             write_indent(&mut output, 1);
             write_content(&mut output, &value)?;
             output.push('\n');
@@ -77,7 +72,22 @@ fn write_xml_node(out: &mut String, key: &str, value: &Value, depth: usize) -> s
             // <key>value</key>
             write_indent(out, depth);
             write!(out, "<{key}>")?;
-            write_content(out, value)?;
+
+            if let Some(s) = value.as_str()
+                && s.contains('\n')
+            {
+                writeln!(out)?;
+
+                for line in value.as_str().unwrap().lines() {
+                    write_indent(out, depth + 1);
+                    writeln!(out, "{line}")?;
+                }
+
+                write_indent(out, depth);
+            } else {
+                write_content(out, value)?;
+            }
+
             writeln!(out, "</{key}>")?;
             Ok(())
         }
@@ -110,19 +120,16 @@ fn write_content(out: &mut String, value: &Value) -> std::fmt::Result {
 /// Helper to guess a tag name from a type string
 fn infer_array_tag_name<T: ?Sized>() -> String {
     let type_name = std::any::type_name::<T>();
-    let inner = if let Some(start) = type_name.find('<') {
-        if let Some(end) = type_name.rfind('>') {
-            &type_name[start + 1..end]
-        } else {
-            type_name
-        }
+    let inner = if let Some(start) = type_name.find('<')
+        && let Some(end) = type_name.rfind('>')
+    {
+        &type_name[start + 1..end]
     } else {
         type_name
     };
-    let clean_name = inner.split("::").last().unwrap_or("item");
-    let tag = clean_name.to_lowercase();
-    match tag.as_str() {
+    let tag = inner.split("::").last().unwrap_or("item");
+    match tag.to_lowercase().as_ref() {
         "string" | "str" | "i32" | "i64" | "u32" | "u64" | "f64" | "bool" => "item".to_string(),
-        _ => tag,
+        _ => convert_case::ccase!(snake, tag),
     }
 }
