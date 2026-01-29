@@ -521,6 +521,7 @@ impl From<jp_workspace::Error> for Error {
         let metadata: Vec<(&str, Value)> = match error {
             Conversation(error) => return error.into(),
             Storage(error) => return error.into(),
+            Io(error) => return error.into(),
             Config(error) => return error.into(),
             NotDir(path) => [
                 ("message", "Path is not a directory.".into()),
