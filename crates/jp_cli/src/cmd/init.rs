@@ -1,22 +1,16 @@
-use std::{
-    env::{self, current_dir},
-    fs,
-    io::Write as _,
-    str::FromStr as _,
-};
+use std::{env, fs, io::Write as _, str::FromStr as _};
 
 use camino::{FromPathBufError, Utf8PathBuf};
 use clean_path::Clean as _;
 use crossterm::style::Stylize as _;
 use duct::cmd;
 use jp_config::{
-    AppConfig, Config, PartialAppConfig, PartialConfig as _,
+    PartialAppConfig,
     conversation::tool::RunMode,
     model::id::{ModelIdConfig, Name, PartialModelIdConfig, ProviderId},
 };
 use jp_printer::Printer;
 use jp_workspace::Workspace;
-use schematic::schema::{SchemaGenerator, TemplateOptions, TomlTemplateRenderer};
 
 use crate::{DEFAULT_STORAGE_DIR, Output, ctx::IntoPartialAppConfig};
 
