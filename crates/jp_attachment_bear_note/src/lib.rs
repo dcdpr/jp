@@ -1,11 +1,7 @@
-use std::{
-    collections::BTreeSet,
-    error::Error,
-    path::{Path, PathBuf},
-    rc::Rc,
-};
+use std::{collections::BTreeSet, error::Error, rc::Rc};
 
 use async_trait::async_trait;
+use camino::{Utf8Path, Utf8PathBuf};
 use directories::BaseDirs;
 use jp_attachment::{
     Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, percent_decode_str,
@@ -135,11 +131,11 @@ impl Handler for BearNotes {
 
     async fn get(
         &self,
-        _: &Path,
+        _: &Utf8Path,
         _: Client,
     ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         let db = get_database_path()?;
-        trace!(db = %db.display(), "Connecting to Bear database.");
+        trace!(db = %db, "Connecting to Bear database.");
         let conn = Connection::open(db)?;
 
         let mut attachments = vec![];
@@ -271,7 +267,7 @@ fn get_notes(query: &Query, conn: &Connection) -> Result<Vec<Note>, Box<dyn Erro
 
 /// Attempts to find the path to the Bear Sqlite database.
 /// Assumes the standard macOS location.
-fn get_database_path() -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
+fn get_database_path() -> Result<Utf8PathBuf, Box<dyn Error + Send + Sync>> {
     let path = BaseDirs::new()
         .ok_or("Could not find base directories")?
         .home_dir()
@@ -281,7 +277,7 @@ fn get_database_path() -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
         return Err(format!("Missing Bear SQLite database at {}", path.display()).into());
     }
 
-    Ok(path)
+    path.try_into().map_err(Into::into)
 }
 
 #[cfg(test)]

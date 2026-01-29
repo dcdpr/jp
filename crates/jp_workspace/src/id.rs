@@ -14,6 +14,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use camino::Utf8Path;
+
 use crate::{Error, Result};
 
 static ID_CHARS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
@@ -47,7 +49,7 @@ impl Id {
     }
 
     /// Store the globally unique workspace ID to the given root path.
-    pub fn store(&self, storage: &Path) -> io::Result<()> {
+    pub fn store(&self, storage: &Utf8Path) -> io::Result<()> {
         fs::write(
             storage.join(ID_FILE),
             format!("{ID_PREAMBLE}\n{}\n", self.0),

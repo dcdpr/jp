@@ -1,7 +1,8 @@
 //! Editor configuration for Jean-Pierre.
 
-use std::{env, path::PathBuf};
+use std::env;
 
+use camino::Utf8PathBuf;
 use duct::Expression;
 use schematic::Config;
 
@@ -101,13 +102,13 @@ impl EditorConfig {
 
     /// Return the path to the editor, if any.
     #[must_use]
-    pub fn path(&self) -> Option<PathBuf> {
-        self.cmd.as_ref().map(PathBuf::from).or_else(|| {
+    pub fn path(&self) -> Option<Utf8PathBuf> {
+        self.cmd.as_ref().map(Utf8PathBuf::from).or_else(|| {
             self.envs.iter().find_map(|v| {
                 env::var(v).ok().and_then(|s| {
                     s.split_ascii_whitespace()
                         .next()
-                        .and_then(|c| which::which(c).ok())
+                        .and_then(|c| which::which(c).ok().and_then(|p| p.try_into().ok()))
                 })
             })
         })
@@ -178,13 +179,13 @@ mod tests {
             envs: vec![],
         };
 
-        assert_eq!(p.path(), Some(PathBuf::from("vim")));
+        assert_eq!(p.path(), Some(Utf8PathBuf::from("vim")));
 
         p.cmd = Some("subl -w".into());
-        assert_eq!(p.path(), Some(PathBuf::from("subl -w")));
+        assert_eq!(p.path(), Some(Utf8PathBuf::from("subl -w")));
 
         p.cmd = Some("/usr/bin/vim".into());
-        assert_eq!(p.path(), Some(PathBuf::from("/usr/bin/vim")));
+        assert_eq!(p.path(), Some(Utf8PathBuf::from("/usr/bin/vim")));
 
         p.cmd = None;
         p.envs = vec![];
@@ -192,7 +193,7 @@ mod tests {
 
         let _env = EnvVarGuard::set("JP_EDITOR1", "vi");
         p.envs = vec!["JP_EDITOR1".into()];
-        assert!(p.path().unwrap().to_string_lossy().ends_with("/bin/vi"));
+        assert!(p.path().unwrap().to_string().ends_with("/bin/vi"));
 
         let _env = EnvVarGuard::set("JP_EDITOR2", "doesnotexist");
         p.envs = vec!["JP_EDITOR2".into()];

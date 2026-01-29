@@ -24,6 +24,7 @@ jp_tool = { workspace = true }
 async-anthropic = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
+camino = { workspace = true }
 crossterm = { workspace = true }
 duct = { workspace = true }
 duct_sh = { workspace = true }

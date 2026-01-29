@@ -3,10 +3,10 @@ mod parser;
 use std::{
     fs::{self, OpenOptions},
     io::{Read as _, Write as _},
-    path::{Path, PathBuf},
     str::FromStr,
 };
 
+use camino::{Utf8Path, Utf8PathBuf};
 use duct::Expression;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _, model::parameters::PartialReasoningConfig,
@@ -57,7 +57,7 @@ pub(crate) struct Options {
     cmd: Expression,
 
     /// The working directory to use.
-    cwd: Option<PathBuf>,
+    cwd: Option<Utf8PathBuf>,
 
     /// The initial content to use.
     content: Option<String>,
@@ -78,7 +78,7 @@ impl Options {
 
     /// Add a working directory to the editor options.
     #[must_use]
-    pub(crate) fn with_cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
+    pub(crate) fn with_cwd(mut self, cwd: impl Into<Utf8PathBuf>) -> Self {
         self.cwd = Some(cwd.into());
         self
     }
@@ -99,7 +99,7 @@ impl Options {
 }
 
 pub(crate) struct RevertFileGuard {
-    path: Option<PathBuf>,
+    path: Option<Utf8PathBuf>,
     orig: String,
     exists: bool,
 }
@@ -153,7 +153,7 @@ impl Drop for RevertFileGuard {
 /// (in other words, `content` is ignored).
 ///
 /// When the editor is closed, the contents are returned.
-pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFileGuard)> {
+pub(crate) fn open(path: Utf8PathBuf, options: Options) -> Result<(String, RevertFileGuard)> {
     let Options {
         cmd,
         cwd,
@@ -220,12 +220,12 @@ pub(crate) fn open(path: PathBuf, options: Options) -> Result<(String, RevertFil
 /// Open an editor for the user to input or edit text using a file in the workspace
 pub(crate) fn edit_query(
     config: &AppConfig,
-    root: &Path,
+    root: &Utf8Path,
     stream: &ConversationStream,
     query: &str,
     cmd: Expression,
     config_error: Option<&str>,
-) -> Result<(String, PathBuf, PartialAppConfig)> {
+) -> Result<(String, Utf8PathBuf, PartialAppConfig)> {
     let query_file_path = root.join(QUERY_FILENAME);
     let existing_content = fs::read_to_string(&query_file_path).unwrap_or_default();
     let mut doc = QueryDocument::try_from(existing_content.as_str()).unwrap_or_default();

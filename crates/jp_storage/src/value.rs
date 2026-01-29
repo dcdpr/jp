@@ -1,17 +1,17 @@
 use std::{
     fs,
     io::{BufReader, BufWriter, Write as _},
-    path::Path,
 };
 
+use camino::Utf8Path;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::error::Result;
 
 pub fn merge_files<T: DeserializeOwned>(
-    base: impl AsRef<Path>,
-    overlay: impl AsRef<Path>,
+    base: impl AsRef<Utf8Path>,
+    overlay: impl AsRef<Utf8Path>,
 ) -> Result<T> {
     let base = base.as_ref();
     let overlay = overlay.as_ref();
@@ -45,13 +45,13 @@ fn deep_merge_values(base: &mut Value, overlay: Value) {
     }
 }
 
-pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
+pub fn read_json<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
     let file = fs::File::open(path)?;
     let reader = BufReader::new(file);
     serde_json::from_reader(reader).map_err(Into::into)
 }
 
-pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+pub fn write_json<T: Serialize>(path: &Utf8Path, value: &T) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }

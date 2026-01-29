@@ -1,5 +1,4 @@
-use std::ffi::OsStr;
-
+use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
 use jp_config::fs::{ConfigFile, ConfigLoader, ConfigLoaderError, user_global_config_path};
 
 use super::Output;
@@ -70,25 +69,32 @@ impl Target {
                 .map(|p| loader.load(p))
                 .transpose()
         } else if self.user_global {
-            user_global_config_path(std::env::home_dir().as_deref())
-                .map(|mut p| {
-                    if p.is_file()
-                        && let Some(stem) = p.file_name().and_then(OsStr::to_str)
-                        && let Some(path) = p.parent()
-                    {
-                        loader.file_stem = stem.to_owned().into();
-                        p = path.to_path_buf();
-                    }
+            user_global_config_path(
+                std::env::home_dir()
+                    .as_deref()
+                    .and_then(|p| Utf8Path::from_path(p)),
+            )
+            .map(|mut p| {
+                if p.is_file()
+                    && let Some(stem) = p.file_name()
+                    && let Some(path) = p.parent()
+                {
+                    loader.file_stem = stem.to_owned().into();
+                    p = path.to_path_buf();
+                }
 
-                    loader.load(p)
-                })
-                .transpose()
+                loader.load(p)
+            })
+            .transpose()
         } else if self.cwd {
             loader.file_stem = ".jp".into();
             loader.recurse_up = true;
             loader.recurse_stop_at = Some(ctx.workspace.root().to_path_buf());
 
-            loader.load(std::env::current_dir()?).map(Some)
+            let current_dir = Utf8PathBuf::try_from(std::env::current_dir()?)
+                .map_err(FromPathBufError::into_io_error)?;
+
+            loader.load(current_dir).map(Some)
         } else {
             ctx.workspace
                 .storage_path()

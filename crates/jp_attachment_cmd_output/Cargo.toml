@@ -17,15 +17,16 @@ jp_attachment = { workspace = true }
 jp_mcp = { workspace = true }
 
 async-trait = { workspace = true }
+camino = { workspace = true }
 duct = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 serde = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+camino-tempfile = { workspace = true }
 indexmap = { workspace = true }
 indoc = { workspace = true }
-tempfile = { workspace = true }
 test-log = { workspace = true }
 tokio = { workspace = true }
 

@@ -341,7 +341,7 @@ impl From<crate::error::Error> for Error {
             .into(),
             MissingConfigFile(path) => [
                 ("message", "Missing config file".into()),
-                ("path", path.display().to_string()),
+                ("path", path.to_string()),
             ]
             .into(),
         };
@@ -521,10 +521,11 @@ impl From<jp_workspace::Error> for Error {
         let metadata: Vec<(&str, Value)> = match error {
             Conversation(error) => return error.into(),
             Storage(error) => return error.into(),
+            Io(error) => return error.into(),
             Config(error) => return error.into(),
             NotDir(path) => [
                 ("message", "Path is not a directory.".into()),
-                ("path", path.to_string_lossy().into()),
+                ("path", path.to_string().into()),
             ]
             .into(),
             MissingStorage => [("message", "Missing storage directory".into())].into(),
@@ -569,12 +570,12 @@ impl From<jp_storage::Error> for Error {
             Error::Config(error) => return error.into(),
             Error::NotDir(path) => [
                 ("message", "Path is not a directory.".into()),
-                ("path", path.to_string_lossy().into()),
+                ("path", path.to_string().into()),
             ]
             .into(),
             Error::NotSymlink(path) => [
                 ("message", "Path is not a symlink.".into()),
-                ("path", path.to_string_lossy().into()),
+                ("path", path.to_string().into()),
             ]
             .into(),
         };

@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-
+use camino::Utf8PathBuf;
 use jp_conversation::ConversationId;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
@@ -22,7 +21,7 @@ pub enum Error {
     MissingHome,
 
     #[error("Path is not a directory: {0}")]
-    NotDir(PathBuf),
+    NotDir(Utf8PathBuf),
 
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
@@ -35,6 +34,9 @@ pub enum Error {
 
     #[error("Conversation error: {0}")]
     Conversation(#[from] jp_conversation::Error),
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
 impl Error {

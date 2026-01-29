@@ -17,6 +17,7 @@ jp_attachment = { workspace = true }
 jp_mcp = { workspace = true }
 
 async-trait = { workspace = true }
+camino = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 serde = { workspace = true }
 url = { workspace = true, features = ["serde"] }

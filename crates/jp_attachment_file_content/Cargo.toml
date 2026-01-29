@@ -17,6 +17,7 @@ jp_attachment = { workspace = true }
 jp_mcp = { workspace = true }
 
 async-trait = { workspace = true }
+camino = { workspace = true }
 crossbeam-channel = { workspace = true, features = ["std"] }
 glob = { workspace = true }
 ignore = { workspace = true }
@@ -26,8 +27,8 @@ tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+camino-tempfile = { workspace = true }
 indexmap = { workspace = true }
-tempfile = { workspace = true }
 test-log = { workspace = true }
 
 [lints]

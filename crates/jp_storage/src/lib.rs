@@ -1,15 +1,10 @@
 pub mod error;
 pub mod value;
 
-use std::{
-    cell::OnceCell,
-    fs,
-    io::BufReader,
-    iter,
-    path::{Path, PathBuf},
-};
+use std::{cell::OnceCell, fs, io::BufReader, iter};
 
 use ahash::{HashMap, HashMapExt};
+use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
 pub use error::Error;
 use jp_conversation::{Conversation, ConversationId, ConversationStream, ConversationsMetadata};
 use jp_id::Id as _;
@@ -30,7 +25,7 @@ pub const CONVERSATIONS_DIR: &str = "conversations";
 #[derive(Debug)]
 pub struct Storage {
     /// The path to the original storage directory.
-    root: PathBuf,
+    root: Utf8PathBuf,
 
     /// The path to the user storage directory.
     ///
@@ -38,22 +33,22 @@ pub struct Storage {
     /// that are tied to the current user.
     ///
     /// If unset, user storage is disabled.
-    user: Option<PathBuf>,
+    user: Option<Utf8PathBuf>,
 }
 
 impl Storage {
     /// Creates a new Storage instance by creating a temporary directory and
     /// copying the contents of `root` into it.
-    pub fn new(root: impl Into<PathBuf>) -> Result<Self> {
+    pub fn new(root: impl Into<Utf8PathBuf>) -> Result<Self> {
         // Create root storage directory, if needed.
-        let root: PathBuf = root.into();
+        let root: Utf8PathBuf = root.into();
         if root.exists() {
             if !root.is_dir() {
                 return Err(Error::NotDir(root));
             }
         } else {
             fs::create_dir_all(&root)?;
-            trace!(path = %root.display(), "Created storage directory.");
+            trace!(path = %root, "Created storage directory.");
         }
 
         Ok(Self { root, user: None })
@@ -61,7 +56,7 @@ impl Storage {
 
     pub fn with_user_storage(
         mut self,
-        root: &Path,
+        root: &Utf8Path,
         name: impl Into<String>,
         id: impl Into<String>,
     ) -> Result<Self> {
@@ -72,9 +67,9 @@ impl Storage {
 
         // Create user storage directory, if needed.
         if root.exists()
-            && let Some(mut existing_path) = fs::read_dir(root)?.find_map(|entry| {
-                let path = entry.ok()?.path();
-                path.to_string_lossy().ends_with(&id).then_some(path)
+            && let Some(mut existing_path) = root.read_dir_utf8()?.find_map(|entry| {
+                let path = entry.ok()?.into_path();
+                path.to_string().ends_with(&id).then_some(path)
             })
         {
             if !existing_path.is_dir() {
@@ -89,8 +84,8 @@ impl Storage {
             {
                 let new_path = existing_path.with_file_name(dirname);
                 trace!(
-                    old = %existing_path.display(),
-                    new = %new_path.display(),
+                    old = %existing_path,
+                    new = %new_path,
                     "Renaming existing user storage directory to match new name."
                 );
                 fs::rename(&existing_path, &new_path)?;
@@ -113,7 +108,7 @@ impl Storage {
             path = existing_path;
         } else {
             fs::create_dir_all(&path)?;
-            trace!(path = %path.display(), "Created user storage directory.");
+            trace!(path = %path, "Created user storage directory.");
         }
 
         // Create reference back to workspace storage.
@@ -142,13 +137,13 @@ impl Storage {
 
     /// Returns the path to the storage directory.
     #[must_use]
-    pub fn path(&self) -> &Path {
+    pub fn path(&self) -> &Utf8Path {
         &self.root
     }
 
     /// Returns the path to the user storage directory, if configured.
     #[must_use]
-    pub fn user_storage_path(&self) -> Option<&Path> {
+    pub fn user_storage_path(&self) -> Option<&Utf8Path> {
         self.user.as_deref()
     }
 
@@ -161,7 +156,7 @@ impl Storage {
     pub fn load_conversations_metadata(&self) -> Result<ConversationsMetadata> {
         let root = self.user.as_deref().unwrap_or(self.root.as_path());
         let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
-        trace!(path = %metadata_path.display(), "Loading user conversations metadata.");
+        trace!(path = %metadata_path, "Loading user conversations metadata.");
 
         if !metadata_path.exists() {
             return Ok(ConversationsMetadata::default());
@@ -212,7 +207,7 @@ impl Storage {
                     let (id, mut conversation) = load_conversation_metadata(&entry)?;
                     conversation.user = Some(root) == self.user.as_ref();
                     (conversation.events_count, conversation.last_event_at) =
-                        load_count_and_timestamp_events(&entry.path()).unwrap_or((0, None));
+                        load_count_and_timestamp_events(entry.path()).unwrap_or((0, None));
 
                     Some((id, conversation))
                 })
@@ -280,8 +275,8 @@ impl Storage {
         let user_conversations_dir = user.join(CONVERSATIONS_DIR);
 
         trace!(
-            global = %conversations_dir.display(),
-            user = %user_conversations_dir.display(),
+            global = conversations_dir.as_str(),
+            user = user_conversations_dir.as_str(),
             "Persisting conversations."
         );
 
@@ -346,11 +341,11 @@ impl Storage {
 
         for dir in [&conversations_dir, &user_conversations_dir] {
             let mut deleted = Vec::new();
-            for entry in dir.read_dir()?.flatten() {
+            for entry in dir.read_dir_utf8()?.flatten() {
                 let path = entry.path();
                 let dir_matches_id = path.file_name().is_some_and(|v| {
                     removed_ids.iter().any(|d| {
-                        let file_name = v.to_string_lossy();
+                        let file_name = v.to_string();
                         let removed_id = d.target_id();
 
                         file_name == *removed_id || file_name.starts_with(&format!("{removed_id}-"))
@@ -377,7 +372,10 @@ impl Storage {
     ) -> Result<()> {
         let root = self.user.as_deref().unwrap_or(self.root.as_path());
         let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
-        trace!(path = %metadata_path.display(), "Persisting user conversations metadata.");
+        trace!(
+            path = metadata_path.as_str(),
+            "Persisting user conversations metadata."
+        );
 
         write_json(&metadata_path, metadata)?;
 
@@ -401,7 +399,7 @@ impl Storage {
                         return None;
                     }
 
-                    let path = entry.path();
+                    let path = entry.into_path();
                     let expiring_ts = get_expiring_timestamp(&path)?;
                     if expiring_ts > UtcDateTime::now() {
                         return None;
@@ -412,7 +410,7 @@ impl Storage {
                 .for_each(|path| {
                     if let Err(error) = fs::remove_dir_all(&path) {
                         warn!(
-                            path = path.display().to_string(),
+                            path = path.as_str(),
                             error = error.to_string(),
                             "Failed to remove ephemeral conversation."
                         );
@@ -422,7 +420,7 @@ impl Storage {
     }
 }
 
-fn load_count_and_timestamp_events(root: &Path) -> Option<(usize, Option<UtcDateTime>)> {
+fn load_count_and_timestamp_events(root: &Utf8Path) -> Option<(usize, Option<UtcDateTime>)> {
     #[derive(serde::Deserialize)]
     struct RawEvent {
         timestamp: Box<serde_json::value::RawValue>,
@@ -435,7 +433,11 @@ fn load_count_and_timestamp_events(root: &Path) -> Option<(usize, Option<UtcDate
     let events: Vec<RawEvent> = match serde_json::from_reader(reader) {
         Ok(events) => events,
         Err(error) => {
-            warn!(%error, path = %path.display(), "Error parsing JSON event file.");
+            warn!(
+                error = error.to_string(),
+                path = path.as_str(),
+                "Error parsing JSON event file."
+            );
             return None;
         }
     };
@@ -458,7 +460,7 @@ fn load_count_and_timestamp_events(root: &Path) -> Option<(usize, Option<UtcDate
 ///
 /// This is a specialized function that ONLY parses the `expires_at` field in
 /// the JSON metadata file, for performance reasons.
-fn get_expiring_timestamp(root: &Path) -> Option<UtcDateTime> {
+fn get_expiring_timestamp(root: &Utf8Path) -> Option<UtcDateTime> {
     #[derive(serde::Deserialize)]
     struct RawConversation {
         expires_at: Option<Box<serde_json::value::RawValue>>,
@@ -471,7 +473,11 @@ fn get_expiring_timestamp(root: &Path) -> Option<UtcDateTime> {
     let conversation: RawConversation = match serde_json::from_reader(reader) {
         Ok(conversation) => conversation,
         Err(error) => {
-            warn!(%error, path = %path.display(), "Error parsing JSON metadata file.");
+            warn!(
+                error = error.to_string(),
+                path = path.as_str(),
+                "Error parsing JSON metadata file."
+            );
             return None;
         }
     };
@@ -485,29 +491,25 @@ fn get_expiring_timestamp(root: &Path) -> Option<UtcDateTime> {
     UtcDateTime::parse(&ts[1..ts.len() - 1], &fmt).ok()
 }
 
-fn dir_entries(path: &Path) -> impl Iterator<Item = fs::DirEntry> {
-    fs::read_dir(path)
+fn dir_entries(path: &Utf8Path) -> impl Iterator<Item = Utf8DirEntry> {
+    path.read_dir_utf8()
         .into_iter()
         .flatten()
         .filter_map(std::result::Result::ok)
 }
 
-fn find_conversation_dir_path(root: &Path, id: &ConversationId) -> Option<PathBuf> {
-    fs::read_dir(root.join(CONVERSATIONS_DIR))
+fn find_conversation_dir_path(root: &Utf8Path, id: &ConversationId) -> Option<Utf8PathBuf> {
+    root.join(CONVERSATIONS_DIR)
+        .read_dir_utf8()
         .ok()
         .into_iter()
         .flatten()
         .filter_map(std::result::Result::ok)
-        .find(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .is_some_and(|v| v.starts_with(&id.to_dirname(None)))
-        })
-        .map(|entry| entry.path())
+        .find(|entry| entry.file_name().starts_with(&id.to_dirname(None)))
+        .map(Utf8DirEntry::into_path)
 }
 
-fn load_conversation_metadata(entry: &fs::DirEntry) -> Option<(ConversationId, Conversation)> {
+fn load_conversation_metadata(entry: &Utf8DirEntry) -> Option<(ConversationId, Conversation)> {
     let conversation_id = load_conversation_id_from_entry(entry)?;
 
     let path = entry.path();
@@ -519,7 +521,7 @@ fn load_conversation_metadata(entry: &fs::DirEntry) -> Option<(ConversationId, C
             Err(error) => {
                 warn!(
                     %error,
-                    path = metadata_path.to_string_lossy().to_string(),
+                    path = metadata_path.to_string(),
                     "Failed to load conversation metadata. Skipping."
                 );
                 return None;
@@ -530,18 +532,12 @@ fn load_conversation_metadata(entry: &fs::DirEntry) -> Option<(ConversationId, C
     Some((conversation_id, conversation))
 }
 
-fn load_conversation_id_from_entry(entry: &fs::DirEntry) -> Option<ConversationId> {
+fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<ConversationId> {
     if !entry.file_type().ok()?.is_dir() {
         return None;
     }
 
-    let file_name = entry.file_name();
-    let Some(dir_name) = file_name.to_str() else {
-        warn!(path = ?entry.path(), "Skipping directory with invalid name.");
-        return None;
-    };
-
-    ConversationId::try_from_dirname(dir_name)
+    ConversationId::try_from_dirname(entry.file_name())
         .inspect_err(|error| {
             warn!(
                 %error,
@@ -554,23 +550,23 @@ fn load_conversation_id_from_entry(entry: &fs::DirEntry) -> Option<ConversationI
 
 fn remove_unused_conversation_dirs(
     id: &ConversationId,
-    conversation_dir: &Path,
-    workspace_conversations_dir: &Path,
-    user_conversations_dir: &Path,
+    conversation_dir: &Utf8Path,
+    workspace_conversations_dir: &Utf8Path,
+    user_conversations_dir: &Utf8Path,
 ) -> Result<()> {
     // Gather all possible conversation directory names
     let mut dirs = vec![];
     for conversations_dir in &[workspace_conversations_dir, user_conversations_dir] {
         let pat = id.to_dirname(None);
         dirs.push(conversations_dir.join(&pat));
-        for entry in fs::read_dir(conversations_dir).ok().into_iter().flatten() {
-            let path = entry?.path();
+        for entry in conversations_dir.read_dir_utf8().ok().into_iter().flatten() {
+            let path = entry?.into_path();
             if !path.is_dir() {
                 continue;
             }
             if path
                 .file_name()
-                .is_none_or(|v| !v.to_string_lossy().starts_with(&format!("{pat}-")))
+                .is_none_or(|v| !v.starts_with(&format!("{pat}-")))
             {
                 continue;
             }
@@ -594,7 +590,11 @@ fn remove_unused_conversation_dirs(
     Ok(())
 }
 
-fn remove_deleted(root: &Path, dir: &Path, deleted: impl Iterator<Item = PathBuf>) -> Result<()> {
+fn remove_deleted(
+    root: &Utf8Path,
+    dir: &Utf8Path,
+    deleted: impl Iterator<Item = Utf8PathBuf>,
+) -> Result<()> {
     for entry in deleted {
         let mut path = dir.join(entry);
         if path.is_file() {
@@ -603,7 +603,7 @@ fn remove_deleted(root: &Path, dir: &Path, deleted: impl Iterator<Item = PathBuf
             fs::remove_dir_all(&path)?;
         } else {
             warn!(
-                path = %path.display(),
+                path = path.to_string(),
                 "File or directory marked for deletion not found. Skipping."
             );
         }
@@ -632,9 +632,9 @@ mod tests {
         str::FromStr as _,
     };
 
+    use camino_tempfile::tempdir;
     use jp_conversation::ConversationId;
     use serde_json::json;
-    use tempfile::tempdir;
     use test_log::test;
     use time::macros::utc_datetime;
 
@@ -642,7 +642,7 @@ mod tests {
 
     #[test]
     fn test_storage_handles_missing_src() {
-        let missing_path = PathBuf::from("./non_existent_jp_workspace_source_dir_abc123");
+        let missing_path = Utf8PathBuf::from("./non_existent_jp_workspace_source_dir_abc123");
         assert!(!missing_path.exists());
 
         let storage = Storage::new(&missing_path).expect("must succeed");

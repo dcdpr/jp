@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use camino::Utf8Path;
 use glob::glob;
 use indexmap::IndexMap;
 use schematic::{ConfigLoader, MergeError, MergeResult, PartialConfig, TransformResult};
@@ -119,7 +120,7 @@ pub fn load_partial_at_path<P: Into<PathBuf>>(path: P) -> Result<Option<PartialA
 /// Can error if file parsing fails, or if partial validation fails.
 pub fn load_partial_at_path_recursive<P: Into<PathBuf>>(
     path: P,
-    root: Option<&Path>,
+    root: Option<&Utf8Path>,
 ) -> Result<Option<PartialAppConfig>, Error> {
     let path: PathBuf = path.into();
 
@@ -411,9 +412,9 @@ mod tests {
     use std::fs;
 
     use assert_matches::assert_matches;
+    use camino_tempfile::tempdir;
     use serde_json::{Value, json};
     use serial_test::serial;
-    use tempfile::tempdir;
     use test_log::test;
 
     use super::*;
@@ -425,7 +426,7 @@ mod tests {
     };
 
     // Helper to write config content to a file, creating parent dirs
-    fn write_config(path: &Path, content: &str) {
+    fn write_config(path: &Utf8Path, content: &str) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();
         }

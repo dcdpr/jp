@@ -1,5 +1,6 @@
-use std::{env, fs, io::Write as _, path::PathBuf, str::FromStr as _};
+use std::{env, fs, io::Write as _, str::FromStr as _};
 
+use camino::{FromPathBufError, Utf8PathBuf};
 use clean_path::Clean as _;
 use crossterm::style::Stylize as _;
 use duct::cmd;
@@ -16,17 +17,23 @@ use crate::{DEFAULT_STORAGE_DIR, Output, ctx::IntoPartialAppConfig};
 #[derive(Debug, clap::Args)]
 pub(crate) struct Init {
     /// Path to initialize the workspace at. Defaults to the current directory.
-    path: Option<PathBuf>,
+    path: Option<Utf8PathBuf>,
 }
 
 impl Init {
     pub(crate) fn run(&self, printer: &Printer) -> Output {
-        let cwd = std::env::current_dir()?;
-        let mut root = self
+        let cwd: Utf8PathBuf = std::env::current_dir()?
+            .try_into()
+            .map_err(FromPathBufError::into_io_error)?;
+
+        let mut root: Utf8PathBuf = self
             .path
             .clone()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .clean();
+            .unwrap_or_else(|| Utf8PathBuf::from("."))
+            .into_std_path_buf()
+            .clean()
+            .try_into()
+            .map_err(FromPathBufError::into_io_error)?;
 
         if !root.is_absolute() {
             root = cwd.join(root);
@@ -71,7 +78,7 @@ impl Init {
         let loc = if root == cwd {
             "current directory".to_owned()
         } else {
-            root.to_string_lossy().bold().to_string()
+            root.to_string().bold().to_string()
         };
 
         Ok(format!("Initialized workspace at {loc}").into())

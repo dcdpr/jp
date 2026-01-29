@@ -2,10 +2,10 @@ use std::{
     error::Error,
     hash::Hasher,
     ops::{Deref, DerefMut},
-    path::Path,
 };
 
 use async_trait::async_trait;
+use camino::Utf8Path;
 use dyn_clone::DynClone;
 use dyn_hash::DynHash;
 use jp_mcp::Client;
@@ -77,7 +77,7 @@ pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     /// resources from MCP servers, if needed.
     async fn get(
         &self,
-        cwd: &Path,
+        cwd: &Utf8Path,
         mcp_client: Client,
     ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>>;
 }

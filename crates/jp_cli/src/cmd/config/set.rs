@@ -77,8 +77,7 @@ impl Set {
 
         Ok(format!(
             "Set configuration value for {} in {}",
-            self.key,
-            config.path.display()
+            self.key, config.path,
         )
         .into())
     }

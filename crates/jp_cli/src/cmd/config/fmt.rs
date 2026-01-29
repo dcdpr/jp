@@ -105,25 +105,19 @@ impl Fmt {
             if curr != config.content {
                 return Err(Error::CliConfig(format!(
                     "Configuration file {} is not formatted correctly.",
-                    config.path.display()
+                    config.path,
                 ))
                 .into());
             }
 
-            Ok(format!(
-                "Checked configuration file: {}",
-                config.path.display()
-            ))
+            Ok(format!("Checked configuration file: {}", config.path,))
         } else if curr != config.content {
             fs::write(&config.path, config.content)?;
-            Ok(format!(
-                "Formatted configuration file: {}",
-                config.path.display()
-            ))
+            Ok(format!("Formatted configuration file: {}", config.path,))
         } else {
             Ok(format!(
                 "Skipped formatted configuration file: {}",
-                config.path.display()
+                config.path,
             ))
         }
     }

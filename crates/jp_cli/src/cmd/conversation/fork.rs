@@ -88,6 +88,7 @@ mod tests {
     use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
     use assert_matches::assert_matches;
+    use camino_tempfile::tempdir;
     use jp_config::AppConfig;
     use jp_conversation::{
         Conversation, ConversationEvent, ConversationStream,
@@ -95,7 +96,6 @@ mod tests {
     };
     use jp_printer::Printer;
     use jp_workspace::Workspace;
-    use tempfile::tempdir;
     use time::macros::utc_datetime;
     use tokio::runtime::Runtime;
 

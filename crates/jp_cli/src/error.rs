@@ -1,4 +1,6 @@
-use std::{io, path::PathBuf};
+use std::io;
+
+use camino::Utf8PathBuf;
 
 use crate::cmd;
 
@@ -21,7 +23,7 @@ pub(crate) enum Error {
 
     /// Missing config file.
     #[error("Config file not found: {0}")]
-    MissingConfigFile(PathBuf),
+    MissingConfigFile(Utf8PathBuf),
 
     #[error("CLI Config error: {0}")]
     CliConfig(String),

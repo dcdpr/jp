@@ -1,12 +1,9 @@
 //! Configuration file loader.
 
-use std::{
-    borrow::Cow,
-    env,
-    path::{Path, PathBuf},
-};
+use std::{borrow::Cow, env};
 
-use clean_path::Clean as _;
+use camino::{Utf8Path, Utf8PathBuf};
+use clean_path::clean;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -29,14 +26,14 @@ pub enum ConfigLoaderError {
     #[error("provided path is not a directory")]
     PathIsNotADirectory {
         /// The path which is not a directory.
-        got: PathBuf,
+        got: Utf8PathBuf,
     },
 
     /// Configuration file not found.
     #[error("config file not found")]
     NotFound {
         /// The path to the configuration file.
-        path: PathBuf,
+        path: Utf8PathBuf,
 
         /// The file stem which was searched for.
         stem: String,
@@ -65,7 +62,7 @@ pub struct ConfigLoader {
 
     /// The final path to search for a configuration file, if `recurse_up` is
     /// enabled.
-    pub recurse_stop_at: Option<PathBuf>,
+    pub recurse_stop_at: Option<Utf8PathBuf>,
 
     /// Whether to create a new configuration file if none is found.
     ///
@@ -90,7 +87,7 @@ impl Default for ConfigLoader {
 #[derive(Debug)]
 pub struct ConfigFile {
     /// The path to the file.
-    pub path: PathBuf,
+    pub path: Utf8PathBuf,
 
     /// The format of the file.
     pub format: Format,
@@ -211,7 +208,7 @@ impl ConfigLoader {
     ///
     /// Returns an error if the configuration file could not be found, or if the
     /// file could not be loaded.
-    pub fn load<P: AsRef<Path>>(&self, directory: P) -> Result<ConfigFile, ConfigLoaderError> {
+    pub fn load<P: AsRef<Utf8Path>>(&self, directory: P) -> Result<ConfigFile, ConfigLoaderError> {
         let directory = directory.as_ref();
 
         // Directory must exist.
@@ -288,25 +285,34 @@ impl ConfigLoader {
 
 /// Get the path to user the global config directory, if it exists.
 #[must_use]
-pub fn user_global_config_path(home: Option<&Path>) -> Option<PathBuf> {
+pub fn user_global_config_path(home: Option<&Utf8Path>) -> Option<Utf8PathBuf> {
     env::var(GLOBAL_CONFIG_ENV_VAR)
         .ok()
-        .and_then(|path| expand_tilde(path, home.and_then(Path::to_str)))
-        .map(|path| path.clean())
-        .inspect(|path| debug!(path = %path.display(), "Custom global configuration file path configured."))
-        .or_else(|| ProjectDirs::from("", "", APPLICATION).map(|p| p.config_dir().to_path_buf()))
+        .and_then(|path| expand_tilde(path, home))
+        .and_then(|path| Utf8PathBuf::from_path_buf(clean(path)).ok())
+        .inspect(|path| {
+            debug!(
+                path = path.as_str(),
+                "Custom global configuration file path configured."
+            );
+        })
+        .or_else(|| {
+            ProjectDirs::from("", "", APPLICATION)
+                .map(|p| p.config_dir().to_path_buf())
+                .and_then(|path| Utf8PathBuf::from_path_buf(clean(path)).ok())
+        })
 }
 
 /// Expand tilde in path to home directory
 ///
 /// If no tilde is found, returns `Some` with the original path. If a tilde is
 /// found, but no home directory is set, returns `None`.
-pub fn expand_tilde<T: AsRef<str>>(path: impl AsRef<str>, home: Option<T>) -> Option<PathBuf> {
+pub fn expand_tilde<T: AsRef<str>>(path: impl AsRef<str>, home: Option<T>) -> Option<Utf8PathBuf> {
     if path.as_ref().starts_with('~') {
-        return home.map(|home| PathBuf::from(path.as_ref().replacen('~', home.as_ref(), 1)));
+        return home.map(|home| Utf8PathBuf::from(path.as_ref().replacen('~', home.as_ref(), 1)));
     }
 
-    Some(PathBuf::from(path.as_ref()))
+    Some(Utf8PathBuf::from(path.as_ref()))
 }
 
 /// Load a partial configuration, with optional fallback.
@@ -370,7 +376,7 @@ mod tests {
         for (name, case) in cases {
             assert_eq!(
                 expand_tilde(case.path, case.home),
-                case.expected.map(PathBuf::from),
+                case.expected.map(Utf8PathBuf::from),
                 "Failed test case: {name}"
             );
         }

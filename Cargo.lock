@@ -2018,6 +2018,7 @@ name = "jp_attachment"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "camino",
  "dyn-clone",
  "dyn-hash",
  "jp_mcp",
@@ -2033,6 +2034,7 @@ name = "jp_attachment_bear_note"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "camino",
  "directories",
  "indoc",
  "jp_attachment",
@@ -2050,6 +2052,8 @@ name = "jp_attachment_cmd_output"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "camino",
+ "camino-tempfile",
  "duct",
  "indexmap",
  "indoc",
@@ -2057,7 +2061,6 @@ dependencies = [
  "jp_mcp",
  "quick-xml",
  "serde",
- "tempfile",
  "test-log",
  "tokio",
  "url",
@@ -2068,6 +2071,8 @@ name = "jp_attachment_file_content"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "camino",
+ "camino-tempfile",
  "crossbeam-channel",
  "glob",
  "ignore",
@@ -2075,7 +2080,6 @@ dependencies = [
  "jp_attachment",
  "jp_mcp",
  "serde",
- "tempfile",
  "test-log",
  "tokio",
  "tracing",
@@ -2087,6 +2091,7 @@ name = "jp_attachment_http_content"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "camino",
  "jp_attachment",
  "jp_mcp",
  "reqwest",
@@ -2100,6 +2105,7 @@ name = "jp_attachment_mcp_resources"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "camino",
  "jp_attachment",
  "jp_mcp",
  "quick-xml",
@@ -2114,6 +2120,8 @@ dependencies = [
  "assert_matches",
  "async-stream",
  "bat",
+ "camino",
+ "camino-tempfile",
  "clap",
  "clean-path",
  "comfy-table",
@@ -2159,7 +2167,6 @@ dependencies = [
  "serde_json",
  "serial_test",
  "strip-ansi-escapes",
- "tempfile",
  "termimad",
  "test-log",
  "thiserror 2.0.16",
@@ -2178,6 +2185,8 @@ name = "jp_config"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
+ "camino",
+ "camino-tempfile",
  "clean-path",
  "directories",
  "duct",
@@ -2197,7 +2206,6 @@ dependencies = [
  "serde_json5",
  "serde_yaml",
  "serial_test",
- "tempfile",
  "test-log",
  "thiserror 2.0.16",
  "toml 0.9.7",
@@ -2260,6 +2268,7 @@ dependencies = [
  "async-anthropic",
  "async-stream",
  "async-trait",
+ "camino",
  "crossterm",
  "duct",
  "duct_sh",
@@ -2358,6 +2367,8 @@ name = "jp_storage"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "camino",
+ "camino-tempfile",
  "jp_config",
  "jp_conversation",
  "jp_id",
@@ -2365,7 +2376,6 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
- "tempfile",
  "test-log",
  "thiserror 2.0.16",
  "time",
@@ -2432,6 +2442,8 @@ dependencies = [
 name = "jp_workspace"
 version = "0.1.0"
 dependencies = [
+ "camino",
+ "camino-tempfile",
  "directories",
  "jp_config",
  "jp_conversation",
@@ -2439,7 +2451,6 @@ dependencies = [
  "jp_storage",
  "jp_tombmap",
  "serde",
- "tempfile",
  "test-log",
  "thiserror 2.0.16",
  "time",
