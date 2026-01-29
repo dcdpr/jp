@@ -8,13 +8,9 @@ mod error;
 mod id;
 mod state;
 
-use std::{
-    cell::OnceCell,
-    iter,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{cell::OnceCell, iter, sync::Arc};
 
+use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
 pub use error::Error;
 use error::Result;
 pub use id::Id;
@@ -33,7 +29,7 @@ pub struct Workspace {
     /// The root directory of the workspace.
     ///
     /// This differs from the storage's root directory.
-    root: PathBuf,
+    root: Utf8PathBuf,
 
     /// The globally unique ID of the workspace.
     id: id::Id,
@@ -61,7 +57,7 @@ pub struct Workspace {
 impl Workspace {
     /// Find the [`Workspace`] root by walking up the directory tree.
     #[must_use]
-    pub fn find_root(mut current_dir: PathBuf, storage_dir: &str) -> Option<PathBuf> {
+    pub fn find_root(mut current_dir: Utf8PathBuf, storage_dir: &str) -> Option<Utf8PathBuf> {
         if storage_dir.is_empty() {
             return None;
         }
@@ -79,14 +75,14 @@ impl Workspace {
     }
 
     /// Creates a new workspace with the given root directory.
-    pub fn new(root: impl AsRef<Path>) -> Self {
+    pub fn new(root: impl Into<Utf8PathBuf>) -> Self {
         Self::new_with_id(root, id::Id::new())
     }
 
     /// Creates a new workspace with the given root directory and ID.
-    pub fn new_with_id(root: impl AsRef<Path>, id: id::Id) -> Self {
-        let root = root.as_ref().to_path_buf();
-        trace!(root = %root.display(), id = %id, "Initializing Workspace.");
+    pub fn new_with_id(root: impl Into<Utf8PathBuf>, id: id::Id) -> Self {
+        let root = root.into();
+        trace!(root = %root, id = %id, "Initializing Workspace.");
 
         Self {
             root,
@@ -99,13 +95,13 @@ impl Workspace {
 
     /// Get the root path of the workspace.
     #[must_use]
-    pub fn root(&self) -> &Path {
+    pub fn root(&self) -> &Utf8Path {
         &self.root
     }
 
     /// Enable persistence for the workspace at the given (absolute) path.
-    pub fn persisted_at(mut self, path: &Path) -> Result<Self> {
-        trace!(path = %path.display(), "Enabling workspace persistence.");
+    pub fn persisted_at(mut self, path: &Utf8Path) -> Result<Self> {
+        trace!(path = %path, "Enabling workspace persistence.");
 
         self.disable_persistence = false;
         self.storage = Some(Storage::new(path)?);
@@ -123,8 +119,7 @@ impl Workspace {
         let name = self
             .root
             .file_name()
-            .ok_or_else(|| Error::NotDir(self.root.clone()))?
-            .to_string_lossy();
+            .ok_or_else(|| Error::NotDir(self.root.clone()))?;
 
         self.storage = self
             .storage
@@ -146,14 +141,14 @@ impl Workspace {
 
     /// Returns the path to the storage directory, if persistence is enabled.
     #[must_use]
-    pub fn storage_path(&self) -> Option<&Path> {
+    pub fn storage_path(&self) -> Option<&Utf8Path> {
         self.storage.as_ref().map(Storage::path)
     }
 
     /// Returns the path to the user storage directory, if persistence is
     /// enabled, and user storage is configured.
     #[must_use]
-    pub fn user_storage_path(&self) -> Option<&Path> {
+    pub fn user_storage_path(&self) -> Option<&Utf8Path> {
         self.storage.as_ref().and_then(Storage::user_storage_path)
     }
 
@@ -261,7 +256,7 @@ impl Workspace {
             &self.state.local.active_conversation,
         )?;
 
-        info!(path = %self.root.display(), "Persisted state.");
+        info!(path = %self.root, "Persisted state.");
         Ok(())
     }
 
@@ -288,7 +283,7 @@ impl Workspace {
             &self.state.local.active_conversation,
         )?;
 
-        info!(path = %self.root.display(), "Persisted active conversation.");
+        info!(path = %self.root, "Persisted active conversation.");
         Ok(())
     }
 
@@ -661,19 +656,22 @@ fn maybe_init_events<'a>(
     }
 }
 
-pub fn user_data_dir() -> Result<PathBuf> {
-    Ok(directories::ProjectDirs::from("", "", APPLICATION)
+pub fn user_data_dir() -> Result<Utf8PathBuf> {
+    directories::ProjectDirs::from("", "", APPLICATION)
         .ok_or(Error::MissingHome)?
         .data_local_dir()
-        .to_path_buf())
+        .to_path_buf()
+        .try_into()
+        .map_err(FromPathBufError::into_io_error)
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, fs, time::Duration};
 
+    use camino_tempfile::tempdir;
     use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
-    use tempfile::tempdir;
     use test_log::test;
     use time::{UtcDateTime, macros::utc_datetime};
 
@@ -806,7 +804,7 @@ mod tests {
 
     #[test]
     fn test_workspace_conversations() {
-        let mut workspace = Workspace::new(PathBuf::new());
+        let mut workspace = Workspace::new(Utf8PathBuf::new());
         assert_eq!(workspace.conversations().count(), 1); // Default conversation
 
         let id = ConversationId::default();
@@ -824,7 +822,7 @@ mod tests {
 
     #[test]
     fn test_workspace_get_conversation() {
-        let mut workspace = Workspace::new(PathBuf::new());
+        let mut workspace = Workspace::new(Utf8PathBuf::new());
         assert!(workspace.state.local.conversations.is_empty());
 
         let id = ConversationId::try_from(UtcDateTime::now() - Duration::from_secs(1)).unwrap();
@@ -844,7 +842,7 @@ mod tests {
 
     #[test]
     fn test_workspace_create_conversation() {
-        let mut workspace = Workspace::new(PathBuf::new());
+        let mut workspace = Workspace::new(Utf8PathBuf::new());
         assert!(workspace.state.local.conversations.is_empty());
 
         let conversation = Conversation::default();
@@ -864,7 +862,7 @@ mod tests {
 
     #[test]
     fn test_workspace_remove_conversation() {
-        let mut workspace = Workspace::new(PathBuf::new());
+        let mut workspace = Workspace::new(Utf8PathBuf::new());
         assert!(workspace.state.local.conversations.is_empty());
 
         let id = ConversationId::try_from(UtcDateTime::now() - Duration::from_secs(1)).unwrap();
@@ -886,7 +884,7 @@ mod tests {
 
     #[test]
     fn test_workspace_cannot_remove_active_conversation() {
-        let mut workspace = Workspace::new(PathBuf::new());
+        let mut workspace = Workspace::new(Utf8PathBuf::new());
         assert!(workspace.state.local.conversations.is_empty());
 
         let active_id = workspace

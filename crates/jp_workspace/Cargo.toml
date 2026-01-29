@@ -19,9 +19,10 @@ jp_id = { workspace = true }
 jp_storage = { workspace = true }
 jp_tombmap = { workspace = true }
 
+camino = { workspace = true }
+camino-tempfile = { workspace = true }
 directories = { workspace = true }
 serde = { workspace = true }
-tempfile = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tracing = { workspace = true }
