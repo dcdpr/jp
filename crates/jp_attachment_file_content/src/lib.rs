@@ -1,6 +1,7 @@
-use std::{borrow::Cow, collections::BTreeSet, error::Error, fs, path::Path};
+use std::{borrow::Cow, collections::BTreeSet, error::Error, fs};
 
 use async_trait::async_trait;
+use camino::Utf8Path;
 use glob::Pattern;
 use ignore::{WalkBuilder, WalkState, overrides::OverrideBuilder};
 use jp_attachment::{
@@ -76,7 +77,7 @@ impl Handler for FileContent {
 
     async fn get(
         &self,
-        cwd: &Path,
+        cwd: &Utf8Path,
         _: Client,
     ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         debug!(id = self.scheme(), "Getting file attachment contents.");
@@ -159,7 +160,9 @@ impl Handler for FileContent {
                     let Ok(entry) = entry else {
                         return WalkState::Continue;
                     };
-                    let path = entry.path();
+                    let Some(path) = Utf8Path::from_path(entry.path()) else {
+                        return WalkState::Continue;
+                    };
                     if path.is_dir() {
                         return WalkState::Continue;
                     }
@@ -181,7 +184,7 @@ impl Handler for FileContent {
 }
 
 /// If the pattern is a directory, add it recursively.
-fn sanitize_pattern<'a>(mut pattern: &'a str, cwd: &Path) -> Cow<'a, str> {
+fn sanitize_pattern<'a>(mut pattern: &'a str, cwd: &Utf8Path) -> Cow<'a, str> {
     if pattern.starts_with('/') {
         pattern = &pattern[1..];
     }
@@ -197,10 +200,10 @@ fn sanitize_pattern<'a>(mut pattern: &'a str, cwd: &Path) -> Cow<'a, str> {
     }
 }
 
-fn build_attachment(path: &Path, cwd: &Path) -> Option<Attachment> {
+fn build_attachment(path: &Utf8Path, cwd: &Utf8Path) -> Option<Attachment> {
     let Ok(rel) = path.strip_prefix(cwd) else {
         warn!(
-            path = %path.display(),
+            path = %path,
             "Attachment path outside of working directory, skipping."
         );
 
@@ -210,13 +213,13 @@ fn build_attachment(path: &Path, cwd: &Path) -> Option<Attachment> {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) => {
-            warn!(path = %rel.display(), %error, "Failed to read attachment.");
+            warn!(path = %rel, %error, "Failed to read attachment.");
             return None;
         }
     };
 
     Some(Attachment {
-        source: rel.to_string_lossy().to_string(),
+        source: rel.to_string(),
         content,
         ..Default::default()
     })
@@ -285,9 +288,9 @@ mod pat {
 
 #[cfg(test)]
 mod tests {
+    use camino_tempfile::tempdir;
     use glob::Pattern;
     use indexmap::IndexMap;
-    use tempfile::tempdir;
     use url::Url;
 
     use super::*;

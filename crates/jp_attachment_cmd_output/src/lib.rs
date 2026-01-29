@@ -1,6 +1,7 @@
-use std::{collections::BTreeSet, error::Error, path::Path};
+use std::{collections::BTreeSet, error::Error};
 
 use async_trait::async_trait;
+use camino::Utf8Path;
 use jp_attachment::{
     Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, percent_decode_str,
     percent_encode_str, typetag,
@@ -103,7 +104,7 @@ impl Handler for Commands {
 
     async fn get(
         &self,
-        root: &Path,
+        root: &Utf8Path,
         _: Client,
     ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         let mut attachments = vec![];
@@ -272,7 +273,7 @@ mod tests {
             .collect(),
         );
 
-        let root = tempfile::tempdir().unwrap();
+        let root = camino_tempfile::tempdir().unwrap();
         let path = root.path();
         std::fs::create_dir_all(path.join("dir")).unwrap();
         std::fs::write(path.join("file1"), "").unwrap();

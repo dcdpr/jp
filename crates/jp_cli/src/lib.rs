@@ -17,6 +17,7 @@ use std::{
     time::Duration,
 };
 
+use camino::{FromPathBufError, Utf8PathBuf, absolute_utf8};
 use clap::{
     ArgAction, Parser,
     builder::{BoolValueParser, TypedValueParser as _},
@@ -192,7 +193,7 @@ impl FromStr for KeyValueOrPath {
 #[derive(Debug, Clone)]
 pub(crate) enum WorkspaceIdOrPath {
     Id(jp_workspace::Id),
-    Path(PathBuf),
+    Path(Utf8PathBuf),
 }
 
 impl FromStr for WorkspaceIdOrPath {
@@ -200,7 +201,7 @@ impl FromStr for WorkspaceIdOrPath {
 
     fn from_str(s: &str) -> Result<Self> {
         if PathBuf::from(s).exists() {
-            return Ok(Self::Path(PathBuf::from(s)));
+            return Ok(Self::Path(Utf8PathBuf::from(s)));
         }
 
         Ok(Self::Id(jp_workspace::Id::from_str(s)?))
@@ -409,7 +410,7 @@ fn load_partial_config(
 ) -> Result<PartialAppConfig> {
     // Load all partials in different file locations, the first loaded file
     // having the lowest precedence.
-    let partials = load_partial_configs_from_files(workspace, std::env::current_dir().ok())?;
+    let partials = load_partial_configs_from_files(workspace, absolute_utf8(".").ok())?;
 
     // Load all partials, merging later partials over earlier ones, unless one
     // of the partials set `inherit = false`, then later partials are ignored.
@@ -495,7 +496,7 @@ fn load_cli_cfg_args(
 
 fn load_partial_configs_from_files(
     workspace: Option<&Workspace>,
-    cwd: Option<PathBuf>,
+    cwd: Option<Utf8PathBuf>,
 ) -> Result<Vec<PartialAppConfig>> {
     let mut partials = vec![];
 
@@ -546,7 +547,7 @@ fn load_partial_configs_from_files(
 /// Find the workspace for the current directory.
 fn load_workspace(workspace: Option<&WorkspaceIdOrPath>) -> Result<Workspace> {
     let cwd = match workspace {
-        None => std::env::current_dir()?,
+        None => absolute_utf8(".")?,
         Some(WorkspaceIdOrPath::Path(path)) => path.clone(),
 
         // TODO: Centralize this in a new `UserStorage` struct.
@@ -562,18 +563,20 @@ fn load_workspace(workspace: Option<&WorkspaceIdOrPath>) -> Result<Workspace> {
             })
             .ok_or(jp_workspace::Error::MissingStorage)?
             .join("storage")
-            .canonicalize()?,
+            .canonicalize()?
+            .try_into()
+            .map_err(FromPathBufError::into_io_error)?,
     };
-    trace!(cwd = %cwd.display(), "Finding workspace.");
+    trace!(cwd = %cwd, "Finding workspace.");
 
     let root = Workspace::find_root(cwd, DEFAULT_STORAGE_DIR).ok_or(cmd::Error::from(format!(
         "Could not locate workspace. Use `{}` to create a new workspace.",
         "jp init".bold().yellow()
     )))?;
-    trace!(root = %root.display(), "Found workspace root.");
+    trace!(root = %root, "Found workspace root.");
 
     let storage = root.join(DEFAULT_STORAGE_DIR);
-    trace!(storage = %storage.display(), "Initializing workspace storage.");
+    trace!(storage = %storage, "Initializing workspace storage.");
 
     let id = jp_workspace::Id::load(&storage)
         .transpose()
@@ -586,7 +589,7 @@ fn load_workspace(workspace: Option<&WorkspaceIdOrPath>) -> Result<Workspace> {
 
     let workspace = Workspace::new_with_id(root, id)
         .persisted_at(&storage)
-        .inspect(|ws| info!(workspace = %ws.root().display(), "Using existing workspace."))?;
+        .inspect(|ws| info!(workspace = %ws.root(), "Using existing workspace."))?;
 
     workspace.id().store(&storage)?;
 

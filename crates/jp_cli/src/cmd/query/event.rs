@@ -1,5 +1,6 @@
-use std::{env, fmt::Write, fs, path::Path, time};
+use std::{env, fmt::Write, fs, time};
 
+use camino::Utf8Path;
 use crossterm::style::Stylize as _;
 use indexmap::{IndexMap, IndexSet};
 use jp_config::{
@@ -111,7 +112,7 @@ impl StreamEventHandler {
         &mut self,
         cfg: &AppConfig,
         mcp_client: &jp_mcp::Client,
-        root: &Path,
+        root: &Utf8Path,
         is_tty: bool,
         turn_state: &mut TurnState,
         call: ToolCallRequest,

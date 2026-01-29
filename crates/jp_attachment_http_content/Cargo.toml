@@ -17,6 +17,7 @@ jp_attachment = { workspace = true }
 jp_mcp = { workspace = true }
 
 async-trait = { workspace = true }
+camino = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }

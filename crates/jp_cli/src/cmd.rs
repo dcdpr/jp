@@ -524,7 +524,7 @@ impl From<jp_workspace::Error> for Error {
             Config(error) => return error.into(),
             NotDir(path) => [
                 ("message", "Path is not a directory.".into()),
-                ("path", path.to_string_lossy().into()),
+                ("path", path.to_string().into()),
             ]
             .into(),
             MissingStorage => [("message", "Missing storage directory".into())].into(),
@@ -569,12 +569,12 @@ impl From<jp_storage::Error> for Error {
             Error::Config(error) => return error.into(),
             Error::NotDir(path) => [
                 ("message", "Path is not a directory.".into()),
-                ("path", path.to_string_lossy().into()),
+                ("path", path.to_string().into()),
             ]
             .into(),
             Error::NotSymlink(path) => [
                 ("message", "Path is not a symlink.".into()),
-                ("path", path.to_string_lossy().into()),
+                ("path", path.to_string().into()),
             ]
             .into(),
         };

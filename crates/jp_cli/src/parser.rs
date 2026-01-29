@@ -1,9 +1,6 @@
-use std::{
-    convert::Infallible,
-    env::current_dir,
-    path::{Path, PathBuf},
-};
+use std::convert::Infallible;
 
+use camino::{FromPathBufError, Utf8Path, Utf8PathBuf, absolute_utf8};
 use clean_path::Clean as _;
 use relative_path::RelativePathBuf;
 use tracing::trace;
@@ -18,7 +15,7 @@ pub(crate) enum AttachmentUrlOrPath {
 }
 
 impl AttachmentUrlOrPath {
-    pub fn parse(&self, root: Option<&Path>) -> Result<Url> {
+    pub fn parse(&self, root: Option<&Utf8Path>) -> Result<Url> {
         let path = match &self {
             AttachmentUrlOrPath::Url(url) => return Ok(url.clone()),
             AttachmentUrlOrPath::Path(path) => path,
@@ -38,44 +35,43 @@ impl AttachmentUrlOrPath {
         //
         // If `root` is `None`, then we allow absolute paths, otherwise we
         // assume the context is a workspace and we only allow relative paths.
-        let mut path = PathBuf::from(path);
+        let mut path = Utf8PathBuf::from(path);
         if let Some(root) = root {
             if path.is_relative() {
-                let Ok(cwd) = current_dir() else {
-                    return Err(Error::Attachment(format!(
-                        "Attachment path is relative, but the current directory could not be \
-                         determined: {}",
-                        path.display()
-                    )));
-                };
-
-                path = cwd.join(path);
+                path = absolute_utf8(&path).map_err(|error| {
+                    Error::Attachment(format!(
+                        "Attachment path {path} is relative, but the current directory could not \
+                         be determined: {error}",
+                    ))
+                })?;
             }
 
             if !path.exists() {
                 return Err(Error::Attachment(format!(
-                    "Attachment path does not exist: {}",
-                    path.display()
+                    "Attachment path does not exist: {path}",
                 )));
             }
 
-            let p = path.clean();
+            let p: Utf8PathBuf = path
+                .as_std_path()
+                .clean()
+                .try_into()
+                .map_err(FromPathBufError::into_io_error)?;
+
             let Ok(p) = p.strip_prefix(root) else {
                 return Err(Error::Attachment(format!(
-                    "Attachment path must be relative to the workspace: {}",
-                    path.display()
+                    "Attachment path must be relative to the workspace: {path}",
                 )));
             };
 
             path = p.to_path_buf();
         } else if !path.exists() {
             return Err(Error::Attachment(format!(
-                "Attachment path does not exist: {}",
-                path.display()
+                "Attachment path does not exist: {path}",
             )));
         }
 
-        Url::parse(&format!("file:{}{exclude}", path.display())).map_err(Into::into)
+        Url::parse(&format!("file:{path}{exclude}")).map_err(Into::into)
     }
 }
 

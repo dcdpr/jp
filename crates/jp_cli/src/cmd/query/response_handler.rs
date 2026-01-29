@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, sync::Arc, time::Duration};
+use std::{fs, sync::Arc, time::Duration};
 
 use crossterm::style::{Color, Stylize as _};
 use jp_config::style::{LinkStyle, StyleConfig};

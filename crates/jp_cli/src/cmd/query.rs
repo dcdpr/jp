@@ -8,11 +8,11 @@ use std::{
     fmt::Write as _,
     fs,
     io::{self, BufRead as _, IsTerminal},
-    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
 
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::{ArgAction, builder::TypedValueParser as _};
 use event::StreamEventHandler;
 use futures::StreamExt as _;
@@ -428,8 +428,8 @@ impl Query {
         &self,
         stream: &mut ConversationStream,
         config: &AppConfig,
-        root: &Path,
-    ) -> Result<(Option<PathBuf>, PartialAppConfig)> {
+        root: &Utf8Path,
+    ) -> Result<(Option<Utf8PathBuf>, PartialAppConfig)> {
         // If replaying, remove all events up-to-and-including the last
         // `ChatRequest` event, which we'll replay.
         //
@@ -542,8 +542,8 @@ impl Query {
         stream: &mut ConversationStream,
         piped: bool,
         config: &AppConfig,
-        root: &Path,
-    ) -> Result<(Option<PathBuf>, PartialAppConfig)> {
+        root: &Utf8Path,
+    ) -> Result<(Option<Utf8PathBuf>, PartialAppConfig)> {
         // If there is no query provided, but the user explicitly requested not
         // to edit the query, we populate the query with a default message,
         // since most LLM providers do not support empty queries.
@@ -582,7 +582,7 @@ impl Query {
         cfg: &AppConfig,
         signals: &mut SignalRx,
         mcp_client: &jp_mcp::Client,
-        root: PathBuf,
+        root: Utf8PathBuf,
         is_tty: bool,
         turn_state: &mut TurnState,
         thread: &mut Thread,
@@ -863,7 +863,7 @@ impl Query {
         event: std::result::Result<Event, jp_llm::Error>,
         cfg: &AppConfig,
         mcp_client: &jp_mcp::Client,
-        root: PathBuf,
+        root: Utf8PathBuf,
         is_tty: bool,
         signals: &mut SignalRx,
         turn_state: &mut TurnState,
@@ -1368,7 +1368,7 @@ fn apply_reasoning(
 fn cleanup(
     ctx: &mut Ctx,
     last_active_conversation_id: ConversationId,
-    query_file_path: Option<&Path>,
+    query_file_path: Option<&Utf8Path>,
 ) -> Result<Success> {
     let conversation_id = ctx.workspace.active_conversation_id();
 
