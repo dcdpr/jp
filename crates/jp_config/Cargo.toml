@@ -15,6 +15,7 @@ version.workspace = true
 [dependencies]
 jp_id = { workspace = true }
 
+camino = { workspace = true }
 clean-path = { workspace = true }
 directories = { workspace = true }
 duct = { workspace = true }
@@ -53,11 +54,11 @@ which = { workspace = true, features = ["real-sys"] }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
+camino-tempfile = { workspace = true }
 indoc = { workspace = true }
 insta = { workspace = true }
 pretty_assertions = { workspace = true, features = ["std"] }
 serial_test = { workspace = true }
-tempfile = { workspace = true }
 test-log = { workspace = true }
 
 [lints]
