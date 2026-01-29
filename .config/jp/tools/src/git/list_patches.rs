@@ -1,22 +1,12 @@
-// New Workflow:
-//
-// 1. use `git_patches` to list all patches with a unique ID (base64 encoded patch)
-// 2. use `git_patch` to apply one or more patches based on IDs
-//
-// TODO: Don't use Base64, since the IDs are too large. Instead use a hash of
-// the patch, but require `git_patch` to provide a file path to apply one or
-// more patch IDs to. Then, we iterate over all hunks in that file, and compare
-// the hash of the hunk against the patch IDs to find the matching patches to
-// apply.
-
-use std::path::Path;
-
-use duct::cmd;
+use camino::Utf8Path;
 use serde::Serialize;
 
 use crate::{
     to_simple_xml_with_root,
-    util::{OneOrMany, ToolResult, error},
+    util::{
+        OneOrMany, ToolResult, error,
+        runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
+    },
 };
 
 #[derive(Debug, Serialize)]
@@ -26,35 +16,40 @@ struct Patch {
     diff: String,
 }
 
-pub(crate) fn git_list_patches(root: &Path, files: OneOrMany<String>) -> ToolResult {
+pub(crate) fn git_list_patches(root: &Utf8Path, files: OneOrMany<String>) -> ToolResult {
+    git_list_patches_impl(root, files, &DuctProcessRunner)
+}
+
+fn git_list_patches_impl<R: ProcessRunner>(
+    root: &Utf8Path,
+    files: OneOrMany<String>,
+    runner: &R,
+) -> ToolResult {
     let mut patches = vec![];
 
     for path in files {
         let path = path.trim();
-        let file_content = std::fs::read_to_string(root.join(path)).unwrap_or_default();
+        let file = root.join(path);
+        if !file.is_file() {
+            return error(format!("File not found: {file}"));
+        }
+
+        let file_content = std::fs::read_to_string(file).unwrap_or_default();
         let source_lines: Vec<&str> = file_content.lines().collect();
 
-        let output = cmd!(
+        let ProcessOutput {
+            stdout,
+            stderr,
+            status,
+        } = runner.run(
             "git",
-            "diff-files",
-            "-p",
-            "--minimal",
-            "--unified=0",
-            "--",
-            path,
-        )
-        .dir(root)
-        .unchecked()
-        .stdout_capture()
-        .stderr_capture()
-        .run()?;
+            &["diff-files", "-p", "--minimal", "--unified=0", "--", path],
+            root,
+        )?;
 
-        let stdout = String::from_utf8(output.stdout).unwrap_or_default();
-        let stderr = String::from_utf8(output.stderr).unwrap_or_default();
-
-        if !output.status.success() {
+        if !status.is_success() {
             return error(format!(
-                "Failed to list patches for path '{path}': {stderr}"
+                "Failed to list patches for path '{path}': {stderr}",
             ));
         }
 
@@ -69,8 +64,6 @@ pub(crate) fn git_list_patches(root: &Path, files: OneOrMany<String>) -> ToolRes
 
         for (id, hunk) in tail.split("\n@@ ").enumerate() {
             let hunk_with_header = format!("@@ {hunk}");
-            // let id1 = BASE64_URL_SAFE_NO_PAD.encode(path.as_bytes());
-            // let id2 = seahash::hash(hunk_with_header.as_bytes());
 
             patches.push(Patch {
                 path: path.to_string(),
@@ -88,7 +81,7 @@ pub(crate) fn git_list_patches(root: &Path, files: OneOrMany<String>) -> ToolRes
 /// This produces non-valid diff output, but we use IDs to match the actual
 /// valid diff, and use this as a visual aid to help understand the diff.
 fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) -> String {
-    // 1. Parse the Header to find coordinates
+    // Parse the Header to find coordinates
     let parts: Vec<&str> = hunk_with_header.split_whitespace().collect();
 
     // Find part starting with '+' (target file coordinates)
@@ -102,7 +95,7 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
         1
     };
 
-    // 2. Calculate Context Indices (0-indexed)
+    // Calculate Context Indices (0-indexed)
     let line_idx = if start_line > 0 { start_line - 1 } else { 0 };
 
     // 3 lines before
@@ -116,7 +109,7 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
 
     let mut result = String::new();
 
-    // A. Pre-context
+    // Pre-context
     for i in ctx_before_start..ctx_before_end {
         if let Some(line) = source_lines.get(i) {
             result.push(' ');
@@ -125,15 +118,16 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
         }
     }
 
-    // B. Actual Changes
-    // Skip the first line of raw_body, which contains the header info (e.g., "-1,1 +1,1 @@")
+    // Actual Changes
+    // Skip the first line of raw_body, which contains the header info (e.g.,
+    // "-1,1 +1,1 @@")
     let body_lines: Vec<&str> = hunk.lines().collect();
     for line in body_lines.iter().skip(1) {
         result.push_str(line);
         result.push('\n');
     }
 
-    // C. Post-context
+    // Post-context
     for i in ctx_after_start..ctx_after_end {
         if let Some(line) = source_lines.get(i) {
             result.push(' ');
@@ -147,98 +141,196 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, process::Command};
+    use std::fs;
 
+    use camino_tempfile::tempdir;
     use jp_tool::Outcome;
-    use tempfile::TempDir;
 
     use super::*;
-
-    /// Helper function to run git commands in the test directory
-    fn run_git(dir: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .current_dir(dir)
-            .args(args)
-            .output()
-            .expect("Failed to execute git command");
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            panic!("Git command {args:?} failed: {stderr}");
-        }
-    }
+    use crate::util::runner::MockProcessRunner;
 
     #[test]
-    fn test_git_list_patches_success() {
-        // Skip if git is not installed
-        //
-        // TODO: use DI to inject a mock
-        if which::which("git").is_err() {
-            return;
-        }
-
-        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    fn test_git_list_patches_multiple_hunks() {
+        let temp_dir = tempdir().unwrap();
         let root = temp_dir.path();
         let filename = "test_script.rs";
 
-        // Setup
-        {
-            let file_path = root.join(filename);
+        let modified_content = "fn main() -> () {\n    {};\n    println!(\"Hello World\");\n}\n";
+        fs::write(root.join(filename), modified_content).unwrap();
 
-            // 2. Initialize Git Repo
-            run_git(root, &["init"]);
+        // Mock git diff output
+        let mock_diff = indoc::indoc! {r#"
+            diff --git a/test_script.rs b/test_script.rs
+            index 1234567..abcdefg 100644
+            --- a/test_script.rs
+            +++ b/test_script.rs
+            @@ -1 +1 @@
+            -fn main() {
+            +fn main() -> () {
+            @@ -3 +3 @@
+            -    println!("Hello");
+            +    println!("Hello World");
+        "#};
 
-            if std::env::var("CI").is_ok() {
-                run_git(root, &["config", "user.email", "you@example.com"]);
-                run_git(root, &["config", "user.name", "Your Name"]);
-            }
+        let runner = MockProcessRunner::success(mock_diff);
+        let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner)
+            .unwrap()
+            .into_content()
+            .unwrap();
 
-            // 3. Create initial file state and commit
-            let initial_content = "fn main() {\n    {};\n    println!(\"Hello\");\n}\n";
-            fs::write(&file_path, initial_content).expect("Failed to write file");
-            run_git(root, &["add", filename]);
-            run_git(root, &["commit", "-m", "Initial commit"]);
+        assert_eq!(content, indoc::indoc! {r#"
+            <patches>
+                <patch>
+                    <path>test_script.rs</path>
+                    <id>0</id>
+                    <diff>
+                        -fn main() {
+                        +fn main() -> () {
+                             {};
+                             println!("Hello World");
+                         }
+                    </diff>
+                </patch>
+                <patch>
+                    <path>test_script.rs</path>
+                    <id>1</id>
+                    <diff>
+                         fn main() -> () {
+                             {};
+                        -    println!("Hello");
+                        +    println!("Hello World");
+                         }
+                    </diff>
+                </patch>
+            </patches>"#
+        });
+    }
 
-            // 4. Modify file to create a 'dirty' state (the patch)
-            let modified_content =
-                "fn main() -> () {\n    {};\n    println!(\"Hello World\");\n}\n";
-            fs::write(&file_path, modified_content).expect("Failed to update file");
-        }
+    #[test]
+    fn test_git_list_patches_single_hunk() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+        let filename = "simple.rs";
+        let file_path = root.join(filename);
 
-        match git_list_patches(root, vec![filename.to_string()].into()) {
-            Ok(tool_output) => {
-                let Outcome::Success { content } = tool_output else {
-                    panic!("Unexpected ToolResult: {tool_output:?}");
-                };
+        let content = "fn foo() -> i32 {\n    42\n}\n";
+        fs::write(&file_path, content).unwrap();
 
-                assert_eq!(content, indoc::indoc! {r#"
-                    <patches>
-                      <patch>
-                        <path>test_script.rs</path>
-                        <id>0</id>
-                        <diff><![CDATA[
-                    -fn main() {
-                    +fn main() -> () {
-                         {};
-                         println!("Hello World");
-                     }
-                    ]]></diff>
-                      </patch>
-                      <patch>
-                        <path>test_script.rs</path>
-                        <id>1</id>
-                        <diff><![CDATA[
-                     fn main() -> () {
-                         {};
-                    -    println!("Hello");
-                    +    println!("Hello World");
-                     }
-                    ]]></diff>
-                      </patch>
-                    </patches>"#
-                });
-            }
-            Err(e) => panic!("git_list_patches returned an error: {e:?}"),
-        }
+        let mock_diff = indoc::indoc! {r"
+            diff --git a/simple.rs b/simple.rs
+            index abc123..def456 100644
+            --- a/simple.rs
+            +++ b/simple.rs
+            @@ -2 +2 @@
+            -    0
+            +    42
+        "};
+
+        let runner = MockProcessRunner::success(mock_diff);
+        let content = git_list_patches_impl(root, vec!["simple.rs".to_string()].into(), &runner)
+            .unwrap()
+            .into_content()
+            .unwrap();
+
+        assert_eq!(content, indoc::indoc! {"
+            <patches>
+                <patch>
+                    <path>simple.rs</path>
+                    <id>0</id>
+                    <diff>
+                         fn foo() -> i32 {
+                        -    0
+                        +    42
+                         }
+                    </diff>
+                </patch>
+            </patches>"
+        });
+    }
+
+    #[test]
+    fn test_git_list_patches_no_changes() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+        let filename = "unchanged.rs";
+        let file_path = root.join(filename);
+
+        fs::write(&file_path, "fn main() {}\n").unwrap();
+
+        let runner = MockProcessRunner::success("");
+        let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner)
+            .unwrap()
+            .into_content()
+            .unwrap();
+
+        assert_eq!(content, "<patches>\n</patches>");
+    }
+
+    #[test]
+    fn test_git_list_patches_git_command_fails() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+        let filename = "error.rs";
+        let file_path = root.join(filename);
+
+        fs::write(&file_path, "fn main() {}\n").unwrap();
+
+        let runner = MockProcessRunner::error("fatal: not a git repository");
+
+        let outcome =
+            git_list_patches_impl(root, vec![filename.to_string()].into(), &runner).unwrap();
+        let Outcome::Error { message, .. } = outcome else {
+            panic!("Expected error but got: {outcome:?}");
+        };
+
+        assert!(message.contains("Failed to list patches"));
+        assert!(message.contains("fatal: not a git repository"));
+    }
+
+    #[test]
+    fn test_git_list_patches_context_lines() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+        let filename = "context.rs";
+
+        // File with enough lines to test context
+        let content = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n";
+        fs::write(root.join(filename), content).unwrap();
+
+        // Change in the middle (line 5)
+        let mock_diff = indoc::indoc! {r"
+            diff --git a/context.rs b/context.rs
+            index abc..def 100644
+            --- a/context.rs
+            +++ b/context.rs
+            @@ -5 +5 @@
+            -line5
+            +MODIFIED
+        "};
+
+        let runner = MockProcessRunner::success(mock_diff);
+        let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner)
+            .unwrap()
+            .into_content()
+            .unwrap();
+
+        assert_eq!(content, indoc::indoc! {"
+            <patches>
+                <patch>
+                    <path>context.rs</path>
+                    <id>0</id>
+                    <diff>
+                         line2
+                         line3
+                         line4
+                        -line5
+                        +MODIFIED
+                         line6
+                         line7
+                         line8
+                    </diff>
+                </patch>
+            </patches>"
+        });
     }
 }

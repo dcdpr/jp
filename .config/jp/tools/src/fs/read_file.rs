@@ -1,9 +1,9 @@
-use std::{ffi::OsStr, path::PathBuf};
+use camino::Utf8Path;
 
 use crate::util::{ToolResult, error};
 
 pub(crate) async fn fs_read_file(
-    root: PathBuf,
+    root: &Utf8Path,
     path: String,
     start_line: Option<usize>,
     end_line: Option<usize>,
@@ -15,11 +15,7 @@ pub(crate) async fn fs_read_file(
         return error("Path is not a file.");
     }
 
-    let ext = absolute_path
-        .extension()
-        .and_then(OsStr::to_str)
-        .unwrap_or_default();
-
+    let ext = absolute_path.extension().unwrap_or_default();
     let mut contents = std::fs::read_to_string(&absolute_path)?;
     let lines = contents.split('\n').count();
 
@@ -65,6 +61,7 @@ pub(crate) async fn fs_read_file(
 
 #[cfg(test)]
 mod tests {
+    use camino_tempfile::tempdir;
     use jp_tool::Outcome;
 
     use super::*;
@@ -117,19 +114,14 @@ mod tests {
             },
         ) in cases
         {
-            let tmp = tempfile::tempdir().unwrap();
+            let tmp = tempdir().unwrap();
             let path = tmp.path().join("file.txt");
 
             std::fs::write(&path, file_contents).unwrap();
 
-            let result = fs_read_file(
-                tmp.path().to_owned(),
-                "file.txt".to_owned(),
-                start_line,
-                end_line,
-            )
-            .await
-            .unwrap();
+            let result = fs_read_file(tmp.path(), "file.txt".to_owned(), start_line, end_line)
+                .await
+                .unwrap();
 
             let out = match result {
                 Outcome::Success { content } => content,

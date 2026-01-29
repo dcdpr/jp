@@ -8,21 +8,21 @@ mod github;
 mod util;
 mod web;
 
-use jp_tool::{Context, Outcome};
+use jp_tool::Context;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 type Result<T> = std::result::Result<T, Error>;
 
-pub async fn run(ctx: Context, t: Tool) -> Result<Outcome> {
+pub async fn run(ctx: Context, t: Tool) -> util::ToolResult {
     match t.name.as_str() {
         s if s.starts_with("cargo_") => cargo::run(ctx, t).await,
-        s if s.starts_with("github_") => github::run(ctx, t).await.map(Into::into),
+        s if s.starts_with("github_") => github::run(ctx, t).await,
         s if s.starts_with("fs_") => fs::run(ctx, t).await,
         s if s.starts_with("web_") => web::run(ctx, t).await.map(Into::into),
         s if s.starts_with("git_") => git::run(ctx, t).await,
-        _ => Err(format!("Unknown tool '{}'", t.name).into()),
+        _ => util::unknown_tool(t),
     }
 }
 

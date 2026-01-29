@@ -1,4 +1,7 @@
-use crate::{Context, Error, Tool};
+use crate::{
+    Context, Error, Tool,
+    util::{ToolResult, unknown_tool},
+};
 
 mod create_issue_bug;
 mod create_issue_enhancement;
@@ -15,47 +18,60 @@ use repo::{github_code_search, github_list_files, github_read_file};
 const ORG: &str = "dcdpr";
 const REPO: &str = "jp";
 
-pub async fn run(_: Context, t: Tool) -> std::result::Result<String, Error> {
+pub async fn run(_: Context, t: Tool) -> ToolResult {
     match t.name.trim_start_matches("github_") {
-        "issues" => github_issues(t.opt_or_empty("number")?).await,
-        "create_issue_bug" => {
-            github_create_issue_bug(
-                t.req("title")?,
-                t.req("description")?,
-                t.req("expected_behavior")?,
-                t.req("actual_behavior")?,
-                t.req("complexity")?,
-                t.opt("reproduce")?,
-                t.opt("proposed_solution")?,
-                t.opt("tasks")?,
-                t.opt("resource_links")?,
-                t.opt("labels")?,
-                t.opt("assignees")?,
-            )
+        "issues" => github_issues(t.opt_or_empty("number")?)
             .await
-        }
-        "create_issue_enhancement" => {
-            github_create_issue_enhancement(
-                t.req("title")?,
-                t.req("description")?,
-                t.req("context")?,
-                t.req("complexity")?,
-                t.opt("alternatives")?,
-                t.opt("proposed_implementation")?,
-                t.opt("tasks")?,
-                t.opt("resource_links")?,
-                t.opt("labels")?,
-                t.opt("assignees")?,
-            )
+            .map(Into::into),
+
+        "create_issue_bug" => github_create_issue_bug(
+            t.req("title")?,
+            t.req("description")?,
+            t.req("expected_behavior")?,
+            t.req("actual_behavior")?,
+            t.req("complexity")?,
+            t.opt("reproduce")?,
+            t.opt("proposed_solution")?,
+            t.opt("tasks")?,
+            t.opt("resource_links")?,
+            t.opt("labels")?,
+            t.opt("assignees")?,
+        )
+        .await
+        .map(Into::into),
+
+        "create_issue_enhancement" => github_create_issue_enhancement(
+            t.req("title")?,
+            t.req("description")?,
+            t.req("context")?,
+            t.req("complexity")?,
+            t.opt("alternatives")?,
+            t.opt("proposed_implementation")?,
+            t.opt("tasks")?,
+            t.opt("resource_links")?,
+            t.opt("labels")?,
+            t.opt("assignees")?,
+        )
+        .await
+        .map(Into::into),
+
+        "pulls" => github_pulls(t.opt("number")?, t.opt("state")?, t.opt("file_diffs")?)
             .await
-        }
-        "pulls" => github_pulls(t.opt("number")?, t.opt("state")?, t.opt("file_diffs")?).await,
-        "code_search" => github_code_search(t.opt("repository")?, t.req("query")?).await,
-        "read_file" => github_read_file(t.opt("repository")?, t.opt("ref")?, t.req("path")?).await,
-        "list_files" => {
-            github_list_files(t.opt("repository")?, t.opt("ref")?, t.opt("path")?).await
-        }
-        _ => Err(format!("Unknown tool '{}'", t.name).into()),
+            .map(Into::into),
+
+        "code_search" => github_code_search(t.opt("repository")?, t.req("query")?)
+            .await
+            .map(Into::into),
+
+        "read_file" => github_read_file(t.opt("repository")?, t.opt("ref")?, t.req("path")?)
+            .await
+            .map(Into::into),
+
+        "list_files" => github_list_files(t.opt("repository")?, t.opt("ref")?, t.opt("path")?)
+            .await
+            .map(Into::into),
+
+        _ => unknown_tool(t),
     }
 }
 

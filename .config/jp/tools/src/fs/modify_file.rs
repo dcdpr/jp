@@ -7,10 +7,10 @@ use std::{
     fmt::{self, Write as _},
     fs::{self},
     ops::{Deref, DerefMut},
-    path::{Path, PathBuf},
     time::Duration,
 };
 
+use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::{ContentStyle, Stylize as _};
 use fancy_regex::RegexBuilder;
 use jp_tool::{AnswerType, Outcome, Question};
@@ -24,7 +24,7 @@ use crate::{
 };
 
 pub struct Change {
-    pub path: PathBuf,
+    pub path: Utf8PathBuf,
     pub before: String,
     pub after: String,
 }
@@ -120,7 +120,7 @@ pub(crate) async fn fs_modify_file(
         return error("String to replace is the same as the new string.");
     }
 
-    let p = PathBuf::from(&path);
+    let p = Utf8PathBuf::from(&path);
 
     if p.is_absolute() {
         return error("Path must be relative.");
@@ -137,8 +137,12 @@ pub(crate) async fn fs_modify_file(
     let absolute_path = ctx.root.join(path.trim_start_matches('/'));
 
     let mut changes = vec![];
-    for entry in glob::glob(&absolute_path.to_string_lossy())? {
+    for entry in glob::glob(absolute_path.as_ref())? {
         let entry = entry?;
+        let Ok(entry) = Utf8PathBuf::try_from(entry) else {
+            return error("Path is not valid UTF-8.");
+        };
+
         if !entry.exists() {
             return error("File does not exist.");
         }
@@ -171,7 +175,7 @@ pub(crate) async fn fs_modify_file(
         };
 
         changes.push(Change {
-            path: path.to_path_buf(),
+            path: path.to_owned(),
             before: contents.0,
             after,
         });
@@ -188,8 +192,7 @@ fn format_changes(changes: Vec<Change>) -> String {
     let diff = changes
         .into_iter()
         .map(|change| {
-            let path = change.path.to_string_lossy();
-
+            let path = change.path.to_string();
             let diff = text_diff(&change.before, &change.after);
             let unified = unified_diff(&diff, &path);
 
@@ -207,7 +210,7 @@ fn format_changes(changes: Vec<Change>) -> String {
 
 fn apply_changes(
     changes: Vec<Change>,
-    root: &Path,
+    root: &Utf8Path,
     answers: &Map<String, Value>,
 ) -> Result<Outcome, Error> {
     let mut queue = vec![];
@@ -228,10 +231,7 @@ fn apply_changes(
                     return Ok(Outcome::NeedsInput {
                         question: Question {
                             id: "modify_dirty_file".to_string(),
-                            text: format!(
-                                "File '{}' has uncommitted changes. Modify anyway?",
-                                path.display()
-                            ),
+                            text: format!("File '{path}' has uncommitted changes. Modify anyway?",),
                             answer_type: AnswerType::Boolean,
                             default: Some(Value::Bool(false)),
                         },
@@ -240,7 +240,7 @@ fn apply_changes(
             }
         }
 
-        let file_path = path.to_string_lossy();
+        let file_path = path.to_string();
         let file_path = file_path.trim_start_matches('/');
 
         queue.push((file_path.to_owned(), before, after));
@@ -363,9 +363,9 @@ fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
 mod tests {
     use std::fs;
 
+    use camino_tempfile::tempdir;
     use indoc::indoc;
     use jp_tool::Action;
-    use tempfile::tempdir;
 
     use super::*;
 

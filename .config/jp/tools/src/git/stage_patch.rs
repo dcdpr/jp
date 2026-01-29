@@ -1,21 +1,12 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use duct::cmd;
 use jp_tool::{AnswerType, Context, Outcome, Question};
-use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::{
-    to_xml_with_root,
-    util::{OneOrMany, ToolResult},
+use crate::util::{
+    OneOrMany, ToolResult,
+    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
 };
-
-#[derive(Serialize)]
-struct CommandResult {
-    status: i32,
-    stdout: String,
-    stderr: String,
-}
 
 pub(crate) async fn git_stage_patch(
     ctx: Context,
@@ -23,74 +14,88 @@ pub(crate) async fn git_stage_patch(
     path: PathBuf,
     patch_ids: OneOrMany<usize>,
 ) -> ToolResult {
-    // git ls-files .config/jp/tools/src/git/stage_patch.rs
-    let ls = cmd!("git", "ls-files", &path)
-        .unchecked()
-        .stdout_capture()
-        .run()?;
-    if !ls.status.success() {
-        return Err(format!("Failed to list staged changes: {ls:?}").into());
+    git_stage_patch_impl(&ctx, answers, &path, &patch_ids, &DuctProcessRunner)
+}
+
+fn git_stage_patch_impl<R: ProcessRunner>(
+    ctx: &Context,
+    answers: &Map<String, Value>,
+    path: &Path,
+    patch_ids: &[usize],
+    runner: &R,
+) -> ToolResult {
+    let path_str = path.to_str().unwrap_or_default();
+
+    let ProcessOutput {
+        stdout,
+        stderr,
+        status,
+    } = runner.run("git", &["ls-files", path_str], &ctx.root)?;
+
+    if !status.is_success() {
+        return Err(format!("Failed to list staged changes: {stderr}").into());
     }
 
-    let patch = if ls.stdout.is_empty() {
+    let ProcessOutput {
+        stdout,
+        stderr,
+        status,
+    } = if stdout.is_empty() {
         // Untracked files.
-        cmd!(
+        runner.run(
             "git",
-            "diff",
-            "--no-index",
-            "--minimal",
-            "--unified=0",
-            "--",
-            "/dev/null",
-            &path
-        )
+            &[
+                "diff",
+                "--no-index",
+                "--minimal",
+                "--unified=0",
+                "--",
+                "/dev/null",
+                path_str,
+            ],
+            &ctx.root,
+        )?
     } else {
         // Tracked files.
-        cmd!(
+        runner.run(
             "git",
-            "diff-files",
-            "-p",
-            "--minimal",
-            "--unified=0",
-            "--",
-            &path
-        )
+            &[
+                "diff-files",
+                "-p",
+                "--minimal",
+                "--unified=0",
+                "--",
+                path_str,
+            ],
+            &ctx.root,
+        )?
+    };
+
+    if !status.is_success() {
+        return Err(format!("Failed to get patch for `{}`: {stderr}", path.display()).into());
     }
-    .dir(&ctx.root)
-    .unchecked()
-    .stdout_capture()
-    .stderr_capture()
-    .run()
-    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-    .and_then(|out| {
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        if !out.status.success() {
-            return Err(format!("Failed to get patch for `{}`: {stderr}", path.display()).into());
+
+    let mut hunks = vec![];
+    for (id, hunk) in stdout.split("\n@@ ").skip(1).enumerate() {
+        if !patch_ids.contains(&id) {
+            continue;
         }
 
-        let mut hunks = vec![];
-        for (id, hunk) in stdout.split("\n@@ ").skip(1).enumerate() {
-            if !patch_ids.contains(&id) {
-                continue;
-            }
+        hunks.push(format!("@@ {hunk}"));
+    }
 
-            hunks.push(format!("@@ {hunk}"));
-        }
+    if hunks.is_empty() {
+        return Err(format!("Failed to find patch for `{}`: {stdout}", path.display()).into());
+    }
 
-        if hunks.is_empty() {
-            return Err(format!("Failed to find patch for `{}`: {stdout}", path.display()).into());
-        }
+    let patch_hunks = hunks.join("\n");
 
-        Ok(hunks.join("\n"))
-    })?;
-
-    let path = path.display().to_string();
+    let path_display = path.display().to_string();
     let patch = indoc::formatdoc! {"
-            diff --git a/{path} b/{path}
-            --- a/{path}
-            +++ b/{path}
-            {patch}
+            diff --git a/{path_display} b/{path_display}
+            --- a/{path_display}
+            +++ b/{path_display}
+            {patch_hunks}
         "};
 
     if ctx.action.is_format_arguments() {
@@ -114,23 +119,72 @@ pub(crate) async fn git_stage_patch(
         }
     }
 
-    let output = cmd!("echo", &patch)
-        .pipe(cmd!("git", "apply", "--cached", "--unidiff-zero", "-"))
-        .dir(&ctx.root)
-        .unchecked()
-        .stdout_capture()
-        .stderr_capture()
-        .run()?;
+    let ProcessOutput { stderr, status, .. } = runner.run_with_env_and_stdin(
+        "git",
+        &["apply", "--cached", "--unidiff-zero", "-"],
+        &ctx.root,
+        &[],
+        Some(&patch),
+    )?;
 
-    let results = CommandResult {
-        status: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8(output.stdout).unwrap_or_default(),
-        stderr: format!(
-            "{}\n\n{}",
-            String::from_utf8(output.stderr).unwrap_or_default(),
-            patch
-        ),
-    };
+    if !status.is_success() {
+        return Err(format!("Failed to apply patch: {stderr}").into());
+    }
 
-    to_xml_with_root(&results, "results").map(Into::into)
+    Ok("Patch applied.".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use camino_tempfile::tempdir;
+    use jp_tool::Action;
+    use serde_json::json;
+
+    use super::*;
+    use crate::util::runner::MockProcessRunner;
+
+    #[test]
+    fn test_git_stage_patch_success() {
+        let dir = tempdir().unwrap();
+        let ctx = Context {
+            root: dir.path().to_owned(),
+            action: Action::Run,
+        };
+
+        let mut answers = serde_json::Map::new();
+        answers.insert("stage_changes".to_string(), json!(true));
+
+        let runner = MockProcessRunner::builder()
+            .expect("git")
+            .args(&["ls-files", "test.rs"])
+            .returns_success("test.rs\n")
+            .expect("git")
+            .args(&[
+                "diff-files",
+                "-p",
+                "--minimal",
+                "--unified=0",
+                "--",
+                "test.rs",
+            ])
+            .returns_success(
+                "diff --git a/test.rs b/test.rs\n--- a/test.rs\n+++ b/test.rs\n@@ -1 +1 \
+                 @@\n-old\n+new\n",
+            )
+            .expect("git")
+            .args(&["apply", "--cached", "--unidiff-zero", "-"])
+            .returns_success("");
+
+        let result = git_stage_patch_impl(
+            &ctx,
+            &answers,
+            &std::path::PathBuf::from("test.rs"),
+            &[0],
+            &runner,
+        )
+        .unwrap();
+
+        let content = result.into_content().unwrap();
+        assert_eq!(content, "Patch applied.");
+    }
 }

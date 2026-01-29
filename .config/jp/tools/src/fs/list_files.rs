@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-
+use camino::{Utf8Path, Utf8PathBuf};
 use ignore::{WalkBuilder, WalkState};
 
 use crate::{Error, util::OneOrMany};
@@ -32,7 +31,7 @@ impl serde::Serialize for Files {
 }
 
 pub(crate) async fn fs_list_files(
-    root: PathBuf,
+    root: &Utf8Path,
     prefixes: Option<OneOrMany<String>>,
     extensions: Option<OneOrMany<String>>,
 ) -> std::result::Result<Files, Error> {
@@ -54,7 +53,6 @@ pub(crate) async fn fs_list_files(
             .run(|| {
                 let tx = tx.clone();
                 let extensions = extensions.clone();
-                let root = root.clone();
                 Box::new(move |entry| {
                     // Ignore invalid entries.
                     let Ok(entry) = entry else {
@@ -75,12 +73,16 @@ pub(crate) async fn fs_list_files(
                         return WalkState::Continue;
                     }
 
-                    // Strip non-workspace prefix from files.
-                    let Ok(path) = entry.into_path().strip_prefix(&root).map(PathBuf::from) else {
+                    let Ok(path) = Utf8PathBuf::try_from(entry.into_path()) else {
                         return WalkState::Continue;
                     };
 
-                    let _result = tx.send(path.to_string_lossy().to_string());
+                    // Strip non-workspace prefix from files.
+                    let Ok(path) = path.strip_prefix(root) else {
+                        return WalkState::Continue;
+                    };
+
+                    let _result = tx.send(path.to_string());
 
                     WalkState::Continue
                 })
@@ -105,6 +107,7 @@ mod tests {
     use std::collections::HashMap;
 
     use assert_matches::assert_matches;
+    use camino_tempfile::tempdir;
 
     use super::*;
 
@@ -167,7 +170,7 @@ mod tests {
             },
         ) in cases
         {
-            let tmp = tempfile::tempdir().unwrap();
+            let tmp = tempdir().unwrap();
             let root = tmp.path();
 
             for path in given {
@@ -184,9 +187,7 @@ mod tests {
             let extensions = (!extensions.is_empty())
                 .then_some(extensions.into_iter().map(str::to_owned).collect());
 
-            let files = fs_list_files(PathBuf::from(root), prefixes, extensions)
-                .await
-                .unwrap();
+            let files = fs_list_files(root, prefixes, extensions).await.unwrap();
 
             assert_eq!(files.into_files(), expected, "test case: {name}");
         }
@@ -195,15 +196,11 @@ mod tests {
     #[tokio::test]
     #[test_log::test]
     async fn test_empty_list() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempdir().unwrap();
         let root = tmp.path();
-        let files = fs_list_files(
-            PathBuf::from(root),
-            Some(vec!["foo".to_owned()].into()),
-            None,
-        )
-        .await
-        .unwrap();
+        let files = fs_list_files(root, Some(vec!["foo".to_owned()].into()), None)
+            .await
+            .unwrap();
 
         assert_matches!(files, Files::Empty);
     }
