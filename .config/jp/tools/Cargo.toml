@@ -58,7 +58,6 @@ camino-tempfile = { workspace = true }
 insta = { workspace = true, features = ["colors"] }
 pretty_assertions = { workspace = true, features = ["std"] }
 test-log = { workspace = true }
-which = { workspace = true, features = ["real-sys"] }
 
 [lints]
 workspace = true
