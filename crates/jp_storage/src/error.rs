@@ -1,14 +1,14 @@
-use std::path::PathBuf;
+use camino::Utf8PathBuf;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Path is not a directory: {0}")]
-    NotDir(PathBuf),
+    NotDir(Utf8PathBuf),
 
     #[error("Path is not a symlink: {0}")]
-    NotSymlink(PathBuf),
+    NotSymlink(Utf8PathBuf),
 
     #[error("Conversation error: {0}")]
     Conversation(#[from] jp_conversation::Error),

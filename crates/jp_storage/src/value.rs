@@ -1,17 +1,17 @@
 use std::{
     fs,
     io::{BufReader, BufWriter, Write as _},
-    path::Path,
 };
 
+use camino::Utf8Path;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::error::Result;
 
 pub fn merge_files<T: DeserializeOwned>(
-    base: impl AsRef<Path>,
-    overlay: impl AsRef<Path>,
+    base: impl AsRef<Utf8Path>,
+    overlay: impl AsRef<Utf8Path>,
 ) -> Result<T> {
     let base = base.as_ref();
     let overlay = overlay.as_ref();
