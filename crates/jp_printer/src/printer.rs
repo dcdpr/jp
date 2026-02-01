@@ -82,6 +82,15 @@ impl Printable for String {
     }
 }
 
+impl Printable for &String {
+    fn into_task(self) -> PrintTask {
+        PrintTask {
+            content: self.to_owned(),
+            ..Default::default()
+        }
+    }
+}
+
 impl Printable for &str {
     fn into_task(self) -> PrintTask {
         PrintTask {
@@ -301,17 +310,24 @@ impl std::fmt::Write for PrinterWriter<'_> {
     }
 }
 
-impl std::io::Write for PrinterWriter<'_> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let s = std::str::from_utf8(buf).map_err(std::io::Error::other)?;
+impl io::Write for PrinterWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let s = std::str::from_utf8(buf).map_err(io::Error::other)?;
 
         self.write_str(s)
-            .map_err(std::io::Error::other)
-            .map(|()| buf.len())
+            .map_err(io::Error::other)
+            .map(|()| s.len())
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+    fn flush(&mut self) -> io::Result<()> {
+        let (tx, rx) = mpsc::channel();
+        self.printer
+            .tx
+            .send(Command::Flush(tx))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "printer shutdown"))?;
+
+        rx.recv()
+            .map_err(|_| io::Error::other("failed to receive flush signal"))
     }
 }
 
