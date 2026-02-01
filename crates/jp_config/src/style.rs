@@ -5,6 +5,8 @@ pub mod reasoning;
 pub mod tool_call;
 pub mod typewriter;
 
+use std::fmt;
+
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 
@@ -79,7 +81,7 @@ impl ToPartial for StyleConfig {
 }
 
 /// Formatting style for links.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, ConfigEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, ConfigEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum LinkStyle {
     /// No link.
@@ -89,4 +91,64 @@ pub enum LinkStyle {
     /// Link with OSC-8 escape sequences.
     #[default]
     Osc8,
+}
+
+impl<'de> Deserialize<'de> for LinkStyle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct LinkStyleVisitor;
+
+        impl serde::de::Visitor<'_> for LinkStyleVisitor {
+            type Value = LinkStyle;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a boolean or a string (\"off\", \"full\", \"osc8\")")
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v {
+                    Ok(LinkStyle::Full)
+                } else {
+                    Ok(LinkStyle::Off)
+                }
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match v {
+                    "off" => Ok(LinkStyle::Off),
+                    "full" => Ok(LinkStyle::Full),
+                    "osc8" => Ok(LinkStyle::Osc8),
+                    _ => Err(serde::de::Error::unknown_variant(v, &[
+                        "off", "full", "osc8",
+                    ])),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(LinkStyleVisitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::from_str;
+
+    use super::*;
+
+    #[test]
+    fn test_link_style_deserialization() {
+        assert_eq!(from_str::<LinkStyle>("false").unwrap(), LinkStyle::Off);
+        assert_eq!(from_str::<LinkStyle>("true").unwrap(), LinkStyle::Full);
+        assert_eq!(from_str::<LinkStyle>("\"off\"").unwrap(), LinkStyle::Off);
+        assert_eq!(from_str::<LinkStyle>("\"full\"").unwrap(), LinkStyle::Full);
+        assert_eq!(from_str::<LinkStyle>("\"osc8\"").unwrap(), LinkStyle::Osc8);
+    }
 }

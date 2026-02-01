@@ -3,18 +3,19 @@
 use std::{convert::Infallible, ops::Deref, str::FromStr};
 
 use schematic::{Config, ConfigEnum, PartialConfig as _};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_untagged::UntaggedEnumVisitor;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::PartialConfigDelta,
+    delta::{PartialConfigDelta, delta_opt},
     partial::ToPartial,
 };
 
 /// String value, either defaulting to a merge strategy of `replace`, or
 /// defining a specific merge strategy.
 #[derive(Debug, Clone, PartialEq, Config)]
-#[config(serde(untagged))]
+#[config(serde(untagged), no_deserialize_derive)]
 pub enum MergeableString {
     /// A string that is merged using the [`schematic::merge::replace`]
     #[setting(default)]
@@ -28,8 +29,8 @@ pub enum MergeableString {
 impl PartialMergeableString {
     /// Returns `true` if the `MergeableString` is the default value.
     #[must_use]
-    pub fn is_default(&self) -> bool {
-        matches!(self, Self::Merged(v) if v.is_default.is_some_and(|v| v))
+    pub fn discard_when_merged(&self) -> bool {
+        matches!(self, Self::Merged(v) if v.discard_when_merged.is_some_and(|v| v))
     }
 }
 
@@ -89,11 +90,11 @@ impl AssignKeyValue for PartialMergeableString {
 
 impl PartialConfigDelta for PartialMergeableString {
     fn delta(&self, next: Self) -> Self {
-        if self == &next {
-            return Self::empty();
+        match (self, next) {
+            (Self::Merged(prev), Self::Merged(next)) => Self::Merged(prev.delta(next)),
+            (Self::String(prev), Self::String(next)) if prev == &next => Self::empty(),
+            (_, next) => next,
         }
-
-        next
     }
 }
 
@@ -103,6 +104,18 @@ impl ToPartial for MergeableString {
             Self::String(v) => Self::Partial::String(v.clone()),
             Self::Merged(v) => Self::Partial::Merged(v.to_partial()),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for PartialMergeableString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        UntaggedEnumVisitor::new()
+            .string(|v| Ok(Self::String(v.to_owned())))
+            .map(|map| map.deserialize().map(Self::Merged))
+            .deserialize(deserializer)
     }
 }
 
@@ -122,12 +135,13 @@ pub struct MergedString {
     #[setting(default)]
     pub separator: MergedStringSeparator,
 
-    /// Whether the value is the default value.
+    /// Whether the value is discarded when another value is merged in,
+    /// regardless of the merge strategy of the other value.
     ///
-    /// When `true`, if another value is merged in, this value will be
-    /// overwritten.
+    /// This is useful for "default" values that should only be used when no
+    /// other value is set.
     #[setting(default)]
-    pub is_default: bool,
+    pub discard_when_merged: bool,
 }
 
 impl AssignKeyValue for PartialMergedString {
@@ -137,7 +151,7 @@ impl AssignKeyValue for PartialMergedString {
             "value" => self.value = kv.try_some_string()?,
             "strategy" => self.strategy = kv.try_some_from_str()?,
             "separator" => self.separator = kv.try_some_from_str()?,
-            "is_default" => self.is_default = kv.try_some_bool()?,
+            "discard_when_merged" => self.discard_when_merged = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -151,7 +165,21 @@ impl ToPartial for MergedString {
             value: Some(self.value.clone()),
             strategy: Some(self.strategy),
             separator: Some(self.separator),
-            is_default: Some(self.is_default),
+            discard_when_merged: Some(self.discard_when_merged),
+        }
+    }
+}
+
+impl PartialConfigDelta for PartialMergedString {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            value: delta_opt(self.value.as_ref(), next.value),
+            strategy: delta_opt(self.strategy.as_ref(), next.strategy),
+            separator: delta_opt(self.separator.as_ref(), next.separator),
+            discard_when_merged: delta_opt(
+                self.discard_when_merged.as_ref(),
+                next.discard_when_merged,
+            ),
         }
     }
 }

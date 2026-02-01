@@ -71,7 +71,7 @@ impl ToPartial for DisplayStyleConfig {
 /// Even if disabled or truncated, a link will be added to a file containing the
 /// full tool call results. Additionally, the full tool call results will be
 /// sent back to the assistant, regardless of this setting.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ConfigEnum)]
+#[derive(Debug, Clone, PartialEq, Serialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum InlineResults {
     /// Never show the tool call results inline.
@@ -88,6 +88,90 @@ pub enum InlineResults {
 impl Default for InlineResults {
     fn default() -> Self {
         Self::Truncate(TruncateLines::default())
+    }
+}
+
+impl<'de> Deserialize<'de> for InlineResults {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct InlineResultsVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for InlineResultsVisitor {
+            type Value = InlineResults;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(
+                    "a boolean, a string (\"off\", \"full\"), or a number for truncation",
+                )
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v {
+                    Ok(InlineResults::Full)
+                } else {
+                    Ok(InlineResults::Off)
+                }
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match v {
+                    "off" => Ok(InlineResults::Off),
+                    "full" => Ok(InlineResults::Full),
+                    s => s
+                        .parse::<usize>()
+                        .map(|lines| InlineResults::Truncate(TruncateLines { lines }))
+                        .map_err(|_| {
+                            serde::de::Error::unknown_variant(v, &["off", "full", "a number"])
+                        }),
+                }
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                usize::try_from(v)
+                    .map(|lines| InlineResults::Truncate(TruncateLines { lines }))
+                    .map_err(|_| {
+                        serde::de::Error::invalid_value(
+                            serde::de::Unexpected::Unsigned(v),
+                            &"a number",
+                        )
+                    })
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                // Reuse the derived deserializer for the complex case (Truncate object)
+                #[derive(Deserialize)]
+                #[serde(rename_all = "snake_case")]
+                enum Helper {
+                    Off,
+                    Full,
+                    Truncate(TruncateLines),
+                }
+
+                let helper =
+                    Helper::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+                match helper {
+                    Helper::Off => Ok(InlineResults::Off),
+                    Helper::Full => Ok(InlineResults::Full),
+                    Helper::Truncate(t) => Ok(InlineResults::Truncate(t)),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(InlineResultsVisitor)
     }
 }
 
@@ -119,7 +203,7 @@ impl fmt::Display for TruncateLines {
 }
 
 /// How to display the link to the file containing the tool call results.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, ConfigEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum LinkStyle {
     /// Full (raw) link.
@@ -131,6 +215,50 @@ pub enum LinkStyle {
 
     /// No link.
     Off,
+}
+
+impl<'de> Deserialize<'de> for LinkStyle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct LinkStyleVisitor;
+
+        impl serde::de::Visitor<'_> for LinkStyleVisitor {
+            type Value = LinkStyle;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a boolean or a string (\"off\", \"full\", \"osc8\")")
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if v {
+                    Ok(LinkStyle::Full)
+                } else {
+                    Ok(LinkStyle::Off)
+                }
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match v {
+                    "off" => Ok(LinkStyle::Off),
+                    "full" => Ok(LinkStyle::Full),
+                    "osc8" => Ok(LinkStyle::Osc8),
+                    _ => Err(serde::de::Error::unknown_variant(v, &[
+                        "off", "full", "osc8",
+                    ])),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(LinkStyleVisitor)
+    }
 }
 
 /// Define the name to serialize and deserialize for a unit variant.
@@ -180,5 +308,53 @@ impl FromStr for ParametersStyle {
             "function_call" => Self::FunctionCall,
             _ => Self::Custom(CommandConfigOrString::String(s.to_owned())),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::from_str;
+
+    use super::*;
+
+    #[test]
+    fn test_link_style_deserialization() {
+        assert_eq!(from_str::<LinkStyle>("false").unwrap(), LinkStyle::Off);
+        assert_eq!(from_str::<LinkStyle>("true").unwrap(), LinkStyle::Full);
+        assert_eq!(from_str::<LinkStyle>("\"off\"").unwrap(), LinkStyle::Off);
+        assert_eq!(from_str::<LinkStyle>("\"full\"").unwrap(), LinkStyle::Full);
+        assert_eq!(from_str::<LinkStyle>("\"osc8\"").unwrap(), LinkStyle::Osc8);
+    }
+
+    #[test]
+    fn test_inline_results_deserialization() {
+        assert_eq!(
+            from_str::<InlineResults>("false").unwrap(),
+            InlineResults::Off
+        );
+        assert_eq!(
+            from_str::<InlineResults>("true").unwrap(),
+            InlineResults::Full
+        );
+        assert_eq!(
+            from_str::<InlineResults>("\"off\"").unwrap(),
+            InlineResults::Off
+        );
+        assert_eq!(
+            from_str::<InlineResults>("\"full\"").unwrap(),
+            InlineResults::Full
+        );
+        assert_eq!(
+            from_str::<InlineResults>("10").unwrap(),
+            InlineResults::Truncate(TruncateLines { lines: 10 })
+        );
+        assert_eq!(
+            from_str::<InlineResults>("\"25\"").unwrap(),
+            InlineResults::Truncate(TruncateLines { lines: 25 })
+        );
+        assert_eq!(
+            from_str::<InlineResults>(r#"{"truncate": {"lines": 5}}"#).unwrap(),
+            InlineResults::Truncate(TruncateLines { lines: 5 })
+        );
     }
 }

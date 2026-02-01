@@ -584,8 +584,8 @@ mod tests {
                     examples: vec![],
                 },
             ],
-            strategy: MergedVecStrategy::Replace,
-            is_default: false,
+            strategy: Some(MergedVecStrategy::Replace),
+            discard_when_merged: false,
         }
         .into();
 

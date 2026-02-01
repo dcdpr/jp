@@ -3,9 +3,9 @@
 use schematic::Config;
 
 /// Convert a configuration into a partial configuration.
-pub trait ToPartial: Config {
+pub trait ToPartial<Partial = <Self as Config>::Partial>: Config {
     /// Convert a configuration into a partial configuration.
-    fn to_partial(&self) -> Self::Partial;
+    fn to_partial(&self) -> Partial;
 }
 
 /// Get the current or default value, if any.

@@ -22,7 +22,7 @@ use crate::{
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::{
         string::{MergeableString, PartialMergeableString, PartialMergedString},
-        vec::{MergeableVec, MergedVec, MergedVecStrategy},
+        vec::{MergeableVec, MergedVec},
     },
 };
 
@@ -102,8 +102,8 @@ impl ToPartial for AssistantConfig {
 #[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
 fn default_instructions(_: &()) -> TransformResult<MergeableVec<PartialInstructionsConfig>> {
     Ok(MergeableVec::Merged(MergedVec {
-        strategy: MergedVecStrategy::Replace,
-        is_default: true,
+        strategy: None,
+        discard_when_merged: true,
         value: vec![PartialInstructionsConfig {
             title: Some("How to respond to the user".into()),
             items: Some(vec![
@@ -130,7 +130,7 @@ fn default_system_prompt(_: &()) -> TransformResult<Option<PartialMergeableStrin
         value: Some("You are a helpful assistant.".to_owned()),
         strategy: None,
         separator: None,
-        is_default: Some(true),
+        discard_when_merged: Some(true),
     })))
 }
 
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(
             p.instructions,
             MergeableVec::Merged(MergedVec {
-                strategy: MergedVecStrategy::Replace,
+                strategy: None,
                 value: vec![PartialInstructionsConfig {
                     title: Some("foo".into()),
                     ..Default::default()
@@ -172,10 +172,10 @@ mod tests {
                 // field is `true`, and when we do `try_from_cli` we trigger
                 // `try_vec_of_nested` on `&mut [PartialInstructionsConfig]`,
                 // NOT on the `MergeableVec<PartialInstructionsConfig>`. This
-                // means `is_default` is left untouched. This is *correct*, but
-                // it might be confusing in some cases, so we might want to
-                // change this in the future.
-                is_default: true,
+                // means `discard_when_merged` is left untouched. This is
+                // *correct*, but it might be confusing in some cases, so we
+                // might want to change this in the future.
+                discard_when_merged: true,
             })
         );
 
@@ -188,7 +188,7 @@ mod tests {
         assert_eq!(
             p.instructions,
             MergeableVec::Merged(MergedVec {
-                strategy: MergedVecStrategy::Replace,
+                strategy: None,
                 value: vec![
                     PartialInstructionsConfig {
                         title: Some("foo".into()),
@@ -200,7 +200,7 @@ mod tests {
                         ..Default::default()
                     }
                 ],
-                is_default: true,
+                discard_when_merged: true,
             })
         );
 
@@ -209,7 +209,7 @@ mod tests {
         assert_eq!(
             p.instructions,
             MergeableVec::Merged(MergedVec {
-                strategy: MergedVecStrategy::Replace,
+                strategy: None,
                 value: vec![
                     PartialInstructionsConfig {
                         title: Some("foo".into()),
@@ -225,7 +225,7 @@ mod tests {
                         ..Default::default()
                     }
                 ],
-                is_default: true,
+                discard_when_merged: true,
             })
         );
 
@@ -234,12 +234,12 @@ mod tests {
         assert_eq!(
             p.instructions,
             MergeableVec::Merged(MergedVec {
-                strategy: MergedVecStrategy::Replace,
+                strategy: None,
                 value: vec![PartialInstructionsConfig {
                     title: Some("qux".into()),
                     ..Default::default()
                 }],
-                is_default: true,
+                discard_when_merged: true,
             })
         );
 
@@ -248,12 +248,12 @@ mod tests {
         assert_eq!(
             p.instructions,
             MergeableVec::Merged(MergedVec {
-                strategy: MergedVecStrategy::Replace,
+                strategy: None,
                 value: vec![PartialInstructionsConfig {
                     title: Some("boop".into()),
                     ..Default::default()
                 }],
-                is_default: true,
+                discard_when_merged: true,
             })
         );
 
@@ -265,13 +265,13 @@ mod tests {
         assert_eq!(
             p.instructions,
             MergeableVec::Merged(MergedVec {
-                strategy: MergedVecStrategy::Replace,
+                strategy: None,
                 value: vec![PartialInstructionsConfig {
                     title: Some("quux".into()),
                     items: Some(vec!["one".into()]),
                     ..Default::default()
                 }],
-                is_default: true,
+                discard_when_merged: true,
             })
         );
 
@@ -280,13 +280,13 @@ mod tests {
         assert_eq!(
             p.instructions,
             MergeableVec::Merged(MergedVec {
-                strategy: MergedVecStrategy::Replace,
+                strategy: None,
                 value: vec![PartialInstructionsConfig {
                     title: Some("quux".into()),
                     items: Some(vec!["two".into()]),
                     ..Default::default()
                 }],
-                is_default: true,
+                discard_when_merged: true,
             })
         );
 
@@ -311,7 +311,7 @@ mod tests {
                 value: Some("foo".into()),
                 strategy: None,
                 separator: None,
-                is_default: None,
+                discard_when_merged: None,
             }))
         );
 
@@ -325,7 +325,7 @@ mod tests {
                 value: Some("foo".into()),
                 strategy: Some(MergedStringStrategy::Append),
                 separator: None,
-                is_default: None,
+                discard_when_merged: None,
             }))
         );
 
@@ -341,7 +341,7 @@ mod tests {
                 value: Some("foo".into()),
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::Space),
-                is_default: None,
+                discard_when_merged: None,
             }))
         );
     }
@@ -441,7 +441,7 @@ mod tests {
                             items: None,
                             examples: vec![],
                         }],
-                        strategy: MergedVecStrategy::Append,
+                        strategy: Some(MergedVecStrategy::Append),
                         ..Default::default()
                     }
                     .into(),
@@ -465,7 +465,7 @@ mod tests {
                                 examples: vec![],
                             },
                         ],
-                        strategy: MergedVecStrategy::Append,
+                        strategy: Some(MergedVecStrategy::Append),
                         ..Default::default()
                     }
                     .into(),
@@ -555,7 +555,7 @@ mod tests {
                         value: Some("foo".into()),
                         strategy: Some(MergedStringStrategy::Append),
                         separator: Some(MergedStringSeparator::Paragraph),
-                        is_default: None,
+                        discard_when_merged: None,
                     })),
                     instructions: MergedVec {
                         value: vec![
@@ -574,7 +574,7 @@ mod tests {
                                 examples: vec![],
                             },
                         ],
-                        strategy: MergedVecStrategy::Append,
+                        strategy: Some(MergedVecStrategy::Append),
                         ..Default::default()
                     }
                     .into(),

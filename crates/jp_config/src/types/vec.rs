@@ -3,7 +3,8 @@
 use std::ops::{Deref, DerefMut};
 
 use schematic::{Config, ConfigEnum, PartialConfig as _, Schematic};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
+use serde_untagged::UntaggedEnumVisitor;
 
 use crate::{delta::PartialConfigDelta, partial::ToPartial};
 
@@ -32,7 +33,7 @@ use crate::{delta::PartialConfigDelta, partial::ToPartial};
 ///
 /// [`AssignKeyValue`]: crate::AssignKeyValue
 /// [`MergeableString`]: super::string::MergeableString
-#[derive(Debug, Config, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Config)]
 #[serde(untagged, rename_all = "snake_case")]
 pub enum MergeableVec<T> {
     /// A vec that is merged using the [`schematic::merge::append_vec`]
@@ -63,6 +64,21 @@ impl<T> DerefMut for MergeableVec<T> {
     }
 }
 
+impl<'de, T> Deserialize<'de> for MergeableVec<T>
+where
+    T: Clone + DeserializeOwned,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        UntaggedEnumVisitor::new()
+            .seq(|v| v.deserialize().map(MergeableVec::Vec))
+            .map(|map| map.deserialize().map(MergeableVec::Merged))
+            .deserialize(deserializer)
+    }
+}
+
 impl<T> MergeableVec<T> {
     /// Consumes the `MergeableVec` and returns the underlying [`Vec`].
     #[must_use]
@@ -84,27 +100,29 @@ impl<T> MergeableVec<T> {
 
     /// Returns `true` if the `MergeableVec` is the default value.
     #[must_use]
-    pub const fn is_default(&self) -> bool {
-        matches!(self, Self::Merged(v) if v.is_default)
+    pub const fn discard_when_merged(&self) -> bool {
+        matches!(self, Self::Merged(v) if v.discard_when_merged)
+    }
+
+    /// Get a mutable reference to the [`MergedVec`], if applicable.
+    pub const fn as_merged_mut(&mut self) -> Option<&mut MergedVec<T>> {
+        match self {
+            Self::Vec(_) => None,
+            Self::Merged(v) => Some(v),
+        }
     }
 }
 
-impl<T: ToPartial> MergeableVec<T> {
-    /// Convert the `MergeableVec<T>` into a [`MergeableVec`] of `T:Partial`.
-    ///
-    /// Note that we do not implement `ToPartial` for `MergeableVec<T>` because
-    /// that trait requires `to_partial` to return a `PartialConfig`, which is
-    /// not what we want in this case.
-    ///
-    /// For more details, see [`MergeableVec`].
-    #[must_use]
-    pub fn to_partial(&self) -> MergeableVec<T::Partial> {
+impl<T: Config + Clone + PartialEq + Serialize + DeserializeOwned + ToPartial>
+    ToPartial<MergeableVec<T::Partial>> for MergeableVec<T>
+{
+    fn to_partial(&self) -> MergeableVec<T::Partial> {
         match self {
             Self::Vec(v) => MergeableVec::Vec(v.iter().map(ToPartial::to_partial).collect()),
             Self::Merged(v) => MergeableVec::Merged(MergedVec {
                 value: v.value.iter().map(ToPartial::to_partial).collect(),
                 strategy: v.strategy,
-                is_default: v.is_default,
+                discard_when_merged: v.discard_when_merged,
             }),
         }
     }
@@ -184,7 +202,7 @@ where
 }
 
 /// Strings that are merged using the specified merge strategy.
-#[derive(Debug, Config, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Config)]
 #[serde(rename_all = "snake_case")]
 pub struct MergedVec<T> {
     /// The vec value.
@@ -192,16 +210,24 @@ pub struct MergedVec<T> {
     pub value: Vec<T>,
 
     /// The merge strategy.
-    #[setting(default)]
-    pub strategy: MergedVecStrategy,
+    #[setting(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    // The strategy is wrapped in an `Option`, because otherwise
+    // `PartialMergedVec` would always set `strategy` to the default value,
+    // which is not what we want.  Anyway, this isn't great, and it's related to
+    // the fact that `MergedVec` behaves "special" compared to `MergedString` in
+    // `schematic`, which isn't great either, but it's wrapped in tests, so if
+    // you change this you'll see what happens.
+    pub strategy: Option<MergedVecStrategy>,
 
-    /// Whether the value is the default value.
+    /// Whether the value is discarded when another value is merged in,
+    /// regardless of the merge strategy of the other value.
     ///
-    /// When `true`, if another value is merged in, this value will be
-    /// overwritten.
+    /// This is useful for "default" values that should only be used when no
+    /// other value is set.
     #[setting(default)]
     #[serde(default)]
-    pub is_default: bool,
+    pub discard_when_merged: bool,
 }
 
 impl<T> From<MergedVec<T>> for MergeableVec<T> {
@@ -217,8 +243,8 @@ where
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
             value: Some(self.value.clone()),
-            strategy: Some(self.strategy),
-            is_default: Some(self.is_default),
+            strategy: self.strategy,
+            discard_when_merged: Some(self.discard_when_merged),
         }
     }
 }

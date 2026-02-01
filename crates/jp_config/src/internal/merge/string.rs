@@ -13,7 +13,7 @@ pub fn string_with_strategy(
     _context: &(),
 ) -> MergeResult<PartialMergeableString> {
     // If prev is default, replace regardless of strategy.
-    if prev.is_default() {
+    if prev.discard_when_merged() {
         return Ok(Some(next));
     }
 
@@ -23,11 +23,13 @@ pub fn string_with_strategy(
     };
 
     let next_is_replace = matches!(next, PartialMergeableString::String(_));
-    let (strategy, separator, next_value, is_default) = match next {
+    let (strategy, separator, next_value, discard_when_merged) = match next {
         PartialMergeableString::String(v) => {
             (Some(MergedStringStrategy::Replace), None, Some(v), None)
         }
-        PartialMergeableString::Merged(v) => (v.strategy, v.separator, v.value, v.is_default),
+        PartialMergeableString::Merged(v) => {
+            (v.strategy, v.separator, v.value, v.discard_when_merged)
+        }
     };
 
     let sep = separator.as_ref().map_or("", |sep| sep.as_str());
@@ -51,7 +53,7 @@ pub fn string_with_strategy(
             value,
             strategy,
             separator,
-            is_default,
+            discard_when_merged,
         })
     }))
 }
@@ -83,13 +85,13 @@ mod tests {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("foobar".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -98,13 +100,13 @@ mod tests {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -112,7 +114,7 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 next: PartialMergeableString::String("bar".to_owned()),
                 expected: PartialMergeableString::String("bar".to_owned()),
@@ -122,19 +124,19 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 next: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -142,19 +144,19 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 next: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -162,39 +164,39 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 next: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("foobar".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
                 prev: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
-                    is_default: None,
+                    discard_when_merged: None,
                     separator: Some(MergedStringSeparator::None),
                 }),
                 next: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -203,13 +205,13 @@ mod tests {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::Space),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("foo bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::Space),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -218,13 +220,13 @@ mod tests {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::Line),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("foo\nbar".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::Line),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -233,13 +235,13 @@ mod tests {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::Paragraph),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("foo\n\nbar".to_owned()),
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::Paragraph),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
         ];
@@ -275,13 +277,13 @@ mod tests {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("barfoo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -290,13 +292,13 @@ mod tests {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -304,7 +306,7 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 next: PartialMergeableString::String("bar".to_owned()),
                 expected: PartialMergeableString::String("bar".to_owned()),
@@ -314,19 +316,19 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 next: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -334,19 +336,19 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 next: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -354,19 +356,19 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 next: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("barfoo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -374,19 +376,19 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 next: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Replace),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -395,13 +397,13 @@ mod tests {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::Space),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::Space),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -410,13 +412,13 @@ mod tests {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::Line),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar\nfoo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::Line),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
             TestCase {
@@ -425,13 +427,13 @@ mod tests {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::Paragraph),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar\n\nfoo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::Paragraph),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             },
         ];
@@ -461,7 +463,7 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: None,
                     separator: None,
-                    is_default: Some(true),
+                    discard_when_merged: Some(true),
                 }),
                 next: PartialMergeableString::String("bar".to_owned()),
                 expected: PartialMergeableString::String("bar".to_owned()),
@@ -471,19 +473,19 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: None,
                     separator: None,
-                    is_default: Some(true),
+                    discard_when_merged: Some(true),
                 }),
                 next: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("bar".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: None,
+                    discard_when_merged: None,
                 }),
             }),
             ("default stacking", TestCase {
@@ -491,19 +493,19 @@ mod tests {
                     value: Some("foo".to_owned()),
                     strategy: None,
                     separator: None,
-                    is_default: Some(true),
+                    discard_when_merged: Some(true),
                 }),
                 next: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: Some(true),
+                    discard_when_merged: Some(true),
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: Some(true),
+                    discard_when_merged: Some(true),
                 }),
             }),
             ("next as default", TestCase {
@@ -511,19 +513,19 @@ mod tests {
                     value: Some("bar".to_owned()),
                     strategy: None,
                     separator: None,
-                    is_default: Some(false),
+                    discard_when_merged: Some(false),
                 }),
                 next: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("foo".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: Some(true),
+                    discard_when_merged: Some(true),
                 }),
                 expected: PartialMergeableString::Merged(PartialMergedString {
                     value: Some("foobar".to_owned()),
                     strategy: Some(MergedStringStrategy::Prepend),
                     separator: Some(MergedStringSeparator::None),
-                    is_default: Some(true),
+                    discard_when_merged: Some(true),
                 }),
             }),
         ];
