@@ -17,7 +17,7 @@ where
     T: Clone + PartialEq + Serialize + DeserializeOwned + Schematic,
 {
     // If prev is default, replace regardless of strategy.
-    if prev.is_default() {
+    if prev.discard_when_merged() {
         return Ok(Some(next));
     }
 
@@ -27,24 +27,24 @@ where
     };
 
     let next_is_merged = matches!(next, MergeableVec::Merged(_));
-    let (strategy, mut next_value, is_default) = match next {
-        MergeableVec::Vec(v) => (MergedVecStrategy::Append, v, false),
-        MergeableVec::Merged(v) => (v.strategy, v.value, v.is_default),
+    let (strategy, mut next_value, discard_when_merged) = match next {
+        MergeableVec::Vec(v) => (None, v, false),
+        MergeableVec::Merged(v) => (v.strategy, v.value, v.discard_when_merged),
     };
 
     let value = match strategy {
-        MergedVecStrategy::Append => {
+        None | Some(MergedVecStrategy::Append) => {
             prev_value.append(&mut next_value);
             prev_value
         }
-        MergedVecStrategy::Replace => next_value,
+        Some(MergedVecStrategy::Replace) => next_value,
     };
 
     Ok(Some(if next_is_merged {
         MergeableVec::Merged(MergedVec {
             value,
             strategy,
-            is_default,
+            discard_when_merged,
         })
     } else {
         MergeableVec::Vec(value)
@@ -76,33 +76,33 @@ mod tests {
                 prev: MergeableVec::Vec(vec![1, 2, 3]),
                 next: MergeableVec::Merged(MergedVec {
                     value: vec![4, 5, 6],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: false,
                 }),
                 expected: MergeableVec::Merged(MergedVec {
                     value: vec![1, 2, 3, 4, 5, 6],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: false,
                 }),
             },
             TestCase {
                 prev: MergeableVec::Vec(vec![1, 2, 3]),
                 next: MergeableVec::Merged(MergedVec {
                     value: vec![4, 5, 6],
-                    strategy: MergedVecStrategy::Replace,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Replace),
+                    discard_when_merged: false,
                 }),
                 expected: MergeableVec::Merged(MergedVec {
                     value: vec![4, 5, 6],
-                    strategy: MergedVecStrategy::Replace,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Replace),
+                    discard_when_merged: false,
                 }),
             },
             TestCase {
                 prev: MergeableVec::Merged(MergedVec {
                     value: vec![1, 2, 3],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: false,
                 }),
                 next: MergeableVec::Vec(vec![4, 5, 6]),
                 expected: MergeableVec::Vec(vec![1, 2, 3, 4, 5, 6]),
@@ -110,52 +110,52 @@ mod tests {
             TestCase {
                 prev: MergeableVec::Merged(MergedVec {
                     value: vec![1, 2, 3],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: false,
                 }),
                 next: MergeableVec::Merged(MergedVec {
                     value: vec![4, 5, 6],
-                    strategy: MergedVecStrategy::Replace,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Replace),
+                    discard_when_merged: false,
                 }),
                 expected: MergeableVec::Merged(MergedVec {
                     value: vec![4, 5, 6],
-                    strategy: MergedVecStrategy::Replace,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Replace),
+                    discard_when_merged: false,
                 }),
             },
             TestCase {
                 prev: MergeableVec::Merged(MergedVec {
                     value: vec![1, 2, 3],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: false,
                 }),
                 next: MergeableVec::Merged(MergedVec {
                     value: vec![4, 5, 6],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: false,
                 }),
                 expected: MergeableVec::Merged(MergedVec {
                     value: vec![1, 2, 3, 4, 5, 6],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: false,
                 }),
             },
             TestCase {
                 prev: MergeableVec::Merged(MergedVec {
                     value: vec![1, 2, 3],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: false,
                 }),
                 next: MergeableVec::Merged(MergedVec {
                     value: vec![4, 5, 6],
-                    strategy: MergedVecStrategy::Replace,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Replace),
+                    discard_when_merged: false,
                 }),
                 expected: MergeableVec::Merged(MergedVec {
                     value: vec![4, 5, 6],
-                    strategy: MergedVecStrategy::Replace,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Replace),
+                    discard_when_merged: false,
                 }),
             },
         ];
@@ -183,8 +183,8 @@ mod tests {
             ("default with next string", TestCase {
                 prev: MergeableVec::Merged(MergedVec {
                     value: vec![1],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: true,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: true,
                 }),
                 next: MergeableVec::Vec(vec![2]),
                 expected: MergeableVec::Vec(vec![2]),
@@ -192,52 +192,52 @@ mod tests {
             ("default does not merge", TestCase {
                 prev: MergeableVec::Merged(MergedVec {
                     value: vec![1],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: true,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: true,
                 }),
                 next: MergeableVec::Merged(MergedVec {
                     value: vec![2],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: false,
                 }),
                 expected: MergeableVec::Merged(MergedVec {
                     value: vec![2],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: false,
                 }),
             }),
             ("default stacking", TestCase {
                 prev: MergeableVec::Merged(MergedVec {
                     value: vec![1],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: true,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: true,
                 }),
                 next: MergeableVec::Merged(MergedVec {
                     value: vec![2],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: true,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: true,
                 }),
                 expected: MergeableVec::Merged(MergedVec {
                     value: vec![2],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: true,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: true,
                 }),
             }),
             ("next as default", TestCase {
                 prev: MergeableVec::Merged(MergedVec {
                     value: vec![1],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: false,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: false,
                 }),
                 next: MergeableVec::Merged(MergedVec {
                     value: vec![2],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: true,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: true,
                 }),
                 expected: MergeableVec::Merged(MergedVec {
                     value: vec![1, 2],
-                    strategy: MergedVecStrategy::Append,
-                    is_default: true,
+                    strategy: Some(MergedVecStrategy::Append),
+                    discard_when_merged: true,
                 }),
             }),
         ];

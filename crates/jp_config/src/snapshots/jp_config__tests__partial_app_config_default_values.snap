@@ -28,7 +28,7 @@ Ok(
                             ),
                             strategy: None,
                             separator: None,
-                            is_default: Some(
+                            discard_when_merged: Some(
                                 true,
                             ),
                         },
@@ -55,8 +55,8 @@ Ok(
                                 examples: [],
                             },
                         ],
-                        strategy: Replace,
-                        is_default: true,
+                        strategy: None,
+                        discard_when_merged: true,
                     },
                 ),
                 tool_choice: None,

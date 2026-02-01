@@ -90,6 +90,7 @@ schemars = { version = "1.0.0-alpha.17", default-features = false }
 schemars_08 = { package = "schemars", version = "0.8.22", default-features = false }
 schematic = { git = "https://github.com/JeanMertz/schematic", branch = "merged", default-features = false }
 serde = { version = "1", default-features = false }
+serde-untagged = { version = "0.1", default-features = false }
 serde_json = { version = "1", default-features = false }
 serde_json5 = { version = "0.2", default-features = false }
 serde_yaml = { version = "0.9", default-features = false }
