@@ -1,4 +1,11 @@
-use std::{collections::HashMap, env, path::Path, process::Stdio, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+    path::Path,
+    process::Stdio,
+    sync::Arc,
+    time::Duration,
+};
 
 use indexmap::IndexMap;
 use jp_config::providers::mcp::{AlgorithmConfig, McpProviderConfig};
