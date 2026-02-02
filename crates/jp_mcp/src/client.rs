@@ -174,7 +174,7 @@ impl Client {
 
     pub async fn run_services(
         &mut self,
-        server_ids: &[McpServerId],
+        server_ids: HashSet<McpServerId>,
         handle: Handle,
     ) -> Result<JoinSet<Result<()>>> {
         let mut clients = self.services.write().await;
@@ -195,7 +195,7 @@ impl Client {
         for server_id in server_ids {
             // Determine which servers to start (in configs but not currently
             // active)
-            if clients.contains_key(server_id) {
+            if clients.contains_key(&server_id) {
                 continue;
             }
 
@@ -204,7 +204,6 @@ impl Client {
             joins.spawn({
                 let servers = self.servers.clone();
                 let clients = self.services.clone();
-                let server_id = server_id.clone();
                 async move {
                     let servers = servers.read().await;
                     let server = servers
@@ -243,11 +242,11 @@ impl Client {
                     .iter()
                     .filter_map(|key| {
                         env::var(key)
-                            .inspect(|error| {
+                            .inspect_err(|error| {
                                 warn!(
                                     key,
-                                    error,
-                                    server = %id,
+                                    error = error.to_string(),
+                                    server = id.to_string(),
                                     "Failed to read MCP server environment variable"
                                 );
                             })
