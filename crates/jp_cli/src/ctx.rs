@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     io::{self, IsTerminal as _},
     sync::Arc,
 };
@@ -124,7 +125,7 @@ impl Ctx {
     pub(crate) async fn configure_active_mcp_servers(
         &mut self,
     ) -> Result<JoinSet<std::result::Result<(), jp_mcp::Error>>> {
-        let mut server_ids = vec![];
+        let mut server_ids = HashSet::new();
 
         for (name, cfg) in self.config.conversation.tools.iter() {
             if !cfg.enable() {
@@ -145,11 +146,11 @@ impl Ctx {
                 }
             };
 
-            server_ids.push(server_id);
+            server_ids.insert(server_id);
         }
 
         self.mcp_client
-            .run_services(&server_ids, self.handle().clone())
+            .run_services(server_ids, self.handle().clone())
             .await
             .map_err(Into::into)
     }
