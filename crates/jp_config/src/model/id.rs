@@ -23,7 +23,7 @@ use crate::{
 
 /// Either a [`ModelIdConfig`] or a named alias for one.
 #[derive(Debug, Clone, PartialEq, Config)]
-#[config(serde(untagged))]
+#[config(serde(untagged), skip_custom_untagged_enum_deserialize_impl)]
 pub enum ModelIdOrAliasConfig {
     /// A model ID configuration.
     #[setting(nested, empty)]

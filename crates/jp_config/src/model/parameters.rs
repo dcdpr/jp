@@ -138,15 +138,15 @@ mod strings {
 
 /// Reasoning configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Config)]
-#[config(serde(untagged))]
+#[config(serde(untagged), skip_custom_untagged_enum_deserialize_impl)]
 pub enum ReasoningConfig {
     /// Reasoning is disabled, regardless of the model's capabilities.
-    #[setting(with = "strings::off")]
+    #[setting(with = "strings::off", literal = "off")]
     Off,
 
     /// Reasoning is enabled with reasonable defaults if the model supports it,
     /// otherwise disabled.
-    #[setting(default, with = "strings::auto")]
+    #[setting(default, with = "strings::auto", literal = "auto")]
     Auto,
 
     /// Reasoning is enabled with custom configuration, unless the model is
