@@ -9,6 +9,9 @@ PartialAppConfig {
     assistant: PartialAssistantConfig {
         name: None,
         system_prompt: None,
+        system_prompt_sections: Vec(
+            [],
+        ),
         instructions: Vec(
             [],
         ),
@@ -91,6 +94,7 @@ PartialAppConfig {
             },
             deepseek: PartialDeepseekConfig {
                 api_key_env: None,
+                base_url: None,
             },
             google: PartialGoogleConfig {
                 api_key_env: None,

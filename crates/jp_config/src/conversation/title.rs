@@ -16,6 +16,9 @@ use crate::{
 #[config(rename_all = "snake_case")]
 pub struct TitleConfig {
     /// Title generation configuration.
+    ///
+    /// Configures how and when titles are automatically generated for new
+    /// conversations.
     #[setting(nested)]
     pub generate: GenerateConfig,
 }

@@ -13,6 +13,9 @@ use crate::{
 #[config(rename_all = "snake_case")]
 pub struct OllamaConfig {
     /// The base URL to use for API requests.
+    ///
+    /// The default is `http://localhost:11434`, which is the default URL for
+    /// Ollama.
     #[setting(default = "http://localhost:11434")]
     pub base_url: String,
 }

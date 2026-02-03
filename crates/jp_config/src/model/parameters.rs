@@ -37,15 +37,17 @@ pub struct ParametersConfig {
 
     /// Reasoning configuration.
     ///
-    /// If `None`, the model uses reasoning with reasonable defaults if it
-    /// supports it, otherwise disabled. If set to `Some`, the model uses the
-    /// provided configuration.
+    /// - `off`: Reasoning is disabled.
+    /// - `auto`: Reasoning is enabled with defaults (if supported).
+    /// - `<effort>`: Reasoning is enabled with the specified effort.
     #[setting(nested)]
     pub reasoning: Option<ReasoningConfig>,
 
     /// Temperature of the model.
     ///
-    /// ...
+    /// Controls the randomness of the output. Higher values (e.g. 0.8) make
+    /// the output more random, while lower values (e.g. 0.2) make it more
+    /// deterministic.
     pub temperature: Option<f32>,
 
     /// Control the randomness and diversity of the generated text. Also
@@ -71,11 +73,11 @@ pub struct ParametersConfig {
     /// The `stop_words` parameter can be set to specific sequences, such as a
     /// period or specific word, to stop the model from generating text when it
     /// encounters these sequences.
-    #[setting(default, merge = schematic::merge::append_vec)]
+    #[setting(default, merge = schematic::merge::append_vec, skip_serializing_if = "Vec::is_empty")]
     pub stop_words: Vec<String>,
 
     /// Other non-typed parameters that some models might support.
-    #[setting(default, flatten, merge = schematic::merge::merge_iter)]
+    #[setting(default, flatten, merge = schematic::merge::merge_iter, skip_serializing_if = "Map::is_empty")]
     pub other: Map<String, Value>,
 }
 

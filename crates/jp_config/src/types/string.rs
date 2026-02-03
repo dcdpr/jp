@@ -128,10 +128,19 @@ pub struct MergedString {
     pub value: String,
 
     /// The merge strategy.
+    ///
+    /// - `append`: Append this string to the existing string (default).
+    /// - `prepend`: Prepend this string to the existing string.
+    /// - `replace`: Replace the existing string with this one.
     #[setting(default)]
     pub strategy: MergedStringStrategy,
 
     /// The separator to use between the previous value and the new value.
+    ///
+    /// - `none`: No separator (default).
+    /// - `space`: Single space separator.
+    /// - `line`: New line separator.
+    /// - `paragraph`: Paragraph separator (two new lines).
     #[setting(default)]
     pub separator: MergedStringSeparator,
 

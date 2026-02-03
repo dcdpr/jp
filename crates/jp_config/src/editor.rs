@@ -26,8 +26,6 @@ pub struct EditorConfig {
     ///
     /// Defaults to `JP_EDITOR`, `VISUAL`, and `EDITOR`.
     ///
-    /// # Safety
-    ///
     /// Note that for security reasons, the value of these environment variables
     /// are split by whitespace, and only the first element is used for the
     /// command. Meaning, you cannot set `JP_EDITOR="subl -w"`, because it will

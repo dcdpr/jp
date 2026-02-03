@@ -191,6 +191,12 @@ pub fn build(mut partial: PartialAppConfig) -> Result<AppConfig, Error> {
         .instructions
         .sort_by(|a, b| a.position.cmp(&b.position));
 
+    // Sort sections by position.
+    config
+        .assistant
+        .system_prompt_sections
+        .sort_by(|a, b| a.position.cmp(&b.position));
+
     Ok(config)
 }
 

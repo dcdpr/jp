@@ -14,7 +14,7 @@ use crate::{
     partial::{ToPartial, partial_opt},
 };
 
-/// Reasoning configuration.
+/// Attachment configuration.
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(serde(untagged))]
 pub enum AttachmentConfig {
@@ -108,10 +108,14 @@ impl From<Url> for PartialAttachmentConfig {
 #[derive(Debug, Clone, PartialEq, Config)]
 pub struct AttachmentObjectConfig {
     /// The type of the attachment.
+    ///
+    /// e.g. `file`, `http`, etc.
     #[setting(required, rename = "type")]
     pub kind: String,
 
     /// The url path of the attachment.
+    ///
+    /// The path part of the URL.
     #[setting(required)]
     pub path: String,
 

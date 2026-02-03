@@ -26,10 +26,14 @@ pub mod style;
 #[config(rename_all = "snake_case", allow_unknown_fields)]
 pub struct ToolsConfig {
     /// Global config
+    ///
+    /// This section configures global defaults for all tools.
     #[setting(nested, rename = "*")]
     pub defaults: ToolsDefaultsConfig,
 
     /// Tool config
+    ///
+    /// This section configures individual tools. The key is the tool ID.
     #[setting(nested, flatten, merge = merge_nested_indexmap)]
     tools: IndexMap<String, ToolConfig>,
 }
@@ -124,13 +128,25 @@ impl ToolsConfig {
 #[config(rename_all = "snake_case")]
 pub struct ToolsDefaultsConfig {
     /// Whether the tool is enabled.
+    ///
+    /// If false, the tool will not be available to the assistant.
     pub enable: Option<bool>,
 
     /// How to run the tool.
+    ///
+    /// - `ask`: Ask for confirmation before running the tool.
+    /// - `unattended`: Run the tool without asking for confirmation.
+    /// - `edit`: Open an editor to edit the tool call before running it.
+    /// - `skip`: Skip running the tool.
     #[setting(required)]
     pub run: RunMode,
 
     /// How to deliver the results of the tool to the assistant.
+    ///
+    /// - `unattended`: Always deliver the results of the tool call.
+    /// - `ask`: Ask for confirmation before delivering the results.
+    /// - `edit`: Open an editor to edit the result before delivering it.
+    /// - `skip`: Skip delivering the results.
     #[setting(default)]
     pub result: ResultMode,
 
@@ -182,18 +198,29 @@ impl ToPartial for ToolsDefaultsConfig {
 #[config(rename_all = "snake_case")]
 pub struct ToolConfig {
     /// The source of the tool.
+    ///
+    /// - `builtin`: Use a built-in tool.
+    /// - `local`: Use a locally defined tool (shell command).
+    /// - `mcp`: Use a tool from an MCP server.
     #[setting(required)]
     pub source: ToolSource,
 
     /// Whether the tool is enabled.
+    ///
+    /// If false, the tool will not be available to the assistant.
     pub enable: Option<bool>,
 
     /// The command to run. Only used for local tools.
+    ///
+    /// Can be a simple string (e.g. `ls -la`) or a structured object with
+    /// `program`, `args`, and `shell` properties.
     #[setting(nested)]
     pub command: Option<CommandConfigOrString>,
 
-    /// The description of the tool. This will override any existing
-    /// description, such as the one from an MCP server, or a built-in tool.
+    /// The description of the tool.
+    ///
+    /// This will override any existing description, such as the one from an
+    /// MCP server, or a built-in tool.
     pub description: Option<String>,
 
     /// The parameters expected by the tool.
@@ -212,12 +239,18 @@ pub struct ToolConfig {
     pub parameters: IndexMap<String, ToolParameterConfig>,
 
     /// How to run the tool.
+    ///
+    /// Overrides the global default.
     pub run: Option<RunMode>,
 
     /// How to deliver the results of the tool to the assistant.
+    ///
+    /// Overrides the global default.
     pub result: Option<ResultMode>,
 
     /// How to display the results of the tool in the terminal.
+    ///
+    /// Overrides the global default.
     #[setting(nested)]
     pub style: Option<DisplayStyleConfig>,
 

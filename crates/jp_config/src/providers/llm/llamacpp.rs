@@ -13,6 +13,9 @@ use crate::{
 #[config(rename_all = "snake_case")]
 pub struct LlamacppConfig {
     /// The base URL to use for API requests.
+    ///
+    /// The default is `http://127.0.0.1:8080`, which is the default URL for
+    /// `llama.cpp` server.
     #[setting(default = "http://127.0.0.1:8080")]
     pub base_url: String,
 }

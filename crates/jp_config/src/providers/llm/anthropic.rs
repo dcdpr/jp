@@ -27,14 +27,6 @@ pub struct AnthropicConfig {
     /// This is enabled by default, but even when enabled, if you explicitly set
     /// the model's `max_tokens` parameter, the request will not be chained when
     /// that limit is reached. This allows for better cost control.
-    ///
-    /// Further note that if/when an API response contains a tool call request,
-    /// no chaining will be performed, as the API expects the next request to
-    /// contain the tool call results.
-    ///
-    /// Finally, be aware that there is a performance penalty for enabling this
-    /// feature, as the client has to copy the received messages in order to
-    /// append them to the next request.
     #[setting(default = true)]
     pub chain_on_max_tokens: bool,
 

@@ -19,10 +19,14 @@ use crate::{
 #[config(default, rename_all = "snake_case")]
 pub struct InstructionsConfig {
     /// The title of the instructions.
+    ///
+    /// This is used to organize instructions into sections.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 
     /// An optional description of the instructions.
+    ///
+    /// This is used to provide more context about the instructions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
@@ -37,9 +41,13 @@ pub struct InstructionsConfig {
     pub position: isize,
 
     /// The list of instructions.
+    ///
+    /// Each item is a separate instruction.
     pub items: Vec<String>,
 
     /// A list of examples to go with the instructions.
+    ///
+    /// Examples are used to demonstrate how to follow the instructions.
     #[setting(nested)]
     pub examples: Vec<ExampleConfig>,
 }
@@ -253,12 +261,18 @@ impl FromStr for PartialExampleConfig {
 #[config(rename_all = "snake_case")]
 pub struct ContrastConfig {
     /// The good example.
+    ///
+    /// This is an example of how to follow the instruction.
     pub good: String,
 
     /// The bad example.
+    ///
+    /// This is an example of how NOT to follow the instruction.
     pub bad: String,
 
     /// Why is the good example better than the bad example?
+    ///
+    /// This is optional, but recommended to provide more context.
     pub reason: Option<String>,
 }
 

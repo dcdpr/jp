@@ -17,6 +17,8 @@ use crate::{
 pub struct TypewriterConfig {
     /// Delay between printing characters.
     ///
+    /// The default is `3` milliseconds.
+    ///
     /// You can use one of the following formats:
     /// - `10` for 10 milliseconds
     /// - `5m` for 5 milliseconds
@@ -25,7 +27,9 @@ pub struct TypewriterConfig {
     #[config(default = "3")]
     pub text_delay: DelayDuration,
 
-    /// Delay between printing characters.
+    /// Delay between printing code-block characters.
+    ///
+    /// The default is `500` microseconds.
     ///
     /// You can use one of the following formats:
     /// - `10` for 10 milliseconds
