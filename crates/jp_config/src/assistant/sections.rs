@@ -151,149 +151,24 @@ impl FromStr for PartialSectionConfig {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//
-//     #[test]
-//     fn test_instructions_assign() {
-//         let mut p = PartialSectionConfig::default();
-//
-//         let kv = KvAssignment::try_from_cli("title", "foo").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p.title, Some("foo".into()));
-//
-//         let kv = KvAssignment::try_from_cli("description", "bar").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p.description, Some("bar".into()));
-//
-//         let kv = KvAssignment::try_from_cli("items", "baz").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p.items, Some(vec!["baz".into()]));
-//
-//         let kv = KvAssignment::try_from_cli("items+", "quux").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p.items, Some(vec!["baz".into(), "quux".into()]));
-//
-//         let kv = KvAssignment::try_from_cli("items.0", "quuz").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p.items, Some(vec!["quuz".into(), "quux".into()]));
-//
-//         let kv = KvAssignment::try_from_cli("examples", "qux").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p.examples, vec![PartialExampleConfig::Generic(
-//             "qux".into()
-//         )]);
-//
-//         let kv = KvAssignment::try_from_cli("examples+", "quuz").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p.examples, vec![
-//             PartialExampleConfig::Generic("qux".into()),
-//             PartialExampleConfig::Generic("quuz".into())
-//         ]);
-//
-//         let kv = KvAssignment::try_from_cli("examples.0", "quuz").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p.examples, vec![
-//             PartialExampleConfig::Generic("quuz".into()),
-//             PartialExampleConfig::Generic("quuz".into())
-//         ]);
-//     }
-//
-//     #[test]
-//     fn test_example_assign() {
-//         let mut p = PartialExampleConfig::default();
-//
-//         let kv = KvAssignment::try_from_cli("", "bar").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p, PartialExampleConfig::Generic("bar".into()));
-//
-//         let kv = KvAssignment::try_from_cli(":", r#""bar""#).unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p, PartialExampleConfig::Generic("bar".into()));
-//
-//         let kv = KvAssignment::try_from_cli(":", r#"{"good":"bar","bad":"baz"}"#).unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(
-//             p,
-//             PartialExampleConfig::Contrast(PartialContrastConfig {
-//                 good: Some("bar".into()),
-//                 bad: Some("baz".into()),
-//                 reason: None,
-//             })
-//         );
-//
-//         let kv = KvAssignment::try_from_cli("nope", "nope").unwrap();
-//         assert_eq!(&p.assign(kv).unwrap_err().to_string(), "nope: unknown key");
-//     }
-//
-//     #[test]
-//     fn test_contrast_assign() {
-//         let mut p = PartialContrastConfig::default();
-//
-//         let kv = KvAssignment::try_from_cli("good", "bar").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p, PartialContrastConfig {
-//             good: Some("bar".into()),
-//             bad: None,
-//             reason: None,
-//         });
-//
-//         let kv = KvAssignment::try_from_cli("bad", "baz").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p, PartialContrastConfig {
-//             good: Some("bar".into()),
-//             bad: Some("baz".into()),
-//             reason: None,
-//         });
-//
-//         let kv = KvAssignment::try_from_cli("reason", "qux").unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p, PartialContrastConfig {
-//             good: Some("bar".into()),
-//             bad: Some("baz".into()),
-//             reason: Some("qux".into()),
-//         });
-//
-//         let kv = KvAssignment::try_from_cli(":", r#"{"good":"one","bad":null}"#).unwrap();
-//         p.assign(kv).unwrap();
-//         assert_eq!(p, PartialContrastConfig {
-//             good: Some("one".into()),
-//             bad: None,
-//             reason: None,
-//         });
-//
-//         let kv = KvAssignment::try_from_cli("nope", "nope").unwrap();
-//         assert_eq!(&p.assign(kv).unwrap_err().to_string(), "nope: unknown key");
-//     }
-//
-//     #[test]
-//     fn test_instructions_to_xml() {
-//         let i = SectionConfig {
-//             title: Some("foo".to_owned()),
-//             description: Some("bar".to_owned()),
-//             position: 0,
-//             items: vec![
-//                 "foo".to_owned(),
-//                 "bar <test>bar</test>".to_owned(),
-//                 "baz]]> baz".to_owned(),
-//             ],
-//             examples: vec![
-//                 ExampleConfig::Generic("foo".to_owned()),
-//                 ExampleConfig::Contrast(ContrastConfig {
-//                     good: "bar".to_owned(),
-//                     bad: "baz".to_owned(),
-//                     reason: Some("qux".to_owned()),
-//                 }),
-//                 ExampleConfig::Contrast(ContrastConfig {
-//                     good: "quux".to_owned(),
-//                     bad: "quuz".to_owned(),
-//                     reason: None,
-//                 }),
-//             ],
-//         };
-//
-//         let xml = i.try_to_xml().unwrap();
-//         insta::assert_snapshot!(xml);
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_instructions_assign() {
+        let mut p = PartialSectionConfig::default();
+
+        let kv = KvAssignment::try_from_cli("tag", "foo").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.tag, Some("foo".into()));
+
+        let kv = KvAssignment::try_from_cli("content", "bar").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.content, Some("bar".into()));
+
+        let kv = KvAssignment::try_from_cli("position", "1").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.position, Some(1));
+    }
+}

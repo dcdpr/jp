@@ -86,7 +86,8 @@ expression: v
             "beta_headers": []
           },
           "deepseek": {
-            "api_key_env": ""
+            "api_key_env": "",
+            "base_url": ""
           },
           "google": {
             "api_key_env": "",
