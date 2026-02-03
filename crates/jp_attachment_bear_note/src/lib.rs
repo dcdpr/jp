@@ -162,6 +162,13 @@ fn uri_to_query(uri: &Url) -> Result<Query, Box<dyn Error + Send + Sync>> {
         .collect::<Result<Vec<_>, _>>()?;
 
     let query = match uri.host_str() {
+        // Support official "Copy Link" x-callback-url links:
+        // bear://x-callback-url/open-note?id=E340A2C4-8671-4233-860B-6AEFF7CB00D8
+        Some("x-callback-url") if path == "open-note" => query_pairs
+            .into_iter()
+            .find_map(|(k, v)| (k == "id").then_some(v))
+            .ok_or("Missing note id")
+            .map(Query::Get)?,
         Some("get") => Query::Get(path),
         Some("search") => {
             let tags = query_pairs
@@ -309,6 +316,10 @@ mod tests {
     #[test]
     fn test_uri_to_query() {
         let cases = [
+            (
+                "bear://x-callback-url/open-note?id=123-456",
+                Ok(Query::Get("123-456".to_string())),
+            ),
             ("bear://get/1", Ok(Query::Get("1".to_string()))),
             (
                 "bear://get/tag%20%231",
