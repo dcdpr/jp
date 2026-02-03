@@ -490,6 +490,26 @@ impl KvAssignment {
         self.try_f32().map(Some)
     }
 
+    /// Try to parse the value as a signed 32-bit integer.
+    pub(crate) fn try_i32(self) -> Result<i32, KvAssignmentError> {
+        let Self { key, value, .. } = self;
+
+        match value {
+            #[expect(clippy::cast_possible_truncation)]
+            KvValue::Json(Value::Number(v)) if v.is_i64() => Ok(v.as_i64().expect("is i64") as i32),
+            KvValue::Json(_) => type_error(&key, &value, &["number", "string"]),
+            KvValue::String(v) => Ok(v
+                .parse()
+                .map_err(|err| KvAssignmentError::new(key.full_path.clone(), err))?),
+        }
+    }
+
+    /// Convenience method for [`Self::try_i32`] that wraps the `Ok` value into
+    /// `Some`.
+    pub(crate) fn try_some_i32(self) -> Result<Option<i32>, KvAssignmentError> {
+        self.try_i32().map(Some)
+    }
+
     /// Try to parse the value as a JSON array of partial configs, and set or
     /// merge the elements.
     pub(crate) fn try_vec<T>(

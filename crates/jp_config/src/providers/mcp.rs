@@ -61,6 +61,10 @@ pub struct StdioConfig {
     pub arguments: Vec<String>,
 
     /// The environment variables to expose to the command.
+    ///
+    /// By default, the command inherits the environment of the parent process.
+    /// You can use this to add additional environment variables, or override
+    /// existing ones.
     #[setting(default, merge = schematic::merge::append_vec)]
     pub variables: Vec<String>,
 

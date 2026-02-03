@@ -210,6 +210,9 @@ pub struct MergedVec<T> {
     pub value: Vec<T>,
 
     /// The merge strategy.
+    ///
+    /// - `append`: Append the vec to the previous value.
+    /// - `replace`: Replace the previous value with the new value.
     #[setting(default, skip_serializing_if = "Option::is_none")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     // The strategy is wrapped in an `Option`, because otherwise

@@ -29,7 +29,9 @@ pub struct CodeConfig {
 
     /// Show a link to the file containing the source code in code blocks.
     ///
-    /// Can be one of: `off`, `full`, `osc8`.
+    /// - `off`: Do not show the link.
+    /// - `full`: Show the full file path.
+    /// - `osc8`: Show a clickable link (OSC8 escape sequence).
     ///
     /// See: <https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda>
     #[setting(default = "osc8")]

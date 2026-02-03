@@ -18,14 +18,27 @@ use crate::{
 #[config(rename_all = "snake_case")]
 pub struct DisplayStyleConfig {
     /// How to display the results of the tool call.
+    ///
+    /// - `full`: Show the full tool call results inline.
+    /// - `off`: Never show the tool call results inline.
+    /// - `<number>`: Show the first N lines of the tool call results inline.
     #[setting(default)]
     pub inline_results: InlineResults,
 
     /// How to display the link to the file containing the tool call results.
+    ///
+    /// - `full`: Show the full file path.
+    /// - `osc8`: Show a clickable link (OSC8 escape sequence).
+    /// - `off`: Do not show the file path.
     #[setting(default)]
     pub results_file_link: LinkStyle,
 
     /// How to display the tool call parameters.
+    ///
+    /// - `json`: Show as JSON.
+    /// - `function_call`: Show as a function call (e.g. `tool_name(arg=val)`).
+    /// - `off`: Do not show parameters.
+    /// - `<command>`: Use a custom command to format the parameters.
     #[setting(default)]
     pub parameters: ParametersStyle,
 }

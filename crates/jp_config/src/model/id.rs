@@ -166,10 +166,14 @@ impl PartialModelIdOrAliasConfig {
 #[config(rename_all = "snake_case", no_deserialize_derive)]
 pub struct ModelIdConfig {
     /// The provider to supply the model.
+    ///
+    /// e.g. `anthropic`, `openai`, `ollama`, etc.
     #[setting(required)]
     pub provider: ProviderId,
 
     /// The actual model name.
+    ///
+    /// e.g. `claude-3-opus-20240229`, `gpt-4-turbo`, `llama3`, etc.
     #[setting(required)]
     pub name: Name,
 }

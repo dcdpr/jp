@@ -14,10 +14,16 @@ use crate::{
 #[config(rename_all = "snake_case")]
 pub struct GenerateConfig {
     /// Whether to automatically generate titles for conversations.
+    ///
+    /// If true, a title will be generated based on the first prompt of the
+    /// conversation.
     #[setting(default = true)]
     pub auto: bool,
 
     /// Model configuration specific to title generation.
+    ///
+    /// By default, the main assistant model is used. You can override this to
+    /// use a faster or cheaper model specifically for title generation.
     #[setting(nested)]
     pub model: Option<ModelConfig>,
 }

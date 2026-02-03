@@ -6,6 +6,7 @@
 //! improved performance.
 
 pub mod instructions;
+pub mod sections;
 pub mod tool_choice;
 
 use schematic::{Config, TransformResult};
@@ -14,6 +15,7 @@ use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     assistant::{
         instructions::{InstructionsConfig, PartialInstructionsConfig},
+        sections::{PartialSectionConfig, SectionConfig},
         tool_choice::ToolChoice,
     },
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
@@ -30,14 +32,28 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct AssistantConfig {
-    /// Optional name of the assistant.
+    /// The name of the assistant.
+    ///
+    /// This is purely cosmetic and currently not used in the UI.
     pub name: Option<String>,
 
     /// The system prompt to use for the assistant.
+    ///
+    /// The system prompt is the initial instruction given to the assistant to
+    /// define its behavior, tone, and role.
     #[setting(nested, default = default_system_prompt, merge = string_with_strategy)]
     pub system_prompt: Option<MergeableString>,
 
+    /// A list of system prompt sections for the assistant.
+    #[setting(nested, default = default_sections, merge = vec_with_strategy)]
+    pub system_prompt_sections: MergeableVec<SectionConfig>,
+
     /// A list of instructions for the assistant.
+    ///
+    /// Instructions are similar to system prompts but are organized into a list
+    /// of titled sections. This allows for better organization and easier
+    /// overriding or extending of specific instructions when merging multiple
+    /// configurations.
     #[setting(nested, default = default_instructions, merge = vec_with_strategy)]
     pub instructions: MergeableVec<InstructionsConfig>,
 
@@ -57,6 +73,9 @@ impl AssignKeyValue for PartialAssistantConfig {
             "name" => self.name = kv.try_some_string()?,
             "system_prompt" => self.system_prompt = kv.try_some_object_or_from_str()?,
             _ if kv.p("instructions") => kv.try_vec_of_nested(self.instructions.as_mut())?,
+            _ if kv.p("system_prompt_sections") => {
+                kv.try_vec_of_nested(self.system_prompt_sections.as_mut())?;
+            }
             "tool_choice" => self.tool_choice = kv.try_some_from_str()?,
             _ if kv.p("model") => self.model.assign(kv)?,
             _ => return missing_key(&kv),
@@ -71,13 +90,17 @@ impl PartialConfigDelta for PartialAssistantConfig {
         Self {
             name: delta_opt(self.name.as_ref(), next.name),
             system_prompt: delta_opt_partial(self.system_prompt.as_ref(), next.system_prompt),
-            instructions: {
-                next.instructions
-                    .into_iter()
-                    .filter(|v| !self.instructions.contains(v))
-                    .collect::<Vec<_>>()
-                    .into()
-            },
+            instructions: next
+                .instructions
+                .into_iter()
+                .filter(|v| !self.instructions.contains(v))
+                .collect::<Vec<_>>()
+                .into(),
+            system_prompt_sections: next
+                .system_prompt_sections
+                .into_iter()
+                .filter(|v| !self.system_prompt_sections.contains(v))
+                .collect(),
             tool_choice: delta_opt(self.tool_choice.as_ref(), next.tool_choice),
             model: self.model.delta(next.model),
         }
@@ -92,6 +115,7 @@ impl ToPartial for AssistantConfig {
             name: partial_opts(self.name.as_ref(), defaults.name),
             system_prompt: partial_opt_config(self.system_prompt.as_ref(), defaults.system_prompt),
             instructions: self.instructions.to_partial(),
+            system_prompt_sections: self.system_prompt_sections.to_partial(),
             tool_choice: partial_opt(&self.tool_choice, defaults.tool_choice),
             model: self.model.to_partial(),
         }
@@ -121,6 +145,12 @@ fn default_instructions(_: &()) -> TransformResult<MergeableVec<PartialInstructi
             ..Default::default()
         }],
     }))
+}
+
+/// The default instructions for the assistant.
+#[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
+const fn default_sections(_: &()) -> TransformResult<MergeableVec<PartialSectionConfig>> {
+    Ok(MergeableVec::Vec(vec![]))
 }
 
 /// The default system prompt for the assistant.

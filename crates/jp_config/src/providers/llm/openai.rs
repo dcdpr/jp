@@ -23,6 +23,8 @@ pub struct OpenaiConfig {
     pub base_url: String,
 
     /// Environment variable that contains the API base URL key.
+    ///
+    /// If set, the value of this environment variable will override `base_url`.
     #[setting(default = "OPENAI_BASE_URL")]
     pub base_url_env: String,
 }

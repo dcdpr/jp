@@ -16,13 +16,22 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ReasoningConfig {
-    /// Whether to show reasoning blocks.
+    /// How to display the reasoning content.
+    ///
+    /// - `full`: Show all reasoning content (default).
+    /// - `hidden`: Do not show reasoning content.
+    /// - `summary`: Show a summary of the reasoning (requires `summary_model`).
+    /// - `static`: Show a static "reasoning..." message.
+    /// - `progress`: Show "reasoning..." with animated dots.
+    /// - `<number>`: Show the first N characters of the reasoning content.
     #[setting(default)]
     pub display: ReasoningDisplayConfig,
 
     /// The model to use for summarizing reasoning blocks.
     ///
     /// Defaults to the assistant's default model, but with reasoning disabled.
+    ///
+    /// Only used when `display` is set to `summary`.
     #[setting(nested)]
     pub summary_model: Option<ModelConfig>,
 }

@@ -33,6 +33,15 @@ use crate::{
 #[config(default, rename_all = "snake_case")]
 pub struct LlmProviderConfig {
     /// Aliases for specific provider/model combinations.
+    ///
+    /// This allows you to define short names for models.
+    ///
+    /// For example:
+    ///
+    /// ```toml
+    /// [providers.llm.aliases]
+    /// haiku = { provider = "anthropic", name = "claude-3-haiku-20240307" }
+    /// ```
     #[setting(nested, merge = merge_nested_indexmap)]
     pub aliases: IndexMap<String, ModelIdConfig>,
 

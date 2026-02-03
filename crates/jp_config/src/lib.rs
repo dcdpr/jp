@@ -83,27 +83,18 @@ type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 #[config(rename_all = "snake_case")]
 pub struct AppConfig {
     /// Inherit from a local ancestor or global configuration file.
-    #[setting(default = true)]
+    #[setting(optional)]
     pub inherit: bool,
 
-    /// Paths from which configuration files can be loaded without specifying
-    /// the full path to the file.
+    /// Directories to search for additional configuration files.
     ///
-    /// Paths are relative to both the workspace root, and the user's workspace
-    /// override directory.
+    /// Files in these directories can be loaded on demand using the `--cfg`
+    /// flag. Use this to organize reusable configurations, such as personas or
+    /// tool sets.
     ///
-    /// For example, a path of `.jp/config.d` will be resolved to
-    /// `<workspace-path>/.jp/config.d`, and
-    /// `$XDG_DATA_HOME/jp/workspace/<workspace-id>/.jp/config.d`.
-    ///
-    /// If a file exists at both locations, the user's workspace file will be
-    /// merged on top of the workspace file.
-    ///
-    /// Files in these paths are **NOT** loaded by default, but can instead be
-    /// referenced by their basename, optionally without a file extension. For
-    /// example, a file named `my-agent.toml` in a config load path can be
-    /// loaded using `--cfg my-agent`.
-    #[setting(default = vec![], merge = schematic::merge::append_vec, transform = util::vec_dedup)]
+    /// For example, to load `.jp/agents/dev.toml`, add `.jp/agents` to this
+    /// list and run `jp query --cfg dev`.
+    #[setting(optional, merge = schematic::merge::append_vec, transform = util::vec_dedup)]
     pub config_load_paths: Vec<RelativePathBuf>,
 
     /// Extends the configuration from the given files.

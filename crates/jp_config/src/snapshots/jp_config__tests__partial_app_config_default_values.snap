@@ -5,12 +5,8 @@ expression: "PartialAppConfig::default_values(&())"
 Ok(
     Some(
         PartialAppConfig {
-            inherit: Some(
-                true,
-            ),
-            config_load_paths: Some(
-                [],
-            ),
+            inherit: None,
+            config_load_paths: None,
             extends: Some(
                 [
                     Path(
@@ -33,6 +29,9 @@ Ok(
                             ),
                         },
                     ),
+                ),
+                system_prompt_sections: Vec(
+                    [],
                 ),
                 instructions: Merged(
                     MergedVec {
@@ -167,6 +166,9 @@ Ok(
                     deepseek: PartialDeepseekConfig {
                         api_key_env: Some(
                             "DEEPSEEK_API_KEY",
+                        ),
+                        base_url: Some(
+                            "https://api.deepseek.com",
                         ),
                     },
                     google: PartialGoogleConfig {

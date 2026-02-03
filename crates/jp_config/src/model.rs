@@ -17,13 +17,18 @@ use crate::{
 
 /// Assistant-specific configuration.
 #[derive(Debug, Clone, PartialEq, Config)]
-#[config(rename_all = "snake_case")]
+#[config(rename_all = "snake_case", allow_unknown_fields)]
 pub struct ModelConfig {
     /// The model ID.
+    ///
+    /// This identifies the LLM model to use. It can be a full ID (e.g.
+    /// `anthropic/claude-3-opus-20240229`) or an alias.
     #[setting(nested)]
     pub id: ModelIdOrAliasConfig,
 
     /// The model parameters.
+    ///
+    /// Configuration for model parameters such as temperature, max tokens, etc.
     #[setting(nested)]
     pub parameters: ParametersConfig,
 }

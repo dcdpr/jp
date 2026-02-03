@@ -21,6 +21,8 @@ pub struct OpenrouterConfig {
     pub app_name: String,
 
     /// Optional HTTP referrer to send with requests.
+    ///
+    /// This is used by Openrouter to identify the application.
     pub app_referrer: Option<String>,
 
     /// The base URL to use for API requests.

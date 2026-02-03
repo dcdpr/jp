@@ -22,14 +22,21 @@ use crate::{
 #[config(rename_all = "snake_case")]
 pub struct ConversationConfig {
     /// Title configuration.
+    ///
+    /// This section configures how conversation titles are generated.
     #[setting(nested)]
     pub title: TitleConfig,
 
     /// Tool configuration.
+    ///
+    /// This section configures tool usage within conversations.
     #[setting(nested)]
     pub tools: ToolsConfig,
 
     /// Attachment configuration.
+    ///
+    /// This section defines attachments (files, resources) that are added to
+    /// conversations.
     #[setting(nested, merge = schematic::merge::append_vec)]
     pub attachments: Vec<AttachmentConfig>,
 }

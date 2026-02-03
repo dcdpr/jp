@@ -27,18 +27,27 @@ use crate::{
 #[config(rename_all = "snake_case")]
 pub struct StyleConfig {
     /// Fenced code block style.
+    ///
+    /// Configures how code blocks in the assistant's response are rendered.
     #[setting(nested)]
     pub code: CodeConfig,
 
     /// Reasoning content style.
+    ///
+    /// Configures how the assistant's reasoning process (thinking) is
+    /// displayed.
     #[setting(nested)]
     pub reasoning: ReasoningConfig,
 
     /// Tool call content style.
+    ///
+    /// Configures how tool calls are displayed.
     #[setting(nested)]
     pub tool_call: ToolCallConfig,
 
     /// Typewriter style.
+    ///
+    /// Configures the typing animation effect.
     #[setting(nested)]
     pub typewriter: TypewriterConfig,
 }
