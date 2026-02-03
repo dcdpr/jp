@@ -28,7 +28,7 @@ pub struct ToolParameterItemConfig {
     pub description: Option<String>,
 
     /// A list of possible values for the parameter.
-    #[setting(rename = "enum")]
+    #[setting(rename = "enum", skip_serializing_if = "Option::is_none")]
     #[serde(default, rename = "enum", skip_serializing_if = "Vec::is_empty")]
     pub enumeration: Vec<Value>,
 }

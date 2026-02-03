@@ -277,16 +277,19 @@ pub enum ParametersStyle {
     /// A JSON representation of the tool call parameters.
     #[default]
     #[serde(with = "strings::json")]
+    #[schema(literal = "json")]
     Json,
 
     /// Function call syntax.
     ///
     /// e.g. `tool_name(arg1 = "value", arg2 = 123)`.
     #[serde(with = "strings::function_call")]
+    #[schema(literal = "function_call")]
     FunctionCall,
 
     /// No parameters are displayed.
     #[serde(with = "strings::off")]
+    #[schema(literal = "off")]
     Off,
 
     /// A custom command to format how the tool call parameters are displayed in
