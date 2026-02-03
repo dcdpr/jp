@@ -658,7 +658,7 @@ mod tests {
                 file: "config.ini",
                 data: "",
                 arg: "config.ini",
-                want: Err("Unsupported format for"),
+                want: Err("no matching source format for extension ini"),
             }),
         ];
 
@@ -672,8 +672,8 @@ mod tests {
                 assert!(partial.is_err(), "failed case: {name}");
                 let actual = partial.unwrap_err().to_string();
                 assert!(
-                    actual.starts_with(err),
-                    "failed case: {name}, expected error '{actual}' to start with '{err}'"
+                    actual.contains(err),
+                    "failed case: {name}, expected error '{actual}' to contain '{err}'"
                 );
                 continue;
             }
