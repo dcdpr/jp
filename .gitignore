@@ -12,3 +12,8 @@ lcov.info
 # Logs
 *.log
 /tmp
+
+# Agentic-Shepherd
+.agentic-shepherd/code-map.md
+.agentic-shepherd/log/
+
