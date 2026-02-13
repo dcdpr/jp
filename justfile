@@ -144,7 +144,7 @@ serve-tools CONTEXT TOOL:
 
 # Run all ci tasks.
 [group('ci')]
-ci: build-ci lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci
+ci: build-ci lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
 
 # Build the code on CI.
 [group('ci')]
@@ -198,6 +198,12 @@ _insta-ci-setup: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" 
 [group('ci')]
 shear-ci: (_install "cargo-expand@" + expand_version)
     @just shear --expand
+
+# Verify supply-chain audits on CI.
+[group('ci')]
+vet-ci: _install_ci_matchers
+    cargo install --locked cargo-vet
+    cargo vet --locked
 
 @_install_ci_matchers:
     echo "::add-matcher::.github/matchers.json"
