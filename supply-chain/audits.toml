@@ -1,7 +1,10 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.time-core]]
+who = "rgrant <rgrant@contract.design>"
+criteria = "safe-to-deploy"
+delta = "0.1.6 -> 0.1.8"
 
 [[trusted.aho-corasick]]
 criteria = "safe-to-deploy"
