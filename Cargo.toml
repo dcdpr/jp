@@ -35,7 +35,6 @@ async-stream = { version = "0.3", default-features = false }
 async-trait = { version = "0.1", default-features = false }
 backon = { version = "1", default-features = false }
 base64 = { version = "0.22", default-features = false }
-bat = { version = "0.25", default-features = false }
 camino = { version = "1", default-features = false }
 camino-tempfile = { version = "1", default-features = false }
 clap = { version = "4", default-features = false }
@@ -99,6 +98,12 @@ sha1 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 similar = { version = "2", default-features = false }
 strip-ansi-escapes = { version = "0.2", default-features = false }
+syntect = { version = "5.3", default-features = false, features = [
+    "default-syntaxes",
+    "default-themes",
+    "parsing",
+    "regex-fancy",
+] }
 termimad = { version = "0.34", default-features = false }
 test-log = { version = "0.2", default-features = false, features = ["trace"] }
 thiserror = { version = "2", default-features = false }

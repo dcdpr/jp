@@ -15,8 +15,8 @@ use crate::{
 pub struct CodeConfig {
     /// Theme to use for code blocks.
     ///
-    /// This uses the [bat](https://github.com/sharkdp/bat) theme names.
-    #[setting(default = "Monokai Extended")]
+    /// This uses [syntect](https://github.com/trishume/syntect) theme names.
+    #[setting(default = "base16-mocha.dark")]
     pub theme: String,
 
     /// Whether to colorize code blocks.

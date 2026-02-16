@@ -52,8 +52,8 @@ pub(crate) enum Error {
     #[error("Tool error")]
     Tool(#[from] jp_llm::ToolError),
 
-    #[error("Bat error")]
-    Bat(#[from] bat::error::Error),
+    #[error("Syntax highlighting error")]
+    SyntaxHighlight(#[from] syntect::Error),
 
     #[error("Attachment error: {0}")]
     Attachment(String),
