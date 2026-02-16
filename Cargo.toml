@@ -36,6 +36,7 @@ async-trait = { version = "0.1", default-features = false }
 backon = { version = "1", default-features = false }
 base64 = { version = "0.22", default-features = false }
 camino = { version = "1", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 camino-tempfile = { version = "1", default-features = false }
 clap = { version = "4", default-features = false }
 clean-path = { version = "0.2", default-features = false }
@@ -107,7 +108,6 @@ syntect = { version = "5.3", default-features = false, features = [
 termimad = { version = "0.34", default-features = false }
 test-log = { version = "0.2", default-features = false, features = ["trace"] }
 thiserror = { version = "2", default-features = false }
-time = { version = "0.3", default-features = false }
 timeago = { version = "0.5", default-features = false }
 tokio = { version = "1", default-features = false, features = ["full"] }
 tokio-stream = { version = "0.1", default-features = false }
