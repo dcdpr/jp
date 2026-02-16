@@ -4,6 +4,7 @@
 mod cargo;
 mod fs;
 mod git;
+#[cfg(feature = "github")]
 mod github;
 mod util;
 mod web;
@@ -18,7 +19,10 @@ type Result<T> = std::result::Result<T, Error>;
 pub async fn run(ctx: Context, t: Tool) -> util::ToolResult {
     match t.name.as_str() {
         s if s.starts_with("cargo_") => cargo::run(ctx, t).await,
+        #[cfg(feature = "github")]
         s if s.starts_with("github_") => github::run(ctx, t).await,
+        #[cfg(not(feature = "github"))]
+        s if s.starts_with("github_") => Err("GitHub tools require the `github` feature.".into()),
         s if s.starts_with("fs_") => fs::run(ctx, t).await,
         s if s.starts_with("web_") => web::run(ctx, t).await.map(Into::into),
         s if s.starts_with("git_") => git::run(ctx, t).await,
@@ -59,6 +63,7 @@ impl Tool {
         self.req(key).map(Some)
     }
 
+    #[cfg(feature = "github")]
     fn opt_or_empty<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
         match self.opt(key) {
             opt @ Ok(_) => opt,

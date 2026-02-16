@@ -28,7 +28,7 @@ grep-regex = { workspace = true }
 grep-searcher = { workspace = true }
 ignore = { workspace = true }
 indoc = { workspace = true }
-octocrab = { workspace = true, features = [
+octocrab = { workspace = true, optional = true, features = [
     "default-client",
     "follow-redirect",
     "retry",
@@ -51,6 +51,9 @@ strip-ansi-escapes = { workspace = true }
 time = { workspace = true, features = ["serde-human-readable"] }
 tokio = { workspace = true, features = ["full"] }
 url = { workspace = true, features = ["serde", "std"] }
+
+[features]
+github = ["dep:octocrab"]
 
 [dev-dependencies]
 assert_matches = { workspace = true }

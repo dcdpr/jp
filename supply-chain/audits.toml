@@ -1,6 +1,11 @@
 
 # cargo-vet audits file
 
+[[audits.syntect]]
+who = "rgrant <rgrant@contract.design>"
+criteria = "safe-to-deploy"
+delta = "5.2.0 -> 5.3.0"
+
 [[audits.time-core]]
 who = "rgrant <rgrant@contract.design>"
 criteria = "safe-to-deploy"

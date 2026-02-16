@@ -480,13 +480,6 @@ user-id = 2915
 user-login = "Amanieu"
 user-name = "Amanieu d'Antras"
 
-[[publisher.semver]]
-version = "1.0.27"
-when = "2025-09-14"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
 [[publisher.serde-untagged]]
 version = "0.1.9"
 when = "2025-09-14"
@@ -620,23 +613,9 @@ user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
-[[publisher.toml_edit]]
-version = "0.22.27"
-when = "2025-06-06"
-user-id = 6743
-user-login = "epage"
-user-name = "Ed Page"
-
 [[publisher.toml_parser]]
 version = "1.0.6+spec-1.1.0"
 when = "2025-12-18"
-user-id = 6743
-user-login = "epage"
-user-name = "Ed Page"
-
-[[publisher.toml_write]]
-version = "0.1.2"
-when = "2025-06-06"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
@@ -766,13 +745,6 @@ when = "2025-09-07"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
-
-[[publisher.windows]]
-version = "0.56.0"
-when = "2024-04-12"
-user-id = 64539
-user-login = "kennykerr"
-user-name = "Kenny Kerr"
 
 [[publisher.windows-core]]
 version = "0.56.0"
