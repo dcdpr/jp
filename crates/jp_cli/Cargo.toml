@@ -71,7 +71,7 @@ strip-ansi-escapes = { workspace = true }
 syntect = { workspace = true }
 termimad = { workspace = true }
 thiserror = { workspace = true }
-time = { workspace = true, features = ["local-offset"] }
+chrono = { workspace = true }
 timeago = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true, features = ["preserve_order"] }

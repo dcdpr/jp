@@ -734,12 +734,7 @@ fn run_dhat() -> dhat::Profiler {
         .and_then(|v| String::from_utf8(v.stdout).ok())
         .and_then(|v| PathBuf::from(v).parent().map(|v| v.join("tmp/profiling")))
         .and_then(|v| std::fs::create_dir_all(&v).ok().map(|()| v))
-        .map(|v| {
-            v.join(format!(
-                "heap-{}.json",
-                time::UtcDateTime::now().unix_timestamp()
-            ))
-        })
+        .map(|v| v.join(format!("heap-{}.json", chrono::Utc::now().timestamp())))
         .map_or_else(dhat::Profiler::new_heap, |v| {
             dhat::Profiler::builder().file_name(v).build()
         })

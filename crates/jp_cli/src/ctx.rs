@@ -4,12 +4,12 @@ use std::{
     sync::Arc,
 };
 
+use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
 use jp_mcp::id::{McpServerId, McpToolId};
 use jp_printer::Printer;
 use jp_task::TaskHandler;
 use jp_workspace::Workspace;
-use time::UtcDateTime;
 use tokio::{
     runtime::{Handle, Runtime},
     task::JoinSet,
@@ -41,7 +41,7 @@ pub(crate) struct Ctx {
     runtime: Runtime,
 
     #[cfg(test)]
-    pub(crate) stubbed_now: UtcDateTime,
+    pub(crate) stubbed_now: DateTime<Utc>,
 }
 
 pub(crate) struct Term {
@@ -81,23 +81,23 @@ impl Ctx {
             runtime,
 
             #[cfg(test)]
-            stubbed_now: UtcDateTime::UNIX_EPOCH,
+            stubbed_now: DateTime::<Utc>::UNIX_EPOCH,
         }
     }
 
     #[cfg(not(test))]
     #[expect(clippy::unused_self)]
-    pub(crate) fn now(&self) -> UtcDateTime {
-        UtcDateTime::now()
+    pub(crate) fn now(&self) -> DateTime<Utc> {
+        Utc::now()
     }
 
     #[cfg(test)]
-    pub(crate) fn now(&self) -> UtcDateTime {
+    pub(crate) fn now(&self) -> DateTime<Utc> {
         self.stubbed_now
     }
 
     #[cfg(test)]
-    pub(crate) fn set_now(&mut self, now: UtcDateTime) {
+    pub(crate) fn set_now(&mut self, now: DateTime<Utc>) {
         self.stubbed_now = now;
     }
 

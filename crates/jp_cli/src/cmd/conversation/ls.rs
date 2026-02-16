@@ -1,8 +1,8 @@
+use chrono::{DateTime, FixedOffset, Local, Utc};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_conversation::{Conversation, ConversationId};
 use jp_term::osc::hyperlink;
-use time::{UtcDateTime, UtcOffset, macros::format_description};
 
 use crate::{Output, cmd::Success, ctx::Ctx};
 
@@ -44,8 +44,8 @@ struct Details {
     id: ConversationId,
     title: Option<String>,
     messages: usize,
-    last_event_at: Option<UtcDateTime>,
-    expires_at: Option<UtcDateTime>,
+    last_event_at: Option<DateTime<Utc>>,
+    expires_at: Option<DateTime<Utc>>,
     local: bool,
 }
 
@@ -161,16 +161,15 @@ impl Ls {
         let last_message_at_fmt = if self.full {
             last_message_at
                 .and_then(|t| {
-                    let format =
-                        format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
-                    let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+                    let format = "%Y-%m-%d %H:%M:%S";
+                    let local_offset: FixedOffset = *Local::now().offset();
 
-                    t.to_offset(local_offset).format(&format).ok()
+                    Some(t.with_timezone(&local_offset).format(format).to_string())
                 })
                 .unwrap_or_default()
         } else {
             last_message_at.map_or_else(String::new, |t| {
-                let ago = (UtcDateTime::now() - t).try_into().expect("valid duration");
+                let ago = (Utc::now() - t).to_std().expect("valid duration");
                 timeago::Formatter::new().convert(ago)
             })
         };
@@ -182,10 +181,10 @@ impl Ls {
 
         if expires_at_column {
             let expires_at_fmt = expires_at.map_or_else(String::new, |t| {
-                if t < UtcDateTime::now() {
+                if t < Utc::now() {
                     "Now".to_string()
                 } else {
-                    let dur = (UtcDateTime::now() - t).unsigned_abs();
+                    let dur = (Utc::now() - t).abs().to_std().unwrap_or_default();
                     timeago::Formatter::new().ago("").convert(dur)
                 }
             });

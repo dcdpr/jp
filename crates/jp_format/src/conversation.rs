@@ -1,9 +1,9 @@
 use std::fmt;
 
+use chrono::{DateTime, Utc};
 use comfy_table::{Cell, CellAlignment, Row, Table};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
-use time::UtcDateTime;
 
 use crate::datetime::DateTimeFmt;
 
@@ -27,13 +27,13 @@ pub struct DetailsFmt {
     pub active_conversation: Option<ConversationId>,
 
     /// Display the timestamp of the last message in the conversation.
-    pub last_message_at: Option<UtcDateTime>,
+    pub last_message_at: Option<DateTime<Utc>>,
 
     /// Display the last time the conversation was activated.
-    pub last_activated_at: Option<UtcDateTime>,
+    pub last_activated_at: Option<DateTime<Utc>>,
 
     /// Display the timestamp of conversation expiration.
-    pub expires_at: Option<UtcDateTime>,
+    pub expires_at: Option<DateTime<Utc>>,
 
     /// Use OSC-8 hyperlinks.
     pub hyperlinks: bool,
@@ -73,19 +73,19 @@ impl DetailsFmt {
     }
 
     #[must_use]
-    pub fn with_last_message_at(mut self, last_message_at: Option<UtcDateTime>) -> Self {
+    pub fn with_last_message_at(mut self, last_message_at: Option<DateTime<Utc>>) -> Self {
         self.last_message_at = last_message_at;
         self
     }
 
     #[must_use]
-    pub fn with_last_activated_at(mut self, last_activated_at: Option<UtcDateTime>) -> Self {
+    pub fn with_last_activated_at(mut self, last_activated_at: Option<DateTime<Utc>>) -> Self {
         self.last_activated_at = last_activated_at;
         self
     }
 
     #[must_use]
-    pub fn with_expires_at(mut self, expires_at: Option<UtcDateTime>) -> Self {
+    pub fn with_expires_at(mut self, expires_at: Option<DateTime<Utc>>) -> Self {
         self.expires_at = expires_at;
         self
     }
@@ -166,7 +166,7 @@ impl DetailsFmt {
         if let Some(expires_at) = self.expires_at {
             map.push((
                 "Expires In".to_owned(),
-                if expires_at < UtcDateTime::now() {
+                if expires_at < Utc::now() {
                     "On Deactivation".to_string()
                 } else {
                     DateTimeFmt::new(expires_at).to_string()

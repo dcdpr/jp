@@ -13,6 +13,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, Utc};
 use clap::{ArgAction, builder::TypedValueParser as _};
 use event::StreamEventHandler;
 use futures::StreamExt as _;
@@ -44,7 +45,6 @@ use jp_workspace::Workspace;
 use minijinja::{Environment, UndefinedBehavior};
 use response_handler::ResponseHandler;
 use serde_json::Value;
-use time::UtcDateTime;
 use tracing::{debug, error, info, trace, warn};
 
 use super::{Output, attachment::register_attachment};
@@ -498,7 +498,7 @@ impl Query {
         &self,
         ws: &mut Workspace,
         cfg: Arc<AppConfig>,
-        now: UtcDateTime,
+        now: DateTime<Utc>,
     ) -> Result<ConversationId> {
         // Store the (old) active conversation ID, so that we can restore to it,
         // if the current conversation is aborted early (e.g. because of an
@@ -513,10 +513,9 @@ impl Query {
             if let Some(duration) = self.expires_in_duration()
                 && let Some(mut conversation) = ws.get_conversation_mut(&id)
             {
-                conversation.expires_at = duration
-                    .try_into()
+                conversation.expires_at = chrono::Duration::from_std(duration)
                     .ok()
-                    .and_then(|v| id.timestamp().checked_add(v));
+                    .and_then(|v| id.timestamp().checked_add_signed(v));
             }
 
             debug!(

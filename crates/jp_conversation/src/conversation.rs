@@ -2,13 +2,13 @@
 
 use std::{fmt, str::FromStr};
 
+use chrono::{DateTime, Utc};
 use jp_id::{
     Id, NANOSECONDS_PER_DECISECOND,
     parts::{GlobalId, TargetId, Variant},
 };
 use jp_serde::skip_if;
 use serde::{Deserialize, Serialize};
-use time::UtcDateTime;
 
 use crate::error::{Error, Result};
 
@@ -20,7 +20,11 @@ pub struct Conversation {
     pub title: Option<String>,
 
     /// The last time the conversation was activated.
-    pub last_activated_at: UtcDateTime,
+    #[serde(
+        serialize_with = "crate::serialize_dt",
+        deserialize_with = "crate::deserialize_dt"
+    )]
+    pub last_activated_at: DateTime<Utc>,
 
     /// Whether the conversation is stored in the user or workspace storage.
     // TODO: rename to `user_local`
@@ -37,12 +41,17 @@ pub struct Conversation {
     /// is in the future, garbage collection will not occur, if the timestamp is
     /// *exactly* now, the conversation *might* be garbage collected, but it
     /// might also happen at a later time, when the timestamp is in the past.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<UtcDateTime>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::serialize_dt_opt",
+        deserialize_with = "crate::deserialize_dt_opt"
+    )]
+    pub expires_at: Option<DateTime<Utc>>,
 
     /// The time of the last event, or `None` if the conversation is empty.
     #[serde(skip)]
-    pub last_event_at: Option<UtcDateTime>,
+    pub last_event_at: Option<DateTime<Utc>>,
 
     /// The number of events in the conversation.
     #[serde(skip)]
@@ -52,7 +61,7 @@ pub struct Conversation {
 impl Default for Conversation {
     fn default() -> Self {
         Self {
-            last_activated_at: UtcDateTime::now(),
+            last_activated_at: Utc::now(),
             title: None,
             user: false,
             expires_at: None,
@@ -81,14 +90,14 @@ impl Conversation {
 
     /// Sets whether the conversation is ephemeral.
     #[must_use]
-    pub const fn with_ephemeral(mut self, ephemeral: Option<UtcDateTime>) -> Self {
+    pub const fn with_ephemeral(mut self, ephemeral: Option<DateTime<Utc>>) -> Self {
         self.expires_at = ephemeral;
         self
     }
 
     /// Sets the last activated at timestamp.
     #[must_use]
-    pub const fn with_last_activated_at(mut self, last_activated_at: UtcDateTime) -> Self {
+    pub const fn with_last_activated_at(mut self, last_activated_at: DateTime<Utc>) -> Self {
         self.last_activated_at = last_activated_at;
         self
     }
@@ -96,7 +105,7 @@ impl Conversation {
 
 /// ID wrapper for Conversation
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct ConversationId(#[serde(with = "jp_id::serde")] UtcDateTime);
+pub struct ConversationId(#[serde(with = "jp_id::serde")] DateTime<Utc>);
 
 impl fmt::Debug for ConversationId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -109,14 +118,17 @@ impl fmt::Debug for ConversationId {
 impl ConversationId {
     /// Get the timestamp of the conversation id.
     #[must_use]
-    pub const fn timestamp(&self) -> UtcDateTime {
+    pub const fn timestamp(&self) -> DateTime<Utc> {
         self.0
     }
 
     /// Get the timestamp of the conversation id as deciseconds.
     #[must_use]
-    pub fn as_deciseconds(&self) -> i128 {
-        self.timestamp().unix_timestamp_nanos() / i128::from(NANOSECONDS_PER_DECISECOND)
+    pub fn as_deciseconds(&self) -> i64 {
+        self.timestamp()
+            .timestamp_nanos_opt()
+            .expect("timestamp in range")
+            / i64::from(NANOSECONDS_PER_DECISECOND)
     }
 
     /// Try to create a conversation id from deciseconds.
@@ -125,11 +137,13 @@ impl ConversationId {
     ///
     /// Returns an error if the deciseconds cannot be converted to a valid UTC
     /// timestamp.
-    pub fn try_from_deciseconds(deciseconds: i128) -> Result<Self> {
-        let timestamp = UtcDateTime::from_unix_timestamp_nanos(
-            deciseconds * i128::from(NANOSECONDS_PER_DECISECOND),
-        )
-        .map_err(|e| jp_id::Error::InvalidTimestamp(e.to_string()))?;
+    pub fn try_from_deciseconds(deciseconds: i64) -> Result<Self> {
+        let nanos = deciseconds
+            .checked_mul(i64::from(NANOSECONDS_PER_DECISECOND))
+            .ok_or_else(|| {
+                jp_id::Error::InvalidTimestamp("decisecond timestamp overflow".to_owned())
+            })?;
+        let timestamp = DateTime::from_timestamp_nanos(nanos);
 
         Ok(Self(timestamp))
     }
@@ -141,7 +155,7 @@ impl ConversationId {
     /// Returns an error if the deciseconds cannot be parsed or converted to a
     /// valid UTC timestamp.
     pub fn try_from_deciseconds_str(deciseconds: impl AsRef<str>) -> Result<Self> {
-        let deciseconds = deciseconds.as_ref().parse::<i128>().map_err(|_| {
+        let deciseconds = deciseconds.as_ref().parse::<i64>().map_err(|_| {
             Error::InvalidIdFormat(format!("Invalid deciseconds: {}", deciseconds.as_ref()))
         })?;
 
@@ -192,16 +206,20 @@ impl ConversationId {
     }
 }
 
-impl TryFrom<UtcDateTime> for ConversationId {
+impl TryFrom<DateTime<Utc>> for ConversationId {
     type Error = Error;
 
-    fn try_from(timestamp: UtcDateTime) -> Result<Self> {
+    fn try_from(timestamp: DateTime<Utc>) -> Result<Self> {
+        use chrono::Timelike as _;
+
         let nanos = timestamp.nanosecond();
         let truncated_nanos = (nanos / NANOSECONDS_PER_DECISECOND) * NANOSECONDS_PER_DECISECOND;
 
         timestamp
-            .replace_nanosecond(truncated_nanos)
-            .map_err(|e| jp_id::Error::InvalidTimestamp(e.to_string()).into())
+            .with_nanosecond(truncated_nanos)
+            .ok_or_else(|| {
+                jp_id::Error::InvalidTimestamp("invalid nanosecond value".to_owned()).into()
+            })
             .map(Self)
     }
 }
@@ -239,7 +257,7 @@ impl FromStr for ConversationId {
 
 impl Default for ConversationId {
     fn default() -> Self {
-        Self::try_from(UtcDateTime::now()).expect("valid timestamp")
+        Self::try_from(Utc::now()).expect("valid timestamp")
     }
 }
 
@@ -271,16 +289,15 @@ impl Default for ConversationsMetadata {
 
 #[cfg(test)]
 mod tests {
+    use chrono::TimeZone as _;
+
     use super::*;
 
     #[test]
     fn test_conversation_serialization() {
         let conv = Conversation {
             title: None,
-            last_activated_at: UtcDateTime::new(
-                time::Date::from_calendar_date(2023, time::Month::January, 1).unwrap(),
-                time::Time::MIDNIGHT,
-            ),
+            last_activated_at: Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap(),
             user: true,
             expires_at: None,
             last_event_at: None,

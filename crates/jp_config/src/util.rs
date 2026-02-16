@@ -790,7 +790,7 @@ mod tests {
                     ),
                 ],
                 path: "foo",
-                root: None,
+                root: Some(""),
                 want: Ok(None),
             }),
             ("regular extends with string replace", TestCase {

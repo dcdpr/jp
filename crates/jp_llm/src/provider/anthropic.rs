@@ -11,6 +11,7 @@ use async_anthropic::{
 };
 use async_stream::try_stream;
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use futures::{StreamExt as _, TryStreamExt as _, pin_mut};
 use indexmap::IndexMap;
 use jp_config::{
@@ -24,7 +25,6 @@ use jp_conversation::{
     thread::{Document, Documents, Thread},
 };
 use serde_json::{Map, Value, json};
-use time::macros::date;
 use tracing::{debug, info, trace, warn};
 
 use super::Provider;
@@ -620,7 +620,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(date!(2025 - 7 - 1)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             features: vec![
                 "interleaved-thinking",
@@ -634,7 +634,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(date!(2025 - 7 - 1)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             features: vec!["interleaved-thinking", "context-editing"],
         },
@@ -648,7 +648,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             },
             max_output_tokens: Some(64_000),
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(date!(2025 - 7 - 1)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             features: vec![
                 "interleaved-thinking",
@@ -662,7 +662,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(date!(2025 - 3 - 1)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             features: vec![
                 "interleaved-thinking",
@@ -676,7 +676,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             context_window: Some(200_000),
             max_output_tokens: Some(32_000),
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(date!(2025 - 3 - 1)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             features: vec!["interleaved-thinking", "context-editing"],
         },
@@ -690,7 +690,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             },
             max_output_tokens: Some(64_000),
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(date!(2025 - 3 - 1)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             features: vec!["interleaved-thinking", "context-editing"],
         },
@@ -700,7 +700,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(date!(2024 - 11 - 1)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 11, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             features: vec![],
         },
@@ -710,7 +710,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             context_window: Some(200_000),
             max_output_tokens: Some(8_192),
             reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(date!(2024 - 7 - 1)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 7, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             features: vec![],
         },
@@ -720,10 +720,10 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
             reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(date!(2023 - 8 - 1)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2023, 8, 1).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
                 &"recommended replacement: claude-opus-4-1-20250805",
-                Some(date!(2026 - 1 - 5)),
+                Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap()),
             )),
             features: vec![],
         },
@@ -733,7 +733,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             context_window: Some(200_000),
             max_output_tokens: Some(4_096),
             reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(date!(2024 - 8 - 1)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 8, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             features: vec![],
         },

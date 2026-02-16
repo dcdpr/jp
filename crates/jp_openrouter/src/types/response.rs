@@ -1,8 +1,28 @@
+use std::fmt;
+
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use time::OffsetDateTime;
 
 use super::tool::ToolCall;
+
+/// Wrapper for `DateTime<Utc>` that produces `time::OffsetDateTime`-compatible
+/// `Debug` output: `2025-12-09 12:51:48.0 +00:00:00`.
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(transparent)]
+pub struct OffsetDateTimeFmt(#[serde(with = "chrono::serde::ts_seconds")] pub DateTime<Utc>);
+
+impl fmt::Debug for OffsetDateTimeFmt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let nanos = self.0.timestamp_subsec_nanos();
+        if nanos == 0 {
+            write!(f, "{} +00:00:00", self.0.format("%Y-%m-%d %H:%M:%S.0"))
+        } else {
+            let full = self.0.format("%Y-%m-%d %H:%M:%S.%9f").to_string();
+            write!(f, "{} +00:00:00", full.trim_end_matches('0'))
+        }
+    }
+}
 
 /// A chat completion response.
 #[derive(Debug, Deserialize)]
@@ -25,8 +45,7 @@ pub struct ChatCompletion {
     pub choices: Vec<Choice>,
 
     /// The time the response was created.
-    #[serde(with = "time::serde::timestamp")]
-    pub created: OffsetDateTime,
+    pub created: OffsetDateTimeFmt,
 
     /// The model used to generate the response.
     pub model: String,
@@ -349,7 +368,6 @@ pub struct ModelsResponse {
 pub struct Model {
     pub id: String,
     pub name: String,
-    #[serde(with = "time::serde::timestamp")]
-    pub created: OffsetDateTime,
+    pub created: OffsetDateTimeFmt,
     pub context_length: u32,
 }

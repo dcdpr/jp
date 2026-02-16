@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::{AppConfig, Config as _, PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use time::UtcDateTime;
 use tracing::error;
 
 use crate::event::{
@@ -64,7 +64,11 @@ impl InternalEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConfigDelta {
     /// The timestamp of the event.
-    pub timestamp: UtcDateTime,
+    #[serde(
+        serialize_with = "crate::serialize_dt",
+        deserialize_with = "crate::deserialize_dt"
+    )]
+    pub timestamp: DateTime<Utc>,
 
     /// The configuration delta.
     pub delta: Box<PartialAppConfig>,
@@ -107,7 +111,7 @@ impl From<ConfigDelta> for PartialAppConfig {
 impl From<PartialAppConfig> for ConfigDelta {
     fn from(config: PartialAppConfig) -> Self {
         Self {
-            timestamp: UtcDateTime::now(),
+            timestamp: Utc::now(),
             delta: Box::new(config),
         }
     }
@@ -130,7 +134,7 @@ pub struct ConversationStream {
     events: Vec<InternalEvent>,
 
     /// The timestamp of the creation of the stream.
-    pub created_at: UtcDateTime,
+    pub created_at: DateTime<Utc>,
 }
 
 impl ConversationStream {
@@ -140,7 +144,7 @@ impl ConversationStream {
         Self {
             base_config,
             events: Vec::new(),
-            created_at: UtcDateTime::now(),
+            created_at: Utc::now(),
         }
     }
 
@@ -153,7 +157,7 @@ impl ConversationStream {
 
     /// Set the timestamp of the creation of the stream.
     #[must_use]
-    pub fn with_created_at(mut self, created_at: impl Into<UtcDateTime>) -> Self {
+    pub fn with_created_at(mut self, created_at: impl Into<DateTime<Utc>>) -> Self {
         self.created_at = created_at.into();
         self
     }
@@ -478,12 +482,10 @@ impl ConversationStream {
     #[doc(hidden)]
     #[must_use]
     pub fn new_test() -> Self {
-        use time::macros::utc_datetime;
-
         Self {
             base_config: AppConfig::new_test().into(),
             events: vec![],
-            created_at: utc_datetime!(2020-01-01 0:00),
+            created_at: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
         }
     }
 }
@@ -896,42 +898,42 @@ impl<'de> Deserialize<'de> for InternalEvent {
             ConfigDelta(ConfigDelta),
 
             ChatRequest {
-                timestamp: UtcDateTime,
+                timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
                 #[serde(flatten)]
                 data: ChatRequest,
             },
             ChatResponse {
-                timestamp: UtcDateTime,
+                timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
                 #[serde(flatten)]
                 data: ChatResponse,
             },
             ToolCallRequest {
-                timestamp: UtcDateTime,
+                timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
                 #[serde(flatten)]
                 data: ToolCallRequest,
             },
             ToolCallResponse {
-                timestamp: UtcDateTime,
+                timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
                 #[serde(flatten)]
                 data: ToolCallResponse,
             },
             InquiryRequest {
-                timestamp: UtcDateTime,
+                timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
                 #[serde(flatten)]
                 data: InquiryRequest,
             },
             InquiryResponse {
-                timestamp: UtcDateTime,
+                timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
                 #[serde(flatten)]
@@ -1004,8 +1006,6 @@ impl<'de> Deserialize<'de> for InternalEvent {
 
 #[cfg(test)]
 mod tests {
-    use time::macros::utc_datetime;
-
     use super::*;
 
     #[test]
@@ -1018,14 +1018,14 @@ mod tests {
             .events
             .push(InternalEvent::Event(Box::new(ConversationEvent::new(
                 ChatRequest::from("foo"),
-                utc_datetime!(2020-01-01 0:00),
+                Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
             ))));
 
         stream
             .events
             .push(InternalEvent::Event(Box::new(ConversationEvent::new(
                 ChatResponse::message("bar"),
-                utc_datetime!(2020-01-02 0:00),
+                Utc.with_ymd_and_hms(2020, 1, 2, 0, 0, 0).unwrap(),
             ))));
 
         insta::assert_json_snapshot!(&stream);

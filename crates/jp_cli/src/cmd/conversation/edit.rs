@@ -1,12 +1,12 @@
 use std::time::Duration;
 
+use chrono::Utc;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _, model::id::PartialModelIdOrAliasConfig,
 };
 use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{provider, structured};
 use jp_printer::PrinterWriter;
-use time::UtcDateTime;
 
 use crate::{Output, cmd::Success, ctx::Ctx};
 
@@ -70,7 +70,7 @@ impl Edit {
         if let Some(ephemeral) = self.expires_at {
             let mut conversation = ctx.workspace.try_get_conversation_mut(&id)?;
             let duration = ephemeral.map_or(Duration::ZERO, Into::into);
-            conversation.expires_at = Some(UtcDateTime::now() + duration);
+            conversation.expires_at = Some(Utc::now() + duration);
         } else if self.no_expires_at {
             ctx.workspace.try_get_conversation_mut(&id)?.expires_at = None;
         }
