@@ -898,6 +898,7 @@ impl<'de> Deserialize<'de> for InternalEvent {
             ConfigDelta(ConfigDelta),
 
             ChatRequest {
+                #[serde(deserialize_with = "crate::deserialize_dt")]
                 timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
@@ -905,6 +906,7 @@ impl<'de> Deserialize<'de> for InternalEvent {
                 data: ChatRequest,
             },
             ChatResponse {
+                #[serde(deserialize_with = "crate::deserialize_dt")]
                 timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
@@ -912,6 +914,7 @@ impl<'de> Deserialize<'de> for InternalEvent {
                 data: ChatResponse,
             },
             ToolCallRequest {
+                #[serde(deserialize_with = "crate::deserialize_dt")]
                 timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
@@ -919,6 +922,7 @@ impl<'de> Deserialize<'de> for InternalEvent {
                 data: ToolCallRequest,
             },
             ToolCallResponse {
+                #[serde(deserialize_with = "crate::deserialize_dt")]
                 timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
@@ -926,6 +930,7 @@ impl<'de> Deserialize<'de> for InternalEvent {
                 data: ToolCallResponse,
             },
             InquiryRequest {
+                #[serde(deserialize_with = "crate::deserialize_dt")]
                 timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
@@ -933,6 +938,7 @@ impl<'de> Deserialize<'de> for InternalEvent {
                 data: InquiryRequest,
             },
             InquiryResponse {
+                #[serde(deserialize_with = "crate::deserialize_dt")]
                 timestamp: DateTime<Utc>,
                 #[serde(default, with = "jp_serde::repr::base64_json_map")]
                 metadata: Map<String, Value>,
