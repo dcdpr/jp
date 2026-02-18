@@ -7,6 +7,7 @@ jilu_version     := "0.13.2"
 llvm_cov_version := "0.6.21"
 nextest_version  := "0.9.108"
 shear_version    := "1.6.0"
+vet_version      := "0.10.2"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
@@ -201,8 +202,7 @@ shear-ci: (_install "cargo-expand@" + expand_version)
 
 # Verify supply-chain audits on CI.
 [group('ci')]
-vet-ci: _install_ci_matchers
-    cargo install --locked cargo-vet
+vet-ci: (_install "cargo-vet@" + vet_version)
     cargo vet --locked
 
 @_install_ci_matchers:
