@@ -160,11 +160,11 @@ impl Ls {
 
         let last_message_at_fmt = if self.full {
             last_message_at
-                .and_then(|t| {
+                .map(|t| {
                     let format = "%Y-%m-%d %H:%M:%S";
                     let local_offset: FixedOffset = *Local::now().offset();
 
-                    Some(t.with_timezone(&local_offset).format(format).to_string())
+                    t.with_timezone(&local_offset).format(format).to_string()
                 })
                 .unwrap_or_default()
         } else {

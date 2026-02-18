@@ -34,21 +34,15 @@ pub fn format(content: &str, buf: &mut String, config: &Config) -> Result<bool, 
         None => ss.find_syntax_plain_text(),
     };
 
-    let theme_name = match config.theme.as_deref() {
-        Some(name) => name,
-        None => {
-            buf.push_str(content);
-            return Ok(true);
-        }
+    let Some(theme_name) = config.theme.as_deref() else {
+        buf.push_str(content);
+        return Ok(true);
     };
 
     let ts = ThemeSet::load_defaults();
-    let theme = match ts.themes.get(theme_name) {
-        Some(t) => t,
-        None => {
-            buf.push_str(content);
-            return Ok(true);
-        }
+    let Some(theme) = ts.themes.get(theme_name) else {
+        buf.push_str(content);
+        return Ok(true);
     };
 
     let mut h = HighlightLines::new(syntax, theme);

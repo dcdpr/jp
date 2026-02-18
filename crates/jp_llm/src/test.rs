@@ -550,7 +550,7 @@ pub async fn run_chat_completion(
                         for mut event in events {
                             if let Event::Part { event, .. } = &mut event {
                                 event.timestamp =
-                                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap().into();
+                                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
                             }
 
                             all_events[index].push(event.clone());

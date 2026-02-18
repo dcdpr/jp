@@ -123,6 +123,10 @@ impl ConversationId {
     }
 
     /// Get the timestamp of the conversation id as deciseconds.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the timestamp is out of range for nanosecond conversion.
     #[must_use]
     pub fn as_deciseconds(&self) -> i64 {
         self.timestamp()

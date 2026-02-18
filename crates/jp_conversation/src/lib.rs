@@ -88,6 +88,7 @@ fn parse_dt(s: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Serialize a `DateTime<Utc>` in `time`'s human-readable format.
 pub(crate) fn serialize_dt<S: serde::Serializer>(
     dt: &chrono::DateTime<chrono::Utc>,
     s: S,
@@ -95,6 +96,7 @@ pub(crate) fn serialize_dt<S: serde::Serializer>(
     s.serialize_str(&fmt_dt(dt))
 }
 
+/// Deserialize a `DateTime<Utc>` from `time`'s format or RFC 3339.
 pub(crate) fn deserialize_dt<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<chrono::DateTime<chrono::Utc>, D::Error> {
@@ -102,6 +104,8 @@ pub(crate) fn deserialize_dt<'de, D: serde::Deserializer<'de>>(
     parse_dt(&s).map_err(serde::de::Error::custom)
 }
 
+/// Serialize an optional `DateTime<Utc>` in `time`'s human-readable format.
+#[expect(clippy::ref_option, reason = "serde serialize_with requires &Option<T>")]
 pub(crate) fn serialize_dt_opt<S: serde::Serializer>(
     dt: &Option<chrono::DateTime<chrono::Utc>>,
     s: S,
@@ -112,12 +116,10 @@ pub(crate) fn serialize_dt_opt<S: serde::Serializer>(
     }
 }
 
+/// Deserialize an optional `DateTime<Utc>` from `time`'s format or RFC 3339.
 pub(crate) fn deserialize_dt_opt<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<chrono::DateTime<chrono::Utc>>, D::Error> {
     let s: Option<String> = serde::Deserialize::deserialize(d)?;
-    match s {
-        Some(s) => parse_dt(&s).map(Some).map_err(serde::de::Error::custom),
-        None => Ok(None),
-    }
+    s.map_or_else(|| Ok(None), |s| parse_dt(&s).map(Some).map_err(serde::de::Error::custom))
 }
