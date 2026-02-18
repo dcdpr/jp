@@ -1,5 +1,4 @@
 bacon_version    := "3.20.1"
-binstall_version := "1.15.7"
 deny_version     := "0.18.9"
 expand_version   := "1.0.118"
 insta_version    := "1.43.2"
