@@ -22,8 +22,9 @@ jobs:
         task: [build, lint, fmt, test, docs, coverage, deny, insta, shear, vet]
     name: ${{ matrix.task }}
     steps:
-      - uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
-        id: cache
+      - uses: actions/checkout@v6
+      - uses: actions/cache/restore@v5
+        id: restore-cache
         with:
           path: |
             ~/.rustup
@@ -32,7 +33,6 @@ jobs:
             ~/.cargo/.crates2.json
           key: toolchain-${{ matrix.task }}
       - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
-      - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
       - uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
         with:
           key: ${{ matrix.task }}
@@ -46,11 +46,11 @@ jobs:
           file: lcov.info
           fail-on-error: false
       - if: ${{ github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        uses: actions/cache/save@v5
         with:
           path: |
             ~/.rustup
             ~/.cargo/bin/
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-          key: ${{ steps.cache.outputs.cache-primary-key }}
+          key: ${{ steps.restore-cache.outputs.cache-primary-key }}
