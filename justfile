@@ -212,14 +212,11 @@ vet-ci: (_install "cargo-vet@" + vet_version)
 @_docs CMD="dev" *FLAGS: _docs-install
     yarn vitepress {{CMD}} {{FLAGS}}
 
-@_install +CRATES: _install-binstall
-    cargo binstall {{quiet_flag}} --locked --disable-telemetry --no-confirm --only-signed {{CRATES}}
+@_install +CRATES:
+    cargo install {{quiet_flag}} --locked {{CRATES}}
 
 @_install-jp *args:
     cargo install {{quiet_flag}} --locked --path crates/jp_cli {{args}}
-
-@_install-binstall:
-    cargo install {{quiet_flag}} --locked --version {{binstall_version}} cargo-binstall
 
 [working-directory: 'docs']
 @_docs-install:
