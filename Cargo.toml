@@ -12,6 +12,7 @@ jp_attachment_mcp_resources = { path = "crates/jp_attachment_mcp_resources" }
 jp_config = { path = "crates/jp_config" }
 jp_conversation = { path = "crates/jp_conversation" }
 jp_format = { path = "crates/jp_format" }
+jp_github = { path = "crates/jp_github" }
 jp_id = { path = "crates/jp_id" }
 jp_inquire = { path = "crates/jp_inquire" }
 jp_llm = { path = "crates/jp_llm" }
@@ -69,7 +70,6 @@ itertools = { version = "0.14", default-features = false }
 jsonschema = { version = "0.37", default-features = false }
 linkme = { version = "0.3", default-features = false }
 minijinja = { version = "2", default-features = false }
-octocrab = { version = "0.45", default-features = false }
 ollama-rs = { version = "0.3", default-features = false }
 open-editor = { version = "1", default-features = false }
 openai = { git = "https://github.com/JeanMertz/openai", branch = "tmp", default-features = false } # <https://github.com/rellfy/openai/pull/57>

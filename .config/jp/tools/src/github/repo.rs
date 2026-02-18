@@ -27,13 +27,13 @@ pub(crate) async fn github_code_search(
     auth().await?;
 
     let repository = repository.unwrap_or_else(|| format!("{ORG}/{REPO}"));
-    let page = octocrab::instance()
+    let page = jp_github::instance()
         .search()
         .code(&format!("{query} repo:{repository}"))
         .send()
         .await?;
 
-    let matches = octocrab::instance()
+    let matches = jp_github::instance()
         .all_pages(page)
         .await?
         .into_iter()
@@ -72,7 +72,7 @@ pub(crate) async fn github_read_file(
         .split_once('/')
         .ok_or("`repository` must be in the form of <org>/<repo>")?;
 
-    let client = octocrab::instance();
+    let client = jp_github::instance();
     let files = client.repos(org, repo);
     let mut files = files.get_content().path(path);
 
@@ -84,7 +84,7 @@ pub(crate) async fn github_read_file(
         .send()
         .await
         .map_err(|err| match err {
-            octocrab::Error::GitHub { source, .. } if source.status_code == 404 => {
+            jp_github::Error::GitHub { source, .. } if source.status_code == 404 => {
                 "file does not exist for the provided repository".to_owned()
             }
             _ => format!("failed to fetch file: {err:?}"),
@@ -155,7 +155,7 @@ pub(crate) async fn github_list_files(
             }
         "};
 
-        let result: Value = octocrab::instance()
+        let result: Value = jp_github::instance()
             .graphql(&json!({
                 "query": query,
                 "variables": {

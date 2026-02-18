@@ -28,14 +28,7 @@ grep-regex = { workspace = true }
 grep-searcher = { workspace = true }
 ignore = { workspace = true }
 indoc = { workspace = true }
-octocrab = { workspace = true, optional = true, features = [
-    "default-client",
-    "follow-redirect",
-    "retry",
-    "rustls",
-    "rustls-ring",
-    "timeout",
-] }
+jp_github = { workspace = true, optional = true }
 quick-xml = { workspace = true, features = ["encoding", "serialize"] }
 reqwest = { workspace = true, features = [
     "charset",
@@ -53,7 +46,7 @@ tokio = { workspace = true, features = ["full"] }
 url = { workspace = true, features = ["serde", "std"] }
 
 [features]
-github = ["dep:octocrab"]
+github = ["dep:jp_github"]
 
 [dev-dependencies]
 assert_matches = { workspace = true }

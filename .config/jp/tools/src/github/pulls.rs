@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use octocrab::{models::repos::DiffEntryStatus, params};
+use jp_github::{models::repos::DiffEntryStatus, params};
 use url::Url;
 
 use super::auth;
@@ -60,19 +60,19 @@ async fn get(number: u64) -> Result<String> {
         changed_files: Vec<ChangedFile>,
     }
 
-    let pull = octocrab::instance()
+    let pull = jp_github::instance()
         .pulls(ORG, REPO)
         .get(number)
         .await
         .map_err(|e| handle_404(e, format!("Pull #{number} not found in {ORG}/{REPO}")))?;
 
-    let page = octocrab::instance()
+    let page = jp_github::instance()
         .pulls(ORG, REPO)
         .list_files(number)
         .await
         .map_err(|e| handle_404(e, format!("Pull #{number} not found in {ORG}/{REPO}")))?;
 
-    let changed_files = octocrab::instance()
+    let changed_files = jp_github::instance()
         .all_pages(page)
         .await?
         .into_iter()
@@ -118,13 +118,13 @@ async fn diff(number: u64, file_diffs: Vec<String>) -> Result<String> {
         patch: Option<String>,
     }
 
-    let page = octocrab::instance()
+    let page = jp_github::instance()
         .pulls(ORG, REPO)
         .list_files(number)
         .await
         .map_err(|e| handle_404(e, format!("Pull #{number} not found in {ORG}/{REPO}")))?;
 
-    let changed_files: Vec<_> = octocrab::instance()
+    let changed_files: Vec<_> = jp_github::instance()
         .all_pages(page)
         .await?
         .into_iter()
@@ -168,7 +168,7 @@ async fn list(state: Option<State>) -> Result<String> {
         None => params::State::All,
     };
 
-    let page = octocrab::instance()
+    let page = jp_github::instance()
         .pulls(ORG, REPO)
         .list()
         .state(state)
@@ -176,7 +176,7 @@ async fn list(state: Option<State>) -> Result<String> {
         .send()
         .await?;
 
-    let pull = octocrab::instance()
+    let pull = jp_github::instance()
         .all_pages(page)
         .await?
         .into_iter()

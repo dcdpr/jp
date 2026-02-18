@@ -31,7 +31,7 @@ async fn get_issue(number: u64) -> Result<String> {
         linked_pull_request: Option<Url>,
     }
 
-    let issue = octocrab::instance()
+    let issue = jp_github::instance()
         .issues(ORG, REPO)
         .get(number)
         .await
@@ -68,14 +68,14 @@ async fn get_issues() -> Result<String> {
         linked_pull_request: Option<Url>,
     }
 
-    let page = octocrab::instance()
+    let page = jp_github::instance()
         .issues(ORG, REPO)
         .list()
         .per_page(100)
         .send()
         .await?;
 
-    let issue = octocrab::instance()
+    let issue = jp_github::instance()
         .all_pages(page)
         .await?
         .into_iter()

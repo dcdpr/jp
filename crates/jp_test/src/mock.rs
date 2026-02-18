@@ -4,7 +4,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use httpmock::{MockServer, RecordingRuleBuilder};
+use httpmock::RecordingRuleBuilder;
+pub use httpmock::{
+    MockServer,
+    prelude::{GET, POST},
+};
 use saphyr::{LoadableYamlNode, Yaml, YamlEmitter};
 
 /// A recorder for HTTP requests.
