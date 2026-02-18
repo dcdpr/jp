@@ -115,9 +115,10 @@ pub fn format(content: &str, buf: &mut String, config: &Config) -> Result<bool, 
 
 **Files to modify:**
 - `Cargo.toml` (workspace): Remove `octocrab`
-- `.config/jp/tools/Cargo.toml`: Remove `octocrab`
+- `.config/jp/tools/Cargo.toml`: Remove `octocrab` dep + `github` feature
+- `.config/jp/tools/src/lib.rs`: Remove `#[cfg(feature = "github")]` gates (added during step 1)
 - `.config/jp/tools/src/github.rs`: Replace auth init with reqwest client setup
-- `.config/jp/tools/src/github/pulls.rs`: Replace octocrab calls with reqwest
+- `.config/jp/tools/src/github/pulls.rs`: Replace octocrab calls with reqwest; define local `DiffEntryStatus` enum
 - `.config/jp/tools/src/github/issues.rs`: Replace octocrab calls with reqwest
 - `.config/jp/tools/src/github/create_issue_bug.rs`: Replace octocrab calls with reqwest
 - `.config/jp/tools/src/github/create_issue_enhancement.rs`: Replace octocrab calls with reqwest
@@ -126,9 +127,25 @@ pub fn format(content: &str, buf: &mut String, config: &Config) -> Result<bool, 
 **Approach:**
 - Create a thin `GitHubClient` struct wrapping `reqwest::Client` with base URL + auth token
 - Implement pagination helper that follows GitHub `Link` headers
-- Define minimal serde response structs for: PullRequest, Issue, Label, Collaborator, FileContent, DiffEntry, SearchResult
-- Map each octocrab call to its REST endpoint (see table in exploration notes)
+- Define minimal serde response structs for: PullRequest, Issue, Label, Collaborator, FileContent, DiffEntry, SearchResult, Code
 - GraphQL: POST to `https://api.github.com/graphql` with JSON body
+
+**REST endpoint mapping:**
+
+| octocrab call | REST endpoint |
+|---|---|
+| `.current().user()` | `GET /user` |
+| `.issues(o,r).get(n)` | `GET /repos/{o}/{r}/issues/{n}` |
+| `.issues(o,r).list()` | `GET /repos/{o}/{r}/issues?per_page=100` |
+| `.issues(o,r).create(...)` | `POST /repos/{o}/{r}/issues` |
+| `.issues(o,r).list_labels_for_repo()` | `GET /repos/{o}/{r}/labels?per_page=100` |
+| `.pulls(o,r).get(n)` | `GET /repos/{o}/{r}/pulls/{n}` |
+| `.pulls(o,r).list().state(s)` | `GET /repos/{o}/{r}/pulls?state={s}&per_page=100` |
+| `.pulls(o,r).list_files(n)` | `GET /repos/{o}/{r}/pulls/{n}/files?per_page=100` |
+| `.repos(o,r).list_collaborators()` | `GET /repos/{o}/{r}/collaborators?per_page=100` |
+| `.repos(o,r).get_content().path(p).ref(r)` | `GET /repos/{o}/{r}/contents/{p}?ref={r}` |
+| `.search().code(q)` | `GET /search/code?q={q}&per_page=100` |
+| `.graphql(&query)` | `POST /graphql` |
 
 **Auth pattern:**
 ```rust

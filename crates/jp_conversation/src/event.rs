@@ -4,6 +4,8 @@ mod chat;
 mod inquiry;
 mod tool_call;
 
+use std::fmt;
+
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -16,7 +18,7 @@ pub use self::{
 };
 
 /// A single event in a conversation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationEvent {
     /// The timestamp of the event.
     #[serde(
@@ -36,6 +38,16 @@ pub struct ConversationEvent {
         with = "jp_serde::repr::base64_json_map"
     )]
     pub metadata: Map<String, Value>,
+}
+
+impl fmt::Debug for ConversationEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConversationEvent")
+            .field("timestamp", &crate::DebugDt(&self.timestamp))
+            .field("kind", &self.kind)
+            .field("metadata", &self.metadata)
+            .finish()
+    }
 }
 
 impl ConversationEvent {

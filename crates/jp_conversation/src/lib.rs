@@ -38,6 +38,35 @@ pub use error::Error;
 pub use event::{ConversationEvent, EventKind};
 pub use stream::{ConversationStream, StreamError};
 
+/// A wrapper around `DateTime<Utc>` that implements `Debug` to match `time`'s
+/// `OffsetDateTime` format (e.g. `2020-01-01 0:00:00.0 +00`).
+pub(crate) struct DebugDt<'a>(pub &'a chrono::DateTime<chrono::Utc>);
+
+impl std::fmt::Debug for DebugDt<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use chrono::{Datelike as _, Timelike as _};
+        let dt = self.0;
+        let nanos = dt.nanosecond() % 1_000_000_000;
+        write!(
+            f,
+            "{}-{:02}-{:02} {}:{:02}:{:02}",
+            dt.year(),
+            dt.month(),
+            dt.day(),
+            dt.hour(),
+            dt.minute(),
+            dt.second(),
+        )?;
+        if nanos == 0 {
+            write!(f, ".0")?;
+        } else {
+            let s = format!("{nanos:09}");
+            write!(f, ".{}", s.trim_end_matches('0'))?;
+        }
+        write!(f, " +00")
+    }
+}
+
 /// Format `DateTime<Utc>` like `time`'s human-readable serde: `"2023-01-01 00:00:00.0"`.
 fn fmt_dt(dt: &chrono::DateTime<chrono::Utc>) -> String {
     if dt.timestamp_subsec_nanos() == 0 {
