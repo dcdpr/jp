@@ -105,7 +105,10 @@ pub(crate) fn deserialize_dt<'de, D: serde::Deserializer<'de>>(
 }
 
 /// Serialize an optional `DateTime<Utc>` in `time`'s human-readable format.
-#[expect(clippy::ref_option, reason = "serde serialize_with requires &Option<T>")]
+#[expect(
+    clippy::ref_option,
+    reason = "serde serialize_with requires &Option<T>"
+)]
 pub(crate) fn serialize_dt_opt<S: serde::Serializer>(
     dt: &Option<chrono::DateTime<chrono::Utc>>,
     s: S,
@@ -121,5 +124,8 @@ pub(crate) fn deserialize_dt_opt<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<Option<chrono::DateTime<chrono::Utc>>, D::Error> {
     let s: Option<String> = serde::Deserialize::deserialize(d)?;
-    s.map_or_else(|| Ok(None), |s| parse_dt(&s).map(Some).map_err(serde::de::Error::custom))
+    s.map_or_else(
+        || Ok(None),
+        |s| parse_dt(&s).map(Some).map_err(serde::de::Error::custom),
+    )
 }
