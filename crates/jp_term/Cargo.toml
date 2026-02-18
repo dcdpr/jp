@@ -13,9 +13,9 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-bat = { workspace = true, features = ["regex-onig"] }
 comfy-table = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
+syntect = { workspace=true}
 
 [lints]
 workspace = true

@@ -5,12 +5,12 @@ use std::{cell::OnceCell, fs, io::BufReader, iter};
 
 use ahash::{HashMap, HashMapExt};
 use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, NaiveDateTime, Utc};
 pub use error::Error;
 use jp_conversation::{Conversation, ConversationId, ConversationStream, ConversationsMetadata};
 use jp_id::Id as _;
 use jp_tombmap::TombMap;
 use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
-use time::{UtcDateTime, macros::format_description};
 use tracing::{trace, warn};
 
 use crate::{
@@ -401,7 +401,7 @@ impl Storage {
 
                     let path = entry.into_path();
                     let expiring_ts = get_expiring_timestamp(&path)?;
-                    if expiring_ts > UtcDateTime::now() {
+                    if expiring_ts > Utc::now() {
                         return None;
                     }
 
@@ -420,12 +420,22 @@ impl Storage {
     }
 }
 
-fn load_count_and_timestamp_events(root: &Utf8Path) -> Option<(usize, Option<UtcDateTime>)> {
+fn parse_datetime(s: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .ok()
+        .or_else(|| {
+            NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f")
+                .ok()
+                .map(|dt| dt.and_utc())
+        })
+}
+
+fn load_count_and_timestamp_events(root: &Utf8Path) -> Option<(usize, Option<DateTime<Utc>>)> {
     #[derive(serde::Deserialize)]
     struct RawEvent {
         timestamp: Box<serde_json::value::RawValue>,
     }
-    let fmt = format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond]");
     let path = root.join(EVENTS_FILE);
     let file = fs::File::open(&path).ok()?;
     let reader = BufReader::new(file);
@@ -448,7 +458,7 @@ fn load_count_and_timestamp_events(root: &Utf8Path) -> Option<(usize, Option<Utc
         event_count += 1;
         let ts = event.timestamp.get();
         if ts.len() >= 2 && ts.starts_with('"') && ts.ends_with('"') {
-            last_timestamp = UtcDateTime::parse(&ts[1..ts.len() - 1], &fmt).ok();
+            last_timestamp = parse_datetime(&ts[1..ts.len() - 1]);
         }
     }
 
@@ -460,12 +470,11 @@ fn load_count_and_timestamp_events(root: &Utf8Path) -> Option<(usize, Option<Utc
 ///
 /// This is a specialized function that ONLY parses the `expires_at` field in
 /// the JSON metadata file, for performance reasons.
-fn get_expiring_timestamp(root: &Utf8Path) -> Option<UtcDateTime> {
+fn get_expiring_timestamp(root: &Utf8Path) -> Option<DateTime<Utc>> {
     #[derive(serde::Deserialize)]
     struct RawConversation {
         expires_at: Option<Box<serde_json::value::RawValue>>,
     }
-    let fmt = format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond]");
     let path = root.join(METADATA_FILE);
     let file = fs::File::open(&path).ok()?;
     let reader = BufReader::new(file);
@@ -488,7 +497,7 @@ fn get_expiring_timestamp(root: &Utf8Path) -> Option<UtcDateTime> {
         return None;
     }
 
-    UtcDateTime::parse(&ts[1..ts.len() - 1], &fmt).ok()
+    parse_datetime(&ts[1..ts.len() - 1])
 }
 
 fn dir_entries(path: &Utf8Path) -> impl Iterator<Item = Utf8DirEntry> {
@@ -633,10 +642,10 @@ mod tests {
     };
 
     use camino_tempfile::tempdir;
+    use chrono::TimeZone as _;
     use jp_conversation::ConversationId;
     use serde_json::json;
     use test_log::test;
-    use time::macros::utc_datetime;
 
     use super::*;
 
@@ -733,8 +742,6 @@ mod tests {
 
     #[test]
     fn test_remove_ephemeral_conversations() {
-        use time::ext::NumericalDuration;
-
         let storage_dir = tempdir().unwrap();
         let path = storage_dir.path();
         let convs = path.join(CONVERSATIONS_DIR);
@@ -750,8 +757,8 @@ mod tests {
         write_json(
             &dir1.join("metadata.json"),
             &json!({
-                "last_activated_at": utc_datetime!(2023-01-01 00:00:00),
-                "expires_at": UtcDateTime::now().saturating_sub(1.hours())
+                "last_activated_at": Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap(),
+                "expires_at": Utc::now() - chrono::Duration::hours(1)
             }),
         )
         .unwrap();
@@ -764,8 +771,8 @@ mod tests {
             &dir2.join("metadata.json"),
             &json!({
                 "title": title,
-                "last_activated_at": utc_datetime!(2023-01-01 00:00:00),
-                "expires_at": UtcDateTime::now().saturating_add(1.hours())
+                "last_activated_at": Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap(),
+                "expires_at": Utc::now() + chrono::Duration::hours(1)
             }),
         )
         .unwrap();
@@ -777,8 +784,8 @@ mod tests {
             &dir3.join("metadata.json"),
             &json!({
                 "title": title,
-                "last_activated_at": utc_datetime!(2023-01-01 00:00:00),
-                "expires_at": UtcDateTime::now().saturating_sub(1.hours())
+                "last_activated_at": Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap(),
+                "expires_at": Utc::now() - chrono::Duration::hours(1)
             }),
         )
         .unwrap();

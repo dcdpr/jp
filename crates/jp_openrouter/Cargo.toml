@@ -26,12 +26,7 @@ reqwest = { workspace = true, features = [
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
-time = { workspace = true, features = [
-    "serde",
-    "serde-human-readable",
-    "serde-well-known",
-    "std",
-] }
+chrono = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

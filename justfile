@@ -1,5 +1,4 @@
 bacon_version    := "3.20.1"
-binstall_version := "1.15.7"
 deny_version     := "0.18.9"
 expand_version   := "1.0.118"
 insta_version    := "1.43.2"
@@ -7,6 +6,7 @@ jilu_version     := "0.13.2"
 llvm_cov_version := "0.6.21"
 nextest_version  := "0.9.108"
 shear_version    := "1.6.0"
+vet_version      := "0.10.2"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
@@ -144,7 +144,7 @@ serve-tools CONTEXT TOOL:
 
 # Run all ci tasks.
 [group('ci')]
-ci: build-ci lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci
+ci: build-ci lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
 
 # Build the code on CI.
 [group('ci')]
@@ -199,6 +199,11 @@ _insta-ci-setup: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" 
 shear-ci: (_install "cargo-expand@" + expand_version)
     @just shear --expand
 
+# Verify supply-chain audits on CI.
+[group('ci')]
+vet-ci: (_install "cargo-vet@" + vet_version)
+    cargo vet --locked
+
 @_install_ci_matchers:
     echo "::add-matcher::.github/matchers.json"
 
@@ -206,14 +211,11 @@ shear-ci: (_install "cargo-expand@" + expand_version)
 @_docs CMD="dev" *FLAGS: _docs-install
     yarn vitepress {{CMD}} {{FLAGS}}
 
-@_install +CRATES: _install-binstall
-    cargo binstall {{quiet_flag}} --locked --disable-telemetry --no-confirm --only-signed {{CRATES}}
+@_install +CRATES:
+    cargo install {{quiet_flag}} --locked {{CRATES}}
 
 @_install-jp *args:
     cargo install {{quiet_flag}} --locked --path crates/jp_cli {{args}}
-
-@_install-binstall:
-    cargo install {{quiet_flag}} --locked --version {{binstall_version}} cargo-binstall
 
 [working-directory: 'docs']
 @_docs-install:

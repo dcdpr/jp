@@ -1,8 +1,8 @@
+use chrono::NaiveDate;
 use jp_config::model::{
     id::ModelIdConfig,
     parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort},
 };
-use time::Date;
 use tracing::warn;
 
 /// Details about a model for a given provider, as specified by the provider.
@@ -25,7 +25,7 @@ pub struct ModelDetails {
     pub reasoning: Option<ReasoningDetails>,
 
     /// The knowledge cutoff date, if known.
-    pub knowledge_cutoff: Option<Date>,
+    pub knowledge_cutoff: Option<NaiveDate>,
 
     /// Deprecation status of the model, if known.
     pub deprecated: Option<ModelDeprecation>,
@@ -154,12 +154,12 @@ pub enum ModelDeprecation {
         note: String,
 
         /// The date on which the model will be retired, if known.
-        retire_at: Option<Date>,
+        retire_at: Option<NaiveDate>,
     },
 }
 
 impl ModelDeprecation {
-    pub fn deprecated(note: &impl ToString, retire_at: Option<Date>) -> Self {
+    pub fn deprecated(note: &impl ToString, retire_at: Option<NaiveDate>) -> Self {
         Self::Deprecated {
             note: note.to_string(),
             retire_at,

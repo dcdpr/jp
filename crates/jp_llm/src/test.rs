@@ -1,5 +1,6 @@
 use std::{panic, sync::Arc};
 
+use chrono::{TimeZone as _, Utc};
 use futures::TryStreamExt as _;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _,
@@ -21,7 +22,6 @@ use jp_conversation::{
 };
 use jp_test::mock::{Snap, Vcr};
 use schemars::Schema;
-use time::macros::{datetime, utc_datetime};
 
 use crate::{
     event::Event,
@@ -95,7 +95,7 @@ impl TestRequest {
                             name: "test".parse().unwrap(),
                         });
                         ConversationStream::new(config.into())
-                            .with_created_at(utc_datetime!(2020-01-01 0:00))
+                            .with_created_at(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap())
                     })
                     .build()
                     .unwrap(),
@@ -121,7 +121,7 @@ impl TestRequest {
                             name: "test".parse().unwrap(),
                         });
                         ConversationStream::new(config.into())
-                            .with_created_at(utc_datetime!(2020-01-01 0:00))
+                            .with_created_at(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap())
                     })
                     .build()
                     .unwrap(),
@@ -511,7 +511,8 @@ pub async fn run_chat_completion(
                             .clone()
                             .into_iter()
                             .map(|mut v| {
-                                v.event.timestamp = utc_datetime!(2020-01-01 0:00);
+                                v.event.timestamp =
+                                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
                                 v
                             })
                             .collect::<Vec<_>>(),
@@ -548,7 +549,8 @@ pub async fn run_chat_completion(
 
                         for mut event in events {
                             if let Event::Part { event, .. } = &mut event {
-                                event.timestamp = datetime!(2020-01-01 0:00 utc).into();
+                                event.timestamp =
+                                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
                             }
 
                             all_events[index].push(event.clone());

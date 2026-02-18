@@ -301,7 +301,7 @@ impl From<crate::error::Error> for Error {
             Llm(error) => return error.into(),
             Io(error) => return error.into(),
             Url(error) => return error.into(),
-            Bat(error) => return error.into(),
+            SyntaxHighlight(error) => return error.into(),
             Template(error) => return error.into(),
             Json(error) => return error.into(),
             Toml(error) => return error.into(),
@@ -373,7 +373,7 @@ macro_rules! impl_from_error {
     };
 }
 
-impl_from_error!(bat::error::Error, "Error while formatting code");
+impl_from_error!(syntect::Error, "Error while formatting code");
 impl_from_error!(
     jp_config::assignment::KvAssignmentError,
     "Key-value assignment error"

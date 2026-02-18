@@ -82,14 +82,14 @@ async fn auth() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
             "unable to get auth token. Set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to a valid token."
         })?;
 
-    let octocrab = octocrab::Octocrab::builder()
+    let octocrab = jp_github::Octocrab::builder()
         .personal_token(token)
         .build()
         .map_err(|err| format!("unable to create github client: {err:#}"))?;
 
-    octocrab::initialise(octocrab);
+    jp_github::initialise(octocrab);
 
-    if octocrab::instance().current().user().await.is_err() {
+    if jp_github::instance().current().user().await.is_err() {
         return Err(
             "Unable to authenticate with github. This might be because the token is expired. \
              Either set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to a valid token."
@@ -100,9 +100,9 @@ async fn auth() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     Ok(())
 }
 
-fn handle_404(error: octocrab::Error, msg: impl Into<String>) -> Error {
+fn handle_404(error: jp_github::Error, msg: impl Into<String>) -> Error {
     match error {
-        octocrab::Error::GitHub { source, .. } if source.status_code.as_u16() == 404 => {
+        jp_github::Error::GitHub { source, .. } if source.status_code.as_u16() == 404 => {
             msg.into().into()
         }
         _ => Box::new(error) as Error,

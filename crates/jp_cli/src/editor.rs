@@ -7,6 +7,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{FixedOffset, Local};
 use duct::Expression;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _, model::parameters::PartialReasoningConfig,
@@ -15,7 +16,6 @@ use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, EventKind},
 };
-use time::{UtcOffset, macros::format_description};
 
 use crate::{
     editor::parser::QueryDocument,
@@ -291,17 +291,17 @@ fn build_history_text(history: &ConversationStream) -> String {
         text.push_str("\n# Conversation History (last 10 entries)");
     }
 
-    let local_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
-    let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    let local_offset: FixedOffset = *Local::now().offset();
+    let format = "%Y-%m-%d %H:%M:%S";
 
     let mut messages = vec![];
     for event in history.iter().rev().take(10) {
         let mut buf = String::new();
         let timestamp = event
             .timestamp
-            .to_offset(local_offset)
-            .format(&format)
-            .unwrap_or_else(|_| event.timestamp.to_string());
+            .with_timezone(&local_offset)
+            .format(format)
+            .to_string();
 
         let options = comrak::Options {
             render: comrak::options::Render {

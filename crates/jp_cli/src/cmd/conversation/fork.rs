@@ -1,7 +1,7 @@
 use std::{str::FromStr as _, time::Duration};
 
+use chrono::{DateTime, Utc};
 use jp_conversation::ConversationId;
-use time::UtcDateTime;
 
 use crate::{Output, cmd::Success, ctx::Ctx};
 
@@ -20,19 +20,19 @@ pub(crate) struct Fork {
     /// Timestamp can be relative (5days, 2mins, etc) or absolute. Can be used
     /// in combination with `--until`.
     #[arg(long, value_parser = parse_duration)]
-    from: Option<UtcDateTime>,
+    from: Option<DateTime<Utc>>,
 
     /// Ignore all conversation events *after* the specified timestamp.
     ///
     /// Timestamp can be relative (5days, 2mins, etc) or absolute. Can be used
     /// in combination with `--until`.
     #[arg(long, value_parser = parse_duration)]
-    until: Option<UtcDateTime>,
+    until: Option<DateTime<Utc>>,
 }
 
-fn parse_duration(s: &str) -> Result<UtcDateTime, String> {
+fn parse_duration(s: &str) -> Result<DateTime<Utc>, String> {
     humantime::Duration::from_str(s)
-        .map(|d| UtcDateTime::now() - Duration::from(d))
+        .map(|d| Utc::now() - Duration::from(d))
         .map_err(|e| e.to_string())
         .or_else(|_| {
             humantime::parse_rfc3339_weak(s)
@@ -89,6 +89,7 @@ mod tests {
 
     use assert_matches::assert_matches;
     use camino_tempfile::tempdir;
+    use chrono::TimeZone as _;
     use jp_config::AppConfig;
     use jp_conversation::{
         Conversation, ConversationEvent, ConversationStream,
@@ -96,7 +97,6 @@ mod tests {
     };
     use jp_printer::Printer;
     use jp_workspace::Workspace;
-    use time::macros::utc_datetime;
     use tokio::runtime::Runtime;
 
     use super::*;
@@ -141,8 +141,8 @@ mod tests {
                     assert!(convs[0].2.created_at < convs[1].2.created_at);
 
                     for (_, conv, stream) in &mut convs {
-                        conv.last_activated_at = UtcDateTime::UNIX_EPOCH;
-                        stream.created_at = UtcDateTime::UNIX_EPOCH;
+                        conv.last_activated_at = DateTime::<Utc>::UNIX_EPOCH;
+                        stream.created_at = DateTime::<Utc>::UNIX_EPOCH;
                     }
 
                     assert!(convs[0].0.timestamp() < convs[1].0.timestamp());
@@ -171,11 +171,11 @@ mod tests {
                     ctx.workspace.get_events_mut(&id).unwrap().extend(vec![
                         ConversationEvent::new(
                             ChatRequest::from("foo"),
-                            utc_datetime!(2020-01-01 0:00),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
                         ),
                         ConversationEvent::new(
                             ChatResponse::message("bar"),
-                            utc_datetime!(2020-01-01 0:01),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
                         ),
                     ]);
                 },
@@ -187,8 +187,8 @@ mod tests {
                     assert!(convs[0].2.created_at < convs[1].2.created_at);
 
                     for (_, conv, stream) in &mut convs {
-                        conv.last_activated_at = UtcDateTime::UNIX_EPOCH;
-                        stream.created_at = UtcDateTime::UNIX_EPOCH;
+                        conv.last_activated_at = DateTime::<Utc>::UNIX_EPOCH;
+                        stream.created_at = DateTime::<Utc>::UNIX_EPOCH;
                     }
 
                     assert!(convs[0].0.timestamp() < convs[1].0.timestamp());
@@ -216,11 +216,11 @@ mod tests {
                     ctx.workspace.get_events_mut(&id).unwrap().extend(vec![
                         ConversationEvent::new(
                             ChatRequest::from("foo"),
-                            utc_datetime!(2020-01-01 0:00),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
                         ),
                         ConversationEvent::new(
                             ChatResponse::message("bar"),
-                            utc_datetime!(2020-01-01 0:01),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
                         ),
                     ]);
                 },
@@ -235,8 +235,8 @@ mod tests {
                     assert!(convs[0].2.created_at > convs[1].2.created_at);
 
                     for (_, conv, stream) in &mut convs {
-                        conv.last_activated_at = UtcDateTime::UNIX_EPOCH;
-                        stream.created_at = UtcDateTime::UNIX_EPOCH;
+                        conv.last_activated_at = DateTime::<Utc>::UNIX_EPOCH;
+                        stream.created_at = DateTime::<Utc>::UNIX_EPOCH;
                     }
 
                     assert!(convs[0].0.timestamp() > convs[1].0.timestamp());
@@ -248,7 +248,7 @@ mod tests {
                 args: Fork {
                     id: None,
                     activate: false,
-                    from: Some(utc_datetime!(2020-01-01 0:01)),
+                    from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
                     until: None,
                 },
                 setup: |ctx| {
@@ -264,15 +264,15 @@ mod tests {
                     ctx.workspace.get_events_mut(&id).unwrap().extend(vec![
                         ConversationEvent::new(
                             ChatRequest::from("foo"),
-                            utc_datetime!(2020-01-01 0:00),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
                         ),
                         ConversationEvent::new(
                             ChatResponse::message("bar"),
-                            utc_datetime!(2020-01-01 0:01),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
                         ),
                         ConversationEvent::new(
                             ChatResponse::message("baz"),
-                            utc_datetime!(2020-01-01 0:02),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
                         ),
                     ]);
                 },
@@ -283,11 +283,11 @@ mod tests {
                     assert_eq!(convs[1].2.iter().count(), 2);
                     assert_eq!(
                         convs[0].2.first().unwrap().event.timestamp,
-                        utc_datetime!(2020-01-01 0:00)
+                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
                     );
                     assert_eq!(
                         convs[1].2.first().unwrap().event.timestamp,
-                        utc_datetime!(2020-01-01 0:01)
+                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()
                     );
                 },
             }),
@@ -296,7 +296,7 @@ mod tests {
                     id: None,
                     activate: false,
                     from: None,
-                    until: Some(utc_datetime!(2020-01-01 0:01)),
+                    until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
                 },
                 setup: |ctx| {
                     let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -311,15 +311,15 @@ mod tests {
                     ctx.workspace.get_events_mut(&id).unwrap().extend(vec![
                         ConversationEvent::new(
                             ChatRequest::from("foo"),
-                            utc_datetime!(2020-01-01 0:00),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
                         ),
                         ConversationEvent::new(
                             ChatResponse::message("bar"),
-                            utc_datetime!(2020-01-01 0:01),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
                         ),
                         ConversationEvent::new(
                             ChatResponse::message("baz"),
-                            utc_datetime!(2020-01-01 0:02),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
                         ),
                     ]);
                 },
@@ -330,11 +330,11 @@ mod tests {
                     assert_eq!(convs[1].2.iter().count(), 2);
                     assert_eq!(
                         convs[0].2.last().unwrap().event.timestamp,
-                        utc_datetime!(2020-01-01 0:02)
+                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()
                     );
                     assert_eq!(
                         convs[1].2.last().unwrap().event.timestamp,
-                        utc_datetime!(2020-01-01 0:01)
+                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()
                     );
                 },
             }),
@@ -342,8 +342,8 @@ mod tests {
                 args: Fork {
                     id: None,
                     activate: false,
-                    from: Some(utc_datetime!(2020-01-01 0:01)),
-                    until: Some(utc_datetime!(2020-01-01 0:02)),
+                    from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
+                    until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()),
                 },
                 setup: |ctx| {
                     let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -358,19 +358,19 @@ mod tests {
                     ctx.workspace.get_events_mut(&id).unwrap().extend(vec![
                         ConversationEvent::new(
                             ChatRequest::from("foo"),
-                            utc_datetime!(2020-01-01 0:00),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
                         ),
                         ConversationEvent::new(
                             ChatResponse::message("bar"),
-                            utc_datetime!(2020-01-01 0:01),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
                         ),
                         ConversationEvent::new(
                             ChatResponse::message("baz"),
-                            utc_datetime!(2020-01-01 0:02),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
                         ),
                         ConversationEvent::new(
                             ChatResponse::message("qux"),
-                            utc_datetime!(2020-01-01 0:03),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap(),
                         ),
                     ]);
                 },
@@ -381,19 +381,19 @@ mod tests {
                     assert_eq!(convs[1].2.iter().count(), 2);
                     assert_eq!(
                         convs[0].2.first().unwrap().event.timestamp,
-                        utc_datetime!(2020-01-01 0:00)
+                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
                     );
                     assert_eq!(
                         convs[1].2.first().unwrap().event.timestamp,
-                        utc_datetime!(2020-01-01 0:01)
+                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()
                     );
                     assert_eq!(
                         convs[0].2.last().unwrap().event.timestamp,
-                        utc_datetime!(2020-01-01 0:03)
+                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap()
                     );
                     assert_eq!(
                         convs[1].2.last().unwrap().event.timestamp,
-                        utc_datetime!(2020-01-01 0:02)
+                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()
                     );
                 },
             }),
@@ -419,7 +419,7 @@ mod tests {
                 resume_unwind(panic);
             }
 
-            ctx.set_now(UtcDateTime::UNIX_EPOCH + Duration::from_secs(1));
+            ctx.set_now(DateTime::<Utc>::UNIX_EPOCH + Duration::from_secs(1));
 
             let msg =
                 assert_matches!(case.args.run(&mut ctx).unwrap(), Success::Message(msg) => msg);

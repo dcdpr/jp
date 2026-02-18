@@ -89,7 +89,7 @@ pub(crate) async fn github_create_issue_enhancement(
         _ => return Err("Invalid complexity, must be one of `low`, `medium`, or `high`.".into()),
     }
 
-    let issue = octocrab::instance()
+    let issue = jp_github::instance()
         .issues(ORG, REPO)
         .create(&title)
         .body(&body)
@@ -104,13 +104,13 @@ pub(crate) async fn github_create_issue_enhancement(
 }
 
 async fn check_labels(as_ref: Option<&[String]>) -> Result<()> {
-    let page = octocrab::instance()
+    let page = jp_github::instance()
         .issues(ORG, REPO)
         .list_labels_for_repo()
         .send()
         .await?;
 
-    let labels = octocrab::instance().all_pages(page).await?;
+    let labels = jp_github::instance().all_pages(page).await?;
 
     let mut invalid_labels = vec![];
     for label in as_ref.into_iter().flatten() {
@@ -156,13 +156,13 @@ async fn check_labels(as_ref: Option<&[String]>) -> Result<()> {
 }
 
 async fn check_assignees(assignees: Option<&[String]>) -> Result<()> {
-    let page = octocrab::instance()
+    let page = jp_github::instance()
         .repos(ORG, REPO)
         .list_collaborators()
         .send()
         .await?;
 
-    let collaborators = octocrab::instance().all_pages(page).await?;
+    let collaborators = jp_github::instance().all_pages(page).await?;
 
     let mut invalid_assignees = vec![];
     for assignee in assignees.into_iter().flatten() {

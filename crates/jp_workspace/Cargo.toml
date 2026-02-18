@@ -24,7 +24,7 @@ camino-tempfile = { workspace = true }
 directories = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
-time = { workspace = true }
+chrono = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

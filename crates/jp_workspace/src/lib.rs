@@ -11,6 +11,7 @@ mod state;
 use std::{cell::OnceCell, iter, sync::Arc};
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, Utc};
 pub use error::Error;
 use error::Result;
 pub use id::Id;
@@ -19,7 +20,6 @@ use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::Storage;
 use jp_tombmap::{Mut, TombMap};
 use state::{LocalState, State, UserState};
-use time::UtcDateTime;
 use tracing::{debug, info, trace, warn};
 
 const APPLICATION: &str = "jp";
@@ -316,7 +316,7 @@ impl Workspace {
     pub fn set_active_conversation_id(
         &mut self,
         id: ConversationId,
-        activation_timestamp: UtcDateTime,
+        activation_timestamp: DateTime<Utc>,
     ) -> Result<()> {
         // Remove the new active conversation from the list of conversations,
         // returning an error if it doesn't exist.
@@ -671,9 +671,9 @@ mod tests {
     use std::{collections::HashMap, fs, time::Duration};
 
     use camino_tempfile::tempdir;
+    use chrono::TimeZone as _;
     use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
     use test_log::test;
-    use time::{UtcDateTime, macros::utc_datetime};
 
     use super::*;
 
@@ -780,7 +780,7 @@ mod tests {
 
         let id = workspace.create_conversation(Conversation::default(), config.into());
         workspace
-            .set_active_conversation_id(id, UtcDateTime::UNIX_EPOCH)
+            .set_active_conversation_id(id, DateTime::<Utc>::UNIX_EPOCH)
             .unwrap();
         assert!(!storage.exists());
 
@@ -825,7 +825,7 @@ mod tests {
         let mut workspace = Workspace::new(Utf8PathBuf::new());
         assert!(workspace.state.local.conversations.is_empty());
 
-        let id = ConversationId::try_from(UtcDateTime::now() - Duration::from_secs(1)).unwrap();
+        let id = ConversationId::try_from(Utc::now() - Duration::from_secs(1)).unwrap();
         assert_eq!(workspace.get_conversation(&id), None);
 
         let conversation = Conversation::default();
@@ -865,7 +865,7 @@ mod tests {
         let mut workspace = Workspace::new(Utf8PathBuf::new());
         assert!(workspace.state.local.conversations.is_empty());
 
-        let id = ConversationId::try_from(UtcDateTime::now() - Duration::from_secs(1)).unwrap();
+        let id = ConversationId::try_from(Utc::now() - Duration::from_secs(1)).unwrap();
         let conversation = Conversation::default();
         workspace
             .state
@@ -912,13 +912,15 @@ mod tests {
         let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
         let config = Arc::new(AppConfig::new_test());
 
-        let id1 = ConversationId::try_from(utc_datetime!(2023-01-01 0:00)).unwrap();
-        let id2 = ConversationId::try_from(utc_datetime!(2023-01-02 0:00)).unwrap();
+        let id1 =
+            ConversationId::try_from(Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap()).unwrap();
+        let id2 =
+            ConversationId::try_from(Utc.with_ymd_and_hms(2023, 1, 2, 0, 0, 0).unwrap()).unwrap();
 
         workspace.create_conversation_with_id(id1, Conversation::default(), config.clone());
         workspace.create_conversation_with_id(id2, Conversation::default(), config.clone());
         workspace
-            .set_active_conversation_id(id1, UtcDateTime::UNIX_EPOCH)
+            .set_active_conversation_id(id1, DateTime::<Utc>::UNIX_EPOCH)
             .unwrap();
 
         workspace.persist_active_conversation().unwrap();

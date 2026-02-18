@@ -4,10 +4,12 @@ mod chat;
 mod inquiry;
 mod tool_call;
 
+use std::fmt;
+
+use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use time::UtcDateTime;
 
 pub use self::{
     chat::{ChatRequest, ChatResponse},
@@ -16,10 +18,14 @@ pub use self::{
 };
 
 /// A single event in a conversation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationEvent {
     /// The timestamp of the event.
-    pub timestamp: UtcDateTime,
+    #[serde(
+        serialize_with = "crate::serialize_dt",
+        deserialize_with = "crate::deserialize_dt"
+    )]
+    pub timestamp: DateTime<Utc>,
 
     /// The kind of event.
     #[serde(flatten)]
@@ -34,10 +40,20 @@ pub struct ConversationEvent {
     pub metadata: Map<String, Value>,
 }
 
+impl fmt::Debug for ConversationEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConversationEvent")
+            .field("timestamp", &crate::DebugDt(&self.timestamp))
+            .field("kind", &self.kind)
+            .field("metadata", &self.metadata)
+            .finish()
+    }
+}
+
 impl ConversationEvent {
     /// Create a new event with the given timestamp and kind.
     #[must_use]
-    pub fn new(event: impl Into<EventKind>, timestamp: impl Into<UtcDateTime>) -> Self {
+    pub fn new(event: impl Into<EventKind>, timestamp: impl Into<DateTime<Utc>>) -> Self {
         Self {
             timestamp: timestamp.into(),
             kind: event.into(),
@@ -48,7 +64,7 @@ impl ConversationEvent {
     /// Create a new event with the current timestamp and kind.
     #[must_use]
     pub fn now(event: impl Into<EventKind>) -> Self {
-        Self::new(event, UtcDateTime::now())
+        Self::new(event, Utc::now())
     }
 
     /// Attaches metadata to the event.

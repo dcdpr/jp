@@ -1,4 +1,4 @@
-use time::OffsetDateTime;
+use chrono::{DateTime, Utc};
 use url::Url;
 
 use super::auth;
@@ -26,14 +26,12 @@ async fn get_issue(number: u64) -> Result<String> {
         url: Url,
         labels: Vec<String>,
         author: String,
-        #[serde(with = "time::serde::rfc3339")]
-        created_at: OffsetDateTime,
-        #[serde(with = "time::serde::rfc3339::option")]
-        closed_at: Option<OffsetDateTime>,
+        created_at: DateTime<Utc>,
+        closed_at: Option<DateTime<Utc>>,
         linked_pull_request: Option<Url>,
     }
 
-    let issue = octocrab::instance()
+    let issue = jp_github::instance()
         .issues(ORG, REPO)
         .get(number)
         .await
@@ -46,11 +44,8 @@ async fn get_issue(number: u64) -> Result<String> {
         url: issue.html_url,
         labels: issue.labels.into_iter().map(|label| label.name).collect(),
         author: issue.user.login,
-        created_at: OffsetDateTime::from_unix_timestamp(issue.created_at.timestamp())?,
-        closed_at: issue
-            .closed_at
-            .map(|t| OffsetDateTime::from_unix_timestamp(t.timestamp()))
-            .transpose()?,
+        created_at: issue.created_at,
+        closed_at: issue.closed_at,
         linked_pull_request: issue.pull_request.map(|pr| pr.html_url),
     })
 }
@@ -68,40 +63,33 @@ async fn get_issues() -> Result<String> {
         url: Url,
         labels: Vec<String>,
         author: String,
-        #[serde(with = "time::serde::rfc3339")]
-        created_at: OffsetDateTime,
-        #[serde(with = "time::serde::rfc3339::option")]
-        closed_at: Option<OffsetDateTime>,
+        created_at: DateTime<Utc>,
+        closed_at: Option<DateTime<Utc>>,
         linked_pull_request: Option<Url>,
     }
 
-    let page = octocrab::instance()
+    let page = jp_github::instance()
         .issues(ORG, REPO)
         .list()
         .per_page(100)
         .send()
         .await?;
 
-    let issue = octocrab::instance()
+    let issue = jp_github::instance()
         .all_pages(page)
         .await?
         .into_iter()
-        .map(|issue| {
-            Ok(Issue {
-                number: issue.number,
-                title: issue.title,
-                url: issue.html_url,
-                labels: issue.labels.into_iter().map(|label| label.name).collect(),
-                author: issue.user.login,
-                created_at: OffsetDateTime::from_unix_timestamp(issue.created_at.timestamp())?,
-                closed_at: issue
-                    .closed_at
-                    .map(|t| OffsetDateTime::from_unix_timestamp(t.timestamp()))
-                    .transpose()?,
-                linked_pull_request: issue.pull_request.map(|pr| pr.html_url),
-            })
+        .map(|issue| Issue {
+            number: issue.number,
+            title: issue.title,
+            url: issue.html_url,
+            labels: issue.labels.into_iter().map(|label| label.name).collect(),
+            author: issue.user.login,
+            created_at: issue.created_at,
+            closed_at: issue.closed_at,
+            linked_pull_request: issue.pull_request.map(|pr| pr.html_url),
         })
-        .collect::<Result<_>>()?;
+        .collect();
 
     to_xml(Issues { issue })
 }

@@ -28,14 +28,7 @@ grep-regex = { workspace = true }
 grep-searcher = { workspace = true }
 ignore = { workspace = true }
 indoc = { workspace = true }
-octocrab = { workspace = true, features = [
-    "default-client",
-    "follow-redirect",
-    "retry",
-    "rustls",
-    "rustls-ring",
-    "timeout",
-] }
+jp_github = { workspace = true }
 quick-xml = { workspace = true, features = ["encoding", "serialize"] }
 reqwest = { workspace = true, features = [
     "charset",
@@ -48,7 +41,7 @@ serde = { workspace = true, features = ["std", "derive", "alloc"] }
 serde_json = { workspace = true, features = ["std", "preserve_order", "alloc"] }
 similar = { workspace = true, features = ["text", "unicode", "inline"] }
 strip-ansi-escapes = { workspace = true }
-time = { workspace = true, features = ["serde-human-readable"] }
+chrono = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 url = { workspace = true, features = ["serde", "std"] }
 

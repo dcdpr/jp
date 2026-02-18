@@ -1,0 +1,20 @@
+[package]
+name = "gargoyle-snaps"
+version = "0.1.5+1196a84"
+edition = "2021"
+description = "Always-on snapshot testing utilities with path normalization filters"
+license = "MPL-2.0"
+repository = "local"
+readme = "README.md"
+keywords = ["testing", "snapshot", "insta"]
+categories = ["development-tools::testing"]
+
+[lib]
+path = "src/gargoyle_snaps.rs"
+
+[dependencies]
+insta = { version = "1", features = ["json", "filters", "redactions"] }
+inventory = "0.3.21"
+onlyerror = "0.1"
+serde = "1"
+serde_json = "1"

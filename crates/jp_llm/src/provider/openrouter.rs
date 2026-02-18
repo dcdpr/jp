@@ -477,7 +477,7 @@ fn map_model(model: response::Model) -> Result<ModelDetails> {
         context_window: Some(model.context_length),
         max_output_tokens: None,
         reasoning: None,
-        knowledge_cutoff: Some(model.created.date()),
+        knowledge_cutoff: Some(model.created.0.date_naive()),
         deprecated: None,
         features: vec![],
     })
