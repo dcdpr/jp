@@ -8,6 +8,7 @@ export default defineConfig({
     title: "Jean-Pierre",
     description: "An LLM-based Programming Assistant",
     cleanUrls: true,
+    srcExclude: ['rfd/**/*'],
     themeConfig: {
         outline: {
             level: [2, 3]
