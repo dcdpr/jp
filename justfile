@@ -99,6 +99,105 @@ profile-heap *ARGS:
     #!/usr/bin/env sh
     cargo run --profile profiling --features dhat -- "$@"
 
+# Create a new RFD draft. STYLE is 'rfd' (design proposal) or 'adr' (decision record).
+[group('rfd')]
+rfd-draft STYLE +TITLE:
+    #!/usr/bin/env sh
+    set -eu
+
+    style="{{STYLE}}"
+
+    # Validate the style argument.
+    case "$style" in
+        rfd|adr) ;;
+        *) echo "Unknown style '$style'. Use 'rfd' or 'adr'." >&2; exit 1 ;;
+    esac
+
+    # Find the next available RFD number.
+    last=$(ls docs/rfd/[0-9][0-9][0-9]-*.md 2>/dev/null \
+        | sed 's|.*/||; s|-.*||' \
+        | sort -n \
+        | tail -1 \
+        || echo "000")
+
+    # Strip leading zeros to avoid octal interpretation in POSIX sh.
+    last=$(echo "$last" | sed 's/^0*//')
+    last=${last:-0}
+    next=$(printf "%03d" $((last + 1)))
+
+    # Resolve the author from git config, falling back to $USER.
+    git_name=$(git config user.name 2>/dev/null || true)
+    git_email=$(git config user.email 2>/dev/null || true)
+    if [ -n "$git_name" ] && [ -n "$git_email" ]; then
+        author="${git_name} <${git_email}>"
+    elif [ -n "$git_name" ]; then
+        author="$git_name"
+    else
+        author="${USER:-unknown}"
+    fi
+
+    # Build the filename slug from the title.
+    slug=$(echo "{{TITLE}}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-')
+    file="docs/rfd/${next}-${slug}.md"
+
+    # Copy the template and fill in metadata.
+    sed \
+        -e "s/RFD NNN: TITLE/RFD ${next}: {{TITLE}}/" \
+        -e "s/AUTHOR/${author}/" \
+        -e "s/DATE/$(date +%Y-%m-%d)/" \
+        "docs/rfd/000-${style}-template.md" > "$file"
+
+    echo "Created $file"
+
+# Supersede RFD NNN with RFD MMM, updating both documents.
+[group('rfd')]
+rfd-supersede NNN MMM:
+    #!/usr/bin/env sh
+    set -eu
+
+    old_n=$(echo "{{NNN}}" | sed 's/^0*//')
+    old_num=$(printf "%03d" "${old_n:-0}")
+    new_n=$(echo "{{MMM}}" | sed 's/^0*//')
+    new_num=$(printf "%03d" "${new_n:-0}")
+    old_file=$(ls docs/rfd/${old_num}-*.md 2>/dev/null | head -1)
+    new_file=$(ls docs/rfd/${new_num}-*.md 2>/dev/null | head -1)
+    if [ -z "$old_file" ]; then
+        echo "No RFD found with number ${old_num}." >&2; exit 1
+    fi
+    if [ -z "$new_file" ]; then
+        echo "No RFD found with number ${new_num}." >&2; exit 1
+    fi
+
+    # Validate the old RFD can be superseded.
+    current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$old_file")
+    case "$current" in
+        Accepted|Implemented) ;;
+        *)
+            echo "Cannot supersede from '${current}'." >&2
+            echo "Only Accepted or Implemented RFDs can be superseded." >&2
+            exit 1 ;;
+    esac
+
+    # Update old RFD: status -> Superseded, add/update "Superseded by" link.
+    awk -v new="RFD ${new_num}" '
+        /^- \*\*Status\*\*:/ { print "- **Status**: Superseded"; next }
+        /^- \*\*Superseded by\*\*:/ { next }
+        /^- \*\*Date\*\*:/ { print; print "- **Superseded by**: " new; next }
+        { print }
+    ' "$old_file" > "${old_file}.tmp"
+    mv "${old_file}.tmp" "$old_file"
+
+    # Update new RFD: add/update "Supersedes" link.
+    awk -v old="RFD ${old_num}" '
+        /^- \*\*Supersedes\*\*:/ { next }
+        /^- \*\*Date\*\*:/ { print; print "- **Supersedes**: " old; next }
+        { print }
+    ' "$new_file" > "${new_file}.tmp"
+    mv "${new_file}.tmp" "$new_file"
+
+    echo "${old_file}: Superseded by RFD ${new_num}"
+    echo "${new_file}: Supersedes RFD ${old_num}"
+
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
 develop-docs: (_docs "dev" "--open")

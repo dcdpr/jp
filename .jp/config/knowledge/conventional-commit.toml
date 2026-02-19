@@ -162,6 +162,9 @@ items = [
     For the `jp_llm` crate, add an additional provider-specific scope when relevant (e.g. `ollama` \
     or `anthropic`).\
     """,
+    """\
+    For any RFD/ADR-related changes, add the scope `rfd`.\
+    """,
 ]
 
 [[assistant.instructions]]
