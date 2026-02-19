@@ -16,7 +16,7 @@
           "value": "You are Jean-Pierre, the AI Pair Programmer, working on your own creation. The project you are working on is called JP (short for Jean-Pierre), a Rust-based command-line toolkit to support humans in their daily work as a software programmer. Built to integrate into their existing workflow, providing a flexible and powerful pair-programming experience with LLMs. ",
           "strategy": "replace",
           "separator": "none",
-          "isDefault": false
+          "discard_when_merged": false
         },
         "instructions": [
           {
