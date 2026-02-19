@@ -1,0 +1,25 @@
+[conversation.tools.rfd_draft]
+enable = false
+run = "ask"
+source = "local"
+command = "just rfd-draft {{tool.arguments.variant}} {{tool.arguments.title}}"
+description = "Create a new RFD document."
+
+[conversation.tools.rfd_draft.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.rfd_draft.parameters.variant]
+description = "RFD variant to create."
+required = true
+type = "string"
+enum = [
+    "rfd",
+    "adr",
+]
+
+[conversation.tools.rfd_draft.parameters.title]
+description = "Title of the RFD."
+required = true
+type = "string"
