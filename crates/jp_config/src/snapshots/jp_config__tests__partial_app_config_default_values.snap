@@ -119,6 +119,18 @@ Ok(
                         Off,
                     ),
                 },
+                markdown: PartialMarkdownConfig {
+                    wrap_width: Some(
+                        80,
+                    ),
+                    table_max_column_width: Some(
+                        40,
+                    ),
+                    theme: Some(
+                        "gruvbox-dark",
+                    ),
+                    hr_style: None,
+                },
                 reasoning: PartialReasoningConfig {
                     display: None,
                     summary_model: None,

@@ -1,0 +1,18 @@
+---
+source: crates/jp_md/tests/buffer.rs
+description: "Source: blockquotes"
+---
+[
+    Block(
+        "Here is a Markdown document with the requested blockquote structures.\n\n",
+    ),
+    Block(
+        "> This blockquote contains **bold text** to emphasize a point and *italicized text* for subtle distinction.\n> It demonstrates basic inline formatting within a single level.\n\n",
+    ),
+    Block(
+        "> You can include [hyperlinks](https://github.com) and `inline code` snippets like `struct JP;` inside a blockquote.\n> This is useful for referencing technical documentation or specific implementation details.\n\n",
+    ),
+    Flush(
+        "> This level contains a ~~strikethrough~~ element.\n> > This is a nested blockquote.\n> > > This is a triple-nested blockquote, showing **deep** hierarchy.\n> Nested structures help in representing threaded conversations or hierarchical data.\n",
+    ),
+]

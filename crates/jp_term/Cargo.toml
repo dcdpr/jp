@@ -15,7 +15,7 @@ version.workspace = true
 [dependencies]
 comfy-table = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
-syntect = { workspace=true}
+syntect = { workspace = true, features = ["regex-fancy", "default-themes", "default-syntaxes"] }
 
 [lints]
 workspace = true

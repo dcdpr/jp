@@ -1,0 +1,24 @@
+---
+source: crates/jp_md/tests/buffer.rs
+description: "Source: headers-lists"
+---
+[
+    Block(
+        "# JP Project\n",
+    ),
+    Block(
+        "## Architecture\n",
+    ),
+    Block(
+        "JP is a CLI tool written in Rust designed for seamless integration with existing development workflows.\n\n",
+    ),
+    Block(
+        "## Features\n",
+    ),
+    Block(
+        "> JP provides a flexible and powerful pair-programming experience with LLMs.\n\n",
+    ),
+    Flush(
+        "*   Core Modules\n    *   Command Dispatcher\n    *   LLM Integration Layer\n*   Tooling Support\n    *   Test Runner\n    *   Code Scaffolder\n",
+    ),
+]

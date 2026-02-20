@@ -1,0 +1,36 @@
+---
+source: crates/jp_md/tests/buffer.rs
+description: "Source: hr-setext-headers"
+---
+[
+    Block(
+        "# ATX Level 1 Header\n",
+    ),
+    Block(
+        "This paragraph demonstrates **strong emphasis**, *emphasis*, and `inline code`.\nMarkdown supports various inline styles for text decoration.\n\n",
+    ),
+    Block(
+        "---\n",
+    ),
+    Block(
+        "## ATX Level 2 Header\n",
+    ),
+    Block(
+        "The horizontal rule above separates sections. Below is a Setext-style header.\n\n",
+    ),
+    Block(
+        "Level 1 Setext Header\n=====================\n",
+    ),
+    Block(
+        "Level 2 Setext Header\n---------------------\n",
+    ),
+    Block(
+        "***\n",
+    ),
+    Block(
+        "### ATX Level 3 Header\n",
+    ),
+    Flush(
+        "You can also use ~~strikethrough~~ or [hyperlinks](https://rust-lang.org) within paragraphs.\nMultiple hashes determine the header depth in ATX style.\n",
+    ),
+]
