@@ -168,3 +168,6 @@ debug = true
 
 [workspace.metadata.vet]
 store = { path = './.config/supply-chain' }
+
+[workspace.metadata.cargo-shear]
+ignored = ["jp_md"]
