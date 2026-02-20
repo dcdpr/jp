@@ -1,0 +1,27 @@
+[package]
+name = "jp_md"
+
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+comrak = { workspace = true }
+syntect = { workspace = true, features = ["regex-fancy", "default-themes", "default-syntaxes"] }
+two-face = { workspace = true, features = ["syntect-fancy"] }
+unicode-width = { workspace = true }
+
+[dev-dependencies]
+glob = { workspace = true }
+insta = { workspace = true }
+proptest = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

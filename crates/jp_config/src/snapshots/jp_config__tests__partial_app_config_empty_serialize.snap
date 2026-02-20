@@ -64,6 +64,12 @@ PartialAppConfig {
             file_link: None,
             copy_link: None,
         },
+        markdown: PartialMarkdownConfig {
+            wrap_width: None,
+            table_max_column_width: None,
+            theme: None,
+            hr_style: None,
+        },
         reasoning: PartialReasoningConfig {
             display: None,
             summary_model: None,

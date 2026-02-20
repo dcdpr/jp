@@ -18,6 +18,7 @@ jp_inquire = { path = "crates/jp_inquire" }
 jp_llm = { path = "crates/jp_llm" }
 jp_macro = { path = "crates/jp_macro" }
 jp_mcp = { path = "crates/jp_mcp" }
+jp_md = { path = "crates/jp_md" }
 jp_openrouter = { path = "crates/jp_openrouter" }
 jp_printer = { path = "crates/jp_printer" }
 jp_serde = { path = "crates/jp_serde" }
@@ -37,12 +38,12 @@ async-trait = { version = "0.1", default-features = false }
 backon = { version = "1", default-features = false }
 base64 = { version = "0.22", default-features = false }
 camino = { version = "1", default-features = false }
-chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 camino-tempfile = { version = "1", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", default-features = false }
 clean-path = { version = "0.2", default-features = false }
 comfy-table = { version = "7", default-features = false }
-comrak = { version = "0.49", default-features = false }
+comrak = { version = "0.50", default-features = false }
 convert_case = { version = "0.10", default-features = false }
 crossbeam-channel = { version = "0.5", default-features = false }
 crossterm = { version = "0.29", default-features = false }
@@ -78,6 +79,7 @@ parking_lot = { version = "0.12", default-features = false }
 paste = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
+proptest = { version = "1", default-features = false }
 quick-xml = { version = "0.38", default-features = false }
 rayon = { version = "1", default-features = false }
 relative-path = { version = "2", default-features = false }
@@ -99,12 +101,7 @@ sha1 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 similar = { version = "2", default-features = false }
 strip-ansi-escapes = { version = "0.2", default-features = false }
-syntect = { version = "5.3", default-features = false, features = [
-    "default-syntaxes",
-    "default-themes",
-    "parsing",
-    "regex-fancy",
-] }
+syntect = { version = "5.3", default-features = false }
 termimad = { version = "0.34", default-features = false }
 test-log = { version = "0.2", default-features = false, features = ["trace"] }
 thiserror = { version = "2", default-features = false }
@@ -115,7 +112,9 @@ tokio-util = { version = "0.7", default-features = false }
 toml = { version = "0.9", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
+two-face = { version = "0.4", default-features = false }
 typetag = { version = "0.2", default-features = false }
+unicode-width = { version = "0.2", default-features = false }
 url = { version = "2", default-features = false }
 which = { version = "8", default-features = false }
 
@@ -166,3 +165,9 @@ private_intra_doc_links = "allow"
 [profile.profiling]
 inherits = "release"
 debug = true
+
+[workspace.metadata.vet]
+store = { path = './.config/supply-chain' }
+
+[workspace.metadata.cargo-shear]
+ignored = ["jp_md"]

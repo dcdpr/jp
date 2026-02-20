@@ -3,7 +3,7 @@ disallowed-methods = []
 disallowed-types = []
 
 too-many-arguments-threshold = 10
-doc-valid-idents = ["OpenAI", "OpenRouter", ".."]
+doc-valid-idents = ["OpenAI", "OpenRouter", "CommonMark", ".."]
 allow-unwrap-in-tests = true
 allow-print-in-tests = true
 allowed-duplicate-crates = [

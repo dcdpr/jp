@@ -1,0 +1,15 @@
+---
+source: crates/jp_md/tests/buffer.rs
+description: "Source: mixed-list-bullets"
+---
+[
+    Block(
+        "JP is a Rust-based command-line toolkit designed to augment software development workflows. You can initialize the\nenvironment by running `jp init` in your terminal. This tool bridges the gap between local codebases and LLMs.\nVisit the [Rust website](https://www.rust-lang.org/) for more information on the language.\n\n",
+    ),
+    Block(
+        "The architecture focuses on low latency and extensibility. Users can define custom prompts within the\n`config.toml` file to suit specific project needs. For further details, check the [repository](https://github.com/).\n\n",
+    ),
+    Flush(
+        "- Core functionalities:\n  * Automated code review.\n  * Unit test generation.\n    + Support for `cargo test`.\n    + Mocking complex dependencies.\n  * Refactoring suggestions.\n",
+    ),
+]

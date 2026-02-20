@@ -1,6 +1,7 @@
 //! Style configuration for output formatting.
 
 pub mod code;
+pub mod markdown;
 pub mod reasoning;
 pub mod tool_call;
 pub mod typewriter;
@@ -16,6 +17,7 @@ use crate::{
     partial::ToPartial,
     style::{
         code::{CodeConfig, PartialCodeConfig},
+        markdown::{MarkdownConfig, PartialMarkdownConfig},
         reasoning::{PartialReasoningConfig, ReasoningConfig},
         tool_call::{PartialToolCallConfig, ToolCallConfig},
         typewriter::{PartialTypewriterConfig, TypewriterConfig},
@@ -31,6 +33,12 @@ pub struct StyleConfig {
     /// Configures how code blocks in the assistant's response are rendered.
     #[setting(nested)]
     pub code: CodeConfig,
+
+    /// Markdown rendering style.
+    ///
+    /// Configures how markdown content is rendered in the terminal.
+    #[setting(nested)]
+    pub markdown: MarkdownConfig,
 
     /// Reasoning content style.
     ///
@@ -57,6 +65,7 @@ impl AssignKeyValue for PartialStyleConfig {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
             _ if kv.p("code") => self.code.assign(kv)?,
+            _ if kv.p("markdown") => self.markdown.assign(kv)?,
             _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
             _ if kv.p("tool_call") => self.tool_call.assign(kv)?,
             _ if kv.p("typewriter") => self.typewriter.assign(kv)?,
@@ -71,6 +80,7 @@ impl PartialConfigDelta for PartialStyleConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             code: self.code.delta(next.code),
+            markdown: self.markdown.delta(next.markdown),
             reasoning: self.reasoning.delta(next.reasoning),
             tool_call: self.tool_call.delta(next.tool_call),
             typewriter: self.typewriter.delta(next.typewriter),
@@ -82,6 +92,7 @@ impl ToPartial for StyleConfig {
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
             code: self.code.to_partial(),
+            markdown: self.markdown.to_partial(),
             reasoning: self.reasoning.to_partial(),
             tool_call: self.tool_call.to_partial(),
             typewriter: self.typewriter.to_partial(),

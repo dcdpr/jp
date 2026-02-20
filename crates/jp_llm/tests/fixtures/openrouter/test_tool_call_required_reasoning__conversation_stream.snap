@@ -54,6 +54,11 @@ expression: v
           "file_link": "osc8",
           "copy_link": "osc8"
         },
+        "markdown": {
+          "wrap_width": 0,
+          "table_max_column_width": 0,
+          "hr_style": "line"
+        },
         "reasoning": {
           "display": "full"
         },
