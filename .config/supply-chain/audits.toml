@@ -1,6 +1,26 @@
 
 # cargo-vet audits file
 
+[[audits.comrak]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.49.0 -> 0.50.0"
+
+[[audits.rand_xorshift]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.0 -> 0.4.0"
+
+[[audits.rand_xorshift]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.0 -> 0.4.0"
+
+[[audits.siphasher]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "1.0.2"
+
 [[audits.syntect]]
 who = "rgrant <rgrant@contract.design>"
 criteria = "safe-to-deploy"
@@ -10,6 +30,11 @@ delta = "5.2.0 -> 5.3.0"
 who = "rgrant <rgrant@contract.design>"
 criteria = "safe-to-deploy"
 delta = "0.1.6 -> 0.1.8"
+
+[[audits.two-face]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.4.5"
 
 [[trusted.aho-corasick]]
 criteria = "safe-to-deploy"
@@ -364,6 +389,30 @@ criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-03-19"
 end = "2027-02-13"
+
+[[trusted.phf]]
+criteria = "safe-to-deploy"
+user-id = 51017 # Yuki Okushi (JohnTitor)
+start = "2021-06-17"
+end = "2027-02-20"
+
+[[trusted.phf_codegen]]
+criteria = "safe-to-deploy"
+user-id = 51017 # Yuki Okushi (JohnTitor)
+start = "2021-06-17"
+end = "2027-02-20"
+
+[[trusted.phf_generator]]
+criteria = "safe-to-deploy"
+user-id = 51017 # Yuki Okushi (JohnTitor)
+start = "2021-06-17"
+end = "2027-02-20"
+
+[[trusted.phf_shared]]
+criteria = "safe-to-deploy"
+user-id = 51017 # Yuki Okushi (JohnTitor)
+start = "2021-06-17"
+end = "2027-02-20"
 
 [[trusted.potential_utf]]
 criteria = "safe-to-deploy"

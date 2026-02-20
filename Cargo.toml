@@ -165,3 +165,6 @@ private_intra_doc_links = "allow"
 [profile.profiling]
 inherits = "release"
 debug = true
+
+[workspace.metadata.vet]
+store = { path = './.config/supply-chain' }

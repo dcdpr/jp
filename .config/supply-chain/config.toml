@@ -590,6 +590,10 @@ criteria = "safe-to-deploy"
 version = "1.4.1"
 criteria = "safe-to-run"
 
+[[exemptions.proptest]]
+version = "1.9.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.quick-xml]]
 version = "0.38.4"
 criteria = "safe-to-deploy"
