@@ -141,6 +141,24 @@ impl Formatter {
         self
     }
 
+    /// Set the theme.
+    #[must_use]
+    pub fn theme(mut self, theme: Option<&str>) -> Self {
+        self.theme = theme::resolve(theme);
+        self
+    }
+
+    /// Set the HR style.
+    #[must_use]
+    pub const fn pretty_hr(mut self, pretty: bool) -> Self {
+        self.hr_style = if pretty {
+            HrStyle::Line
+        } else {
+            HrStyle::Markdown
+        };
+        self
+    }
+
     /// Set the actual terminal width in columns.
     ///
     /// When [`HrStyle::Line`] is active, horizontal rules are rendered as

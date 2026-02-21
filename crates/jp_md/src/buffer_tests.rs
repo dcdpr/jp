@@ -17,8 +17,7 @@ impl TestCase<'_> {
             assert_eq!(actual, expected, "failed case: {name}");
         }
 
-        let expected_flush = self.flushed.map(|s| Event::Flush(s.to_string()));
-        assert_eq!(buf.flush(), expected_flush, "failed case: {name}");
+        assert_eq!(buf.flush().as_deref(), self.flushed, "failed case: {name}");
     }
 }
 
@@ -366,7 +365,7 @@ fn test_fmt_write() {
         "This is a paragraph.\nIt has two lines.\n\n".into(),
     )]);
 
-    assert_eq!(buf.flush(), Some(Event::Flush("And a new one.\n".into())));
+    assert_eq!(buf.flush(), Some("And a new one.\n".into()));
 }
 
 #[test]
@@ -501,7 +500,7 @@ fn test_tabs_in_block_detection() {
     buf.push("\t# Not Header\n\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, Vec::<Event>::new());
-    assert_eq!(buf.flush(), Some(Event::Flush("\t# Not Header\n\n".into())));
+    assert_eq!(buf.flush(), Some("\t# Not Header\n\n".into()));
 
     // 3 spaces before # = valid header
     let mut buf = Buffer::new();
@@ -520,7 +519,7 @@ fn test_tabs_in_block_detection() {
     buf.push("\t***\n\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, Vec::<Event>::new());
-    assert_eq!(buf.flush(), Some(Event::Flush("\t***\n\n".into())));
+    assert_eq!(buf.flush(), Some("\t***\n\n".into()));
 
     // 3 spaces before *** = valid thematic break
     let mut buf = Buffer::new();
