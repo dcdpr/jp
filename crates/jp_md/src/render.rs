@@ -59,6 +59,8 @@ pub struct HrOptions {
 /// Format a comrak AST as styled terminal output.
 ///
 /// This is the public entry point, called from [`Formatter::format_terminal`].
+///
+/// [`Formatter::format_terminal`]: crate::format::Formatter::format_terminal
 pub fn format_terminal(
     root: Node<'_>,
     width: usize,

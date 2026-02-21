@@ -49,6 +49,27 @@ pub enum Event {
     Flush(String),
 }
 
+impl fmt::Display for Event {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::FencedCodeStart {
+                language,
+                fence_type,
+                fence_length,
+            } => {
+                let fence = match fence_type {
+                    FenceType::Backtick => "`".repeat(*fence_length),
+                    FenceType::Tilde => "~".repeat(*fence_length),
+                };
+
+                write!(f, "{fence}{language}")
+            }
+            Self::FencedCodeEnd => write!(f, "```"),
+            Self::Block(s) | Self::FencedCodeLine(s) | Self::Flush(s) => write!(f, "{s}"),
+        }
+    }
+}
+
 /// Holds the internal buffer and the current parsing state.
 #[derive(Debug)]
 pub struct Buffer {
@@ -76,11 +97,11 @@ impl Buffer {
 
     /// Called at the end of the stream to flush any remaining content.
     #[must_use]
-    pub fn flush(&mut self) -> Option<Event> {
+    pub fn flush(&mut self) -> Option<String> {
         if self.buffer.is_empty() {
             None
         } else {
-            Some(Event::Flush(std::mem::take(&mut self.buffer)))
+            Some(std::mem::take(&mut self.buffer))
         }
     }
 
