@@ -42,7 +42,7 @@ pub enum Event {
     FencedCodeLine(String),
 
     /// The end of a fenced code block.
-    FencedCodeEnd,
+    FencedCodeEnd(String),
 
     /// Raw content flushed from the buffer at end-of-stream.
     /// The content may be a partial block if the stream ended mid-parse.
@@ -64,8 +64,9 @@ impl fmt::Display for Event {
 
                 write!(f, "{fence}{language}")
             }
-            Self::FencedCodeEnd => write!(f, "```"),
-            Self::Block(s) | Self::FencedCodeLine(s) | Self::Flush(s) => write!(f, "{s}"),
+            Self::FencedCodeEnd(s) | Self::Block(s) | Self::FencedCodeLine(s) | Self::Flush(s) => {
+                write!(f, "{s}")
+            }
         }
     }
 }
@@ -386,7 +387,9 @@ impl Buffer {
                 if after_fence.trim().is_empty() {
                     // Found closing fence. Drain line and switch state.
                     let _drained = self.buffer.drain(..=line_end);
-                    return (Some(Event::FencedCodeEnd), State::AtBoundary);
+                    let fence = expected_char.to_string().repeat(fence_length);
+
+                    return (Some(Event::FencedCodeEnd(fence)), State::AtBoundary);
                 }
             }
         }
