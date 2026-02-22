@@ -17,8 +17,7 @@ impl TestCase<'_> {
             assert_eq!(actual, expected, "failed case: {name}");
         }
 
-        let expected_flush = self.flushed.map(|s| Event::Flush(s.to_string()));
-        assert_eq!(buf.flush(), expected_flush, "failed case: {name}");
+        assert_eq!(buf.flush().as_deref(), self.flushed, "failed case: {name}");
     }
 }
 
@@ -166,7 +165,7 @@ fn test_buffer_fenced_code_streaming() {
                     "fn main() {\n".into(),
                 )]),
                 ("}\n", vec![Event::FencedCodeLine("}\n".into())]),
-                ("```\n", vec![Event::FencedCodeEnd]),
+                ("```\n", vec![Event::FencedCodeEnd("```".into())]),
                 ("After\n\n", vec![Event::Block("After\n\n".into())]),
             ],
             flushed: None,
@@ -181,7 +180,7 @@ fn test_buffer_fenced_code_streaming() {
                 ("  fn main() {\n", vec![Event::FencedCodeLine(
                     "fn main() {\n".into(),
                 )]),
-                ("  ```\n", vec![Event::FencedCodeEnd]),
+                ("  ```\n", vec![Event::FencedCodeEnd("```".into())]),
             ],
             flushed: None,
         }),
@@ -194,7 +193,7 @@ fn test_buffer_fenced_code_streaming() {
                 }]),
                 ("}\n```\nAfter\n\n", vec![
                     Event::FencedCodeLine("fn main() {}\n".into()),
-                    Event::FencedCodeEnd,
+                    Event::FencedCodeEnd("```".into()),
                     Event::Block("After\n\n".into()),
                 ]),
             ],
@@ -208,7 +207,7 @@ fn test_buffer_fenced_code_streaming() {
                     fence_length: 4,
                 },
                 Event::FencedCodeLine("code\n".into()),
-                Event::FencedCodeEnd,
+                Event::FencedCodeEnd("````".into()),
             ])],
             flushed: None,
         }),
@@ -222,7 +221,7 @@ fn test_buffer_fenced_code_streaming() {
                 Event::FencedCodeLine("Hello\n".into()),
                 Event::FencedCodeLine("\n".into()),
                 Event::FencedCodeLine("World\n".into()),
-                Event::FencedCodeEnd,
+                Event::FencedCodeEnd("~~~".into()),
             ])],
             flushed: None,
         }),
@@ -366,7 +365,7 @@ fn test_fmt_write() {
         "This is a paragraph.\nIt has two lines.\n\n".into(),
     )]);
 
-    assert_eq!(buf.flush(), Some(Event::Flush("And a new one.\n".into())));
+    assert_eq!(buf.flush(), Some("And a new one.\n".into()));
 }
 
 #[test]
@@ -501,7 +500,7 @@ fn test_tabs_in_block_detection() {
     buf.push("\t# Not Header\n\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, Vec::<Event>::new());
-    assert_eq!(buf.flush(), Some(Event::Flush("\t# Not Header\n\n".into())));
+    assert_eq!(buf.flush(), Some("\t# Not Header\n\n".into()));
 
     // 3 spaces before # = valid header
     let mut buf = Buffer::new();
@@ -520,7 +519,7 @@ fn test_tabs_in_block_detection() {
     buf.push("\t***\n\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, Vec::<Event>::new());
-    assert_eq!(buf.flush(), Some(Event::Flush("\t***\n\n".into())));
+    assert_eq!(buf.flush(), Some("\t***\n\n".into()));
 
     // 3 spaces before *** = valid thematic break
     let mut buf = Buffer::new();
@@ -533,4 +532,33 @@ fn test_tabs_in_block_detection() {
     buf.push("*\t*\t*\t\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, vec![Event::Block("*\t*\t*\t\n".into())]);
+}
+
+#[test]
+fn test_buffer_event_display() {
+    let cases = vec![
+        (Event::Block("Hello".into()), "Hello"),
+        (
+            Event::FencedCodeStart {
+                language: "rust".into(),
+                fence_type: FenceType::Backtick,
+                fence_length: 3,
+            },
+            "```rust",
+        ),
+        (
+            Event::FencedCodeStart {
+                language: "python".into(),
+                fence_type: FenceType::Tilde,
+                fence_length: 4,
+            },
+            "~~~~python",
+        ),
+        (Event::FencedCodeLine("Hello".into()), "Hello"),
+        (Event::FencedCodeEnd("```".into()), "```"),
+    ];
+
+    for (event, expected) in cases {
+        assert_eq!(event.to_string(), expected);
+    }
 }

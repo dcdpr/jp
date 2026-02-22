@@ -22,6 +22,14 @@ pub enum HrStyle {
     Line,
 }
 
+impl HrStyle {
+    /// Returns `true` if this is a line style.
+    #[must_use]
+    pub const fn is_line(&self) -> bool {
+        matches!(self, Self::Line)
+    }
+}
+
 /// Markdown rendering configuration.
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]

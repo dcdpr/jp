@@ -143,7 +143,9 @@ description: "Source: document"
     FencedCodeLine(
         "}\n",
     ),
-    FencedCodeEnd,
+    FencedCodeEnd(
+        "```",
+    ),
     Block(
         "Bash Script:\n\n",
     ),
@@ -164,7 +166,9 @@ description: "Source: document"
     FencedCodeLine(
         "jp --version\n",
     ),
-    FencedCodeEnd,
+    FencedCodeEnd(
+        "```",
+    ),
     Block(
         "JSON Configuration:\n\n",
     ),
@@ -188,7 +192,9 @@ description: "Source: document"
     FencedCodeLine(
         "}\n",
     ),
-    FencedCodeEnd,
+    FencedCodeEnd(
+        "```",
+    ),
     Block(
         "-----\n",
     ),
@@ -263,7 +269,9 @@ description: "Source: document"
     FencedCodeLine(
         "}\n",
     ),
-    FencedCodeEnd,
+    FencedCodeEnd(
+        "```",
+    ),
     Block(
         "#### Detailed Feature Matrix\n",
     ),
@@ -317,7 +325,9 @@ description: "Source: document"
     FencedCodeLine(
         "auto_copy = false\n",
     ),
-    FencedCodeEnd,
+    FencedCodeEnd(
+        "```",
+    ),
     Block(
         "#### Code Snippet: CLI Definition\n",
     ),
@@ -368,7 +378,9 @@ description: "Source: document"
     FencedCodeLine(
         "}\n",
     ),
-    FencedCodeEnd,
+    FencedCodeEnd(
+        "```",
+    ),
     Block(
         "#### Citation Block\n",
     ),
@@ -440,7 +452,9 @@ description: "Source: document"
     FencedCodeLine(
         "}\n",
     ),
-    FencedCodeEnd,
+    FencedCodeEnd(
+        "```",
+    ),
     Block(
         "#### Markdown Special Cases\n",
     ),

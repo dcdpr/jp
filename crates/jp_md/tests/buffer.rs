@@ -27,7 +27,7 @@ fn test_buffer_chunks() {
             chunks.push(event);
         }
         if let Some(flushed) = buffer.flush() {
-            chunks.push(flushed);
+            chunks.push(jp_md::buffer::Event::Flush(flushed));
         }
 
         insta::with_settings!({
