@@ -533,3 +533,32 @@ fn test_tabs_in_block_detection() {
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, vec![Event::Block("*\t*\t*\t\n".into())]);
 }
+
+#[test]
+fn test_buffer_event_display() {
+    let cases = vec![
+        (Event::Block("Hello".into()), "Hello"),
+        (
+            Event::FencedCodeStart {
+                language: "rust".into(),
+                fence_type: FenceType::Backtick,
+                fence_length: 3,
+            },
+            "```rust",
+        ),
+        (
+            Event::FencedCodeStart {
+                language: "python".into(),
+                fence_type: FenceType::Tilde,
+                fence_length: 4,
+            },
+            "~~~~python",
+        ),
+        (Event::FencedCodeLine("Hello".into()), "Hello"),
+        (Event::FencedCodeEnd("```".into()), "```"),
+    ];
+
+    for (event, expected) in cases {
+        assert_eq!(event.to_string(), expected);
+    }
+}
