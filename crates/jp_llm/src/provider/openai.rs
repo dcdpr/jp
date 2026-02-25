@@ -6,7 +6,7 @@ use futures::{FutureExt as _, StreamExt as _, TryStreamExt as _, future, stream}
 use indexmap::{IndexMap, IndexSet};
 use jp_config::{
     assistant::tool_choice::ToolChoice,
-    conversation::tool::{OneOrManyTypes, ToolParameterConfig, item::ToolParameterItemConfig},
+    conversation::tool::{OneOrManyTypes, ToolParameterConfig},
     model::{
         id::{Name, ProviderId},
         parameters::{CustomReasoningConfig, ReasoningEffort},
@@ -18,7 +18,7 @@ use jp_conversation::{
     event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest, ToolCallResponse},
 };
 use openai_responses::{
-    Client, CreateError, StreamError,
+    Client, CreateError, StreamError as OpenaiStreamError,
     types::{self, Include, Request, SummaryConfig},
 };
 use reqwest::header::{self, HeaderMap, HeaderValue};
@@ -28,7 +28,7 @@ use tracing::{trace, warn};
 
 use super::{EventStream, ModelDetails, Provider};
 use crate::{
-    error::{Error, Result},
+    error::{Error, Result, StreamError, StreamErrorKind},
     event::{Event, FinishReason},
     model::{ModelDeprecation, ReasoningDetails},
     query::ChatQuery,
@@ -80,15 +80,15 @@ impl Provider for Openai {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<EventStream> {
-        let request = create_request(model, query)?;
+        let (request, is_structured, reasoning_enabled) = create_request(model, query)?;
 
         Ok(self
             .client
             .stream(request)
             .or_else(map_error)
-            .map_ok(|v| stream::iter(map_event(v)))
+            .map_ok(move |v| stream::iter(map_event(v, is_structured, reasoning_enabled)))
             .try_flatten()
-            .chain(future::ok(Event::Finished(FinishReason::Completed)).into_stream())
+            .chain(future::ready(Ok(Event::Finished(FinishReason::Completed))).into_stream())
             .boxed())
     }
 }
@@ -112,41 +112,84 @@ pub(crate) struct ModelResponse {
 }
 
 /// Create a request for the given model and query details.
-fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<Request> {
+///
+/// Returns `(request, is_structured, reasoning_enabled)`.
+fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bool, bool)> {
     let ChatQuery {
         thread,
         tools,
         tool_choice,
-        tool_call_strict_mode,
     } = query;
 
+    // Only use the schema if the very last event is a ChatRequest with one.
+    // Transform the schema for OpenAI's strict structured output mode
+    // before passing it to the request.
+    let text = thread
+        .events
+        .last()
+        .and_then(|e| e.event.as_chat_request())
+        .and_then(|req| req.schema.clone())
+        .map(|schema| types::TextConfig {
+            format: types::TextFormat::JsonSchema {
+                schema: Value::Object(transform_schema(schema)),
+                description: "Structured output".to_owned(),
+                name: "structured_output".to_owned(),
+                strict: Some(true),
+            },
+        });
+
+    let is_structured = text.is_some();
     let parameters = thread.events.config()?.assistant.model.parameters;
-    let reasoning = model
-        .custom_reasoning_config(parameters.reasoning)
-        .map(|r| convert_reasoning(r, model.max_output_tokens));
     let supports_reasoning = model
         .reasoning
         .is_some_and(|v| !matches!(v, ReasoningDetails::Unsupported));
+    let reasoning = match model.custom_reasoning_config(parameters.reasoning) {
+        Some(r) => Some(convert_reasoning(r, model.max_output_tokens)),
+        // Explicitly disable reasoning for models that support it when the
+        // user has turned it off. Sending `null` lets the model use its
+        // default (which may include reasoning).
+        //
+        // For leveled models, use their lowest supported effort. For all
+        // others (budgetted), fall back to `minimal` which is universally
+        // supported across OpenAI reasoning models.
+        None if supports_reasoning => {
+            let effort = model
+                .reasoning
+                .and_then(|r| r.lowest_effort())
+                .unwrap_or(ReasoningEffort::Xlow);
+            Some(convert_reasoning(
+                CustomReasoningConfig {
+                    effort,
+                    exclude: true,
+                },
+                model.max_output_tokens,
+            ))
+        }
+        None => None,
+    };
+    let reasoning_enabled = model
+        .custom_reasoning_config(parameters.reasoning)
+        .is_some();
     let messages = thread.into_messages(to_system_messages, convert_events(supports_reasoning))?;
-
     let request = Request {
         model: types::Model::Other(model.id.name.to_string()),
         input: types::Input::List(messages),
-        include: supports_reasoning.then_some(vec![Include::ReasoningEncryptedContent]),
+        include: reasoning_enabled.then_some(vec![Include::ReasoningEncryptedContent]),
         store: Some(false),
         tool_choice: Some(convert_tool_choice(tool_choice)),
-        tools: Some(convert_tools(tools, tool_call_strict_mode)),
+        tools: Some(convert_tools(tools)),
         temperature: parameters.temperature,
         reasoning,
         max_output_tokens: parameters.max_tokens.map(Into::into),
         truncation: Some(types::Truncation::Auto),
         top_p: parameters.top_p,
+        text,
         ..Default::default()
     };
 
     trace!(?request, "Sending request to OpenAI.");
 
-    Ok(request)
+    Ok((request, is_structured, reasoning_enabled))
 }
 
 #[expect(clippy::too_many_lines)]
@@ -447,27 +490,26 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
     Ok(details)
 }
 
-/// Convert a [`StreamError`] into an [`Error`].
+/// Convert an OpenAI [`OpenaiStreamError`] into a [`StreamError`].
 ///
-/// This needs an async function because we want to get the response text from
-/// the body as contextual information.
-async fn map_error(error: StreamError) -> Result<types::Event> {
+/// This needs an async function because we read the response body for context.
+/// Headers are extracted *before* consuming the body.
+async fn map_error(error: OpenaiStreamError) -> std::result::Result<types::Event, StreamError> {
     Err(match error {
-        StreamError::Parsing(error) => error.into(),
-        StreamError::Stream(error) => match error {
-            reqwest_eventsource::Error::InvalidStatusCode(status_code, response) => {
-                Error::OpenaiStatusCode {
-                    status_code,
-                    response: response.text().await.unwrap_or_default(),
-                }
-            }
-            _ => Error::OpenaiEvent(Box::new(error)),
-        },
+        OpenaiStreamError::Stream(error) => StreamError::from(error),
+        OpenaiStreamError::Parsing(error) => {
+            StreamError::other(error.to_string()).with_source(error)
+        }
     })
 }
 
 /// Map an Openai [`types::Event`] into one or more [`Event`]s.
-fn map_event(event: types::Event) -> Vec<Result<Event>> {
+#[expect(clippy::too_many_lines)]
+fn map_event(
+    event: types::Event,
+    is_structured: bool,
+    reasoning_enabled: bool,
+) -> Vec<std::result::Result<Event, StreamError>> {
     use types::Event::*;
 
     #[expect(clippy::cast_possible_truncation)]
@@ -481,11 +523,26 @@ fn map_event(event: types::Event) -> Vec<Result<Event>> {
             output_index,
             item: types::OutputItem::Message(_),
         } => vec![Ok(Event::Part {
-            event: ConversationEvent::now(ChatResponse::message(String::new())),
+            event: ConversationEvent::now(if is_structured {
+                ChatResponse::structured(Value::String(String::new()))
+            } else {
+                ChatResponse::message(String::new())
+            }),
             index: output_index as usize,
         })],
 
-        // See the previous `OutputItemAdded` case for details.
+        // Skip all reasoning events when reasoning is disabled. The model
+        // may still return minimal reasoning output at `effort: "minimal"`.
+        OutputItemAdded {
+            item: types::OutputItem::Reasoning(_),
+            ..
+        }
+        | ReasoningSummaryTextDelta { .. }
+        | OutputItemDone {
+            item: types::OutputItem::Reasoning(_),
+            ..
+        } if !reasoning_enabled => vec![],
+
         OutputItemAdded {
             output_index,
             item: types::OutputItem::Reasoning(_),
@@ -498,10 +555,17 @@ fn map_event(event: types::Event) -> Vec<Result<Event>> {
             delta,
             output_index,
             ..
-        } => vec![Ok(Event::Part {
-            event: ConversationEvent::now(ChatResponse::message(delta)),
-            index: output_index as usize,
-        })],
+        } => {
+            let response = if is_structured {
+                ChatResponse::structured(Value::String(delta))
+            } else {
+                ChatResponse::message(delta)
+            };
+            vec![Ok(Event::Part {
+                event: ConversationEvent::now(response),
+                index: output_index as usize,
+            })]
+        }
 
         ReasoningSummaryTextDelta {
             delta,
@@ -513,6 +577,8 @@ fn map_event(event: types::Event) -> Vec<Result<Event>> {
         })],
 
         OutputItemDone { item, output_index } => {
+            let index = output_index as usize;
+            let mut events = vec![];
             let metadata = match &item {
                 types::OutputItem::FunctionCall(_) => IndexMap::new(),
                 types::OutputItem::Message(v) => {
@@ -536,14 +602,15 @@ fn map_event(event: types::Event) -> Vec<Result<Event>> {
                 | types::OutputItem::ComputerToolCall(_) => return vec![],
             };
 
-            match item {
-                types::OutputItem::FunctionCall(types::FunctionCall {
-                    name,
-                    arguments,
-                    call_id,
-                    ..
-                }) => vec![Ok(Event::Part {
-                    index: output_index as usize,
+            if let types::OutputItem::FunctionCall(types::FunctionCall {
+                name,
+                arguments,
+                call_id,
+                ..
+            }) = item
+            {
+                events.push(Ok(Event::Part {
+                    index,
                     event: ConversationEvent::now(ToolCallRequest {
                         id: call_id,
                         name,
@@ -555,25 +622,39 @@ fn map_event(event: types::Event) -> Vec<Result<Event>> {
                             map
                         },
                     }),
-                })],
-                _ => vec![Ok(Event::flush_with_metadata(
-                    output_index as usize,
-                    metadata,
-                ))],
+                }));
             }
+
+            events.push(Ok(Event::flush_with_metadata(index, metadata)));
+            events
         }
-        Error {
-            code,
-            message,
-            param,
-        } => vec![Err(types::Error {
-            r#type: "stream_error".to_owned(),
-            code,
-            message,
-            param,
-        }
-        .into())],
+        Error { error } => vec![Err(classify_stream_error(error))],
         _ => vec![],
+    }
+}
+
+/// Classify an OpenAI streaming error event into a [`StreamError`].
+///
+/// Maps well-known error types (quota, rate-limit, auth, server errors)
+/// to the appropriate [`StreamErrorKind`] so the retry and display layers
+/// can handle them correctly.
+fn classify_stream_error(error: types::response::Error) -> StreamError {
+    match error.r#type.as_str() {
+        "insufficient_quota" => StreamError::new(
+            StreamErrorKind::InsufficientQuota,
+            format!(
+                "Insufficient API quota. Check your plan and billing details \
+                 at https://platform.openai.com/settings/organization/billing. \
+                 ({})",
+                error.message
+            ),
+        ),
+        "rate_limit_exceeded" => StreamError::rate_limit(None),
+        "server_error" | "api_error" => StreamError::transient(error.message),
+        _ => StreamError::other(format!(
+            "OpenAI error: type={}, code={:?}, message={}, param={:?}",
+            error.r#type, error.code, error.message, error.param
+        )),
     }
 }
 
@@ -603,6 +684,145 @@ impl TryFrom<&OpenaiConfig> for Openai {
             base_url: config.base_url.clone(),
         })
     }
+}
+
+/// Transform a JSON schema for OpenAI's strict structured output mode.
+///
+/// OpenAI's structured outputs require:
+/// - `additionalProperties: false` on all objects
+/// - All properties listed in `required`
+/// - `allOf` is not supported and must be flattened
+///
+/// Additionally handles:
+/// - Unraveling `$ref` that has sibling properties (OpenAI doesn't support
+///   `$ref` alongside other keys)
+/// - Recursively processing `$defs`/`definitions`, `properties`, `items`, and
+///   `anyOf`
+/// - Stripping `null` defaults
+///
+/// Unlike Google, OpenAI supports `$ref`/`$defs` and `const` natively, so those
+/// are left in place when standalone.
+///
+/// See: <https://platform.openai.com/docs/guides/structured-outputs>
+fn transform_schema(src: Map<String, Value>) -> Map<String, Value> {
+    let root = Value::Object(src.clone());
+    process_schema(src, &root)
+}
+
+/// Core recursive processor for a single schema node.
+fn process_schema(mut src: Map<String, Value>, root: &Value) -> Map<String, Value> {
+    // Recursively process $defs/definitions in place.
+    for key in ["$defs", "definitions"] {
+        if let Some(Value::Object(defs)) = src.remove(key) {
+            let processed: Map<String, Value> = defs
+                .into_iter()
+                .map(|(k, v)| (k, resolve_and_process(v, root)))
+                .collect();
+            src.insert(key.into(), Value::Object(processed));
+        }
+    }
+
+    // Force `additionalProperties: false` on all objects.
+    // The docs require this for strict mode.
+    if src.get("type").and_then(Value::as_str) == Some("object") {
+        src.insert("additionalProperties".into(), Value::Bool(false));
+    }
+
+    // Force all properties into `required` (strict mode requirement).
+    if let Some(Value::Object(props)) = src.get("properties") {
+        let keys: Vec<Value> = props.keys().map(|k| Value::String(k.clone())).collect();
+        src.insert("required".into(), Value::Array(keys));
+    }
+
+    // Recursively process object properties.
+    if let Some(Value::Object(props)) = src.remove("properties") {
+        let processed: Map<String, Value> = props
+            .into_iter()
+            .map(|(k, v)| (k, resolve_and_process(v, root)))
+            .collect();
+        src.insert("properties".into(), Value::Object(processed));
+    }
+
+    // Recursively process array items.
+    if let Some(items) = src.remove("items") {
+        src.insert("items".into(), resolve_and_process(items, root));
+    }
+
+    // Recursively process anyOf variants.
+    if let Some(Value::Array(variants)) = src.remove("anyOf") {
+        src.insert(
+            "anyOf".into(),
+            Value::Array(
+                variants
+                    .into_iter()
+                    .map(|v| resolve_and_process(v, root))
+                    .collect(),
+            ),
+        );
+    }
+
+    // Flatten `allOf` — not supported by OpenAI.
+    // Merge all entries into the parent schema; later entries yield to
+    // earlier ones (and to keys already present on the parent).
+    if let Some(Value::Array(entries)) = src.remove("allOf") {
+        for entry in entries {
+            if let Value::Object(entry_map) = resolve_and_process(entry, root) {
+                for (k, v) in entry_map {
+                    src.entry(k).or_insert(v);
+                }
+            }
+        }
+    }
+
+    // Strip `null` defaults (no meaningful distinction for strict mode).
+    if src.get("default") == Some(&Value::Null) {
+        src.remove("default");
+    }
+
+    // Unravel `$ref` when it has sibling properties.
+    // OpenAI supports standalone `$ref` but not alongside other keys.
+    if src.contains_key("$ref")
+        && src.len() > 1
+        && let Some(Value::String(ref_path)) = src.remove("$ref")
+    {
+        if let Some(resolved) = resolve_ref(&ref_path, root) {
+            // Current schema properties take priority over the
+            // resolved definition's.
+            let mut merged = resolved;
+            for (k, v) in src {
+                merged.insert(k, v);
+            }
+            return process_schema(merged, root);
+        }
+        // Failed to resolve — put it back.
+        src.insert("$ref".into(), Value::String(ref_path));
+    }
+
+    src
+}
+
+/// Recursively process a value that may be a schema object.
+fn resolve_and_process(value: Value, root: &Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(process_schema(map, root)),
+        other => other,
+    }
+}
+
+/// Resolve a JSON pointer against the root schema.
+///
+/// Handles paths like `#/$defs/MyType` and `#` (root self-reference).
+fn resolve_ref(ref_path: &str, root: &Value) -> Option<Map<String, Value>> {
+    if ref_path == "#" {
+        return root.as_object().cloned();
+    }
+
+    let path = ref_path.strip_prefix("#/")?;
+    let mut current = root;
+    for segment in path.split('/') {
+        current = current.get(segment)?;
+    }
+    current.as_object().cloned()
 }
 
 fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {
@@ -706,9 +926,7 @@ fn make_config_nullable(cfg: &mut ToolParameterConfig) {
 /// moving array-based enums into the 'items' configuration.
 fn sanitize_parameter(config: &mut ToolParameterConfig) {
     if let Some(items) = &mut config.items {
-        let mut item_config = items.clone().into();
-        sanitize_parameter(&mut item_config);
-        *items = item_config.into();
+        sanitize_parameter(items);
     }
 
     let allows_array = match &config.kind {
@@ -758,26 +976,31 @@ fn sanitize_parameter(config: &mut ToolParameterConfig) {
             OneOrManyTypes::Many(inferred_types.into_iter().collect())
         };
 
-        ToolParameterItemConfig {
+        Box::new(ToolParameterConfig {
             kind,
             default: None,
+            required: false,
+            summary: None,
             description: None,
+            examples: None,
             enumeration: vec![],
-        }
+            items: None,
+            properties: IndexMap::default(),
+        })
     });
 
     // Append the flattened values to the items enum
     items_config.enumeration.extend(items);
 }
 
-fn convert_tools(tools: Vec<ToolDefinition>, strict: bool) -> Vec<types::Tool> {
+fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
     tools
         .into_iter()
         .map(|tool| types::Tool::Function {
             name: tool.name,
-            strict,
+            strict: true,
             description: tool.description,
-            parameters: parameters_with_strict_mode(tool.parameters, strict).into(),
+            parameters: parameters_with_strict_mode(tool.parameters, true).into(),
         })
         .collect()
 }
@@ -792,11 +1015,17 @@ fn convert_reasoning(
         } else {
             Some(SummaryConfig::Auto)
         },
-        effort: match reasoning.effort.abs_to_rel(max_tokens) {
-            ReasoningEffort::XHigh => Some(types::ReasoningEffort::XHigh),
+        effort: match reasoning
+            .effort
+            .abs_to_rel(max_tokens)
+            .unwrap_or(ReasoningEffort::Auto)
+        {
+            ReasoningEffort::None => Some(types::ReasoningEffort::None),
+            ReasoningEffort::Max | ReasoningEffort::XHigh => Some(types::ReasoningEffort::XHigh),
             ReasoningEffort::High => Some(types::ReasoningEffort::High),
             ReasoningEffort::Auto | ReasoningEffort::Medium => Some(types::ReasoningEffort::Medium),
-            ReasoningEffort::Low | ReasoningEffort::Xlow => Some(types::ReasoningEffort::Low),
+            ReasoningEffort::Low => Some(types::ReasoningEffort::Low),
+            ReasoningEffort::Xlow => Some(types::ReasoningEffort::Minimal),
             ReasoningEffort::Absolute(_) => {
                 debug_assert!(false, "Reasoning effort must be relative.");
                 None
@@ -898,6 +1127,12 @@ fn convert_events(
                                     })]
                                 }
                             }
+                            ChatResponse::Structured { data } => {
+                                vec![types::InputListItem::Message(types::InputMessage {
+                                    role: types::Role::Assistant,
+                                    content: types::ContentInput::Text(data.to_string()),
+                                })]
+                            }
                         }
                     }
                     EventKind::ToolCallRequest(request) => vec![types::InputListItem::Item(
@@ -928,232 +1163,12 @@ fn convert_events(
     }
 }
 
-// /// Converts a single event into `OpenAI` input items.
-// ///
-// /// Note: `OpenAI` requires separate items for different content types.
-// fn convert_events(
-//     events: ConversationStream,
-//     supports_reasoning: bool,
-// ) -> Vec<types::InputListItem> {
-//     events
-//         .into_iter()
-//         .flat_map(|event| {
-//             let ConversationEvent {
-//                 kind, mut metadata, ..
-//             } = event.event;
-//
-//             match kind {
-//                 EventKind::ChatRequest(request) => {
-//                     vec![types::InputListItem::Message(types::InputMessage {
-//                         role: types::Role::User,
-//                         content: types::ContentInput::Text(request.content),
-//                     })]
-//                 }
-//                 EventKind::ChatResponse(response) => {
-//                     if let Some(item) = metadata.remove(ENCODED_PAYLOAD_KEY).and_then(|s| {
-//                         Some(if response.is_reasoning() {
-//                             if !supports_reasoning {
-//                                 return None;
-//                             }
-//
-//                             types::InputItem::Reasoning(
-//                                 serde_json::from_value::<types::Reasoning>(s).ok()?,
-//                             )
-//                         } else {
-//                             types::InputItem::OutputMessage(
-//                                 serde_json::from_value::<types::OutputMessage>(s).ok()?,
-//                             )
-//                         })
-//                     }) {
-//                         vec![types::InputListItem::Item(item)]
-//                     } else if response.is_reasoning() {
-//                         // Unsupported reasoning content - wrap in XML tags
-//                         vec![types::InputListItem::Message(types::InputMessage {
-//                             role: types::Role::Assistant,
-//                             content: types::ContentInput::Text(format!(
-//                                 "<think>\n{}\n</think>\n\n",
-//                                 response.content()
-//                             )),
-//                         })]
-//                     } else {
-//                         vec![types::InputListItem::Message(types::InputMessage {
-//                             role: types::Role::Assistant,
-//                             content: types::ContentInput::Text(response.into_content()),
-//                         })]
-//                     }
-//                 }
-//                 EventKind::ToolCallRequest(request) => {
-//                     let call = metadata
-//                         .remove(ENCODED_PAYLOAD_KEY)
-//                         .and_then(|s| serde_json::from_value::<types::FunctionCall>(s).ok())
-//                         .unwrap_or_else(|| types::FunctionCall {
-//                             call_id: String::new(),
-//                             name: request.name,
-//                             arguments: Value::Object(request.arguments).to_string(),
-//                             status: None,
-//                             id: (!request.id.is_empty()).then_some(request.id),
-//                         });
-//
-//                     vec![types::InputListItem::Item(types::InputItem::FunctionCall(
-//                         call,
-//                     ))]
-//                 }
-//                 EventKind::ToolCallResponse(ToolCallResponse { id, result }) => {
-//                     vec![types::InputListItem::Item(
-//                         types::InputItem::FunctionCallOutput(types::FunctionCallOutput {
-//                             call_id: id,
-//                             output: match result {
-//                                 Ok(content) | Err(content) => content,
-//                             },
-//                             id: None,
-//                             status: None,
-//                         }),
-//                     )]
-//                 }
-//                 _ => vec![],
-//             }
-//         })
-//         .collect()
-// }
+impl From<types::response::Error> for Error {
+    fn from(error: types::response::Error) -> Self {
+        Self::OpenaiResponse(error)
+    }
+}
 
-// impl From<types::OutputItem> for Delta {
-//     fn from(item: types::OutputItem) -> Self {
-//         match item {
-//             types::OutputItem::Message(message) => Delta::content(
-//                 message
-//                     .content
-//                     .into_iter()
-//                     .filter_map(|item| match item {
-//                         types::OutputContent::Text { text, .. } => Some(text),
-//                         types::OutputContent::Refusal { .. } => None,
-//                     })
-//                     .collect::<Vec<_>>()
-//                     .join("\n\n"),
-//             ),
-//             types::OutputItem::Reasoning(reasoning) => Delta::reasoning(
-//                 reasoning
-//                     .summary
-//                     .into_iter()
-//                     .map(|item| match item {
-//                         types::ReasoningSummary::Text { text, .. } => text,
-//                     })
-//                     .collect::<Vec<_>>()
-//                     .join("\n\n"),
-//             ),
-//             types::OutputItem::FunctionCall(call) => {
-//                 Delta::tool_call(call.call_id, call.name, call.arguments).finished()
-//             }
-//             _ => Delta::default(),
-//         }
-//     }
-// }
-
-// #[cfg(test)]
-// mod tests {
-//     use jp_config::providers::llm::LlmProviderConfig;
-//     use jp_test::{Result, fn_name, mock::Vcr};
-//     use test_log::test;
-//
-//     use super::*;
-//
-//     fn vcr() -> Vcr {
-//         Vcr::new("https://api.openai.com", env!("CARGO_MANIFEST_DIR"))
-//     }
-//
-//     #[test(tokio::test)]
-//     async fn test_openai_model_details() -> Result {
-//         let mut config = LlmProviderConfig::default().openai;
-//         let name: Name = "o4-mini".parse().unwrap();
-//
-//         let vcr = vcr();
-//         vcr.cassette(
-//             fn_name!(),
-//             |rule| {
-//                 rule.filter(|when| {
-//                     when.any_request();
-//                 });
-//             },
-//             |recording, url| async move {
-//                 config.base_url = url;
-//                 if !recording {
-//                     // dummy api key value when replaying a cassette
-//                     config.api_key_env = "USER".to_owned();
-//                 }
-//
-//                 Openai::try_from(&config)
-//                     .unwrap()
-//                     .model_details(&name)
-//                     .await
-//             },
-//         )
-//         .await
-//     }
-//
-//     #[test(tokio::test)]
-//     async fn test_openai_models() -> Result {
-//         let mut config = LlmProviderConfig::default().openai;
-//         let vcr = vcr();
-//         vcr.cassette(
-//             fn_name!(),
-//             |rule| {
-//                 rule.filter(|when| {
-//                     when.any_request();
-//                 });
-//             },
-//             |recording, url| async move {
-//                 config.base_url = url;
-//                 if !recording {
-//                     // dummy api key value when replaying a cassette
-//                     config.api_key_env = "USER".to_owned();
-//                 }
-//
-//                 Openai::try_from(&config)
-//                     .unwrap()
-//                     .models()
-//                     .await
-//                     .map(|mut v| {
-//                         v.truncate(10);
-//                         v
-//                     })
-//             },
-//         )
-//         .await
-//     }
-//
-//     #[test(tokio::test)]
-//     async fn test_openai_chat_completion() -> Result {
-//         let mut config = LlmProviderConfig::default().openai;
-//         let model_id = "openai/o4-mini".parse().unwrap();
-//         let model = ModelDetails::empty(model_id);
-//         let query = ChatQuery {
-//             thread: Thread {
-//                 events: ConversationStream::default().with_chat_request("Test message"),
-//                 ..Default::default()
-//             },
-//             ..Default::default()
-//         };
-//
-//         let vcr = vcr();
-//         vcr.cassette(
-//             fn_name!(),
-//             |rule| {
-//                 rule.filter(|when| {
-//                     when.any_request();
-//                 });
-//             },
-//             |recording, url| async move {
-//                 config.base_url = url;
-//                 if !recording {
-//                     // dummy api key value when replaying a cassette
-//                     config.api_key_env = "USER".to_owned();
-//                 }
-//
-//                 Openai::try_from(&config)
-//                     .unwrap()
-//                     .chat_completion(&model, query)
-//                     .await
-//             },
-//         )
-//         .await
-//     }
-// }
+#[cfg(test)]
+#[path = "openai_tests.rs"]
+mod tests;

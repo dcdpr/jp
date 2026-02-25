@@ -1,27 +1,30 @@
-use std::{env, time::Duration};
+use std::{env, future, time::Duration};
 
 use async_anthropic::{
     Client,
     errors::AnthropicError,
     messages::DEFAULT_MAX_TOKENS,
     types::{
-        self, ListModelsResponse, System, Thinking, ToolBash, ToolCodeExecution, ToolComputerUse,
-        ToolTextEditor, ToolWebSearch,
+        self, Effort, JsonOutputFormat, ListModelsResponse, OutputConfig, System, Thinking,
+        ToolBash, ToolCodeExecution, ToolComputerUse, ToolTextEditor, ToolWebSearch,
     },
 };
 use async_stream::try_stream;
 use async_trait::async_trait;
 use chrono::NaiveDate;
-use futures::{StreamExt as _, TryStreamExt as _, pin_mut};
+use futures::{FutureExt as _, StreamExt as _, TryStreamExt as _, pin_mut, stream};
 use indexmap::IndexMap;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
-    model::id::{Name, ProviderId},
+    model::{
+        id::{Name, ProviderId},
+        parameters::ReasoningEffort,
+    },
     providers::llm::anthropic::AnthropicConfig,
 };
 use jp_conversation::{
     ConversationStream,
-    event::{ChatResponse, ConversationEvent, EventKind},
+    event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest},
     thread::{Document, Documents, Thread},
 };
 use serde_json::{Map, Value, json};
@@ -29,7 +32,10 @@ use tracing::{debug, info, trace, warn};
 
 use super::Provider;
 use crate::{
-    error::{Error, Result},
+    error::{
+        Error, Result, StreamError, StreamErrorKind, extract_retry_from_text,
+        looks_like_quota_error,
+    },
     event::{Event, FinishReason},
     model::{ModelDeprecation, ModelDetails, ReasoningDetails},
     query::ChatQuery,
@@ -50,6 +56,27 @@ const MAX_CACHE_CONTROL_COUNT: usize = 4;
 
 const THINKING_SIGNATURE_KEY: &str = "anthropic_thinking_signature";
 const REDACTED_THINKING_KEY: &str = "anthropic_redacted_thinking";
+
+/// Known Anthropic error types that are safe to retry.
+///
+/// See: <https://docs.claude.com/en/docs/build-with-claude/streaming#error-events>
+/// See: <https://docs.claude.com/en/api/errors#http-errors>
+const RETRYABLE_ANTHROPIC_ERROR_TYPES: &[&str] =
+    &["rate_limit_error", "overloaded_error", "api_error"];
+
+/// Supported string `format` values for Anthropic structured output.
+const SUPPORTED_STRING_FORMATS: &[&str] = &[
+    "date-time",
+    "time",
+    "date",
+    "duration",
+    "email",
+    "hostname",
+    "uri",
+    "ipv4",
+    "ipv6",
+    "uuid",
+];
 
 #[derive(Debug, Clone)]
 pub struct Anthropic {
@@ -105,18 +132,25 @@ impl Provider for Anthropic {
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let chain_on_max_tokens = query
+        let max_tokens_config = query
             .thread
             .events
             .config()?
             .assistant
             .model
             .parameters
-            .max_tokens
-            .is_none()
-            && self.chain_on_max_tokens;
+            .max_tokens;
 
-        let request = create_request(model, query, true, &self.beta)?;
+        let (request, is_structured) = create_request(model, query, true, &self.beta)?;
+
+        // Chaining is disabled for structured output — the provider guarantees
+        // schema compliance so the response won't hit max_tokens for a
+        // well-constrained schema.
+        //
+        // It is also disabled when the user has explicitly configured a max
+        // tokens value, or when chaining is disabled in the provider config.
+        let chain_on_max_tokens =
+            !is_structured && max_tokens_config.is_none() && self.chain_on_max_tokens;
 
         debug!(stream = true, "Anthropic chat completion stream request.");
         trace!(
@@ -124,7 +158,7 @@ impl Provider for Anthropic {
             "Request payload."
         );
 
-        Ok(call(client, request, chain_on_max_tokens))
+        Ok(call(client, request, chain_on_max_tokens, is_structured))
     }
 }
 
@@ -139,6 +173,7 @@ fn call(
     client: Client,
     request: types::CreateMessagesRequest,
     chain_on_max_tokens: bool,
+    is_structured: bool,
 ) -> EventStream {
     Box::pin(try_stream!({
         let mut tool_call_aggregator = ToolCallRequestAggregator::new();
@@ -153,87 +188,57 @@ fn call(
             .messages()
             .create_stream(request.clone())
             .await
-            .map_err(|e| match e {
-                AnthropicError::RateLimit { retry_after } => Error::RateLimit {
-                    retry_after: retry_after.map(Duration::from_secs),
-                },
-
-                // Anthropic's API is notoriously unreliable, so we
-                // special-case a few common errors that most of the times
-                // resolve themselves when retried.
-                //
-                // See: <https://docs.claude.com/en/docs/build-with-claude/streaming#error-events>
-                // See: <https://docs.claude.com/en/api/errors#http-errors>
-                AnthropicError::StreamError(e)
-                    if ["rate_limit_error", "overloaded_error", "api_error"]
-                        .contains(&e.error_type.as_str())
-                        || e.error.as_ref().is_some_and(|v| {
-                            v.get("message").and_then(Value::as_str) == Some("Overloaded")
-                        }) =>
-                {
-                    Error::RateLimit {
-                        retry_after: Some(Duration::from_secs(3)),
-                    }
-                }
-
-                _ => Error::from(e),
-            })
+            .map_err(StreamError::from)
+            .map_ok(|v| stream::iter(map_event(v, &mut tool_call_aggregator, is_structured)))
+            .try_flatten()
+            .chain(future::ready(Ok(Event::Finished(FinishReason::Completed))).into_stream())
             .peekable();
 
         pin_mut!(stream);
         while let Some(event) = stream.next().await.transpose()? {
-            if let Some(event) = map_event(event, &mut tool_call_aggregator)? {
-                match event {
-                    // If the assistant has reached the maximum number of
-                    // tokens, and we are in a state in which we can request
-                    // more tokens, we do so by sending a new request and
-                    // chaining those events onto the previous ones, keeping the
-                    // existing stream of events alive.
-                    //
-                    // TODO: generalize this for any provider.
-                    event if should_chain(&event, tool_calls_requested, chain_on_max_tokens) => {
-                        debug!("Max tokens reached, auto-requesting more tokens.");
+            match event {
+                // If the assistant has reached the maximum number of
+                // tokens, and we are in a state in which we can request
+                // more tokens, we do so by sending a new request and
+                // chaining those events onto the previous ones, keeping the
+                // existing stream of events alive.
+                //
+                // TODO: generalize this for any provider.
+                event if should_chain(&event, tool_calls_requested, chain_on_max_tokens) => {
+                    debug!("Max tokens reached, auto-requesting more tokens.");
 
-                        for await event in chain(client.clone(), request.clone(), events) {
-                            yield event?;
-                        }
-                        return;
+                    for await event in chain(client.clone(), request.clone(), events, is_structured)
+                    {
+                        yield event?;
                     }
-                    done @ Event::Finished(_) => {
-                        yield done;
-                        return;
+                    return;
+                }
+                done @ Event::Finished(_) => {
+                    yield done;
+                    return;
+                }
+                Event::Part { event, index } => {
+                    if event.is_tool_call_request() {
+                        tool_calls_requested = true;
+                    } else if chain_on_max_tokens {
+                        events.push(event.clone());
                     }
-                    Event::Part { event, index } => {
-                        if event.is_tool_call_request() {
-                            tool_calls_requested = true;
-                        } else if chain_on_max_tokens {
-                            events.push(event.clone());
-                        }
 
-                        yield Event::Part { event, index };
-                    }
-                    flush @ Event::Flush { .. } => {
-                        let next_delta = stream.as_mut().peek().await.and_then(|e| {
-                            e.as_ref().ok().and_then(|e| match e {
-                                types::MessagesStreamEvent::MessageDelta { delta, .. } => {
-                                    Some(delta)
-                                }
-                                _ => None,
-                            })
-                        });
+                    yield Event::Part { event, index };
+                }
+                flush @ Event::Flush { .. } => {
+                    let next_event = stream.as_mut().peek().await.and_then(|e| e.as_ref().ok());
 
-                        // If we try to flush, but we're about to continue with
-                        // a chained request, we ignore the flush event, to
-                        // allow more event parts to be generated by the next
-                        // response.
-                        if let Some(delta) = next_delta.cloned().and_then(map_message_delta)
-                            && should_chain(&delta, tool_calls_requested, chain_on_max_tokens)
-                        {
-                            continue;
-                        }
-
-                        yield flush;
+                    // If we try to flush, but we're about to continue with a
+                    // chained request, we ignore the flush event, to allow more
+                    // event parts to be generated by the next response.
+                    if let Some(event) = next_event
+                        && should_chain(event, tool_calls_requested, chain_on_max_tokens)
+                    {
+                        continue;
                     }
+
+                    yield flush;
                 }
             }
         }
@@ -255,13 +260,18 @@ fn chain(
     client: Client,
     mut request: types::CreateMessagesRequest,
     events: Vec<ConversationEvent>,
+    is_structured: bool,
 ) -> EventStream {
     debug_assert!(!events.iter().any(ConversationEvent::is_tool_call_request));
 
     let mut should_merge = true;
     let previous_content = events
         .last()
-        .and_then(|e| e.as_chat_response().map(ChatResponse::content))
+        .and_then(|e| match e.as_chat_response() {
+            Some(ChatResponse::Message { message }) => Some(message.as_str()),
+            Some(ChatResponse::Reasoning { reasoning }) => Some(reasoning.as_str()),
+            _ => None,
+        })
         .unwrap_or_default()
         .to_owned();
 
@@ -292,7 +302,7 @@ fn chain(
     });
 
     Box::pin(try_stream!({
-        for await event in call(client, request, true) {
+        for await event in call(client, request, true, is_structured) {
             let mut event = event?;
 
             // When chaining new events, the reasoning content is irrelevant, as
@@ -316,10 +326,12 @@ fn chain(
             // overlap. Sometimes the assistant will start a chaining response
             // with a small amount of content that was already seen in the
             // previous response, and we want to avoid duplicating that.
-            if let Some(content) = event
+            if let Some(
+                ChatResponse::Message { message: content }
+                | ChatResponse::Reasoning { reasoning: content },
+            ) = event
                 .as_conversation_event_mut()
                 .and_then(ConversationEvent::as_chat_response_mut)
-                .map(ChatResponse::content_mut)
             {
                 if should_merge {
                     let merge_point = find_merge_point(&previous_content, content, 500);
@@ -401,12 +413,11 @@ fn create_request(
     query: ChatQuery,
     stream: bool,
     beta: &BetaFeatures,
-) -> Result<types::CreateMessagesRequest> {
+) -> Result<(types::CreateMessagesRequest, bool)> {
     let ChatQuery {
         thread,
         tools,
         mut tool_choice,
-        tool_call_strict_mode,
     } = query;
 
     let mut builder = types::CreateMessagesRequestBuilder::default();
@@ -415,10 +426,21 @@ fn create_request(
 
     let Thread {
         system_prompt,
-        instructions,
+        sections,
         attachments,
         events,
     } = thread;
+
+    // Request a structured response if the very last event is a ChatRequest
+    // with a schema attached. The schema is transformed to strip unsupported
+    // properties (moving them into `description` fields as hints).
+    let format = events
+        .last()
+        .and_then(|e| e.event.as_chat_request())
+        .and_then(|req| req.schema.clone())
+        .map(|schema| JsonOutputFormat::JsonSchema {
+            schema: transform_schema(schema),
+        });
 
     let mut cache_control_count = MAX_CACHE_CONTROL_COUNT;
     let config = events.config()?;
@@ -427,13 +449,8 @@ fn create_request(
         .model(model.id.name.clone())
         .messages(AnthropicMessages::build(events, &mut cache_control_count).0);
 
-    let tools = convert_tools(
-        tools,
-        tool_call_strict_mode
-            && model.features.contains(&"structured-outputs")
-            && beta.structured_outputs(),
-        &mut cache_control_count,
-    );
+    let strict_tools = model.features.contains(&"structured-outputs") && beta.structured_outputs();
+    let tools = convert_tools(tools, strict_tools, &mut cache_control_count);
 
     let mut system_content = vec![];
 
@@ -447,20 +464,29 @@ fn create_request(
         }));
     }
 
-    if !instructions.is_empty() {
-        let text = instructions
-            .into_iter()
-            .map(|instruction| instruction.try_to_xml().map_err(Into::into))
-            .collect::<Result<Vec<_>>>()?
-            .join("\n\n");
+    // FIXME: Somehow the system_prompt is being duplicated. It has to do with
+    // `impl PartialConfigDelta`?
+    // dbg!(&system_content);
 
-        system_content.push(types::SystemContent::Text(types::Text {
-            text,
-            cache_control: (cache_control_count > 0).then_some({
-                cache_control_count = cache_control_count.saturating_sub(1);
-                types::CacheControl::default()
-            }),
-        }));
+    if !sections.is_empty() {
+        // Each section gets its own system content block. Cache control
+        // is placed on the last section, as section content is unlikely
+        // to change between requests.
+        let mut sections = sections.iter().peekable();
+        while let Some(section) = sections.next() {
+            system_content.push(types::SystemContent::Text(types::Text {
+                text: section.render(),
+                cache_control: sections.peek().map_or_else(
+                    || {
+                        (cache_control_count > 0).then(|| {
+                            cache_control_count = cache_control_count.saturating_sub(1);
+                            types::CacheControl::default()
+                        })
+                    },
+                    |_| None,
+                ),
+            }));
+        }
     }
 
     if !attachments.is_empty() {
@@ -546,36 +572,76 @@ fn create_request(
         builder.system(System::Content(system_content));
     }
 
+    // Track the effort from reasoning config so we can merge it with the
+    // structured output format into a single OutputConfig at the end.
+    let mut effort = None;
+    let supports_thinking = model.reasoning.is_some_and(|r| !r.is_unsupported());
+
     if let Some(config) = reasoning_config {
-        let (min_budget, mut max_budget) = match model.reasoning {
+        match model.reasoning {
+            // Adaptive thinking for Opus 4.6+
+            Some(ReasoningDetails::Adaptive { max: supports_max }) => {
+                builder.thinking(types::ExtendedThinking::Adaptive);
+
+                effort = match config
+                    .effort
+                    .abs_to_rel(model.max_output_tokens)
+                    .unwrap_or(ReasoningEffort::Auto)
+                {
+                    ReasoningEffort::Max if supports_max => Some(Effort::Max),
+                    ReasoningEffort::Max
+                    | ReasoningEffort::XHigh
+                    | ReasoningEffort::High
+                    | ReasoningEffort::Absolute(_) => Some(Effort::High),
+                    ReasoningEffort::Medium => Some(Effort::Medium),
+                    ReasoningEffort::Low | ReasoningEffort::Xlow | ReasoningEffort::None => {
+                        Some(Effort::Low)
+                    }
+                    ReasoningEffort::Auto => None,
+                };
+            }
+
+            // Budget-based thinking for older models
             Some(ReasoningDetails::Budgetted {
                 min_tokens,
-                max_tokens,
-            }) => (min_tokens, max_tokens.unwrap_or(u32::MAX)),
-            _ => (0, u32::MAX),
-        };
+                max_tokens: reasoning_max_tokens,
+            }) => {
+                let mut max_budget = reasoning_max_tokens.unwrap_or(u32::MAX);
 
-        // With interleaved thinking, the `budget_tokens` can exceed the
-        // `max_tokens` parameter, as it represents the total budget across all
-        // thinking blocks within one assistant turn.
-        //
-        // See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#interleaved-thinking>
-        //
-        // This is only enabled if the model supports it, otherwise an error is
-        // returned if the `max_tokens` parameter is larger than the model's
-        // supported range.
-        if beta.interleaved_thinking() && model.features.contains(&"interleaved-thinking") {
-            max_budget = model.context_window.unwrap_or(max_budget);
+                // With interleaved thinking, the `budget_tokens` can exceed the
+                // `max_tokens` parameter, as it represents the total budget across all
+                // thinking blocks within one assistant turn.
+                //
+                // See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#interleaved-thinking>
+                //
+                // This is only enabled if the model supports it, otherwise an error is
+                // returned if the `max_tokens` parameter is larger than the model's
+                // supported range.
+                if beta.interleaved_thinking() && model.features.contains(&"interleaved-thinking") {
+                    max_budget = model.context_window.unwrap_or(max_budget);
+                }
+
+                builder.thinking(types::ExtendedThinking::Enabled {
+                    budget_tokens: config
+                        .effort
+                        .to_tokens(max_tokens)
+                        .max(min_tokens)
+                        .min(max_budget),
+                });
+            }
+
+            // Other reasoning details (Leveled, Unsupported) - no thinking config
+            _ => {}
         }
+    } else if supports_thinking {
+        // Reasoning is off but the model supports it — explicitly disable
+        // to prevent the model from thinking by default.
+        builder.thinking(types::ExtendedThinking::Disabled);
+    }
 
-        builder.thinking(types::ExtendedThinking {
-            kind: "enabled".to_string(),
-            budget_tokens: config
-                .effort
-                .to_tokens(max_tokens)
-                .max(min_budget)
-                .min(max_budget),
-        });
+    let is_structured = format.is_some();
+    if effort.is_some() || is_structured {
+        builder.output_config(OutputConfig { effort, format });
     }
 
     if let Some(temperature) = parameters.temperature {
@@ -608,12 +674,53 @@ fn create_request(
         builder.context_management(strategy);
     }
 
-    builder.build().map_err(Into::into)
+    builder
+        .build()
+        .map(|req| (req, is_structured))
+        .map_err(Into::into)
 }
 
 #[expect(clippy::too_many_lines)]
 fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
+        "claude-sonnet-4-6" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
+            context_window: if beta.context_1m() {
+                Some(1_000_000)
+            } else {
+                Some(200_000)
+            },
+            max_output_tokens: Some(64_000),
+            reasoning: Some(ReasoningDetails::adaptive(true)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![
+                "interleaved-thinking",
+                "context-editing",
+                "structured-outputs",
+                "adaptive-thinking",
+            ],
+        },
+        "claude-opus-4-6" | "claude-opus-4-6-20260205" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
+            context_window: if beta.context_1m() {
+                Some(1_000_000)
+            } else {
+                Some(200_000)
+            },
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::adaptive(true)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 5, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![
+                "interleaved-thinking",
+                "context-editing",
+                "structured-outputs",
+                "adaptive-thinking",
+            ],
+        },
         "claude-opus-4-5" | "claude-opus-4-5-20251101" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
@@ -694,39 +801,6 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             features: vec!["interleaved-thinking", "context-editing"],
         },
-        "claude-3-7-sonnet-latest" | "claude-3-7-sonnet-20250219" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(200_000),
-            max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 11, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            features: vec![],
-        },
-        "claude-3-5-haiku-latest" | "claude-3-5-haiku-20241022" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(200_000),
-            max_output_tokens: Some(8_192),
-            reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 7, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            features: vec![],
-        },
-        "claude-3-opus-latest" | "claude-3-opus-20240229" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(200_000),
-            max_output_tokens: Some(4_096),
-            reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2023, 8, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: claude-opus-4-1-20250805",
-                Some(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap()),
-            )),
-            features: vec![],
-        },
         "claude-3-haiku-20240307" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
@@ -734,7 +808,10 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             max_output_tokens: Some(4_096),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 8, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: claude-haiku-4-5-20251001",
+                Some(NaiveDate::from_ymd_opt(2026, 4, 20).unwrap()),
+            )),
             features: vec![],
         },
         id => {
@@ -751,7 +828,8 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
 fn map_event(
     event: types::MessagesStreamEvent,
     agg: &mut ToolCallRequestAggregator,
-) -> Result<Option<Event>> {
+    is_structured: bool,
+) -> Vec<std::result::Result<Event, StreamError>> {
     use types::MessagesStreamEvent::*;
 
     trace!(
@@ -763,11 +841,17 @@ fn map_event(
         ContentBlockStart {
             content_block,
             index,
-        } => Ok(map_content_start(content_block, index, agg)),
-        ContentBlockDelta { delta, index } => Ok(map_content_delta(delta, index, agg)),
+        } => map_content_start(content_block, index, agg, is_structured)
+            .into_iter()
+            .map(Ok)
+            .collect(),
+        ContentBlockDelta { delta, index } => map_content_delta(delta, index, agg, is_structured)
+            .into_iter()
+            .map(Ok)
+            .collect(),
         ContentBlockStop { index } => map_content_stop(index, agg),
-        MessageDelta { delta, .. } => Ok(map_message_delta(delta)),
-        _ => Ok(None),
+        MessageDelta { delta, .. } => map_message_delta(&delta).into_iter().map(Ok).collect(),
+        _ => vec![],
     }
 }
 
@@ -796,6 +880,139 @@ impl TryFrom<&AnthropicConfig> for Anthropic {
                 .map_err(|e| Error::Anthropic(AnthropicError::Unknown(e.to_string())))?,
         })
     }
+}
+
+/// Transform a JSON schema to conform to Anthropic's structured output
+/// constraints.
+///
+/// Anthropic's structured output supports a subset of JSON Schema. Unsupported
+/// properties are stripped and appended to the `description` field so the model
+/// can still see them as soft hints.
+///
+/// Mirrors the logic from Anthropic's Python SDK `transform_schema`.
+///
+/// See: <https://docs.claude.com/en/docs/build-with-claude/structured-outputs#json-schema-limitations>
+fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
+    if let Some(r) = src.remove("$ref") {
+        return Map::from_iter([("$ref".into(), r)]);
+    }
+
+    let mut out = Map::new();
+
+    // Helper macro to move a field from src to out.
+    macro_rules! move_field {
+        ($key:literal) => {
+            if let Some(v) = src.remove($key) {
+                out.insert($key.into(), v);
+            }
+        };
+    }
+
+    // Extract common fields
+    move_field!("title");
+    move_field!("description");
+
+    // Recursive Transformation Helpers
+    let transform_val = |v: Value| match v {
+        Value::Object(o) => Value::Object(transform_schema(o)),
+        other => other,
+    };
+
+    let transform_map = |m: Map<String, Value>| -> Map<String, Value> {
+        m.into_iter().map(|(k, v)| (k, transform_val(v))).collect()
+    };
+
+    let transform_vec =
+        |v: Vec<Value>| -> Vec<Value> { v.into_iter().map(transform_val).collect() };
+
+    // Handle Recursive Dictionaries
+    for key in ["$defs", "definitions"] {
+        if let Some(Value::Object(defs)) = src.remove(key) {
+            out.insert(key.into(), Value::Object(transform_map(defs)));
+        }
+    }
+
+    // Handle Combinators
+    if let Some(Value::Array(variants)) = src.remove("anyOf") {
+        out.insert("anyOf".into(), Value::Array(transform_vec(variants)));
+    } else if let Some(Value::Array(variants)) = src.remove("oneOf") {
+        // Remap oneOf -> anyOf
+        out.insert("anyOf".into(), Value::Array(transform_vec(variants)));
+    } else if let Some(Value::Array(variants)) = src.remove("allOf") {
+        out.insert("allOf".into(), Value::Array(transform_vec(variants)));
+    }
+
+    // Handle Type-Specific Logic
+    //
+    // We remove "type" now so it doesn't get caught in the "leftovers" logic
+    // later.
+    let type_val = src.remove("type");
+    match type_val.as_ref().and_then(Value::as_str) {
+        Some("object") => {
+            if let Some(Value::Object(props)) = src.remove("properties") {
+                out.insert("properties".into(), Value::Object(transform_map(props)));
+            }
+
+            move_field!("required");
+
+            // Force strictness
+            src.remove("additionalProperties");
+            out.insert("additionalProperties".into(), Value::Bool(false));
+        }
+        Some("array") => {
+            if let Some(items) = src.remove("items") {
+                out.insert("items".into(), transform_val(items));
+            }
+
+            // Enforce minItems logic
+            if let Some(min) = src.remove("minItems") {
+                if min.as_u64().is_some_and(|n| n <= 1) {
+                    out.insert("minItems".into(), min);
+                } else {
+                    // Put it back into src so it falls into description
+                    src.insert("minItems".into(), min);
+                }
+            }
+        }
+        Some("string") => {
+            if let Some(format) = src.remove("format") {
+                let is_supported = format
+                    .as_str()
+                    .is_some_and(|f| SUPPORTED_STRING_FORMATS.contains(&f));
+
+                if is_supported {
+                    out.insert("format".into(), format);
+                } else {
+                    src.insert("format".into(), format);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Re-insert type.
+    if let Some(t) = type_val {
+        out.insert("type".into(), t);
+    }
+
+    // 7. Handle "Leftovers" (Unsupported fields -> Description)
+    if !src.is_empty() {
+        let extra_info = src
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        out.entry("description")
+            .and_modify(|v| {
+                if let Some(s) = v.as_str() {
+                    *v = Value::from(format!("{s}\n\n{{{extra_info}}}"));
+                }
+            })
+            .or_insert_with(|| Value::from(format!("{{{extra_info}}}")));
+    }
+
+    out
 }
 
 fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {
@@ -979,7 +1196,11 @@ fn convert_event(
                 && signature.is_some()
             {
                 types::MessageContent::Thinking(Thinking {
-                    thinking: response.into_content(),
+                    thinking: match response {
+                        ChatResponse::Reasoning { reasoning } => reasoning,
+                        ChatResponse::Message { message } => message,
+                        ChatResponse::Structured { data } => data.to_string(),
+                    },
                     signature,
                 })
             } else if is_anthropic
@@ -990,13 +1211,19 @@ fn convert_event(
                     .map(str::to_owned)
             {
                 types::MessageContent::RedactedThinking { data }
-            } else if response.is_reasoning() {
-                // Reasoning from other providers - wrap in XML tags
-                types::MessageContent::Text(
-                    format!("<think>\n{}\n</think>\n\n", response.content()).into(),
-                )
             } else {
-                types::MessageContent::Text(response.into_content().into())
+                match response {
+                    // Reasoning from other providers - wrap in <think> tags.
+                    ChatResponse::Reasoning { reasoning } => types::MessageContent::Text(
+                        format!("<think>\n{reasoning}\n</think>\n\n").into(),
+                    ),
+                    ChatResponse::Message { message } => {
+                        types::MessageContent::Text(message.into())
+                    }
+                    ChatResponse::Structured { data } => {
+                        types::MessageContent::Text(data.to_string().into())
+                    }
+                }
             };
 
             Some((types::MessageRole::Assistant, content))
@@ -1028,7 +1255,8 @@ fn convert_event(
         }
         EventKind::ChatRequest(_)
         | EventKind::InquiryRequest(_)
-        | EventKind::InquiryResponse(_) => None,
+        | EventKind::InquiryResponse(_)
+        | EventKind::TurnStart(_) => None,
     }
 }
 
@@ -1036,16 +1264,29 @@ fn map_content_start(
     item: types::MessageContent,
     index: usize,
     agg: &mut ToolCallRequestAggregator,
+    is_structured: bool,
 ) -> Option<Event> {
     use types::MessageContent::*;
 
     let mut metadata = IndexMap::new();
     let kind: EventKind = match item {
+        // Initial part indicating a tool call request has started. The eventual
+        // fully-aggregated arguments will be sent in a separate Part.
         ToolUse(types::ToolUse { id, name, .. }) => {
-            *agg = ToolCallRequestAggregator::new();
-            agg.add_chunk(index, Some(id), Some(name), None);
-            return None;
+            *agg = ToolCallRequestAggregator::default();
+            agg.add_chunk(index, Some(id.clone()), Some(name.clone()), None);
+            let request = ToolCallRequest {
+                id,
+                name,
+                arguments: Map::new(),
+            };
+
+            return Some(Event::Part {
+                index,
+                event: request.into(),
+            });
         }
+        Text(text) if is_structured => ChatResponse::structured(Value::String(text.text)).into(),
         Text(text) if !text.text.is_empty() => ChatResponse::message(text.text).into(),
         Text(_) => return None,
         Thinking(types::Thinking {
@@ -1077,9 +1318,13 @@ fn map_content_delta(
     delta: types::ContentBlockDelta,
     index: usize,
     agg: &mut ToolCallRequestAggregator,
+    is_structured: bool,
 ) -> Option<Event> {
     let mut metadata = IndexMap::new();
     let kind: EventKind = match delta {
+        types::ContentBlockDelta::TextDelta { text } if is_structured => {
+            ChatResponse::structured(Value::String(text)).into()
+        }
         types::ContentBlockDelta::TextDelta { text } => ChatResponse::message(text).into(),
         types::ContentBlockDelta::ThinkingDelta { thinking } => {
             ChatResponse::reasoning(thinking).into()
@@ -1105,163 +1350,90 @@ fn map_content_delta(
     })
 }
 
-fn map_content_stop(index: usize, agg: &mut ToolCallRequestAggregator) -> Result<Option<Event>> {
+fn map_content_stop(
+    index: usize,
+    agg: &mut ToolCallRequestAggregator,
+) -> Vec<std::result::Result<Event, StreamError>> {
+    let mut events = vec![];
+
     // Check if we're buffering a tool call request
     match agg.finalize(index) {
-        Ok(tool_call) => {
-            return Ok(Some(Event::Part {
-                event: ConversationEvent::now(tool_call),
-                index,
-            }));
-        }
+        Ok(tool_call) => events.push(Ok(Event::Part {
+            event: ConversationEvent::now(tool_call),
+            index,
+        })),
         Err(AggregationError::UnknownIndex) => {}
-        Err(error) => return Err(error.into()),
+        Err(error) => {
+            events.push(Err(StreamError::other(error.to_string())));
+            return events;
+        }
     }
 
-    Ok(Some(Event::flush(index)))
+    events.push(Ok(Event::flush(index)));
+    events
 }
 
-fn map_message_delta(delta: types::MessageDelta) -> Option<Event> {
-    match delta.stop_reason?.as_str() {
+fn map_message_delta(delta: &types::MessageDelta) -> Option<Event> {
+    match delta.stop_reason.as_deref()? {
         "max_tokens" => Some(Event::Finished(FinishReason::MaxTokens)),
         _ => None,
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use indexmap::IndexMap;
-    use jp_config::model::parameters::{
-        PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort,
-    };
-    use jp_test::{Result, function_name};
-    use test_log::test;
+impl From<AnthropicError> for StreamError {
+    fn from(error: AnthropicError) -> Self {
+        use AnthropicError as E;
 
-    use super::*;
-    use crate::test::{TestRequest, run_test};
+        match error {
+            E::Network(error) => Self::from(error),
+            E::StreamTransport(_) => StreamError::transient(error.to_string()).with_source(error),
+            E::RateLimit { retry_after } => {
+                Self::rate_limit(retry_after.map(Duration::from_secs)).with_source(error)
+            }
 
-    const MAGIC_STRING: &str = "ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB";
+            // Anthropic's API is notoriously unreliable, so we special-case a
+            // few common errors that most of the times resolve themselves when
+            // retried.
+            //
+            // See: <https://docs.claude.com/en/docs/build-with-claude/streaming#error-events>
+            // See: <https://docs.claude.com/en/api/errors#http-errors>
+            E::Api(ref api_error)
+                if RETRYABLE_ANTHROPIC_ERROR_TYPES.contains(&api_error.error_type.as_str()) =>
+            {
+                let retry_after = api_error
+                    .message
+                    .as_deref()
+                    .and_then(extract_retry_from_text)
+                    .unwrap_or(Duration::from_secs(3));
 
-    #[test(tokio::test)]
-    async fn test_redacted_thinking() -> Result {
-        let requests = vec![
-            TestRequest::chat(PROVIDER)
-                .enable_reasoning()
-                .chat_request(MAGIC_STRING),
-            TestRequest::chat(PROVIDER)
-                .chat_request("Do you have access to your redacted thinking content?"),
-        ];
+                StreamError::transient(error.to_string())
+                    .with_retry_after(retry_after)
+                    .with_source(error)
+            }
 
-        run_test(PROVIDER, function_name!(), requests).await
-    }
+            // Detect billing/quota errors before falling through to generic.
+            E::Api(ref api_error)
+                if looks_like_quota_error(&api_error.error_type)
+                    || api_error
+                        .message
+                        .as_deref()
+                        .is_some_and(looks_like_quota_error) =>
+            {
+                StreamError::new(
+                    StreamErrorKind::InsufficientQuota,
+                    format!(
+                        "Insufficient API quota. Check your plan and billing details \
+                         at https://console.anthropic.com/settings/billing. ({error})"
+                    ),
+                )
+                .with_source(error)
+            }
 
-    #[test(tokio::test)]
-    async fn test_request_chaining() -> Result {
-        let mut request = TestRequest::chat(PROVIDER)
-            .stream(true)
-            .reasoning(Some(PartialReasoningConfig::Custom(
-                PartialCustomReasoningConfig {
-                    effort: Some(ReasoningEffort::Absolute(1024.into())),
-                    exclude: Some(false),
-                },
-            )))
-            .chat_request("Give me a 2000 word explainer about Kirigami-inspired parachutes");
-
-        if let Some(details) = request.as_model_details_mut() {
-            details.max_output_tokens = Some(1152);
-        }
-
-        run_test(PROVIDER, function_name!(), Some(request)).await
-    }
-
-    #[test]
-    fn test_find_merge_point_edge_cases() {
-        struct TestCase {
-            left: &'static str,
-            right: &'static str,
-            expected: &'static str,
-            max_search: usize,
-        }
-
-        let cases = IndexMap::from([
-            ("no overlap", TestCase {
-                left: "Hello",
-                right: " world",
-                expected: "Hello world",
-                max_search: 500,
-            }),
-            ("single word overlap", TestCase {
-                left: "The quick brown",
-                right: "brown fox",
-                expected: "The quick brown fox",
-                max_search: 500,
-            }),
-            ("minimal overlap (5 chars)", TestCase {
-                expected: "abcdefghij",
-                left: "abcdefgh",
-                right: "defghij",
-                max_search: 500,
-            }),
-            (
-                "below minimum overlap (4 chars) - should not merge",
-                TestCase {
-                    left: "abcd",
-                    right: "abcd",
-                    expected: "abcdabcd",
-                    max_search: 500,
-                },
-            ),
-            ("complete overlap", TestCase {
-                left: "Hello world",
-                right: "world",
-                expected: "Hello world",
-                max_search: 500,
-            }),
-            ("overlap with punctuation", TestCase {
-                left: "Hello, how are",
-                right: "how are you?",
-                expected: "Hello, how are you?",
-                max_search: 500,
-            }),
-            ("overlap with whitespace", TestCase {
-                left: "Hello     ",
-                right: "     world",
-                expected: "Hello     world",
-                max_search: 500,
-            }),
-            ("unicode overlap", TestCase {
-                left: "Hello 世界",
-                right: "世界 friend",
-                expected: "Hello 世界 friend",
-                max_search: 500,
-            }),
-            ("long overlap", TestCase {
-                left: "The quick brown fox jumps",
-                right: "fox jumps over the lazy dog",
-                expected: "The quick brown fox jumpsfox jumps over the lazy dog",
-                max_search: 8,
-            }),
-            ("empty right", TestCase {
-                left: "Hello",
-                right: "",
-                expected: "Hello",
-                max_search: 500,
-            }),
-        ]);
-
-        for (
-            name,
-            TestCase {
-                left,
-                right,
-                expected,
-                max_search,
-            },
-        ) in cases
-        {
-            let pos = find_merge_point(left, right, max_search);
-            let result = format!("{left}{}", &right[pos..]);
-            assert_eq!(result, expected, "Failed test case: {name}");
+            error => StreamError::other(error.to_string()).with_source(error),
         }
     }
 }
+
+#[cfg(test)]
+#[path = "anthropic_tests.rs"]
+mod tests;
