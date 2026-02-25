@@ -1,7 +1,7 @@
 //! See [`Thread`].
 
 use jp_attachment::Attachment;
-use jp_config::assistant::instructions::InstructionsConfig;
+use jp_config::assistant::sections::SectionConfig;
 use quick_xml::se::TextFormat;
 use serde::Serialize;
 use tracing::trace;
@@ -17,8 +17,8 @@ pub struct ThreadBuilder {
     /// See [`Thread::system_prompt`].
     pub system_prompt: Option<String>,
 
-    /// See [`Thread::instructions`].
-    pub instructions: Vec<InstructionsConfig>,
+    /// See [`Thread::sections`].
+    pub sections: Vec<SectionConfig>,
 
     /// See [`Thread::attachments`].
     pub attachments: Vec<Attachment>,
@@ -33,7 +33,7 @@ impl ThreadBuilder {
     pub const fn new() -> Self {
         Self {
             system_prompt: None,
-            instructions: Vec::new(),
+            sections: Vec::new(),
             attachments: Vec::new(),
             events: None,
         }
@@ -46,17 +46,17 @@ impl ThreadBuilder {
         self
     }
 
-    /// Set the instructions for the thread.
+    /// Set the sections for the thread.
     #[must_use]
-    pub fn with_instructions(mut self, instructions: Vec<InstructionsConfig>) -> Self {
-        self.instructions = instructions;
+    pub fn with_sections(mut self, sections: Vec<SectionConfig>) -> Self {
+        self.sections = sections;
         self
     }
 
-    /// Add an instruction to the thread.
+    /// Add a section to the thread.
     #[must_use]
-    pub fn add_instruction(mut self, instruction: InstructionsConfig) -> Self {
-        self.instructions.push(instruction);
+    pub fn add_section(mut self, section: SectionConfig) -> Self {
+        self.sections.push(section);
         self
     }
 
@@ -74,16 +74,6 @@ impl ThreadBuilder {
         self
     }
 
-    // /// Add an event to the thread.
-    // ///
-    // /// If no [`ConversationStream`] exists, a default one is created.
-    // #[must_use]
-    // pub fn with_event(mut self, event: impl Into<ConversationEvent>) -> Self {
-    //     let mut stream = self.events.take().unwrap_or_default();
-    //     stream.push(event);
-    //     self.with_events(stream)
-    // }
-
     /// Build the thread.
     ///
     /// # Errors
@@ -92,7 +82,7 @@ impl ThreadBuilder {
     pub fn build(self) -> Result<Thread> {
         let Self {
             system_prompt,
-            instructions,
+            sections,
             attachments,
             events,
         } = self;
@@ -102,7 +92,7 @@ impl ThreadBuilder {
 
         Ok(Thread {
             system_prompt,
-            instructions,
+            sections,
             attachments,
             events,
         })
@@ -118,8 +108,11 @@ pub struct Thread {
     /// The system prompt to use.
     pub system_prompt: Option<String>,
 
-    /// The instructions to use.
-    pub instructions: Vec<InstructionsConfig>,
+    /// The sections to include after the system prompt.
+    ///
+    /// Each section is rendered via [`SectionConfig::render()`] before
+    /// being sent to the provider.
+    pub sections: Vec<SectionConfig>,
 
     /// The attachments to use.
     pub attachments: Vec<Attachment>,
@@ -130,6 +123,8 @@ pub struct Thread {
 
 impl Thread {
     /// Convert the thread into a list of messages.
+    ///
+    /// Sections are rendered to strings via [`SectionConfig::render()`].
     ///
     /// # Errors
     ///
@@ -146,7 +141,7 @@ impl Thread {
     {
         let Self {
             system_prompt,
-            instructions,
+            sections,
             attachments,
             events,
         } = self;
@@ -158,8 +153,8 @@ impl Thread {
             parts.push(system_prompt);
         }
 
-        for instruction in &instructions {
-            parts.push(instruction.try_to_xml()?);
+        for section in &sections {
+            parts.push(section.render());
         }
 
         if !attachments.is_empty() {

@@ -2,20 +2,27 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, TimeZone as _, Utc};
+use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, Config as _, PartialAppConfig, PartialConfig as _};
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde::{Deserialize, Serialize, Serializer};
+use serde_json::Value;
 use tracing::error;
 
-use crate::event::{
-    ChatRequest, ChatResponse, ConversationEvent, EventKind, InquiryRequest, InquiryResponse,
-    ToolCallRequest, ToolCallResponse,
+use crate::{
+    event::{
+        ChatRequest, ChatResponse, ConversationEvent, EventKind, InquiryId, InquiryRequest,
+        InquiryResponse, ToolCallRequest, ToolCallResponse, TurnStart,
+    },
+    storage::{decode_event_value, encode_event},
 };
 
 /// An internal representation of events in a conversation stream.
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+///
+/// This type handles base64-encoding of content fields (tool arguments, tool
+/// response content, metadata) during serialization, and decoding during
+/// deserialization. This keeps the encoding concern isolated to the storage
+/// layer — the inner [`ConversationEvent`] types serialize as plain text.
+#[derive(Debug, Clone, PartialEq)]
 pub enum InternalEvent {
     /// The configuration state of the conversation is updated.
     ///
@@ -28,10 +35,38 @@ pub enum InternalEvent {
     /// Any non-config events before the first `ConfigDelta` event are
     /// considered to have the default configuration.
     ConfigDelta(ConfigDelta),
-    // ConfigDelta(Box<PartialAppConfig>),
     /// An event in the conversation stream.
-    #[serde(untagged)]
     Event(Box<ConversationEvent>),
+}
+
+impl Serialize for InternalEvent {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::ConfigDelta(delta) => {
+                #[derive(Serialize)]
+                struct Tagged<'a> {
+                    #[serde(rename = "type")]
+                    tag: &'static str,
+                    #[serde(flatten)]
+                    inner: &'a ConfigDelta,
+                }
+
+                Tagged {
+                    tag: "config_delta",
+                    inner: delta,
+                }
+                .serialize(serializer)
+            }
+            Self::Event(event) => {
+                let mut value =
+                    serde_json::to_value(event.as_ref()).map_err(serde::ser::Error::custom)?;
+
+                // Base64-encode storage fields.
+                encode_event(&mut value, &event.kind);
+                value.serialize(serializer)
+            }
+        }
+    }
 }
 
 impl InternalEvent {
@@ -386,6 +421,20 @@ impl ConversationStream {
         self
     }
 
+    /// Push a [`ConversationEvent`] of type [`EventKind::TurnStart`] onto
+    /// the stream.
+    pub fn add_turn_start(&mut self) {
+        self.push(ConversationEvent::now(TurnStart));
+    }
+
+    /// Add a [`ConversationEvent`] of type [`EventKind::TurnStart`] onto the
+    /// stream.
+    #[must_use]
+    pub fn with_turn_start(mut self) -> Self {
+        self.add_turn_start();
+        self
+    }
+
     /// Returns the last [`ConversationEvent`] in the stream, wrapped in a
     /// [`ConversationEventWithConfigRef`], containing the [`PartialAppConfig`]
     /// at the time the event was added.
@@ -438,6 +487,27 @@ impl ConversationStream {
         }
     }
 
+    /// Similar to [`Self::pop`], but only pops if the predicate returns `true`.
+    pub fn pop_if(
+        &mut self,
+        f: impl Fn(&ConversationEvent) -> bool,
+    ) -> Option<ConversationEventWithConfig> {
+        if !self
+            .events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                InternalEvent::Event(event) => Some(f(event)),
+                InternalEvent::ConfigDelta(_) => None,
+            })
+            .unwrap_or(false)
+        {
+            return None;
+        }
+
+        self.pop()
+    }
+
     /// Retains only the [`ConversationEvent`]s that pass the predicate.
     ///
     /// This does NOT remove the [`ConfigDelta`]s.
@@ -451,6 +521,277 @@ impl ConversationStream {
     /// Clears the stream of any events, leaving the base configuration intact.
     pub fn clear(&mut self) {
         self.events.clear();
+    }
+
+    /// Repairs structural invariants that may be violated after arbitrary
+    /// filtering (e.g. `--from`/`--until` on fork).
+    ///
+    /// Specifically:
+    /// 1. Drops conversation events before the first [`ChatRequest`],
+    ///    preserving [`ConfigDelta`]s and [`TurnStart`]s.
+    /// 2. Removes orphaned [`ToolCallResponse`]s whose matching
+    ///    [`ToolCallRequest`] is missing.
+    /// 3. Injects synthetic error [`ToolCallResponse`]s for
+    ///    [`ToolCallRequest`]s that lack a matching response.
+    /// 4. Removes orphaned [`InquiryResponse`]s whose matching
+    ///    [`InquiryRequest`] is missing.
+    /// 5. Removes orphaned [`InquiryRequest`]s whose matching
+    ///    [`InquiryResponse`] is missing.
+    /// 6. Normalizes [`TurnStart`] events: ensures the stream begins
+    ///    with exactly one `TurnStart` and re-indexes all turn starts
+    ///    to a zero-based sequence.
+    pub fn sanitize(&mut self) {
+        self.drop_leading_non_user_events();
+        self.remove_orphaned_tool_call_responses();
+        self.sanitize_orphaned_tool_calls();
+        self.remove_orphaned_inquiry_responses();
+        self.remove_orphaned_inquiry_requests();
+        self.normalize_turn_starts();
+    }
+
+    /// Drops conversation events before the first [`ChatRequest`] that
+    /// would be invalid as leading content (e.g. assistant responses,
+    /// tool call results). [`ConfigDelta`]s and [`TurnStart`]s are
+    /// preserved — config deltas maintain configuration state, and turn
+    /// markers are invisible to providers but useful for `--last`.
+    fn drop_leading_non_user_events(&mut self) {
+        let Some(pos) = self
+            .events
+            .iter()
+            .position(|e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()))
+        else {
+            return;
+        };
+
+        let mut idx = 0;
+        self.events.retain(|event| {
+            let i = idx;
+            idx += 1;
+            if i >= pos {
+                return true;
+            }
+            match event {
+                InternalEvent::ConfigDelta(_) => true,
+                InternalEvent::Event(e) => e.is_turn_start(),
+            }
+        });
+    }
+
+    /// Removes [`ToolCallResponse`]s whose ID doesn't match any
+    /// [`ToolCallRequest`] in the stream.
+    fn remove_orphaned_tool_call_responses(&mut self) {
+        let request_ids: Vec<String> = self
+            .events
+            .iter()
+            .filter_map(InternalEvent::as_event)
+            .filter_map(|e| e.as_tool_call_request())
+            .map(|r| r.id.clone())
+            .collect();
+
+        self.events.retain(|event| {
+            if let Some(event) = event.as_event()
+                && let Some(response) = event.as_tool_call_response()
+            {
+                return request_ids.contains(&response.id);
+            }
+            true
+        });
+    }
+
+    /// Removes [`InquiryResponse`]s whose ID doesn't match any
+    /// [`InquiryRequest`] in the stream.
+    fn remove_orphaned_inquiry_responses(&mut self) {
+        let request_ids: Vec<InquiryId> = self
+            .events
+            .iter()
+            .filter_map(InternalEvent::as_event)
+            .filter_map(|e| e.as_inquiry_request())
+            .map(|r| r.id.clone())
+            .collect();
+
+        self.events.retain(|event| {
+            if let Some(event) = event.as_event()
+                && let Some(response) = event.as_inquiry_response()
+            {
+                return request_ids.contains(&response.id);
+            }
+            true
+        });
+    }
+
+    /// Removes [`InquiryRequest`]s whose ID doesn't match any
+    /// [`InquiryResponse`] in the stream.
+    fn remove_orphaned_inquiry_requests(&mut self) {
+        let response_ids: Vec<InquiryId> = self
+            .events
+            .iter()
+            .filter_map(InternalEvent::as_event)
+            .filter_map(|e| e.as_inquiry_response())
+            .map(|r| r.id.clone())
+            .collect();
+
+        self.events.retain(|event| {
+            if let Some(event) = event.as_event()
+                && let Some(request) = event.as_inquiry_request()
+            {
+                return response_ids.contains(&request.id);
+            }
+            true
+        });
+    }
+
+    /// Ensures the stream has exactly one leading [`TurnStart`] and that
+    /// all `TurnStart` indices form a zero-based sequence.
+    ///
+    /// After filtering, the stream may have multiple stale `TurnStart`s
+    /// from earlier turns piled up at the front, or gaps in the index
+    /// sequence. This step:
+    /// - Inserts a `TurnStart(0)` if the stream has events but no
+    ///   leading `TurnStart`.
+    /// - Removes duplicate `TurnStart`s that precede the first
+    ///   `ChatRequest` (keeping only the last one).
+    /// - Re-indexes all `TurnStart` events to `0, 1, 2, …`.
+    fn normalize_turn_starts(&mut self) {
+        if self
+            .events
+            .iter()
+            .all(|e| !matches!(e, InternalEvent::Event(event) if !event.is_turn_start()))
+        {
+            // Stream has no non-TurnStart events, nothing to normalize.
+            return;
+        }
+
+        // Find the position of the first ChatRequest.
+        let first_chat_pos = self
+            .events
+            .iter()
+            .position(|e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()));
+
+        // Remove all but the last TurnStart before the first ChatRequest.
+        // This collapses multiple stale turn markers from filtered turns
+        // into a single one.
+        if let Some(chat_pos) = first_chat_pos {
+            let leading_turn_starts: Vec<usize> = self.events[..chat_pos]
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| matches!(e, InternalEvent::Event(event) if event.is_turn_start()))
+                .map(|(i, _)| i)
+                .collect();
+
+            if leading_turn_starts.len() > 1 {
+                // Keep the last one, remove the rest.
+                let to_remove: Vec<usize> =
+                    leading_turn_starts[..leading_turn_starts.len() - 1].to_vec();
+                let mut idx = 0;
+                self.events.retain(|_| {
+                    let i = idx;
+                    idx += 1;
+                    !to_remove.contains(&i)
+                });
+            }
+        }
+
+        // Ensure there's a TurnStart before the first ChatRequest.
+        let first_event_is_turn_start =
+            self.events
+                .iter()
+                .any(|e| matches!(e, InternalEvent::Event(event) if event.is_turn_start()))
+                && self.events.iter().position(
+                    |e| matches!(e, InternalEvent::Event(event) if event.is_turn_start()),
+                ) < self.events.iter().position(
+                    |e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()),
+                );
+
+        if !first_event_is_turn_start {
+            // Find where to insert (right before the first ChatRequest,
+            // or at position 0 if there are no ChatRequests).
+            let insert_pos = self
+                .events
+                .iter()
+                .position(|e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()))
+                .unwrap_or(0);
+
+            let timestamp = self
+                .events
+                .get(insert_pos)
+                .and_then(InternalEvent::as_event)
+                .map_or(DateTime::<Utc>::UNIX_EPOCH, |e| e.timestamp);
+
+            self.events.insert(
+                insert_pos,
+                InternalEvent::Event(Box::new(ConversationEvent::new(TurnStart, timestamp))),
+            );
+        }
+    }
+
+    /// Injects synthetic [`ToolCallResponse`]s for any [`ToolCallRequest`]s
+    /// that lack a matching response.
+    ///
+    /// This can happen when the user interrupts tool execution (e.g. Ctrl+C
+    /// → "save & exit") after the request has been streamed but before
+    /// responses are recorded. Providers such as Anthropic reject streams
+    /// where a `tool_use` block has no corresponding `tool_result`.
+    ///
+    /// The synthetic responses carry an error message explaining the
+    /// interruption, preserving the context that a tool call was attempted.
+    pub fn sanitize_orphaned_tool_calls(&mut self) {
+        // Collect IDs that already have a response.
+        let mut response_ids: Vec<String> = Vec::new();
+        for event in &self.events {
+            if let Some(event) = event.as_event()
+                && let EventKind::ToolCallResponse(resp) = &event.kind
+            {
+                response_ids.push(resp.id.clone());
+            }
+        }
+
+        // Walk the events to find orphaned request positions.
+        // Collect (index, id) pairs for requests that lack a response.
+        #[expect(clippy::needless_collect, reason = "borrow checker")]
+        let orphans: Vec<(usize, String, DateTime<Utc>)> = self
+            .events
+            .iter()
+            .enumerate()
+            .filter_map(|(i, event)| {
+                event.as_event().and_then(|event| {
+                    event.as_tool_call_request().and_then(|request| {
+                        (!response_ids.contains(&request.id))
+                            .then(|| (i, request.id.clone(), event.timestamp))
+                    })
+                })
+            })
+            .collect();
+
+        // Insert synthetic responses directly after each orphaned request.
+        // Iterate in reverse so earlier indices remain valid.
+        for (pos, id, timestamp) in orphans.into_iter().rev() {
+            let response = InternalEvent::Event(Box::new(ConversationEvent::new(
+                ToolCallResponse {
+                    id,
+                    result: Err("Tool call was interrupted.".to_string()),
+                },
+                timestamp,
+            )));
+            self.events.insert(pos + 1, response);
+        }
+    }
+
+    /// Removes a trailing [`TurnStart`] event if it is the last
+    /// conversation event in the stream.
+    ///
+    /// This cleans up empty turns that can occur when the turn loop errors
+    /// out before any real events are added after the turn marker.
+    pub fn trim_trailing_empty_turn(&mut self) {
+        // Walk backwards past any config deltas to find the last real event.
+        if let Some(pos) = self
+            .events
+            .iter()
+            .rposition(|e| matches!(e, InternalEvent::Event(_)))
+            && let InternalEvent::Event(ref event) = self.events[pos]
+            && event.is_turn_start()
+        {
+            self.events.remove(pos);
+        }
     }
 
     /// Returns an iterator over the events in the stream, wrapped in a
@@ -482,6 +823,8 @@ impl ConversationStream {
     #[doc(hidden)]
     #[must_use]
     pub fn new_test() -> Self {
+        use chrono::TimeZone as _;
+
         Self {
             base_config: AppConfig::new_test().into(),
             events: vec![],
@@ -873,170 +1216,42 @@ pub enum StreamError {
     Config(#[from] jp_config::ConfigError),
 }
 
-// A custom deserializer for `InternalEvent` that allows us to avoid serde
-// allocations when trying to match `untagged` enum variants.
+// A custom deserializer for `InternalEvent` that avoids serde allocations
+// when trying to match `untagged` enum variants.
 //
-// This essentially "flattens" the `InternalEvent` enum into one where no
-// untagged variants exist, allowing serde to match the correct variant based on
-// the `type` field.
+// Deserializes to a JSON `Value` first, then dispatches on the `type` tag.
+// This avoids the allocation overhead serde incurs when trying each variant
+// of an untagged enum. Base64-encoded storage fields are decoded before the
+// final deserialization into typed events.
 //
-// We then convert the `InternalEventFlattened` back into the original
-// `InternalEvent` type.
-//
-// `cargo dhat` had shown this to be a hotspot in the codebase, so we're
-// optimizing it for performance.
-#[allow(clippy::allow_attributes, clippy::missing_docs_in_private_items)]
+// `cargo dhat` had shown the untagged approach to be a hotspot.
 impl<'de> Deserialize<'de> for InternalEvent {
-    #[expect(clippy::too_many_lines)]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(tag = "type", rename_all = "snake_case")]
-        enum InternalEventFlattened {
-            ConfigDelta(ConfigDelta),
+        let mut value = Value::deserialize(deserializer)?;
 
-            ChatRequest {
-                #[serde(deserialize_with = "crate::deserialize_dt")]
-                timestamp: DateTime<Utc>,
-                #[serde(default, with = "jp_serde::repr::base64_json_map")]
-                metadata: Map<String, Value>,
-                #[serde(flatten)]
-                data: ChatRequest,
-            },
-            ChatResponse {
-                #[serde(deserialize_with = "crate::deserialize_dt")]
-                timestamp: DateTime<Utc>,
-                #[serde(default, with = "jp_serde::repr::base64_json_map")]
-                metadata: Map<String, Value>,
-                #[serde(flatten)]
-                data: ChatResponse,
-            },
-            ToolCallRequest {
-                #[serde(deserialize_with = "crate::deserialize_dt")]
-                timestamp: DateTime<Utc>,
-                #[serde(default, with = "jp_serde::repr::base64_json_map")]
-                metadata: Map<String, Value>,
-                #[serde(flatten)]
-                data: ToolCallRequest,
-            },
-            ToolCallResponse {
-                #[serde(deserialize_with = "crate::deserialize_dt")]
-                timestamp: DateTime<Utc>,
-                #[serde(default, with = "jp_serde::repr::base64_json_map")]
-                metadata: Map<String, Value>,
-                #[serde(flatten)]
-                data: ToolCallResponse,
-            },
-            InquiryRequest {
-                #[serde(deserialize_with = "crate::deserialize_dt")]
-                timestamp: DateTime<Utc>,
-                #[serde(default, with = "jp_serde::repr::base64_json_map")]
-                metadata: Map<String, Value>,
-                #[serde(flatten)]
-                data: InquiryRequest,
-            },
-            InquiryResponse {
-                #[serde(deserialize_with = "crate::deserialize_dt")]
-                timestamp: DateTime<Utc>,
-                #[serde(default, with = "jp_serde::repr::base64_json_map")]
-                metadata: Map<String, Value>,
-                #[serde(flatten)]
-                data: InquiryResponse,
-            },
+        let tag = value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+
+        if tag == "config_delta" {
+            return serde_json::from_value(value)
+                .map(Self::ConfigDelta)
+                .map_err(serde::de::Error::custom);
         }
 
-        let event = match InternalEventFlattened::deserialize(deserializer)? {
-            InternalEventFlattened::ConfigDelta(d) => return Ok(Self::ConfigDelta(d)),
+        // Decode base64-encoded storage fields before deserializing.
+        decode_event_value(&mut value);
 
-            InternalEventFlattened::ChatRequest {
-                timestamp,
-                metadata,
-                data,
-            } => ConversationEvent {
-                timestamp,
-                metadata,
-                kind: data.into(),
-            },
-            InternalEventFlattened::ChatResponse {
-                timestamp,
-                metadata,
-                data,
-            } => ConversationEvent {
-                timestamp,
-                metadata,
-                kind: data.into(),
-            },
-            InternalEventFlattened::ToolCallRequest {
-                timestamp,
-                metadata,
-                data,
-            } => ConversationEvent {
-                timestamp,
-                metadata,
-                kind: data.into(),
-            },
-            InternalEventFlattened::ToolCallResponse {
-                timestamp,
-                metadata,
-                data,
-            } => ConversationEvent {
-                timestamp,
-                metadata,
-                kind: data.into(),
-            },
-            InternalEventFlattened::InquiryRequest {
-                timestamp,
-                metadata,
-                data,
-            } => ConversationEvent {
-                timestamp,
-                metadata,
-                kind: data.into(),
-            },
-            InternalEventFlattened::InquiryResponse {
-                timestamp,
-                metadata,
-                data,
-            } => ConversationEvent {
-                timestamp,
-                metadata,
-                kind: data.into(),
-            },
-        };
-
-        Ok(Self::Event(Box::new(event)))
+        serde_json::from_value(value)
+            .map(|e| Self::Event(Box::new(e)))
+            .map_err(serde::de::Error::custom)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_conversation_stream_serialization_roundtrip() {
-        let mut stream = ConversationStream::new_test();
-
-        insta::assert_json_snapshot!(&stream);
-
-        stream
-            .events
-            .push(InternalEvent::Event(Box::new(ConversationEvent::new(
-                ChatRequest::from("foo"),
-                Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-            ))));
-
-        stream
-            .events
-            .push(InternalEvent::Event(Box::new(ConversationEvent::new(
-                ChatResponse::message("bar"),
-                Utc.with_ymd_and_hms(2020, 1, 2, 0, 0, 0).unwrap(),
-            ))));
-
-        insta::assert_json_snapshot!(&stream);
-        let json = serde_json::to_string(&stream).unwrap();
-        let stream2 = serde_json::from_str::<ConversationStream>(&json).unwrap();
-        assert_eq!(stream, stream2);
-    }
-}
+#[path = "stream_tests.rs"]
+mod tests;
