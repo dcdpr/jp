@@ -293,7 +293,11 @@ fn event_text_len(event: &Event) -> usize {
     event
         .as_conversation_event()
         .and_then(ConversationEvent::as_chat_response)
-        .map_or(0, |v| v.content().len())
+        .map_or(0, |v| match v {
+            ChatResponse::Message { message } => message.len(),
+            ChatResponse::Reasoning { reasoning } => reasoning.len(),
+            ChatResponse::Structured { .. } => 0,
+        })
 }
 
 /// Reconstruct text from a deque of events.
@@ -305,10 +309,16 @@ fn reconstruct_text(events: &VecDeque<Event>) -> (String, Vec<(usize, usize)>) {
     let mut map = Vec::new();
 
     for (i, event) in events.iter().enumerate() {
-        if let Some(content) = event
+        let content = event
             .as_conversation_event()
             .and_then(ConversationEvent::as_chat_response)
-            .map(ChatResponse::content)
+            .and_then(|v| match v {
+                ChatResponse::Message { message } => Some(message.as_str()),
+                ChatResponse::Reasoning { reasoning } => Some(reasoning.as_str()),
+                ChatResponse::Structured { .. } => None,
+            });
+
+        if let Some(content) = content
             && !content.is_empty()
         {
             s.push_str(content);
@@ -324,7 +334,11 @@ fn trim_event_start(event: &mut Event, count: usize) {
     let Some(content) = event
         .as_conversation_event_mut()
         .and_then(ConversationEvent::as_chat_response_mut)
-        .map(ChatResponse::content_mut)
+        .and_then(|v| match v {
+            ChatResponse::Message { message } => Some(message),
+            ChatResponse::Reasoning { reasoning } => Some(reasoning),
+            ChatResponse::Structured { .. } => None,
+        })
     else {
         return;
     };

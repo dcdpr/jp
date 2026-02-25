@@ -1,3 +1,6 @@
+//! An extractor that segments a stream of text into 'reasoning' and 'other'
+//! buckets.
+
 #[derive(Default, Debug)]
 /// A parser that segments a stream of text into 'reasoning' and 'other'
 /// buckets. It handles streams with or without a `<think>` block.
