@@ -21,6 +21,11 @@ expression: "&stream"
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -34,6 +39,7 @@ expression: "&stream"
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -61,8 +67,25 @@ expression: "&stream"
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {

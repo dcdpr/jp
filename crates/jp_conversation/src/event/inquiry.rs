@@ -1,7 +1,46 @@
 //! See [`InquiryRequest`] and [`InquiryResponse`].
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// Opaque identifier for an inquiry.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct InquiryId(String);
+
+impl InquiryId {
+    /// Creates a new inquiry ID.
+    #[must_use]
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    /// Returns the ID as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for InquiryId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<String> for InquiryId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for InquiryId {
+    fn from(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+}
 
 /// An inquiry request event - requesting additional input or clarification.
 ///
@@ -10,10 +49,11 @@ use serde_json::Value;
 /// pause execution and wait for a corresponding `InquiryResponse` event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InquiryRequest {
-    /// Unique identifier for this inquiry.
+    /// Identifier for this inquiry.
     ///
     /// This must match the `id` in the corresponding `InquiryResponse`.
-    pub id: String,
+    /// The caller determines the ID convention.
+    pub id: InquiryId,
 
     /// The source of the inquiry (who is asking).
     pub source: InquirySource,
@@ -25,9 +65,9 @@ pub struct InquiryRequest {
 impl InquiryRequest {
     /// Creates a new inquiry request.
     #[must_use]
-    pub const fn new(id: String, source: InquirySource, question: InquiryQuestion) -> Self {
+    pub fn new(id: impl Into<InquiryId>, source: InquirySource, question: InquiryQuestion) -> Self {
         Self {
-            id,
+            id: id.into(),
             source,
             question,
         }
@@ -98,9 +138,16 @@ impl InquiryQuestion {
         Self::new(text, InquiryAnswerType::Boolean)
     }
 
-    /// Creates a new select inquiry question.
+    /// Creates a new select inquiry question from `SelectOption`s.
     #[must_use]
-    pub const fn select(text: String, options: Vec<Value>) -> Self {
+    pub const fn select(text: String, options: Vec<SelectOption>) -> Self {
+        Self::new(text, InquiryAnswerType::Select { options })
+    }
+
+    /// Creates a new select inquiry question from plain values (no descriptions).
+    #[must_use]
+    pub fn select_values(text: String, values: impl IntoIterator<Item = Value>) -> Self {
+        let options = values.into_iter().map(SelectOption::from).collect();
         Self::new(text, InquiryAnswerType::Select { options })
     }
 
@@ -119,15 +166,54 @@ pub enum InquiryAnswerType {
     Boolean,
 
     /// Select from predefined options.
-    ///
-    /// The options can be any JSON value (strings, numbers, booleans, etc.).
     Select {
         /// The available options to choose from.
-        options: Vec<Value>,
+        options: Vec<SelectOption>,
     },
 
     /// Free-form text input.
     Text,
+}
+
+/// A single option in a select inquiry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectOption {
+    /// The value returned when this option is selected.
+    pub value: Value,
+
+    /// Human-readable description of this option, used as help text in
+    /// interactive prompts and as context for assistant-targeted inquiries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl SelectOption {
+    /// Creates a new select option with a value and description.
+    #[must_use]
+    pub fn new(value: impl Into<Value>, description: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            description: Some(description.into()),
+        }
+    }
+}
+
+impl From<Value> for SelectOption {
+    fn from(value: Value) -> Self {
+        Self {
+            value,
+            description: None,
+        }
+    }
+}
+
+impl From<&str> for SelectOption {
+    fn from(s: &str) -> Self {
+        Self {
+            value: s.into(),
+            description: None,
+        }
+    }
 }
 
 /// An inquiry response event - the answer to an inquiry request.
@@ -137,14 +223,14 @@ pub enum InquiryAnswerType {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InquiryResponse {
     /// ID matching the corresponding `InquiryRequest`.
-    pub id: String,
+    pub id: InquiryId,
 
     /// The answer provided.
     ///
     /// The shape of this value depends on the `answer_type` of the
     /// corresponding inquiry:
     /// - `Boolean`: `Value::Bool`
-    /// - `Select`: `Value::String` (one of the options)
+    /// - `Select`: one of the option values
     /// - `Text`: `Value::String`
     pub answer: Value,
 }
@@ -152,25 +238,28 @@ pub struct InquiryResponse {
 impl InquiryResponse {
     /// Creates a new inquiry response.
     #[must_use]
-    pub const fn new(id: String, answer: Value) -> Self {
-        Self { id, answer }
+    pub fn new(id: impl Into<InquiryId>, answer: Value) -> Self {
+        Self {
+            id: id.into(),
+            answer,
+        }
     }
 
     /// Creates a new boolean inquiry response.
     #[must_use]
-    pub const fn boolean(id: String, answer: bool) -> Self {
+    pub fn boolean(id: impl Into<InquiryId>, answer: bool) -> Self {
         Self::new(id, Value::Bool(answer))
     }
 
     /// Creates a new select inquiry response.
     #[must_use]
-    pub fn select(id: String, answer: impl Into<Value>) -> Self {
+    pub fn select(id: impl Into<InquiryId>, answer: impl Into<Value>) -> Self {
         Self::new(id, answer.into())
     }
 
     /// Creates a new text inquiry response.
     #[must_use]
-    pub const fn text(id: String, answer: String) -> Self {
+    pub fn text(id: impl Into<InquiryId>, answer: String) -> Self {
         Self::new(id, Value::String(answer))
     }
 
@@ -200,9 +289,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_inquiry_id_display() {
+        let id = InquiryId::new("fs_modify_file.__permission__");
+        assert_eq!(id.to_string(), "fs_modify_file.__permission__");
+        assert_eq!(id.as_str(), "fs_modify_file.__permission__");
+    }
+
+    #[test]
+    fn test_inquiry_id_equality_and_hash() {
+        use std::collections::HashMap;
+
+        let id1 = InquiryId::new("same");
+        let id2 = InquiryId::new("same");
+        let id3 = InquiryId::new("different");
+
+        assert_eq!(id1, id2);
+        assert_ne!(id1, id3);
+
+        let mut map = HashMap::new();
+        map.insert(id1, "value");
+        assert_eq!(map.get(&id2), Some(&"value"));
+        assert_eq!(map.get(&id3), None);
+    }
+
+    #[test]
+    fn test_inquiry_id_serialization() {
+        let id = InquiryId::new("test-id");
+        let json = serde_json::to_value(&id).unwrap();
+        assert_eq!(json, "test-id"); // transparent serialization
+
+        let deserialized: InquiryId = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized, id);
+    }
+
+    #[test]
     fn test_inquiry_request_serialization() {
         let request = InquiryRequest::new(
-            "test-id".to_string(),
+            "test-id",
             InquirySource::Tool {
                 name: "file_editor".to_string(),
             },
@@ -224,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_inquiry_response_serialization() {
-        let response = InquiryResponse::boolean("test-id".to_string(), true);
+        let response = InquiryResponse::boolean("test-id", true);
 
         let json = serde_json::to_value(&response).unwrap();
         assert_eq!(json["id"], "test-id");
@@ -236,54 +359,70 @@ mod tests {
 
     #[test]
     fn test_inquiry_question_types() {
-        // Boolean
         let q = InquiryQuestion::boolean("Confirm?".to_string());
         assert!(matches!(q.answer_type, InquiryAnswerType::Boolean));
 
-        // Select with strings
         let q = InquiryQuestion::select("Choose one:".to_string(), vec![
-            "option1".into(),
-            "option2".into(),
+            SelectOption::new("y", "yes"),
+            SelectOption::new("n", "no"),
         ]);
-        assert!(matches!(q.answer_type, InquiryAnswerType::Select { .. }));
-
-        // Select with integers
-        let q = InquiryQuestion::select("Choose a number:".to_string(), vec![
-            Value::Number(1.into()),
-            Value::Number(2.into()),
-            Value::Number(3.into()),
-        ]);
-        if let InquiryAnswerType::Select { options } = q.answer_type {
-            assert_eq!(options.len(), 3);
-            assert_eq!(options[0], 1);
-            assert_eq!(options[1], 2);
-            assert_eq!(options[2], 3);
+        if let InquiryAnswerType::Select { options } = &q.answer_type {
+            assert_eq!(options.len(), 2);
+            assert_eq!(options[0].value, "y");
+            assert_eq!(options[1].value, "n");
+            assert_eq!(options[0].description.as_deref(), Some("yes"));
+            assert_eq!(options[1].description.as_deref(), Some("no"));
         } else {
             panic!("Expected Select variant");
         }
 
-        // Text
+        let q = InquiryQuestion::select_values("Pick:".to_string(), vec![
+            Value::Number(1.into()),
+            Value::Number(2.into()),
+        ]);
+        if let InquiryAnswerType::Select { options } = &q.answer_type {
+            assert_eq!(options.len(), 2);
+            assert_eq!(options[0].value, 1);
+            assert_eq!(options[1].value, 2);
+            assert!(options[0].description.is_none());
+            assert!(options[1].description.is_none());
+        } else {
+            panic!("Expected Select variant");
+        }
+
         let q = InquiryQuestion::text("Enter name:".to_string());
         assert!(matches!(q.answer_type, InquiryAnswerType::Text));
     }
 
     #[test]
+    fn test_select_option_serialization() {
+        let opt = SelectOption::new("y", "Run tool");
+        let json = serde_json::to_value(&opt).unwrap();
+        assert_eq!(json["value"], "y");
+        assert_eq!(json["description"], "Run tool");
+
+        let opt_no_desc = SelectOption::from("n");
+        let json = serde_json::to_value(&opt_no_desc).unwrap();
+        assert_eq!(json["value"], "n");
+        assert!(json.get("description").is_none());
+
+        let deserialized: SelectOption = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized, opt_no_desc);
+    }
+
+    #[test]
     fn test_inquiry_response_helpers() {
-        let response = InquiryResponse::boolean("id".to_string(), true);
+        let response = InquiryResponse::boolean("id", true);
         assert_eq!(response.as_bool(), Some(true));
         assert_eq!(response.as_str(), None);
 
-        let response = InquiryResponse::text("id".to_string(), "hello".to_string());
-        assert_eq!(response.as_bool(), None);
+        let response = InquiryResponse::text("id", "hello".to_string());
         assert_eq!(response.as_str(), Some("hello"));
-        assert_eq!(response.as_string(), Some("hello".to_string()));
 
-        // Select with string
-        let response = InquiryResponse::select("id".to_string(), "option1");
+        let response = InquiryResponse::select("id", "option1");
         assert_eq!(response.as_str(), Some("option1"));
 
-        // Select with integer
-        let response = InquiryResponse::select("id".to_string(), 42);
+        let response = InquiryResponse::select("id", 42);
         assert_eq!(response.answer, 42);
     }
 }
