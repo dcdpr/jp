@@ -1,0 +1,62 @@
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Generate a title for this conversation."
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "responseMimeType": "application/json",
+        "_responseJsonSchema": {
+          "type": "object",
+          "required": [
+            "titles"
+          ],
+          "properties": {
+            "titles": {
+              "type": "array",
+              "maxItems": 1,
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "description": "A concise, descriptive title for the conversation"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": false,
+          "thinkingBudget": 512,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"text": "{\n  \"titles\": [\"Conversation Title"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 8,"candidatesTokenCount": 9,"totalTokenCount": 163,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 8}],"thoughtsTokenCount": 146},"modelVersion": "gemini-2.5-flash-lite","responseId": "oraVaebXMYjyxs0PwJ_VyQQ"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": " Request\"]\n}"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 8,"candidatesTokenCount": 13,"totalTokenCount": 167,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 8}],"thoughtsTokenCount": 146},"modelVersion": "gemini-2.5-flash-lite","responseId": "oraVaebXMYjyxs0PwJ_VyQQ"}
+    

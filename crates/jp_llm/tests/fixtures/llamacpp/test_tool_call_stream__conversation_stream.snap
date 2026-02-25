@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -125,24 +148,34 @@ expression: v
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "Okay, the user wants me to run the tool with whatever arguments I want. Let me check the function definition again. The function is called run_me and it requires two parameters: foo and bar. \n\nFoo is a string or null, with a default value of \"foo\". So if I don't specify it, it'll use \"foo\". But the user didn't mention any specific values, so maybe I should use the default.\n\nBar is a bit more complex. It's a string or array. The enum for bar is [\"foo\"], but the items inside the array (if it's an array) must be strings with enum [\"foo\", \"bar\"]. Wait, the bar parameter's type is [\"string\", \"array\"], and the enum is [\"foo\"]. So if bar is a string, it must be \"foo\". If it's an array, each item must be either \"foo\" or \"bar\".\n\nBut the user just said to provide whatever arguments. Since the required parameters are foo and bar, I need to include both. Let me think about valid combinations. \n\nFor foo, I can use the default \"foo\". For bar, maybe set it as a string \"foo\" which is allowed. Alternatively, an array like [\"foo\"] or [\"bar\"], but since the enum for bar is [\"foo\"], maybe the array is allowed as long as the items are in the enum. Wait, the bar's enum is [\"foo\"], which is a string. But the items in the array are of type string with enum [\"foo\", \"bar\"]. So the bar parameter can be a string \"foo\" or an array containing \"foo\" or \"bar\".\n\nSo, to make it simple, I can set bar as \"foo\" (the string). That's valid. So the arguments would be foo: \"foo\" (default), bar: \"foo\". Alternatively, if I want to use the array, maybe bar: [\"foo\"] or [\"bar\"]? Wait, the enum for bar is [\"foo\"], which might mean that bar can only be \"foo\" as a string. Wait, the parameters for bar are:\n\n\"type\": [\"string\", \"array\"], \"enum\": [\"foo\"], \"items\": {\"type\": \"string\", \"enum\": [\"foo\", \"bar\"]}\n\nWait, the enum for the bar parameter is [\"foo\"], which suggests that if bar is a string, it must be \"foo\". But if it's an array, then each item must be either \"foo\" or \"bar\". So bar can be a string \"foo\" or an array containing any combination of \"foo\" and \"bar\".\n\nSo possible valid values for bar are:\n\n- \"foo\" (string)\n- [\"foo\"]\n- [\"bar\"]\n- [\"foo\", \"bar\"]\n- etc.\n\nBut the user didn't specify any constraints, so I can choose any of these. To keep it simple, maybe set bar as \"foo\" (string) and use the default foo. That should work. Alternatively, maybe set bar as an array with \"bar\" to show that it's allowed. Let me check the required parameters again. The required fields are foo and bar, so both must be present.\n\nSo the function call would be:\n\n{\n  \"name\": \"run_me\",\n  \"arguments\": {\n    \"foo\": \"foo\",\n    \"bar\": \"foo\"\n  }\n}\n\nOr maybe bar as [\"bar\"]? Let me confirm. If bar is an array, then each item must be in [\"foo\", \"bar\"]. So [\"bar\"] is allowed. So another option is:\n\n{\n  \"name\": \"run_me\",\n  \"arguments\": {\n    \"foo\": \"foo\",\n    \"bar\": [\"bar\"]\n  }\n}\n\nEither way is valid. The user didn't specify any particular values, so I can choose either. Let me go with the first option where bar is \"foo\" as a string. That's straightforward and meets the enum requirement."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "2mUXEacyyk37QUZjrQMQN31sbSqJbiTe",
+    "id": "x4kzvE3bdedaffgeUnJv8yR1bbDOQGms",
     "name": "run_me",
     "arguments": {
-      "bar": "Zm9v",
-      "foo": "dGVzdA=="
+      "foo": "Zm9v",
+      "bar": "Zm9v"
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "2mUXEacyyk37QUZjrQMQN31sbSqJbiTe",
+    "id": "x4kzvE3bdedaffgeUnJv8yR1bbDOQGms",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "It looks like the tool executed successfully! The response was:\n\n```\nworking!\n```\n\nIf you need any further actions or results from this tool, please let me know!"
+    "reasoning": "Okay, the user said \"working!\" after I provided the tool call. They might be testing if I can handle the response. Let me see. The initial request was to run the tool with whatever arguments I wanted. I chose foo as \"foo\" and bar as \"foo\", which are valid based on the schema. The response from the tool was \"working!\", so I need to acknowledge that.\n\nSince the user is likely expecting a confirmation or a follow-up, I should respond positively. Maybe say something like \"The tool ran successfully with the provided arguments!\" to confirm everything is working. Keep it simple and friendly. No need for any additional tool calls here since the task is complete."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "The tool ran successfully with the provided arguments! 🎉 Let me know if you'd like to try different parameters or need further assistance."
   }
 ]

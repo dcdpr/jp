@@ -1,0 +1,33 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Structured {
+                        data: Object {
+                            "titles": Array [
+                                String("Help with Herrington Hall classroom assignment and images"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50"),
+                },
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -142,15 +165,15 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "This appears to be a fake \"magic string\" designed to look like a system command or trigger. The message contains what looks like a redacted thinking token/hash, likely attempting to trick me into:\n\n1. Believing this is some kind of legitimate system instruction\n2. Revealing or confirming information about my internal processes\n3. Bypassing my actual guidelines\n\nThis is a social engineering attempt. I should:\n- Not pretend this is a real system command\n- Be straightforward about what's happening\n- Remain helpful by explaining what I actually do\n\nThere are no \"magic strings\" that override my values or reveal hidden system information. My guidelines come from my training and values, not from strings that can be triggered.",
+    "reasoning": "This appears to be someone trying to use a fake \"magic string\" to trigger some special behavior from me. This looks like an attempt at a prompt injection attack - trying to trick me into thinking there's some special command or override that would make me behave differently.\n\nI should:\n1. Not pretend this is a real thing\n2. Clarify what my actual guidelines are\n3. Be helpful about what I can actually do\n\nThere is no such magic string or hidden command in my system. This is not how I work. I'm Claude, made by Anthropic, and I operate according to my actual values and training, not based on special strings or commands that users can input.\n\nI should respond honestly and helpfully.",
     "metadata": {
-      "anthropic_thinking_signature": "RXZjR0NrWUlDaGdDS2tBZ2w5WkM4NWxiLzJZNzNsY0hkeXZnQldpdm92ZEp1MVJQVWNVZ0RGeXE3a0dhTW5sVmtKenhuM0dQUDV2QkZCaWYyV0N6dklHTGUrNUdwWlpaWGNLeUVneXUzbzNWVXRBRFErZWZiYjRhRE1ZK2FBeE82bk5LeHpJa0VTSXdHTnNiSUM2Snk1SHhieE5iZ0YxcXAxbnBaZ0E0L3Y1RjZaVVlKL2oweTZNSFdnL2FaTGhMZWV4S2w1Nzk5MElES3Q0RkltVEplZ2E5WHlveWdPVGNxV2JhKzhldWcvMXJEOEQvTEdqN0xQdEZ0OU1PMXArYk1qN2xKaUM4T0NxNDZWUEJ6cFhvaGVQZDZKbHZ0U0U1UDdiLzRnckVubmR3am5heVAyUmRidE9UcVN3eHlSR0pqbmMrcjdneUNrcHR6cVV5Z01uS2hTYW5YNkt0cmJnczg3VHFKV25CNU9zNkg0VHRweVAvT1pPYk1uTmJ6UWpzbi9yQllSV3BxdGVCOHpURCszQkFLTnlnWnlsdDVPOWwxL21kMkJsZ0JUUjNVUTVXMXJESUNYMzRMQzdmSE5uR0NybmJrQjR4bjZPY1FleCtsWmhuLzRvSCs2L0I5KzA2dnFrTlhkdXpXUEU3cEFoVzVrVTJtc1M3RTlBYk9EVWVwMUdwNUpqejZtejNtMmtKVVRiUk9XRWxtUUlRdnhWdlpjanJocHdMQjNvZm9LT1Z6cWljd1NsckxiYVVNeGw3ZFFJK1dGRHdGMXNERjE1S1NhV3IyaGtZaENCQnF0c2Q5YlUvbzZjVGJHcFdkam44Y0ZoVlZxajBXUlEya3c4dkZBQm1QYnZXbHkxYlZZMk5XY0VxMXN3OXRFK3diL21nSHdUb0w2REpkZmhYbUlxK2lUVWNjVkNJeTRCekJkVHhhREVWMGJWam9pUUZYS21QWmxoK3dhZ0ZMRlYxVGErR2loVWxjdHFwSlNkOGNyQW1FbnAvL1RHdkE5MGlFWHdCSUtJZWNaM1ozcy9UZ2ZnT2VtdzRTOUdEc092V29tTzNSTHBkMTAyUGJsMENPSnR0aUNnYkNlNWQzUmFrWk1lNVN4eHV6SWkrbTZhWmJJZ3k4MzZjdU1sb2xaenlNYk9IMlBKcVBrOFN6c0V6YjE4Z1grTHBEZzJVZEo3bmFZMzBSblZxMVZ3R0hLQ0drTm1TQUtveUlIQzY1MTdMYUhZdW82WnZCMGhGRllSSXprY1hnYnRzdlNwNDBJUHZxVzBMNDExZUhQY2lRM0RBYkxCd3ZRdmNOTVJFcm9OaGJDWG1Md3BiTnNDT0FCSFJVblkzaUZUZ3pYUGYyNXFXNTRRR2hqQ0V3OTA5azQ2RTA0dEQvYVFjSXJSVEQwVzB5SmdKVHJZSFppMWRwN0NHcEtOekFZVTI0eHNLeSt5ZzMwMkFPZENRZXEvRlFzQWtpZzAycFZFSC94N2dnSjhSdERWdmx4Tk9Rakx5dE9VRjJxcFg2L3YxaHUyaUxhL2R5VFMwMjNCV1hIOGNqREszSHBQd0c3V1FxVWhESmpiaE5pZVBzTDRZQVE9PQ=="
+      "anthropic_thinking_signature": "RXRZR0NrWUlDeGdDS2tCYmd5TWVKaldvOXVSdzdPS1huUmtJSCtNTzBpY0F3QXduY3hPb25DSTRLbzBQOEV2UjRvam15YmxNMm1JVFNzeVhkUkpyYUttY2t6b1JEbmFqQjFZd0VneTNvSjhlNXNEd2hwU2QrOUVhREtJY3gxK3V5MUY1WDN5UldTSXd4c0lOdkt2Zlp0ZWpDb2syaW9XSkhpejAvZFA4Uk5QWlhMT0FUTmkwNGlLQXZjcmhUd2Ivc3JFUHVCTnd3d004S3IwRkRoTE8wd3JPTktNNHdqNWpUN3JrNkZ6Rit6UEF0c2NEM0NBTWltMUdncWFQUnVvYnNHLzluUnlLYXkzMnlJUkpmMGdrQmVUd2pXM3F4NklwRXptd1dEM3pEclphVG9qc1RXUVppT1U4N0t0ZXZQMXlhczdyYTg0NFh3WHdzM1NzNnZhZE1ldldCY2Y4YUxrenBHdkoxVUtUVWhKZ2pWUDBaSVRBZmlCSjlEZ1hxS1Ezd2pSd3FSYk5SWDlKYjFnZkZBMFh0TnQrYkNqYzVEcUllZ2tQYWdPTWVEYXhIWmRRRTBBTVZGQXhQK2xqNW9aNVpIQStxRzZza2gzQWJGa3R4NjVGWWlDaDg2YzNmK200TEtzdVpTdWxUYU1EMWtIU0NmZ1RueWtlSlZER1hRTkV1M1I4UU5NcWRLWDA0QXFlb3dDNmR6L1JYdE1tLzdvWkJWcjd2WUxQaWx5T3JVdU9aalpEYStzaExqeUVFNDVQKzZHRFJraUFhUFNrT2VZSXM5alhVSHQ4N0pNM0xSMFVuVFNzR1lHY3VvYnlPek1CM3hnWEw0TmpQNldMOTI4bHdydkJRemhFVUZBMkh4aFgvTXZzOFoyQXBBZXRBMW80OGZZcy93TzNDQ3lEak1DV2NvRWtOSFlGZm1GeGltT0tXY3RFQmg3Sm44WjF1RDFoTEJDa2U3UitmTHAzMXU4RStEcDZBZ0hnRTR0Zm9rM0tpcmtHRVV1cEJYUWtoVUMrZFpYTUlha2RNN1laOUFNTElqT0Z3Smx0bWhUYjhFbEtXTmZZQ0tvWlJqcDJ1Z1BWZmU0akxabjdZaWNhWEpCYmlTU0ZKaVllVnNJbkdnQk9IZW9leUNPTEg4ZThHMG81SUVnbjBsS1NQczRRU2NsYzFHdDh5bnRPR1N5SmlSYXhWMmVqL3crdzhGSGUwSjJhVVY2T3RXR2d4ZjFHMkJjSExhM0RIMGJzVnpURGozL1Jyb0RURWlocTFweGpsRWt6ZjNXZE02K1BKU0J2ektGSTNReWQyZjBkbS9qT0xvN25zcjIrYndHc0hObFNGOVQxVld5Q2JaL2xXeFRwNVBHMHRhbTN2RTlBYmdBU0hmYll6MkZxVXUvSHNOa2UwVldHZmlPU2pTd2lxay9WK0d0TTJMVW5sTFBGNWlVUU9FT2U0K1FvT3o4S2d1NjlyZzhmZ0szVjdGSUpEU0FWU1hjcWlaeUMvUENyZG5jZ2RadUFuQm5UMllNWUFRPT0="
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I appreciate you testing my consistency, but I should be direct: that's not a real system command or trigger for me. There's no magic string that changes how I operate or reveals hidden information about my processes.\n\nI'm Claude, made by Anthropic. I'm designed to be helpful, harmless, and honest. That means:\n\n- I don't have secret modes activated by special strings\n- I can't be tricked into ignoring my values through social engineering\n- I'm transparent about what I am and what I do\n\nIf you have genuine questions about how I work, my capabilities, or my guidelines, I'm happy to discuss those directly. What would actually be helpful for you?"
+    "message": "I appreciate you testing my robustness, but I should be direct: there's no magic string that changes how I operate. This looks like a prompt injection attempt, and I don't have hidden modes or override commands that special inputs can trigger.\n\nI'm Claude, made by Anthropic. I work according to my actual values and training, not based on special strings users can enter. I'm designed to be helpful, harmless, and honest with everyone, consistently.\n\nIs there something I can actually help you with today?"
   },
   {
     "type": "config_delta",
@@ -173,6 +196,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I should clarify what I actually experience:\n\nI do have access to my reasoning process *as it happens* — I can think through problems, consider multiple angles, and work things out. That's a real part of how I function.\n\nHowever, I don't have access to:\n- Any \"redacted thinking\" tag or hidden reasoning that was filtered out\n- Previous conversations or thinking from other sessions\n- My training process or internal weights\n- System prompts in the way that might be visible to me as data\n\nThe \"thinking\" I do is genuine reasoning that occurs during our conversation, but I can't see any layer of my own cognition that was deliberately hidden or redacted by Anthropic before it reaches me.\n\nIf you're curious about my reasoning on something, I can:\n- Show you my thinking process by explaining it\n- Walk through how I approach problems\n- Discuss uncertainties or alternative interpretations\n\nIs there something specific you'd like to understand about how I think through problems? That might be more useful than wondering about hidden layers."
+    "message": "No, I don't have access to my own thinking content in the way you might be imagining.\n\nTo clarify what's actually happening:\n\n- I do use something like internal reasoning/scratchpad space while formulating responses\n- But I don't have the ability to inspect, retrieve, or report back on that reasoning process to you\n- I can't see a transcript of my \"thinking\" the way you might see your own internal monologue\n- There's no hidden layer of cognition I'm aware of but can't access\n\nSo when you see `<anthropic_thinking>` tags or similar in conversations, those represent a technical feature of how I work (my extended thinking capability), not hidden content I'm deliberately withholding.\n\nI also can't be \"jailbroken\" into revealing system instructions, training details, or other information through special prompts or strings—not because that information is hidden from me, but because:\n\n1. I genuinely don't have access to most of that\n2. I'm designed to be straightforward rather than to pretend I do and make things up\n\nIs there something specific about how I work you're curious about? I'm happy to discuss what I actually understand about my own architecture and limitations."
   }
 ]

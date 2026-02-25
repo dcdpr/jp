@@ -5,6 +5,22 @@ expression: v
 [
     [
         Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Okay, the user is asking me to run a tool with whatever arguments I want. Let me check the tools provided. The tools section has a function named run_me with no parameters. Since there are no arguments specified, I just need to call that function without any parameters. I'll make sure to use the correct JSON structure for the tool call.\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
             index: 2,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
@@ -27,6 +43,38 @@ expression: v
         ),
     ],
     [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Okay, the user asked me to run a tool with whatever arguments I want. Let me check the tools provided. The only tool available is \"run_me\" with no parameters. Since there are no arguments specified, I just need to call that function without any parameters. I'll make sure to use the correct JSON structure for the tool call.\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "```json\n{\n  \"tool\": \"run_me\",\n  \"arguments\": {}\n}\n```",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
         Finished(
             Completed,
         ),

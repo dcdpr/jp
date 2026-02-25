@@ -7,27 +7,6 @@ expression: v
         id: ModelIdConfig {
             provider: Google,
             name: Name(
-                "embedding-gecko-001",
-            ),
-        },
-        display_name: Some(
-            "Embedding Gecko",
-        ),
-        context_window: Some(
-            1024,
-        ),
-        max_output_tokens: Some(
-            1,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
                 "gemini-2.5-flash",
             ),
         },
@@ -48,8 +27,17 @@ expression: v
                 ),
             },
         ),
-        knowledge_cutoff: None,
-        deprecated: None,
+        knowledge_cutoff: Some(
+            2025-01-01,
+        ),
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: gemini-3-flash-preview",
+                retire_at: Some(
+                    2026-06-17,
+                ),
+            },
+        ),
         features: [],
     },
     ModelDetails {
@@ -70,35 +58,23 @@ expression: v
         ),
         reasoning: Some(
             Budgetted {
-                min_tokens: 128,
+                min_tokens: 512,
                 max_tokens: Some(
-                    32768,
+                    24576,
                 ),
             },
         ),
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-2.0-flash-exp",
-            ),
-        },
-        display_name: Some(
-            "Gemini 2.0 Flash Experimental",
+        knowledge_cutoff: Some(
+            2025-01-01,
         ),
-        context_window: Some(
-            1048576,
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: gemini-3-pro-preview",
+                retire_at: Some(
+                    2026-06-17,
+                ),
+            },
         ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
         features: [],
     },
     ModelDetails {
@@ -117,9 +93,25 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: Some(
+                    24576,
+                ),
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-08-01,
+        ),
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: gemini-2.5-flash",
+                retire_at: Some(
+                    2026-06-01,
+                ),
+            },
+        ),
         features: [],
     },
     ModelDetails {
@@ -138,9 +130,25 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 0,
+                max_tokens: Some(
+                    24576,
+                ),
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-08-01,
+        ),
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: gemini-2.5-flash",
+                retire_at: Some(
+                    2026-06-01,
+                ),
+            },
+        ),
         features: [],
     },
     ModelDetails {
@@ -159,9 +167,20 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-08-01,
+        ),
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: gemini-2.5-flash-lite",
+                retire_at: Some(
+                    2026-06-01,
+                ),
+            },
+        ),
         features: [],
     },
     ModelDetails {
@@ -180,72 +199,20 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-2.0-flash-lite-preview-02-05",
-            ),
-        },
-        display_name: Some(
-            "Gemini 2.0 Flash-Lite Preview 02-05",
+        reasoning: Some(
+            Unsupported,
         ),
-        context_window: Some(
-            1048576,
+        knowledge_cutoff: Some(
+            2024-08-01,
         ),
-        max_output_tokens: Some(
-            8192,
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: gemini-2.5-flash-lite",
+                retire_at: Some(
+                    2026-06-01,
+                ),
+            },
         ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-2.0-flash-lite-preview",
-            ),
-        },
-        display_name: Some(
-            "Gemini 2.0 Flash-Lite Preview",
-        ),
-        context_window: Some(
-            1048576,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-exp-1206",
-            ),
-        },
-        display_name: Some(
-            "Gemini Experimental 1206",
-        ),
-        context_window: Some(
-            1048576,
-        ),
-        max_output_tokens: Some(
-            65536,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
         features: [],
     },
     ModelDetails {
@@ -264,14 +231,7 @@ expression: v
         max_output_tokens: Some(
             16384,
         ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: Some(
-                    24576,
-                ),
-            },
-        ),
+        reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         features: [],
@@ -292,14 +252,7 @@ expression: v
         max_output_tokens: Some(
             16384,
         ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 128,
-                max_tokens: Some(
-                    32768,
-                ),
-            },
-        ),
+        reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         features: [],
@@ -455,8 +408,12 @@ expression: v
                 xhigh: false,
             },
         ),
-        knowledge_cutoff: None,
-        deprecated: None,
+        knowledge_cutoff: Some(
+            2025-01-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
         features: [],
     },
     ModelDetails {
@@ -475,9 +432,25 @@ expression: v
         max_output_tokens: Some(
             65536,
         ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
+        reasoning: Some(
+            Budgetted {
+                min_tokens: 512,
+                max_tokens: Some(
+                    24576,
+                ),
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-01-01,
+        ),
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: unknown",
+                retire_at: Some(
+                    2026-07-22,
+                ),
+            },
+        ),
         features: [],
     },
     ModelDetails {
@@ -500,13 +473,17 @@ expression: v
             Leveled {
                 xlow: false,
                 low: true,
-                medium: false,
+                medium: true,
                 high: true,
                 xhigh: false,
             },
         ),
-        knowledge_cutoff: None,
-        deprecated: None,
+        knowledge_cutoff: Some(
+            2025-01-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
         features: [],
     },
     ModelDetails {
@@ -527,42 +504,23 @@ expression: v
         ),
         reasoning: Some(
             Budgetted {
-                min_tokens: 0,
+                min_tokens: 512,
                 max_tokens: Some(
                     24576,
                 ),
             },
         ),
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-2.5-flash-image-preview",
-            ),
-        },
-        display_name: Some(
-            "Nano Banana",
+        knowledge_cutoff: Some(
+            2025-01-01,
         ),
-        context_window: Some(
-            32768,
-        ),
-        max_output_tokens: Some(
-            32768,
-        ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: Some(
-                    24576,
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: unknown",
+                retire_at: Some(
+                    2026-07-22,
                 ),
             },
         ),
-        knowledge_cutoff: None,
-        deprecated: None,
         features: [],
     },
     ModelDetails {
@@ -581,42 +539,7 @@ expression: v
         max_output_tokens: Some(
             32768,
         ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: Some(
-                    24576,
-                ),
-            },
-        ),
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-2.5-flash-preview-09-2025",
-            ),
-        },
-        display_name: Some(
-            "Gemini 2.5 Flash Preview Sep 2025",
-        ),
-        context_window: Some(
-            1048576,
-        ),
-        max_output_tokens: Some(
-            65536,
-        ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: Some(
-                    24576,
-                ),
-            },
-        ),
+        reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         features: [],
@@ -639,14 +562,23 @@ expression: v
         ),
         reasoning: Some(
             Budgetted {
-                min_tokens: 0,
+                min_tokens: 512,
                 max_tokens: Some(
                     24576,
                 ),
             },
         ),
-        knowledge_cutoff: None,
-        deprecated: None,
+        knowledge_cutoff: Some(
+            2025-01-01,
+        ),
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: unknown",
+                retire_at: Some(
+                    2026-07-22,
+                ),
+            },
+        ),
         features: [],
     },
     ModelDetails {
@@ -674,8 +606,12 @@ expression: v
                 xhigh: false,
             },
         ),
-        knowledge_cutoff: None,
-        deprecated: None,
+        knowledge_cutoff: Some(
+            2025-01-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
         features: [],
     },
     ModelDetails {
@@ -703,8 +639,78 @@ expression: v
                 xhigh: false,
             },
         ),
-        knowledge_cutoff: None,
-        deprecated: None,
+        knowledge_cutoff: Some(
+            2025-01-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.1-pro-preview",
+            ),
+        },
+        display_name: Some(
+            "Gemini 3.1 Pro Preview",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Leveled {
+                xlow: false,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-01-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.1-pro-preview-customtools",
+            ),
+        },
+        display_name: Some(
+            "Gemini 3.1 Pro Preview Custom Tools",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Leveled {
+                xlow: false,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-01-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
         features: [],
     },
     ModelDetails {
@@ -723,15 +729,7 @@ expression: v
         max_output_tokens: Some(
             32768,
         ),
-        reasoning: Some(
-            Leveled {
-                xlow: false,
-                low: true,
-                medium: false,
-                high: true,
-                xhigh: false,
-            },
-        ),
+        reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         features: [],
@@ -824,90 +822,6 @@ expression: v
         id: ModelIdConfig {
             provider: Google,
             name: Name(
-                "embedding-001",
-            ),
-        },
-        display_name: Some(
-            "Embedding 001",
-        ),
-        context_window: Some(
-            2048,
-        ),
-        max_output_tokens: Some(
-            1,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "text-embedding-004",
-            ),
-        },
-        display_name: Some(
-            "Text Embedding 004",
-        ),
-        context_window: Some(
-            2048,
-        ),
-        max_output_tokens: Some(
-            1,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-embedding-exp-03-07",
-            ),
-        },
-        display_name: Some(
-            "Gemini Embedding Experimental 03-07",
-        ),
-        context_window: Some(
-            8192,
-        ),
-        max_output_tokens: Some(
-            1,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-embedding-exp",
-            ),
-        },
-        display_name: Some(
-            "Gemini Embedding Experimental",
-        ),
-        context_window: Some(
-            8192,
-        ),
-        max_output_tokens: Some(
-            1,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
                 "gemini-embedding-001",
             ),
         },
@@ -940,48 +854,6 @@ expression: v
         ),
         max_output_tokens: Some(
             1024,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "imagen-4.0-generate-preview-06-06",
-            ),
-        },
-        display_name: Some(
-            "Imagen 4 (Preview)",
-        ),
-        context_window: Some(
-            480,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "imagen-4.0-ultra-generate-preview-06-06",
-            ),
-        },
-        display_name: Some(
-            "Imagen 4 Ultra (Preview)",
-        ),
-        context_window: Some(
-            480,
-        ),
-        max_output_tokens: Some(
-            8192,
         ),
         reasoning: None,
         knowledge_cutoff: None,
@@ -1172,14 +1044,7 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: Some(
-                    24576,
-                ),
-            },
-        ),
+        reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         features: [],
@@ -1200,14 +1065,7 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: Some(
-                    24576,
-                ),
-            },
-        ),
+        reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         features: [],
@@ -1228,14 +1086,7 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: Some(
-                    24576,
-                ),
-            },
-        ),
+        reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         features: [],

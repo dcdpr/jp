@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "toolu_01A6UP53WYa7sQL2KCsEMGcg",
+                        id: "toolu_01JsugtidFSR5SfcbiJkyZQL",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
@@ -20,6 +20,10 @@ expression: v
                 ),
                 metadata: {},
             },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
         },
         Finished(
             Completed,
@@ -32,7 +36,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Great! I ran the tool successfully with the arguments:\n- `bar`: \"foo\"\n- `foo`: \"foo\"\n\nThe tool returned: **\"working!\"** ✓",
+                        message: "Great! The tool executed successfully. I called `run_me` with two arguments:\n- `bar`: \"foo\"\n- `foo`: \"foo\"\n\nAnd it returned \"working!\" as the result. 🎉",
                     },
                 ),
                 metadata: {},

@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -142,12 +165,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Acknowledging user message**\n\nThe user said, \"Test message,\" so it seems like they might just be checking in on how I function. I should provide a brief acknowledgment and let them know I'm here to help. I want to keep it concise but still offer examples of the services I can provide. Maybe I'll also ask if their test was successful to ensure they're getting what they need!",
+    "reasoning": "**Acknowledging user message**\n\nThe user sent a \"Test message,\" so I think they might want me to acknowledge it. I'm considering a concise response, maybe asking if they need any help. It's important to keep it straightforward while offering to run tests or provide examples if needed. I’ll make sure to acknowledge their message clearly and simply.",
     "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBSUnBLLXY1V2RzRFZUbnItMFVHVlZJMmE4azhMSzNkYVNmRno4TEZodjZrMHNUd2V3MUNIemY1dWJqYThmSkh5TFJpeGd0S0Ezam1kRmVjWWdhT0ZJMDgzOWhfLXJfQ3gwekhrUzc1QS1ZWWx4STh0akx2V3JHeWcwMVdHVUlNLUZPOFpwQUxHVF9TeWl5OFhRQmluUlZjWElSNi1KVm4zNW1GZklQblV2ZUdKZG5Mdi1QdGhqV21BeVBheTRSWmZQbE8wS2ZDX19laV8xRnhtUlFmMDJtdDQwaXkxTktkc0dmWS04Qmt4QWJEa0JFY0xZN1Y2UmowbDBqNTdpQ0dwYkJOczBNN2lzU1Y1SVYxSW5vWTE3ZkZLMmtDYUFEaU1LdmVwUzBSSVpmbjBucmgwR3FlZW9qNnJFMllsTHhkYUZfbTcyN1Q0S3dJRm42aFNyUUh6bmVBY2JIOENxWHFpUEtsMjcwWEM1d3g0WW5DZGhoMXZIcHFiTnozVFlwanNlcUkwVExqR1o5S1lqUkh6UGs5NWI3VjFrdTZCaWt1UTZuTDlhZk1tRDdEZmJvR3NLeDlZN0hwajI1QU5lVDEyZ1A1M1FMNTIxT3JVRWdQU3dvVmRRWkVTVngtRkpmRTRrd1pFT292V1JScEh5Xy1WVmx6NVJYaktZMURTbWI5aDBYU05WUHNsSFoyZjducDhqQVB3d3duTElkaEJBNDFBelZfTDBqNnlCS1RET1dPaHlhbkowc1gtckFLMTZrbXdobE5IektRanhfLTc3ck5wUnVNWkxWaUd6N0hIWlVVazJKenlZbUlMcGJNbTJ3WU44QUg2WEdaSjF5MTdwNGFSS3ZPTnowMnBWd1JjRzZxTGZHSlRyb1VoN1Z4aUZlSEZzM0ZZdTZUNDU0RXZpU1Zqa3k2bmxxeDlVeXM3WEhDVmlkbkRva1ZzMk9Na1Y1LVNNNllKeUYtUGVCbTFlNTlxSUdLTllJRTFobDhDSnhjdWFzRFo3eHpJVkE4YlJkOHBCcERWamlBbW5TeVluRjMzQ0xVVEVsLVIyTkJUM1lyRFRVeUQ4UnFxMWtnV1B0XzFRMl9pWmlIaFNLY3Z5SmhxOHFYWmpJYTFjMm00bVFQMHlqR1hqbHA4STR0ZkpQdVRuTEZacGtKSVNReFR0SWxNVGdPSXFtUjIyLU85Z0UyOGVFb255ckdNX2dHcmJKOVBZWHRxMEJRQ3dYTHdQUmFBUEVQOXh2N1kyQjU0QzFXOE0xSXRpVkhqQ0ctcWhpXzFUVDFvU1BLMlhUeTRUQThBVTdOSGpWQnBlWGpfSktFSVFHeWRRQjJoWGl1OFFZNkV5SURQX3FVLVlzWnlkRFIxOUVWWnZFOXdPUUVYRmNPdHNYNkJCc0JDNThYNjV6c3h4dVpnRG5EVGxDcHpjTS05SERMbUJHenlCYUpLRkR4M0o5amE=",
+      "openai_encrypted_content": "Z0FBQUFBQnBsYmJFYlNoZlg2MlZKc0Z3THJVNWNlYWNhVkxlWGpGTWR0a2EwSkpOZnlRMGg5SGpYejNmUVEtUGtwZXk3MUVLS21OR1MzMFEtdTdncHhneHdhSGhhS1N2VUVLRXVNTkFRbktBaGlOR2RtUDVIcWwwdHVsM0ZTdWZqNl9nM0hIVS1McHlFTFNIcWVLUEZCOTNqamtWMU1qLUM3YVJBUTlER3VGVGVfRGtHR1lpU3FDVEdNSUNaMHJja0FvVEd6MmRkb2toVUUxSGYyRmItblQ4aHo2Mmcxa3FoNlVnUU9xRDRHUk5NeWpqaWQ1d2Mtam5JeTd3eGMwZ200ckFXaVlMNGtITDZYU0xFN3VUcF9GU0RuRUJpcm5RMThYVkFsTVIwdW1LWnF4MkhZanl3MlFRaXl6NU1CQVdFVkV6V0JORTNINjk4RkxKSVRHWGFLQzFSbGdaeU1OUjg5dXNBUXYtMGZpR0lxOXFCYjdVaDdfRTh2eHdnMHdpNDRaTFBWU3hZdUFZTE9TLTFBNklnYW1nZU0zOThqY1BEY3BFUXN5QnBiUVVzNlp5eXIySlViWGxsdjFIeGZFYlo3NHlINTI0cUFiNUd4YXNiUDk4aTZMRHlENmNKcGdWWFBUU0lsNEtDbFRLQ2w0SDhnNVBIclVwZHU3SktqMjRjaDJoVmpZTHIwWVRBZUpmcm1PUkw1S2ZuYnhGVG5QOWltLVNmMS1rekhEUTd4ZjlKNTFLY1VyQnJUR3JXdVhNZ2NmYTBUQ3R2TGgyQlhoTXNKRzFXQnE1cWlUMWNFUXJBVVdNdlZLaGoyX2J2M3o0dFIxZGRhMEdySWtrbzFfOXU2QS1qOC1ib01RVU1MMUtXOVgxcGRxNWRfaWFFLWdpQW9uQUNvSW45bmxNODl2N2lJeUhzY1ZoTFhBRTluRWpXbTIyVUNJanMtZkxBZGkxcmNPMFBFSE9ZVGZKMEVJdDltcXVqTmdGSU42bjFLdnlYb2ptSEhkbmw3TXJ2UUJPNGJIME1rWS1LY21PRkV1cUJCLXhqZ2RYWGp6dnhvWlBFa2ZhYkd3Mk1rLWQxa21IUWNzeG42Sk1GUXFOZmJQOUlQVm5tRFMyaWhUZTlwODJKaXR0SGRIQjgyeXF3ZC13eUZ1c05IUTNKbUNWSGRZUHNVOXYzQTQxMmlBbXlfbXZjeTNNdTZfeG94b1BoQTlNSlNkT2xSVGNBOWVWMHBHZ1gza2xHMGpMNmF3QlpFeGsxT0dKY08xRmJsS1JRVTBKVm44dFB3TjhKRWxKNVFzU2o2Z29GVkxqODlyZk5PdGRoLWFqd1RScTF4bm1GeXI1QmxOOG5RSXk1SVAtRnQyU0swZFVtRUk4MUwxbEFva0xKc3ROeUFqbkFEaWEwNW1jeGFaczZDdEFSSEJtNGdtdWZqT21iN1VMMW92ajI5dzYzaEZvS0dINXRRRkY=",
       "openrouter_metadata": [
         {
-          "id": "cnNfMGIyMTk3Y2Y1ODg3MDM5ZDAxNjk0NTFhNDgwN2YwODE5MDhjOGNiNWU2YTY3OWU0NmI=",
+          "id": "cnNfMDZlMGQ1YjFkMzhlYzY4NTAxNjk5NWI2YzFhZmFjODE5NWFhY2VlZmRkYzY4M2Y5ZmI=",
           "index": 0,
           "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
         }
@@ -157,6 +180,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Received — test message acknowledged. How can I help? (You can ask me to summarize text, draft emails, debug code, generate ideas, answer questions, analyze an image, or anything else.)"
+    "message": "Received your test message — everything's working. How can I help you next?"
   }
 ]

@@ -5,36 +5,16 @@ expression: v
 [
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "",
-                    },
-                ),
-                metadata: {
-                    "openai_item_id": String("rs_09f82ef3c4f309b20169451a42fc34819d840f591cfb439d5f"),
-                    "openai_encrypted_content": String("gAAAAABpRRpFKpcbTeCAys1HWj7-IPEiblnllKaauWlPIIVPVnabpYI4irT7z8W0SpeR9RK1yDpAVmNS3LeUcZGy97mQTjp3erdbKOlzSrz_KjyHUXHEeldzo_5EE6DOD3i2Lqnf7kpEq1tRN2Ao0ijOE36eXo1PgRV6gguqTHy93Yf7cynPbJppQAjWVPql77qjZKtkPb-vXlotHUCQvCBJ4alvGESLM2UFCbFo74aiR4EobWggeCQEqhZRIDPrsN2qeWcJimpbo9A4yme4kyKjOG2zA4FvBvmMqVXkOMsoM3crH6b75RlYIqjO2Y4VtHUNeErznRnqW27Ra-9fdmlFI1PPxjODkqIwGJEQ_jB6lQxVJJJxdbTeK8nI6E1j41ZOYNWlpIiALDizB242qvUxQ4OAjBuBHciiCLiSkwI6KkxNlid7SPc4bds9TtzSSzK80I5l0QeZ8aLst7CbwLHgkLU41I9gdJHfhkGwB1XAgUrOX_oCtwb1eOFouKr0tXKERWv4drs4XHT8DaP32ymRzbA-OLy3uXmKtCLCVL3zbCtCSBzvToPUa7WtA-CgjjkA1wXG3GKplmWvTI1NYHq88WlnWj90y0b4UhWbTrLbKe-kZCH46OKlLZwJECujoZTjPv2WoDb1FRMGLtL-z0VCXaPnPyKnbZFRoa3DWUsvTO5BeD8-m2yWSzVhtJMZPbNmSeqrzJly9luy7TB1S5fV9S9Z7e4iPxw27ElZ5CAYx8I5DQnUK61v051n5GjBOzcA-7la0RCuG-E3aw0JC4jUMqup3rOlRSNo2kQWO8DBhRnSmA2DM9-az0IByahiD8BEIFlVMSsz3Qc70TIsAiAm8m79NKrj8GWcqIeZiyDLvZDzRYYpv7MIplBqUA_nPlsCc-YZbj-pb7U-qHUSLcAqioOg1kWCz7JdU8BxnPql6OUwczgYAP4GnAFfce95-X90A_gPihZCpp0ex4N1t4jSKNChFphRrhIETMyZRGqgvk0_156cUVV4kZlydmLkHNtaV2boy19_G5dceZ-QGoD7deQo0eIoUscgElZnZECrJvc-dHbXo0W10EOIi1-lZ7mQiy2GzuYsZMUFSsQ7vjYaSatPTsUTqxVPJu5_Am9XPPhF4u7Nw1MeerdPWI61DBEt2eHSf2bzXZi7LePJO0JWvVS3B2o7-dFhDLk5YNZzWefHxVFy07qmX7ZQ8r95bpVFQwzbL4I-iTRs93lbfOmnoO6ywYvS90fhlBX_ZaI6AqP0K7XKXe25-aN0mEcczZkg2VXUz5piDCy6b3CuW9MtTiWNq53RQnH9XEBjgH-hslmAZ1LkedZqCL18TJ3C9uK23CON9j604Yg1UPKPmWNQUvCr-YNcpGf15K46ed38GQTNbGM2uFAXEWf69pEjRdStCgN3xpYEJqYyFDm7x3HcIqhWSt2DKCQT0aGqY4uqNClV0rsXYTTSNp1k0mt5V0zFtT2WWhx1G_6SeMPLEZ5a81I6Bh1jRHHIwbe0U5pN3LjFKNPs2kBSDSj5txTKm60Neh5081ApTooPaxOgUHjQ-dc0pzJ47LScnpw8KYV016Iy6QIstnIFoBBuHQ6eIU2G439QqqIARdibTH1hdDN9R3gtNdSeSNx2sXd_i81JQ_cATEEdYVWP47SGbTm6RZLLBoxTIF-SmzQBka1OsIpfkqHo4GjaHhUQ2ePpoE-qiH1sClkkbGdWjTs3B-R3FUWk8w6dJXjoxn98igwulGluldsm_R2h6fNrnqZXIXvTnn86-luTSY_DgHveUiekoTRe7rL3lILhWxBp2iEWbL69IUJY02-Hb6xcoVhipwUvTXM76zro3VsY3Rk7CF_V1kpUt4cwzfS1qfxCrKrhfG8DnXunGUmmyYNGkSarIOFMez_O9VfgLr1bBOQl4k1qrxEsA-849-DisfzY6x3PU_2diNuMPcXlEoHtVwtwgQfQhy4kunA1qP1r_9GokGygp-5CAqBs9PJinYU7Nc7Ai88Uft9PUArAySjV2sq_KrCvJir8WHcpPSX7QWKpuYc7xYk6mAkj1aidgY4X1hWRh9SN3GVBSft3dIJebCRfj1EFPTwv_Ti79qg="),
-                },
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_kJGazRkz2QtHylhRTl4uIJvG",
+                        id: "call_3f9VdElzz9orDg2VLwzEdqrd",
                         name: "run_me",
                         arguments: {
+                            "foo": String("run with this argument"),
                             "bar": String("foo"),
-                            "foo": String("example-run"),
-                            "extra": String("additional-parameter"),
                         },
                     },
                 ),
@@ -51,21 +31,21 @@ expression: v
     ],
     [
         Part {
-            index: 0,
+            index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Done — I ran the tool. Output:\nworking!",
+                        message: "I ran the tool with the arguments you provided. Output:\nworking!\n\nIf you want me to run it again with different arguments, tell me what to pass (or say \"choose arguments\" and I'll pick them).",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_09f82ef3c4f309b20169451a465ee8819da8ade8f69d8c6014"),
+                    "openai_item_id": String("msg_0f18db31c0e40906016995b6c037f481939ccbf0c43281a76a"),
                 },
             },
         },
         Flush {
-            index: 0,
+            index: 1,
             metadata: {},
         },
         Finished(

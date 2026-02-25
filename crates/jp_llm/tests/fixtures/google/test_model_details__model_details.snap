@@ -21,14 +21,23 @@ expression: v
         ),
         reasoning: Some(
             Budgetted {
-                min_tokens: 0,
+                min_tokens: 512,
                 max_tokens: Some(
                     24576,
                 ),
             },
         ),
-        knowledge_cutoff: None,
-        deprecated: None,
+        knowledge_cutoff: Some(
+            2025-01-01,
+        ),
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: unknown",
+                retire_at: Some(
+                    2026-07-22,
+                ),
+            },
+        ),
         features: [],
     },
 ]

@@ -29,15 +29,9 @@ then:
           "owned_by": "openai"
         },
         {
-          "id": "chatgpt-image-latest",
+          "id": "gpt-5.2-codex",
           "object": "model",
-          "created": 1765925279,
-          "owned_by": "system"
-        },
-        {
-          "id": "gpt-4o-mini-tts-2025-03-20",
-          "object": "model",
-          "created": 1765610731,
+          "created": 1766164985,
           "owned_by": "system"
         },
         {
@@ -56,6 +50,12 @@ then:
           "id": "gpt-audio-mini-2025-12-15",
           "object": "model",
           "created": 1765760008,
+          "owned_by": "system"
+        },
+        {
+          "id": "chatgpt-image-latest",
+          "object": "model",
+          "created": 1765925279,
           "owned_by": "system"
         },
         {
@@ -194,12 +194,6 @@ then:
           "id": "gpt-4o-2024-08-06",
           "object": "model",
           "created": 1722814719,
-          "owned_by": "system"
-        },
-        {
-          "id": "chatgpt-4o-latest",
-          "object": "model",
-          "created": 1723515131,
           "owned_by": "system"
         },
         {
@@ -422,12 +416,6 @@ then:
           "id": "gpt-image-1",
           "object": "model",
           "created": 1745517030,
-          "owned_by": "system"
-        },
-        {
-          "id": "codex-mini-latest",
-          "object": "model",
-          "created": 1746673257,
           "owned_by": "system"
         },
         {
@@ -704,6 +692,12 @@ then:
           "id": "gpt-4o-mini-transcribe-2025-03-20",
           "object": "model",
           "created": 1765610545,
+          "owned_by": "system"
+        },
+        {
+          "id": "gpt-4o-mini-tts-2025-03-20",
+          "object": "model",
+          "created": 1765610731,
           "owned_by": "system"
         },
         {

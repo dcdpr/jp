@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -125,6 +148,11 @@ expression: v
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "Okay, the user is asking me to run the tool, specifically the 'run_me' function, and they mentioned providing whatever arguments I want. Let me check the tools section again.\n\nThe tools provided have a function called 'run_me' with no parameters. The function signature shows it's defined with <nil> for parameters, so it doesn't require any arguments. But the user wants me to provide arguments. Wait, maybe the function can accept arguments even if they're not specified? Or perhaps the user just wants me to call it without any arguments since the tool doesn't require any. \n\nSince the function doesn't have any parameters, I should call it without arguments. The user might be testing if I can execute the function correctly. I need to make sure I follow the directive to use the 'run_me' function and not ask for more context. So the correct action is to generate a tool call for 'run_me' with an empty arguments object.\n"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
     "id": "",
     "name": "run_me",
@@ -136,5 +164,15 @@ expression: v
     "id": "",
     "content": "d29ya2luZyE=",
     "is_error": false
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "Okay, the user asked me to run the tool with whatever arguments I want. Let me check the tools again.\n\nThe available tool is 'run_me' with no parameters. So the function doesn't require any arguments. But the user wants me to provide arguments. Wait, maybe they just want me to call the function without any arguments since there are none specified. I should call 'run_me' with an empty arguments object. That's the correct approach here. Let me make sure I'm not missing any hidden parameters or requirements. No, the function is defined with <nil> for parameters, so it's safe to call it without any. Alright, I'll generate the tool call accordingly.\n"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "```json\n{\n  \"tool\": \"run_me\",\n  \"arguments\": {}\n}\n```"
   }
 ]

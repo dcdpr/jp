@@ -13,11 +13,16 @@ expression: v
                         id: "run_me_0",
                         name: "run_me",
                         arguments: {
-                            "bar": String("foo"),
+                            "bar": Array [
+                                String("apple"),
+                                String("banana"),
+                            ],
                         },
                     },
                 ),
-                metadata: {},
+                metadata: {
+                    "google_thought_signature": String("CiQBvj72+3Eznyvg9jiUhca64XUHdbIbl2yoefaRAJAnVDXaBUwKYgG+Pvb7MiHOidVCCyQGer46ZwCsi/m+ml9PYqmKwKSPvwddg37xnCXeVzh6UlsIEi8XSbv2M3mb96e6YrgM45u0RbFV0zj8Ze8jTjGxFolzwmFydUNDfDFmJge3xxam0keyCs8BAb4+9vvK9a4syhCnXEr81PtJqTCzvShJm+TKuPXUnSZQ7ySrmGkVTVK6gzMpBnK0Kxn1j7uq8ds1onjvRIzVnJOvBDztJOsmzaUh9dXamrS2ALzHtPt1gXm/uNqFlNOU8YNYd35tS/AIMu+aZOb8Um/m6miBg6FstXpOfKdACaGtlDqHiPBheFjYXB+eq41EBA+qSCMsrUYMzEvqL8mJC+ssSLxXSUW9N85LUFEs6QZwCf+DBBzc2go7J2pRDdFlJttlHAJN8OUjnVkI1wJMCtkBAb4+9vuF7tGCYuDZdVNj/P0L3ND5mGWO6ZyzL0MXNQdGC4xDdfRZ9fC/BwVGCcqyp8TIjpYzkb2a7gVBObeoyOUeI3M+drvqsjJe1caLYBxnCUPEpM1wxvVNZQS5TXx1v8fY6G2xPqiyCvfJ6Gr4ygGMFK0QCzV/+zHeCLYbseHxCeZLF/gW0r5KUjCgfhKLUKNugUyZA8Qdo0Xsi8DY7bF1PFEvE5ViEnC7HgK0ay/glojnfvYggRH+kY4pLl8nORHOpjHesHFXX6X4OSLRGwCdrCYpXQX7lwq/AQG+Pvb7tGNvA/2jVEPz3OB9HhAluVNjTuugvZHMgVWVDeJ5/CM+sGwaxussuwNAEfOPUsgIoHi2VU3Cwo9GwkWmYCAtUYea7ipkEucJsrGTpIdqczBQYLoZjol5GMzLdrg3xgcDTcvRua8xL2JjxUZtOVEEHu7YpEQFGVtGBXgJ9kG+GsAzC74vUJOS6TxdA5iHD8pLTG0cys7W1eoL5BASzViwm6s7YhqnBZ9/vNwEpAVYqsCrLeYjwqQdIkhjCtoBAb4+9vvByQCQpgNr35GikMVmnlrKBw1I6Nr6MXPkQBoDVoMf8fJ5OrNlybvyzeMU4MF975F/g+cXLP+4vqU9sMnmsk8A8Yo7qGoq+TfzrF/VBpgI2NI2hwOoBn3f3iATj9+7lSgug11GB3ShWy0DdgzItvXyKuFC350Tge1fFIYelYyeUrpZ4K19P3rwNr6pCo0fDzOBRn5T4cIoS3Y8Xf4lQaaEm14NDY/fE5AQWmvE7d7OrbCA7Dp1t3yfHdvSW30a0qilTrXfClNcd/K99C3Wjp5NgoOSbeAKkwEBvj72+9Of8v2oCPkWuJl4LI66zvLbCC+H14bJfCoKwSdvwBIhnPZ4GA3oQQkHJwru6K+re+k/lZEj7stRvWdw8uHDyUBWtAwdY9XYv1GqSDBfV90dH60WsKmUtJRp5UauNs5uqUw6X3RFgZyk5BGJ9SF86nunumFJbTK5+1EhcDSNBWn23gVL0pRoC2z0PCXt2O0="),
+                },
             },
         },
         Flush {
@@ -29,22 +34,6 @@ expression: v
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "Okay, I ran the tool with the `bar` argument set to `\"foo\"`. The output was:\n\n```json\n{\"run_me_response\": {\"content\": \"working!\"}}\n```\n\nThis indicates that the `run_me` function was successfully executed and returned the string \"working!\".\n\nWould you like me to try running the tool with different arguments, or perform another action?",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
         Finished(
             Completed,
         ),

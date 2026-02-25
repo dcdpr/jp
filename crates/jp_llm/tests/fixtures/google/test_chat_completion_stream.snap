@@ -10,19 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Recognizing Test Intent**\n\nI'm currently processing a simple \"Test message.\" My primary focus is to identify the user's intent, which appears to be a basic system check or exploratory query. I'm formulating a response that is both polite and helpful, acknowledging the test message effectively.\n\n\n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "**Crafting a Polite Response**\n\nI've refined my initial response, landing on \"Test message received! I'm here and ready to assist. What can I help you with today?\". I prioritized a balance of acknowledging the test, confirming functionality, and offering further assistance. My initial responses were too short, and others a bit too casual. This feels like a good fit for this scenario.\n\n\n",
+                        reasoning: "**Assessing the Interaction**\n\nI've identified the user's likely intent: to test the system's responsiveness. It's a simple input, so the goal is equally straightforward – a helpful and appropriate response acknowledging the interaction. The core task is now in responding appropriately.\n\n\n**Refining the Response**\n\nI've determined the best response to the test message as \"Hello! I received your test message. How can I help you today?\". This balances acknowledgment with a prompt for further interaction. My next step is to prepare it for implementation, making it ready for a real-time interaction.\n\n\n",
                     },
                 ),
                 metadata: {},
@@ -38,7 +26,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Test message received! I'm here and ready to assist. What can I help you with today?",
+                        message: "Hello! I received your test message. How can I help you today?",
                     },
                 ),
                 metadata: {},

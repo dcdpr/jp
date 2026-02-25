@@ -1,0 +1,45 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "4",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("EqkBCkYICxgCKkDo5w3BcOFDM2J7MsIKxgUfuba9NpwDavusotnNesPeZa7anZZRQjr0ND/Y4T9kgQgbRz4ipY8/DiooFD5PtwvCEgyG6uQ+pIe1Miqg6T8aDDOqoanY2Yj6TkYPgyIwQw6GDWq4f68+ADBe9bjIWrknSYf5zqw3b6HwveQd5SRniCxzG0BXWKM0sbHKGDo8KhFIISG1NzvILBukDtU05lhNaRgB"),
+                },
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "2 + 2 = **4**.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 2,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]
