@@ -1,38 +1,71 @@
-# Jean-Pierre, An LLM-based Programming Assistant
+# Jean-Pierre, An LLM-powered Programming Assistant
 
 > A command-line toolkit to support you in your daily work as a software
 > programmer. Built to integrate into your existing workflows, providing a
-> powerful and flexible pair-programming experience with LLMs.
+> secure, powerful and flexible pair-programming experience with LLMs.
 
-Visit [**jp.computer**] for more information.
+Visit [**jp.computer**] to learn more.
 
-## Features
+> [!NOTE]
+> This project is in active development. Expect breaking changes. What is
+> documented here is subject to change and may not be up-to-date. Please consult
+> the [installation instructions](#getting-started) to get started, and [reach
+> out to us](https://jp.computer/contact) if you need any assistance, or have
+> feedback.
 
-- Single `jp` command for all interactions, no installation required.
-- Use multiple LLM _providers_ (support for local LLMs coming soon).
-- Integrate existing Model-Context-Protocol servers using _mcp_ configurations.
-- _Embedded mcp server_ to run custom scripts and tools.
-- Switch between different _conversations_ during your work.
-- Attach files or notes to conversations using _attachments_.
-- Use _models_ to use specific providers, models and parameters.
-- Highly customizable _layered configuration_ system for maximum flexibility.
-- Switch between custom _assistants_ with different _personas_ and _contexts_.
-- Persist JP state in your VCS of choice.
-- LLM-based conversation naming + manual renaming.
-- Locally stored conversations excluded from VCS.
-- (soon) Encrypted conversation history.
-- (soon) Text-to-speech integration.
-- (soon) Sync server to store data in a central local location.
-- (soon) API server to expose data to other devices.
-- (soon) Mobile web app to continue conversations on mobile devices.
-- (soon) Agentic workflows with budget constraints and milestones.
-- (soon) Directly integrate into your VCS, allowing LLM to edit files.
+## Philosophy
+
+JP is built to be **[provider-agnostic][1]**, your workflow shouldn't be coupled
+to any single LLM backend; **[private and secure by default][2]**, with no
+implicit network access or silent tool execution; a **[proper Unix
+citizen][3]**, a single static binary that composes with pipes, respects your
+shell, and stays out of your way; **[extensible][4]** through sandboxed plugins
+and **[configurable][5]** where it matters; **[open-source and
+independent][6]**, funded without VC money, no allegiance to any LLM provider,
+just software that serves its users.
+
+[1]: docs/README/providers.md
+[2]: docs/README/privacy-and-security.md
+[3]: docs/README/workflow-integration.md
+[4]: docs/README/extensibility.md
+[5]: docs/README/configuration.md
+[6]: docs/README/open-source.md
 
 ## Getting Started
 
-1. [install] JP on your computer.
-2. Run `jp init` to initialize a new workspace.
-3. See `jp --help` for all available commands.
+JP is in active development. Install from source:
 
-[**jp.computer**]: https://jp.computer
-[install]: https://jp.computer/installation
+```sh
+cargo install --locked --git https://github.com/dcdpr/jp.git
+```
+
+Initiate a new workspace in an existing directory:
+
+```sh
+jp init .
+> Confirm before running tools?
+Yes (safest option)
+> Which LLM model do you want to use?
+ollama/qwen3
+
+Initialized workspace at current directory
+```
+
+Run your first query:
+
+```sh
+jp query "Is this thing on?"
+Hello there! I am Jean-pierre, how can I help you today?
+```
+
+Configure your JP workspace:
+
+```sh
+open .jp/config.toml
+```
+
+See what else you can do:
+
+```sh
+jp help
+```
