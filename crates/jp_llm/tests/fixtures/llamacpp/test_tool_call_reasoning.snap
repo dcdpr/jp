@@ -8,14 +8,9 @@ expression: v
             index: 0,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ToolCallRequest(
-                    ToolCallRequest {
-                        id: "sF2ivmYeu2EZ66osbn1c9HEWVWcwECw2",
-                        name: "run_me",
-                        arguments: {
-                            "bar": String("foo"),
-                            "foo": String("test_value"),
-                        },
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Okay, the user wants me to run the tool with whatever arguments I want. Let me check the function definition again. The function is called run_me and it requires two parameters: foo and bar. \n\nFoo is a string or null, with a default value of \"foo\". Bar is an array of strings, with each item being either \"foo\" or \"bar\". The enum for bar is [\"foo\"], but the items have an enum of [\"foo\", \"bar\"]. Wait, that seems conflicting. The bar parameter's type is an array, and the enum for bar is [\"foo\"], but the items' enum is [\"foo\", \"bar\"]. Hmm, maybe there's a mistake in the tool's definition. But I need to follow the given structure.\n\nSince the user says to provide whatever arguments, I can choose values that fit. For foo, I can use the default \"foo\" or set it to null. Let's go with \"foo\" for simplicity. For bar, since the enum for the parameter is [\"foo\"], but the items can be \"foo\" or \"bar\", maybe the parameter bar is an array that must contain \"foo\" as the only element. Wait, the enum for bar is [\"foo\"], which suggests that the entire bar array must be \"foo\". But arrays can't be strings. That doesn't make sense. Maybe it's a typo, and the actual intention is that each item in the array is from [\"foo\", \"bar\"], and the bar parameter is an array. So perhaps the enum for bar is not correctly specified. But as per the given tool definition, I have to work with what's there.\n\nSo, the bar parameter is an array, and the enum for bar is [\"foo\"], which might mean that the array must be exactly [\"foo\"]. But the items' enum is [\"foo\", \"bar\"], so each element can be either. But the bar parameter's enum is [\"foo\"], which is confusing. Maybe the tool's definition has an error, but I have to proceed. \n\nTo be safe, I'll set bar to [\"foo\"], which fits the enum [\"foo\"] for the parameter. Alternatively, if the bar parameter is supposed to be an array of strings from [\"foo\", \"bar\"], then the enum for bar should be [\"foo\", \"bar\"], but according to the tool definition, bar's enum is [\"foo\"]. So maybe the correct approach is to set bar as an array containing \"foo\" as the only element. \n\nSo, the arguments would be foo: \"foo\" and bar: [\"foo\"]. That should satisfy the parameters. Let me check again. The function requires foo and bar. Foo is a string or null, default is \"foo\". Bar is an array of strings, each item is in [\"foo\", \"bar\"], and the bar parameter's enum is [\"foo\"]. Wait, the bar parameter's type is an array, and the enum is [\"foo\"], which is a string. That seems like a mistake. But perhaps the tool expects bar to be a single string, not an array. Wait, the parameters for the function are:\n\n\"bar\": {\n  \"type\": [\"string\", \"array\"],\n  \"enum\": [\"foo\"],\n  \"items\": {\n    \"type\": \"string\",\n    \"enum\": [\"foo\", \"bar\"]\n  }\n}\n\nWait, the type for bar is either string or array. But the enum is [\"foo\"], which is a string. So if bar is a string, it must be \"foo\". If it's an array, then the items must be from [\"foo\", \"bar\"], but the enum for the bar parameter is [\"foo\"], which is confusing. Maybe the tool's definition is incorrect, but I have to work with it. \n\nGiven that, perhaps the user intended bar to be an array of strings, each being \"foo\" or \"bar\". But the enum for bar is [\"foo\"], which might be a mistake. But since the user says to provide whatever arguments, I'll choose bar as [\"foo\"] to fit the enum. \n\nSo the final arguments would be foo: \"foo\" and bar: [\"foo\"]. That should work. Let me make sure that the required parameters are included. Yes, foo and bar are required. So the tool call should be:\n\n{\n  \"name\": \"run_me\",\n  \"arguments\": {\n    \"foo\": \"foo\",\n    \"bar\": [\"foo\"]\n  }\n}",
                     },
                 ),
                 metadata: {},
@@ -23,6 +18,27 @@ expression: v
         },
         Flush {
             index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "q48x6s2Q44HFEJvhAoWS4sz2NDMotfPW",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("foo"),
+                            "bar": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 2,
             metadata: {},
         },
         Finished(
@@ -35,8 +51,8 @@ expression: v
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
-                    Message {
-                        message: "It looks like the tool executed successfully! Here's the response:\n\n```\nworking!\n```\n\nIs there anything specific you want to do next or any other tools you'd like to run?",
+                    Reasoning {
+                        reasoning: "Okay, the user ran the tool with the arguments {\"foo\": \"foo\", \"bar\": \"foo\"} and got a response \"working!\". Now they want me to generate a response based on that. Let me think about what's going on here.\n\nFirst, the original function definition had some confusion. The bar parameter was supposed to be an array, but the user's tool call treated it as a string. The assistant's previous response had a tool call where bar was an array, but the user's response was \"working!\", which might indicate that the tool accepts bar as a string. \n\nWait, looking back, the function's bar parameter had a type that was either string or array. The enum for bar was [\"foo\"], which might have been a mistake. The items for the array had an enum of [\"foo\", \"bar\"], but the bar parameter's enum was [\"foo\"]. So there's inconsistency here. \n\nIn the initial tool call, the assistant used bar as an array [\"foo\"], but the user's response was \"working!\". Maybe the tool actually expects bar to be a string, not an array. So the correct arguments should be foo: \"foo\" and bar: \"foo\". \n\nThe user's response after running the tool was \"working!\", which suggests that the tool worked with bar as a string. Therefore, the assistant's previous tool call with bar as an array might have been incorrect. The user might have intended bar to be a string, not an array. \n\nSo the correct response should be to acknowledge that the tool worked and maybe provide a message like \"Tool executed successfully with arguments foo: foo and bar: foo.\" \n\nBut the user's last message was just \"working!\" and the assistant needs to respond. The user might be expecting a confirmation or a message based on the tool's success. Since the tool's output was \"working!\", the assistant should probably echo that or provide a friendly response. \n\nAlternatively, maybe the user is testing if the assistant can handle the tool's response. The correct approach is to generate a response that reflects the tool's success, perhaps with a message like \"The tool ran successfully!\" or similar. \n\nGiven that, the final response should be a simple confirmation that the tool worked, based on the user's \"working!\" response.",
                     },
                 ),
                 metadata: {},
@@ -44,6 +60,22 @@ expression: v
         },
         Flush {
             index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool ran successfully! Let me know if you need further assistance. 😊",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
             metadata: {},
         },
         Finished(

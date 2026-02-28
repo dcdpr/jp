@@ -26,7 +26,7 @@ when:
         "maxOutputTokens": 64000,
         "thinkingConfig": {
           "includeThoughts": false,
-          "thinkingBudget": null,
+          "thinkingBudget": 512,
           "thinkingLevel": null
         }
       }
@@ -37,9 +37,7 @@ then:
     - name: content-type
       value: text/event-stream
   body: |+
-    data: {"candidates": [{"content": {"parts": [{"text": "Hello"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 3,"candidatesTokenCount": 1,"totalTokenCount": 4,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wh1FaYCxEqqYvdIPy7X9UA"}
-    
-    data: {"candidates": [{"content": {"parts": [{"text": "! I am a large language model, trained by Google. How can I help you today?"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 3,"candidatesTokenCount": 20,"totalTokenCount": 23,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wh1FaYCxEqqYvdIPy7X9UA"}
+    data: {"candidates": [{"content": {"parts": [{"text": "Received! How can I help you today?"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 3,"candidatesTokenCount": 9,"totalTokenCount": 188,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 3}],"thoughtsTokenCount": 176},"modelVersion": "gemini-2.5-flash-lite","responseId": "oraVaa_iCPWNxs0Pm9-XoQg"}
     
 ---
 when:
@@ -62,7 +60,7 @@ when:
         {
           "parts": [
             {
-              "text": "Hello! I am a large language model, trained by Google. How can I help you today?"
+              "text": "Received! How can I help you today?"
             }
           ],
           "role": "model"
@@ -97,9 +95,9 @@ then:
     - name: content-type
       value: text/event-stream
   body: |+
-    data: {"candidates": [{"content": {"parts": [{"text": "**Analyzing Task Requirements**\n\nI've been examining the user's instructions and am focused on understanding the core elements: recognizing and repeating the preceding message. I am now working to ensure that future responses precisely follow the constraints regarding format and word count. My objective is to create updates that accurately reflect any progress.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 29,"totalTokenCount": 58,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 29}],"thoughtsTokenCount": 29},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wh1FaaP4L5fWxN8P9-mp8Ak"}
+    data: {"candidates": [{"content": {"parts": [{"text": "**Repeating the Input**\n\nI am now focusing on repeating the last user message. It was \"Test message.\" My sole task is to reproduce this text accurately. This should be a straightforward repetition, with no alterations or interpretations needed.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 18,"totalTokenCount": 46,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 18}],"thoughtsTokenCount": 28},"modelVersion": "gemini-2.5-flash-lite","responseId": "o7aVaZX4C_WNxs0PtLSW2QE"}
     
-    data: {"candidates": [{"content": {"parts": [{"text": "Test message"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 29,"candidatesTokenCount": 1,"totalTokenCount": 59,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 29}],"thoughtsTokenCount": 29},"modelVersion": "gemini-2.5-flash-lite","responseId": "Wh1FaaP4L5fWxN8P9-mp8Ak"}
+    data: {"candidates": [{"content": {"parts": [{"text": "Test message"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 18,"candidatesTokenCount": 1,"totalTokenCount": 47,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 18}],"thoughtsTokenCount": 28},"modelVersion": "gemini-2.5-flash-lite","responseId": "o7aVaZX4C_WNxs0PtLSW2QE"}
     
 ---
 when:
@@ -122,7 +120,7 @@ when:
         {
           "parts": [
             {
-              "text": "Hello! I am a large language model, trained by Google. How can I help you today?"
+              "text": "Received! How can I help you today?"
             }
           ],
           "role": "model"
@@ -139,7 +137,7 @@ when:
           "parts": [
             {
               "thought": true,
-              "text": "**Analyzing Task Requirements**\n\nI've been examining the user's instructions and am focused on understanding the core elements: recognizing and repeating the preceding message. I am now working to ensure that future responses precisely follow the constraints regarding format and word count. My objective is to create updates that accurately reflect any progress.\n\n\n"
+              "text": "**Repeating the Input**\n\nI am now focusing on repeating the last user message. It was \"Test message.\" My sole task is to reproduce this text accurately. This should be a straightforward repetition, with no alterations or interpretations needed.\n\n\n"
             },
             {
               "text": "Test message"
@@ -209,7 +207,7 @@ when:
         "maxOutputTokens": 64000,
         "thinkingConfig": {
           "includeThoughts": false,
-          "thinkingBudget": null,
+          "thinkingBudget": 512,
           "thinkingLevel": null
         }
       }
@@ -220,7 +218,7 @@ then:
     - name: content-type
       value: text/event-stream
   body: |+
-    data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "run_me","args": {"bar": "foo"}}}],"role": "model"},"finishReason": "STOP","index": 0,"finishMessage": "Model generated function call(s)."}],"usageMetadata": {"promptTokenCount": 163,"candidatesTokenCount": 15,"totalTokenCount": 178,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 163}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "XR1Faaz7BJPHxN8PxKrGsAw"}
+    data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "run_me","args": {"bar": "foo"}},"thoughtSignature": "Ci8Bvj72+0Hl+UuItWx2IuL9lIHe417EQZNT4p/tVdeIUaS4foQ6yQ3NEHqQ2idDEQpZAb4+9vtTdMk7akQuaf+/rEsQ0rz4X5HAgJKsWJpVMK5CsO1oRWOWkkbDtRPh56gpkFJygnOAkKb802DuCWsMy0CQMokd5P5i5PidWuhf+us1aiW7wV4YWCsK2QEBvj72+3I0gtFzNh/TNwr2roD43eSh2dqdOv/Ou76Z7eoehD/HFgnIP4vx8Ja+RjMWIvhItHJuRhZcETy1aWkGCQsKYLJxyfzh3649KxOc613zkhtqNav+jEgvBxn9mO6HqnfL7KcDNGc013EKf8VYyoJm/OPprFe59cbEvemZbca1qLs6jacXQjPEURoJFMhI99CT2qII3GiN0uENVZNSmI5YLMubn823e1vrFIcmb6rZW+HW4D6Nng6UcpLhb6v37W4vGP1lW/XYnf6UMLV15fvJyFWAF6AqCr8BAb4+9vvdQ2A/5YnAVzVbquLUPgvZbpjScbxOGFINDzVN9OgVZRWQeyLgU0YipDeK2iC65uab0xjKe6cjtyAaS6hXievTdfLJB9TJehyvfl/iRZ/AEhA9ASZWGCAOEHqprdWzl0Z2rVQh7H1WU96YZi5ix382Nhr7PrmJy3pZb9EuSg90o7aQNI1ZFj6VKR2WcfR/H4HCl1uvOfRsSmScw89dvp6nVCR3DQgNT5/oZA34+tWrKVJtRcVRuCgwohgKYwG+Pvb7o6PUMhHErLbj19po3YtUVOR5mv3UdFc47G0eyzJopTMeqIH0KC+M4TljC1Ba9xxSFvX+Hp9Detos0vQoOV5Zxb2/WUZd6IF4zqSOQDzJtVacLKo0dWVDLNpDewaH3g=="}],"role": "model"},"finishReason": "STOP","index": 0,"finishMessage": "Model generated function call(s)."}],"usageMetadata": {"promptTokenCount": 136,"candidatesTokenCount": 15,"totalTokenCount": 295,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 136}],"thoughtsTokenCount": 144},"modelVersion": "gemini-2.5-flash-lite","responseId": "pLaVaf3tFZuZ28oPi9qtsAQ"}
     
 ---
 when:
@@ -243,7 +241,7 @@ when:
         {
           "parts": [
             {
-              "text": "Hello! I am a large language model, trained by Google. How can I help you today?"
+              "text": "Received! How can I help you today?"
             }
           ],
           "role": "model"
@@ -260,7 +258,7 @@ when:
           "parts": [
             {
               "thought": true,
-              "text": "**Analyzing Task Requirements**\n\nI've been examining the user's instructions and am focused on understanding the core elements: recognizing and repeating the preceding message. I am now working to ensure that future responses precisely follow the constraints regarding format and word count. My objective is to create updates that accurately reflect any progress.\n\n\n"
+              "text": "**Repeating the Input**\n\nI am now focusing on repeating the last user message. It was \"Test message.\" My sole task is to reproduce this text accurately. This should be a straightforward repetition, with no alterations or interpretations needed.\n\n\n"
             },
             {
               "text": "Test message"
@@ -286,7 +284,7 @@ when:
                   "bar": "foo"
                 }
               },
-              "thoughtSignature": "skip_thought_signature_validator"
+              "thoughtSignature": "Ci8Bvj72+0Hl+UuItWx2IuL9lIHe417EQZNT4p/tVdeIUaS4foQ6yQ3NEHqQ2idDEQpZAb4+9vtTdMk7akQuaf+/rEsQ0rz4X5HAgJKsWJpVMK5CsO1oRWOWkkbDtRPh56gpkFJygnOAkKb802DuCWsMy0CQMokd5P5i5PidWuhf+us1aiW7wV4YWCsK2QEBvj72+3I0gtFzNh/TNwr2roD43eSh2dqdOv/Ou76Z7eoehD/HFgnIP4vx8Ja+RjMWIvhItHJuRhZcETy1aWkGCQsKYLJxyfzh3649KxOc613zkhtqNav+jEgvBxn9mO6HqnfL7KcDNGc013EKf8VYyoJm/OPprFe59cbEvemZbca1qLs6jacXQjPEURoJFMhI99CT2qII3GiN0uENVZNSmI5YLMubn823e1vrFIcmb6rZW+HW4D6Nng6UcpLhb6v37W4vGP1lW/XYnf6UMLV15fvJyFWAF6AqCr8BAb4+9vvdQ2A/5YnAVzVbquLUPgvZbpjScbxOGFINDzVN9OgVZRWQeyLgU0YipDeK2iC65uab0xjKe6cjtyAaS6hXievTdfLJB9TJehyvfl/iRZ/AEhA9ASZWGCAOEHqprdWzl0Z2rVQh7H1WU96YZi5ix382Nhr7PrmJy3pZb9EuSg90o7aQNI1ZFj6VKR2WcfR/H4HCl1uvOfRsSmScw89dvp6nVCR3DQgNT5/oZA34+tWrKVJtRcVRuCgwohgKYwG+Pvb7o6PUMhHErLbj19po3YtUVOR5mv3UdFc47G0eyzJopTMeqIH0KC+M4TljC1Ba9xxSFvX+Hp9Detos0vQoOV5Zxb2/WUZd6IF4zqSOQDzJtVacLKo0dWVDLNpDewaH3g=="
             }
           ],
           "role": "model"
@@ -316,7 +314,7 @@ when:
         "maxOutputTokens": 64000,
         "thinkingConfig": {
           "includeThoughts": false,
-          "thinkingBudget": null,
+          "thinkingBudget": 512,
           "thinkingLevel": null
         }
       }
@@ -327,9 +325,9 @@ then:
     - name: content-type
       value: text/event-stream
   body: |+
-    data: {"candidates": [{"content": {"parts": [{"text": "The secret"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 145,"candidatesTokenCount": 2,"totalTokenCount": 147,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 145}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "XR1FaayrHMS_xN8Pkeu1gQI"}
+    data: {"candidates": [{"content": {"parts": [{"text": "The"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 262,"candidatesTokenCount": 1,"totalTokenCount": 263,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 262}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "pbaVafKtFJXIvdIP-oyG2AU"}
     
-    data: {"candidates": [{"content": {"parts": [{"text": " code is: 42"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 145,"candidatesTokenCount": 8,"totalTokenCount": 153,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 145}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "XR1FaayrHMS_xN8Pkeu1gQI"}
+    data: {"candidates": [{"content": {"parts": [{"text": " secret code is: 42"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 262,"candidatesTokenCount": 8,"totalTokenCount": 270,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 262}]},"modelVersion": "gemini-2.5-flash-lite","responseId": "pbaVafKtFJXIvdIP-oyG2AU"}
     
 ---
 when:
@@ -352,7 +350,7 @@ when:
         {
           "parts": [
             {
-              "text": "Hello! I am a large language model, trained by Google. How can I help you today?"
+              "text": "Received! How can I help you today?"
             }
           ],
           "role": "model"
@@ -369,7 +367,7 @@ when:
           "parts": [
             {
               "thought": true,
-              "text": "**Analyzing Task Requirements**\n\nI've been examining the user's instructions and am focused on understanding the core elements: recognizing and repeating the preceding message. I am now working to ensure that future responses precisely follow the constraints regarding format and word count. My objective is to create updates that accurately reflect any progress.\n\n\n"
+              "text": "**Repeating the Input**\n\nI am now focusing on repeating the last user message. It was \"Test message.\" My sole task is to reproduce this text accurately. This should be a straightforward repetition, with no alterations or interpretations needed.\n\n\n"
             },
             {
               "text": "Test message"
@@ -395,7 +393,7 @@ when:
                   "bar": "foo"
                 }
               },
-              "thoughtSignature": "skip_thought_signature_validator"
+              "thoughtSignature": "Ci8Bvj72+0Hl+UuItWx2IuL9lIHe417EQZNT4p/tVdeIUaS4foQ6yQ3NEHqQ2idDEQpZAb4+9vtTdMk7akQuaf+/rEsQ0rz4X5HAgJKsWJpVMK5CsO1oRWOWkkbDtRPh56gpkFJygnOAkKb802DuCWsMy0CQMokd5P5i5PidWuhf+us1aiW7wV4YWCsK2QEBvj72+3I0gtFzNh/TNwr2roD43eSh2dqdOv/Ou76Z7eoehD/HFgnIP4vx8Ja+RjMWIvhItHJuRhZcETy1aWkGCQsKYLJxyfzh3649KxOc613zkhtqNav+jEgvBxn9mO6HqnfL7KcDNGc013EKf8VYyoJm/OPprFe59cbEvemZbca1qLs6jacXQjPEURoJFMhI99CT2qII3GiN0uENVZNSmI5YLMubn823e1vrFIcmb6rZW+HW4D6Nng6UcpLhb6v37W4vGP1lW/XYnf6UMLV15fvJyFWAF6AqCr8BAb4+9vvdQ2A/5YnAVzVbquLUPgvZbpjScbxOGFINDzVN9OgVZRWQeyLgU0YipDeK2iC65uab0xjKe6cjtyAaS6hXievTdfLJB9TJehyvfl/iRZ/AEhA9ASZWGCAOEHqprdWzl0Z2rVQh7H1WU96YZi5ix382Nhr7PrmJy3pZb9EuSg90o7aQNI1ZFj6VKR2WcfR/H4HCl1uvOfRsSmScw89dvp6nVCR3DQgNT5/oZA34+tWrKVJtRcVRuCgwohgKYwG+Pvb7o6PUMhHErLbj19po3YtUVOR5mv3UdFc47G0eyzJopTMeqIH0KC+M4TljC1Ba9xxSFvX+Hp9Detos0vQoOV5Zxb2/WUZd6IF4zqSOQDzJtVacLKo0dWVDLNpDewaH3g=="
             }
           ],
           "role": "model"
@@ -452,9 +450,382 @@ then:
     - name: content-type
       value: text/event-stream
   body: |+
-    data: {"candidates": [{"content": {"parts": [{"text": "**Refining Understanding**\n\nI'm now focusing on directly mapping the user's query about the \"previous tool call result\" to the output from the most recent tool execution. Specifically, I'm identifying that the prior turn used `default_api.run_me` and returned `{\"run_me_response\": {\"content\": \"The secret code\"}}`. This clarifies my approach.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 165,"totalTokenCount": 236,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 165}],"thoughtsTokenCount": 71},"modelVersion": "gemini-2.5-flash-lite","responseId": "XR1Faav9NOqivdIPmfvc0QE"}
+    data: {"candidates": [{"content": {"parts": [{"text": "**Identifying Tool Output**\n\nI've homed in on the need to identify and retrieve the output of the prior tool execution. The crucial parameter is clearly the result itself. Therefore, I need to focus on recalling the specifics of the last tool call to ensure I can provide the right result.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 138,"totalTokenCount": 208,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 138}],"thoughtsTokenCount": 70},"modelVersion": "gemini-2.5-flash-lite","responseId": "pbaVadn4IbPTvdIPh7q28Qo"}
     
-    data: {"candidates": [{"content": {"parts": [{"text": "**Clarifying Tool Usage**\n\nI've zeroed in on the specifics of the tool interaction. It's clear the previous turn executed `default_api.run_me`, with a returned value: `{\"run_me_response\": {\"content\": \"The secret code is: 42\"}}`. My response now isolates the essential bit; extracting the value associated with the `content` key within the `run_me_response`. This simplifies the process.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 165,"totalTokenCount": 298,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 165}],"thoughtsTokenCount": 133},"modelVersion": "gemini-2.5-flash-lite","responseId": "XR1Faav9NOqivdIPmfvc0QE"}
+    data: {"candidates": [{"finishReason": "UNEXPECTED_TOOL_CALL","index": 0}],"usageMetadata": {"promptTokenCount": 138,"totalTokenCount": 138,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 138}]}}
     
-    data: {"candidates": [{"content": {"parts": [{"text": "The result of the previous tool call was: \"The secret code is: 42\"."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 165,"candidatesTokenCount": 17,"totalTokenCount": 315,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 165}],"thoughtsTokenCount": 133},"modelVersion": "gemini-2.5-flash-lite","responseId": "XR1Faav9NOqivdIPmfvc0QE"}
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "Received! How can I help you today?"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Repeat my previous message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "thought": true,
+              "text": "**Repeating the Input**\n\nI am now focusing on repeating the last user message. It was \"Test message.\" My sole task is to reproduce this text accurately. This should be a straightforward repetition, with no alterations or interpretations needed.\n\n\n"
+            },
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Please run the tool, providing whatever arguments you want."
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "args": {
+                  "bar": "foo"
+                }
+              },
+              "thoughtSignature": "Ci8Bvj72+0Hl+UuItWx2IuL9lIHe417EQZNT4p/tVdeIUaS4foQ6yQ3NEHqQ2idDEQpZAb4+9vtTdMk7akQuaf+/rEsQ0rz4X5HAgJKsWJpVMK5CsO1oRWOWkkbDtRPh56gpkFJygnOAkKb802DuCWsMy0CQMokd5P5i5PidWuhf+us1aiW7wV4YWCsK2QEBvj72+3I0gtFzNh/TNwr2roD43eSh2dqdOv/Ou76Z7eoehD/HFgnIP4vx8Ja+RjMWIvhItHJuRhZcETy1aWkGCQsKYLJxyfzh3649KxOc613zkhtqNav+jEgvBxn9mO6HqnfL7KcDNGc013EKf8VYyoJm/OPprFe59cbEvemZbca1qLs6jacXQjPEURoJFMhI99CT2qII3GiN0uENVZNSmI5YLMubn823e1vrFIcmb6rZW+HW4D6Nng6UcpLhb6v37W4vGP1lW/XYnf6UMLV15fvJyFWAF6AqCr8BAb4+9vvdQ2A/5YnAVzVbquLUPgvZbpjScbxOGFINDzVN9OgVZRWQeyLgU0YipDeK2iC65uab0xjKe6cjtyAaS6hXievTdfLJB9TJehyvfl/iRZ/AEhA9ASZWGCAOEHqprdWzl0Z2rVQh7H1WU96YZi5ix382Nhr7PrmJy3pZb9EuSg90o7aQNI1ZFj6VKR2WcfR/H4HCl1uvOfRsSmScw89dvp6nVCR3DQgNT5/oZA34+tWrKVJtRcVRuCgwohgKYwG+Pvb7o6PUMhHErLbj19po3YtUVOR5mv3UdFc47G0eyzJopTMeqIH0KC+M4TljC1Ba9xxSFvX+Hp9Detos0vQoOV5Zxb2/WUZd6IF4zqSOQDzJtVacLKo0dWVDLNpDewaH3g=="
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "response": {
+                  "content": "The secret code is: 42"
+                }
+              }
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "The secret code is: 42"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "What was the result of the previous tool call?"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": true,
+          "thinkingBudget": 12800,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"finishReason": "UNEXPECTED_TOOL_CALL","index": 0}],"usageMetadata": {"promptTokenCount": 138,"totalTokenCount": 138,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 138}]}}
+    
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "Received! How can I help you today?"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Repeat my previous message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "thought": true,
+              "text": "**Repeating the Input**\n\nI am now focusing on repeating the last user message. It was \"Test message.\" My sole task is to reproduce this text accurately. This should be a straightforward repetition, with no alterations or interpretations needed.\n\n\n"
+            },
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Please run the tool, providing whatever arguments you want."
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "args": {
+                  "bar": "foo"
+                }
+              },
+              "thoughtSignature": "Ci8Bvj72+0Hl+UuItWx2IuL9lIHe417EQZNT4p/tVdeIUaS4foQ6yQ3NEHqQ2idDEQpZAb4+9vtTdMk7akQuaf+/rEsQ0rz4X5HAgJKsWJpVMK5CsO1oRWOWkkbDtRPh56gpkFJygnOAkKb802DuCWsMy0CQMokd5P5i5PidWuhf+us1aiW7wV4YWCsK2QEBvj72+3I0gtFzNh/TNwr2roD43eSh2dqdOv/Ou76Z7eoehD/HFgnIP4vx8Ja+RjMWIvhItHJuRhZcETy1aWkGCQsKYLJxyfzh3649KxOc613zkhtqNav+jEgvBxn9mO6HqnfL7KcDNGc013EKf8VYyoJm/OPprFe59cbEvemZbca1qLs6jacXQjPEURoJFMhI99CT2qII3GiN0uENVZNSmI5YLMubn823e1vrFIcmb6rZW+HW4D6Nng6UcpLhb6v37W4vGP1lW/XYnf6UMLV15fvJyFWAF6AqCr8BAb4+9vvdQ2A/5YnAVzVbquLUPgvZbpjScbxOGFINDzVN9OgVZRWQeyLgU0YipDeK2iC65uab0xjKe6cjtyAaS6hXievTdfLJB9TJehyvfl/iRZ/AEhA9ASZWGCAOEHqprdWzl0Z2rVQh7H1WU96YZi5ix382Nhr7PrmJy3pZb9EuSg90o7aQNI1ZFj6VKR2WcfR/H4HCl1uvOfRsSmScw89dvp6nVCR3DQgNT5/oZA34+tWrKVJtRcVRuCgwohgKYwG+Pvb7o6PUMhHErLbj19po3YtUVOR5mv3UdFc47G0eyzJopTMeqIH0KC+M4TljC1Ba9xxSFvX+Hp9Detos0vQoOV5Zxb2/WUZd6IF4zqSOQDzJtVacLKo0dWVDLNpDewaH3g=="
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "response": {
+                  "content": "The secret code is: 42"
+                }
+              }
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "The secret code is: 42"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "What was the result of the previous tool call?"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": true,
+          "thinkingBudget": 12800,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"finishReason": "UNEXPECTED_TOOL_CALL","index": 0}],"usageMetadata": {"promptTokenCount": 138,"totalTokenCount": 138,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 138}]}}
+    
+---
+when:
+  path: "/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "Received! How can I help you today?"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Repeat my previous message"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "thought": true,
+              "text": "**Repeating the Input**\n\nI am now focusing on repeating the last user message. It was \"Test message.\" My sole task is to reproduce this text accurately. This should be a straightforward repetition, with no alterations or interpretations needed.\n\n\n"
+            },
+            {
+              "text": "Test message"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "Please run the tool, providing whatever arguments you want."
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "functionCall": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "args": {
+                  "bar": "foo"
+                }
+              },
+              "thoughtSignature": "Ci8Bvj72+0Hl+UuItWx2IuL9lIHe417EQZNT4p/tVdeIUaS4foQ6yQ3NEHqQ2idDEQpZAb4+9vtTdMk7akQuaf+/rEsQ0rz4X5HAgJKsWJpVMK5CsO1oRWOWkkbDtRPh56gpkFJygnOAkKb802DuCWsMy0CQMokd5P5i5PidWuhf+us1aiW7wV4YWCsK2QEBvj72+3I0gtFzNh/TNwr2roD43eSh2dqdOv/Ou76Z7eoehD/HFgnIP4vx8Ja+RjMWIvhItHJuRhZcETy1aWkGCQsKYLJxyfzh3649KxOc613zkhtqNav+jEgvBxn9mO6HqnfL7KcDNGc013EKf8VYyoJm/OPprFe59cbEvemZbca1qLs6jacXQjPEURoJFMhI99CT2qII3GiN0uENVZNSmI5YLMubn823e1vrFIcmb6rZW+HW4D6Nng6UcpLhb6v37W4vGP1lW/XYnf6UMLV15fvJyFWAF6AqCr8BAb4+9vvdQ2A/5YnAVzVbquLUPgvZbpjScbxOGFINDzVN9OgVZRWQeyLgU0YipDeK2iC65uab0xjKe6cjtyAaS6hXievTdfLJB9TJehyvfl/iRZ/AEhA9ASZWGCAOEHqprdWzl0Z2rVQh7H1WU96YZi5ix382Nhr7PrmJy3pZb9EuSg90o7aQNI1ZFj6VKR2WcfR/H4HCl1uvOfRsSmScw89dvp6nVCR3DQgNT5/oZA34+tWrKVJtRcVRuCgwohgKYwG+Pvb7o6PUMhHErLbj19po3YtUVOR5mv3UdFc47G0eyzJopTMeqIH0KC+M4TljC1Ba9xxSFvX+Hp9Detos0vQoOV5Zxb2/WUZd6IF4zqSOQDzJtVacLKo0dWVDLNpDewaH3g=="
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "id": "run_me_0",
+                "name": "run_me",
+                "response": {
+                  "content": "The secret code is: 42"
+                }
+              }
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "The secret code is: 42"
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "text": "What was the result of the previous tool call?"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 64000,
+        "thinkingConfig": {
+          "includeThoughts": true,
+          "thinkingBudget": 12800,
+          "thinkingLevel": null
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"text": "**Interpreting Previous Output**\n\nI'm now zeroing in on interpreting the previous tool's output to address the user's current query about the \"result.\" It appears the question references the `default_api.run_me` tool output.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 138,"totalTokenCount": 207,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 138}],"thoughtsTokenCount": 69},"modelVersion": "gemini-2.5-flash-lite","responseId": "qbaVafTFEKS9xN8P6rzX8AQ"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "**Pinpointing The Result**\n\nI've homed in on extracting the core \"result\" from the `default_api.run_me` output, as requested. The user's question explicitly points to this. It's a straightforward data extraction exercise. I will formulate a concise response to present the user with the output's primary value.\n\n\n","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 138,"totalTokenCount": 289,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 138}],"thoughtsTokenCount": 151},"modelVersion": "gemini-2.5-flash-lite","responseId": "qbaVafTFEKS9xN8P6rzX8AQ"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "The result of the previous tool call was: \"The secret code is: 42"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 138,"candidatesTokenCount": 16,"totalTokenCount": 305,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 138}],"thoughtsTokenCount": 151},"modelVersion": "gemini-2.5-flash-lite","responseId": "qbaVafTFEKS9xN8P6rzX8AQ"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "\"."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 138,"candidatesTokenCount": 17,"totalTokenCount": 306,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 138}],"thoughtsTokenCount": 151},"modelVersion": "gemini-2.5-flash-lite","responseId": "qbaVafTFEKS9xN8P6rzX8AQ"}
     

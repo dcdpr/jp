@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Hello! I am a large language model, trained by Google. How can I help you today?",
+                        message: "Received! How can I help you today?",
                     },
                 ),
                 metadata: {},
@@ -31,7 +31,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Analyzing Task Requirements**\n\nI've been examining the user's instructions and am focused on understanding the core elements: recognizing and repeating the preceding message. I am now working to ensure that future responses precisely follow the constraints regarding format and word count. My objective is to create updates that accurately reflect any progress.\n\n\n",
+                        reasoning: "**Repeating the Input**\n\nI am now focusing on repeating the last user message. It was \"Test message.\" My sole task is to reproduce this text accurately. This should be a straightforward repetition, with no alterations or interpretations needed.\n\n\n",
                     },
                 ),
                 metadata: {},
@@ -75,7 +75,9 @@ expression: v
                         },
                     },
                 ),
-                metadata: {},
+                metadata: {
+                    "google_thought_signature": String("Ci8Bvj72+0Hl+UuItWx2IuL9lIHe417EQZNT4p/tVdeIUaS4foQ6yQ3NEHqQ2idDEQpZAb4+9vtTdMk7akQuaf+/rEsQ0rz4X5HAgJKsWJpVMK5CsO1oRWOWkkbDtRPh56gpkFJygnOAkKb802DuCWsMy0CQMokd5P5i5PidWuhf+us1aiW7wV4YWCsK2QEBvj72+3I0gtFzNh/TNwr2roD43eSh2dqdOv/Ou76Z7eoehD/HFgnIP4vx8Ja+RjMWIvhItHJuRhZcETy1aWkGCQsKYLJxyfzh3649KxOc613zkhtqNav+jEgvBxn9mO6HqnfL7KcDNGc013EKf8VYyoJm/OPprFe59cbEvemZbca1qLs6jacXQjPEURoJFMhI99CT2qII3GiN0uENVZNSmI5YLMubn823e1vrFIcmb6rZW+HW4D6Nng6UcpLhb6v37W4vGP1lW/XYnf6UMLV15fvJyFWAF6AqCr8BAb4+9vvdQ2A/5YnAVzVbquLUPgvZbpjScbxOGFINDzVN9OgVZRWQeyLgU0YipDeK2iC65uab0xjKe6cjtyAaS6hXievTdfLJB9TJehyvfl/iRZ/AEhA9ASZWGCAOEHqprdWzl0Z2rVQh7H1WU96YZi5ix382Nhr7PrmJy3pZb9EuSg90o7aQNI1ZFj6VKR2WcfR/H4HCl1uvOfRsSmScw89dvp6nVCR3DQgNT5/oZA34+tWrKVJtRcVRuCgwohgKYwG+Pvb7o6PUMhHErLbj19po3YtUVOR5mv3UdFc47G0eyzJopTMeqIH0KC+M4TljC1Ba9xxSFvX+Hp9Detos0vQoOV5Zxb2/WUZd6IF4zqSOQDzJtVacLKo0dWVDLNpDewaH3g=="),
+                },
             },
         },
         Flush {
@@ -114,7 +116,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Refining Understanding**\n\nI'm now focusing on directly mapping the user's query about the \"previous tool call result\" to the output from the most recent tool execution. Specifically, I'm identifying that the prior turn used `default_api.run_me` and returned `{\"run_me_response\": {\"content\": \"The secret code\"}}`. This clarifies my approach.\n\n\n**Clarifying Tool Usage**\n\nI've zeroed in on the specifics of the tool interaction. It's clear the previous turn executed `default_api.run_me`, with a returned value: `{\"run_me_response\": {\"content\": \"The secret code is: 42\"}}`. My response now isolates the essential bit; extracting the value associated with the `content` key within the `run_me_response`. This simplifies the process.\n\n\n",
+                        reasoning: "**Identifying Tool Output**\n\nI've homed in on the need to identify and retrieve the output of the prior tool execution. The crucial parameter is clearly the result itself. Therefore, I need to focus on recalling the specifics of the last tool call to ensure I can provide the right result.\n\n\n",
                     },
                 ),
                 metadata: {},
@@ -125,23 +127,57 @@ expression: v
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
-                    Message {
-                        message: "The result of the previous tool call was: \"The secret code is: 42\".",
+                    Reasoning {
+                        reasoning: "**Identifying Tool Output**\n\nI've homed in on the need to identify and retrieve the output of the prior tool execution. The crucial parameter is clearly the result itself. Therefore, I need to focus on recalling the specifics of the last tool call to ensure I can provide the right result.\n\n\n",
                     },
                 ),
                 metadata: {},
             },
         },
         Flush {
-            index: 1,
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Identifying Tool Output**\n\nI've homed in on the need to identify and retrieve the output of the prior tool execution. The crucial parameter is clearly the result itself. Therefore, I need to focus on recalling the specifics of the last tool call to ensure I can provide the right result.\n\n\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Identifying Tool Output**\n\nI've homed in on the need to identify and retrieve the output of the prior tool execution. The crucial parameter is clearly the result itself. Therefore, I need to focus on recalling the specifics of the last tool call to ensure I can provide the right result.\n\n\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
             metadata: {},
         },
         Finished(
-            Completed,
+            Other(
+                String("UNEXPECTED_TOOL_CALL"),
+            ),
         ),
     ],
 ]

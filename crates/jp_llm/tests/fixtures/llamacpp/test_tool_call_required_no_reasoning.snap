@@ -5,16 +5,16 @@ expression: v
 [
     [
         Part {
-            index: 0,
+            index: 2,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "uMPoFeTaAuIH4MoGxJ02MNTAB75Hbv0S",
+                        id: "kA4dduSivBJMGiJS5RMg4M0VXAbs5jiV",
                         name: "run_me",
                         arguments: {
+                            "foo": String("bar"),
                             "bar": String("foo"),
-                            "foo": String("hello"),
                         },
                     },
                 ),
@@ -22,7 +22,7 @@ expression: v
             },
         },
         Flush {
-            index: 0,
+            index: 2,
             metadata: {},
         },
         Finished(
@@ -35,8 +35,8 @@ expression: v
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
-                    Message {
-                        message: "It seems like the tool executed successfully! Here's a confirmation with the provided arguments:\n\n- `bar`: `foo`\n- `foo`: `hello`\n\nIf you need any further assistance or have more tools to run, feel free to let me know!",
+                    Reasoning {
+                        reasoning: "Okay, the user asked me to run a tool with whatever arguments I want. I chose the \"run_me\" tool and provided \"foo\" as \"bar\" and \"bar\" as \"foo\". The response came back as \"working!\", which is a positive sign.\n\nNow, the user hasn't given a new query yet, but I need to be ready to respond. Since the previous interaction was about running a tool, maybe they want to know if the tool worked or what the next steps are. I should confirm that the tool executed successfully and perhaps ask if they need anything else. I should keep the tone friendly and helpful, making sure they know I'm here to assist further. Let me make sure my response is clear and concise.",
                     },
                 ),
                 metadata: {},
@@ -44,6 +44,22 @@ expression: v
         },
         Flush {
             index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool \"run_me\" executed successfully with the provided arguments! 🎉 If you have any more tasks or need further assistance, feel free to ask. What's next?",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
             metadata: {},
         },
         Finished(

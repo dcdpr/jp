@@ -7,7 +7,7 @@ expression: v
         id: ModelIdConfig {
             provider: Llamacpp,
             name: Name(
-                "bartowski_Qwen2.5-7B-Instruct-GGUF_Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+                "unsloth_Qwen3-8B-GGUF_Qwen3-8B-Q4_K_M.gguf",
             ),
         },
         display_name: None,

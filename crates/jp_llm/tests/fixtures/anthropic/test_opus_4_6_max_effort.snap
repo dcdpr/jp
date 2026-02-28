@@ -1,0 +1,45 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user is asking a simple arithmetic question.\n\n2 + 2 = 4",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("EuEBCkYICxgCKkCPKGrRwPKSQgveXptDkTjOveepodrFdzK3+KYA5JfWOoiXaZbLQLZvysjKpK4Q2pk6Eyjwt0r2CCyGHkSEdpOsEgyrCL8z0l2rKmFzl30aDG+/Z2seBlZfyo2COyIwqLVHm2cDC5gsFE1LDd77dPWNOyva8ZEbTMDQ5GCfx3eRWTpfVyYdO24WTtqQ/tyjKkm9hkor8ggi6OZOKohzKNzC8kgHVRKUaNf0mNs8rRIE6t2zqt6t7D/f2PZM0PYbvgGVvXU6vOWgayYMhASshHaRnc7uyifbGOuRGAE="),
+                },
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "2 + 2 = **4**.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 2,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

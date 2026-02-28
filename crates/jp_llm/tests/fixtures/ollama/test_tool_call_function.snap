@@ -5,6 +5,22 @@ expression: v
 [
     [
         Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Okay, the user is asking me to run the tool, specifically the 'run_me' function, and they mentioned providing whatever arguments I want. Let me check the tools section again.\n\nThe tools provided have a function called 'run_me' with no parameters. The function signature shows it's defined with <nil> for parameters, so it doesn't require any arguments. But the user wants me to provide arguments. Wait, maybe the function can accept arguments even if they're not specified? Or perhaps the user just wants me to call it without any arguments since the tool doesn't require any. \n\nSince the function doesn't have any parameters, I should call it without arguments. The user might be testing if I can execute the function correctly. I need to make sure I follow the directive to use the 'run_me' function and not ask for more context. So the correct action is to generate a tool call for 'run_me' with an empty arguments object.\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
             index: 2,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
@@ -27,6 +43,38 @@ expression: v
         ),
     ],
     [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Okay, the user asked me to run the tool with whatever arguments I want. Let me check the tools again.\n\nThe available tool is 'run_me' with no parameters. So the function doesn't require any arguments. But the user wants me to provide arguments. Wait, maybe they just want me to call the function without any arguments since there are none specified. I should call 'run_me' with an empty arguments object. That's the correct approach here. Let me make sure I'm not missing any hidden parameters or requirements. No, the function is defined with <nil> for parameters, so it's safe to call it without any. Alright, I'll generate the tool call accordingly.\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "```json\n{\n  \"tool\": \"run_me\",\n  \"arguments\": {}\n}\n```",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
         Finished(
             Completed,
         ),

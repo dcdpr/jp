@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -129,7 +152,11 @@ expression: v
     "id": "run_me_0",
     "name": "run_me",
     "arguments": {
+      "foo": "YmFy",
       "bar": "Zm9v"
+    },
+    "metadata": {
+      "google_thought_signature": "Q2lRQnZqNzIrNlQvRE9vdVRMWnc2UVVQWnhmR2NxcEoxMWFGUmVmNkZOVmJReDlaYVJrS1pBRytQdmI3aEY3SWF1c0V6WW14VFFPb2JoMzBKVEhNVVM3Z0NRYTVYSXMwVmI4bnBraTRrbWQ5T1cvUVIxRTZZTW40Tm5aVEtNUEoxWkg3dUxEa0lWMkRkSFV2WXdGT3MzS3I5VmRraGl0RmNVTG9Dc3FWU09EdzFZNEhCS2NsMSthOHJYZ0syQUVCdmo3Mis0cHRSL0N1NUJIalRMaVpCSGQwMjRJbmNPYWtPcE1tcHlPcldXQUVXM1JwY2hJc3RZRTZST1luNHI0Z0l1WjA3SVRDS2NGZnNYZi9sYVI1V0lFaTR0M2NhOG5CVndKeTJKeG1WbW1jTkVZL21hdWVGRUdKV1BwV0o2bTJ1YXZEeTdSR3h1YzRCY0lOM25xcldtUGhsK0hvalpUcldaUDlRdlhiUmE0OFBpZlpMTXdiZTB4Y0lrRXVIb0NCOTBCaW5nNDBIK2RNVWNvVnQ3V2x2bEt2SlNTQkd2UDRIcG14aU41V3pxdFRnVEFzVWxtM1A2b2ozMzVJcHN1REdxbG9INFY2WnRSSWFxMGh1SFBpZkJPcGtpL05KSTBLMlFFQnZqNzIrMzJQelE5OXE1M1lhWkl5eXErUG5nUkRlbk5kR3pFdXlBekV3U1FKMytMUUVkK29DYmpsaUp3eW9PMXBLOXFQUHlZNmFRT1VhOWtDRXhIWnBpK091SFlVbGpQbmdjcTRWalpvUHdiWmhaSkUya2x5L1p2SVRQdE9RdW9Za2lQWlBjTmJDa3kwaGVoYlJKNWJYejA0VHYwa2NOUHEzME1SQjFCc3lRL3JuYXpXT3lYcE5oNGFzTkxRc0dySHJrRnFyRGQ4aEpLVC9ON1BqV3dieXpKOS9kNHJWTlpXY0Y5TE5zdzRhUC8zbjg3ZE40VjFoK3BKSndTdkpWUXhxams0M0FLZDAzRGo3djN2bExvRG82NjFaOFBwTDgzUEN0a0JBYjQrOXZ1RnF4Mk9hSGYzQ2pKek9QcGY3eHNFQXdYZVRJSlQ2bkROd1NGc0NjZi9aaUhkNUJya2N1cWxzV3A1UlhKR2JQN1RGN0phL21odS9lc3MvYlBEdFBJQS9HbWRWYnlkNGhNL09ITHpPY2RTditlTzVQQmF4RFZGM1ZXMW5YcnhLTVdEOStnZ1ZUWm1mcnNQVTZQWEpCNHN0ZEhZbkpLdVR6MUJiRURZMGExanhKRC82UWt3VUYySTgrdEcyV05udFdnaVZKTXFNd2VTMU5ZeW5mYWloU2s4R3BadjFBb0JFMVAwZ2VoZENJQ1BJQStoVGZvNlA0TDZya2lhamV2UlduN0xGNDlqR3U2NW1hZUNFRFRXVy9PT2loVUFhd3BGQWI0Kzl2c3RMMCtjeDVGOTl6dDFtamVvMCtmTmVDYWZFcnFzczA3SDM5Tmh6TXdGVDQyVVBOMEdSYXBVR2EzWGlacUk3R1FrK1ZJRzBQdzJnK081RWdKbDBaQ1ZDbHNCdmo3Mit6K2tvb0V3TXdjOXhTTEV5NVl3a3RSeWNhVjhjektWbHk0TnozKzF2NlRPeTFDVzhWa28zalp5Tng0MS9SdXNzcUQyeHVPQ2lzeklXM3cyNUJhR2psWmZwNjBnRzFHVVdMWlJEZ3gvRnB0NjY3bHdVcnJqQ2lRQnZqNzIrMmdrOGNrbjRGc3EyTCtSY3NxTWg2YVhRUEYzUzVYcVUyY1JyMUl1WFdBPQ=="
     }
   },
   {
@@ -142,6 +169,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "The tool successfully ran with the argument `bar=\"foo\"` and returned `{\"run_me_response\": {\"content\": \"working!\"}}`."
+    "message": "\"working!\""
   }
 ]

@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -126,12 +149,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "",
+    "reasoning": "**Calling the appropriate tool**\n\nI need to run one of the defined tools right away because the user asked me to. There are two options: I can use either `functions.run_me` for a simple call or `multi_tool_use.parallel` for multiple functions. I'll probably go with `functions.run_me` since it’s straightforward. I’ll use arguments like `\"foo\": \"test\"` and `\"bar\": \"foo\"` and then respond to the user after the tool returns. Let's get that going!**Preparing for tool response**\n\nI expect the tool will return something for me, even though it’s a stub, the system will simulate the output. Once I have that return, I need to craft a final message for the user that confirms the tool ran successfully and presents the results. It’s important to keep it concise so the user gets the information quickly. Alright, let’s go ahead and call the tool!",
     "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBSUnBUTXNVQnBOVlFwaWdYUTVUalVBUHJITmRVTVF3RVFOR2xVXzhIa0U0RjNveWpSWnI4M0JhR1FEbWl4eUdpYnRkd1lVTzQ3VWRuRnZFazlBaGozVG94b2h5ZDVTNEEyYVMyNjVDTkpGOFdjWUVieWFZdGoyM2tDZ3BWbFlwdnBMTTRZekRzYjFJWnAydEZFVTNOY1hDeUYtY3k0aVhkQ3ZGZUVCaUF5cUc4aUR6NGVPWVB2S01ycnJXVFQ5UEQ2Nk5weWhwejVYT2s1aDVqQUFNNVpEajRjTUpNbGgxQzc3NzQ2enhBQUJfSDhwU09qckU5N1BsZXd4SnFPY0xlbGxlVWRGR1UyZU1wN2RuS0JaZmZUM0w5LTV5RlFFTkMySFZCcTFld3JiOURHcWxNNXMxTnNaRVVNaGxrNFM4c3N1VVV3STNUOUktZGFwemlhRzk4T2Y4TE1STzlUcFp6andXQjItOEJtZWxKMW1DY3VJdmcyQ3JWWWdGMFItZnNrcVF5OW9saGNJWTJxSWdUQjJnWTJqbUI4WHVxcXFMOGRfa21ETFByYVFfanNSM1M3RUw4SkpGREh1ZGNlQnJsS3pfT0l4VU1FUDlrai1kRkZKdGVBNzcyODhvaFd2Z3RqYU03QnhFai1ZTlpJRkdwV3lJdXNZRWVFUjdqQ1BQMU9ZcnFUVFVXeWxIWTA2OEdzcUpheGFzZ19NS1ZCT3VKREVyRWx5OTE1S0tQdnJTYWZPYW5zYWhvdFF5aU4yUE1LdjJ5TXMtT2VLTHBOU0ZBQmtGVGdWblBJSjJXdWNqelRUQnU2YW9waWRLVmF3b3JTZEJLeWNxa2JHVm5QcFZodEFSVUNSVm81V2U5bEpaR1VQREJvMWFabmhDM2VOQ1BYMi1GWmJkZE1UMjQ1NTRYdkZCalBxTC1zbnhLTXZGY0ZSY0JOLVB5MTRRUzhmeVZnUVlnRHZHMzEtOVlnUXVHT05WZzlqUE5GWXNWTGJpcEZOQ1VuRmNrQm1OaFV1WkdEalpqRWN1V3I3WmYzZ1dobWVWcDdIQUpMYld5MWM4YUxnZ25wbmNoYnF1UjJ3QzIweGgxcGRWR0htS2UtN25aLWFsa25fYzZmUUNGNDhmY3FEcndoYkxVMHN0ZEJUTUs3VXdrMTMzV095WnZvZ3RBX2p4a3JScEZ0d2dhY1BHYjd2U0FSX2VtNTNDTEVNN3ZtTGVIU3VSTEZfNUdGSjBEUGFydGs2YWlWckdNODZ3WlFuYnNvTHFLRkVpZTZzY215VHI5X2tjTTkwVENhZllEVktNUWJrNjJybVUybE5ZSS1iMTVidEtmUTA5bFFxT1pVaEVwTVh4MHZyekNjaVZqeUIyWm12bnRWVHNtSENFWWNBcXR2UzVYYlBwME9veVRQaldVeUpMYUx4dURiSEVDOHVhNUd6U1JkTXkxRTJGazIzYkh3SEZJYk80LXJBdTRDbmlla1p5bkE4eW93MzJidUFaNngxUmxRNS1HY01ZUkM4YmpPd1BxNWpYZnMza3RYeExLRkM1bk5IcUpsZzF1NDhmVVBFVWVlcXE5bXNNdVdfUjJTSGtPQUhMSENYY0p0ZzZ4c3VST3NvOHdKdlB5OHJaa1ZiY1p1WlVOZnB4M2o0dEZPamVnZ1R6b3Vid3J3czVUT1BDOGVRak5ZdUk0QWRQT3lSbWt4Rm5LbnpDUFBsRDZoWjdZQzUzUXNsQ2JyeEFDalcxbEpzbWxRNjFPTDM1aGR1UnJVbHVZV3pveERWdk1acWQxRFB4UHBnLXMyVG82c3gtZHA2ZmxLdzk2eElxNUh1Unl1MVotMFlINnRTV1dMWTdZVkwyXy03cDh5NzdoLWdrQ1BWX3JSYVpBWm1zNEo4aHRVRmtEWnAwMTNDcWcyck9IUm5lNUQ2Q2VtUEgtNGVKTElQWGNVcDQwRzRYcDkxMWlwZHBOWkxhRENVZFpvb3lpejBRZXh6NTRUNEFhSDhiRDBKZTVHVDFhQktRNlFLV015NTF1d2hjUEU4V1NWR0FnNjV4NlVJaHNzRGROY2lZOEFsRW1sYThQRXQ1bnFxT1hxLXAxR0dmX19Ma2U0TVRDNkN6UkE5QlJaRWV5TlppV3daaVc5bFpFZnpmdVJzTmpJODRpa0FyNnlwZXFTaEp5RnpNMlplSm5Nb05fOVdfMnF3M0prLXFVdzFEZmJuUG1ETmJiYktLaFQtajJBa3FFRGRiakRNYmxTbVRwZGFnalBqNUx5dXBOMDNrbk43akVtaXA5TDZTcHdYb3R0OThob0JOejBHOXlQbVNYTk5wVzhBLUZxeFlxX0dQR3dxRXVKak9XVWxIRFlBZUNLTTlYM252U2trdFJfQUZLWlZxd3FMRkZCdzRXNjdoLXBabW5rNk5nRkNNcEQxd1lYODNKUzM0a0lBdjdEUkhRY0I3TjJDTFFUZTlhN3IzY1Y4LXl1bHNzYTlLTGVlUWllXy05Ymx6N0FZT01UWFBHLWFGQ0NkNHVVT0syVFloQ2lpTmtDOW1QOHZxeFhXdTRiOU1jTm8yb2t4ZUVUZ2NuNHhyNDBqb0xCejVsUHdkT2NzUU5zZGhzeEtRTDJvTVB6TUxFNmNaUndNWmNRTzd0T2tRX0pNREo3dW5ocTlicjBiVWVRbkU4a25LdHptVmxnYzVTWklvdkk3NlFWUmR1MzRubHNHUEhWRkd3RVdxS19pdzgtVXNMb0daVGZqUDFyQXFFOTNLQTlwbDBqY1Y5ZG12a0JkM2ZhRkJGbjk5bEJ2TW1EUElKR0xkMmRjMlc4NEstaHE1MlJDaDBrRy1udnpENnE4ajZqejlLa3NKQ1hQQVh5U05MMFkzUi14aklOTzRZMEZmejljQmZnb2xQUmY5T2pVdWRNMTdkc3dMcE9FOFdIRmdGb0k2bENVS283UkdsZ1E9PQ==",
+      "openai_encrypted_content": "Z0FBQUFBQnBsYmJXN21JdzVfNWxGV2V0N3FDamtzMjR1X1hfT0tJZVRWVE9YSXN5VlAzX2kwcmpCczVOblhtaVhraTYtaEFnek56bllrZXB3NFQtSkE1UENzUGdSUnZwNGFZMVpWSzJId0YyRmlBeThvRGVmdW5sTEJvMnZuTHNKXzlXS3h5RU94SFdxWmQyQnNobTY2Zy1tLWZBUDFldHg2TkREWWMyVGZKa0JEdE96NGd4Y21hS2VkbGVnd2hVTHhUNkI1THd4djVzcWdnZHpfTktacVNLRmRCOHJ6Wm9GWVZmUWdRMmFsX0dvU01FVkRranNVUTRoRGZ2UjlzRWFDZjFyYmJHWDlSdHRaS3VfUDktZUpsUTA3YmkxTWF3dHcyN0tXRkdUcDV2R1hCWHNyay03SVFzMml3cFFnZ0lucURQT1FQaUk3ZUVQX2FnNDJaZVRyMXFjY085YmwxY28xN2VSbTVMcTVJaWZzWWFGSjRhVlpSYXp5dUpnZjBLZ3NwazJNNDhBbHdUUVpqRW5XRU5DQlNYYnRpY1VwNlY0cjBKUTBBZHZheFdiNUdaMWRaaUhqZVFWZjNSZ2xLenJaZnF4Z2hrbFJsMUlXNW40akx6alp0c2p6VW8wRnZCMVdoWV95N3FmNmlYMUxCQlpOcTM2bURmYVY3TThFVXFieHFQZWVFN2NqWFJZNS1zdTI3R0VGa2FNeW1vb1QyemYtSnBmRGxIbnhsUEpMZkdiVHMtdnI3ZFNVeXVjTFJBbGtRNGxfYjJLTnJ0Tlp5aHVWUkszUWo4MkZmeDZwcEVfdjdLUE5YOWd0cTM1Q0J3eXdSWlhxMEs2a1JmTjdPYUI1UVVPc2ZCY2ljdmt1d3lIQmRwMXZHYm9acGJpQ0lXejBPNEJYZDNZX19XcGZYTlB6Y3BrTVM5TVBDdEJjeXh0WmE1bm1GYmFsYVlQNG5ieUw0MXlqQ2dzVVpBZVo1cndMZWh0eUNZNXV3RTF0MFhtWGZxbTN5dmZRNEgwOWkycHF2N2l0Rk5ZcURMdDhtOUkwRUN3Wnc0UklNTklMZ3FyUEJFclNqb25IWXVyLTNzbmtXMHZTQ19kbU5FRVNkMENCaUFJNjlENU92dWdpaFdhM2NHUnFJNXZqSU9mYXJIZ2hqZlhvZzI4eWE3cUpPOEY0dUxxV1pEd0I3OVVGTnBYZG0wa2VuQVotZmJrX2wzZmI0dDRCTmREbDdpaWNHWl9UMV9Kcno0YWw1bDFKa3huZDN1MllvRC1ncm5wbTFRNkVpQzExdzZ5dE9BWkx5STRjQVRMSG1fZVdjUzkzNFJqblZkQk9GOUJlR1diVU5aenVhTjRnamxFMXdsWHFabEFNZlNtWVhBb3E1Ri1kTGRJZmIwTTNIdlNfOXlfNndCZnI0eTZKRTQyU1pXVmJSNzRqOVJIdnBXYVN2S29nYUl3YlRTRVFJalVfOVFyUDhBd2ROWGVibVRpRi0xMXc3cEJKU2RSajZPRW9fcTYwa0J3VWxubzNSNFE5eC1fVzlKMWllQUNFcmJEck9LckFyUXRqNDJJUklGZl9lRWxKeGFmcE8yOHBEU2FpaVdqSFAzQXJkQmhMNEl1WEY0SXFIcHFaLXU0b3JCNFM3ZXNVcDRDYUEtdGxCRmU4TXpiSkxUVUdsQ05PaVdmazh4REYzeW53VUhnWi05TnBjbEkyaDdNVWpUZHVxX3JBVDlMQ2prcGJoYTkxMjdUcGt2a1FYVXZfam1Lc0dSMjJtM19kQzFZY2FwTENsTmxsN256LTNCZ0cxd3RjWTlaUXdUVHA3cFJpWDNTb0JueW44eWcyR2xzOUlLcXFkQ2JqRGR5c2QyZ2lXdUJMWDRhOUlzOUVYYnBDeDViRHlyczhpX0dyUkl6ZG9uRE9hZW1YQ2pMcDBIRTVJRWZCZVJkYlBfbk9mdXdJdUZHXzRwWXhlcjVRVzJrQ3pBdW82TUFPSjhmMFJVTGpqMXdfNTFVVmx0MU9YWWxGVzB4Zi1zdUloTkFvZFhpS282R1JMdFlhd2Z1dUl1d3A3ZUJPanBPWVZTU21fN0Q1WW02aXUzMEhZVmdqUHNjeWtMOWpNNDZnOVRRRlk3aTNweml4NGlxdnRlZ01neEU0SFZ5QU5OTEp2YXdrTS1HUkd6dnYwSm9tZGc0eUh5dlh1M1BzNjUwN3FhZnVYWTJrNFdWX1Z0aUgtSVRuQ3VYcHViMUpzQXRfTEI0OGJNc1pnVk43V3pHUDhjT0h4cUUxQ0l1WFJtMFZEZEN3WUlkaEJiLTMyVUtHbS1nM2UzMDZzeTFmbEVQbTY1RVZGWXIwR0JDTHdfVFNKU2dlejczdEhrYjVQZTQ2dWQxZ0EwWldJMDVxaC14eDkzRy0yVEdER0FVX1NwNER6Q1I3MVFOYXBpdjFxdUh4RnhNNzd2eDY1ZmNWY2pUNi1JOWdjY3VUYkEtVWlVckhoRUVmbTFlVTN2YVdxY3dSRUlGZXlLWl9mZ2MxTEd3bmoxYmRtdV9jSmlmODBkd0lzVzZBT1g1eTFUalFvS3huMFhmSU1XMzZJQU5VVDZlR2l3bllEN3M4cG92T1ZNOHhwbVdxSkNYc3kyRXRBOVFUbElrdlI4YnBMczN0cC1rOGJ3cmMzMXVPVGtFYUR3NXBtdmFjNUpiamlyYU9DSkg5Rm94MDNMaGN6cTRNTl8zN21zMkIzSjFheS1XZ01BaUNoaVBNcjJPTFpybmZ1ZXVzeENJc0lWRU9tNVFIbUdaVnhCTFdQbTQtSWRzNF9xdFYwNzRRTV82RTZDZDJxMEpSR01DX29IeW8yS19VTTk3TVd6M2EyenpnR2dvN1cxaUE4WGlmY0RfU09lTlg4SUMwRkhGbVV2UmNqM2c3eHRnbkFuejRXWFJlal9MUnFKYVcwTlUwai1ZN1pMSmRncDhEV3NqelNwWW1keFJhb0ZnNDVOV1N5c0hTbkJieENYQkc4NEpDdmFyUU9Uc1VmWWY1cEk5S1d0bUVPNDVRZFNORkFvNU9uZVJhZW9vdktEWmJMWVJoUXl3eVRWT0ViYTZuYjZhVlR1dS1iZ2dGcU12UVY1SnVFS09rRUhlLS1DWWQ4ZExaNGFqZ1VfTWxKNVpoajYyWnd4QWZmX284SlpTc05rOHdFX0pJXzI2Tk5qUFFBUjZrQ3VTM3hTZVlHblk1N1ktajIxR2I3djZKV3lBYjAtS0M3eU81MzlDcVU9",
       "openrouter_metadata": [
         {
-          "id": "cnNfMDRjNWFhNjIyZTQ5ZjJhNzAxNjk0NTFhNTAyMGE4ODE5M2JjZDRmMmFjNTk3ODYzM2Y=",
+          "id": "cnNfMGM0MDUzM2RmYTU1ZmZiMzAxNjk5NWI2Y2Y3NTI0ODE5NTlhODRhMDM4ZjUwYTkzMDQ=",
           "index": 0,
           "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
         }
@@ -141,29 +164,29 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "call_llWXLA7s94FJzxNV9YKNmucv",
+    "id": "call_xxXRfP5HSmgE7LVTmDfe7TDs",
     "name": "run_me",
     "arguments": {
-      "foo": "cnVuIHdpdGggYXJiaXRyYXJ5IGFyZ3M=",
+      "foo": "dGVzdA==",
       "bar": "Zm9v"
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "call_llWXLA7s94FJzxNV9YKNmucv",
+    "id": "call_xxXRfP5HSmgE7LVTmDfe7TDs",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "",
+    "reasoning": "**Considering tool responses**\n\nI need to respond to the user who asked me to run the tool again with any arguments I want. Previously, I already executed the function with some test inputs, and it returned \"working!\" Now, the user hasn't given more details, so maybe they want me to run it again with different inputs. I should confirm that I ran it earlier and provide the result. Offering to run it again with different arguments could be a good idea!**Responding with tool results**\n\nI need to reply to the user, mentioning that I ran the tool with the arguments foo=\"test\" and bar=\"foo,\" which returned \"working!\" Now, I'd like to ask if they'd like me to run it again with different arguments. I could propose options, such as foo=\"hello\", bar=\"world\", and count=3, but I shouldn’t make up any unsupported arguments. I’ll keep it concise and friendly in my response.",
     "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBSUnBXX2tvUFBPRXZUWk1ILWlwYmJ0elhpVXhlWkJETkR6ZUZWS1J2NWMtTm5NRzI4aVhOQ3JtM2pfOGptck1wVFMxMkZpb3BUakwwanFqRVNhcmR4eWhZaTdnRE1vVzBlM3d3MVRaVV81aXZ4RDhfa0JTVmtUOUQwdDZnd1p4dlU0ZXZQZ08yU2c5bVJ5cHRVb2l4UGNpZFRhRWtsYUo5b1o3ZHR3c3lNUHp3djVMS2RhMGhzalZ1WnI4X0U4R3ZIV01Pbm1VNldnUUE2VERDUlNmcHQ4ZWdFME43ZTBvcGd5Mkd3NUVQcm12R3ZTTF8xV2lNeEZmY0VORDR4WWNPa1BjZFQya2d2cjJaS0NXTG9td1kwaEQ1am1ZOW5zMDZmbkJXY0tFNU1JcGdLRUxXWUlyUEk5a0w4aUFvNHJpRW9NMWtLOG0xMjN3MUMwOEpMMmRNbE9FTmRjUVg4anl4bTZRWW9DdEdQdmpzakJ1T2t3Wmd3SUxBWUxNSmZOcXRhVS01aWxnSEIzV0hNRVBkU29vV1l4dWVZZXN3ZGxRaDk0SXZ1X1RYbXZXWHhpUWR3eXB4TjJTdTZ2SllsNEVJcFJJTl9sajFyZklDNkdzcFJkd2QzZDJ4SGEtaG9BNW1pR2hRQ0E1MFFTRklQMnRKVVhiUTVVNDRtTWFLa0I3OG5wM2R5ak1RYWVxRHRWQ3BZUUY4U1RncXJqYi1pNmNIWUZ0bEtoa1ppNE8zWWUyaVZZT1NRbGxmTkFlTWpGbUF1RE83LVhVcy0xUUtmOWEwcVljRmY2LU5Za21RMHFCSEpma2EwelJtd1dVakU3cTJraU0tSVM1TUR2TXdkRERvOFYzc1NobDJIdFRLSEFaam9BVWxEcmh3b0pfNDJlV1ZleG1zSE5MQVdtZW56U1FSMHZ2eVlOb3ExX1BvTVNKanAtSGdmRk5KTVRwZFdqSnA1eEQ5OF92aTEwQlRrbTJIMzlqbDVUdmN3amN0UWlZZFRaUzFrNFFaTGpBQzd5Um1fZmxtSFQwUm9fRVlLa2hzN0ozY2laSVlIUzhHNzBwSG03Z01oSVNodDF0d3VTcThRWDZWSnFlT1VfZDNQOE1nUm02bG5NTHBqR0NkV1UyZi1FMU9QQkFSQmxDd3FYN2k1VmVPaEZYVk1kdE95OHM1VDZkTzVkOGRZUWdqWEdXbkpDZnFpUUtVaDlWTzZ5a19LMHJDSmo3NWF1bng1X3hJMTUzdE9jOF9tOVdldm9nc3c5VU1US2FTTnZ4Mk94UGNWc1JyYVk4a1dSMlZDWlVOT21JT0lyeFVrOWQ1Yy00WFJ4TEpwMHpnRHhmelBhNVE0dFd5NkRDQlNsQ3E0QXRNcWxBbnowUDg5MWo1amhKOEtlUTJUV3Z4UUt6Umd4dTNYdWFJNlJ6MnN3OHhLd0JoQ3hKZGt6OWQ3XzFKajJDZnZTZGVFeFFVMkZLckVIY3dEZHVMWnNIazlvZ0ZueDlTNGswRm9xOExpVlZ1ZkRxNkxKb0g5U2VBN2lTUHdrbWI4dnBBeTI1ZXJ4akduanNyYmE5UnRra04xY284Rk9WNlJ2N1hmZmotUmhQX1hDQzViMVdtZklmLU9NdndVYjh4YU1KMWp4QUpNeUY5ak9qODAwT1o5d2tUb2Vhd0gxdWg1NWI0QjREMlFmcUJiSDljb29XVmdrV2ZiTXNrcVJTWmRMMDZnTHpHdmRzOU9QMVZEeERUYTJHU0dGN1pyaElNSFA0VGVvRWJDVWJiUW9pMFNWUk5TdWxiZ21nOW5nT21ZT1lLaUhoN3Fnd2cybUhkZkVqMmVWTGVPd2RkQkxxTmpFVWNSd09oSW11ZmxIY1lEU2dZdXZJTTNrWTlsY2Q3ZGZEcUFJaGJoemRfdThKTjlxQnljUnNiVnlPbmFWSnhoam1JR0R4dEVLWHJGVzljeElzdjh1MTdaTHhsTDNJT3BfYkxqY2s1TkVONjRaUmo1VUw4dkxZVWk5dzRCZmNRUmFjSURsLS00Zl9yd0pxbHpPNGhOcGJGYUpQX0YxZGwwMnl1S2twVE9OWkhhSDQzZWFtSjh1amNUdHNVcmhTUktaR2NOZGRpeDIyNGU0LWh0NGdMN2hPSi12bXFZT1BScGRHdGdjdjZmd1NiWXZoMXF5ZVktQmJjdUdmOFRyZTlPUHZDV3REMXdIUDhIcW1na3AtRGxHV1RQLXRndXN0TWlac1psaFZOb0R1bFRaUEU2aDV2WUc1V1lLWmxUUkJzTFlETW0zT2w4Q1NDQUowZk83SC1QLXZYbjQzM1BWNDVYSDVDMU50M3JZQkJicXF0bW5YRlJ0Uzlwb18waWdQWDJUdW5QczU1VlhCLTlGZz0=",
+      "openai_encrypted_content": "Z0FBQUFBQnBsYmJlY3RNQWkxTUZVN1JIUnRGZkYwRHRvZ2g1QmVGSzZPcTItTUs0aEtCdVpsdVAwVmJRWVRQOFZIQ2VCanJoWXZYSzc3dTQ1bFJpVkhrNF9PNnFzTDBJN1hwSERwS2RQTktTWkI4cDY1QVlXTElyWHFrZlJWQzloTHY5dGRXTlppdVgxTmk0akhSOXFWeUY5TktMdGNzYmR3N2pKRWRRUlFWd0lUcXR2LW9zOXpzMzBMQmV6N29hVzQ5T283WnpCZldoZnpneUR3dmM3VWYwR1QwVzB0NVRmYkg2d050dlNaM0U3VVpzVW9SamNSZ2JteWNHT1lvU0lzNFFwVE1NdTI4VzhlRS0wRGZSdjNseThIdWpOYW51OVhLRXprZ1BDUVg2dk5BMDNGTkpHYUpxWDZLUkhTcm1UX0RGSWlNX1VGWHA5WU96b1l1ZVpOTnlmck9vZlM4TzVqZnItWmRia1J5dTVSVU1HeHpRazFuZU9CQ282MnFqZ3czTG1xZ1RENlVlWERlTHlrVVNDbHNsaTFINmNDSV9mMDhnYmJmQU5DaHpSQkJTNlNTLXhzdm9IRXp6Q0tLSzEwM0IzcUJCSHBjcEFnTUIyNXlFRTByNHNYcVpfSDVoVkRKVDFvZ3JfVGFtVzctM1YzRmVHQW1BSlY2R3lad3dTSGFvX2UzUENrZ3pZWER1d0UydWUxMGQzRmRDb202STB6QTUwTjZLRFlzRXNIOGk0RGZUby1pTTJsZW8wd1ZwM2REWldYSm5JVHZiNWt3QThRZ2lNcFFVTlJ6dDNEYzRjSUZpS1k0aGZPUlNDX1NsUi1nNmFlMjhUSWZpbVljUTZmcHJLWUJ6WTdBMmlaZWRWb1M1UjJramVHUERNSWxsbjI4eE4zd2JQdzhLUndxTWpRT3RISTBJUDYtZTR4N2ZXSUJuQ2VydWRxVEVBbGhlZ2lCTHdCUkp5YTk0SWRxcmN4LXp5UzJfcXRXWThHeDZfS3NEanhkYWFPRVFOemsxZlF5TVNoZTFaX2NCMWthdFVRa2N5SDRnQ1k4NTRWVGJQQUZSNkhWOFl5d1pxc3p6T1dGQ0VsS3F2U2ZMLWd1THBpcVhBX2V5VHhyZnZySjNNSHBLRjR4Q0MycGg3dEF4QktuSXJKck9JSjN5Y1FXY1VZT01yTFFvbWI3Y2czOGN1SEhMSmoxd1FqeS1TSU83b1JtTU5OUENLdDZVWS1ERzduLS14M2hKTDdjTUdXellrR2F5WWpKY3ljbEpuVk05NHlkeVdxX2FqZjZTUkNqV0NheFZQQnc0ei1CaWhPV0RvUXVzenhVVm9vWXdJQVEzZm1sTUpHdTZUemVsZ0l4R1lKR1FKTVhZaDFtZzNpTktsMWQyQWdabTloclo4VV9OUWZuTWYwd0pXQVlKSGNJa3lBN3h6QmM4X2RTWTdKbWxudUt2ZDVLQWZkdzR3Ui10YkJYMHVUMzl3bjMwTVpycEl6Um5IZGZJSWc4b3N2aE8yQm1rR0M2SzlMY0FpTEdHYVltMFc2cm5RekVERWZIR3Q0UEJROW5YeFVPbUE5QnhWWVpnMDVGR1kyVzNZRWpjZ19maEFxZ25PNnF0SUpCNzVjaS1pTU1OLW92R213cmxsWmRzR0lKN1hFaEg4N0pQTUFGbTRRbWp3MmQtb1Nab1ZvWE1HX1JhYlFrRzh0N041VHJrTzVOQkxrb1VZTGV0cU41Ui1XUDFIVDhlaXhKNFFZeGZLTE1WQzJoR3lxQk9DQWc0Z0Q0LUx6eTJFZUxfQkdLejk0aEMzYzZoa0NWTzgwQ3R4ZHZFakFmZ3I3WjBqOFJPMVZRMlJYMWsxODd2NkxSRVdQejdHNzBZQXgxWm5wQmJPTG1RanJNMU1kRVdQNEl1Qmg1ckxRZGp2cjBleUlWNVdLeFZLWFZJSXZqa3VkcXdTbV96cUFudWpzVGktdzNEVk5JOWJLWXozR0FhQXZmSktOd1lFUUNoUEk2QzhHUGtfd1RYam5LZUNsS3g2d2hydFllWGZvNklrb0tYZnhRbHNzLVVobHpMWU92YXVtNW5qbGItZnUyTUNhR2NhY1J4cDEwcEVET3dFb0tnS0FiRHZvcnZqWjZlR0FfM2RmbW1nemNmcFNhdXFqRjhTdDE3dU00QzU4akExcXVVaWk4SHMyM1RBZUxnX29mNkFvWHZyTi03N1huNW9FSjVjM285U2loSkJJRTJpdzNhN1l4eTZHb1Z2T200LVNzbWlURVNVdXAxQW5oU2Z1VEVSbHFpWHhNeW0wdl9TTDYydzdoRXdNQVpqczBhWlEwcDREbE8tMmZ4enNrY095c3pGbjl1MXFVQkQ5eHE3VEJrMnh5Y2xQRDFMNm1HWF9ZNDhkamZrVWlKa0NJYlF1ODJGWjBFLWpIM01ZODBqOGkwYmtSZ29WSy1JMUppbFlYY25WZ1dGU3RYblNpcHlmbWFGMlo1aTNUNnlhUmxsNXQxRHlKNENwVEtkUjlwVk41T3ZRRERwNUd6WDlWR1lKUkpTUzlMc05MWUVhei1ySEZHMFZVSldoTTB2cVdJek5Pc1M5bHV5QW5MWGE3WXJUcFotUDZtb3loU2xUZzJLcm1zS3VvSmJfM2hETDlCc0c3NmlydXVST21rbWt6ajBOcTY0cnJtN2ppQWM5U181NHJlVlVSOXgtWHBxWEZhX2UwdWJMam1rZDhBU2FJSk9udkZLdTNIYXhRQmtibkVpWTN6RDVfUmExdWE2WlFKd0tpWXF5bGpqYjZCRUJyZ21ZUDBkdWJjalV3WHlPZkQxR0hSWXIyS1hyZG5oMm95RndBaXJPcVgwZGRFZWRvNFRVTWx4aTlZVFZZNEhRWWNockFENnNZX3AtcVVoSElvTGdDUzJKcXFPZExrWWUyR1ZfcWpqLTNqS3RUSWM3S2dqY0RCQW53WHg3ajJtNDh2TmZ2QmFXTjRzUzRNMHJldzRRU0pBOWdNVGpBU2ZBLUVVYzF5Uk5INzN1YzhTS0ZadkR2dXZlbVhnY1ZKMXREbVp5ZnBYNFdwQ1NtOFlXVkk2ZDVHZ2ZXRHM3RHlack9Qc21qdzNRV0VMZndWNmNNUkluaXFnUndWZExWbGZ4OUNZZVRQNU9hYVEzclZ4MU4zdk03MHJVQXFUTFY0TDZGMEZrWmJkUHlqRGZiNzY3dW5SWGRYTC1lOGhPTjBuV2E4TjY4QVBUVXRvVFRxQnUtZlpUMTA4dUhWdjRyMWNBN3ZEbGhQT1l1Sl9SMUtqdDBLckdfWDdSeFFJUVV5cFBiRGtVNm5fYk1pa2pQcDhEYkUzTHl4bDBaRFV2VzJvVjl1YW5PYU1LbjhWQnNic2xYbng4cTVPellOckpsRTJrWEEybVB1NjNqX2hwVXRYeS1rNjQ4SnBGWlAxT2ozWHZaZS01b2lyU0pDdEhtMWR2SlBZUkJRM1E1VkktQmZpRVB3Q3lkbXBGaDBpSVdVRmt3M0pxMEFiZmlJVTNhR1RSczRya0tkUGxNSUZ0N1dIekkzSWZWZWtncmVtWDd1dG55dTJZbUUwZkJmRDhnYzZnWGcyS2JDVnVhazdoMml2V0F3aTdvUnpjTW1jcjlrNXpwUFpvOGpSbEx4b095eGdrUnVYWGRudG1pWUNQYkgtYWowdlh6b2UwczBIY0RzTGN2eHVIUTV6ZGZpdjU3MnZNNV8wYmI3Rnl5RDNmQlF3Z2p3RWxCNFVScG9IbEZiczhCdEtwdXJOWG5DdTI1d1lQLUU=",
       "openrouter_metadata": [
         {
-          "id": "cnNfMGRiZTU4ZWRiMzcxMDBmMzAxNjk0NTFhNTNlZjE0ODE5Mzg2MTU2YmEzYzM5OTkyMmI=",
+          "id": "cnNfMDU3NjJlODg3Y2U1MGNmODAxNjk5NWI2ZDc0OTA0ODE5MGI4ZDEyMDliMWM4MzQwYTk=",
           "index": 0,
           "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
         }
@@ -173,6 +196,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I ran the tool with the arguments:\n- foo: \"run with arbitrary args\"\n- bar: \"foo\"\n\nTool output:\n- \"working!\"\n\nWould you like me to run it again with different arguments or take any next steps?"
+    "message": "Done — I ran the tool with arguments {\"foo\": \"test\", \"bar\": \"foo\"}.\n\nOutput: working!\n\nWould you like me to run it again with different arguments? If so, tell me what to try or I can pick other values (e.g., {\"foo\":\"hello\",\"bar\":\"world\"})."
   }
 ]

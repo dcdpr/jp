@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -145,11 +168,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "The user's message is \"Test message\". This seems like a test or perhaps an empty query. According to my guidelines, I should respond informatively. But since it's just a test message, I might need to acknowledge it appropriately.\n\n\n## Handling User Input  \n- Received a message labeled \"Test message,\" which appears to be a placeholder or empty query.  \n- Need to respond informatively, as per guidelines, while acknowledging the message's likely purpose as a test."
+    "reasoning": ""
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "It looks like you're sending a test message. If you have a specific question or topic in mind, feel free to ask—I'm here to help! 🚀"
+    "message": "Test acknowledged. Ready for the real questions? Fire away! 🚀"
   }
 ]

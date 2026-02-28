@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -129,7 +152,11 @@ expression: v
     "id": "run_me_0",
     "name": "run_me",
     "arguments": {
-      "bar": "Zm9v"
+      "bar": "Zm9v",
+      "foo": "YmFy"
+    },
+    "metadata": {
+      "google_thought_signature": "Q2lRQnZqNzIrL2FtR3dQZ1VaM29RcUlUSStaeUlRQVJLS2Vvd1pIMmFLUkRRMjRUdWRNS1hnRytQdmI3c0l4akNsR2N4WmM3Y2Y5VGs4WHJJaEpKYlI0TkJERXJlMTNiUDJoWmpCQk9GbG5WNzFTeWpsMCt4aVlDQVVERUZyYTZwOEhDMWF0eVN2aWJTUy9OTFRkTnVKeGp5Qkh2bGZXNUJRWFU2MWZvbUY4QnpYVDk4dk1LMHdFQnZqNzIrMlJVZTk2eDUxdXpQaEY5bnpFVVpueE05Yy90UG1GM1dGZzJXYTFKNndwQ1Z3Sk9Ha2xJMVlKYWpwQndER29EVzFyaHAzMlpOVFZ1VWdQK0JqcjNSTmowN3dmVTdUWHdwa3c1WHJmejAvM0ZpS2o5QitUUzZqeVBENTk2QVNnYlpueDFhb3M4YmVTN1ppT2JoQnJkTndxY0RObThHVEV2cENBK3FhaEkyVmJxVG5BZm9IblBVcjcvemllbGVmVWVyazlqMkZXK2lPSUtQMHFsNmQ1TzNwQVd3WnVCTDQweG8weEtpZXJkcnJ0VG5senRTd2hsQ3hKY0xnZG5neEloMkYrcXNNZElsYW5MdU1lRzhBZEJDdGdCQWI0Kzl2djBQZy90MXZrTWNQM3E1cUpNOU5mQUZrUmdGditKbG9UUUxaT3NiTTRWUlZWVXF5RWticVI2M0F1NStOc3hmbnhiTFJZQUtaNFZPaWdpSFdNbmt6MlkzeGdwUzFOSXhDMFRxQUtiVytORmh2UjIwdExBUHY4d2hnZm9VMzNwbVMxbUJORkpCTmZXaGVqNTJJR0YzUjE1b1ZxYm9ZS1ptWmx6UDNLb1lMZzU5bHhWNmh0NXRxbU8wd2ZjQVZhZFJDR1dRWkZ3aEhldCtkbE55Z2J3clZYcDcyeGhqeHpqbjRSYjYyNEdTZEY0eU4xTERsRFVzeTZXK1MyRTd3WFlOSkpKQTFRRTI2dUJmUVZBenpIWWhpbWo4ZnJLQ3JvQkFiNCs5dnNrZTYvNkY5bG1iOThxTStwVFpaV0hCQ2ZVK3hmK2pyVHpIQVZKUWRiSWJyd09XN0YxQXpvWEc0bnRKZXpWVWZ3bDBqK2lZZW13UGMyRXBZamRDN0Jrd0RPeG1DS0d2b0x5cUh5NUVWSmlNV3E5UnYwWFpzSVhFUXY1aFFMM3lQbHUzMUdaNGZycWhsZGx0ZytnSXZWRllWMXJQaGU4cmFyOVRhQzRVMlh4MUcyeW56MUNhOVdiVXVON09EcEcxZDVUQUhVM1Jjb3NNbXhNc254eVFpazBZRWpsbFVnYk82VWdkYXlNSkJpNlNNallyM1puQ3FvQkFiNCs5dnNvL2lhNDVwSUp4TE9GU1N5RzVFUXJxR1RFVlVPTnp5UmtkNm93d3ZPT0lpVnphMGpGUXBBbDZKUEgxeUFXeGQzRjdwY3NzV2tOWmtGWWpQVER3bGRlVXE5aEhSZTJRZzc2NG11eEllR0Vna2xqRENzYzFseEp6dUQrMkFwQXJHbCt5Yko1dGpoSkZleXdtUFVhVEFWZ1kzMzVuTVJXYWVpQW5jL1ViQytpaTBmN3gzblFZM2gzM3VHZklsVHBkdHBvdm1YaURWUjQ3blBWZVY4WjdrZkRVS0pBK1hvPQ=="
     }
   },
   {
@@ -138,10 +165,5 @@ expression: v
     "id": "run_me_0",
     "content": "d29ya2luZyE=",
     "is_error": false
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "Hello there! I'm ready to help. What would you like to do next?"
   }
 ]

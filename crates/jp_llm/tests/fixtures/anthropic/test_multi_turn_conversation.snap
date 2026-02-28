@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "# Hello! 👋\n\nThis is a test message response. I'm working properly and ready to help!\n\nIs there something specific you'd like to test or discuss?",
+                        message: "Hello! This is a test message response. I'm working properly and ready to help. \n\nWhat would you like to do?",
                     },
                 ),
                 metadata: {},
@@ -31,11 +31,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user is asking me to repeat their previous message. Their previous message was \"Test message\". So I should repeat that back to them.",
+                        reasoning: "The user is asking me to repeat their previous message. Their previous message was \"Test message\".\n\nSo I should simply repeat: \"Test message\"",
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("ErECCkYIChgCKkA1/edkfP0kfLQZuvfs2pFS0oN0V5GnYDlMKfgU1ttt89w1wNtVsJhlyTikvZ/wodikEqnzlF/0mCW618v9bL5rEgwha6HsLkFsfwo7Zg8aDL2UjGYDnHjm330luyIw80D4sj/7LJ58C7e7s9tmKL87tJmn68gEpb9MTpP3k0M/uNcGpRHMMcAoZugbbr/UKpgB+cUbegWsD8Zz9H1thGA2BqcxijsKriRiOKync+x1b1sedRtO77PTeL2EakwEslYlLz1iloODS7epuGEzu6br418aWTkED9707sMyh6DgwkDV4r3QdUrxkuYx8vPrqPusGCqHhuRdLB06g0ppeDmxt4oY3Oc09aXH6qtliFZq7WZq2I+y6yhRpH4l4dPnzASUKMlykNgS9D0YAQ=="),
+                    "anthropic_thinking_signature": String("ErQCCkYICxgCKkAq7PRo63WK1kcfSjcTxBK7CKu3+zQzWELqf1exNsWJHlncCECI1vUVPdmjrXs2PJR8ESM2f1iWCxLHqDugVuSnEgwRudx7MdNRRfNhrGwaDL9gNW6Mpn1zmgvvaiIwy2pOSd+NEyzBrgyav4W1MoSURLiyXpDoWZHCRSs97mHgqcIDuNFeAO3vwcY+aFTTKpsBwwhd/ok388wNy1IQQ45I4Q3MugWl8U0L9+REAoxdpEo69yvEEmmX2k4MjZkYmaPYt+znMOnq/5m2XsuSKp+UbyKqIY7CDaCHf18Ykc/jy4gycLyMuOK29F7OFQX1i4I3MXTT/it6QCC+7TzxHtnbzJ8Zvtg6A0ote5u7DDLeX0g3+Hx7fSrDMP0wnS200Gdpti1k/+oki3NXZC8YAQ=="),
                 },
             },
         },
@@ -70,7 +70,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "toolu_01F3qxRanMBBxb4CDausBx8L",
+                        id: "toolu_01Saqbtd44f3anveY71jqJtd",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
@@ -95,7 +95,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Great! I ran the tool with the argument `bar: \"foo\"` and it returned:\n\n**The secret code is: 42**\n\nInterestingly, this is a reference to *The Hitchhiker's Guide to the Galaxy*, where 42 is famously \"the Answer to the Ultimate Question of Life, the Universe, and Everything!\"",
+                        message: "I've run the tool with the argument `bar: \"foo\"` and received the result: **The secret code is: 42**",
                     },
                 ),
                 metadata: {},
@@ -116,11 +116,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user is asking me to recall the result of the previous tool call. Looking at my previous response, I called the `run_me` tool with the argument `bar: \"foo\"`, and the function result was:\n\n\"The secret code is: 42\"\n\nSo I should simply state that the result was \"The secret code is: 42\"",
+                        reasoning: "The user is asking me what the result of the previous tool call was. Looking back at my previous message, I called the \"run_me\" tool with the argument bar=\"foo\" and the function returned \"The secret code is: 42\"\n\nSo the result was: The secret code is: 42",
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("EsYDCkYIChgCKkA2NkmREHX2b1x3M3oTMdgclq1scKqiytPuRU3FUt/rp20y5frCgDdkoREKf3/VfRFQKJW6j1gwy7YC10wf08n4Egw2ZQebjTbdKU2wB0waDMv1uL1tEmPcSQFQjCIwfSSv7zpTgxBpndT3m5CC6eHo/4nTPYXnZ8+AmBW3CrOOpVKqMiAS/+hKVFla8FEMKq0Cys41oYiZTnBTGvckqeOIj2eMR2rG59f1DrSR14kVN8eldeMvRp/FTNjnWy9ww5DhH+MdbaPJszNfaEM8QtaRFjMg6Z86gmI1cMeoZDe1E/LYQx0aXh7Je0U4CDrYQ65WZJo7VD/UrCdm6q/M52xd2mF9VxH2Lta+74Q8NeQbHBjJwx0BharwBl7MejXc4edQU0Yx1fRUQBAqKTAQLPIrVGvvBPaFQmAp+Bm5KjYIGgcHm8il6SxWW0rgWc7U3OZE/XF4+K84+GIH3kpRtw4BIjO4Ot6Da5gnr0gwt7jmTp3/CwSMavVmsor3mYWurWDWSritk7ksLzAdhD2MnCequLOtwRPzyqUz/jPf00Niyb46Xw519QTplRMidIa5+muNX6HqFbAeMAyrHfNwMRgB"),
+                    "anthropic_thinking_signature": String("EqUDCkYICxgCKkAxZBmHEEmCXFJYcodhgdcpGcAIyk6RpE/stkGBWIxWYUWjWyUD0Zmfazi5uRcZlkHbugwDn3EgrJNsd6igreNsEgyofZv7NZ/ucRAaa7YaDPOUDm9URZBB7IlUZSIw19vqFkandFgNITjoFKXAPAXiqhOqnpij2p0njHWT7i/aKhZZqDSq2R5RYEE8AkJDKowCuV5ozNVZoDWeG301EGa3M4bYbd8mCD5i0bSHpKUAPOvJGcRoVYm8GeeO5iNiw4Zp3DYYzYrTG0pvoxEOdGeIgqAqdLtblUNm5cmhJIVNFDkSyFtMbC8xXYbFyXNNhX1Ls1NT3JLSeEK3jgfuydD/pwik93NSurlQd6KpDZrNS+SkhfsFRGU7XeLnByJqK6mUlEt2DuZ/f36quFcQviY8MsaE197tlUajs8YHgrAnRSqK4Q0YfZHQi57rF9NmvDApWbXWTFSaOeKwq6FDNo8loTHnkeq2RBw6h1RA32TNDAQyJmD7U8xTMkItoCqYuxPmdcCVlM+p6U8J3Z1yjazZIE6QGDhCvGtInWSozBgB"),
                 },
             },
         },
@@ -134,7 +134,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The result of the previous tool call was:\n\n**The secret code is: 42**",
+                        message: "The result of the previous tool call was: **The secret code is: 42**",
                     },
                 ),
                 metadata: {},

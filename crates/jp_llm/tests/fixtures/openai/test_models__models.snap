@@ -52,22 +52,7 @@ expression: v
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "chatgpt-image-latest",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-mini-tts-2025-03-20",
+                "gpt-5.2-codex",
             ),
         },
         display_name: None,
@@ -113,6 +98,21 @@ expression: v
             provider: Openai,
             name: Name(
                 "gpt-audio-mini-2025-12-15",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "chatgpt-image-latest",
             ),
         },
         display_name: None,
@@ -513,38 +513,6 @@ expression: v
         ),
         deprecated: Some(
             Active,
-        ),
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "chatgpt-4o-latest",
-            ),
-        },
-        display_name: Some(
-            "ChatGPT-4o",
-        ),
-        context_window: Some(
-            128000,
-        ),
-        max_output_tokens: Some(
-            16384,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: Some(
-            2023-10-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: gpt-5.1-chat-latest",
-                retire_at: Some(
-                    2026-02-11,
-                ),
-            },
         ),
         features: [],
     },
@@ -1315,21 +1283,6 @@ expression: v
             provider: Openai,
             name: Name(
                 "gpt-image-1",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "codex-mini-latest",
             ),
         },
         display_name: None,
@@ -2371,6 +2324,21 @@ expression: v
             provider: Openai,
             name: Name(
                 "gpt-4o-mini-transcribe-2025-03-20",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-mini-tts-2025-03-20",
             ),
         },
         display_name: None,

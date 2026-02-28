@@ -13,11 +13,17 @@ expression: v
                         id: "run_me_0",
                         name: "run_me",
                         arguments: {
-                            "bar": String("foo"),
+                            "bar": Array [
+                                String("a"),
+                                String("b"),
+                            ],
+                            "foo": String("bar"),
                         },
                     },
                 ),
-                metadata: {},
+                metadata: {
+                    "google_thought_signature": String("Ci8Bvj72+5/sSrlhsPdy4UFQ00FRtIPUZbXpISblJQNOmOUosInz1ejt1Pr4NPPPRgpuAb4+9vsa8JZh/O1Ayz7dH8MF992kJZ8UK2PYrhEOBu2layigzCjVV21fsoyV1bBCYGjUCLhEpfJCLHnXld91jTwP2yzP2rhkKNlIG2A/d9a/s4/P5Ka6P9Y4MQjokHWrbsICPzBgRdDQV4AJYiAK0AEBvj72+02cY0ST0I/nmwpa9BA890HbbCShowUmttYuFn3CH6OEkwqqba1iTVrlMpR71GQTwLDEt3/BXcsy4Hq8IXhK/idI/12apLnDyruSKIklOeJAhK1KpaQmAwf3lzTCb/Aw1ZV99ODlOSuB7IpwKLBrBlsQQJ814n4Mmfal7GRauNiIZ4R4RwsywErJDe4H9KqxWW4fK2nKPksReTcc+cYJDgC84CRZXAbC/0a4D3+xOYm+Wu15PI9dpnMChZiKiMAP5731sWAxJA+NvQxYCtMBAb4+9vsy2D4HwL6/zYmu+rHua16f42oV9RWDOLE73Tbce1sO0AXAkD139Re7PKgDz4KjPYI12JvpN2Ux0CHAAUDdPF92U/OmaTjGlnXpS5vEZPlV+gNAE1FU4bfFIATqhhS+LJLbJESio1lCLmr/Q5Ju6/Xjyb2fkTXdmQDKW/9QZ508qclgGS1Sd2wMWJuSdcU6ym6mJURB8eC0Oht6+pkjLqem23xh8dZheauUwkpOuRryU6T+lDV3khFnTRqQ+P4aTTSdB9TSRQe44IToU2k+QArDAQG+Pvb7ML1GTOOu5ZD6Ep0wbPdPhUKls2AgHHP0ocFfpve5rr3c6anlJTQ63OMSRYUmETW6fKhVDir5CHSLvJ22TtlgEBNL0FMygl5X6v8aJVsHhoXWxR5V8sIt/1Wc/FwpjPhoYnTeMVf6ccuyQuy54Zi91QRD6quEijoY2sSRjZx0XMlTDMZSjkTRe+YSBQ51xQKXyT9J2PqNfO31LashqCfr6GUWe64TEdBOmTga84UhJeYZ+ihn/KYIBnyfMLSwrQo+Ab4+9vtpGILwabPZj/DKYQ5gyC+aTQlTwpRveznp/DGjuhFBHIuH72JhjpFlQO9TLnSsTHnbOUHexdLdcqA="),
+                },
             },
         },
         Flush {
@@ -35,7 +41,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "This is the output of the tool: `{\"run_me_response\": {\"content\": \"working!\"}}`.",
+                        message: "The tool ran successfully with the arguments `bar=['a', 'b']` and `foo='bar'`. The response from the tool was `{\"run_me_response\": {\"content\": \"working!\"}}`.",
                     },
                 ),
                 metadata: {},

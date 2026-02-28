@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -125,24 +148,34 @@ expression: v
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "Okay, the user wants me to run the tool with whatever arguments I want. Let me check the function definition again. The function is called run_me and it requires two parameters: foo and bar. \n\nFoo is a string or null, with a default value of \"foo\". Bar is an array of strings, with each item being either \"foo\" or \"bar\". The enum for bar is [\"foo\"], but the items have an enum of [\"foo\", \"bar\"]. Wait, that seems conflicting. The bar parameter's type is an array, and the enum for bar is [\"foo\"], but the items' enum is [\"foo\", \"bar\"]. Maybe that's a mistake in the tool definition. But I need to follow the given structure.\n\nSince the user says to provide whatever arguments, I can choose values that fit. For foo, I can use the default \"foo\" or set it to null. Let me pick \"foo\" for simplicity. For bar, since the enum for the parameter is [\"foo\"], but the items can be \"foo\" or \"bar\", maybe the intended is that the array contains elements from the items' enum. Wait, the bar parameter's type is an array, and the items are of type string with enum [\"foo\", \"bar\"]. But the parameter's enum is [\"foo\"], which might be a typo. But I have to follow the given specs. \n\nWait, the function's parameters are: bar is an array, and the items are strings with enum [\"foo\", \"bar\"]. So the array can have elements \"foo\" or \"bar\". But the parameter's enum is [\"foo\"], which might be a mistake. But maybe the parameter's enum is not applicable here. Wait, the function's parameters for bar have \"enum\": [\"foo\"], but that's probably an error because bar is an array. Maybe the correct structure is that bar is an array of strings, each of which is either \"foo\" or \"bar\". So I can set bar to [\"foo\", \"bar\"] or something like that.\n\nSo for the arguments, I'll set foo to \"foo\" and bar to [\"foo\", \"bar\"]. Let me check if that fits. The foo is a string, which is allowed. Bar is an array of strings, each being \"foo\" or \"bar\", which matches the items' enum. The parameter's enum for bar might have been a mistake, but I'll proceed with the array of [\"foo\", \"bar\"]."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "urogTTfSV6RBwYERUYa7Y75xqQHhG6gQ",
+    "id": "f1al2XoghPFToNowPUMmYhekIpTlodbS",
     "name": "run_me",
     "arguments": {
-      "bar": "Zm9v",
-      "foo": "aGVsbG8="
+      "foo": "Zm9v",
+      "bar": "Zm9v"
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "urogTTfSV6RBwYERUYa7Y75xqQHhG6gQ",
+    "id": "f1al2XoghPFToNowPUMmYhekIpTlodbS",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "It seems like the tool executed successfully with the provided arguments. Here's a summary of the arguments used:\n\n- `bar`: The value is \"foo\".\n- `foo`: The value is \"hello\".\n\nIf you need any further assistance or have more tasks to perform, feel free to let me know!"
+    "reasoning": "Okay, the user asked me to run the tool with whatever arguments I wanted. I checked the function definition again to make sure I was using the right parameters. The function 'run_me' takes 'foo' as a string or null, defaulting to \"foo\", and 'bar' as an array of strings with each item being \"foo\" or \"bar\". \n\nI decided to use the default value for 'foo' which is \"foo\". For 'bar', since the array can contain \"foo\" or \"bar\", I chose to include both to demonstrate the possible values. However, I noticed that the parameter's enum for 'bar' was listed as [\"foo\"], which might be a mistake. But since the items' enum allows \"foo\" and \"bar\", I went with [\"foo\", \"bar\"] to show both options.\n\nThe response from the tool was \"working!\", which indicates that the arguments were accepted. Now, I need to provide a helpful response to the user. I should confirm that the tool ran successfully and maybe explain the arguments I used. Let me make sure to mention that I used the default for 'foo' and included both allowed values for 'bar' to show compliance with the schema. Also, I should keep the explanation clear and concise."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "The tool ran successfully with the provided arguments! Here's what I used:\n\n- `foo`: Default value `\"foo\"` (as specified in the schema)\n- `bar`: Array containing both allowed values `[\"foo\", \"bar\"]` (matching the item enum)\n\nLet me know if you'd like to try different arguments! 🚀"
   }
 ]

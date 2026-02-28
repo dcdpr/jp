@@ -5,36 +5,16 @@ expression: v
 [
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "",
-                    },
-                ),
-                metadata: {
-                    "openai_item_id": String("rs_06662cf759e755cc0169451a366330819e9501e8546810089a"),
-                    "openai_encrypted_content": String("gAAAAABpRRo592ub6QFbhRTevu5KM2hgdZb44JzHd-EREE3v_iklTUmigy4RxlrMhNiKp6SyOhs4dtBplKapfs5bNN7Ge3JodNb2TDGlgEHobfL0XL0xBeCYYtBPoP43bWoLo98Y70fWqfVv8tMWM0mRvyxcT88oO9hpioHZuwrc7SQpFO_A7GuJBPDiow40loTxwo9AxI1FT1VeET64gwcfatNO3Fg-7NswCUyYjoTRdSNGK1c8zzgPQj5jZhTTb6MMHZaPEjdmU4C666jEYgpG4OMolISZNnC27YZCbko2b78V1WOHS3CtJaMBU44k2Ky3ZXq8gZCHhGms8sZywTeFBpoyQDJVFn0pXqZgXc2aXqk-L5PVqKRtylmqEuvxeuOjgXGXJHMx2Hg7_jFgIYjKG5CA-j7ZdNr-SKZ6o5es5x063Se-ggMPH_M1M2nAvQV00IQY2f_LCfBhxiozzFkuw-5N8hGaafS_l_wzNo4dkh_TRwdMjGZUezsjbnT7yBy5jMnCspFlG7kI3p0GXPuPu6JKlTkI07aS0BZS5o-MZCsNMqNjgs-o-Bdy1BvG3IemR2MbOASbMnEBBg8gPn4hZLGSRPXyqsXuXeKUu4ullDlGJdwRmg2w9VmbIKppnMxcA-VsQkcq6lcidZ2nWGjhapzEuglDVhXRwUr5u0w8WAUvW3XZP6bLRKgj_eHQHzqUyzZqsVfwFcJvnyTF9YetW6CPFPEEsAe2Af1bP3AAI_vfXRhb0pN1dCdEd2yV7zw2ShwwcDiSDuxc82il5qeTIGjNbrkrZVhyoUVAlitSf7c68TYYpHCzomUGPQhktNWpcBwxtUugYU4ZhtxV-Ee1PNe7yLFn9-NQkqh2QTAp3JOdAWNfjtu_dbSLUPyr7qXi_Z6sVwsOZL58EterDP5ogoHqgmDq2Gc2LT3R5NDduAOLTi9nQhezoey_U3eXqjCbAU76l01vGHzsF_Fopb3S_hwjQFyBZJnL5INUHn5S2OQhtB8v0zHVGftakd2s7bvikuSDGrl7bdygQqNE9UDyRyvWRD6ex806Q12HSQMMN_IUCahSBr6ZrbQibTbbv1QHGMasQpDI7idPph1f9A61BhsYGJrs0cg24gLZG2kZyP_D4M4Frxwbg-YKzx9eCTUBmScA0_LtSHdIsVu3wPOYkzq-sgpP0v-5ifElj-eBrWLnEnLol7KY9Xrm5CukmLskp6arIyiOXtO-UxBHlf1KIidwJaKrlmHx5jynIHm5iO9av49qSnwx4obwARYaOEpm6dnE8CfqDylsgA5KaiFv5GSBxqpvIgQeQLC0JizVakbsiCdoxaJKSV9p5zGpQQTB-KGqsR1xXrCVBkXkitmXJYJsv21a8asTbEMJCs7JpixkuxJaQx1FnkdeerSrOJfYyeQKcPDPN_UVMzKsuP_7Wq6bEs9HF80Q_AaDdpKRuN4UvSeWpJBun6tNncFU7IGqQ966P_mZGShe8ZM1z7zVvp-l0cmu1M54SUBCHVswr5v_Ot1F4vX4uDz5kgtxL9mogpGQMG-Wcn4IQHr_0Sdr3YNIxDrfmXHQXF82Vjp4N-xe0041Atl99-v5DCZfn_WXgZi-Xt1VfHxu16wgXt46lWWx0uWIxuP4O7PKn2KmxzRe-ayypGPntClP0HD3N9sKrfHQpslT-fxdzFzwfmD2tIXkLLWdKuxiUGtMsbK7Ziivzup40ncQ89-D3UJid_wCnzNucq_yrzHdOjuBweect6EB4lE72dXXFgn0k53k7LLhBIaixr8UHm_jNtRZSjzPEnRygCPbfAOFeIVlxwe2nRgePjYLccH2NXcfozn0dc14dmQFLw2dTg3p2zuwxOSqTsY4Cf3_77e297EsIUWQhKliYgRtQz1J58vo_ymfiQV5tOWzRDe_f1g8gufYd6D6Dr38KwaPR1fsdxKs7aNRN0RUEFwwaHC_B2N8XAt08K-I5utAgdHyDYX6cfzTYSkQOaJgpc4BWWvStCrwFlu8J_hmk1EDvhN8LU3ngs-UYkuYHerV3GhYzLUIQIy25SKA2BTdLG4DBqg685COSLPs_1efKk-jQ__z5Xj66b4y7USx_GFmaiE2lNwCEc9lm9sPmQy5qvQNL2Edy6Uerk-W2Rpn4YUsV4my50grCNkMRQTJChXAJlRLE8Tm2PBtIOu1iG5mMo-cah9gjuQ-SDoODg7OzcpStR-eNNN8YYb-mIThYlS1EryFSbLK3H4ZzWvED8To4HtRU-hs8Kk5DPXo8U8CuNRcYjjfLZyfBxGLfEDB_6qjaRyUa6lJj9sYVxVJAc7ULKh5zkh11Aab8asqxDpLe_ikbdi1cPTxEGnCTlCPe01ijMnUcedJ7R9mgnibqHj4TE-bEl-8FY1QpS1DWDG5xnU4_PM1s2UOahCuM8BUTwh1MoRwCSZ0bi5VA-a6VeuCYUxqfyrVCSPt9nHG3xbBPSAzzA=="),
-                },
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_jHFir0EVaO80KqdZglWimpV7",
+                        id: "call_AO3J5fHZqoX3OaqIfyUC3hre",
                         name: "run_me",
                         arguments: {
+                            "foo": String("foo"),
                             "bar": String("foo"),
-                            "foo": String("example"),
-                            "note": String("running as requested"),
                         },
                     },
                 ),
@@ -51,21 +31,21 @@ expression: v
     ],
     [
         Part {
-            index: 0,
+            index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Done — I ran the tool as requested. Output:\nworking!",
+                        message: "I ran the tool with the arguments you provided; it returned: \"working!\"\n\nIf you want, tell me different arguments to try or what you expect the tool to do next.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_06662cf759e755cc0169451a3a8c80819e9bb26593dda1d572"),
+                    "openai_item_id": String("msg_01f639be2b5eb5d3016995b6bb84cc81a293ffe388e335c4c2"),
                 },
             },
         },
         Flush {
-            index: 0,
+            index: 1,
             metadata: {},
         },
         Finished(
