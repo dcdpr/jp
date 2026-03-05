@@ -21,6 +21,7 @@ camino = { workspace = true }
 duct = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 serde = { workspace = true }
+shlex = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]

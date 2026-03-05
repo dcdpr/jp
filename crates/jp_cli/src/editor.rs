@@ -122,11 +122,7 @@ impl Drop for RevertFileGuard {
         if !self.exists {
             let _rm = fs::remove_file(path);
             let mut path = path.clone();
-            loop {
-                let Some(parent) = path.parent() else {
-                    break;
-                };
-
+            while let Some(parent) = path.parent() {
                 let Ok(mut dir) = fs::read_dir(parent) else {
                     break;
                 };
@@ -220,13 +216,13 @@ pub(crate) fn open(path: Utf8PathBuf, options: Options) -> Result<(String, Rever
 /// Open an editor for the user to input or edit text using a file in the workspace
 pub(crate) fn edit_query(
     config: &AppConfig,
-    root: &Utf8Path,
+    conversation_root: &Utf8Path,
     stream: &ConversationStream,
     query: &str,
     cmd: Expression,
     config_error: Option<&str>,
 ) -> Result<(String, Utf8PathBuf, PartialAppConfig)> {
-    let query_file_path = root.join(QUERY_FILENAME);
+    let query_file_path = conversation_root.join(QUERY_FILENAME);
     let existing_content = fs::read_to_string(&query_file_path).unwrap_or_default();
     let mut doc = QueryDocument::try_from(existing_content.as_str()).unwrap_or_default();
 
@@ -247,7 +243,7 @@ pub(crate) fn edit_query(
     doc.meta.history.value = &history_value;
 
     let options = Options::new(cmd.clone())
-        .with_cwd(root)
+        .with_cwd(conversation_root)
         .with_content(doc)
         .with_force_write(true);
 
@@ -260,7 +256,7 @@ pub(crate) fn edit_query(
             Ok(v) => partial = v,
             Err(error) => {
                 let error = error.to_string();
-                return edit_query(config, root, stream, "", cmd, Some(&error));
+                return edit_query(config, conversation_root, stream, "", cmd, Some(&error));
             }
         }
     }
@@ -332,6 +328,18 @@ fn build_history_text(history: &ConversationStream) -> String {
                     buf.push_str(&format!(" on {timestamp}\n\n"));
                     buf.push_str(comrak::markdown_to_commonmark(reasoning, &options).trim());
                 }
+                ChatResponse::Structured { data } => {
+                    buf.push_str("\n\n## Assistant (structured)");
+                    buf.push_str(&format!(" ({})", event.config.assistant.model.id));
+                    buf.push_str(&format!(" on {timestamp}\n\n"));
+                    buf.push_str("```json\n");
+                    if let Ok(pretty) = serde_json::to_string_pretty(data) {
+                        buf.push_str(&pretty);
+                    } else {
+                        buf.push_str(&data.to_string());
+                    }
+                    buf.push_str("\n```");
+                }
             },
             EventKind::ToolCallRequest(request) => {
                 if let Ok(json) = serde_json::to_string_pretty(request) {
@@ -363,6 +371,7 @@ fn build_history_text(history: &ConversationStream) -> String {
                 buf.push_str("Answer: ");
                 buf.push_str(&response.answer.to_string());
             }
+            EventKind::TurnStart(_) => {}
         }
 
         buf.push_str("\n\n");

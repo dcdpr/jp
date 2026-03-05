@@ -8,14 +8,8 @@ const DEFAULT_TIME_FMT: &str = "%Y-%m-%d %H:%M:%S";
 pub struct DateTimeFmt {
     pub timestamp: DateTime<Utc>,
     pub offset: FixedOffset,
-    pub timeago: Option<TimeAgo>,
     pub format: &'static str,
     pub color: bool,
-}
-
-pub enum TimeAgo {
-    Now,
-    From(DateTime<Utc>),
 }
 
 impl DateTimeFmt {
@@ -24,25 +18,9 @@ impl DateTimeFmt {
         Self {
             timestamp,
             offset: *Local::now().offset(),
-            timeago: Some(TimeAgo::Now),
             format: DEFAULT_TIME_FMT,
             color: true,
         }
-    }
-
-    #[must_use]
-    pub fn with_offset(self, offset: FixedOffset) -> Self {
-        Self { offset, ..self }
-    }
-
-    #[must_use]
-    pub fn with_timeago(self, timeago: Option<TimeAgo>) -> Self {
-        Self { timeago, ..self }
-    }
-
-    #[must_use]
-    pub fn with_time_format(self, format: &'static str) -> Self {
-        Self { format, ..self }
     }
 }
 

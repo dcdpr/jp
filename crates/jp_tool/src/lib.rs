@@ -64,10 +64,21 @@ impl Outcome {
             Outcome::NeedsInput { .. } | Outcome::Error { .. } => None,
         }
     }
+
+    /// Returns the content of the outcome if it is a success, panicking if it
+    /// is not.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the outcome is not a success.
+    #[must_use]
+    pub fn unwrap_content(self) -> String {
+        self.into_content().unwrap()
+    }
 }
 
 /// A request for additional input.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Question {
     /// The question ID.
     ///
@@ -89,7 +100,7 @@ pub struct Question {
 }
 
 /// The type of answer expected for a given question.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AnswerType {
     /// Boolean yes/no question
     Boolean,

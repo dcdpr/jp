@@ -1,11 +1,12 @@
-bacon_version    := "3.20.1"
-deny_version     := "0.18.9"
-expand_version   := "1.0.118"
-insta_version    := "1.43.2"
+bacon_version    := "3.22.0"
+binstall_version := "1.17.4"
+deny_version     := "0.19.0"
+expand_version   := "1.0.120"
+insta_version    := "1.46.3"
 jilu_version     := "0.13.2"
-llvm_cov_version := "0.6.21"
-nextest_version  := "0.9.108"
-shear_version    := "1.6.0"
+llvm_cov_version := "0.8.4"
+nextest_version  := "0.9.126"
+shear_version    := "1.9.1"
 vet_version      := "0.10.2"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
@@ -24,15 +25,41 @@ alias if := issue-feat
 
 [private]
 default:
-  just --list
+    #!/usr/bin/env sh
+    if ! which jq >/dev/null; then
+        just --list
+        exit 0
+    fi
 
+    GROUP="main"
+
+    BOLD_YELLOW="\033[1;93m"
+    RESET="\033[0;0m"
+
+    echo "Available recipes:"
+    echo -e "    ${BOLD_YELLOW}[${GROUP}]${RESET}"
+    just --dump --dump-format=json |
+        jq '.recipes | to_entries[] | select(.value.attributes | any(try (.group == "main") catch false)) | "\(.key)~# \(.value.doc // "")"' |
+        tr -d '"' |
+        sed 's/^/    /g' |
+        column -t -s "~"
+
+    echo
+    echo "Additional recipes are available. To see all, run:"
+    echo "    just --list"
+
+# Run the main binary through `cargo run`.
 [group('build')]
+[group('main')]
 [no-cd]
+[positional-arguments]
 run *ARGS:
-    cargo run --package jp_cli -- {{ARGS}}
+    #!/usr/bin/env sh
+    cargo run --package jp_cli -- "$@"
 
 # Install the `jp` binary from your local checkout.
 [group('build')]
+[group('main')]
 install:
     @just quiet_flag="" _install-jp
 
@@ -99,18 +126,21 @@ profile-heap *ARGS:
     #!/usr/bin/env sh
     cargo run --profile profiling --features dhat -- "$@"
 
-# Create a new RFD draft. STYLE is 'rfd' (design proposal) or 'adr' (decision record).
+# Create a new RFD draft. CATEGORY is 'design', 'decision', 'guide', or 'process'.
 [group('rfd')]
-rfd-draft STYLE +TITLE:
+rfd-draft CATEGORY +TITLE:
     #!/usr/bin/env sh
     set -eu
 
-    style="{{STYLE}}"
+    category="{{CATEGORY}}"
 
-    # Validate the style argument.
-    case "$style" in
-        rfd|adr) ;;
-        *) echo "Unknown style '$style'. Use 'rfd' or 'adr'." >&2; exit 1 ;;
+    # Validate the category and resolve the template.
+    case "$category" in
+        design)   template="design"  ;;
+        decision) template="decision" ;;
+        guide)    template="guide"   ;;
+        process)  template="guide"   ;;
+        *) echo "Unknown category '$category'. Use 'design', 'decision', 'guide', or 'process'." >&2; exit 1 ;;
     esac
 
     # Find the next available RFD number.
@@ -136,6 +166,9 @@ rfd-draft STYLE +TITLE:
         author="${USER:-unknown}"
     fi
 
+    # Capitalize the category for the metadata header.
+    cap_category=$(echo "$category" | sed 's/^./\U&/')
+
     # Build the filename slug from the title.
     slug=$(echo "{{TITLE}}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-')
     file="docs/rfd/${next}-${slug}.md"
@@ -143,9 +176,10 @@ rfd-draft STYLE +TITLE:
     # Copy the template and fill in metadata.
     sed \
         -e "s/RFD NNN: TITLE/RFD ${next}: {{TITLE}}/" \
+        -e "s/^- \*\*Category\*\*: .*/- **Category**: ${cap_category}/" \
         -e "s/AUTHOR/${author}/" \
         -e "s/DATE/$(date +%Y-%m-%d)/" \
-        "docs/rfd/000-${style}-template.md" > "$file"
+        "docs/rfd/000-${template}-template.md" > "$file"
 
     echo "Created $file"
 
@@ -169,7 +203,7 @@ rfd-supersede NNN MMM:
     fi
 
     # Validate the old RFD can be superseded.
-    current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$old_file")
+    current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$old_file" | head -1)
     case "$current" in
         Accepted|Implemented) ;;
         *)
@@ -178,25 +212,200 @@ rfd-supersede NNN MMM:
             exit 1 ;;
     esac
 
+    # Resolve basenames for relative markdown links.
+    new_basename=$(basename "$new_file")
+    old_basename=$(basename "$old_file")
+
     # Update old RFD: status -> Superseded, add/update "Superseded by" link.
-    awk -v new="RFD ${new_num}" '
+    awk -v new="RFD ${new_num}" -v new_file="${new_basename}" '
         /^- \*\*Status\*\*:/ { print "- **Status**: Superseded"; next }
         /^- \*\*Superseded by\*\*:/ { next }
-        /^- \*\*Date\*\*:/ { print; print "- **Superseded by**: " new; next }
+        /^- \*\*Date\*\*:/ { print; print "- **Superseded by**: [" new "](./" new_file ")"; next }
         { print }
     ' "$old_file" > "${old_file}.tmp"
     mv "${old_file}.tmp" "$old_file"
 
     # Update new RFD: add/update "Supersedes" link.
-    awk -v old="RFD ${old_num}" '
+    awk -v old="RFD ${old_num}" -v old_file="${old_basename}" '
         /^- \*\*Supersedes\*\*:/ { next }
-        /^- \*\*Date\*\*:/ { print; print "- **Supersedes**: " old; next }
+        /^- \*\*Date\*\*:/ { print; print "- **Supersedes**: [" old "](./" old_file ")"; next }
         { print }
     ' "$new_file" > "${new_file}.tmp"
     mv "${new_file}.tmp" "$new_file"
 
     echo "${old_file}: Superseded by RFD ${new_num}"
     echo "${new_file}: Supersedes RFD ${old_num}"
+
+# Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
+[group('rfd')]
+rfd-promote NNN:
+    #!/usr/bin/env sh
+    set -eu
+
+    n=$(echo "{{NNN}}" | sed 's/^0*//')
+    num=$(printf "%03d" "${n:-0}")
+    file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
+    if [ -z "$file" ]; then
+        echo "No RFD found with number ${num}." >&2; exit 1
+    fi
+
+    current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
+    case "$current" in
+        Draft)       next="Discussion" ;;
+        Discussion)  next="Accepted" ;;
+        Accepted)    next="Implemented" ;;
+        *)
+            echo "Cannot promote from '${current}'." >&2
+            echo "Promotable statuses: Draft, Discussion, Accepted." >&2
+            exit 1 ;;
+    esac
+
+    sed "s/^- \*\*Status\*\*: ${current}/- **Status**: ${next}/" "$file" > "${file}.tmp"
+    mv "${file}.tmp" "$file"
+    echo "${file}: ${current} -> ${next}"
+
+# Mark an RFD as abandoned with the given reason.
+[group('rfd')]
+rfd-abandon NNN +REASON:
+    #!/usr/bin/env sh
+    set -eu
+
+    n=$(echo "{{NNN}}" | sed 's/^0*//')
+    num=$(printf "%03d" "${n:-0}")
+    file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
+    if [ -z "$file" ]; then
+        echo "No RFD found with number ${num}." >&2; exit 1
+    fi
+
+    current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
+    case "$current" in
+        Implemented|Superseded|Abandoned)
+            echo "Cannot abandon from '${current}'." >&2; exit 1 ;;
+    esac
+
+    sed "s/^- \*\*Status\*\*: ${current}/- **Status**: Abandoned/" "$file" > "${file}.tmp"
+    mv "${file}.tmp" "$file"
+
+    # Append the reason as a note after the metadata block.
+    awk -v reason="{{REASON}}" '
+        /^## / && !done { print "> **Abandoned**: " reason; print ""; done=1 }
+        { print }
+    ' "$file" > "${file}.tmp"
+    mv "${file}.tmp" "$file"
+
+    echo "${file}: Abandoned (${current} -> Abandoned)"
+
+# Generate or update AI summaries for RFD documents.
+#
+# Only re-generates summaries for RFDs whose content has changed since
+# the last run (based on SHA-256). Pass `--force` to regenerate all.
+#
+# Usage:
+#   just rfd-summaries              # changed RFDs only, default model
+#   just rfd-summaries --force       # regenerate all
+#   just rfd-summaries flash         # use a different model
+#   just rfd-summaries flash --force # both
+[group('rfd')]
+rfd-summaries *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    CACHE="docs/.vitepress/cache/rfd-summaries.json"
+    MODEL="haiku"
+    FORCE=false
+    PROMPT="summarize this document in one sentence of max 20 words, don't start with 'The/This RFD ...'"
+    SCHEMA='{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]}'
+
+    for arg in {{ARGS}}; do
+        case "$arg" in
+            --force) FORCE=true ;;
+            *)       MODEL="$arg" ;;
+        esac
+    done
+
+    [ -f "$CACHE" ] || echo '{}' > "$CACHE"
+
+    generated=0
+    skipped=0
+
+    for file in docs/rfd/[0-9][0-9][0-9]-*.md; do
+        [ -f "$file" ] || continue
+        basename=$(basename "$file")
+        case "$basename" in 000-*) continue ;; esac
+
+        hash=$(shasum -a 256 "$file" | cut -d' ' -f1)
+        cached_hash=$(jq -r --arg f "$basename" '.[$f].hash // ""' "$CACHE")
+
+        if [ "$FORCE" = false ] && [ "$hash" = "$cached_hash" ]; then
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        num=$(echo "$basename" | sed 's/-.*//')
+        printf "RFD %s..." "$num" >&2
+
+        summary=$(
+            jp -! q --format=json --no-tools --new \
+                --schema "$SCHEMA" --no-reasoning \
+                --attachment "$file" --model "$MODEL" \
+                "$PROMPT" \
+            | jq -r -s '.[-1].summary'
+        )
+
+        jq --arg f "$basename" --arg h "$hash" --arg s "$summary" \
+            '.[$f] = {hash: $h, summary: $s}' "$CACHE" > "${CACHE}.tmp"
+        mv "${CACHE}.tmp" "$CACHE"
+
+        generated=$((generated + 1))
+        printf " done\n" >&2
+    done
+
+    # Remove entries for deleted RFDs.
+    existing=$(ls -1 docs/rfd/[0-9][0-9][0-9]-*.md 2>/dev/null | xargs -I{} basename {} | jq -R -s 'split("\n") | map(select(. != ""))')
+    jq --argjson keep "$existing" 'with_entries(select(.key as $k | $keep | index($k)))' "$CACHE" > "${CACHE}.tmp"
+    mv "${CACHE}.tmp" "$CACHE"
+
+    printf "\nDone: %d generated, %d cached\n" "$generated" "$skipped" >&2
+
+# Search across all RFD documents.
+[group('rfd')]
+rfd-grep +ARGS:
+    @rg {{ARGS}} docs/rfd/
+
+# List RFDs, optionally filtered by category.
+[group('rfd')]
+rfd-list *CATEGORY:
+    #!/usr/bin/env sh
+    set -eu
+
+    filter="{{CATEGORY}}"
+
+    for file in docs/rfd/[0-9][0-9][0-9]-*.md; do
+        [ -f "$file" ] || continue
+
+        num=$(basename "$file" | sed 's/-.*//')
+
+        # Skip templates.
+        [ "$num" = "000" ] && continue
+        status=$(sed -n 's/^- \*\*Status\*\*: \(.*\)/\1/p' "$file" | head -1)
+        category=$(sed -n 's/^- \*\*Category\*\*: \(.*\)/\1/p' "$file" | head -1)
+        title=$(sed -n 's/^# RFD [0-9]*: \(.*\)/\1/p' "$file" | head -1)
+
+        # Append the superseding RFD number to the status.
+        if [ "$status" = "Superseded" ]; then
+            by=$(sed -n 's/^- \*\*Superseded by\*\*: \[RFD \([0-9]*\)\].*/\1/p' "$file" | head -1)
+            [ -n "$by" ] && status="Superseded (${by})"
+        fi
+
+        # Filter by category if specified.
+        if [ -n "$filter" ]; then
+            match=$(echo "$category" | tr '[:upper:]' '[:lower:]')
+            want=$(echo "$filter" | tr '[:upper:]' '[:lower:]')
+            [ "$match" = "$want" ] || continue
+        fi
+
+        printf "%s  %-16s %-12s %s\n" "$num" "$status" "$category" "$title"
+    done
 
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
@@ -213,12 +422,24 @@ preview-docs: (_docs "preview")
 # Live-check the code, using Clippy and Bacon.
 [group('check')]
 check *FLAGS:
-    just _bacon clippy {{FLAGS}}
+    @just _bacon clippy {{FLAGS}}
+
+# Live-check the code, including tests, using Clippy and Bacon.
+[group('check')]
+[group('main')]
+check-all *FLAGS:
+    @just _bacon clippy_all {{FLAGS}}
+
+# Live-check the code, using Clippy and Bacon, auto-fixing as much as possible.
+[group('check')]
+check-and-fix *FLAGS:
+    @just check --fix --allow-dirty {{FLAGS}}
 
 # Run tests, using nextest.
 [group('check')]
+[group('main')]
 test *FLAGS="--workspace": (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
-    cargo nextest run --all-targets {{FLAGS}}
+    cargo nextest run --all-targets --cargo-profile=nextest {{FLAGS}}
 
 # Continuously run tests, using Bacon.
 [group('check')]
@@ -229,6 +450,12 @@ testw *FLAGS:
 [group('check')]
 shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
     cargo shear {{FLAGS}}
+
+[group('check')]
+coverage: _coverage-setup
+    # FIXME: Branch coverage seems to have broken recently?
+    # cargo llvm-cov --doctests --branch --lcov --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --output-path=target/lcov.info
+    cargo llvm-cov --doctests --lcov --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --output-path=target/lcov.info
 
 _bacon CMD *FLAGS: (_install "bacon@" + bacon_version)
     @bacon {{CMD}} -- {{FLAGS}}
@@ -243,17 +470,12 @@ serve-tools CONTEXT TOOL:
 
 # Run all ci tasks.
 [group('ci')]
-ci: build-ci lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
-
-# Build the code on CI.
-[group('ci')]
-build-ci: _install_ci_matchers
-    cargo build --workspace --all-targets --keep-going --locked --future-incompat-report
+ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
 
 # Lint the code on CI.
 [group('ci')]
 lint-ci: (_rustup_component "clippy") _install_ci_matchers
-    cargo clippy --workspace --all-targets --no-deps -- --deny warnings
+    cargo clippy --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
 
 # Check code formatting on CI.
 [group('ci')]
@@ -263,23 +485,23 @@ fmt-ci: (_rustup_component "rustfmt") _install_ci_matchers
 # Test the code on CI.
 [group('ci')]
 test-ci: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
-    @just test --no-fail-fast
+    @just test --workspace --no-fail-fast
 
 # Generate documentation on CI.
 [group('ci')]
 docs-ci: _install_ci_matchers
     #!/usr/bin/env sh
     export RUSTDOCFLAGS="-D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-html-tags -D rustdoc::invalid-rust-codeblocks -D rustdoc::bare-urls -D rustdoc::unescaped-backticks -D rustdoc::redundant-explicit-links"
-    cargo doc --workspace --all-features --keep-going --document-private-items --no-deps
+    cargo doc --workspace --profile=docs --all-features --keep-going --document-private-items --no-deps
 
 # Generate code coverage on CI.
 [group('ci')]
-coverage-ci: _coverage-ci-setup
-    cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --no-report nextest
-    cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --no-report --doc
+coverage-ci: _coverage-setup _install_ci_matchers
+    cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
+    cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info
 
-_coverage-ci-setup: (_rustup_component "llvm-tools") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version) _install_ci_matchers
+_coverage-setup: (_rustup_component "llvm-tools") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
 
 # Check for security vulnerabilities on CI.
 [group('ci')]
@@ -310,11 +532,14 @@ vet-ci: (_install "cargo-vet@" + vet_version)
 @_docs CMD="dev" *FLAGS: _docs-install
     yarn vitepress {{CMD}} {{FLAGS}}
 
-@_install +CRATES:
-    cargo install {{quiet_flag}} --locked {{CRATES}}
+@_install +CRATES: _install-binstall
+    cargo binstall {{quiet_flag}} --locked --disable-telemetry --no-confirm --only-signed {{CRATES}}
 
 @_install-jp *args:
     cargo install {{quiet_flag}} --locked --path crates/jp_cli {{args}}
+
+@_install-binstall:
+    cargo install {{quiet_flag}} --locked --version {{binstall_version}} cargo-binstall
 
 [working-directory: 'docs']
 @_docs-install:

@@ -1,7 +1,9 @@
+use std::cmp;
+
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 
-use crate::{Output, ctx::Ctx};
+use crate::{cmd::Output, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Use {
@@ -21,7 +23,7 @@ impl Use {
                 .filter(|(id, _)| id != &&active_id)
                 .collect::<Vec<_>>();
 
-            conversations.sort_by(|a, b| b.1.last_activated_at.cmp(&a.1.last_activated_at));
+            conversations.sort_by_key(|b| cmp::Reverse(b.1.last_activated_at));
             conversations
                 .into_iter()
                 .next()
@@ -31,7 +33,9 @@ impl Use {
         let id_fmt = id.to_string().bold().yellow();
         let active_id = ctx.workspace.active_conversation_id();
         if id == active_id {
-            return Ok(format!("Already active conversation: {id_fmt}").into());
+            ctx.printer
+                .println(format!("Already active conversation: {id_fmt}"));
+            return Ok(());
         }
 
         if ctx
@@ -42,11 +46,11 @@ impl Use {
             Err((1, format!("Conversation not found: {}", id_fmt.red())))?;
         }
 
-        Ok(format!(
+        ctx.printer.println(format!(
             "Switched active conversation from {} to {}",
             active_id.to_string().bold().grey(),
             id.to_string().bold().yellow()
-        )
-        .into())
+        ));
+        Ok(())
     }
 }

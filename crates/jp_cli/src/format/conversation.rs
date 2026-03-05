@@ -5,7 +5,7 @@ use comfy_table::{Cell, CellAlignment, Row, Table};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 
-use crate::datetime::DateTimeFmt;
+use super::datetime::DateTimeFmt;
 
 pub struct DetailsFmt {
     /// The ID of the conversation.
@@ -35,11 +35,8 @@ pub struct DetailsFmt {
     /// Display the timestamp of conversation expiration.
     pub expires_at: Option<DateTime<Utc>>,
 
-    /// Use OSC-8 hyperlinks.
-    pub hyperlinks: bool,
-
-    /// Use color in the output.
-    pub color: bool,
+    /// Pretty-print the output.
+    pub pretty: bool,
 }
 
 impl DetailsFmt {
@@ -55,20 +52,13 @@ impl DetailsFmt {
             last_message_at: None,
             last_activated_at: None,
             expires_at: None,
-            hyperlinks: true,
-            color: true,
+            pretty: true,
         }
     }
 
     #[must_use]
     pub fn with_event_count(mut self, message_count: usize) -> Self {
         self.message_count = message_count;
-        self
-    }
-
-    #[must_use]
-    pub fn with_assistant_name(mut self, assistant_name: Option<impl Into<String>>) -> Self {
-        self.assistant_name = assistant_name.map(Into::into);
         self
     }
 
@@ -115,14 +105,8 @@ impl DetailsFmt {
 
     /// Use color in the output.
     #[must_use]
-    pub fn with_color(self, color: bool) -> Self {
-        Self { color, ..self }
-    }
-
-    /// Use OSC-8 hyperlinks.
-    #[must_use]
-    pub fn with_hyperlinks(self, hyperlinks: bool) -> Self {
-        Self { hyperlinks, ..self }
+    pub fn with_pretty_printing(self, pretty: bool) -> Self {
+        Self { pretty, ..self }
     }
 
     /// Return the title of the conversation.
@@ -151,7 +135,7 @@ impl DetailsFmt {
         if let Some(active) = self.active_conversation {
             map.push((
                 "Last Activated".to_owned(),
-                if active == self.id && self.color {
+                if active == self.id && self.pretty {
                     "Currently Active".green().bold().to_string()
                 } else if active == self.id {
                     "Currently Active".to_owned()
@@ -189,7 +173,7 @@ impl DetailsFmt {
         for (key, value) in map {
             let mut row = Row::new();
             row.add_cell(
-                Cell::new(if self.color {
+                Cell::new(if self.pretty {
                     key.bold().to_string()
                 } else {
                     key

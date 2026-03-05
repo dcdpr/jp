@@ -29,7 +29,7 @@ use crate::{
 };
 
 /// Manages multiple MCP clients and delegates operations to them
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Client {
     /// All MCP servers known to the client.
     servers: Arc<RwLock<IndexMap<McpServerId, McpProviderConfig>>>,
@@ -281,7 +281,7 @@ impl Client {
                 })?;
 
                 // Create a timeout for the connection
-                let timeout = Duration::from_secs(60);
+                let timeout = Duration::from_mins(1);
 
                 // Serve the client with timeout
                 let client = tokio::time::timeout(timeout, async { ().serve(child_process).await })

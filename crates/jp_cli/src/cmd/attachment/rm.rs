@@ -1,7 +1,7 @@
 use jp_config::{Config as _, PartialAppConfig, conversation::attachment::AttachmentConfig};
 use jp_workspace::Workspace;
 
-use crate::{IntoPartialAppConfig, Output, ctx::Ctx, parser::AttachmentUrlOrPath};
+use crate::{IntoPartialAppConfig, cmd::Output, ctx::Ctx, parser::AttachmentUrlOrPath};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Rm {
@@ -13,7 +13,7 @@ impl Rm {
     pub(crate) fn run(self, _: &mut Ctx) -> Output {
         // See `apply_cli_config` for implementation.
 
-        Ok(().into())
+        Ok(())
     }
 }
 

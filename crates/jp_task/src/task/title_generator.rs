@@ -10,8 +10,18 @@ use jp_config::{
     },
     providers::llm::LlmProviderConfig,
 };
-use jp_conversation::{ConversationId, ConversationStream};
-use jp_llm::{provider, structured};
+use jp_conversation::{
+    ConversationEvent, ConversationId, ConversationStream,
+    event::{ChatRequest, ChatResponse},
+    event_builder::EventBuilder,
+    thread::ThreadBuilder,
+};
+use jp_llm::{
+    event::Event,
+    provider,
+    retry::{RetryConfig, collect_with_retry},
+    title,
+};
 use jp_workspace::Workspace;
 use tokio_util::sync::CancellationToken;
 use tracing::{trace, warn};
@@ -50,7 +60,7 @@ impl TitleGeneratorTask {
         let model_id = model.id.finalize(&config.providers.llm.aliases)?;
 
         // If reasoning is explicitly enabled for title generation, use it,
-        // otherwise limit it to
+        // otherwise limit it to low effort.
         if model.parameters.reasoning.is_none() {
             model.parameters.reasoning = Some(
                 CustomReasoningConfig {
@@ -74,13 +84,59 @@ impl TitleGeneratorTask {
         trace!(conversation_id = %self.conversation_id, "Updating conversation title.");
 
         let provider = provider::get_provider(self.model_id.provider, &self.providers)?;
-        let query = structured::titles::titles(1, self.events.clone(), &[])?;
-        let titles: Vec<_> =
-            structured::completion(provider.as_ref(), &self.model_id, query).await?;
+        let model = provider.model_details(&self.model_id.name).await?;
 
-        trace!(titles = ?titles, "Received conversation titles.");
-        if let Some(title) = titles.into_iter().next() {
-            self.title = Some(title);
+        let sections = title::title_instructions(1, &[]);
+        let thread = ThreadBuilder::default()
+            .with_events(self.events.clone())
+            .with_sections(sections)
+            .build()?;
+
+        let schema = title::title_schema(1);
+        let mut events = thread.events.clone();
+        events.add_chat_request(ChatRequest {
+            content: "Generate a title for this conversation.".into(),
+            schema: Some(schema),
+        });
+
+        let query = jp_llm::query::ChatQuery {
+            thread: jp_conversation::thread::Thread { events, ..thread },
+            tools: vec![],
+            tool_choice: jp_config::assistant::tool_choice::ToolChoice::default(),
+        };
+
+        let retry_config = RetryConfig::default();
+        let llm_events =
+            collect_with_retry(provider.as_ref(), &model, query, &retry_config).await?;
+
+        // Pipe raw streaming events through the EventBuilder so that
+        // structured JSON chunks are concatenated and parsed into a
+        // proper Value (rather than individual Value::String fragments).
+        let mut builder = EventBuilder::new();
+        let mut flushed = Vec::new();
+        for event in llm_events {
+            match event {
+                Event::Part { index, event } => builder.handle_part(index, event),
+                Event::Flush { index, metadata } => {
+                    flushed.extend(builder.handle_flush(index, metadata));
+                }
+                Event::Finished(_) => flushed.extend(builder.drain()),
+            }
+        }
+
+        let structured_data = flushed
+            .into_iter()
+            .filter_map(ConversationEvent::into_chat_response)
+            .find_map(ChatResponse::into_structured_data);
+
+        if let Some(data) = structured_data {
+            let titles = title::extract_titles(&data);
+            trace!(titles = ?titles, "Received conversation titles.");
+            if let Some(t) = titles.into_iter().next() {
+                self.title = Some(t);
+            }
+        } else {
+            warn!(conversation_id = %self.conversation_id, "No structured data in title response.");
         }
 
         Ok(())

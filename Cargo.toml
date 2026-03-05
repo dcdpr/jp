@@ -11,7 +11,7 @@ jp_attachment_http_content = { path = "crates/jp_attachment_http_content" }
 jp_attachment_mcp_resources = { path = "crates/jp_attachment_mcp_resources" }
 jp_config = { path = "crates/jp_config" }
 jp_conversation = { path = "crates/jp_conversation" }
-jp_format = { path = "crates/jp_format" }
+jp_editor = { path = "crates/jp_editor" }
 jp_github = { path = "crates/jp_github" }
 jp_id = { path = "crates/jp_id" }
 jp_inquire = { path = "crates/jp_inquire" }
@@ -21,7 +21,6 @@ jp_mcp = { path = "crates/jp_mcp" }
 jp_md = { path = "crates/jp_md" }
 jp_openrouter = { path = "crates/jp_openrouter" }
 jp_printer = { path = "crates/jp_printer" }
-jp_serde = { path = "crates/jp_serde" }
 jp_storage = { path = "crates/jp_storage" }
 jp_task = { path = "crates/jp_task" }
 jp_term = { path = "crates/jp_term" }
@@ -44,7 +43,7 @@ clap = { version = "4", default-features = false }
 clean-path = { version = "0.2", default-features = false }
 comfy-table = { version = "7", default-features = false }
 comrak = { version = "0.50", default-features = false }
-convert_case = { version = "0.10", default-features = false }
+convert_case = { version = "0.11", default-features = false }
 crossbeam-channel = { version = "0.5", default-features = false }
 crossterm = { version = "0.29", default-features = false }
 dhat = { version = "0.3", default-features = false }
@@ -52,12 +51,12 @@ directories = { version = "6", default-features = false }
 duct = { version = "1", default-features = false }
 duct_sh = { version = "1", default-features = false }
 dyn-clone = { version = "1", default-features = false }
-dyn-hash = { version = "0.2", default-features = false }
-fancy-regex = { version = "0.16", default-features = false }
+dyn-hash = { version = "1", default-features = false }
+fancy-regex = { version = "0.17", default-features = false }
 futures = { version = "0.3", default-features = false }
 gemini_client_rs = { git = "https://github.com/JeanMertz/gemini-client", default-features = false } # <https://github.com/Adriftdev/gemini-client/pull/16>
 glob = { version = "0.3", default-features = false }
-grep-printer = { version = "0.2", default-features = false }
+grep-printer = { version = "0.3", default-features = false }
 grep-regex = { version = "0.1", default-features = false }
 grep-searcher = { version = "0.1", default-features = false }
 httpmock = { git = "https://github.com/JeanMertz/httpmock", branch = "tweaks", default-features = false }
@@ -67,30 +66,26 @@ indexmap = { version = "2", default-features = false }
 indoc = { version = "2", default-features = false }
 inquire = { git = "https://github.com/JeanMertz/inquire", branch = "merged", default-features = false } # <https://github.com/mikaelmello/inquire/pull/321>
 insta = { version = "1", default-features = false }
-itertools = { version = "0.14", default-features = false }
-jsonschema = { version = "0.37", default-features = false }
 linkme = { version = "0.3", default-features = false }
 minijinja = { version = "2", default-features = false }
 ollama-rs = { version = "0.3", default-features = false }
 open-editor = { version = "1", default-features = false }
-openai = { git = "https://github.com/JeanMertz/openai", branch = "tmp", default-features = false } # <https://github.com/rellfy/openai/pull/57>
-openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs", default-features = false } # <https://github.com/m1guelpf/openai-responses-rs/pull/6>
+openai_responses = { version = "0.1", default-features = false }
 parking_lot = { version = "0.12", default-features = false }
 paste = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
 proptest = { version = "1", default-features = false }
-quick-xml = { version = "0.38", default-features = false }
+quick-xml = { version = "0.39", default-features = false }
 rayon = { version = "1", default-features = false }
 relative-path = { version = "2", default-features = false }
 reqwest = { version = "0.12", default-features = false }
 reqwest-eventsource = { version = "0.6", default-features = false }
 rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", rev = "18346b94e4e71463a06d93852cfc26c683ca5b83" }
-rusqlite = { version = "0.37", default-features = false }
+rusqlite = { version = "0.38", default-features = false }
 saphyr = { git = "https://github.com/JeanMertz/saphyr", branch = "jean/fix-multinewline-endings", default-features = false } # <https://github.com/saphyr-rs/saphyr/pull/90>
 schemars = { version = "1.0.0-alpha.17", default-features = false }
-schemars_08 = { package = "schemars", version = "0.8.22", default-features = false }
-schematic = { git = "https://github.com/JeanMertz/schematic", branch = "merged", default-features = false }
+schematic = { version = "0.19", default-features = false }
 serde = { version = "1", default-features = false }
 serde-untagged = { version = "0.1", default-features = false }
 serde_json = { version = "1", default-features = false }
@@ -99,24 +94,29 @@ serde_yaml = { version = "0.9", default-features = false }
 serial_test = { version = "3", default-features = false }
 sha1 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false }
+shlex = { version = "1", default-features = false }
 similar = { version = "2", default-features = false }
 strip-ansi-escapes = { version = "0.2", default-features = false }
 syntect = { version = "5.3", default-features = false }
-termimad = { version = "0.34", default-features = false }
 test-log = { version = "0.2", default-features = false, features = ["trace"] }
 thiserror = { version = "2", default-features = false }
-timeago = { version = "0.5", default-features = false }
+timeago = { version = "0.6", default-features = false }
 tokio = { version = "1", default-features = false, features = ["full"] }
 tokio-stream = { version = "0.1", default-features = false }
 tokio-util = { version = "0.7", default-features = false }
-toml = { version = "0.9", default-features = false }
+toml = { version = "1", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
-two-face = { version = "0.4", default-features = false }
+two-face = { version = "0.5", default-features = false }
 typetag = { version = "0.2", default-features = false }
 unicode-width = { version = "0.2", default-features = false }
 url = { version = "2", default-features = false }
 which = { version = "8", default-features = false }
+
+[patch.crates-io]
+miette = { git = "https://github.com/zkat/miette" } # <https://github.com/zkat/miette/pull/439>
+openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs" } # <https://github.com/m1guelpf/openai-responses-rs/pull/6>
+schematic = { git = "https://github.com/JeanMertz/schematic", branch = "merged" }
 
 [workspace.package]
 authors = ["Jean Mertz <git@jeanmertz.com>"]
@@ -162,12 +162,21 @@ struct_field_names = "allow"
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"
 
+[workspace.metadata.vet]
+store = { path = './.config/supply-chain' }
+
 [profile.profiling]
 inherits = "release"
 debug = true
 
-[workspace.metadata.vet]
-store = { path = './.config/supply-chain' }
+[profile.coverage]
+inherits = "dev"
 
-[workspace.metadata.cargo-shear]
-ignored = ["jp_md"]
+[profile.lint]
+inherits = "dev"
+
+[profile.docs]
+inherits = "dev"
+
+[profile.nextest]
+inherits = "test"

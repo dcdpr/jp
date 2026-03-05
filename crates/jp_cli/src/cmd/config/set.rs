@@ -6,7 +6,7 @@ use jp_config::{
 };
 
 use super::TargetWithConversation;
-use crate::{Output, ctx::Ctx};
+use crate::{cmd::Output, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Set {
@@ -54,11 +54,11 @@ impl Set {
                 .try_get_events_mut(&id)?
                 .add_config_delta(new_config);
 
-            return Ok(format!(
+            ctx.printer.println(format!(
                 "Set configuration value for {} in conversation {id:?}",
                 self.key
-            )
-            .into());
+            ));
+            return Ok(());
         }
 
         let Some(mut config) = self.target.target.config_file(ctx)? else {
@@ -75,10 +75,10 @@ impl Set {
         }
         fs::write(&config.path, config.content)?;
 
-        Ok(format!(
+        ctx.printer.println(format!(
             "Set configuration value for {} in {}",
             self.key, config.path,
-        )
-        .into())
+        ));
+        Ok(())
     }
 }

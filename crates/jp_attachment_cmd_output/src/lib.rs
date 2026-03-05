@@ -140,10 +140,16 @@ impl Handler for Commands {
 }
 
 fn uri_to_command(uri: &Url) -> Result<Command, Box<dyn Error + Send + Sync>> {
+    if uri.cannot_be_a_base() {
+        return parse_opaque_command(uri);
+    }
+
     let cmd = uri.host_str().ok_or("Invalid command URI")?;
     let args = uri
         .query_pairs()
-        .filter_map(|(k, v)| (k == "arg").then(|| v.to_string()))
+        .filter_map(|(k, v)| {
+            (k == "arg" || k == "args" || k == "arg[]" || k == "args[]").then(|| v.to_string())
+        })
         .map(|v| percent_decode_str(&v))
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -154,6 +160,25 @@ fn uri_to_command(uri: &Url) -> Result<Command, Box<dyn Error + Send + Sync>> {
     Ok(Command {
         cmd: cmd.to_string(),
         args,
+        description,
+    })
+}
+
+/// Parse an opaque-path URL like `cmd:git diff --cached`.
+///
+/// The path is split using shell-word rules, so quoting works:
+/// `cmd:git commit -m 'hello world'` produces `["git", "commit", "-m", "hello world"]`
+fn parse_opaque_command(uri: &Url) -> Result<Command, Box<dyn Error + Send + Sync>> {
+    let parts = shlex::split(uri.path()).ok_or("Invalid shell quoting in command")?;
+    let (cmd, args) = parts.split_first().ok_or("Empty command")?;
+
+    let description = uri
+        .query_pairs()
+        .find_map(|(k, v)| (k == "description").then(|| v.to_string()));
+
+    Ok(Command {
+        cmd: cmd.clone(),
+        args: args.to_vec(),
         description,
     })
 }
@@ -182,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn test_uri_to_command_to_uri() {
+    fn test_uri_to_command_hierarchical() {
         let cases = [
             (
                 "cmd://ls",
@@ -246,6 +271,63 @@ mod tests {
             if let Ok(command) = command {
                 assert_eq!(command.to_uri("cmd").unwrap(), uri);
             }
+        }
+    }
+
+    #[test]
+    fn test_uri_to_command_opaque() {
+        let cases = [
+            (
+                "cmd:ls",
+                Ok(Command {
+                    cmd: "ls".to_string(),
+                    args: vec![],
+                    description: None,
+                }),
+            ),
+            (
+                "cmd:git diff --cached",
+                Ok(Command {
+                    cmd: "git".to_string(),
+                    args: vec!["diff".to_string(), "--cached".to_string()],
+                    description: None,
+                }),
+            ),
+            (
+                "cmd:ls -l -a -h",
+                Ok(Command {
+                    cmd: "ls".to_string(),
+                    args: vec!["-l".to_string(), "-a".to_string(), "-h".to_string()],
+                    description: None,
+                }),
+            ),
+            (
+                "cmd:git commit -m 'hello world'",
+                Ok(Command {
+                    cmd: "git".to_string(),
+                    args: vec![
+                        "commit".to_string(),
+                        "-m".to_string(),
+                        "hello world".to_string(),
+                    ],
+                    description: None,
+                }),
+            ),
+            (
+                "cmd:git diff --cached?description=staged changes",
+                Ok(Command {
+                    cmd: "git".to_string(),
+                    args: vec!["diff".to_string(), "--cached".to_string()],
+                    description: Some("staged changes".to_string()),
+                }),
+            ),
+            ("cmd:", Err("Empty command")),
+        ];
+
+        for (uri, expected) in cases {
+            let uri = Url::parse(uri).unwrap();
+            let command = uri_to_command(&uri).map_err(|e| e.to_string());
+            assert_eq!(command, expected.map_err(str::to_string));
         }
     }
 

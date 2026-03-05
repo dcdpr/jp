@@ -3,7 +3,7 @@ use std::fs;
 use jp_config::PartialAppConfig;
 
 use super::Target;
-use crate::{Error, Output, Success, cmd, ctx::Ctx};
+use crate::{Error, cmd::Output, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Fmt {
@@ -41,28 +41,15 @@ impl Fmt {
             vec![self.target]
         };
 
-        let mut results: Vec<Output> = vec![];
-        for target in targets {
-            match self.fmt_target(target, ctx) {
-                Ok(msg) => results.push(Ok(msg.into())),
-                Err(err) => {
-                    let mut metadata = vec![("message".to_owned(), err.to_string().into())];
-                    let mut source = err.source();
-                    while let Some(error) = source {
-                        metadata.push((String::new(), error.to_string().into()));
-                        source = error.source();
-                    }
-
-                    results.push(Err(cmd::Error::from(metadata)));
-                }
-            }
-        }
-
         let mut ok = true;
         let mut msg = String::new();
+        let results = targets
+            .into_iter()
+            .map(|target| self.fmt_target(target, ctx));
+
         for result in results {
             match result {
-                Ok(Success::Message(v)) if !v.trim().is_empty() => {
+                Ok(v) if !v.trim().is_empty() => {
                     msg.push_str(v.trim());
                     msg.push('\n');
                 }
@@ -77,7 +64,8 @@ impl Fmt {
         }
 
         if ok {
-            Ok(msg.into())
+            ctx.printer.println(msg.trim());
+            Ok(())
         } else {
             Err(Error::CliConfig(msg).into())
         }

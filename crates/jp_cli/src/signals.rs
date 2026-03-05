@@ -8,7 +8,7 @@ pub type SignalTx = broadcast::Sender<SignalTo>;
 pub type SignalRx = broadcast::Receiver<SignalTo>;
 
 /// Control messages used to drive application lifecycle events.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SignalTo {
     /// Reload config from the filesystem.
     ReloadFromDisk,
@@ -54,6 +54,7 @@ pub struct SignalHandler {
 impl SignalHandler {
     /// Create a new signal handler with space for 128 control messages at a
     /// time, to ensure the channel doesn't overflow and drop signals.
+    #[must_use]
     pub fn new() -> (Self, SignalRx) {
         let (tx, rx) = broadcast::channel(128);
         let handler = Self {
@@ -65,6 +66,7 @@ impl SignalHandler {
     }
 
     /// Clones the transmitter.
+    #[must_use]
     pub fn clone_tx(&self) -> SignalTx {
         self.tx.clone()
     }

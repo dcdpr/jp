@@ -11,6 +11,9 @@ pub enum Error {
     #[error("Storage error: {0}")]
     Storage(#[from] jp_storage::Error),
 
+    #[error("Error loading workspace state")]
+    Load(#[from] jp_storage::LoadError),
+
     #[error("Config error: {0}")]
     Config(#[from] jp_config::Error),
 
