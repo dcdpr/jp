@@ -1,0 +1,56 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Generating titles in JSON**\n\nThe user wants a concise title for our conversation, so I'll provide a few options. I think something like \"Title Generation Request\" or \"Generate a Conversation Title\" could work well. I want to give them five brief titles total, in a valid JSON format, as expected. \n\nI'll finalize with options like: \"Generate a Title for This Conversation,\" \"Conversation Title Request,\" \"Create a Conversation Title,\" \"Naming This Conversation,\" and \"Conversation Title Generator.\" I’ll structure it in JSON format only.",
+                    },
+                ),
+                metadata: {
+                    "openai_encrypted_content": String("gAAAAABplbbKnJl6YgCEtEWkknQeMuKv8QRYSFNlTAfJF0Kyjfa1os8RM_sDvreT5Ph6YpJm05ukmHrG3Lp_-i-36uhAJqS1p1dSpJtDVaL-4kGzYg8ZrFGRDDQybnJAzw4n5ku2mlhoQRq11KknZQ9TD-HojiSkBdTImHHeeVdAZxeW3uKiP1EULIke31B3uSWEW-qYYJRSpwTYupMPZiMUgepaOVE0rdm4HITniTYHwi7ZJ_LnlHYWj1QDkbmPx3eyuO8eqn1bhxeA6lc39lESFTPZXzCj8YGd5WEFPV3jewtxgAMOS1He7CSf2bjXGd0Gwx443lx-tRxQxmzhUZCBxSJZFjnO90NM-X8GHybET-2VOZufoC93XesyQJ8G8rGDwiX_SbM5Br07rNqWeVJrUoYK-IF2Sg2SOzThS8CCSdUZyyuc4AKWQW1u3oZlt_ccT1OpcDm4vqGedcRUKEEcFSZOPyMU6OHR7zM-Wb3GcJ-NXBoOpxC_FL71AO63bW4F-V51kfquuI4AXwc_X4pkLWqQgrkzRZsojoFCpG-Z4P338f5lw7smDVRJIbBBF_thY91XuSHz0skW3bGA8mafFoec_wbE9_fwfBUZAbS5F3Ui49O6wmkzvg0eHOZrMm_vti7LirW6rKlUF90ygELCqC9bymUEe2ZMiFMuDdrUKL16t4joSM4_sICUcAoIsdlvXKpXu-PfNglj2_RHYsTklchGOa3rdKIDkUpHVdTMXQHqAzbh6FLROjkvJKuXLMkQsC6GmPSxLvbjbc5j67BfotqWuYvwARX-NV-Xksvy6qWCbbXOR96ItIw46AycUNELiiTr1WbaSiGgC7qavfhQL4zCvJ7WHt0wcsrIzMAOy39QXsjVnODZpUie85Eiq6eORglvr_EeamiaIxJVHxBBd9SpaiDLtZQhRw2klErgWKz7pFu6AzHLlqLeojuEMNJ4fCgKdg7C7p8NZMBijXDS7B46WJfTkLsY3l_30PZ3B39JAev3WyBgGq7jmfTv0-mcqzEOnaWK4NZUt3GEnpBpXwQtthh00BOGUFrhtbfNcoiiVefj09zfee9Rz1cJjGv2bHo95mqatqYHZLK0oSWVm1LS7DDb1GgASC8NY-D7HDz8k3bQGhx3d6xTXLgKTYllkKHmQO4-sC6zjN2-b8lIKDIKg7YnUkLVhJo3Llf_zT3himlvdK5ECWcCmulQ1uJSakaZp8ffREy-9NIuFid_6zxvs8RBulOtkLFbfJ4PvT96gHhjD2ZJ3bf2oTIZ4H2xQWla3jgy2Fo69_GzHtZWK7-zmvmbNCojZtIVC3aPgNM352_gjtBv-zWlj2Ab1prv3hAOKoC9j0SENs-evBcXXZzETyC-e7FQiByYS7JOWKeK-cWBS7h5RaVRoF8lipASdHAKj6EAIianQxJNz5UfvgpPozrqPrmTDXgyi1q6zMpqbdurMIBdSaKa2CG-CbzI4LuVHkCHtFHzTdO3BDe2u0lDXixb3LwBUQzJ-5k8X7eoYyG77LrOeDhQPr9qcmtYPKjPDVxg6vsynYqcIaLHtYk0QGC7rziE1X0D96IKKeTDrWsFkefg29CXbuUw63fQQ_I1EU1AGKVrarwUjlsyMjU5BWAe5VTPmq3R4Jj3ecl20h7-PhlXnAp1BCvIYnMd8IKGvxclyudm_zZBx5qDdj88HO7KBInxLQdi9PCyvucRqZ8Takqs8PiWwObVqtTH_5_FrUcqC4HT4tyJdZ-zDTrv-lXb9lUrPWMIsLph5PC_mL2aAZk9NHYVjGFS-F1HnMjpTVQrdPFLCEXGcmpQ6p0ZevSeGsjhMKMqBBldobQo9iGw44ugp5ShSQEhwR5kD4IAYyMj7hRoqHrbYACpcCKE9AX1SDaMYj769kWXspiE4byyJeUfEGkbGOQBsvp8R2k0ZESRYCYXU5vuCC7MgEjG0w0UyD_SKBT2AEpNpiAJP8aH5WKLzyNyjSCff1nzvR9wxyL3kG1SRAtu6oI_gPXLBOG_i4MNk97_Ty2zAlce6vmMuKsW0dGcIQUd9oTDVW5B8J69YiMFY_H-LBMxNIW87kaidy5BQJg9hWEFtOha0ta82ZFA3_FzFpwTuokN9kE5f4-qg5BcGcUspTabZ-E0c2tu9g=="),
+                    "openrouter_metadata": Array [
+                        Object {
+                            "id": String("rs_09344b1fc3c9cf6d016995b6c5050c8194b08a368191cabc65"),
+                            "index": Number(0),
+                            "field": String("openai_encrypted_content"),
+                        },
+                    ],
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Structured {
+                        data: Object {
+                            "titles": Array [
+                                String("Generate a Title for This Conversation','Conversation Title Request','Create a Conversation Title','Naming This Conversation','Conversation Title Generator"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

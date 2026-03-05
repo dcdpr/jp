@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -145,7 +168,13 @@ expression: v
     "id": "run_me_0",
     "name": "run_me",
     "arguments": {
-      "bar": "Zm9v"
+      "bar": [
+        "YXBwbGU=",
+        "YmFuYW5h"
+      ]
+    },
+    "metadata": {
+      "google_thought_signature": "Q2lRQnZqNzIrM0V6bnl2ZzlqaVVoY2E2NFhVSGRiSWJsMnlvZWZhUkFKQW5WRFhhQlV3S1lnRytQdmI3TWlIT2lkVkNDeVFHZXI0Nlp3Q3NpL20rbWw5UFlxbUt3S1NQdndkZGczN3huQ1hlVnpoNlVsc0lFaThYU2J2Mk0zbWI5NmU2WXJnTTQ1dTBSYkZWMHpqOFplOGpUakd4Rm9sendtRnlkVU5EZkRGbUpnZTN4eGFtMGtleUNzOEJBYjQrOXZ2SzlhNHN5aENuWEVyODFQdEpxVEN6dlNoSm0rVEt1UFhVblNaUTd5U3JtR2tWVFZLNmd6TXBCbkswS3huMWo3dXE4ZHMxb25qdlJJelZuSk92QkR6dEpPc216YVVoOWRYYW1yUzJBTHpIdFB0MWdYbS91TnFGbE5PVThZTllkMzV0Uy9BSU11K2FaT2I4VW0vbTZtaUJnNkZzdFhwT2ZLZEFDYUd0bERxSGlQQmhlRmpZWEIrZXE0MUVCQStxU0NNc3JVWU16RXZxTDhtSkMrc3NTTHhYU1VXOU44NUxVRkVzNlFad0NmK0RCQnpjMmdvN0oycFJEZEZsSnR0bEhBSk44T1VqblZrSTF3Sk1DdGtCQWI0Kzl2dUY3dEdDWXVEWmRWTmovUDBMM05ENW1HV082Wnl6TDBNWE5RZEdDNHhEZGZSWjlmQy9Cd1ZHQ2NxeXA4VElqcFl6a2IyYTdnVkJPYmVveU9VZUkzTStkcnZxc2pKZTFjYUxZQnhuQ1VQRXBNMXd4dlZOWlFTNVRYeDF2OGZZNkcyeFBxaXlDdmZKNkdyNHlnR01GSzBRQ3pWLyt6SGVDTFlic2VIeENlWkxGL2dXMHI1S1VqQ2dmaEtMVUtOdWdVeVpBOFFkbzBYc2k4RFk3YkYxUEZFdkU1VmlFbkM3SGdLMGF5L2dsb2puZnZZZ2dSSCtrWTRwTGw4bk9SSE9wakhlc0hGWFg2WDRPU0xSR3dDZHJDWXBYUVg3bHdxL0FRRytQdmI3dEdOdkEvMmpWRVB6M09COUhoQWx1Vk5qVHV1Z3ZaSE1nVldWRGVKNS9DTStzR3dheHVzc3V3TkFFZk9QVXNnSW9IaTJWVTNDd285R3drV21ZQ0F0VVllYTdpcGtFdWNKc3JHVHBJZHFjekJRWUxvWmpvbDVHTXpMZHJnM3hnY0RUY3ZSdWE4eEwySmp4VVp0T1ZFRUh1N1lwRVFGR1Z0R0JYZ0o5a0crR3NBekM3NHZVSk9TNlR4ZEE1aUhEOHBMVEcwY3lzN1cxZW9MNUJBU3pWaXdtNnM3WWhxbkJaOS92TndFcEFWWXFzQ3JMZVlqd3FRZElraGpDdG9CQWI0Kzl2dkJ5UUNRcGdOcjM1R2lrTVZtbmxyS0J3MUk2TnI2TVhQa1FCb0RWb01mOGZKNU9yTmx5YnZ5emVNVTRNRjk3NUYvZytjWExQKzR2cVU5c01ubXNrOEE4WW83cUdvcStUZnpyRi9WQnBnSTJOSTJod09vQm4zZjNpQVRqOSs3bFNndWcxMUdCM1NoV3kwRGRnekl0dlh5S3VGQzM1MFRnZTFmRklZZWxZeWVVcnBaNEsxOVAzcndOcjZwQ28wZkR6T0JSbjVUNGNJb1MzWThYZjRsUWFhRW0xNE5EWS9mRTVBUVdtdkU3ZDdPcmJDQTdEcDF0M3lmSGR2U1czMGEwcWlsVHJYZkNsTmNkL0s5OUMzV2pwNU5nb09TYmVBS2t3RUJ2ajcyKzlPZjh2Mm9DUGtXdUpsNExJNjZ6dkxiQ0MrSDE0YkpmQ29Ld1NkdndCSWhuUFo0R0Ezb1FRa0hKd3J1NksrcmUray9sWkVqN3N0UnZXZHc4dUhEeVVCV3RBd2RZOVhZdjFHcVNEQmZWOTBkSDYwV3NLbVV0SlJwNVVhdU5zNXVxVXc2WDNSRmdaeWs1QkdKOVNGODZudW51bUZKYlRLNSsxRWhjRFNOQlduMjNnVkwwcFJvQzJ6MFBDWHQyTzA9"
     }
   },
   {
@@ -167,10 +196,5 @@ expression: v
     "id": "run_me_0",
     "content": "d29ya2luZyE=",
     "is_error": false
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "Okay, I ran the tool with the `bar` argument set to `\"foo\"`. The output was:\n\n```json\n{\"run_me_response\": {\"content\": \"working!\"}}\n```\n\nThis indicates that the `run_me` function was successfully executed and returned the string \"working!\".\n\nWould you like me to try running the tool with different arguments, or perform another action?"
   }
 ]

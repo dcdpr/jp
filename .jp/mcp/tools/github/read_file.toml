@@ -2,29 +2,40 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-description = """
-Fetch the contents of one or more files
+summary = "Fetch the contents of one or more files"
+
+examples = """
+Read a file from the default branch:
+```json
+{"path": "Cargo.toml"}
+```
+
+Read from a specific branch in another repository:
+```json
+{"path": "src/main.rs", "ref": "develop", "repository": "owner/repo"}
+```
 """
+
+[conversation.tools.github_read_file.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
 
 [conversation.tools.github_read_file.parameters.repository]
 type = "string"
+summary = "Repository to search for code."
 description = """
-Repository to search for code.
-
 If unspecified, it defaults to the current project's GitHub repository.
 """
 
 [conversation.tools.github_read_file.parameters.path]
 type = "string"
 required = true
-description = '''
-File path to get contents of.
-'''
+summary = "File path to get contents of."
 
 [conversation.tools.github_read_file.parameters.ref]
 type = "string"
+summary = "The name of the commit/branch/tag."
 description = '''
-The name of the commit/branch/tag.
-
-If unspecified, it defaults to the repository’s default branch (usually `main`)
+If unspecified, it defaults to the repository's default branch (usually `main`)
 '''

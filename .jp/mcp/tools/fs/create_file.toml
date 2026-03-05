@@ -2,8 +2,18 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-description = """
-Create a new file in the project's local filesystem.
+summary = "Create a new file in the project's local filesystem."
+
+examples = """
+Create a file with content:
+```json
+{"path": "src/new_module.rs", "content": "//! New module.\n\npub fn hello() {}\n"}
+```
+
+Create an empty file:
+```json
+{"path": "src/placeholder.rs"}
+```
 """
 
 [conversation.tools.fs_create_file.style]
@@ -14,13 +24,9 @@ results_file_link = "off"
 [conversation.tools.fs_create_file.parameters.path]
 type = "string"
 required = true
-description = """
-The path to the file to create. The path must be relative to the project's root.
-"""
+summary = "The path to the file to create. The path must be relative to the project's root."
 
 [conversation.tools.fs_create_file.parameters.content]
 type = "string"
 required = false
-description = """
-The content of the file to create. If not specified, the file will be empty.
-"""
+summary = "The content of the file to create. If not specified, the file will be empty."

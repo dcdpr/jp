@@ -2,13 +2,15 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-description = """
-Fetch the contents of a web page over HTTP(S).
+summary = "Fetch the contents of a web page over HTTP(S)."
+
+examples = """
+```json
+{"url": "https://docs.rs/tokio/latest/tokio/"}
+```
 """
 
 [conversation.tools.web_fetch.parameters.url]
 type = "string"
 required = true
-description = """
-The URL of the web page to fetch.
-"""
+summary = "The URL of the web page to fetch."

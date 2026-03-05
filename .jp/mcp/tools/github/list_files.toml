@@ -2,31 +2,44 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+summary = "List all files in a GitHub repository."
 description = """
-List all files in a GitHub repository. Can be combined with `github_read_file`
-to fetch the contents of a file.
+Can be combined with `github_read_file` to fetch the contents of a file.
 """
+
+examples = """
+List all files in the current repo:
+```json
+{}
+```
+
+List files in a subdirectory of another repo:
+```json
+{"repository": "owner/repo", "path": "src/"}
+```
+"""
+
+[conversation.tools.github_list_files.style]
+results_file_link = "off"
+parameters = "function_call"
 
 [conversation.tools.github_read_file.parameters.repository]
 type = "string"
+summary = "Repository to search for code."
 description = """
-Repository to search for code.
-
 If unspecified, it defaults to the current project's GitHub repository.
 """
 
 [conversation.tools.github_read_file.parameters.ref]
 type = "string"
+summary = "The name of the commit/branch/tag."
 description = '''
-The name of the commit/branch/tag.
-
 If unspecified, it defaults to `HEAD`.
 '''
 
 [conversation.tools.github_read_file.parameters.path]
 type = "string"
+summary = "An optional path to filter the files by."
 description = '''
-An optional path to filter the files by.
-
 If unspecified, it defaults to the root of the repository.
 '''

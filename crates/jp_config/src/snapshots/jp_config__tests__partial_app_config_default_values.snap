@@ -76,6 +76,17 @@ Ok(
                         other: None,
                     },
                 },
+                request: PartialRequestConfig {
+                    max_retries: Some(
+                        5,
+                    ),
+                    base_backoff_ms: Some(
+                        1000,
+                    ),
+                    max_backoff_secs: Some(
+                        60,
+                    ),
+                },
             },
             conversation: PartialConversationConfig {
                 title: PartialTitleConfig {
@@ -92,6 +103,9 @@ Ok(
                         run: None,
                         result: None,
                         style: PartialDisplayStyleConfig {
+                            hidden: Some(
+                                false,
+                            ),
                             inline_results: None,
                             results_file_link: None,
                             parameters: None,
@@ -134,15 +148,61 @@ Ok(
                 reasoning: PartialReasoningConfig {
                     display: None,
                     summary_model: None,
+                    background: Some(
+                        236,
+                    ),
+                },
+                streaming: PartialStreamingConfig {
+                    progress: PartialProgressConfig {
+                        show: Some(
+                            true,
+                        ),
+                        delay_secs: Some(
+                            3,
+                        ),
+                        interval_ms: Some(
+                            100,
+                        ),
+                    },
                 },
                 tool_call: PartialToolCallConfig {
                     show: Some(
                         true,
                     ),
+                    progress: PartialProgressConfig {
+                        show: Some(
+                            true,
+                        ),
+                        delay_secs: Some(
+                            3,
+                        ),
+                        interval_ms: Some(
+                            100,
+                        ),
+                    },
+                    preparing: PartialPreparingConfig {
+                        show: Some(
+                            true,
+                        ),
+                        delay_secs: Some(
+                            3,
+                        ),
+                        interval_ms: Some(
+                            100,
+                        ),
+                    },
                 },
                 typewriter: PartialTypewriterConfig {
-                    text_delay: None,
-                    code_delay: None,
+                    text_delay: Some(
+                        DelayDuration(
+                            3ms,
+                        ),
+                    ),
+                    code_delay: Some(
+                        DelayDuration(
+                            500µs,
+                        ),
+                    ),
                 },
             },
             editor: PartialEditorConfig {

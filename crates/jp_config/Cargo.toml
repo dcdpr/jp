@@ -22,14 +22,6 @@ duct = { workspace = true }
 duct_sh = { workspace = true }
 glob = { workspace = true }
 indexmap = { workspace = true }
-minijinja = { workspace = true, features = [
-    "builtins",
-    "json",
-    "preserve_order",
-    "serde",
-    "unicode",
-] }
-quick-xml = { workspace = true, features = ["serialize"] }
 relative-path = { workspace = true, features = ["serde", "alloc", "std"] }
 schematic = { workspace = true, features = [
     "config",

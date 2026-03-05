@@ -1,0 +1,47 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Okay, the user wants a title for a conversation. But wait, they didn't provide the conversation content. Hmm, maybe they forgot to include it. Let me check the query again. The original request was just \"Generate a title for this conversation.\" So there's no conversation text here. Without the actual conversation, it's impossible to create an accurate title. I should ask them to provide the conversation details so I can generate an appropriate title. Alternatively, maybe they expected me to know the conversation from a previous interaction? But in this case, there's no prior context. So the best approach is to prompt them for the conversation content to proceed.\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Structured {
+                        data: Object {
+                            "titles": Array [
+                                String("Conversation Title: [Please provide the conversation content to generate an accurate title]"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

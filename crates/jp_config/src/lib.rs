@@ -51,6 +51,7 @@ pub mod util; // TODO: Rename
 use std::sync::Arc;
 
 pub use error::Error;
+use indexmap::IndexMap;
 pub use partial::ToPartial;
 use relative_path::RelativePathBuf;
 pub use schematic::{Config, ConfigError, PartialConfig};
@@ -297,6 +298,37 @@ impl AppConfig {
         }
 
         output
+    }
+
+    /// Return a list of all environment variable names in the configuration.
+    ///
+    /// ```rust
+    /// # use jp_config::AppConfig;
+    ///
+    /// assert_eq!(AppConfig::envs()[0..5], [
+    ///     (
+    ///         "config_load_paths".to_owned(),
+    ///         "JP_CFG_CONFIG_LOAD_PATHS".to_owned()
+    ///     ),
+    ///     ("extends".to_owned(), "JP_CFG_EXTENDS".to_owned()),
+    ///     ("inherit".to_owned(), "JP_CFG_INHERIT".to_owned()),
+    ///     (
+    ///         "template.values".to_owned(),
+    ///         "JP_CFG_TEMPLATE_VALUES".to_owned()
+    ///     ),
+    ///     (
+    ///         "style.typewriter.code_delay".to_owned(),
+    ///         "JP_CFG_STYLE_TYPEWRITER_CODE_DELAY".to_owned()
+    ///     ),
+    /// ]);
+    /// ```
+    #[must_use]
+    pub fn envs() -> IndexMap<String, String> {
+        Self::fields()
+            .into_iter()
+            .map(|k| (format!("JP_CFG_{}", k.to_uppercase().replace('.', "_")), k))
+            .map(|(k, v)| (v, k))
+            .collect()
     }
 
     /// Convert this configuration to a partial configuration containing only

@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -126,7 +149,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Hello! I am a large language model, trained by Google. How can I help you today?"
+    "message": "Received! How can I help you today?"
   },
   {
     "type": "config_delta",
@@ -152,7 +175,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Analyzing Task Requirements**\n\nI've been examining the user's instructions and am focused on understanding the core elements: recognizing and repeating the preceding message. I am now working to ensure that future responses precisely follow the constraints regarding format and word count. My objective is to create updates that accurately reflect any progress.\n\n\n"
+    "reasoning": "**Repeating the Input**\n\nI am now focusing on repeating the last user message. It was \"Test message.\" My sole task is to reproduce this text accurately. This should be a straightforward repetition, with no alterations or interpretations needed.\n\n\n"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
@@ -184,6 +207,9 @@ expression: v
     "name": "run_me",
     "arguments": {
       "bar": "Zm9v"
+    },
+    "metadata": {
+      "google_thought_signature": "Q2k4QnZqNzIrMEhsK1V1SXRXeDJJdUw5bElIZTQxN0VRWk5UNHAvdFZkZUlVYVM0Zm9RNnlRM05FSHFRMmlkREVRcFpBYjQrOXZ0VGRNazdha1F1YWYrL3JFc1Ewcno0WDVIQWdKS3NXSnBWTUs1Q3NPMW9SV09Xa2tiRHRSUGg1Nmdwa0ZKeWduT0FrS2I4MDJEdUNXc015MENRTW9rZDVQNWk1UGlkV3VoZit1czFhaVc3d1Y0WVdDc0syUUVCdmo3MiszSTBndEZ6TmgvVE53cjJyb0Q0M2VTaDJkcWRPdi9PdTc2Wjdlb2VoRC9IRmduSVA0dng4SmErUmpNV0l2aEl0SEp1UmhaY0VUeTFhV2tHQ1FzS1lMSnh5ZnpoMzY0OUt4T2M2MTN6a2h0cU5hditqRWd2QnhuOW1PNkhxbmZMN0tjRE5HYzAxM0VLZjhWWXlvSm0vT1BwckZlNTljYkV2ZW1aYmNhMXFMczZqYWNYUWpQRVVSb0pGTWhJOTlDVDJxSUkzR2lOMHVFTlZaTlNtSTVZTE11Ym44MjNlMXZyRkljbWI2clpXK0hXNEQ2Tm5nNlVjcExoYjZ2MzdXNHZHUDFsVy9YWW5mNlVNTFYxNWZ2SnlGV0FGNkFxQ3I4QkFiNCs5dnZkUTJBLzVZbkFWelZicXVMVVBndlpicGpTY2J4T0dGSU5EelZOOU9nVlpSV1FleUxnVTBZaXBEZUsyaUM2NXVhYjB4aktlNmNqdHlBYVM2aFhpZXZUZGZMSkI5VEplaHl2ZmwvaVJaL0FFaEE5QVNaV0dDQU9FSHFwcmRXemwwWjJyVlFoN0gxV1U5NllaaTVpeDM4Mk5ocjdQcm1KeTNwWmI5RXVTZzkwbzdhUU5JMVpGajZWS1IyV2NmUi9INEhDbDF1dk9mUnNTbVNjdzg5ZHZwNm5WQ1IzRFFnTlQ1L29aQTM0K3RXcktWSnRSY1ZSdUNnd29oZ0tZd0crUHZiN282UFVNaEhFckxiajE5cG8zWXRVVk9SNW12M1VkRmM0N0cwZXl6Sm9wVE1lcUlIMEtDK000VGxqQzFCYTl4eFNGdlgrSHA5RGV0b3MwdlFvT1Y1WnhiMi9XVVpkNklGNHpxU09RRHpKdFZhY0xLbzBkV1ZETE5wRGV3YUgzZz09"
     }
   },
   {
@@ -222,11 +248,21 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Refining Understanding**\n\nI'm now focusing on directly mapping the user's query about the \"previous tool call result\" to the output from the most recent tool execution. Specifically, I'm identifying that the prior turn used `default_api.run_me` and returned `{\"run_me_response\": {\"content\": \"The secret code\"}}`. This clarifies my approach.\n\n\n**Clarifying Tool Usage**\n\nI've zeroed in on the specifics of the tool interaction. It's clear the previous turn executed `default_api.run_me`, with a returned value: `{\"run_me_response\": {\"content\": \"The secret code is: 42\"}}`. My response now isolates the essential bit; extracting the value associated with the `content` key within the `run_me_response`. This simplifies the process.\n\n\n"
+    "reasoning": "**Identifying Tool Output**\n\nI've homed in on the need to identify and retrieve the output of the prior tool execution. The crucial parameter is clearly the result itself. Therefore, I need to focus on recalling the specifics of the last tool call to ensure I can provide the right result.\n\n\n"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "The result of the previous tool call was: \"The secret code is: 42\"."
+    "reasoning": "**Identifying Tool Output**\n\nI've homed in on the need to identify and retrieve the output of the prior tool execution. The crucial parameter is clearly the result itself. Therefore, I need to focus on recalling the specifics of the last tool call to ensure I can provide the right result.\n\n\n"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Identifying Tool Output**\n\nI've homed in on the need to identify and retrieve the output of the prior tool execution. The crucial parameter is clearly the result itself. Therefore, I need to focus on recalling the specifics of the last tool call to ensure I can provide the right result.\n\n\n"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Identifying Tool Output**\n\nI've homed in on the need to identify and retrieve the output of the prior tool execution. The crucial parameter is clearly the result itself. Therefore, I need to focus on recalling the specifics of the last tool call to ensure I can provide the right result.\n\n\n"
   }
 ]

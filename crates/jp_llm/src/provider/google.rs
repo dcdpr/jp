@@ -2,8 +2,9 @@ use std::{collections::HashMap, env};
 
 use async_stream::stream;
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use futures::{StreamExt as _, TryStreamExt as _};
-use gemini_client_rs::{GeminiClient, types};
+use gemini_client_rs::{GeminiClient, GeminiError, types};
 use indexmap::IndexMap;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -18,14 +19,15 @@ use jp_conversation::{
     event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest},
     thread::{Document, Documents, Thread},
 };
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tracing::{debug, trace};
 
 use super::{EventStream, Provider};
 use crate::{
-    error::{Error, Result},
+    StreamErrorKind,
+    error::{Error, Result, StreamError, looks_like_quota_error},
     event::{Event, FinishReason},
-    model::{ModelDetails, ReasoningDetails},
+    model::{ModelDeprecation, ModelDetails, ReasoningDetails},
     query::ChatQuery,
     tool::ToolDefinition,
 };
@@ -69,7 +71,7 @@ impl Provider for Google {
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let request = create_request(model, query)?;
+        let (request, structured) = create_request(model, query)?;
         let slug = model.id.name.clone();
 
         debug!(stream = true, "Google chat completion stream request.");
@@ -78,7 +80,7 @@ impl Provider for Google {
             "Request payload."
         );
 
-        Ok(call(client, request, slug, 0))
+        Ok(call(client, request, slug, 0, structured))
     }
 }
 
@@ -87,17 +89,19 @@ fn call(
     request: types::GenerateContentRequest,
     model: Name,
     tries: usize,
+    is_structured: bool,
 ) -> EventStream {
     Box::pin(stream! {
         let mut state = IndexMap::new();
         let stream = client
             .stream_content(&model, &request)
-            .await?
-            .map_err(Error::from);
+            .await
+            .map_err(|e| StreamError::other(e.to_string()))?
+            .map_err(StreamError::from);
 
         tokio::pin!(stream);
         while let Some(event) = stream.next().await {
-            for event in map_response(event?, &mut state)? {
+            for event in map_response(event?, &mut state, is_structured).map_err(|e| StreamError::other(e.to_string()))? {
                 // Sometimes the API returns an "unexpected tool call" error, if
                 // a previous turn had tools available but those were made
                 // unavailable in follow-up turns. This is a known issue:
@@ -117,7 +121,7 @@ fn call(
                 let should_retry = matches!(&event, Event::Finished(FinishReason::Other(Value::String(s))) if s == "UNEXPECTED_TOOL_CALL");
 
                 if should_retry && tries < 3 {
-                    let mut next_stream = call(client.clone(), request.clone(), model.clone(), tries + 1);
+                    let mut next_stream = call(client.clone(), request.clone(), model.clone(), tries + 1, is_structured);
                     while let Some(item) = next_stream.next().await {
                       yield item;
                     }
@@ -131,20 +135,29 @@ fn call(
 }
 
 #[expect(clippy::too_many_lines)]
-fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<types::GenerateContentRequest> {
+fn create_request(
+    model: &ModelDetails,
+    query: ChatQuery,
+) -> Result<(types::GenerateContentRequest, bool)> {
     let ChatQuery {
         thread,
         tools,
         tool_choice,
-        tool_call_strict_mode,
     } = query;
 
     let Thread {
         system_prompt,
-        instructions,
+        sections,
         attachments,
         events,
     } = thread;
+
+    // Only use the schema if the very last event is a ChatRequest with one.
+    let structured_schema = events
+        .last()
+        .and_then(|e| e.event.as_chat_request())
+        .and_then(|req| req.schema.clone());
+    let is_structured = structured_schema.is_some();
 
     let config = events.config()?;
     let parameters = &config.assistant.model.parameters;
@@ -170,51 +183,81 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<types::Gener
             },
         }
     } else {
-        convert_tool_choice(tool_choice, tool_call_strict_mode)
+        convert_tool_choice(tool_choice)
     };
 
     let reasoning = model.custom_reasoning_config(parameters.reasoning);
+    let supports_thinking = model.reasoning.is_some_and(|r| !r.is_unsupported());
 
-    // Add thinking config if the model requires it, or if it supports it,
-    // and we have the parameters configured.
-    let thinking_config = model
-        .reasoning
-        .filter(|details| (details.min_tokens() > 0) || reasoning.is_some())
-        .map(|details| types::ThinkingConfig {
-            include_thoughts: reasoning.is_some_and(|v| !v.exclude),
-            thinking_budget: match details {
-                ReasoningDetails::Leveled { .. } => None,
-                _ => reasoning.map(|v| {
+    // Add thinking config if the model supports it.
+    let thinking_config = if let Some(details) = model.reasoning.filter(|_| supports_thinking) {
+        if let Some(config) = reasoning {
+            // Reasoning is enabled — configure thinking accordingly.
+            Some(types::ThinkingConfig {
+                include_thoughts: !config.exclude,
+                thinking_budget: if details.is_leveled() {
+                    None
+                } else {
                     // TODO: Once the `gemini` crate supports `-1` for "auto"
                     // thinking, use that here if `effort` is `Auto`.
                     //
                     // See: <https://ai.google.dev/gemini-api/docs/thinking#set-budget>
                     #[expect(clippy::cast_sign_loss)]
-                    v.effort
+                    let tokens = config
+                        .effort
                         .to_tokens(max_output_tokens.unwrap_or(32_000) as u32)
                         .min(details.max_tokens().unwrap_or(u32::MAX))
-                        .max(details.min_tokens())
-                }),
-            },
-            thinking_level: match details {
-                ReasoningDetails::Leveled { low, high, .. } => {
-                    let level = reasoning.map(|v| {
-                        v.effort
+                        .max(details.min_tokens());
+                    Some(tokens)
+                },
+                thinking_level: match details {
+                    ReasoningDetails::Leveled {
+                        xlow,
+                        low,
+                        medium,
+                        high,
+                        xhigh: _,
+                    } => {
+                        let level = config
+                            .effort
                             .abs_to_rel(max_output_tokens.map(i32::cast_unsigned))
-                    });
+                            .unwrap_or(ReasoningEffort::Auto);
 
-                    match level {
-                        Some(ReasoningEffort::Low) if low => Some(types::ThinkingLevel::Low),
-                        Some(ReasoningEffort::High) if high => Some(types::ThinkingLevel::High),
-                        // Any other level is unsupported and treated as
-                        // high (since the documentation specifies this is
-                        // the default).
-                        _ => Some(types::ThinkingLevel::High),
+                        match level {
+                            ReasoningEffort::None | ReasoningEffort::Xlow if xlow => {
+                                Some(types::ThinkingLevel::Minimal)
+                            }
+                            ReasoningEffort::Low if low => Some(types::ThinkingLevel::Low),
+                            ReasoningEffort::Medium if medium => Some(types::ThinkingLevel::Medium),
+                            ReasoningEffort::High if high => Some(types::ThinkingLevel::High),
+
+                            // Any other level is unsupported and treated as
+                            // high (since the documentation specifies this is
+                            // the default).
+                            _ => Some(types::ThinkingLevel::High),
+                        }
                     }
-                }
-                _ => None,
-            },
-        });
+                    _ => None,
+                },
+            })
+        } else if details.min_tokens() > 0 {
+            // Model requires a minimum thinking budget — can't fully disable.
+            Some(types::ThinkingConfig {
+                include_thoughts: false,
+                thinking_budget: Some(details.min_tokens()),
+                thinking_level: None,
+            })
+        } else {
+            // Reasoning is off — explicitly disable thinking.
+            Some(types::ThinkingConfig {
+                include_thoughts: false,
+                thinking_budget: Some(0),
+                thinking_level: None,
+            })
+        }
+    } else {
+        None
+    };
 
     let parts = {
         let mut parts = vec![];
@@ -222,14 +265,8 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<types::Gener
             parts.push(types::ContentData::Text(text));
         }
 
-        if !instructions.is_empty() {
-            let text = instructions
-                .into_iter()
-                .map(|instruction| instruction.try_to_xml().map_err(Into::into))
-                .collect::<Result<Vec<_>>>()?
-                .join("\n\n");
-
-            parts.push(types::ContentData::Text(text));
+        for section in &sections {
+            parts.push(types::ContentData::Text(section.render()));
         }
 
         if !attachments.is_empty() {
@@ -255,58 +292,186 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<types::Gener
             .collect::<Vec<_>>()
     };
 
-    Ok(types::GenerateContentRequest {
-        system_instruction: if parts.is_empty() {
-            None
-        } else {
-            Some(types::Content { parts, role: None })
+    // Set structured output config on GenerationConfig when a schema is present.
+    // We use `_responseJsonSchema` (the JSON Schema field) rather than
+    // `responseSchema` (the OpenAPI Schema field) so that standard JSON
+    // Schema properties like `additionalProperties` are accepted.
+    //
+    // The schema is transformed to rewrite unsupported properties (e.g.
+    // `const` → `enum`) so constraints aren't silently dropped.
+    let (response_mime_type, response_json_schema) = match structured_schema {
+        Some(schema) => (
+            Some("application/json".to_owned()),
+            Some(Value::Object(transform_schema(schema))),
+        ),
+        None => (None, None),
+    };
+
+    Ok((
+        types::GenerateContentRequest {
+            system_instruction: if parts.is_empty() {
+                None
+            } else {
+                Some(types::Content { parts, role: None })
+            },
+            contents: convert_events(events),
+            tools,
+            tool_config: Some(tool_config),
+            generation_config: Some(types::GenerationConfig {
+                max_output_tokens,
+                #[expect(clippy::cast_lossless)]
+                temperature: parameters.temperature.map(|v| v as f64),
+                #[expect(clippy::cast_lossless)]
+                top_p: parameters.top_p.map(|v| v as f64),
+                #[expect(clippy::cast_possible_wrap)]
+                top_k: parameters.top_k.map(|v| v as i32),
+                thinking_config,
+                response_mime_type,
+                response_json_schema,
+                ..Default::default()
+            }),
         },
-        contents: convert_events(events),
-        tools,
-        tool_config: Some(tool_config),
-        generation_config: Some(types::GenerationConfig {
-            max_output_tokens,
-            #[expect(clippy::cast_lossless)]
-            temperature: parameters.temperature.map(|v| v as f64),
-            #[expect(clippy::cast_lossless)]
-            top_p: parameters.top_p.map(|v| v as f64),
-            #[expect(clippy::cast_possible_wrap)]
-            top_k: parameters.top_k.map(|v| v as i32),
-            thinking_config,
-            ..Default::default()
-        }),
-    })
+        is_structured,
+    ))
 }
 
+/// Map a Gemini model to a `ModelDetails`.
+///
+/// See: <https://ai.google.dev/gemini-api/docs/models>
+/// See: <https://ai.google.dev/gemini-api/docs/thinking#levels-budgets>
+#[expect(clippy::too_many_lines)]
 fn map_model(model: types::Model) -> ModelDetails {
-    ModelDetails {
-        id: (PROVIDER, model.base_model_id.as_str()).try_into().unwrap(),
-        display_name: Some(model.display_name),
-        context_window: Some(model.input_token_limit),
-        max_output_tokens: Some(model.output_token_limit),
-        reasoning: model
-            .base_model_id
-            .starts_with("gemini-2.5-pro")
-            .then_some(ReasoningDetails::budgetted(128, Some(32768)))
-            .or_else(|| {
-                model
-                    .base_model_id
-                    .starts_with("gemini-2.5-flash")
-                    .then_some(ReasoningDetails::budgetted(0, Some(24576)))
-            })
-            .or_else(|| {
-                (model.base_model_id.starts_with("gemini-3-flash")
-                    || model.base_model_id == "gemini-flash-latest")
-                    .then_some(ReasoningDetails::leveled(true, true, true, true, false))
-            })
-            .or_else(|| {
-                (model.base_model_id.starts_with("gemini-3-pro")
-                    || model.base_model_id == "gemini-pro-latest")
-                    .then_some(ReasoningDetails::leveled(false, true, false, true, false))
-            }),
-        knowledge_cutoff: None,
-        deprecated: None,
-        features: vec![],
+    let name = model.base_model_id.as_str();
+    let display_name = Some(model.display_name);
+    let context_window = Some(model.input_token_limit);
+    let max_output_tokens = Some(model.output_token_limit);
+    let Ok(id) = (PROVIDER, model.base_model_id.as_str()).try_into() else {
+        return ModelDetails::empty((PROVIDER, "unknown").try_into().unwrap());
+    };
+
+    match name {
+        "gemini-pro-latest" | "gemini-3.1-pro-preview" | "gemini-3.1-pro-preview-customtools" => {
+            ModelDetails {
+                id,
+                display_name,
+                context_window,
+                max_output_tokens,
+                reasoning: Some(ReasoningDetails::leveled(false, true, true, true, false)),
+                knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
+                deprecated: Some(ModelDeprecation::Active),
+                features: vec![],
+            }
+        }
+        "gemini-3-pro-preview" => ModelDetails {
+            id,
+            display_name,
+            context_window,
+            max_output_tokens,
+            reasoning: Some(ReasoningDetails::leveled(false, true, false, true, false)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
+        },
+        "gemini-flash-latest" | "gemini-3-flash-preview" => ModelDetails {
+            id,
+            display_name,
+            context_window,
+            max_output_tokens,
+            reasoning: Some(ReasoningDetails::leveled(true, true, true, true, false)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            features: vec![],
+        },
+        "gemini-2.5-flash" => ModelDetails {
+            id,
+            display_name,
+            context_window,
+            max_output_tokens,
+            reasoning: Some(ReasoningDetails::budgetted(0, Some(24576))),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gemini-3-flash-preview",
+                Some(NaiveDate::from_ymd_opt(2026, 6, 17).unwrap()),
+            )),
+            features: vec![],
+        },
+        "gemini-flash-lite-latest"
+        | "gemini-2.5-flash-lite"
+        | "gemini-2.5-flash-lite-preview-09-2025" => ModelDetails {
+            id,
+            display_name,
+            context_window,
+            max_output_tokens,
+            reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: unknown",
+                Some(NaiveDate::from_ymd_opt(2026, 7, 22).unwrap()),
+            )),
+            features: vec![],
+        },
+        "gemini-2.5-pro" => ModelDetails {
+            id,
+            display_name,
+            context_window,
+            max_output_tokens,
+            reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gemini-3-pro-preview",
+                Some(NaiveDate::from_ymd_opt(2026, 6, 17).unwrap()),
+            )),
+            features: vec![],
+        },
+        "gemini-2.0-flash" | "gemini-2.0-flash-001" => ModelDetails {
+            id,
+            display_name,
+            context_window,
+            max_output_tokens,
+            reasoning: Some(ReasoningDetails::budgetted(0, Some(24576))),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 8, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gemini-2.5-flash",
+                Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
+            )),
+            features: vec![],
+        },
+        "gemini-2.0-flash-lite" | "gemini-2.0-flash-lite-001" => ModelDetails {
+            id,
+            display_name,
+            context_window,
+            max_output_tokens,
+            reasoning: Some(ReasoningDetails::unsupported()),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 8, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gemini-2.5-flash-lite",
+                Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
+            )),
+            features: vec![],
+        },
+        id => {
+            trace!(
+                name,
+                display_name = display_name
+                    .clone()
+                    .unwrap_or_else(|| "<unknown>".to_owned()),
+                id,
+                "Missing model details. Falling back to generic model details."
+            );
+
+            ModelDetails {
+                id: (PROVIDER, model.base_model_id.as_str())
+                    .try_into()
+                    .unwrap_or((PROVIDER, "unknown").try_into().unwrap()),
+                display_name,
+                context_window,
+                max_output_tokens,
+                reasoning: None,
+                knowledge_cutoff: None,
+                deprecated: None,
+                features: vec![],
+            }
+        }
     }
 }
 
@@ -340,6 +505,7 @@ impl CandidateState {
 fn map_response(
     response: types::GenerateContentResponse,
     state: &mut IndexMap<usize, CandidateState>,
+    is_structured: bool,
 ) -> Result<Vec<Event>> {
     debug!("Received response from Google API.");
     trace!(
@@ -350,7 +516,7 @@ fn map_response(
     response
         .candidates
         .into_iter()
-        .flat_map(|v| map_candidate(v, state))
+        .flat_map(|v| map_candidate(v, state, is_structured))
         .try_fold(vec![], |mut acc, events| {
             acc.extend(events);
             Ok(acc)
@@ -360,6 +526,7 @@ fn map_response(
 fn map_candidate(
     candidate: types::Candidate,
     states: &mut IndexMap<usize, CandidateState>,
+    is_structured: bool,
 ) -> Result<Vec<Event>> {
     let types::Candidate {
         content,
@@ -381,6 +548,13 @@ fn map_candidate(
             thought_signature,
             ..
         } = part;
+
+        // Google sometimes sends empty text parts (e.g. the final chunk of a
+        // thinking+tool_use response with finishReason: STOP). Skip them before
+        // mode transition logic to avoid spurious flushes.
+        if matches!(&data, types::ContentData::Text(text) if text.is_empty()) {
+            continue;
+        }
 
         // Determine what "mode" the content is in.
         let mode = if matches!(data, types::ContentData::FunctionCall(_)) {
@@ -412,6 +586,10 @@ fn map_candidate(
         let mut event = match data {
             types::ContentData::Text(text) if mode.is_reasoning() => Event::Part {
                 event: ConversationEvent::now(ChatResponse::reasoning(text)),
+                index,
+            },
+            types::ContentData::Text(text) if is_structured => Event::Part {
+                event: ConversationEvent::now(ChatResponse::structured(Value::String(text))),
                 index,
             },
             types::ContentData::Text(text) => Event::Part {
@@ -488,11 +666,140 @@ impl TryFrom<&GoogleConfig> for Google {
     }
 }
 
-fn convert_tool_choice(choice: ToolChoice, strict: bool) -> types::ToolConfig {
+/// Transform a JSON schema to conform to Google's structured output constraints.
+///
+/// Google's Gemini API supports a subset of JSON Schema. This transformation:
+/// - Inlines `$ref` references by replacing them with the referenced `$defs`
+/// - Removes `$defs`/`definitions` from the output after inlining
+/// - Rewrites `const` to `enum` with a single value (Google ignores `const`)
+/// - Adds `propertyOrdering` to objects with multiple properties
+/// - Recursively processes `anyOf`, object properties, `additionalProperties`,
+///   array `items`, and `prefixItems`
+///
+/// Mirrors the logic from Google's Python SDK `process_schema`.
+///
+/// See: <https://ai.google.dev/gemini-api/docs/structured-output>
+fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
+    // Extract $defs from the root. They are inlined wherever $ref appears
+    // and discarded from the output.
+    let defs = src
+        .remove("$defs")
+        .or_else(|| src.remove("definitions"))
+        .and_then(|v| match v {
+            Value::Object(m) => Some(m),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    process_schema(src, &defs)
+}
+
+/// Core recursive processor for a single schema node.
+fn process_schema(mut src: Map<String, Value>, defs: &Map<String, Value>) -> Map<String, Value> {
+    // Resolve $ref by inlining the referenced definition.
+    if let Some(Value::String(ref_path)) = src.remove("$ref")
+        && let Some(resolved) = resolve_ref(&ref_path, defs)
+    {
+        let mut merged = resolved;
+        // Preserve sibling fields (e.g. description, nullable) from the
+        // referring schema — the definition's own fields take precedence.
+        for (k, v) in src {
+            merged.entry(k).or_insert(v);
+        }
+        return process_schema(merged, defs);
+    }
+
+    // Rewrite `const` to `enum` with a single-element array. Google supports
+    // `enum` for strings and numbers but not `const`.
+    if let Some(val) = src.remove("const") {
+        src.insert("enum".into(), Value::Array(vec![val]));
+    }
+
+    // Handle anyOf: recurse into each variant, then return early (matching the
+    // Python SDK's behavior).
+    if let Some(Value::Array(variants)) = src.remove("anyOf") {
+        src.insert(
+            "anyOf".into(),
+            Value::Array(
+                variants
+                    .into_iter()
+                    .map(|v| resolve_and_process(v, defs))
+                    .collect(),
+            ),
+        );
+        return src;
+    }
+
+    // Type-specific processing.
+    match src.get("type").and_then(Value::as_str) {
+        Some("object") => {
+            if let Some(Value::Object(props)) = src.remove("properties") {
+                let keys: Vec<String> = props.keys().cloned().collect();
+                let processed: Map<String, Value> = props
+                    .into_iter()
+                    .map(|(k, v)| (k, resolve_and_process(v, defs)))
+                    .collect();
+
+                // Deterministic output ordering for objects with >1 property.
+                if keys.len() > 1 && !src.contains_key("propertyOrdering") {
+                    src.insert(
+                        "propertyOrdering".into(),
+                        Value::Array(keys.into_iter().map(Value::String).collect()),
+                    );
+                }
+
+                src.insert("properties".into(), Value::Object(processed));
+            }
+
+            // Process additionalProperties when it's a schema (not a boolean).
+            if let Some(additional) = src.remove("additionalProperties") {
+                src.insert("additionalProperties".into(), match additional {
+                    Value::Object(schema) => Value::Object(process_schema(schema, defs)),
+                    other => other,
+                });
+            }
+        }
+        Some("array") => {
+            if let Some(items) = src.remove("items") {
+                src.insert("items".into(), resolve_and_process(items, defs));
+            }
+
+            if let Some(Value::Array(prefixes)) = src.remove("prefixItems") {
+                src.insert(
+                    "prefixItems".into(),
+                    Value::Array(
+                        prefixes
+                            .into_iter()
+                            .map(|v| resolve_and_process(v, defs))
+                            .collect(),
+                    ),
+                );
+            }
+        }
+        _ => {}
+    }
+
+    src
+}
+
+/// Resolve any `$ref` inside a value, then recursively process it.
+fn resolve_and_process(value: Value, defs: &Map<String, Value>) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(process_schema(map, defs)),
+        other => other,
+    }
+}
+
+/// Look up a `$ref` path (e.g. `#/$defs/MyType`) in the definitions map.
+fn resolve_ref(ref_path: &str, defs: &Map<String, Value>) -> Option<Map<String, Value>> {
+    let name = ref_path.rsplit("defs/").next().unwrap_or(ref_path);
+    defs.get(name).and_then(Value::as_object).cloned()
+}
+
+fn convert_tool_choice(choice: ToolChoice) -> types::ToolConfig {
     let (mode, allowed_function_names) = match choice {
         ToolChoice::None => (types::FunctionCallingMode::None, vec![]),
-        ToolChoice::Auto if strict => (types::FunctionCallingMode::Validated, vec![]),
-        ToolChoice::Auto => (types::FunctionCallingMode::Auto, vec![]),
+        ToolChoice::Auto => (types::FunctionCallingMode::Validated, vec![]),
         ToolChoice::Required => (types::FunctionCallingMode::Any, vec![]),
         ToolChoice::Function(name) => (types::FunctionCallingMode::Any, vec![name]),
     };
@@ -546,12 +853,20 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
                     types::Role::User,
                     types::ContentData::Text(request.content).into(),
                 ),
-                EventKind::ChatResponse(response) => (types::Role::Model, types::ContentPart {
-                    thought: response.is_reasoning(),
-                    data: types::ContentData::Text(response.into_content()),
-                    metadata: None,
-                    thought_signature: None,
-                }),
+                EventKind::ChatResponse(response) => {
+                    let thought = response.is_reasoning();
+                    let text = match response {
+                        ChatResponse::Message { message } => message,
+                        ChatResponse::Reasoning { reasoning } => reasoning,
+                        ChatResponse::Structured { data } => data.to_string(),
+                    };
+                    (types::Role::Model, types::ContentPart {
+                        thought,
+                        data: types::ContentData::Text(text),
+                        metadata: None,
+                        thought_signature: None,
+                    })
+                }
                 EventKind::ToolCallRequest(request) => (types::Role::Model, types::ContentPart {
                     data: types::ContentData::FunctionCall(types::FunctionCall {
                         name: {
@@ -611,37 +926,67 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
         })
 }
 
-#[cfg(test)]
-mod tests {
-    use jp_config::model::parameters::{
-        PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort,
-    };
-    use jp_conversation::event::ChatRequest;
-    use jp_test::function_name;
-    use test_log::test;
+impl From<GeminiError> for StreamError {
+    fn from(err: GeminiError) -> Self {
+        match err {
+            GeminiError::Http(error) => Self::from(error),
+            GeminiError::EventSource(error) => Self::from(error),
+            GeminiError::Api(ref value) => {
+                let msg = err.to_string();
 
-    use super::*;
-    use crate::test::{TestRequest, run_test};
+                // Check for quota/billing exhaustion first.
+                if looks_like_quota_error(&msg) {
+                    return StreamError::new(
+                        StreamErrorKind::InsufficientQuota,
+                        format!(
+                            "Insufficient API quota. Check your plan and billing details \
+                             at https://console.cloud.google.com/billing. ({msg})"
+                        ),
+                    )
+                    .with_source(err);
+                }
 
-    // TODO: Test specific conditions as detailed in
-    // <https://ai.google.dev/gemini-api/docs/thought-signatures>:
-    //
-    // - parallel function calls
-    // - dummy thought signatures
-    // - multi-turn conversations
-    #[test(tokio::test)]
-    async fn test_gemini_3_reasoning() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let request = TestRequest::chat(PROVIDER)
-            .stream(true)
-            .reasoning(Some(PartialReasoningConfig::Custom(
-                PartialCustomReasoningConfig {
-                    effort: Some(ReasoningEffort::Low),
-                    exclude: Some(false),
-                },
-            )))
-            .model("google/gemini-3-pro-preview".parse().unwrap())
-            .event(ChatRequest::from("Test message"));
+                // Classify by HTTP status code if present in the API error.
+                let status = value
+                    .get("status")
+                    .or_else(|| value.pointer("/error/code"))
+                    .and_then(serde_json::Value::as_u64);
 
-        run_test(PROVIDER, function_name!(), Some(request)).await
+                match status {
+                    Some(429) => StreamError::rate_limit(None).with_source(err),
+                    Some(500 | 502 | 503 | 504) => StreamError::transient(msg).with_source(err),
+                    _ => StreamError::other(msg).with_source(err),
+                }
+            }
+            GeminiError::Json { data, error } => StreamError::other(data).with_source(error),
+            GeminiError::FunctionExecution(msg) => StreamError::other(msg),
+        }
     }
 }
+
+impl From<GeminiError> for Error {
+    fn from(error: GeminiError) -> Self {
+        match &error {
+            GeminiError::Api(api) if api.get("status").is_some_and(|v| v.as_u64() == Some(404)) => {
+                if let Some(model) = api.pointer("/message/error/message").and_then(|v| {
+                    v.as_str().and_then(|s| {
+                        s.contains("Call ListModels").then(|| {
+                            s.split('/')
+                                .nth(1)
+                                .and_then(|v| v.split(' ').next())
+                                .unwrap_or("unknown")
+                        })
+                    })
+                }) {
+                    return Self::UnknownModel(model.to_owned());
+                }
+                Self::Gemini(error)
+            }
+            _ => Self::Gemini(error),
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "google_tests.rs"]
+mod tests;

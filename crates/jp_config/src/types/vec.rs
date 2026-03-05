@@ -117,14 +117,27 @@ impl<T: Config + Clone + PartialEq + Serialize + DeserializeOwned + ToPartial>
     ToPartial<MergeableVec<T::Partial>> for MergeableVec<T>
 {
     fn to_partial(&self) -> MergeableVec<T::Partial> {
-        match self {
-            Self::Vec(v) => MergeableVec::Vec(v.iter().map(ToPartial::to_partial).collect()),
-            Self::Merged(v) => MergeableVec::Merged(MergedVec {
-                value: v.value.iter().map(ToPartial::to_partial).collect(),
-                strategy: v.strategy,
-                discard_when_merged: v.discard_when_merged,
-            }),
-        }
+        // Always emit `Merged` with `Replace` strategy. The finalized value
+        // already reflects all prior merges (appends), so preserving the
+        // original strategy would cause `vec_with_strategy` to re-apply it
+        // when the partial is merged again (e.g. in
+        // `apply_conversation_config`), duplicating vec entries.
+        //
+        // Unlike `MergeableString` where we can flatten to the `String`
+        // variant (which uses replace semantics), the `Vec` variant here
+        // defaults to *append* semantics in `vec_with_strategy`. So we must
+        // explicitly use `Merged` with `strategy: Some(Replace)`.
+        let value = match self {
+            Self::Vec(v) | Self::Merged(MergedVec { value: v, .. }) => {
+                v.iter().map(ToPartial::to_partial).collect()
+            }
+        };
+
+        MergeableVec::Merged(MergedVec {
+            value,
+            strategy: Some(MergedVecStrategy::Replace),
+            discard_when_merged: false,
+        })
     }
 }
 

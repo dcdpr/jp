@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -126,23 +149,28 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "IPA2Ityl39bHJg3RCOzVhb72ufXtv7Px",
+    "id": "Nx8MNLCopTT8Ka225frBpVRJmOxZe7Bb",
     "name": "run_me",
     "arguments": {
-      "bar": "Zm9v",
-      "foo": "YmFy"
+      "foo": "YmFy",
+      "bar": "Zm9v"
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "IPA2Ityl39bHJg3RCOzVhb72ufXtv7Px",
+    "id": "Nx8MNLCopTT8Ka225frBpVRJmOxZe7Bb",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "It looks like the tool has run successfully! If you have any specific tasks or further instructions, feel free to let me know!"
+    "reasoning": "Okay, the user asked me to run a tool with some arguments. I called the tool \"run_me\" and provided \"foo\" as \"bar\" and \"bar\" as \"foo\". The response was \"working!\", which is a positive sign. Now, the user hasn't given a specific question, just a statement. I need to figure out what they want next. Since they mentioned running the tool, maybe they want to see the output or have more interactions. The tool's response was \"working!\", so perhaps it's a test to check if the tool is functional. I should acknowledge that the tool ran successfully and offer further assistance. Maybe they want to test more commands or need help with something else. I'll respond by confirming the tool worked and ask how they'd like to proceed. Keeping it friendly and open-ended should cover their possible needs."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "The tool \"run_me\" has been executed successfully with the provided arguments! 🎉  \n\nIf you have any specific tasks or questions, feel free to ask, and I'll help you work through them. What would you like to do next?"
   }
 ]

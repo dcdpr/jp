@@ -46,8 +46,8 @@ pub(crate) async fn fs_create_file(
         return error("Path must be relative.");
     }
 
-    if p.iter().any(|c| c.len() > 30) {
-        return error("Individual path components must be less than 30 characters long.");
+    if p.iter().any(|c| c.len() > 100) {
+        return error("Individual path components must be less than 100 characters long.");
     }
 
     if p.iter().count() > 20 {

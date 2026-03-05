@@ -5,9 +5,8 @@ use std::{fmt, str::FromStr};
 use chrono::{DateTime, Utc};
 use jp_id::{
     Id, NANOSECONDS_PER_DECISECOND,
-    parts::{GlobalId, TargetId, Variant},
+    parts::{TargetId, Variant},
 };
-use jp_serde::skip_if;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
@@ -28,7 +27,7 @@ pub struct Conversation {
 
     /// Whether the conversation is stored in the user or workspace storage.
     // TODO: rename to `user_local`
-    #[serde(default, rename = "local", skip_serializing_if = "skip_if::is_false")]
+    #[serde(default, rename = "local", skip_serializing_if = "std::ops::Not::not")]
     pub user: bool,
 
     /// When the conversation expires.
@@ -110,7 +109,7 @@ pub struct ConversationId(#[serde(with = "jp_id::serde")] DateTime<Utc>);
 impl fmt::Debug for ConversationId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ConversationId")
-            .field(&self.to_string())
+            .field(&self.as_deciseconds())
             .finish()
     }
 }
@@ -235,10 +234,6 @@ impl Id for ConversationId {
 
     fn target_id(&self) -> TargetId {
         self.as_deciseconds().to_string().into()
-    }
-
-    fn global_id(&self) -> GlobalId {
-        jp_id::global::get().into()
     }
 }
 

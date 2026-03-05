@@ -24,7 +24,7 @@ pub struct TypewriterConfig {
     /// - `5m` for 5 milliseconds
     /// - `1u` for 1 microsecond
     /// - `0` to disable
-    #[config(default = "3")]
+    #[setting(default = "3")]
     pub text_delay: DelayDuration,
 
     /// Delay between printing code-block characters.
@@ -36,7 +36,7 @@ pub struct TypewriterConfig {
     /// - `5m` for 5 milliseconds
     /// - `1u` for 1 microsecond
     /// - `0` to disable
-    #[config(default = "500u")]
+    #[setting(default = "500u")]
     pub code_delay: DelayDuration,
 }
 
@@ -73,12 +73,25 @@ impl ToPartial for TypewriterConfig {
     }
 }
 
+/// Error when parsing `DelayDuration`.
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid duration: {0}")]
+pub struct DelayError(String);
+
 /// Typewriter delay duration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Schematic)]
 pub struct DelayDuration(Duration);
 
+impl TryFrom<&str> for DelayDuration {
+    type Error = DelayError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
 impl std::str::FromStr for DelayDuration {
-    type Err = String;
+    type Err = DelayError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let num = s
@@ -92,8 +105,7 @@ impl std::str::FromStr for DelayDuration {
             _ => None,
         };
 
-        num.map(Self)
-            .ok_or_else(|| format!("invalid duration: {s}"))
+        num.map(Self).ok_or_else(|| DelayError(s.to_owned()))
     }
 }
 

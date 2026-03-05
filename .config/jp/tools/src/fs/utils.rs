@@ -9,7 +9,7 @@ pub fn is_file_dirty(root: &Utf8Path, file: &Utf8Path) -> Result<bool, Error> {
     is_file_dirty_impl(root, file, &DuctProcessRunner)
 }
 
-fn is_file_dirty_impl<R: ProcessRunner>(
+pub(super) fn is_file_dirty_impl<R: ProcessRunner>(
     root: &Utf8Path,
     file: &Utf8Path,
     runner: &R,

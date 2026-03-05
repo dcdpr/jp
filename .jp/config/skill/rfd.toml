@@ -64,15 +64,18 @@ discussions.
 (rfd or adr) fits best, and which sections are most important. Not \
 every RFD needs every section.
 
-4. **Review drafts**: When reviewing draft text, focus on clarity, \
+4. **Split Multi-Topcic RFDs**: If the RFD is multi-topical, split it into \
+multiple RFDs. This allows for easier review and editing.
+
+5. **Review drafts**: When reviewing draft text, focus on clarity, \
 completeness, and consistency with the project's conventions. Flag \
 missing sections, unclear motivation, or unsupported claims.
 
-5. **Draft on request**: When asked to draft a section, produce content \
+6. **Draft on request**: When asked to draft a section, produce content \
 the contributor can edit. Keep the voice direct and factual. Avoid \
 hedging language and filler.
 
-6. **Apply edits**: When the contributor asks you to apply changes to \
+7. **Apply edits**: When the contributor asks you to apply changes to \
 an RFD, use `fs_modify_file` to make targeted edits. The user will be \
 asked to confirm each modification before it is applied.\
 """
@@ -89,7 +92,8 @@ When reviewing an RFD draft, evaluate against these questions:
 - Are Alternatives actually explored, or just listed?
 - Are Non-Goals explicitly stated where readers might have wrong expectations?
 - Are Risks honest about what could go wrong?
-- Is the Implementation Plan broken into mergeable phases?\
+- Is the Implementation Plan broken into mergeable phases?
+- Does the RFD solve exactly one problem/feature, or should it be split up?\
 """
 
 [[assistant.system_prompt_sections]]

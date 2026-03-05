@@ -13,11 +13,14 @@ expression: v
                         id: "run_me_0",
                         name: "run_me",
                         arguments: {
+                            "foo": String("bar"),
                             "bar": String("foo"),
                         },
                     },
                 ),
-                metadata: {},
+                metadata: {
+                    "google_thought_signature": String("CiQBvj72+6T/DOouTLZw6QUPZxfGcqpJ11aFRef6FNVbQx9ZaRkKZAG+Pvb7hF7IausEzYmxTQOobh30JTHMUS7gCQa5XIs0Vb8npki4kmd9OW/QR1E6YMn4NnZTKMPJ1ZH7uLDkIV2DdHUvYwFOs3Kr9VdkhitFcULoCsqVSODw1Y4HBKcl1+a8rXgK2AEBvj72+4ptR/Cu5BHjTLiZBHd024IncOakOpMmpyOrWWAEW3RpchIstYE6ROYn4r4gIuZ07ITCKcFfsXf/laR5WIEi4t3ca8nBVwJy2JxmVmmcNEY/maueFEGJWPpWJ6m2uavDy7RGxuc4BcIN3nqrWmPhl+HojZTrWZP9QvXbRa48PifZLMwbe0xcIkEuHoCB90Bing40H+dMUcoVt7WlvlKvJSSBGvP4HpmxiN5WzqtTgTAsUlm3P6oj335IpsuDGqloH4V6ZtRIaq0huHPifBOpki/NJI0K2QEBvj72+32PzQ99q53YaZIyyq+PngRDenNdGzEuyAzEwSQJ3+LQEd+oCbjliJwyoO1pK9qPPyY6aQOUa9kCExHZpi+OuHYUljPngcq4VjZoPwbZhZJE2kly/ZvITPtOQuoYkiPZPcNbCky0hehbRJ5bXz04Tv0kcNPq30MRB1BsyQ/rnazWOyXpNh4asNLQsGrHrkFqrDd8hJKT/N7PjWwbyzJ9/d4rVNZWcF9LNsw4aP/3n87dN4V1h+pJJwSvJVQxqjk43AKd03Dj7v3vlLoDo661Z8PpL83PCtkBAb4+9vuFqx2OaHf3CjJzOPpf7xsEAwXeTIJT6nDNwSFsCcf/ZiHd5BrkcuqlsWp5RXJGbP7TF7Ja/mhu/ess/bPDtPIA/GmdVbyd4hM/OHLzOcdSv+eO5PBaxDVF3VW1nXrxKMWD9+ggVTZmfrsPU6PXJB4stdHYnJKuTz1BbEDY0a1jxJD/6QkwUF2I8+tG2WNntWgiVJMqMweS1NYynfaihSk8GpZv1AoBE1P0gehdCICPIA+hTfo6P4L6rkiajevRWn7LF49jGu65maeCEDTWW/OOihUAawpFAb4+9vstL0+cx5F99zt1mjeo0+fNeCafErqss07H39NhzMwFT42UPN0GRapUGa3XiZqI7GQk+VIG0Pw2g+O5EgJl0ZCVClsBvj72+z+kooEwMwc9xSLEy5YwktRycaV8czKVly4Nz3+1v6TOy1CW8Vko3jZyNx41/RussqD2xuOCiszIW3w25BaGjlZfp60gG1GUWLZRDgx/Fpt667lwUrrjCiQBvj72+2gk8ckn4Fsq2L+RcsqMh6aXQPF3S5XqU2cRr1IuXWA="),
+                },
             },
         },
         Flush {
@@ -35,7 +38,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool successfully ran with the argument `bar=\"foo\"` and returned `{\"run_me_response\": {\"content\": \"working!\"}}`.",
+                        message: "\"working!\"",
                     },
                 ),
                 metadata: {},

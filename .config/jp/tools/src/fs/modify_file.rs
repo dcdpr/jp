@@ -14,14 +14,415 @@ use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::{ContentStyle, Stylize as _};
 use fancy_regex::RegexBuilder;
 use jp_tool::{AnswerType, Outcome, Question};
+use serde::Deserialize;
 use serde_json::{Map, Value};
 use similar::{ChangeTag, TextDiff, udiff::UnifiedDiff};
 
-use super::utils::is_file_dirty;
+use super::utils::is_file_dirty_impl;
 use crate::{
     Context, Error,
-    util::{ToolResult, error, fail},
+    util::{
+        ToolResult, error, fail,
+        runner::{DuctProcessRunner, ProcessRunner},
+    },
 };
+
+pub(crate) async fn fs_modify_file(
+    ctx: Context,
+    answers: &Map<String, Value>,
+    path: String,
+    patterns: Vec<Pattern>,
+    replace_using_regex: bool,
+    replace_all: bool,
+    case_sensitive: bool,
+) -> ToolResult {
+    fs_modify_file_impl(
+        &ctx,
+        answers,
+        &path,
+        &patterns,
+        replace_using_regex,
+        replace_all,
+        case_sensitive,
+        &DuctProcessRunner,
+    )
+}
+
+fn fs_modify_file_impl<R: ProcessRunner>(
+    ctx: &Context,
+    answers: &Map<String, Value>,
+    path: &str,
+    patterns: &[Pattern],
+    replace_using_regex: bool,
+    replace_all: bool,
+    case_sensitive: bool,
+    runner: &R,
+) -> ToolResult {
+    if let Err(msg) = validate_patterns(patterns) {
+        return error(msg);
+    }
+
+    if let Err(msg) = validate_path(path) {
+        return error(msg);
+    }
+
+    // Reject known overly-broad regex patterns.
+    if replace_using_regex && let Some(blocked) = find_blocked_regex_patterns(patterns) {
+        let list = blocked
+            .iter()
+            .map(|p| format!("`{p}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        if let Some(result) = guard_broad_replacement(
+            answers,
+            "Replacement rejected: regex pattern is overly broad.",
+            format!(
+                "Regex pattern(s) {list} will match almost every line. This is likely a mistake. \
+                 Continue anyway?"
+            ),
+        ) {
+            return result;
+        }
+    }
+
+    let absolute_path = ctx.root.join(path.trim_start_matches('/'));
+
+    let mut changes = vec![];
+    let mut last_outcomes: Vec<PatternOutcome> = vec![];
+
+    for entry in glob::glob(absolute_path.as_ref())? {
+        let entry = entry?;
+        let Ok(entry) = Utf8PathBuf::try_from(entry) else {
+            return error("Path is not valid UTF-8.");
+        };
+
+        if !entry.exists() {
+            return error("File does not exist.");
+        }
+
+        if !entry.is_file() {
+            return error("Path is not a regular file.");
+        }
+
+        let Ok(path) = entry.strip_prefix(&ctx.root) else {
+            return fail("Path is not within workspace root.");
+        };
+
+        let before = fs::read_to_string(&entry)?;
+        let result = apply_patterns(
+            before.clone(),
+            patterns,
+            replace_using_regex,
+            replace_all,
+            case_sensitive,
+        );
+
+        last_outcomes = result.outcomes;
+
+        if before != result.content {
+            changes.push(Change {
+                path: path.to_owned(),
+                before,
+                after: result.content,
+            });
+        }
+    }
+
+    let report = format_pattern_report(patterns, &last_outcomes);
+
+    if changes.is_empty() {
+        if report.is_empty() {
+            return Err("None of the patterns matched the file's content.".into());
+        }
+        return Ok(report.into());
+    }
+
+    if ctx.action.is_run() {
+        // Guard: flag changes that affect a large fraction of the file.
+        if let Some(broad_files) = find_broad_changes(&changes) {
+            let files = broad_files.join(", ");
+            if let Some(result) = guard_broad_replacement(
+                answers,
+                "Replacement rejected: too many lines changed.",
+                format!(
+                    "The replacement modifies more than {BROAD_CHANGE_MAX_PERCENT}% of lines in: \
+                     {files}. This may be unintentional. Continue anyway?",
+                ),
+            ) {
+                return result;
+            }
+        }
+
+        let result = apply_changes(changes, &ctx.root, answers, runner)?;
+        Ok(prepend_report(result, &report))
+    } else {
+        let diff = format_changes(changes);
+        if report.is_empty() {
+            Ok(diff.into())
+        } else {
+            Ok(format!("{report}\n\n{diff}").into())
+        }
+    }
+}
+
+/// A search-and-replace pattern.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct Pattern {
+    /// The string to find.
+    pub old: String,
+
+    /// The replacement string.
+    pub new: String,
+}
+
+/// Result of applying a single pattern.
+#[derive(Debug, PartialEq)]
+enum PatternOutcome {
+    /// The pattern was found and replaced.
+    Applied,
+
+    /// The pattern was not found in the content.
+    NotFound,
+}
+
+/// Result of applying all patterns to file content.
+struct ApplyResult {
+    /// The content after all applicable patterns have been applied.
+    content: String,
+
+    /// Per-pattern outcome, in the same order as the input patterns.
+    outcomes: Vec<PatternOutcome>,
+}
+
+/// Validates the patterns for common errors.
+///
+/// Returns an error message if invalid, or `None` if all patterns are valid.
+fn validate_patterns(patterns: &[Pattern]) -> Result<(), String> {
+    if patterns.is_empty() {
+        return Err("No patterns provided.".to_owned());
+    }
+
+    let identical: Vec<_> = patterns
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.old == p.new)
+        .map(|(i, _)| format!("#{}", i + 1))
+        .collect();
+
+    if !identical.is_empty() {
+        return Err(format!(
+            "Pattern(s) {} have identical old and new strings.",
+            identical.join(", ")
+        ));
+    }
+
+    Ok(())
+}
+
+/// Validates a file path for common errors.
+///
+/// Returns an error message if invalid, or `None` if the path is valid.
+fn validate_path(path: &str) -> Result<(), &'static str> {
+    let p = Utf8PathBuf::from(path);
+
+    if p.is_absolute() {
+        return Err("Path must be relative.");
+    }
+
+    Ok(())
+}
+
+/// Applies patterns sequentially to the content.
+///
+/// Each pattern operates on the result of the previous one. If a pattern's
+/// `old` string is not found, it is skipped and marked as `NotFound`.
+fn apply_patterns(
+    content: String,
+    patterns: &[Pattern],
+    replace_using_regex: bool,
+    replace_all: bool,
+    case_sensitive: bool,
+) -> ApplyResult {
+    let mut current = content;
+    let mut outcomes = Vec::with_capacity(patterns.len());
+
+    for pattern in patterns {
+        let contents = Content(current);
+        let result = if replace_using_regex {
+            contents.replace_regexp(&pattern.old, &pattern.new, replace_all, case_sensitive)
+        } else {
+            contents.replace_literal(&pattern.old, &pattern.new, replace_all, case_sensitive)
+        };
+
+        current = if let Ok(after) = result {
+            outcomes.push(PatternOutcome::Applied);
+            after
+        } else {
+            outcomes.push(PatternOutcome::NotFound);
+            contents.0
+        };
+    }
+
+    ApplyResult {
+        content: current,
+        outcomes,
+    }
+}
+
+/// Formats a report of pattern outcomes.
+///
+/// Returns empty string when there is a single pattern that succeeded
+/// (backward-compatible). Shows a summary when there are multiple patterns,
+/// and details which patterns were not found.
+fn format_pattern_report(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> String {
+    let total = outcomes.len();
+    let applied = outcomes
+        .iter()
+        .filter(|o| matches!(o, PatternOutcome::Applied))
+        .count();
+    let failed: Vec<_> = patterns
+        .iter()
+        .zip(outcomes.iter())
+        .enumerate()
+        .filter(|(_, (_, o))| matches!(o, PatternOutcome::NotFound))
+        .collect();
+
+    // Single pattern, succeeded: no report.
+    if failed.is_empty() && total <= 1 {
+        return String::new();
+    }
+
+    // All succeeded, multiple patterns: brief summary.
+    if failed.is_empty() {
+        return format!("{applied}/{total} patterns applied.");
+    }
+
+    // Some or all failed: detailed report.
+    let mut report = format!("{applied}/{total} patterns applied.\n\nPatterns not found:");
+    for (i, (pattern, _)) in &failed {
+        let preview = pattern_preview(&pattern.old);
+        report.push_str(&format!("\n  #{}: `{preview}`", i + 1));
+    }
+
+    report
+}
+
+/// Returns a short preview of a pattern string (first line, max 60 chars).
+fn pattern_preview(s: &str) -> String {
+    let first_line = s.lines().next().unwrap_or(s);
+    if first_line.chars().count() <= 60 {
+        first_line.to_owned()
+    } else {
+        let truncated: String = first_line.chars().take(57).collect();
+        format!("{truncated}...")
+    }
+}
+
+/// Prepends a report to a successful outcome.
+///
+/// Non-success outcomes (e.g. `NeedsInput`) are passed through unchanged.
+fn prepend_report(outcome: Outcome, report: &str) -> Outcome {
+    if report.is_empty() {
+        return outcome;
+    }
+    match outcome {
+        Outcome::Success { content } => Outcome::Success {
+            content: format!("{report}\n\n{content}"),
+        },
+        other => other,
+    }
+}
+
+/// Regex patterns that are known to be overly broad.
+///
+/// These patterns match every line (or every character position) in a file,
+/// which is almost never intended in a search-and-replace context.
+const BLOCKED_REGEX_PATTERNS: &[&str] = &[".*", ".+", "^.*$", "^.+$", r"[\s\S]*", r"[\s\S]+"];
+
+/// Minimum number of lines in the original file before the broad-change
+/// check activates. Small files are not worth flagging.
+const BROAD_CHANGE_MIN_LINES: usize = 10;
+
+/// Maximum percentage of changed (deleted) lines to total lines before asking
+/// for confirmation. 50 means more than 50% of the original lines were
+/// removed or replaced.
+const BROAD_CHANGE_MAX_PERCENT: usize = 50;
+
+/// Returns the subset of patterns whose `old` field is a known overly-broad
+/// regex.
+fn find_blocked_regex_patterns(patterns: &[Pattern]) -> Option<Vec<&str>> {
+    let matches = patterns
+        .iter()
+        .map(|p| p.old.trim())
+        .filter(|old| BLOCKED_REGEX_PATTERNS.contains(old))
+        .collect::<Vec<_>>();
+
+    if matches.is_empty() {
+        None
+    } else {
+        Some(matches)
+    }
+}
+
+/// Returns `true` if the change modifies a suspiciously large fraction of
+/// the file.
+///
+/// Only activates for files with at least [`BROAD_CHANGE_MIN_LINES`] lines.
+/// The ratio is computed as deleted lines / total original lines.
+fn is_broad_change(before: &str, after: &str) -> bool {
+    let total_lines = before.lines().count();
+    if total_lines < BROAD_CHANGE_MIN_LINES {
+        return false;
+    }
+
+    let diff = text_diff(before, after);
+    let changed = diff
+        .iter_all_changes()
+        .filter(|c| matches!(c.tag(), ChangeTag::Delete))
+        .count();
+
+    changed * 100 > total_lines * BROAD_CHANGE_MAX_PERCENT
+}
+
+/// Checks the user's answer to the `broad_replacement` question.
+///
+/// Returns `None` if the user approved (continue execution). Returns
+/// `Some(ToolResult)` if the user rejected or hasn't answered yet.
+fn guard_broad_replacement(
+    answers: &Map<String, Value>,
+    reject_message: &str,
+    question_text: String,
+) -> Option<ToolResult> {
+    match answers.get("broad_replacement").and_then(Value::as_bool) {
+        Some(true) => None,
+        Some(false) => Some(fail(reject_message)),
+        None => Some(Ok(Outcome::NeedsInput {
+            question: Question {
+                id: "broad_replacement".to_string(),
+                text: question_text,
+                answer_type: AnswerType::Boolean,
+                default: Some(Value::Bool(false)),
+            },
+        })),
+    }
+}
+
+/// Returns the paths of changes that affect a suspiciously large fraction
+/// of the file.
+fn find_broad_changes(changes: &[Change]) -> Option<Vec<&str>> {
+    let matches = changes
+        .iter()
+        .filter(|c| is_broad_change(&c.before, &c.after))
+        .map(|c| c.path.as_str())
+        .collect::<Vec<_>>();
+
+    if matches.is_empty() {
+        None
+    } else {
+        Some(matches)
+    }
+}
 
 pub struct Change {
     pub path: Utf8PathBuf,
@@ -92,99 +493,111 @@ impl Content {
         None
     }
 
-    fn replace_using_regexp(
+    /// Replace occurrences of a literal string.
+    ///
+    /// Uses [`Content::find_pattern_range`] to locate the first occurrence
+    /// (trying exact, trimmed, and fuzzy matching). When `replace_all` is true,
+    /// all subsequent exact matches of the resolved text are also replaced.
+    fn replace_literal(
         &self,
         find: &str,
         replace: &str,
+        replace_all: bool,
+        case_sensitive: bool,
+    ) -> std::result::Result<String, Error> {
+        if case_sensitive {
+            self.replace_literal_sensitive(find, replace, replace_all)
+        } else {
+            self.replace_literal_insensitive(find, replace, replace_all)
+        }
+    }
+
+    fn replace_literal_sensitive(
+        &self,
+        find: &str,
+        replace: &str,
+        replace_all: bool,
+    ) -> std::result::Result<String, Error> {
+        // Find the first occurrence to determine the effective match.
+        let (first_start, first_end) = self
+            .find_pattern_range(find)
+            .ok_or("Cannot find pattern to replace")?;
+
+        if !replace_all {
+            let mut result = String::with_capacity(self.0.len());
+            result.push_str(&self.0[..first_start]);
+            result.push_str(replace);
+            result.push_str(&self.0[first_end..]);
+            return Ok(result);
+        }
+
+        // Derive the actual matched text (may differ from `find` due to
+        // trimmed/fuzzy matching) so we can find all subsequent
+        // occurrences using exact substring search.
+        let matched = &self.0[first_start..first_end];
+
+        let mut result = String::with_capacity(self.0.len());
+        let mut remaining = &self.0[..];
+
+        while let Some(pos) = remaining.find(matched) {
+            result.push_str(&remaining[..pos]);
+            result.push_str(replace);
+            remaining = &remaining[pos + matched.len()..];
+        }
+        result.push_str(remaining);
+
+        Ok(result)
+    }
+
+    fn replace_literal_insensitive(
+        &self,
+        find: &str,
+        replace: &str,
+        replace_all: bool,
+    ) -> std::result::Result<String, Error> {
+        // Case-insensitive literal search: use regex with escaped pattern.
+        let escaped = fancy_regex::escape(find);
+        let re = RegexBuilder::new(&escaped)
+            .case_insensitive(true)
+            .multi_line(true)
+            .unicode_mode(true)
+            .build()?;
+
+        if !re.is_match(&self.0)? {
+            return Err("Cannot find pattern to replace".into());
+        }
+
+        let replaced = if replace_all {
+            re.replace_all(&self.0, replace)
+        } else {
+            re.replace(&self.0, replace)
+        };
+
+        Ok(replaced.to_string())
+    }
+
+    /// Replace occurrences of a regex pattern.
+    fn replace_regexp(
+        &self,
+        find: &str,
+        replace: &str,
+        replace_all: bool,
+        case_sensitive: bool,
     ) -> std::result::Result<String, Error> {
         let re = RegexBuilder::new(find)
-            .case_insensitive(true)
+            .case_insensitive(!case_sensitive)
             .multi_line(true)
             .dot_matches_new_line(false)
             .unicode_mode(true)
             .build()?;
 
-        Ok(re.replace_all(&self.0, replace).to_string())
-    }
-}
-
-pub(crate) async fn fs_modify_file(
-    ctx: Context,
-    answers: &Map<String, Value>,
-    path: String,
-    string_to_replace: String,
-    new_string: String,
-    replace_using_regex: bool,
-) -> ToolResult {
-    if string_to_replace == new_string {
-        return error("String to replace is the same as the new string.");
-    }
-
-    let p = Utf8PathBuf::from(&path);
-
-    if p.is_absolute() {
-        return error("Path must be relative.");
-    }
-
-    if p.iter().any(|c| c.len() > 30) {
-        return error("Individual path components must be less than 30 characters long.");
-    }
-
-    if p.iter().count() > 20 {
-        return error("Path must be less than 20 components long.");
-    }
-
-    let absolute_path = ctx.root.join(path.trim_start_matches('/'));
-
-    let mut changes = vec![];
-    for entry in glob::glob(absolute_path.as_ref())? {
-        let entry = entry?;
-        let Ok(entry) = Utf8PathBuf::try_from(entry) else {
-            return error("Path is not valid UTF-8.");
-        };
-
-        if !entry.exists() {
-            return error("File does not exist.");
-        }
-
-        if !entry.is_file() {
-            return error("Path is not a regular file.");
-        }
-
-        let Ok(path) = entry.strip_prefix(&ctx.root) else {
-            return fail("Path is not within workspace root.");
-        };
-
-        let before = fs::read_to_string(&entry)?;
-        let contents = Content(before);
-
-        let after = if replace_using_regex {
-            contents.replace_using_regexp(&string_to_replace, &new_string)?
+        let result = if replace_all {
+            re.replace_all(&self.0, replace)
         } else {
-            let (start_byte, end_byte) = contents
-                .find_pattern_range(&string_to_replace)
-                .ok_or("Cannot find pattern to replace")?;
-
-            // Replace the pattern with new string
-            let mut new_content = String::new();
-            new_content.push_str(&contents[..start_byte]);
-            new_content.push_str(&new_string);
-
-            new_content.push_str(&contents[end_byte..]);
-            new_content
+            re.replace(&self.0, replace)
         };
 
-        changes.push(Change {
-            path: path.to_owned(),
-            before: contents.0,
-            after,
-        });
-    }
-
-    if ctx.action.is_run() {
-        apply_changes(changes, &ctx.root, answers)
-    } else {
-        Ok(format_changes(changes).into())
+        Ok(result.to_string())
     }
 }
 
@@ -208,10 +621,11 @@ fn format_changes(changes: Vec<Change>) -> String {
     diff
 }
 
-fn apply_changes(
+fn apply_changes<R: ProcessRunner>(
     changes: Vec<Change>,
     root: &Utf8Path,
     answers: &Map<String, Value>,
+    runner: &R,
 ) -> Result<Outcome, Error> {
     let mut queue = vec![];
     let count = changes.len();
@@ -221,7 +635,7 @@ fn apply_changes(
         before,
     } in changes
     {
-        if is_file_dirty(root, &path)? {
+        if is_file_dirty_impl(root, &path, runner)? {
             match answers.get("modify_dirty_file").and_then(Value::as_bool) {
                 Some(true) => {}
                 Some(false) => {
@@ -233,7 +647,7 @@ fn apply_changes(
                             id: "modify_dirty_file".to_string(),
                             text: format!("File '{path}' has uncommitted changes. Modify anyway?",),
                             answer_type: AnswerType::Boolean,
-                            default: Some(Value::Bool(false)),
+                            default: None,
                         },
                     });
                 }
@@ -259,7 +673,9 @@ fn apply_changes(
     match answers.get("apply_changes").and_then(Value::as_bool) {
         Some(true) => {}
         Some(false) => {
-            return Ok("Changes discarded.".into());
+            return Err(
+                "`apply_changes` inquiry was answered with `false`. Changes discarded.".into(),
+            );
         }
         None => {
             return Ok(Outcome::NeedsInput {
@@ -322,9 +738,38 @@ fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
 ) -> String {
     let mut buf = String::new();
 
+    let (additions, deletions) =
+        diff.iter_all_changes()
+            .fold((0, 0), |(mut add, mut del), change| {
+                if matches!(change.tag(), ChangeTag::Delete) {
+                    del += 1;
+                } else if matches!(change.tag(), ChangeTag::Insert) {
+                    add += 1;
+                }
+                (add, del)
+            });
+
+    // -10,+5
+    let stats_len = additions.to_string().len() + deletions.to_string().len() + 3;
+
+    let mut stats = String::new();
+    if additions > 0 {
+        stats.push_str(&format!("+{additions}").green().to_string());
+    }
+    if deletions > 0 {
+        if !stats.is_empty() {
+            stats.push(',');
+        }
+        stats.push_str(&format!("-{deletions}").red().to_string());
+    }
+
     // header
-    buf.push_str(&format!("         │ {}\n", path.bold()).to_string());
-    buf.push_str(&format!("─────────┼─{}\n", "─".repeat(path.len())));
+    buf.push_str(&format!("{:>stats_len$} │ {}\n", stats, path.bold(),));
+    buf.push_str(&format!(
+        "{}─┼─{}\n",
+        "─".repeat(stats_len),
+        "─".repeat(path.len())
+    ));
 
     // hunks
     for hunk in unified.iter_hunks() {
@@ -335,11 +780,18 @@ fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
                     ChangeTag::Insert => ("+", ContentStyle::new().green()),
                     ChangeTag::Equal => (" ", ContentStyle::new().dim()),
                 };
+
+                let old = Line(change.old_index());
+                let new = Line(change.new_index());
+
+                let left_len = old.to_string().len() + new.to_string().len() + 1;
+                let left = format!("{}{} ", s.apply(old), s.apply(new),);
+
                 let _ = write!(
                     &mut buf,
-                    "{}{} │{}",
-                    s.apply(Line(change.old_index())),
-                    s.apply(Line(change.new_index())),
+                    "{}{}│{}",
+                    left,
+                    " ".repeat(stats_len.saturating_sub(left_len)),
                     s.apply(sign).bold(),
                 );
                 for (emphasized, value) in change.iter_strings_lossy() {
@@ -360,402 +812,5 @@ fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use camino_tempfile::tempdir;
-    use indoc::indoc;
-    use jp_tool::Action;
-
-    use super::*;
-
-    #[tokio::test]
-    #[test_log::test]
-    async fn test_modify_file_replace_word() {
-        struct TestCase {
-            start_content: &'static str,
-            string_to_replace: &'static str,
-            new_string: &'static str,
-        }
-
-        let cases = vec![
-            ("replace_first_line", TestCase {
-                start_content: "hello world\n",
-                string_to_replace: "hello world",
-                new_string: "hello universe",
-            }),
-            ("delete_first_line", TestCase {
-                start_content: "hello world\n",
-                string_to_replace: "hello world",
-                new_string: "",
-            }),
-            ("replace_first_line_with_multiple_lines", TestCase {
-                start_content: "hello world\n",
-                string_to_replace: "hello world",
-                new_string: "hello\nworld\n",
-            }),
-            ("replace_whole_line_without_newline", TestCase {
-                start_content: "hello world\nhello universe",
-                string_to_replace: "hello world",
-                new_string: "hello there",
-            }),
-            ("replace_subset_of_line", TestCase {
-                start_content: "hello world how are you doing?",
-                string_to_replace: "world",
-                new_string: "universe",
-            }),
-            ("replace_subset_across_multiple_lines", TestCase {
-                start_content: "hello world\nhow are you doing?",
-                string_to_replace: "world\nhow",
-                new_string: "universe\nwhat",
-            }),
-            ("ignore_replacement_if_no_match", TestCase {
-                start_content: "hello world how are you doing?",
-                string_to_replace: "universe",
-                new_string: "galaxy",
-            }),
-        ];
-
-        for (name, test_case) in cases {
-            // Create root directory.
-            let temp_dir = tempdir().unwrap();
-            let root = temp_dir.path().to_path_buf();
-
-            // Create file to be modified.
-            let file_path = "test.txt";
-            let absolute_file_path = root.join(file_path);
-            fs::write(&absolute_file_path, test_case.start_content).unwrap();
-
-            let ctx = Context {
-                root,
-                action: Action::Run,
-            };
-
-            let actual = fs_modify_file(
-                ctx,
-                &Map::from_iter([("apply_changes".to_string(), Value::Bool(true))]),
-                file_path.to_owned(),
-                test_case.string_to_replace.to_owned(),
-                test_case.new_string.to_owned(),
-                false,
-            )
-            .await
-            .map(|v| v.into_content().unwrap_or_default())
-            .map_err(|e| e.to_string());
-
-            let response = match &actual {
-                Ok(v) => v,
-                Err(e) => e,
-            };
-
-            insta::with_settings!({
-                snapshot_suffix => name,
-                omit_expression => true,
-                prepend_module_to_snapshot => false,
-            }, {
-                insta::assert_snapshot!(&response);
-
-                let file_content = fs::read_to_string(&absolute_file_path).unwrap();
-                insta::assert_snapshot!(&file_content);
-            });
-        }
-    }
-
-    #[tokio::test]
-    #[test_log::test]
-    async fn test_issue_with_changing_number_of_lines() {
-        let string_to_replace = "/// A tool call response event - the result of executing a \
-                                 tool.\n///\n/// This event MUST be in response to a \
-                                 `ToolCallRequest` event, with a matching `id`.\n#[derive(Debug, \
-                                 Clone, PartialEq)]\npub struct ToolCallResponse {\n    /// ID \
-                                 matching the corresponding ToolCallRequest\n    pub id: String,";
-
-        let new_string = "/// A tool call response event - the result of executing a \
-                          tool.\n///\n/// This event MUST be in response to a `ToolCallRequest` \
-                          event, with a matching `id`.\n#[derive(Debug, Clone, PartialEq)]\npub \
-                          struct ToolCallResponse {\n    /// ID matching the corresponding \
-                          `ToolCallRequest`\n    pub id: String,";
-
-        let source = indoc!(
-            "
-            /// A tool call response event - the result of executing a tool.
-            ///
-            /// This event MUST be in response to a `ToolCallRequest` event, with a matching `id`.
-            #[derive(Debug, Clone, PartialEq)]
-            pub struct ToolCallResponse {
-                /// ID matching the corresponding ToolCallRequest
-                pub id: String,
-
-                /// The result of executing the tool: Ok(content) on success, Err(error) on
-                /// failure
-                pub result: Result<String, String>,
-            }"
-        );
-
-        let result = indoc!(
-            "
-            /// A tool call response event - the result of executing a tool.
-            ///
-            /// This event MUST be in response to a `ToolCallRequest` event, with a matching `id`.
-            #[derive(Debug, Clone, PartialEq)]
-            pub struct ToolCallResponse {
-                /// ID matching the corresponding `ToolCallRequest`
-                pub id: String,
-
-                /// The result of executing the tool: Ok(content) on success, Err(error) on
-                /// failure
-                pub result: Result<String, String>,
-            }"
-        );
-
-        // Create root directory.
-        let temp_dir = tempdir().unwrap();
-        let root = temp_dir.path().to_path_buf();
-
-        // Create file to be modified.
-        let file_path = "test.txt";
-        let absolute_file_path = root.join(file_path);
-        fs::write(&absolute_file_path, source).unwrap();
-
-        let ctx = Context {
-            root,
-            action: Action::Run,
-        };
-
-        let _actual = fs_modify_file(
-            ctx,
-            &Map::from_iter([("apply_changes".to_string(), Value::Bool(true))]),
-            file_path.to_owned(),
-            string_to_replace.to_owned(),
-            new_string.to_owned(),
-            false,
-        )
-        .await
-        .map_err(|e| e.to_string());
-
-        assert_eq!(&fs::read_to_string(&absolute_file_path).unwrap(), result,);
-    }
-
-    #[tokio::test]
-    #[test_log::test]
-    async fn test_issue_with_newlines_at_end() {
-        let string_to_replace = "use crossterm::style::Stylize as _;\nuse inquire::Confirm;\nuse \
-                                 jp_conversation::{Conversation, ConversationId, \
-                                 ConversationStream};\nuse \
-                                 jp_format::conversation::DetailsFmt;\nuse jp_printer::Printable \
-                                 as _;\n\nuse crate::{Output, cmd::Success, ctx::Ctx};\n";
-
-        let new_string = "use crossterm::style::Stylize as _;\nuse inquire::Confirm;\nuse \
-                          jp_conversation::{Conversation, ConversationId, \
-                          ConversationStream};\nuse jp_format::conversation::DetailsFmt;\n\nuse \
-                          crate::{Output, cmd::Success, ctx::Ctx};\n";
-
-        let source = indoc! {"
-            use crossterm::style::Stylize as _;
-            use inquire::Confirm;
-            use jp_conversation::{Conversation, ConversationId, ConversationStream};
-            use jp_format::conversation::DetailsFmt;
-            use jp_printer::Printable as _;
-
-            use crate::{Output, cmd::Success, ctx::Ctx};
-
-            #[derive(Debug, clap::Args)]
-            pub(crate) struct Rm {
-                /// Conversation IDs to remove."};
-
-        let result = indoc! {"
-            use crossterm::style::Stylize as _;
-            use inquire::Confirm;
-            use jp_conversation::{Conversation, ConversationId, ConversationStream};
-            use jp_format::conversation::DetailsFmt;
-
-            use crate::{Output, cmd::Success, ctx::Ctx};
-
-            #[derive(Debug, clap::Args)]
-            pub(crate) struct Rm {
-                /// Conversation IDs to remove."};
-
-        // Create root directory.
-        let temp_dir = tempdir().unwrap();
-        let root = temp_dir.path().to_path_buf();
-
-        // Create file to be modified.
-        let file_path = "test.txt";
-        let absolute_file_path = root.join(file_path);
-        fs::write(&absolute_file_path, source).unwrap();
-
-        let ctx = Context {
-            root,
-            action: Action::Run,
-        };
-
-        let _actual = fs_modify_file(
-            ctx,
-            &Map::from_iter([("apply_changes".to_string(), Value::Bool(true))]),
-            file_path.to_owned(),
-            string_to_replace.to_owned(),
-            new_string.to_owned(),
-            false,
-        )
-        .await
-        .map_err(|e| e.to_string());
-
-        assert_eq!(&fs::read_to_string(&absolute_file_path).unwrap(), result);
-    }
-
-    #[tokio::test]
-    #[test_log::test]
-    async fn test_modify_file_replace_with_regexp() {
-        struct TestCase {
-            start_content: &'static str,
-            string_to_replace: &'static str,
-            new_string: &'static str,
-            final_content: &'static str,
-            output: Result<&'static str, &'static str>,
-        }
-
-        let cases = vec![
-            ("capture group", TestCase {
-                start_content: "hello world\n",
-                string_to_replace: r"(\w+)\s\w+",
-                new_string: "$1 universe",
-                final_content: "hello universe\n",
-                output: Ok("File modified successfully:\n\n```diff\n--- test.txt\n+++ \
-                            test.txt\n@@ -1 +1 @@\n-hello world\n+hello universe\n```"),
-            }),
-            ("delete", TestCase {
-                start_content: "hello world\n",
-                string_to_replace: "h(.+?)d\n",
-                new_string: "$1",
-                final_content: "ello worl",
-                output: Ok("File modified successfully:\n\n```diff\n--- test.txt\n+++ \
-                            test.txt\n@@ -1 +1 @@\n-hello world\n+ello worl\n\\ No newline at \
-                            end of file\n```"),
-            }),
-        ];
-
-        for (name, test_case) in cases {
-            // Create root directory.
-            let temp_dir = tempdir().unwrap();
-            let root = temp_dir.path().to_path_buf();
-
-            // Create file to be modified.
-            let file_path = "test.txt";
-            let absolute_file_path = root.join(file_path);
-            fs::write(&absolute_file_path, test_case.start_content).unwrap();
-
-            let ctx = Context {
-                root,
-                action: Action::Run,
-            };
-
-            let actual = fs_modify_file(
-                ctx,
-                &Map::from_iter([("apply_changes".to_string(), Value::Bool(true))]),
-                file_path.to_owned(),
-                test_case.string_to_replace.to_owned(),
-                test_case.new_string.to_owned(),
-                true,
-            )
-            .await
-            .map_err(|e| e.to_string());
-
-            match (actual, test_case.output) {
-                (Ok(Outcome::Success { content }), Ok(expected)) => {
-                    assert_eq!(&content, expected, "test case: {name}");
-                }
-                (actual, expected) => {
-                    assert_eq!(
-                        actual,
-                        expected.map(Into::into).map_err(str::to_owned),
-                        "test case: {name}"
-                    );
-                }
-            }
-
-            assert_eq!(
-                &fs::read_to_string(&absolute_file_path).unwrap(),
-                test_case.final_content,
-                "test case: {name}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    #[test_log::test]
-    async fn test_modify_file_confirmation() {
-        // Create root directory.
-        let temp_dir = tempdir().unwrap();
-        let root = temp_dir.path().to_path_buf();
-
-        // Create file to be modified.
-        let file_path = "test.txt";
-        let absolute_file_path = root.join(file_path);
-        fs::write(&absolute_file_path, "Hello World").unwrap();
-
-        let actual = fs_modify_file(
-            Context {
-                root: root.clone(),
-                action: Action::Run,
-            },
-            &Map::new(),
-            file_path.to_owned(),
-            "World".to_owned(),
-            "There".to_owned(),
-            true,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(actual, Outcome::NeedsInput {
-            question: Question {
-                id: "apply_changes".to_string(),
-                text: indoc::indoc! {"
-                    Do you want to apply the following patch?
-
-                    ```diff
-                    --- test.txt
-                    +++ test.txt
-                    @@ -1 +1 @@
-                    -Hello World
-                    \\ No newline at end of file
-                    +Hello There
-                    \\ No newline at end of file
-                    ```"}
-                .to_owned(),
-                answer_type: AnswerType::Boolean,
-                default: Some(Value::Bool(true)),
-            },
-        });
-
-        let actual = fs_modify_file(
-            Context {
-                root,
-                action: Action::Run,
-            },
-            &Map::from_iter([("apply_changes".to_string(), Value::Bool(true))]),
-            file_path.to_owned(),
-            "World".to_owned(),
-            "There".to_owned(),
-            true,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(actual, Outcome::Success {
-            content: indoc::indoc! {"
-                File modified successfully:
-
-                ```diff
-                --- test.txt
-                +++ test.txt
-                @@ -1 +1 @@
-                -Hello World
-                \\ No newline at end of file
-                +Hello There
-                \\ No newline at end of file
-                ```"}
-            .to_owned(),
-        });
-    }
-}
+#[path = "modify_file_tests.rs"]
+mod tests;

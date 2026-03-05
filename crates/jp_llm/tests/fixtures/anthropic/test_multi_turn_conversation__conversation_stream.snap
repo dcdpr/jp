@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -126,7 +149,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "# Hello! 👋\n\nThis is a test message response. I'm working properly and ready to help!\n\nIs there something specific you'd like to test or discuss?"
+    "message": "Hello! This is a test message response. I'm working properly and ready to help. \n\nWhat would you like to do?"
   },
   {
     "type": "config_delta",
@@ -152,9 +175,9 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "The user is asking me to repeat their previous message. Their previous message was \"Test message\". So I should repeat that back to them.",
+    "reasoning": "The user is asking me to repeat their previous message. Their previous message was \"Test message\".\n\nSo I should simply repeat: \"Test message\"",
     "metadata": {
-      "anthropic_thinking_signature": "RXJFQ0NrWUlDaGdDS2tBMS9lZGtmUDBrZkxRWnV2ZnMycEZTMG9OMFY1R25ZRGxNS2ZnVTF0dHQ4OXcxd050VnNKaGx5VGlrdlovd29kaWtFcW56bEYvMG1DVzYxOHY5Ykw1ckVnd2hhNkhzTGtGc2Z3bzdaZzhhREwyVWpHWURuSGptMzMwbHV5SXc4MEQ0c2ovN0xKNThDN2U3czl0bUtMODd0Sm1uNjhnRXBiOU1UcFAzazBNL3VOY0dwUkhNTWNBb1p1Z2Jici9VS3BnQitjVWJlZ1dzRDhaejlIMXRoR0EyQnFjeGlqc0tyaVJpT0t5bmMreDFiMXNlZFJ0Tzc3UFRlTDJFYWt3RXNsWWxMejFpbG9PRFM3ZXB1R0V6dTZicjQxOGFXVGtFRDk3MDdzTXloNkRnd2tEVjRyM1FkVXJ4a3VZeDh2UHJxUHVzR0NxSGh1UmRMQjA2ZzBwcGVEbXh0NG9ZM09jMDlhWEg2cXRsaUZacTdXWnEySSt5NnloUnBINGw0ZFBuekFTVUtNbHlrTmdTOUQwWUFRPT0="
+      "anthropic_thinking_signature": "RXJRQ0NrWUlDeGdDS2tBcTdQUm82M1dLMWtjZlNqY1R4Qks3Q0t1Myt6UXpXRUxxZjFleE5zV0pIbG5jQ0VDSTF2VVZQZG1qclhzMlBKUjhFU00yZjFpV0N4TEhxRHVnVnVTbkVnd1J1ZHg3TWROUlJmTmhyR3dhREw5Z05XNk1wbjF6bWd2dmFpSXd5MnBPU2QrTkV5ekJyZ3lhdjRXMU1vU1VSTGl5WHBEb1daSENSU3M5N21IZ3FjSUR1TkZlQU8zdndjWSthRlRUS3BzQnd3aGQvb2szODh3TnkxSVFRNDVJNFEzTXVnV2w4VTBMOStSRUFveGRwRW82OXl2RUVtbVgyazRNalprWW1hUFl0K3puTU9ucS81bTJYc3VTS3ArVWJ5S3FJWTdDRGFDSGYxOFlrYy9qeTRneWNMeU11T0syOUY3T0ZRWDFpNEkzTVhUVC9pdDZRQ0MrN1R6eEh0bmJ6SjhadnRnNkEwb3RlNXU3RERMZVgwZzMrSHg3ZlNyRE1QMHduUzIwMEdkcHRpMWsvK29raTNOWFpDOFlBUT09"
     }
   },
   {
@@ -183,7 +206,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "toolu_01F3qxRanMBBxb4CDausBx8L",
+    "id": "toolu_01Saqbtd44f3anveY71jqJtd",
     "name": "run_me",
     "arguments": {
       "bar": "Zm9v"
@@ -192,14 +215,14 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "toolu_01F3qxRanMBBxb4CDausBx8L",
+    "id": "toolu_01Saqbtd44f3anveY71jqJtd",
     "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Great! I ran the tool with the argument `bar: \"foo\"` and it returned:\n\n**The secret code is: 42**\n\nInterestingly, this is a reference to *The Hitchhiker's Guide to the Galaxy*, where 42 is famously \"the Answer to the Ultimate Question of Life, the Universe, and Everything!\""
+    "message": "I've run the tool with the argument `bar: \"foo\"` and received the result: **The secret code is: 42**"
   },
   {
     "type": "config_delta",
@@ -225,14 +248,14 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "The user is asking me to recall the result of the previous tool call. Looking at my previous response, I called the `run_me` tool with the argument `bar: \"foo\"`, and the function result was:\n\n\"The secret code is: 42\"\n\nSo I should simply state that the result was \"The secret code is: 42\"",
+    "reasoning": "The user is asking me what the result of the previous tool call was. Looking back at my previous message, I called the \"run_me\" tool with the argument bar=\"foo\" and the function returned \"The secret code is: 42\"\n\nSo the result was: The secret code is: 42",
     "metadata": {
-      "anthropic_thinking_signature": "RXNZRENrWUlDaGdDS2tBMk5rbVJFSFgyYjF4M00zb1RNZGdjbHExc2NLcWl5dFB1UlUzRlV0L3JwMjB5NWZyQ2dEZGtvUkVLZjMvVmZSRlFLSlc2ajFnd3k3WUMxMHdmMDhuNEVndzJaUWVialRiZEtVMndCMHdhRE12MXVMMXRFbVBjU1FGUWpDSXdmU1N2N3pwVGd4QnBuZFQzbTVDQzZlSG8vNG5UUFlYblo4K0FtQlczQ3JPT3BWS3FNaUFTLytoS1ZGbGE4RkVNS3EwQ3lzNDFvWWlaVG5CVEd2Y2txZU9JajJlTVIyckc1OWYxRHJTUjE0a1ZOOGVsZGVNdlJwL0ZUTmpuV3k5d3c1RGhIK01kYmFQSnN6TmZhRU04UXRhUkZqTWc2Wjg2Z21JMWNNZW9aRGUxRS9MWVF4MGFYaDdKZTBVNENEcllRNjVXWkpvN1ZEL1VyQ2RtNnEvTTUyeGQybUY5VnhIMkx0YSs3NFE4TmVRYkhCakp3eDBCaGFyd0JsN01lalhjNGVkUVUwWXgxZlJVUUJBcUtUQVFMUElyVkd2dkJQYUZRbUFwK0JtNUtqWUlHZ2NIbThpbDZTeFdXMHJnV2M3VTNPWkUvWEY0K0s4NCtHSUgza3BSdHc0QklqTzRPdDZEYTVnbnIwZ3d0N2ptVHAzL0N3U01hdlZtc29yM21ZV3VyV0RXU3JpdGs3a3NMekFkaEQyTW5DZXF1TE90d1JQenlxVXovalBmMDBOaXliNDZYdzUxOVFUcGxSTWlkSWE1K211Tlg2SHFGYkFlTUF5ckhmTndNUmdC"
+      "anthropic_thinking_signature": "RXFVRENrWUlDeGdDS2tBeFpCbUhFRW1DWEZKWWNvZGhnZGNwR2NBSXlrNlJwRS9zdGtHQldJeFdZVVdqV3lVRDBabWZhemk1dVJjWmxrSGJ1Z3dEbjNFZ3JKTnNkNmlncmVOc0VneW9mWnY3TlovdWNSQWFhN1lhRFBPVURtOVVSWkJCN0lsVVpTSXcxOXZxRmthbmRGZ05JVGpvRktYQVBBWGlxaE9xbnBpajJwMG5qSFdUN2kvYUtoWlpxRFNxMlI1UllFRThBa0pES293Q3VWNW96TlZab0RXZUczMDFFR2EzTTRiWWJkOG1DRDVpMGJTSHBLVUFQT3ZKR2NSb1ZZbThHZWVPNWlOaXc0WnAzRFlZellyVEcwcHZveEVPZEdlSWdxQXFkTHRibFVObTVjbWhKSVZORkRrU3lGdE1iQzh4WFliRnlYTk5oWDFMczFOVDNKTFNlRUszamdmdXlkRC9wd2lrOTNOU3VybFFkNktwRFpyTlMrU2toZnNGUkdVN1hlTG5CeUpxSzZtVWxFdDJEdVovZjM2cXVGY1F2aVk4TXNhRTE5N3RsVWFqczhZSGdyQW5SU3FLNFEwWWZaSFFpNTdyRjlObXZEQXBXYlhXVEZTYU9lS3dxNkZETm84bG9USG5rZXEyUkJ3NmgxUkEzMlROREFReUptRDdVOHhUTWtJdG9DcVl1eFBtZGNDVmxNK3A2VThKM1oxeWphelpJRTZRR0RoQ3ZHdEluV1NvekJnQg=="
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "The result of the previous tool call was:\n\n**The secret code is: 42**"
+    "message": "The result of the previous tool call was: **The secret code is: 42**"
   }
 ]

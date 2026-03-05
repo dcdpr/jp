@@ -1,9 +1,8 @@
 //! Tool configuration for conversations.
 
-use std::{fmt, path::Path, process::Output, str::FromStr, sync::Arc};
+use std::{fmt, str::FromStr};
 
 use indexmap::IndexMap;
-use minijinja::Environment;
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -18,7 +17,6 @@ use crate::{
     util::merge_nested_indexmap,
 };
 
-pub mod item;
 pub mod style;
 
 /// Tools configuration.
@@ -121,6 +119,11 @@ impl ToolsConfig {
             })
         })
     }
+
+    /// Insert a tool configuration.
+    pub fn insert(&mut self, name: String, tool: ToolConfig) {
+        self.tools.insert(name, tool);
+    }
 }
 
 /// Tools defaults configuration.
@@ -129,8 +132,9 @@ impl ToolsConfig {
 pub struct ToolsDefaultsConfig {
     /// Whether the tool is enabled.
     ///
-    /// If false, the tool will not be available to the assistant.
-    pub enable: Option<bool>,
+    /// Accepts `true`/`false`, `"on"`/`"off"`, or `"explicit"`.
+    /// See [`Enable`] for details.
+    pub enable: Option<Enable>,
 
     /// How to run the tool.
     ///
@@ -158,7 +162,7 @@ pub struct ToolsDefaultsConfig {
 impl AssignKeyValue for PartialToolsDefaultsConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "enable" => self.enable = kv.try_some_bool()?,
+            "enable" => self.enable = kv.try_some_bool_or_from_str()?,
             "run" => self.run = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
             _ if kv.p("style") => self.style.assign(kv)?,
@@ -207,8 +211,9 @@ pub struct ToolConfig {
 
     /// Whether the tool is enabled.
     ///
-    /// If false, the tool will not be available to the assistant.
-    pub enable: Option<bool>,
+    /// Accepts `true`/`false`, `"on"`/`"off"`, or `"explicit"`.
+    /// See [`Enable`] for details.
+    pub enable: Option<Enable>,
 
     /// The command to run. Only used for local tools.
     ///
@@ -217,11 +222,30 @@ pub struct ToolConfig {
     #[setting(nested)]
     pub command: Option<CommandConfigOrString>,
 
-    /// The description of the tool.
+    /// A short summary of what the tool does.
     ///
-    /// This will override any existing description, such as the one from an
-    /// MCP server, or a built-in tool.
+    /// This is always included in the tool definition sent to the LLM. It
+    /// should be concise enough to give the LLM a general idea of the tool's
+    /// purpose without consuming excessive context.
+    ///
+    /// If not set, falls back to [`description`](Self::description).
+    pub summary: Option<String>,
+
+    /// The full description of the tool.
+    ///
+    /// This provides detailed information about the tool's behavior, arguments,
+    /// and edge cases. It is NOT sent to the LLM by default, instead, it is
+    /// made available on demand via the `describe_tools` built-in tool.
+    ///
+    /// This will override any existing description, such as the one from an MCP
+    /// server, or a built-in tool.
     pub description: Option<String>,
+
+    /// Usage examples for the tool.
+    ///
+    /// Like `description`, examples are loaded on demand via `describe_tools`
+    /// rather than being sent in every request.
+    pub examples: Option<String>,
 
     /// The parameters expected by the tool.
     ///
@@ -268,9 +292,11 @@ impl AssignKeyValue for PartialToolConfig {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
             "source" => self.source = kv.try_some_from_str()?,
-            "enable" => self.enable = kv.try_some_bool()?,
+            "enable" => self.enable = kv.try_some_bool_or_from_str()?,
             _ if kv.p("command") => self.command.assign(kv)?,
+            "summary" => self.summary = kv.try_some_string()?,
             "description" => self.description = kv.try_some_string()?,
+            "examples" => self.examples = kv.try_some_string()?,
             "parameters" => self.parameters = kv.try_object()?,
             "run" => self.run = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
@@ -289,7 +315,9 @@ impl PartialConfigDelta for PartialToolConfig {
             source: delta_opt(self.source.as_ref(), next.source),
             enable: delta_opt(self.enable.as_ref(), next.enable),
             command: delta_opt_partial(self.command.as_ref(), next.command),
+            summary: delta_opt(self.summary.as_ref(), next.summary),
             description: delta_opt(self.description.as_ref(), next.description),
+            examples: delta_opt(self.examples.as_ref(), next.examples),
             parameters: next
                 .parameters
                 .into_iter()
@@ -339,7 +367,9 @@ impl ToPartial for ToolConfig {
             source: partial_opt(&self.source, defaults.source),
             enable: partial_opts(self.enable.as_ref(), defaults.enable),
             command: partial_opt_config(self.command.as_ref(), defaults.command),
+            summary: partial_opts(self.summary.as_ref(), defaults.summary),
             description: partial_opts(self.description.as_ref(), defaults.description),
+            examples: partial_opts(self.examples.as_ref(), defaults.examples),
             parameters: self
                 .parameters
                 .iter()
@@ -462,43 +492,6 @@ pub struct ToolCommandConfig {
     pub shell: bool,
 }
 
-impl ToolCommandConfig {
-    /// Run the command.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the command fails.
-    pub fn run(&self, root: &Path, ctx: &Value) -> Result<Output, BoxedError> {
-        let tmpl = Arc::new(Environment::new());
-
-        let program = tmpl.render_str(&self.program, ctx)?;
-        let args = self
-            .args
-            .iter()
-            .map(|s| tmpl.render_str(s, ctx))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let expression = if self.shell {
-            let cmd = std::iter::once(program)
-                .chain(args.iter().cloned())
-                .collect::<Vec<_>>()
-                .join(" ");
-
-            duct_sh::sh_dangerous(cmd)
-        } else {
-            duct::cmd(program, args)
-        };
-
-        expression
-            .dir(root)
-            .unchecked()
-            .stdout_capture()
-            .stderr_capture()
-            .run()
-            .map_err(Into::into)
-    }
-}
-
 impl fmt::Display for ToolCommandConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.shell {
@@ -555,35 +548,61 @@ impl ToPartial for ToolCommandConfig {
 }
 
 /// Tool parameter configuration.
+///
+/// This type doubles as a recursive JSON Schema node: `items` points to the
+/// schema for array elements, `properties` describes the fields of object
+/// elements.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolParameterConfig {
     /// The type of the parameter.
-    #[setting(nested, rename = "type")]
+    #[setting(nested)]
     #[serde(rename = "type")]
     pub kind: OneOrManyTypes,
 
     /// The default value of the parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
 
     /// Whether the parameter is required.
+    #[setting(default)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub required: bool,
 
-    /// Description of the parameter.
+    /// A short summary of the parameter.
+    ///
+    /// This is included in the JSON schema sent to the LLM. If not set, falls
+    /// back to [`description`](Self::description).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+
+    /// The full description of the parameter.
+    ///
+    /// Detailed usage information loaded on demand via `describe_tools`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
+    /// Usage examples for the parameter.
+    ///
+    /// Loaded on demand via `describe_tools`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub examples: Option<String>,
+
     /// A list of possible values for the parameter.
-    #[setting(rename = "enum")]
-    #[serde(default, rename = "enum")]
+    #[serde(default, rename = "enum", skip_serializing_if = "Vec::is_empty")]
     pub enumeration: Vec<Value>,
 
-    /// Configuration for array items.
-    ///
-    /// NOTE: While technically this could be `Option<Box<Self>>`, the macro
-    /// expansion would go into an infinite loop, so we support one level of
-    /// `items` nesting for now, using a dedicated `ToolParameterItemsConfig`
-    /// type.
-    pub items: Option<item::ToolParameterItemConfig>,
+    /// Schema for array items (recursive).
+    #[setting(nested)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[expect(clippy::use_self, reason = "macro can't resolve `Self`")]
+    pub items: Option<Box<ToolParameterConfig>>,
+
+    /// Sub-properties for object-typed parameters (recursive).
+    #[setting(nested, merge = merge_nested_indexmap)]
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[expect(clippy::use_self, reason = "macro can't resolve `Self`")]
+    pub properties: IndexMap<String, ToolParameterConfig>,
 }
 
 impl PartialConfigDelta for PartialToolParameterConfig {
@@ -592,9 +611,26 @@ impl PartialConfigDelta for PartialToolParameterConfig {
             kind: self.kind.delta(next.kind),
             default: delta_opt(self.default.as_ref(), next.default),
             required: delta_opt(self.required.as_ref(), next.required),
+            summary: delta_opt(self.summary.as_ref(), next.summary),
             description: delta_opt(self.description.as_ref(), next.description),
-            enumeration: delta_opt(self.enumeration.as_ref(), next.enumeration),
+            examples: delta_opt(self.examples.as_ref(), next.examples),
+            enumeration: delta_opt_vec(self.enumeration.as_ref(), next.enumeration),
             items: delta_opt(self.items.as_ref(), next.items),
+            properties: next
+                .properties
+                .into_iter()
+                .filter_map(|(k, next)| {
+                    let prev = self.properties.get(&k);
+                    if prev.is_some_and(|prev| prev == &next) {
+                        return None;
+                    }
+                    let next = match prev {
+                        Some(prev) => prev.delta(next),
+                        None => next,
+                    };
+                    Some((k, next))
+                })
+                .collect(),
         }
     }
 }
@@ -607,9 +643,20 @@ impl ToPartial for ToolParameterConfig {
             kind: self.kind.to_partial(),
             default: partial_opts(self.default.as_ref(), defaults.default),
             required: partial_opt(&self.required, defaults.required),
+            summary: partial_opts(self.summary.as_ref(), defaults.summary),
             description: partial_opts(self.description.as_ref(), defaults.description),
-            enumeration: partial_opt(&self.enumeration, defaults.enumeration),
-            items: partial_opts(self.items.as_ref(), defaults.items),
+            examples: partial_opts(self.examples.as_ref(), defaults.examples),
+            enumeration: if self.enumeration.is_empty() {
+                None
+            } else {
+                Some(self.enumeration.clone())
+            },
+            items: self.items.as_ref().map(|v| Box::new(v.to_partial())),
+            properties: self
+                .properties
+                .iter()
+                .map(|(k, v)| (k.clone(), v.to_partial()))
+                .collect(),
         }
     }
 }
@@ -691,8 +738,8 @@ impl ToolParameterConfig {
             OneOrManyTypes::Many(v) => v.clone().into(),
         });
 
-        if let Some(description) = self.description.as_deref() {
-            map.insert("description".to_owned(), description.into());
+        if let Some(desc) = self.summary.as_deref().or(self.description.as_deref()) {
+            map.insert("description".to_owned(), desc.into());
         }
 
         if let Some(default) = self.default.clone() {
@@ -707,42 +754,29 @@ impl ToolParameterConfig {
             if !self.kind.is_type("array") {
                 warn!("Unexpected `items` property for non-array type");
             }
+            map.insert("items".to_owned(), items.to_json_schema());
+        }
 
-            if let Ok(v @ Value::Object(_)) = serde_json::to_value(items) {
-                map.insert("items".to_owned(), v);
-            } else {
-                warn!("Unable to serialize `items` property");
+        if !self.properties.is_empty() {
+            let props: Map<_, _> = self
+                .properties
+                .iter()
+                .map(|(k, v)| (k.clone(), v.to_json_schema()))
+                .collect();
+            map.insert("properties".to_owned(), Value::Object(props));
+
+            let required: Vec<_> = self
+                .properties
+                .iter()
+                .filter(|(_, v)| v.required)
+                .map(|(k, _)| Value::String(k.clone()))
+                .collect();
+            if !required.is_empty() {
+                map.insert("required".to_owned(), Value::Array(required));
             }
         }
 
         Value::Object(map)
-    }
-}
-
-/// Tool parameter configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Config)]
-#[config(rename_all = "snake_case")]
-pub struct ToolParameterItemsConfig {
-    /// The type of the parameter array items.
-    #[serde(rename = "type")]
-    pub kind: String,
-}
-
-impl PartialConfigDelta for PartialToolParameterItemsConfig {
-    fn delta(&self, next: Self) -> Self {
-        Self {
-            kind: delta_opt(self.kind.as_ref(), next.kind),
-        }
-    }
-}
-
-impl ToPartial for ToolParameterItemsConfig {
-    fn to_partial(&self) -> Self::Partial {
-        let defaults = Self::Partial::default();
-
-        Self::Partial {
-            kind: partial_opt(&self.kind, defaults.kind),
-        }
     }
 }
 
@@ -880,7 +914,7 @@ impl schematic::Schematic for ToolSource {
     }
 
     fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
-        schema.build()
+        schema.string(schematic::schema::StringType::default())
     }
 }
 
@@ -932,6 +966,10 @@ pub struct ToolConfigWithDefaults {
 
 impl ToolConfigWithDefaults {
     /// Return whether the tool is enabled.
+    ///
+    /// Returns `true` only for [`Enable::On`]. Both [`Enable::Off`] and
+    /// [`Enable::Explicit`] return `false`. If no value is set, defaults to
+    /// `true`.
     #[must_use]
     pub fn enable(&self) -> bool {
         // NOTE: We cannot define `#[setting(default = true)]` on the `enable`
@@ -940,7 +978,19 @@ impl ToolConfigWithDefaults {
         // with the actual configuration, the `enable` field will still default
         // to `false`, because there is no default value set for any specific
         // entry in the map.
-        self.tool.enable.or(self.defaults.enable).unwrap_or(true)
+        self.tool
+            .enable
+            .or(self.defaults.enable)
+            .is_none_or(Enable::is_on)
+    }
+
+    /// Return the [`Enable`] value for this tool.
+    ///
+    /// Returns `None` if neither the tool nor the defaults specify an enable
+    /// value.
+    #[must_use]
+    pub fn enable_mode(&self) -> Option<Enable> {
+        self.tool.enable.or(self.defaults.enable)
     }
 
     /// Return the command to run the tool.
@@ -958,10 +1008,27 @@ impl ToolConfigWithDefaults {
         &self.tool.source
     }
 
-    /// Return the description of the tool.
+    /// Return the summary of the tool.
+    ///
+    /// Falls back to [`description`](Self::description) if no summary is set.
+    #[must_use]
+    pub fn summary(&self) -> Option<&str> {
+        self.tool
+            .summary
+            .as_deref()
+            .or(self.tool.description.as_deref())
+    }
+
+    /// Return the full description of the tool.
     #[must_use]
     pub fn description(&self) -> Option<&str> {
         self.tool.description.as_deref()
+    }
+
+    /// Return the usage examples of the tool.
+    #[must_use]
+    pub fn examples(&self) -> Option<&str> {
+        self.tool.examples.as_deref()
     }
 
     /// Return the parameters of the tool.
@@ -1079,12 +1146,234 @@ pub enum QuestionTarget {
     Assistant,
 }
 
+/// Whether a tool is enabled.
+///
+/// This controls tool activation behavior, particularly in relation to the
+/// `--tools` (`-t`) CLI flag.
+///
+/// In configuration files, this accepts both boolean values (`true`/`false`)
+/// and string values (`"on"`, `"off"`, `"explicit"`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Enable {
+    /// The tool is enabled. Equivalent to `true`.
+    On,
+
+    /// The tool is disabled. Equivalent to `false`.
+    Off,
+
+    /// The tool requires explicit activation.
+    ///
+    /// Unlike [`Enable::Off`], an `Explicit` tool will not be enabled by
+    /// `--tools` (enable all tools), but can be enabled by naming it
+    /// specifically, e.g. `--tools my_tool`.
+    Explicit,
+
+    /// The tool is always enabled and cannot be disabled (even with
+    /// `--no-tools`).
+    Always,
+}
+
+impl Enable {
+    /// Returns `true` if the tool is enabled (i.e. [`Enable::On`]).
+    #[must_use]
+    pub const fn is_on(self) -> bool {
+        matches!(self, Self::On)
+    }
+
+    /// Returns `true` if the tool requires explicit activation.
+    #[must_use]
+    pub const fn is_explicit(self) -> bool {
+        matches!(self, Self::Explicit)
+    }
+
+    /// Returns `true` if the tool is always enabled.
+    #[must_use]
+    pub const fn is_always(self) -> bool {
+        matches!(self, Self::Always)
+    }
+}
+
+impl From<bool> for Enable {
+    fn from(v: bool) -> Self {
+        if v { Self::On } else { Self::Off }
+    }
+}
+
+impl FromStr for Enable {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "true" | "on" => Ok(Self::On),
+            "false" | "off" => Ok(Self::Off),
+            "explicit" => Ok(Self::Explicit),
+            "always" => Ok(Self::Always),
+            _ => Err(format!(
+                "invalid enable value: '{s}', expected one of: true, false, on, off, explicit, \
+                 always"
+            )),
+        }
+    }
+}
+
+impl fmt::Display for Enable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::On => write!(f, "on"),
+            Self::Off => write!(f, "off"),
+            Self::Explicit => write!(f, "explicit"),
+            Self::Always => write!(f, "always"),
+        }
+    }
+}
+
+impl Serialize for Enable {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::On => serializer.serialize_bool(true),
+            Self::Off => serializer.serialize_bool(false),
+            Self::Explicit => serializer.serialize_str("explicit"),
+            Self::Always => serializer.serialize_str("always"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Enable {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct EnableVisitor;
+
+        impl serde::de::Visitor<'_> for EnableVisitor {
+            type Value = Enable;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter
+                    .write_str("a boolean or one of: \"on\", \"off\", \"explicit\", \"always\"")
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Enable, E> {
+                Ok(Enable::from(v))
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Enable, E> {
+                v.parse().map_err(serde::de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_any(EnableVisitor)
+    }
+}
+
+impl schematic::Schematic for Enable {
+    fn schema_name() -> Option<String> {
+        Some("Enable".to_owned())
+    }
+
+    fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
+        use schematic::schema::{BooleanType, EnumType, LiteralValue, UnionType};
+
+        schema.union(UnionType::new_any([
+            schema.nest().boolean(BooleanType::default()),
+            schema.nest().enumerable(EnumType::new([
+                LiteralValue::String("on".into()),
+                LiteralValue::String("off".into()),
+                LiteralValue::String("explicit".into()),
+                LiteralValue::String("always".into()),
+            ])),
+        ]))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use schematic::PartialConfig as _;
+    use schematic::{PartialConfig as _, SchemaBuilder, SchemaType, schema::LiteralValue};
 
     use super::*;
+
+    #[test]
+    fn test_enable_from_bool() {
+        assert_eq!(Enable::from(true), Enable::On);
+        assert_eq!(Enable::from(false), Enable::Off);
+    }
+
+    #[test]
+    fn test_enable_from_str() {
+        assert_eq!("true".parse::<Enable>(), Ok(Enable::On));
+        assert_eq!("on".parse::<Enable>(), Ok(Enable::On));
+        assert_eq!("false".parse::<Enable>(), Ok(Enable::Off));
+        assert_eq!("off".parse::<Enable>(), Ok(Enable::Off));
+        assert_eq!("explicit".parse::<Enable>(), Ok(Enable::Explicit));
+        assert_eq!("always".parse::<Enable>(), Ok(Enable::Always));
+        assert!("invalid".parse::<Enable>().is_err());
+    }
+
+    #[test]
+    fn test_enable_serde_roundtrip() {
+        // Serialize
+        assert_eq!(serde_json::to_value(Enable::On).unwrap(), true);
+        assert_eq!(serde_json::to_value(Enable::Off).unwrap(), false);
+        assert_eq!(serde_json::to_value(Enable::Explicit).unwrap(), "explicit");
+        assert_eq!(serde_json::to_value(Enable::Always).unwrap(), "always");
+
+        // Deserialize from bool
+        assert_eq!(
+            serde_json::from_value::<Enable>(true.into()).unwrap(),
+            Enable::On
+        );
+        assert_eq!(
+            serde_json::from_value::<Enable>(false.into()).unwrap(),
+            Enable::Off
+        );
+
+        // Deserialize from string
+        assert_eq!(
+            serde_json::from_value::<Enable>("on".into()).unwrap(),
+            Enable::On
+        );
+        assert_eq!(
+            serde_json::from_value::<Enable>("off".into()).unwrap(),
+            Enable::Off
+        );
+        assert_eq!(
+            serde_json::from_value::<Enable>("explicit".into()).unwrap(),
+            Enable::Explicit
+        );
+        assert_eq!(
+            serde_json::from_value::<Enable>("always".into()).unwrap(),
+            Enable::Always
+        );
+    }
+
+    #[test]
+    fn test_enable_assign_kv() {
+        let mut p = PartialToolConfig::default_values(&()).unwrap().unwrap();
+
+        // Assign via string "true"
+        let kv = KvAssignment::try_from_cli("enable", "true").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.enable, Some(Enable::On));
+
+        // Assign via string "explicit"
+        let kv = KvAssignment::try_from_cli("enable", "explicit").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.enable, Some(Enable::Explicit));
+
+        // Assign via JSON bool
+        let kv = KvAssignment::try_from_cli("enable:", "false").unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.enable, Some(Enable::Off));
+
+        // Assign via JSON string
+        let kv = KvAssignment::try_from_cli("enable:", r#""explicit""#).unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.enable, Some(Enable::Explicit));
+    }
 
     #[test]
     fn test_tools_config() {
@@ -1094,7 +1383,7 @@ mod tests {
         let mut p = PartialToolsConfig::default_values(&()).unwrap().unwrap();
 
         p.tools.insert("cargo_check".to_owned(), PartialToolConfig {
-            enable: Some(false),
+            enable: Some(Enable::Off),
             source: Some(ToolSource::Local { tool: None }),
             ..Default::default()
         });
@@ -1105,7 +1394,7 @@ mod tests {
         assert_eq!(
             p.tools,
             IndexMap::<_, _>::from_iter(vec![("cargo_check".to_owned(), PartialToolConfig {
-                enable: Some(true),
+                enable: Some(Enable::On),
                 source: Some(ToolSource::Local { tool: None }),
                 ..Default::default()
             })])
@@ -1117,7 +1406,7 @@ mod tests {
             p.tools,
             IndexMap::<_, _>::from_iter(vec![
                 ("cargo_check".to_owned(), PartialToolConfig {
-                    enable: Some(true),
+                    enable: Some(Enable::On),
                     source: Some(ToolSource::Local { tool: None }),
                     ..Default::default()
                 }),
@@ -1173,5 +1462,35 @@ mod tests {
             args: vec!["check".to_owned(), "--verbose".to_owned()],
             shell: true,
         });
+    }
+
+    #[test]
+    fn test_enable_schema() {
+        let schema = SchemaBuilder::build_root::<Enable>();
+        assert_eq!(schema.name, Some("Enable".to_owned()));
+        let SchemaType::Union(union) = schema.ty else {
+            panic!("expected union")
+        };
+        assert_eq!(union.variants_types.len(), 2);
+        assert_eq!(
+            union.variants_types[0].ty,
+            SchemaType::Boolean(Box::default())
+        );
+        let SchemaType::Enum(e) = &union.variants_types[1].ty else {
+            panic!("expected enum")
+        };
+        assert_eq!(e.values, vec![
+            LiteralValue::String("on".into()),
+            LiteralValue::String("off".into()),
+            LiteralValue::String("explicit".into()),
+            LiteralValue::String("always".into())
+        ]);
+    }
+
+    #[test]
+    fn test_tool_source_schema() {
+        let schema = SchemaBuilder::build_root::<ToolSource>();
+        assert_eq!(schema.name, Some("tool_source".to_owned()));
+        assert_eq!(schema.ty, SchemaType::String(Box::default()));
     }
 }

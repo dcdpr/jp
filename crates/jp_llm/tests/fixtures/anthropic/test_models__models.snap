@@ -7,6 +7,74 @@ expression: v
         id: ModelIdConfig {
             provider: Anthropic,
             name: Name(
+                "claude-sonnet-4-6",
+            ),
+        },
+        display_name: Some(
+            "Claude Sonnet 4.6",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            64000,
+        ),
+        reasoning: Some(
+            Adaptive {
+                max: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [
+            "interleaved-thinking",
+            "context-editing",
+            "structured-outputs",
+            "adaptive-thinking",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Anthropic,
+            name: Name(
+                "claude-opus-4-6",
+            ),
+        },
+        display_name: Some(
+            "Claude Opus 4.6",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Adaptive {
+                max: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-05-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        features: [
+            "interleaved-thinking",
+            "context-editing",
+            "structured-outputs",
+            "adaptive-thinking",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Anthropic,
+            name: Name(
                 "claude-opus-4-5-20251101",
             ),
         },
@@ -208,63 +276,6 @@ expression: v
         id: ModelIdConfig {
             provider: Anthropic,
             name: Name(
-                "claude-3-7-sonnet-20250219",
-            ),
-        },
-        display_name: Some(
-            "Claude Sonnet 3.7",
-        ),
-        context_window: Some(
-            200000,
-        ),
-        max_output_tokens: Some(
-            64000,
-        ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 1024,
-                max_tokens: None,
-            },
-        ),
-        knowledge_cutoff: Some(
-            2024-11-01,
-        ),
-        deprecated: Some(
-            Active,
-        ),
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Anthropic,
-            name: Name(
-                "claude-3-5-haiku-20241022",
-            ),
-        },
-        display_name: Some(
-            "Claude Haiku 3.5",
-        ),
-        context_window: Some(
-            200000,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: Some(
-            2024-07-01,
-        ),
-        deprecated: Some(
-            Active,
-        ),
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Anthropic,
-            name: Name(
                 "claude-3-haiku-20240307",
             ),
         },
@@ -284,37 +295,10 @@ expression: v
             2024-08-01,
         ),
         deprecated: Some(
-            Active,
-        ),
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Anthropic,
-            name: Name(
-                "claude-3-opus-20240229",
-            ),
-        },
-        display_name: Some(
-            "Claude Opus 3",
-        ),
-        context_window: Some(
-            200000,
-        ),
-        max_output_tokens: Some(
-            4096,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: Some(
-            2023-08-01,
-        ),
-        deprecated: Some(
             Deprecated {
-                note: "recommended replacement: claude-opus-4-1-20250805",
+                note: "recommended replacement: claude-haiku-4-5-20251001",
                 retire_at: Some(
-                    2026-01-05,
+                    2026-04-20,
                 ),
             },
         ),

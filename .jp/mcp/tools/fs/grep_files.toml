@@ -1,13 +1,11 @@
 [conversation.tools.fs_grep_files]
 enable = false
 run = "unattended"
-style.inline_results = "off"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+summary = "Grep files in the project's local filesystem."
 description = """
-Grep files in the project's local filesystem.
-
 If misused, this tool can return *A LOT* of matches, making it difficult to
 parse the results. It is recommended to use search patterns that are as specific
 as possible to the content you are looking for.
@@ -18,25 +16,42 @@ specific pattern or limited to specific paths to narrow down the results with
 context.
 """
 
+examples = """
+Search for a function definition:
+```json
+{"pattern": "fn build_thread", "paths": ["crates/jp_cli/src"]}
+```
+
+Search with context lines:
+```json
+{"pattern": "ToolDefinition", "context": 3, "paths": ["crates/jp_llm"]}
+```
+
+Search across all files:
+```json
+{"pattern": "TODO|FIXME"}
+```
+"""
+
+[conversation.tools.fs_grep_files.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
+
 [conversation.tools.fs_grep_files.parameters.pattern]
 type = "string"
 required = true
-description = """
-Regular expression to filter the results by.
-"""
+summary = "Regular expression to filter the results by."
 
 [conversation.tools.fs_grep_files.parameters.context]
 type = "integer"
 default = 0
-description = """
-Number of lines of context to include before and after the matching lines.
-"""
+summary = "Number of lines of context to include before and after the matching lines."
 
 [conversation.tools.fs_grep_files.parameters.paths]
 type = "array"
 items.type = "string"
+summary = "Optional list of files or directories to search."
 description = """
-Optional list of files or directories to search.
-
 If unspecified, all files in the project will be returned.
 """

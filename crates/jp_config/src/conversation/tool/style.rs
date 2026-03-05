@@ -17,6 +17,13 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct DisplayStyleConfig {
+    /// Whether to hide this tool's calls from terminal output.
+    ///
+    /// When `true`, the tool executes normally and events are recorded, but no
+    /// call header, arguments, or results are rendered to the terminal.
+    #[setting(default = false)]
+    pub hidden: bool,
+
     /// How to display the results of the tool call.
     ///
     /// - `full`: Show the full tool call results inline.
@@ -47,6 +54,7 @@ impl AssignKeyValue for PartialDisplayStyleConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
+            "hidden" => self.hidden = kv.try_some_bool()?,
             "inline_results" => self.inline_results = kv.try_some_from_str()?,
             "results_file_link" => self.results_file_link = kv.try_some_from_str()?,
             "parameters" => self.parameters = kv.try_some_from_str()?,
@@ -60,6 +68,7 @@ impl AssignKeyValue for PartialDisplayStyleConfig {
 impl PartialConfigDelta for PartialDisplayStyleConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
+            hidden: delta_opt(self.hidden.as_ref(), next.hidden),
             inline_results: delta_opt(self.inline_results.as_ref(), next.inline_results),
             results_file_link: delta_opt(self.results_file_link.as_ref(), next.results_file_link),
             parameters: delta_opt(self.parameters.as_ref(), next.parameters),
@@ -72,6 +81,7 @@ impl ToPartial for DisplayStyleConfig {
         let defaults = Self::Partial::default();
 
         Self::Partial {
+            hidden: partial_opt(&self.hidden, defaults.hidden),
             inline_results: partial_opt(&self.inline_results, defaults.inline_results),
             results_file_link: partial_opt(&self.results_file_link, defaults.results_file_link),
             parameters: partial_opt(&self.parameters, defaults.parameters),

@@ -15,8 +15,10 @@ description = "RFD variant to create."
 required = true
 type = "string"
 enum = [
-    "rfd",
-    "adr",
+    "design",
+    "decision",
+    "guide",
+    "process",
 ]
 
 [conversation.tools.rfd_draft.parameters.title]

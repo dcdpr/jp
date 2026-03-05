@@ -21,7 +21,7 @@ use jp_openrouter::{
     types::{
         self,
         chat::{CacheControl, Content, Message},
-        request::{self, RequestMessage},
+        request::{self, JsonSchemaFormat, RequestMessage, ResponseFormat},
         response::{
             self, ChatCompletion as OpenRouterChunk, FinishReason, ReasoningDetails,
             ReasoningDetailsFormat, ReasoningDetailsKind,
@@ -35,8 +35,8 @@ use tracing::{debug, trace, warn};
 
 use super::{EventStream, ModelDetails};
 use crate::{
-    Error,
-    error::Result,
+    Error, StreamError,
+    error::{Result, StreamErrorKind, looks_like_quota_error},
     event::{self, Event},
     provider::{Provider, openai::parameters_with_strict_mode},
     query::ChatQuery,
@@ -108,18 +108,18 @@ impl Provider for Openrouter {
             "Starting OpenRouter chat completion stream."
         );
 
+        let (request, is_structured) = build_request(query, model)?;
         let mut state = AggregationState {
             tool_calls: ToolCallRequestAggregator::default(),
             aggregating_reasoning: false,
             aggregating_message: false,
+            is_structured,
         };
-
-        let request = build_request(query, model)?;
 
         Ok(self
             .client
             .chat_completion_stream(request)
-            .map_err(Error::from)
+            .map_err(StreamError::from)
             .map_ok(move |v| stream::iter(map_completion(v, &mut state)))
             .try_flatten()
             .boxed())
@@ -136,6 +136,9 @@ struct AggregationState {
 
     /// Did the stream of events have any message content?
     aggregating_message: bool,
+
+    /// Whether the current request uses structured (JSON schema) output.
+    is_structured: bool,
 }
 
 /// Metadata stored in the conversation stream, based on Openrouter
@@ -267,7 +270,10 @@ impl From<MultiProviderMetadata> for IndexMap<String, Value> {
     }
 }
 
-fn map_completion(v: OpenRouterChunk, state: &mut AggregationState) -> Vec<Result<Event>> {
+fn map_completion(
+    v: OpenRouterChunk,
+    state: &mut AggregationState,
+) -> Vec<std::result::Result<Event, StreamError>> {
     v.choices
         .into_iter()
         .flat_map(|v| map_event(v, state))
@@ -275,7 +281,10 @@ fn map_completion(v: OpenRouterChunk, state: &mut AggregationState) -> Vec<Resul
 }
 
 #[expect(clippy::too_many_lines)]
-fn map_event(choice: types::response::Choice, state: &mut AggregationState) -> Vec<Result<Event>> {
+fn map_event(
+    choice: types::response::Choice,
+    state: &mut AggregationState,
+) -> Vec<std::result::Result<Event, StreamError>> {
     let types::response::Choice::Streaming(types::response::StreamingChoice {
         finish_reason,
         delta:
@@ -306,7 +315,17 @@ fn map_event(choice: types::response::Choice, state: &mut AggregationState) -> V
     let reasoning_details = MultiProviderMetadata::from_details(reasoning_details);
 
     if let Some(error) = error {
-        return vec![Err(Error::from(error))];
+        if looks_like_quota_error(&error.message) {
+            return vec![Err(StreamError::new(
+                StreamErrorKind::InsufficientQuota,
+                format!(
+                    "Insufficient API quota. Check your credits \
+                     at https://openrouter.ai/settings/credits. ({})",
+                    error.message
+                ),
+            ))];
+        }
+        return vec![Err(StreamError::other(error.message))];
     }
 
     let mut events = vec![];
@@ -329,9 +348,14 @@ fn map_event(choice: types::response::Choice, state: &mut AggregationState) -> V
     {
         state.aggregating_message = true;
 
+        let response = if state.is_structured {
+            ChatResponse::structured(Value::String(content))
+        } else {
+            ChatResponse::message(content)
+        };
         events.push(Ok(Event::Part {
             index: 1,
-            event: ConversationEvent::now(ChatResponse::message(content)),
+            event: ConversationEvent::now(response),
         }));
     }
 
@@ -375,7 +399,7 @@ fn map_event(choice: types::response::Choice, state: &mut AggregationState) -> V
                                 index,
                                 event: ConversationEvent::now(call),
                             })
-                            .map_err(Error::from),
+                            .map_err(|e| StreamError::other(e.to_string())),
                         Ok(Event::flush(index)),
                     ]
                 }),
@@ -389,10 +413,9 @@ fn map_event(choice: types::response::Choice, state: &mut AggregationState) -> V
         Some(FinishReason::Stop) => {
             events.push(Ok(Event::Finished(event::FinishReason::Completed)));
         }
-        Some(FinishReason::Error) => events.push(Err(jp_openrouter::Error::Stream(
-            "unknown stream error".into(),
-        )
-        .into())),
+        Some(FinishReason::Error) => {
+            events.push(Err(StreamError::other("unknown stream error")));
+        }
         Some(reason) => events.push(Ok(Event::Finished(event::FinishReason::Other(
             reason.as_str().into(),
         )))),
@@ -403,16 +426,36 @@ fn map_event(choice: types::response::Choice, state: &mut AggregationState) -> V
 }
 
 /// Build request for Openrouter API.
-fn build_request(query: ChatQuery, model: &ModelDetails) -> Result<request::ChatCompletion> {
+///
+/// Returns the request and whether structured output is active.
+fn build_request(
+    query: ChatQuery,
+    model: &ModelDetails,
+) -> Result<(request::ChatCompletion, bool)> {
     let ChatQuery {
         thread,
         tools,
         tool_choice,
-        tool_call_strict_mode,
     } = query;
 
     let config = thread.events.config()?;
     let parameters = &config.assistant.model.parameters;
+
+    // Only use the schema if the very last event is a ChatRequest with one.
+    let response_format = thread
+        .events
+        .last()
+        .and_then(|e| e.event.as_chat_request())
+        .and_then(|req| req.schema.clone())
+        .map(|schema| ResponseFormat::JsonSchema {
+            json_schema: JsonSchemaFormat {
+                name: "structured_output".to_owned(),
+                schema: Value::Object(schema),
+                strict: Some(true),
+            },
+        });
+
+    let is_structured = response_format.is_some();
 
     let slug = model.id.name.to_string();
     let reasoning = model.custom_reasoning_config(parameters.reasoning);
@@ -422,10 +465,10 @@ fn build_request(query: ChatQuery, model: &ModelDetails) -> Result<request::Chat
         .into_iter()
         .map(|tool| Tool::Function {
             function: ToolFunction {
-                parameters: parameters_with_strict_mode(tool.parameters, tool_call_strict_mode),
+                parameters: parameters_with_strict_mode(tool.parameters, true),
                 name: tool.name,
                 description: tool.description,
-                strict: tool_call_strict_mode,
+                strict: true,
             },
         })
         .collect::<Vec<_>>();
@@ -447,26 +490,40 @@ fn build_request(query: ChatQuery, model: &ModelDetails) -> Result<request::Chat
         "Built Openrouter request."
     );
 
-    Ok(request::ChatCompletion {
-        model: slug,
-        messages: messages.0,
-        reasoning: reasoning.map(|r| request::Reasoning {
-            exclude: r.exclude,
-            effort: match r.effort.abs_to_rel(model.max_output_tokens) {
-                ReasoningEffort::XHigh => request::ReasoningEffort::XHigh,
-                ReasoningEffort::High => request::ReasoningEffort::High,
-                ReasoningEffort::Auto | ReasoningEffort::Medium => request::ReasoningEffort::Medium,
-                ReasoningEffort::Low | ReasoningEffort::Xlow => request::ReasoningEffort::Low,
-                ReasoningEffort::Absolute(_) => {
-                    debug_assert!(false, "Reasoning effort must be relative.");
-                    request::ReasoningEffort::Medium
-                }
-            },
-        }),
-        tools,
-        tool_choice,
-        ..Default::default()
-    })
+    Ok((
+        request::ChatCompletion {
+            model: slug,
+            messages: messages.0,
+            reasoning: reasoning.map(|r| request::Reasoning {
+                exclude: r.exclude,
+                effort: match r
+                    .effort
+                    .abs_to_rel(model.max_output_tokens)
+                    .unwrap_or(ReasoningEffort::Auto)
+                {
+                    ReasoningEffort::Max | ReasoningEffort::XHigh => {
+                        request::ReasoningEffort::XHigh
+                    }
+                    ReasoningEffort::High => request::ReasoningEffort::High,
+                    ReasoningEffort::Auto | ReasoningEffort::Medium => {
+                        request::ReasoningEffort::Medium
+                    }
+                    ReasoningEffort::None => request::ReasoningEffort::None,
+                    ReasoningEffort::Xlow => request::ReasoningEffort::Minimal,
+                    ReasoningEffort::Low => request::ReasoningEffort::Low,
+                    ReasoningEffort::Absolute(_) => {
+                        debug_assert!(false, "Reasoning effort must be relative.");
+                        request::ReasoningEffort::Medium
+                    }
+                },
+            }),
+            tools,
+            tool_choice,
+            response_format,
+            ..Default::default()
+        },
+        is_structured,
+    ))
 }
 
 // TODO: Manually add a bunch of often-used models.
@@ -482,21 +539,6 @@ fn map_model(model: response::Model) -> Result<ModelDetails> {
         features: vec![],
     })
 }
-
-// impl From<StreamingDelta> for Delta {
-//     fn from(delta: StreamingDelta) -> Self {
-//         let tool_call = delta.tool_calls.into_iter().next();
-//
-//         Self {
-//             content: delta.content,
-//             reasoning: delta.reasoning,
-//             tool_call_id: tool_call.as_ref().and_then(ToolCall::id),
-//             tool_call_name: tool_call.as_ref().and_then(ToolCall::name),
-//             tool_call_arguments: tool_call.as_ref().and_then(ToolCall::arguments),
-//             tool_call_finished: false,
-//         }
-//     }
-// }
 
 impl From<types::response::ErrorResponse> for Error {
     fn from(error: types::response::ErrorResponse) -> Self {
@@ -534,7 +576,7 @@ impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
     fn try_from((model_id, thread): (&ModelIdConfig, Thread)) -> Result<Self> {
         let Thread {
             system_prompt,
-            instructions,
+            sections,
             attachments,
             events,
         } = thread;
@@ -554,7 +596,7 @@ impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
             });
         }
 
-        if !instructions.is_empty() {
+        if !sections.is_empty() {
             content.push(Content::Text {
                 text: "Before we continue, here are some contextual details that will help you \
                        generate a better response."
@@ -562,15 +604,15 @@ impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
                 cache_control: None,
             });
 
-            // Then instructions in XML tags.
+            // Then sections as rendered text.
             //
-            // Cached (3/4), (for the last instruction), as it's not expected to
+            // Cached (3/4), (for the last section), as it's not expected to
             // change.
-            let mut instructions = instructions.iter().peekable();
-            while let Some(instruction) = instructions.next() {
+            let mut sections = sections.iter().peekable();
+            while let Some(section) = sections.next() {
                 content.push(Content::Text {
-                    text: instruction.try_to_xml()?,
-                    cache_control: instructions
+                    text: section.render(),
+                    cache_control: sections
                         .peek()
                         .map_or(Some(CacheControl::Ephemeral), |_| None),
                 });
@@ -631,6 +673,9 @@ fn convert_events(events: ConversationStream) -> Vec<RequestMessage> {
                 ChatResponse::Reasoning { reasoning, .. } => {
                     vec![Message::default().with_reasoning(reasoning).assistant()]
                 }
+                ChatResponse::Structured { data } => {
+                    vec![Message::default().with_text(data.to_string()).assistant()]
+                }
             },
             EventKind::ToolCallRequest(request) => {
                 let message = Message {
@@ -663,62 +708,47 @@ fn convert_events(events: ConversationStream) -> Vec<RequestMessage> {
                     name: None,
                 })]
             }
-            EventKind::InquiryRequest(_) | EventKind::InquiryResponse(_) => vec![],
+            EventKind::InquiryRequest(_)
+            | EventKind::InquiryResponse(_)
+            | EventKind::TurnStart(_) => vec![],
         })
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use jp_config::providers::llm::LlmProviderConfig;
-    use jp_test::{Result, function_name};
+impl From<jp_openrouter::Error> for StreamError {
+    fn from(err: jp_openrouter::Error) -> Self {
+        use jp_openrouter::Error as E;
 
-    use super::*;
-    use crate::test::TestRequest;
-
-    macro_rules! test_all_models {
-        ($($fn:ident),* $(,)?) => {
-            mod anthropic { use super::*; $(test_all_models!(func; $fn, "openrouter/anthropic/claude-haiku-4.5");)* }
-            mod google    { use super::*; $(test_all_models!(func; $fn, "openrouter/google/gemini-2.5-flash");)* }
-            mod xai       { use super::*; $(test_all_models!(func; $fn, "openrouter/x-ai/grok-code-fast-1");)* }
-            mod minimax   { use super::*; $(test_all_models!(func; $fn, "openrouter/minimax/minimax-m2");)* }
-        };
-        (func; $fn:ident, $model:literal) => {
-            paste::paste! {
-                #[test_log::test(tokio::test)]
-                async fn [< test_ $fn >]() -> Result {
-                    $fn($model, &format!("{}_{}", $model.split('/').nth(1).unwrap(), function_name!())).await
-                }
+        match err {
+            E::Request(error) => Self::from(error),
+            E::Api { code: 429, .. } => StreamError::rate_limit(None).with_source(err),
+            // 402 Payment Required — OpenRouter returns this for insufficient credits.
+            E::Api { code: 402, .. } => StreamError::new(
+                StreamErrorKind::InsufficientQuota,
+                format!(
+                    "Insufficient API quota. Check your credits \
+                     at https://openrouter.ai/settings/credits. ({err})"
+                ),
+            )
+            .with_source(err),
+            E::Api { ref message, .. } if looks_like_quota_error(message) => StreamError::new(
+                StreamErrorKind::InsufficientQuota,
+                format!(
+                    "Insufficient API quota. Check your credits \
+                     at https://openrouter.ai/settings/credits. ({err})"
+                ),
+            )
+            .with_source(err),
+            E::Api {
+                code: 408 | 500 | 502 | 503 | 504,
+                ..
             }
-        };
-    }
-
-    test_all_models![sub_provider_event_metadata];
-
-    async fn sub_provider_event_metadata(model: &str, test_name: &str) -> Result {
-        let requests = vec![
-            TestRequest::chat(ProviderId::Openrouter)
-                .model(model.parse().unwrap())
-                .enable_reasoning()
-                .chat_request("Test message"),
-        ];
-
-        run_test(test_name, requests).await?;
-
-        Ok(())
-    }
-
-    async fn run_test(
-        test_name: impl AsRef<str>,
-        requests: impl IntoIterator<Item = TestRequest>,
-    ) -> Result {
-        crate::test::run_chat_completion(
-            test_name,
-            env!("CARGO_MANIFEST_DIR"),
-            ProviderId::Openrouter,
-            LlmProviderConfig::default(),
-            requests.into_iter().collect(),
-        )
-        .await
+            | E::Stream(_) => StreamError::transient(err.to_string()).with_source(err),
+            _ => StreamError::other(err.to_string()).with_source(err),
+        }
     }
 }
+
+#[cfg(test)]
+#[path = "openrouter_tests.rs"]
+mod tests;

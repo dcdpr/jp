@@ -3,6 +3,7 @@
 mod chat;
 mod inquiry;
 mod tool_call;
+mod turn;
 
 use std::fmt;
 
@@ -13,8 +14,12 @@ use serde_json::{Map, Value};
 
 pub use self::{
     chat::{ChatRequest, ChatResponse},
-    inquiry::{InquiryAnswerType, InquiryQuestion, InquiryRequest, InquiryResponse, InquirySource},
+    inquiry::{
+        InquiryAnswerType, InquiryId, InquiryQuestion, InquiryRequest, InquiryResponse,
+        InquirySource, SelectOption,
+    },
     tool_call::{ToolCallRequest, ToolCallResponse},
+    turn::TurnStart,
 };
 
 /// A single event in a conversation.
@@ -32,11 +37,7 @@ pub struct ConversationEvent {
     pub kind: EventKind,
 
     /// Additional opaque metadata associated with the event.
-    #[serde(
-        default,
-        skip_serializing_if = "Map::is_empty",
-        with = "jp_serde::repr::base64_json_map"
-    )]
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub metadata: Map<String, Value>,
 }
 
@@ -305,12 +306,43 @@ impl ConversationEvent {
             _ => None,
         }
     }
+
+    /// Returns `true` if the event is a [`TurnStart`].
+    #[must_use]
+    pub const fn is_turn_start(&self) -> bool {
+        matches!(self.kind, EventKind::TurnStart(_))
+    }
+
+    /// Returns a reference to the [`TurnStart`], if applicable.
+    #[must_use]
+    pub const fn as_turn_start(&self) -> Option<&TurnStart> {
+        match &self.kind {
+            EventKind::TurnStart(turn_start) => Some(turn_start),
+            _ => None,
+        }
+    }
+
+    /// Consumes the event and returns the [`TurnStart`], if applicable.
+    #[must_use]
+    pub fn into_turn_start(self) -> Option<TurnStart> {
+        match self.kind {
+            EventKind::TurnStart(turn_start) => Some(turn_start),
+            _ => None,
+        }
+    }
 }
 
 /// A type of event in a conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventKind {
+    /// A turn start event.
+    ///
+    /// This event marks the beginning of a new turn in the conversation. A turn
+    /// groups together a user's chat request through the assistant's final
+    /// response, including any intermediate tool calls.
+    TurnStart(TurnStart),
+
     /// A chat request event.
     ///
     /// This event is usually triggered by the user, but can also be
@@ -353,6 +385,22 @@ pub enum EventKind {
     InquiryResponse(InquiryResponse),
 }
 
+impl EventKind {
+    /// Returns the name of the event kind.
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
+        match self {
+            Self::TurnStart(_) => "TurnStart",
+            Self::ChatRequest(_) => "ChatRequest",
+            Self::ChatResponse(_) => "ChatResponse",
+            Self::ToolCallRequest(_) => "ToolCallRequest",
+            Self::ToolCallResponse(_) => "ToolCallResponse",
+            Self::InquiryRequest(_) => "InquiryRequest",
+            Self::InquiryResponse(_) => "InquiryResponse",
+        }
+    }
+}
+
 impl From<ChatRequest> for EventKind {
     fn from(request: ChatRequest) -> Self {
         Self::ChatRequest(request)
@@ -389,6 +437,12 @@ impl From<InquiryResponse> for EventKind {
     }
 }
 
+impl From<TurnStart> for EventKind {
+    fn from(turn_start: TurnStart) -> Self {
+        Self::TurnStart(turn_start)
+    }
+}
+
 impl From<ChatRequest> for ConversationEvent {
     fn from(request: ChatRequest) -> Self {
         Self::now(request)
@@ -422,5 +476,11 @@ impl From<InquiryRequest> for ConversationEvent {
 impl From<InquiryResponse> for ConversationEvent {
     fn from(response: InquiryResponse) -> Self {
         Self::now(response)
+    }
+}
+
+impl From<TurnStart> for ConversationEvent {
+    fn from(turn_start: TurnStart) -> Self {
+        Self::now(turn_start)
     }
 }

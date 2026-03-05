@@ -3,7 +3,24 @@ enable = false
 run = "unattended"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-description = "Execute all unit and integration tests and build examples of the project."
+summary = "Execute all unit and integration tests and build examples of the project."
+
+examples = """
+Run all tests in a specific package:
+```json
+{"package": "jp_config"}
+```
+
+Run only tests matching a name:
+```json
+{"package": "jp_llm", "testname": "builtin"}
+```
+
+Run all tests across the workspace:
+```json
+{}
+```
+"""
 
 [conversation.tools.cargo_test.style]
 inline_results = "full"
@@ -11,9 +28,9 @@ results_file_link = "off"
 parameters = "function_call"
 
 [conversation.tools.cargo_test.parameters.package]
-description = "Package to run tests for, if unspecified, all workspace packages will be tested."
+summary = "Package to run tests for, if unspecified, all workspace packages will be tested."
 type = "string"
 
 [conversation.tools.cargo_test.parameters.testname]
-description = "If specified, only run tests containing this string in their names."
+summary = "If specified, only run tests containing this string in their names."
 type = "string"
