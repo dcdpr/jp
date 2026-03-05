@@ -313,8 +313,8 @@ rfd-summaries *ARGS: _install-jp
     CACHE="docs/.vitepress/rfd-summaries.json"
     MODEL="haiku"
     FORCE=false
-    PROMPT="summarize this document in one sentence of max 20 words, don't start with 'The/This RFD ...'"
-    SCHEMA='{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]}'
+    BASE_PROMPT="summarize this document in one sentence of max 20 words, don't start with 'The/This RFD ...'"
+    SCHEMA='{"type":"object","properties":{"changed":{"type":"boolean","description":"false if the existing summary is still accurate, true if you wrote a new one"},"summary":{"type":"string"}},"required":["changed","summary"]}'
 
     for arg in {{ARGS}}; do
         case "$arg" in
@@ -326,6 +326,7 @@ rfd-summaries *ARGS: _install-jp
     [ -f "$CACHE" ] || echo '{}' > "$CACHE"
 
     generated=0
+    kept=0
     skipped=0
 
     for file in docs/rfd/[0-9][0-9][0-9]-*.md; do
@@ -342,22 +343,39 @@ rfd-summaries *ARGS: _install-jp
         fi
 
         num=$(echo "$basename" | sed 's/-.*//')
+        existing=$(jq -r --arg f "$basename" '.[$f].summary // ""' "$CACHE")
+
+        if [ -n "$existing" ]; then
+            PROMPT="The current summary is: \"${existing}\". If this still accurately captures the document, set changed=false and return it as-is. Otherwise set changed=true and ${BASE_PROMPT}"
+        else
+            PROMPT="Set changed=true and ${BASE_PROMPT}"
+        fi
+
         printf "RFD %s..." "$num" >&2
 
-        summary=$(
+        result=$(
             jp -! q --format=json --no-tools --new \
                 --schema "$SCHEMA" --no-reasoning \
                 --attachment "$file" --model "$MODEL" \
                 "$PROMPT" \
-            | jq -r -s '.[-1].summary'
+            | jq -s '.[-1]'
         )
+
+        changed=$(echo "$result" | jq -r '.changed')
+
+        if [ "$changed" = "true" ]; then
+            summary=$(echo "$result" | jq -r '.summary')
+            generated=$((generated + 1))
+            printf " updated\n" >&2
+        else
+            summary="$existing"
+            kept=$((kept + 1))
+            printf " kept\n" >&2
+        fi
 
         jq --arg f "$basename" --arg h "$hash" --arg s "$summary" \
             '.[$f] = {hash: $h, summary: $s}' "$CACHE" > "${CACHE}.tmp"
         mv "${CACHE}.tmp" "$CACHE"
-
-        generated=$((generated + 1))
-        printf " done\n" >&2
     done
 
     # Remove entries for deleted RFDs.
@@ -365,7 +383,7 @@ rfd-summaries *ARGS: _install-jp
     jq --argjson keep "$existing" 'with_entries(select(.key as $k | $keep | index($k)))' "$CACHE" > "${CACHE}.tmp"
     mv "${CACHE}.tmp" "$CACHE"
 
-    printf "\nDone: %d generated, %d cached\n" "$generated" "$skipped" >&2
+    printf "\nDone: %d updated, %d kept, %d cached\n" "$generated" "$kept" "$skipped" >&2
 
 # Search across all RFD documents.
 [group('rfd')]
