@@ -5,10 +5,12 @@ use crate::{
 
 mod check;
 mod expand;
+mod format;
 mod test;
 
 use check::cargo_check;
 use expand::cargo_expand;
+use format::cargo_format;
 use test::cargo_test;
 
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
@@ -16,6 +18,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         "check" => cargo_check(&ctx, t.opt("package")?).await,
         "expand" => cargo_expand(&ctx, t.req("item")?, t.opt("package")?).await,
         "test" => cargo_test(&ctx, t.opt("package")?, t.opt("testname")?).await,
+        "format" => cargo_format(&ctx, t.opt("package")?).await,
         _ => unknown_tool(t),
     }
 }
