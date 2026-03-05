@@ -599,9 +599,9 @@ impl ConversationStream {
     /// earlier turns piled up at the front, or gaps in the index sequence. This
     /// step:
     /// - Inserts a `TurnStart(0)` if the stream has events but no leading
-    /// `TurnStart`.
+    ///   `TurnStart`.
     /// - Removes duplicate `TurnStart`s that precede the first `ChatRequest`
-    /// (keeping only the last one).
+    ///   (keeping only the last one).
     /// - Re-indexes all `TurnStart` events to `0, 1, 2, …`.
     fn normalize_turn_starts(&mut self) {
         if self
