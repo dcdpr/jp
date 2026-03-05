@@ -8,7 +8,7 @@ export default defineConfig({
     title: "Jean-Pierre",
     description: "An LLM-based Programming Assistant",
     cleanUrls: true,
-    srcExclude: ['rfd/**/*'],
+    srcExclude: ['README/**'],
     themeConfig: {
         outline: {
             level: [2, 3]
@@ -22,6 +22,7 @@ export default defineConfig({
             { text: 'Home', link: '/' },
             { text: 'Installation', link: '/installation' },
             { text: 'Change Log', link: '/change-log' },
+            { text: 'RFDs', link: '/rfd/' },
         ],
 
         sidebar: [

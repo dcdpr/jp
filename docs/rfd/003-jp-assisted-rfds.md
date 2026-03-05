@@ -1,6 +1,7 @@
 # RFD 003: JP-Assisted RFD Writing
 
-- **Status**: Draft
+- **Status**: Accepted
+- **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
 
@@ -266,9 +267,9 @@ insufficient.
   teaches JP to follow.
 - [RFD 002: Using LLMs in the JP Project](002-using-llms.md) — the guidelines on
   LLM use that inform this skill's boundaries.
-- [Skill: Read Files](../../.jp/config/skill/read-files.toml) —
+- Skill: Read Files (`.jp/config/skill/read-files.toml`) —
   extended by this skill for codebase exploration.
-- [Skill: Project Discourse](../../.jp/config/skill/project-discourse.toml)
+- Skill: Project Discourse (`.jp/config/skill/project-discourse.toml`)
   — extended by this skill for GitHub context.
 
 [RFD 001]: 001-jp-rfd-process.md
