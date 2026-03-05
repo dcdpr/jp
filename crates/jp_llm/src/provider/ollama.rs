@@ -1,7 +1,7 @@
-use std::{mem, str::FromStr as _};
+use std::str::FromStr as _;
 
 use async_trait::async_trait;
-use futures::{FutureExt as _, StreamExt as _, future, stream};
+use futures::{FutureExt as _, StreamExt as _, TryStreamExt as _, future, stream};
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
@@ -16,9 +16,10 @@ use jp_conversation::{
 };
 use ollama_rs::{
     Ollama as Client,
+    error::OllamaError,
     generation::{
         chat::{ChatMessage, ChatMessageResponse, MessageRole, request::ChatMessageRequest},
-        parameters::{KeepAlive, TimeUnit},
+        parameters::{FormatType, JsonStructure, KeepAlive, TimeUnit},
         tools::{ToolCall, ToolCallFunction, ToolFunctionInfo, ToolInfo, ToolType},
     },
     models::{LocalModel, ModelOptions},
@@ -29,10 +30,9 @@ use url::Url;
 
 use super::{EventStream, ModelDetails, Provider};
 use crate::{
-    error::{Error, Result},
+    error::{Error, Result, StreamError},
     event::{Event, FinishReason},
     query::ChatQuery,
-    stream::aggregator::reasoning::ReasoningExtractor,
     tool::ToolDefinition,
 };
 
@@ -72,8 +72,7 @@ impl Provider for Ollama {
             "Starting Ollama chat completion stream."
         );
 
-        let mut extractor = ReasoningExtractor::default();
-        let request = create_request(model, query)?;
+        let (request, is_structured) = create_request(model, query)?;
 
         trace!(
             request = serde_json::to_string(&request).unwrap_or_default(),
@@ -84,11 +83,19 @@ impl Provider for Ollama {
             .client
             .send_chat_messages_stream(request)
             .await?
-            .filter_map(|v| future::ready(v.ok()))
-            .map(move |v| stream::iter(map_event(v, &mut extractor)))
-            .flatten()
-            .chain(future::ready(Event::Finished(FinishReason::Completed)).into_stream())
-            .map(Ok)
+            .map(|v| v.map_err(|()| StreamError::other("Ollama stream error")))
+            .map_ok({
+                let mut reasoning_flushed = false;
+                move |v| {
+                    stream::iter(
+                        map_event(v, is_structured, &mut reasoning_flushed)
+                            .into_iter()
+                            .map(Ok),
+                    )
+                }
+            })
+            .try_flatten()
+            .chain(future::ready(Ok(Event::Finished(FinishReason::Completed))).into_stream())
             .boxed())
     }
 }
@@ -106,10 +113,61 @@ fn map_model(model: LocalModel) -> Result<ModelDetails> {
     })
 }
 
-fn map_event(event: ChatMessageResponse, extractor: &mut ReasoningExtractor) -> Vec<Event> {
+/// Map an Ollama streaming chunk into provider-agnostic events.
+///
+/// Index convention: 0 = reasoning, 1 = message content, 2+ = tool calls.
+///
+/// Ollama guarantees that thinking tokens arrive before content/tool call
+/// tokens. We exploit this by flushing the reasoning stream (index 0) as soon
+/// as the first content or tool call chunk appears, ensuring the reasoning
+/// event precedes content and tool call events in the history.
+fn map_event(
+    event: ChatMessageResponse,
+    is_structured: bool,
+    reasoning_flushed: &mut bool,
+) -> Vec<Event> {
     let ChatMessageResponse { message, done, .. } = event;
 
-    let mut events = fetch_content(extractor, done);
+    trace!(
+        content = message.content,
+        thinking = message.thinking,
+        tool_calls = message.tool_calls.len(),
+        done,
+        "Ollama stream chunk."
+    );
+
+    let mut events = Vec::new();
+
+    if let Some(thinking) = message.thinking
+        && !thinking.is_empty()
+    {
+        events.push(Event::Part {
+            index: 0,
+            event: ConversationEvent::now(ChatResponse::reasoning(thinking)),
+        });
+    }
+
+    let has_content = !message.content.is_empty();
+    let has_tool_calls = !message.tool_calls.is_empty();
+
+    // Flush reasoning before emitting content or tool calls so the reasoning
+    // event always precedes them in the conversation history.
+    if !*reasoning_flushed && (has_content || has_tool_calls) {
+        events.push(Event::flush(0));
+        *reasoning_flushed = true;
+    }
+
+    if has_content {
+        let response = if is_structured {
+            ChatResponse::structured(Value::String(message.content))
+        } else {
+            ChatResponse::message(message.content)
+        };
+        events.push(Event::Part {
+            index: 1,
+            event: ConversationEvent::now(response),
+        });
+    }
 
     for (
         index,
@@ -118,61 +176,47 @@ fn map_event(event: ChatMessageResponse, extractor: &mut ReasoningExtractor) -> 
         },
     ) in message.tool_calls.into_iter().enumerate()
     {
-        events.extend(vec![
-            Event::Part {
-                // These events don't have any index assigned, but we use `0`
-                // and `1` for regular chat messages and reasoning, and `2` and
-                // up for tool calls.
-                index: index + 2,
-                event: ConversationEvent::now(ToolCallRequest {
-                    id: String::new(),
-                    name,
-                    arguments: match arguments {
-                        Value::Object(map) => map,
-                        v => Map::from_iter([("input".into(), v)]),
-                    },
-                }),
-            },
-            Event::flush(0),
-        ]);
-    }
-
-    events
-}
-
-fn fetch_content(extractor: &mut ReasoningExtractor, done: bool) -> Vec<Event> {
-    let mut events = Vec::new();
-
-    if !extractor.reasoning.is_empty() {
-        let reasoning = mem::take(&mut extractor.reasoning);
+        let index = index + 2;
         events.push(Event::Part {
-            index: 0,
-            event: ConversationEvent::now(ChatResponse::reasoning(reasoning)),
+            index,
+            event: ConversationEvent::now(ToolCallRequest {
+                id: String::new(),
+                name,
+                arguments: match arguments {
+                    Value::Object(map) => map,
+                    v => Map::from_iter([("input".into(), v)]),
+                },
+            }),
         });
-    }
-
-    if !extractor.other.is_empty() {
-        let content = mem::take(&mut extractor.other);
-        events.push(Event::Part {
-            index: 1,
-            event: ConversationEvent::now(ChatResponse::message(content)),
-        });
+        events.push(Event::flush(index));
     }
 
     if done {
-        events.extend(vec![Event::flush(0), Event::flush(1)]);
+        if !*reasoning_flushed {
+            events.push(Event::flush(0));
+        }
+        events.push(Event::flush(1));
     }
 
     events
 }
 
-fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<ChatMessageRequest> {
+fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(ChatMessageRequest, bool)> {
     let ChatQuery {
         thread,
         tools,
         tool_choice,
-        tool_call_strict_mode,
     } = query;
+
+    let structured_schema = thread
+        .events
+        .last()
+        .and_then(|e| e.event.as_chat_request())
+        .and_then(|req| req.schema.clone())
+        .map(|schema| JsonStructure::new_for_schema(schema.into()))
+        .map(|schema| FormatType::StructuredJson(Box::new(schema)));
+
+    let is_structured = structured_schema.is_some();
 
     let config = thread.events.config()?;
     let parameters = &config.assistant.model.parameters;
@@ -185,7 +229,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<ChatMessageR
 
     let mut request = ChatMessageRequest::new(model.id.name.to_string(), messages);
 
-    let tools = convert_tools(tools, tool_call_strict_mode)?;
+    let tools = convert_tools(tools)?;
     if !tools.is_empty() {
         request = request.tools(tools);
     }
@@ -248,7 +292,11 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<ChatMessageR
         request = request.think(true);
     }
 
-    Ok(request)
+    if let Some(schema) = structured_schema {
+        request = request.format(schema);
+    }
+
+    Ok((request, is_structured))
 }
 
 impl TryFrom<&OllamaConfig> for Ollama {
@@ -265,7 +313,7 @@ impl TryFrom<&OllamaConfig> for Ollama {
     }
 }
 
-fn convert_tools(tools: Vec<ToolDefinition>, _strict: bool) -> Result<Vec<ToolInfo>> {
+fn convert_tools(tools: Vec<ToolDefinition>) -> Result<Vec<ToolInfo>> {
     tools
         .into_iter()
         .map(|tool| {
@@ -334,6 +382,7 @@ fn convert_events(events: ConversationStream) -> Vec<ChatMessage> {
                     images: None,
                     thinking: Some(reasoning),
                 }),
+                ChatResponse::Structured { data } => Some(ChatMessage::assistant(data.to_string())),
             },
             EventKind::ToolCallRequest(request) => Some(ChatMessage {
                 role: MessageRole::Assistant,
@@ -371,204 +420,20 @@ fn convert_events(events: ConversationStream) -> Vec<ChatMessage> {
         })
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use jp_config::providers::llm::LlmProviderConfig;
-//     use jp_conversation::event::ChatResponse;
-//     use jp_test::{Result, fn_name, mock::Vcr};
-//     use test_log::test;
-//
-//     use super::*;
-//     use crate::structured;
-//
-//     fn vcr(url: &str) -> Vcr {
-//         Vcr::new(url, env!("CARGO_MANIFEST_DIR"))
-//     }
-//
-//     #[test(tokio::test)]
-//     async fn test_ollama_models() -> Result {
-//         let mut config = LlmProviderConfig::default().ollama;
-//         let vcr = vcr(&config.base_url);
-//         vcr.cassette(
-//             fn_name!(),
-//             |rule| {
-//                 rule.filter(|when| {
-//                     when.any_request();
-//                 });
-//             },
-//             |_, url| async move {
-//                 config.base_url = url;
-//
-//                 Ollama::try_from(&config)
-//                     .unwrap()
-//                     .models()
-//                     .await
-//                     .map(|mut v| {
-//                         v.truncate(2);
-//                         v
-//                     })
-//             },
-//         )
-//         .await
-//     }
-//
-//     #[test(tokio::test)]
-//     async fn test_ollama_chat_completion() -> Result {
-//         let mut config = LlmProviderConfig::default().ollama;
-//         let model_id = "ollama/llama3:latest".parse().unwrap();
-//         let model = ModelDetails::empty(model_id);
-//         let query = ChatQuery {
-//             thread: Thread {
-//                 events: ConversationStream::default().with_chat_request("Test message"),
-//                 ..Default::default()
-//             },
-//             ..Default::default()
-//         };
-//
-//         let vcr = vcr(&config.base_url);
-//         vcr.cassette(
-//             fn_name!(),
-//             |rule| {
-//                 rule.filter(|when| {
-//                     when.any_request();
-//                 });
-//             },
-//             |_, url| async move {
-//                 config.base_url = url;
-//
-//                 Ollama::try_from(&config)
-//                     .unwrap()
-//                     .chat_completion(&model, query)
-//                     .await
-//             },
-//         )
-//         .await
-//     }
-//
-//     #[test(tokio::test)]
-//     async fn test_ollama_chat_completion_stream() -> Result {
-//         let mut config = LlmProviderConfig::default().ollama;
-//         let model_id = "ollama/llama3:latest".parse().unwrap();
-//         let model = ModelDetails::empty(model_id);
-//         let query = ChatQuery {
-//             thread: Thread {
-//                 events: ConversationStream::default().with_chat_request("Test message"),
-//                 ..Default::default()
-//             },
-//             ..Default::default()
-//         };
-//
-//         let vcr = vcr(&config.base_url);
-//         vcr.cassette(
-//             fn_name!(),
-//             |rule| {
-//                 rule.filter(|when| {
-//                     when.any_request();
-//                 });
-//             },
-//             |_, url| async move {
-//                 config.base_url = url;
-//
-//                 Ollama::try_from(&config)
-//                     .unwrap()
-//                     .chat_completion_stream(&model, query)
-//                     .await
-//                     .unwrap()
-//                     .collect::<Vec<_>>()
-//                     .await
-//             },
-//         )
-//         .await
-//     }
-//
-//     #[test(tokio::test)]
-//     async fn test_ollama_structured_completion() -> Result {
-//         let mut config = LlmProviderConfig::default().ollama;
-//         let model_id = "ollama/llama3.1:8b".parse().unwrap();
-//         let model = ModelDetails::empty(model_id);
-//         let history = ConversationStream::default()
-//             .with_chat_request("Test message")
-//             .with_chat_response(ChatResponse::reasoning("Test response"));
-//
-//         let vcr = vcr(&config.base_url);
-//         vcr.cassette(
-//             fn_name!(),
-//             |rule| {
-//                 rule.filter(|when| {
-//                     when.any_request();
-//                 });
-//             },
-//             |_, url| async move {
-//                 config.base_url = url;
-//                 let query = structured::titles::titles(3, history, &[]).unwrap();
-//
-//                 Ollama::try_from(&config)
-//                     .unwrap()
-//                     .structured_completion(&model, query)
-//                     .await
-//             },
-//         )
-//         .await
-//     }
-//
-//     mod chunk_parser {
-//         use test_log::test;
-//
-//         use super::*;
-//
-//         #[test]
-//         fn test_no_think_tag_at_all() {
-//             let mut parser = ReasoningExtractor::default();
-//             parser.handle("some other text");
-//             parser.finalize();
-//             assert_eq!(parser.other, "some other text");
-//             assert_eq!(parser.reasoning, "");
-//         }
-//
-//         #[test]
-//         fn test_standard_case_with_newline() {
-//             let mut parser = ReasoningExtractor::default();
-//             parser.handle("prefix\n<think>\nthoughts\n</think>\nsuffix");
-//             parser.finalize();
-//             assert_eq!(parser.reasoning, "thoughts\n");
-//             assert_eq!(parser.other, "prefix\nsuffix");
-//         }
-//
-//         #[test]
-//         fn test_suffix_only() {
-//             let mut parser = ReasoningExtractor::default();
-//             parser.handle("<think>\nthoughts\n</think>\n\nsuffix text here");
-//             parser.finalize();
-//             assert_eq!(parser.reasoning, "thoughts\n");
-//             assert_eq!(parser.other, "\nsuffix text here");
-//         }
-//
-//         #[test]
-//         fn test_ends_with_closing_tag_no_newline() {
-//             let mut parser = ReasoningExtractor::default();
-//             parser.handle("<think>\nfinal thoughts\n");
-//             parser.handle("</think>");
-//             parser.finalize();
-//             assert_eq!(parser.reasoning, "final thoughts\n");
-//             assert_eq!(parser.other, "");
-//         }
-//
-//         #[test]
-//         fn test_less_than_symbol_in_reasoning_content_is_not_stripped() {
-//             let mut parser = ReasoningExtractor::default();
-//             parser.handle("<think>\na < b is a true statement\n</think>");
-//             parser.finalize();
-//             // The last '<' is part of "</think>", so "a < b is a true statement" is kept.
-//             assert_eq!(parser.reasoning, "a < b is a true statement\n");
-//         }
-//
-//         #[test]
-//         fn test_less_than_symbol_not_part_of_tag_is_kept() {
-//             let mut parser = ReasoningExtractor::default();
-//             parser.handle("<think>\nhere is a random < symbol");
-//             parser.finalize();
-//             // The final '<' is not a prefix of '</think>', so it's kept.
-//             assert_eq!(parser.reasoning, "here is a random < symbol");
-//         }
-//     }
-// }
+impl From<OllamaError> for StreamError {
+    fn from(err: OllamaError) -> Self {
+        use ollama_rs::error::InternalOllamaError;
+
+        match err {
+            OllamaError::ReqwestError(error) => Self::from(error),
+            OllamaError::ToolCallError(error) => {
+                StreamError::other("tool-call error").with_source(error)
+            }
+            OllamaError::JsonError(error) => StreamError::other("json error").with_source(error),
+            OllamaError::InternalError(InternalOllamaError { message }) => {
+                StreamError::other(message)
+            }
+            OllamaError::Other(message) => StreamError::other(message),
+        }
+    }
+}

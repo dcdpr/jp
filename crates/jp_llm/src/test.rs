@@ -17,37 +17,28 @@ use jp_config::{
 use jp_conversation::{
     ConversationEvent, ConversationStream,
     event::{ChatRequest, ToolCallResponse},
+    event_builder::EventBuilder,
     stream::ConversationEventWithConfig,
     thread::{Thread, ThreadBuilder},
 };
 use jp_test::mock::{Snap, Vcr};
-use schemars::Schema;
 
 use crate::{
     event::Event,
     model::{ModelDetails, ReasoningDetails},
     provider::get_provider,
-    query::{ChatQuery, StructuredQuery},
-    stream::aggregator::chunk::EventAggregator,
+    query::ChatQuery,
     tool::ToolDefinition,
 };
 
+#[allow(clippy::large_enum_variant)]
 pub enum TestRequest {
     /// A chat completion request.
     Chat {
-        stream: bool,
         model: ModelDetails,
         query: ChatQuery,
         #[expect(clippy::type_complexity)]
         assert: Arc<dyn Fn(&[Vec<Event>])>,
-    },
-
-    /// A structured completion request.
-    Structured {
-        model: ModelDetails,
-        query: StructuredQuery,
-        #[expect(clippy::type_complexity)]
-        assert: Arc<dyn Fn(&[Result<serde_json::Value, crate::Error>])>,
     },
 
     /// List all models.
@@ -83,7 +74,6 @@ impl TestRequest {
 
     pub fn chat(provider: ProviderId) -> Self {
         Self::Chat {
-            stream: false,
             model: test_model_details(provider),
             query: ChatQuery {
                 thread: ThreadBuilder::new()
@@ -101,31 +91,7 @@ impl TestRequest {
                     .unwrap(),
                 tools: vec![],
                 tool_choice: ToolChoice::default(),
-                tool_call_strict_mode: false,
             },
-            assert: Arc::new(|_| {}),
-        }
-    }
-
-    #[expect(dead_code)]
-    pub fn structured(provider: ProviderId) -> Self {
-        Self::Structured {
-            model: test_model_details(provider),
-            query: StructuredQuery::new(
-                true.into(),
-                ThreadBuilder::new()
-                    .with_events({
-                        let mut config = AppConfig::new_test();
-                        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
-                            provider,
-                            name: "test".parse().unwrap(),
-                        });
-                        ConversationStream::new(config.into())
-                            .with_created_at(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap())
-                    })
-                    .build()
-                    .unwrap(),
-            ),
             assert: Arc::new(|_| {}),
         }
     }
@@ -144,14 +110,6 @@ impl TestRequest {
         }
     }
 
-    pub fn stream(mut self, stream: bool) -> Self {
-        if let Self::Chat { stream: s, .. } = &mut self {
-            *s = stream;
-        }
-
-        self
-    }
-
     pub fn model(mut self, model: ModelIdConfig) -> Self {
         let Some(thread) = self.as_thread_mut() else {
             return self;
@@ -161,9 +119,8 @@ impl TestRequest {
         delta.assistant.model.id = PartialModelIdOrAliasConfig::Id(model.to_partial());
         thread.events.add_config_delta(delta);
 
-        match &mut self {
-            Self::Chat { model: m, .. } | Self::Structured { model: m, .. } => m.id = model,
-            _ => {}
+        if let Self::Chat { model: m, .. } = &mut self {
+            m.id = model;
         }
 
         self
@@ -211,22 +168,6 @@ impl TestRequest {
         self
     }
 
-    #[expect(dead_code)]
-    pub fn schema(self, schema: impl Into<Schema>) -> Self {
-        match self {
-            Self::Structured {
-                model,
-                query,
-                assert,
-            } => Self::Structured {
-                model,
-                query: StructuredQuery::new(schema.into(), query.thread),
-                assert,
-            },
-            _ => self,
-        }
-    }
-
     pub fn tool_choice_fn(self, name: impl Into<String>) -> Self {
         self.tool_choice(ToolChoice::Function(name.into()))
     }
@@ -244,16 +185,7 @@ impl TestRequest {
                     .into_iter()
                     .map(|(k, v)| (k.to_owned(), v))
                     .collect(),
-                include_tool_answers_parameter: false,
             });
-        }
-
-        self
-    }
-
-    pub fn tool_call_strict_mode(mut self, strict: bool) -> Self {
-        if let Self::Chat { query, .. } = &mut self {
-            query.tool_call_strict_mode = strict;
         }
 
         self
@@ -262,18 +194,6 @@ impl TestRequest {
     #[expect(dead_code)]
     pub fn assert_chat(mut self, assert: impl Fn(&[Vec<Event>]) + 'static) -> Self {
         if let Self::Chat { assert: a, .. } = &mut self {
-            *a = Arc::new(assert);
-        }
-
-        self
-    }
-
-    #[expect(dead_code)]
-    pub fn assert_structured(
-        mut self,
-        assert: impl Fn(&[Result<serde_json::Value, crate::Error>]) + 'static,
-    ) -> Self {
-        if let Self::Structured { assert: a, .. } = &mut self {
             *a = Arc::new(assert);
         }
 
@@ -292,7 +212,6 @@ impl TestRequest {
     pub fn as_thread(&self) -> Option<&Thread> {
         match self {
             Self::Chat { query, .. } => Some(&query.thread),
-            Self::Structured { query, .. } => Some(&query.thread),
             _ => None,
         }
     }
@@ -300,14 +219,13 @@ impl TestRequest {
     pub fn as_thread_mut(&mut self) -> Option<&mut Thread> {
         match self {
             Self::Chat { query, .. } => Some(&mut query.thread),
-            Self::Structured { query, .. } => Some(&mut query.thread),
             _ => None,
         }
     }
 
     pub fn as_model_details_mut(&mut self) -> Option<&mut ModelDetails> {
         match self {
-            Self::Chat { model, .. } | Self::Structured { model, .. } => Some(model),
+            Self::Chat { model, .. } => Some(model),
             _ => None,
         }
     }
@@ -316,19 +234,8 @@ impl TestRequest {
 impl std::fmt::Debug for TestRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Chat {
-                stream,
-                model,
-                query,
-                ..
-            } => f
+            Self::Chat { model, query, .. } => f
                 .debug_struct("Chat")
-                .field("stream", stream)
-                .field("model", model)
-                .field("query", query)
-                .finish(),
-            Self::Structured { model, query, .. } => f
-                .debug_struct("Structured")
                 .field("model", model)
                 .field("query", query)
                 .finish(),
@@ -414,9 +321,6 @@ pub async fn run_chat_completion(
             }
 
             let provider = get_provider(provider_id, &config).unwrap();
-            let has_structured_request = requests
-                .iter()
-                .any(|v| matches!(v, TestRequest::Structured { .. }));
             let has_chat_request = requests
                 .iter()
                 .any(|v| matches!(v, TestRequest::Chat { .. }));
@@ -433,7 +337,6 @@ pub async fn run_chat_completion(
 
             let mut all_events = vec![];
             let mut history = vec![];
-            let mut structured_history = vec![];
             let mut model_details = vec![];
             let mut models = vec![];
 
@@ -491,9 +394,6 @@ pub async fn run_chat_completion(
                     TestRequest::Chat { query, .. } => {
                         query.thread.events.config().unwrap().to_partial()
                     }
-                    TestRequest::Structured { query, .. } => {
-                        query.thread.events.config().unwrap().to_partial()
-                    }
                     TestRequest::Models { .. } | TestRequest::ModelDetails { .. } => {
                         PartialAppConfig::empty()
                     }
@@ -529,56 +429,74 @@ pub async fn run_chat_completion(
                 // 3. Then we run the query, and collect the new events.
                 match request {
                     TestRequest::Chat {
-                        stream,
                         model,
                         query,
                         assert,
                     } => {
-                        let mut agg = EventAggregator::new();
-                        let events = if stream {
-                            provider
-                                .chat_completion_stream(&model, query)
-                                .await
-                                .unwrap()
-                                .try_collect()
-                                .await
-                                .unwrap()
-                        } else {
-                            provider.chat_completion(&model, query).await.unwrap()
-                        };
+                        let events: Vec<Event> = provider
+                            .chat_completion_stream(&model, query)
+                            .await
+                            .unwrap()
+                            .try_collect()
+                            .await
+                            .unwrap();
 
-                        for mut event in events {
-                            if let Event::Part { event, .. } = &mut event {
-                                event.timestamp =
-                                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
-                            }
+                        let stream = conversation_stream
+                            .as_mut()
+                            .expect("Chat request always sets conversation_stream");
+                        let mut builder = EventBuilder::new();
 
-                            all_events[index].push(event.clone());
+                        for llm_event in events {
+                            match llm_event {
+                                Event::Part { index: idx, event } => {
+                                    builder.handle_part(idx, event);
+                                }
+                                Event::Flush {
+                                    index: idx,
+                                    metadata,
+                                } => {
+                                    if let Some(mut event) = builder.handle_flush(idx, metadata) {
+                                        // Normalize timestamp for deterministic snapshots.
+                                        event.timestamp =
+                                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
 
-                            for event in agg.ingest(event) {
-                                if let Event::Part { event, .. } = event {
-                                    if let Some(stream) = conversation_stream.as_mut() {
-                                        stream.push(event.clone());
+                                        all_events[index].push(Event::Part {
+                                            index: idx,
+                                            event: event.clone(),
+                                        });
+                                        all_events[index].push(Event::flush(idx));
+
+                                        history.push(ConversationEventWithConfig {
+                                            event: event.clone(),
+                                            config: config.clone(),
+                                        });
+                                        stream.push(event);
+                                    }
+                                }
+                                Event::Finished(reason) => {
+                                    for mut event in builder.drain() {
+                                        event.timestamp =
+                                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+                                        all_events[index].push(Event::Part {
+                                            index: 0,
+                                            event: event.clone(),
+                                        });
+                                        all_events[index].push(Event::flush(0));
+
+                                        history.push(ConversationEventWithConfig {
+                                            event: event.clone(),
+                                            config: config.clone(),
+                                        });
+                                        stream.push(event);
                                     }
 
-                                    history.push(ConversationEventWithConfig {
-                                        event,
-                                        config: config.clone(),
-                                    });
+                                    all_events[index].push(Event::Finished(reason));
                                 }
                             }
                         }
 
                         assert(&all_events);
-                    }
-                    TestRequest::Structured {
-                        model,
-                        query,
-                        assert,
-                    } => {
-                        let value = provider.structured_completion(&model, query).await;
-                        structured_history.push(value);
-                        assert(&structured_history);
                     }
                     TestRequest::Models { assert } => {
                         let value = provider.models().await.unwrap();
@@ -603,18 +521,6 @@ pub async fn run_chat_completion(
                     ("", Snap::debug(all_events)),
                     ("conversation_stream", Snap::json(conversation_stream)),
                 ]);
-            }
-
-            if has_structured_request {
-                let out = structured_history
-                    .into_iter()
-                    .map(|v| match v {
-                        Ok(value) => value,
-                        Err(error) => format!("Error::{error:?}").into(),
-                    })
-                    .collect::<Vec<_>>();
-
-                outputs.push(("structured_outputs", Snap::json(out)));
             }
 
             if has_model_details_request {
@@ -650,7 +556,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             display_name: None,
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::budgetted(128, Some(24576))),
+            reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
             knowledge_cutoff: None,
             deprecated: None,
             features: vec![],
@@ -695,6 +601,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             deprecated: None,
             features: vec![],
         },
+        ProviderId::Test => ModelDetails::empty("test/mock-model".parse().unwrap()),
         ProviderId::Xai => unimplemented!(),
         ProviderId::Deepseek => unimplemented!(),
     }

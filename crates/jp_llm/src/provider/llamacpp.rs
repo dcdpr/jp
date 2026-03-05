@@ -1,7 +1,7 @@
 use std::mem;
 
 use async_trait::async_trait;
-use futures::{FutureExt as _, StreamExt as _, future, stream};
+use futures::{StreamExt as _, future, stream};
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::id::{ModelIdConfig, Name, ProviderId},
@@ -11,26 +11,19 @@ use jp_conversation::{
     ConversationEvent, ConversationStream,
     event::{ChatResponse, EventKind, ToolCallResponse},
 };
-use openai::{
-    Credentials,
-    chat::{
-        self, ChatCompletionBuilder, ChatCompletionChoiceDelta, ChatCompletionDelta,
-        ChatCompletionMessage, ChatCompletionMessageDelta, ChatCompletionMessageRole,
-        ToolCallFunction, structured_output::ToolCallFunctionDefinition,
-    },
-};
-use serde_json::Value;
-use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, trace};
+use reqwest_eventsource::{Event as SseEvent, EventSource};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use tracing::{debug, trace, warn};
 
 use super::{
     EventStream, ModelDetails,
-    openai::{ModelListResponse, ModelResponse},
+    openai::{ModelListResponse, ModelResponse, parameters_with_strict_mode},
 };
 use crate::{
-    error::{Error, Result},
+    error::{Error, StreamError},
     event::{Event, FinishReason},
-    provider::{Provider, openai::parameters_with_strict_mode},
+    provider::Provider,
     query::ChatQuery,
     stream::aggregator::{
         reasoning::ReasoningExtractor, tool_call_request::ToolCallRequestAggregator,
@@ -43,46 +36,12 @@ static PROVIDER: ProviderId = ProviderId::Llamacpp;
 #[derive(Debug, Clone)]
 pub struct Llamacpp {
     reqwest_client: reqwest::Client,
-    credentials: Credentials,
     base_url: String,
-}
-
-impl Llamacpp {
-    /// Build request for Llama.cpp API.
-    fn build_request(
-        &self,
-        model: &ModelDetails,
-        query: ChatQuery,
-    ) -> Result<ChatCompletionBuilder> {
-        let slug = model.id.name.to_string();
-        let ChatQuery {
-            thread,
-            tools,
-            tool_choice,
-            tool_call_strict_mode,
-        } = query;
-
-        let messages = thread.into_messages(to_system_messages, convert_events)?;
-        let tools = convert_tools(tools, tool_call_strict_mode, &tool_choice);
-        let tool_choice = convert_tool_choice(&tool_choice);
-
-        trace!(
-            slug,
-            messages_size = messages.len(),
-            tools_size = tools.len(),
-            "Built Llamacpp request."
-        );
-
-        Ok(ChatCompletionDelta::builder(&slug, messages)
-            .credentials(self.credentials.clone())
-            .tools(tools)
-            .tool_choice(tool_choice))
-    }
 }
 
 #[async_trait]
 impl Provider for Llamacpp {
-    async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
+    async fn model_details(&self, name: &Name) -> Result<ModelDetails, Error> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
         Ok(self
@@ -93,7 +52,7 @@ impl Provider for Llamacpp {
             .unwrap_or(ModelDetails::empty(id)))
     }
 
-    async fn models(&self) -> Result<Vec<ModelDetails>> {
+    async fn models(&self) -> Result<Vec<ModelDetails>, Error> {
         self.reqwest_client
             .get(format!("{}/v1/models", self.base_url))
             .send()
@@ -104,113 +63,417 @@ impl Provider for Llamacpp {
             .data
             .iter()
             .map(map_model)
-            .collect::<Result<_>>()
+            .collect::<Result<_, _>>()
     }
 
     async fn chat_completion_stream(
         &self,
         model: &ModelDetails,
         query: ChatQuery,
-    ) -> Result<EventStream> {
+    ) -> Result<EventStream, Error> {
         debug!(
             model = %model.id.name,
             "Starting Llamacpp chat completion stream."
         );
 
-        let mut extractor = ReasoningExtractor::default();
-        let mut agg = ToolCallRequestAggregator::default();
-        let request = self.build_request(model, query)?;
+        let (body, is_structured) = build_request(model, query)?;
 
-        trace!(?request, "Sending request to Llamacpp.");
+        trace!(
+            body = serde_json::to_string(&body).unwrap_or_default(),
+            "Sending request to Llamacpp."
+        );
 
-        Ok(request
-            .create_stream()
-            .await
-            .map(ReceiverStream::new)
-            .expect("Should not fail to clone")
-            .flat_map(|v| stream::iter(v.choices))
-            .flat_map(move |v| stream::iter(map_event(v, &mut extractor, &mut agg)))
-            .chain(future::ok(Event::Finished(FinishReason::Completed)).into_stream())
+        let request = self
+            .reqwest_client
+            .post(format!("{}/v1/chat/completions", self.base_url))
+            .header("content-type", "application/json")
+            .json(&body);
+
+        let es = EventSource::new(request).map_err(|e| Error::InvalidResponse(e.to_string()))?;
+
+        let mut state = StreamState {
+            extractor: ReasoningExtractor::default(),
+            tool_calls: ToolCallRequestAggregator::default(),
+            reasoning_flushed: false,
+            finish_reason: None,
+            is_structured,
+        };
+
+        Ok(es
+            // EventSource yields Err on close; stop the stream.
+            .take_while(|event| future::ready(event.is_ok()))
+            .flat_map(move |event| stream::iter(handle_sse_event(event, &mut state)))
             .boxed())
     }
 }
 
-fn map_event(
-    event: ChatCompletionChoiceDelta,
-    extractor: &mut ReasoningExtractor,
-    agg: &mut ToolCallRequestAggregator,
-) -> Vec<Result<Event>> {
-    let ChatCompletionChoiceDelta {
-        index,
-        finish_reason,
-        delta:
-            ChatCompletionMessageDelta {
-                content,
-                tool_calls,
-                ..
-            },
-    } = event;
-
-    #[allow(clippy::cast_possible_truncation)]
-    let index = index as usize;
-    let mut events = vec![];
-
-    for chat::ToolCallDelta { id, function, .. } in tool_calls.into_iter().flatten() {
-        let (name, arguments) = match function {
-            Some(chat::ToolCallFunction { name, arguments }) => (Some(name), Some(arguments)),
-            None => (None, None),
-        };
-
-        agg.add_chunk(index, id, name, arguments.as_deref());
-    }
-
-    if ["function_call", "tool_calls"].contains(&finish_reason.as_deref().unwrap_or_default()) {
-        match agg.finalize(index) {
-            Ok(request) => events.extend(vec![
-                Ok(Event::Part {
-                    index,
-                    event: ConversationEvent::now(request),
-                }),
-                Ok(Event::flush(index)),
-            ]),
-            Err(error) => events.push(Err(error.into())),
-        }
-    }
-
-    if let Some(content) = content {
-        extractor.handle(&content);
-    }
-
-    if finish_reason.is_some() {
-        extractor.finalize();
-    }
-
-    events.extend(fetch_content(extractor, index).into_iter().map(Ok));
-    events
+/// Mutable state carried across SSE events in a single stream.
+struct StreamState {
+    extractor: ReasoningExtractor,
+    tool_calls: ToolCallRequestAggregator,
+    reasoning_flushed: bool,
+    /// Captured from `finish_reason` in the last choice delta. Emitted as
+    /// `Event::Finished` when the `[DONE]` sentinel arrives.
+    finish_reason: Option<FinishReason>,
+    is_structured: bool,
 }
 
-fn fetch_content(extractor: &mut ReasoningExtractor, index: usize) -> Vec<Event> {
+/// Process a single SSE event into zero or more provider-agnostic events.
+#[expect(clippy::too_many_lines)]
+fn handle_sse_event(
+    event: Result<SseEvent, reqwest_eventsource::Error>,
+    state: &mut StreamState,
+) -> Vec<Result<Event, StreamError>> {
+    match event {
+        Ok(SseEvent::Open) => vec![],
+        Ok(SseEvent::Message(msg)) => {
+            if msg.data == "[DONE]" {
+                // Finalize the reasoning extractor on stream end.
+                state.extractor.finalize();
+                let mut events: Vec<Result<Event, StreamError>> =
+                    drain_extractor(&mut state.extractor, state.is_structured)
+                        .into_iter()
+                        .map(Ok)
+                        .collect();
+
+                // Flush reasoning if we never did.
+                if !state.reasoning_flushed {
+                    events.push(Ok(Event::flush(0)));
+                    state.reasoning_flushed = true;
+                }
+
+                // Flush message content.
+                events.push(Ok(Event::flush(1)));
+
+                events.push(Ok(Event::Finished(
+                    state
+                        .finish_reason
+                        .take()
+                        .unwrap_or(FinishReason::Completed),
+                )));
+                return events;
+            }
+
+            let chunk: StreamChunk = match serde_json::from_str(&msg.data) {
+                Ok(c) => c,
+                Err(error) => {
+                    warn!(
+                        error = error.to_string(),
+                        data = &msg.data,
+                        "Failed to parse Llamacpp chunk."
+                    );
+
+                    return vec![];
+                }
+            };
+
+            let mut events = Vec::new();
+
+            for choice in &chunk.choices {
+                let delta = &choice.delta;
+
+                // Reasoning via `reasoning_content` (deepseek / deepseek-legacy formats)
+                if let Some(reasoning) = &delta.reasoning_content
+                    && !reasoning.is_empty()
+                {
+                    events.push(Ok(Event::Part {
+                        index: 0,
+                        event: ConversationEvent::now(ChatResponse::reasoning(reasoning.clone())),
+                    }));
+                }
+
+                // Content
+                //
+                // If reasoning_content was present, the server already
+                // separated reasoning from content (deepseek /
+                // deepseek-legacy). Otherwise, content may contain <think> tags
+                // (none format) and needs the extractor.
+                if let Some(content) = &delta.content
+                    && !content.is_empty()
+                {
+                    // Server separated reasoning; content is pure text.
+                    if delta.reasoning_content.is_some() {
+                        flush_reasoning_if_needed(&mut events, &mut state.reasoning_flushed);
+
+                        let response = if state.is_structured {
+                            ChatResponse::structured(Value::String(content.clone()))
+                        } else {
+                            ChatResponse::message(content.clone())
+                        };
+                        events.push(Ok(Event::Part {
+                            index: 1,
+                            event: ConversationEvent::now(response),
+                        }));
+                    } else {
+                        // Might contain <think> tags — feed through extractor.
+                        state.extractor.handle(content);
+                        events.extend(
+                            drain_extractor(&mut state.extractor, state.is_structured)
+                                .into_iter()
+                                .map(Ok),
+                        );
+                    }
+                }
+
+                // Tool calls
+                if let Some(tool_calls) = &delta.tool_calls {
+                    flush_reasoning_if_needed(&mut events, &mut state.reasoning_flushed);
+
+                    for tc in tool_calls {
+                        let index = tc.index as usize + 2;
+                        let name = tc.function.as_ref().and_then(|f| f.name.clone());
+                        let arguments = tc.function.as_ref().and_then(|f| f.arguments.as_deref());
+                        state
+                            .tool_calls
+                            .add_chunk(index, tc.id.clone(), name, arguments);
+                    }
+                }
+
+                // Finish reason
+                if let Some(reason) = &choice.finish_reason {
+                    state.extractor.finalize();
+                    events.extend(
+                        drain_extractor(&mut state.extractor, state.is_structured)
+                            .into_iter()
+                            .map(Ok),
+                    );
+
+                    if matches!(reason.as_str(), "tool_calls" | "stop") {
+                        events.extend(state.tool_calls.finalize_all().into_iter().flat_map(
+                            |(index, result)| {
+                                vec![
+                                    result
+                                        .map(|call| Event::Part {
+                                            index,
+                                            event: ConversationEvent::now(call),
+                                        })
+                                        .map_err(|e| StreamError::other(e.to_string())),
+                                    Ok(Event::flush(index)),
+                                ]
+                            },
+                        ));
+                    }
+
+                    if !state.reasoning_flushed {
+                        events.push(Ok(Event::flush(0)));
+                        state.reasoning_flushed = true;
+                    }
+                    events.push(Ok(Event::flush(1)));
+
+                    // Per the OpenAI spec.
+                    match reason.as_str() {
+                        "length" => state.finish_reason = Some(FinishReason::MaxTokens),
+                        "stop" => state.finish_reason = Some(FinishReason::Completed),
+                        _ => {}
+                    }
+                }
+            }
+
+            events
+        }
+        Err(e) => vec![Err(StreamError::from(e))],
+    }
+}
+
+/// Push a reasoning flush event if we haven't already.
+fn flush_reasoning_if_needed(events: &mut Vec<Result<Event, StreamError>>, flushed: &mut bool) {
+    if !*flushed {
+        events.push(Ok(Event::flush(0)));
+        *flushed = true;
+    }
+}
+
+/// Drain accumulated content from the `ReasoningExtractor` into events.
+///
+/// Index convention matches Ollama: 0 = reasoning, 1 = message content.
+fn drain_extractor(extractor: &mut ReasoningExtractor, is_structured: bool) -> Vec<Event> {
     let mut events = Vec::new();
+
     if !extractor.reasoning.is_empty() {
         let reasoning = mem::take(&mut extractor.reasoning);
         events.push(Event::Part {
-            index,
+            index: 0,
             event: ConversationEvent::now(ChatResponse::reasoning(reasoning)),
         });
     }
 
     if !extractor.other.is_empty() {
         let content = mem::take(&mut extractor.other);
+        let response = if is_structured {
+            ChatResponse::structured(Value::String(content))
+        } else {
+            ChatResponse::message(content)
+        };
         events.push(Event::Part {
-            index,
-            event: ConversationEvent::now(ChatResponse::message(content)),
+            index: 1,
+            event: ConversationEvent::now(response),
         });
     }
 
     events
 }
 
-fn map_model(model: &ModelResponse) -> Result<ModelDetails> {
+/// Build the JSON request body for the llama.cpp `/v1/chat/completions`
+/// endpoint.
+///
+/// Returns `(body, is_structured)`.
+fn build_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool), Error> {
+    let ChatQuery {
+        thread,
+        tools,
+        tool_choice,
+    } = query;
+
+    let structured_schema = thread
+        .events
+        .last()
+        .and_then(|e| e.event.as_chat_request())
+        .and_then(|req| req.schema.clone());
+
+    let is_structured = structured_schema.is_some();
+    let slug = model.id.name.to_string();
+
+    let messages = thread.into_messages(to_system_messages, convert_events)?;
+    let converted_tools = convert_tools(tools, &tool_choice);
+    let tool_choice_val = convert_tool_choice(&tool_choice);
+
+    trace!(
+        slug,
+        messages_size = messages.len(),
+        tools_size = converted_tools.len(),
+        "Built Llamacpp request."
+    );
+
+    let mut body = json!({
+        "model": slug,
+        "messages": messages,
+        "stream": true,
+    });
+
+    if !converted_tools.is_empty() {
+        body["tools"] = json!(converted_tools);
+        body["tool_choice"] = json!(tool_choice_val);
+    }
+
+    if let Some(schema) = structured_schema {
+        body["response_format"] = json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "structured_output",
+                "schema": schema,
+                "strict": true,
+            },
+        });
+    }
+
+    Ok((body, is_structured))
+}
+
+/// Convert system prompt parts into a list of JSON message values.
+fn to_system_messages(parts: Vec<String>) -> impl Iterator<Item = Value> {
+    parts
+        .into_iter()
+        .map(|content| json!({ "role": "system", "content": content }))
+}
+
+/// Convert a conversation event stream into a list of JSON message values.
+fn convert_events(events: ConversationStream) -> Vec<Value> {
+    events
+        .into_iter()
+        .filter_map(|event| match event.into_kind() {
+            EventKind::ChatRequest(request) => {
+                Some(json!({ "role": "user", "content": request.content }))
+            }
+            EventKind::ChatResponse(response) => match response {
+                ChatResponse::Message { message } => {
+                    Some(json!({ "role": "assistant", "content": message }))
+                }
+                ChatResponse::Reasoning { reasoning } => {
+                    // Wrap reasoning in <think> tags so the model can pick up
+                    // its own chain-of-thought on the next turn.
+                    Some(json!({
+                        "role": "assistant",
+                        "content": format!("<think>\n{reasoning}\n</think>"),
+                    }))
+                }
+                ChatResponse::Structured { data } => {
+                    Some(json!({ "role": "assistant", "content": data.to_string() }))
+                }
+            },
+            EventKind::ToolCallRequest(request) => Some(json!({
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": request.id,
+                    "type": "function",
+                    "function": {
+                        "name": request.name,
+                        "arguments": Value::Object(request.arguments).to_string(),
+                    },
+                }],
+            })),
+            EventKind::ToolCallResponse(ToolCallResponse { id, result }) => Some(json!({
+                "role": "tool",
+                "tool_call_id": id,
+                "content": match result {
+                    Ok(content) | Err(content) => content,
+                },
+            })),
+            _ => None,
+        })
+        .fold(vec![], |mut messages: Vec<Value>, message| {
+            // Merge consecutive assistant messages that carry tool_calls
+            // (same folding logic as the old openai-crate implementation).
+            if message.get("tool_calls").is_some()
+                && let Some(last) = messages.last_mut()
+                && last.get("tool_calls").is_some()
+                && let (Some(existing), Some(new)) = (
+                    last["tool_calls"].as_array_mut(),
+                    message["tool_calls"].as_array(),
+                )
+            {
+                existing.extend(new.iter().cloned());
+                return messages;
+            }
+            messages.push(message);
+            messages
+        })
+}
+
+/// Convert tool definitions to the OpenAI-compatible JSON format.
+///
+/// If [`ToolChoice::Function`] is set, only include the named tool. llama.cpp
+/// doesn't support calling a specific tool by name, but it supports `required`
+/// mode, so we limit the tool list instead.
+fn convert_tools(tools: Vec<ToolDefinition>, tool_choice: &ToolChoice) -> Vec<Value> {
+    tools
+        .into_iter()
+        .map(|tool| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description.unwrap_or_default(),
+                    "parameters": parameters_with_strict_mode(tool.parameters, true),
+                    "strict": true,
+                },
+            })
+        })
+        .filter(|tool| match tool_choice {
+            ToolChoice::Function(req) => tool["function"]["name"].as_str() == Some(req.as_str()),
+            _ => true,
+        })
+        .collect()
+}
+
+fn convert_tool_choice(choice: &ToolChoice) -> &str {
+    match choice {
+        ToolChoice::Auto => "auto",
+        ToolChoice::None => "none",
+        ToolChoice::Required | ToolChoice::Function(_) => "required",
+    }
+}
+
+fn map_model(model: &ModelResponse) -> Result<ModelDetails, Error> {
     Ok(ModelDetails {
         id: (
             PROVIDER,
@@ -233,189 +496,65 @@ fn map_model(model: &ModelResponse) -> Result<ModelDetails> {
 impl TryFrom<&LlamacppConfig> for Llamacpp {
     type Error = Error;
 
-    fn try_from(config: &LlamacppConfig) -> Result<Self> {
+    fn try_from(config: &LlamacppConfig) -> Result<Self, Self::Error> {
         let reqwest_client = reqwest::Client::builder().build()?;
         let base_url = config.base_url.clone();
-        let credentials = Credentials::new("", &base_url);
 
         Ok(Llamacpp {
             reqwest_client,
-            credentials,
             base_url,
         })
     }
 }
 
-/// Convert a list of [`jp_mcp::Tool`] to a list of [`chat::ChatCompletionTool`].
-///
-/// Additionally, if [`ToolChoice::Function`] is provided, only return the
-/// tool(s) that matches the expected name. This is done because Llama.cpp does
-/// not support calling a specific tool by name, but it *does* support
-/// "required"/forced tool calling, which we can turn into a request to call a
-/// specific tool, by limiting the list of tools to the ones that we want to be
-/// called.
-fn convert_tools(
-    tools: Vec<ToolDefinition>,
-    strict: bool,
-    tool_choice: &ToolChoice,
-) -> Vec<chat::ChatCompletionTool> {
-    tools
-        .into_iter()
-        .map(|tool| chat::ChatCompletionTool::Function {
-            function: ToolCallFunctionDefinition {
-                parameters: Some(Value::Object(parameters_with_strict_mode(
-                    tool.parameters,
-                    strict,
-                ))),
-                name: tool.name,
-                description: tool.description.or(Some(String::new())),
-                strict: Some(strict),
-            },
-        })
-        .filter(|tool| match tool_choice {
-            ToolChoice::Function(req) => matches!(
-                tool,
-                chat::ChatCompletionTool::Function {
-                    function: ToolCallFunctionDefinition { name, .. }
-                } if name == req
-            ),
-            _ => true,
-        })
-        .collect::<Vec<_>>()
+// These mirror the llama.cpp server's `common_chat_msg_diff_to_json_oaicompat`
+// output. The critical addition over the `openai` crate is the
+// `reasoning_content` field, which carries extracted reasoning for the
+// `--reasoning-format deepseek` (default) and `deepseek-legacy` modes.
+
+#[derive(Debug, Deserialize)]
+struct StreamChunk {
+    #[serde(default)]
+    choices: Vec<StreamChoice>,
 }
 
-fn convert_tool_choice(choice: &ToolChoice) -> chat::ToolChoice {
-    match choice {
-        ToolChoice::Auto => chat::ToolChoice::mode(chat::ToolChoiceMode::Auto),
-        ToolChoice::None => chat::ToolChoice::mode(chat::ToolChoiceMode::None),
-        ToolChoice::Required | ToolChoice::Function(_) => {
-            chat::ToolChoice::mode(chat::ToolChoiceMode::Required)
-        }
-    }
+#[derive(Debug, Deserialize)]
+struct StreamChoice {
+    delta: StreamDelta,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
-/// Convert a list of content into system messages.
-fn to_system_messages(parts: Vec<String>) -> impl Iterator<Item = ChatCompletionMessage> {
-    parts.into_iter().map(|content| ChatCompletionMessage {
-        role: ChatCompletionMessageRole::System,
-        content: Some(content),
-        ..Default::default()
-    })
+#[derive(Debug, Deserialize, Default)]
+struct StreamDelta {
+    #[serde(default)]
+    content: Option<String>,
+    /// Reasoning content extracted by the server (deepseek / deepseek-legacy).
+    /// This is a non-standard `DeepSeek` extension that llama.cpp also uses.
+    #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<ToolCallDelta>>,
 }
 
-fn convert_events(events: ConversationStream) -> Vec<ChatCompletionMessage> {
-    events
-        .into_iter()
-        .filter_map(|event| match event.into_kind() {
-            EventKind::ChatRequest(request) => Some(ChatCompletionMessage {
-                role: ChatCompletionMessageRole::User,
-                content: Some(request.content),
-                ..Default::default()
-            }),
-            EventKind::ChatResponse(response) => Some(ChatCompletionMessage {
-                role: ChatCompletionMessageRole::Assistant,
-                content: Some(response.into_content()),
-                ..Default::default()
-            }),
-            EventKind::ToolCallRequest(request) => Some(ChatCompletionMessage {
-                role: ChatCompletionMessageRole::Assistant,
-                tool_calls: Some(vec![chat::ToolCall {
-                    id: request.id.clone(),
-                    r#type: chat::FunctionType::Function,
-                    function: ToolCallFunction {
-                        name: request.name.clone(),
-                        arguments: Value::Object(request.arguments.clone()).to_string(),
-                    },
-                }]),
-                ..Default::default()
-            }),
-            EventKind::ToolCallResponse(ToolCallResponse { id, result }) => {
-                Some(ChatCompletionMessage {
-                    role: ChatCompletionMessageRole::Tool,
-                    tool_call_id: Some(id),
-                    content: Some(match result {
-                        Ok(content) | Err(content) => content,
-                    }),
-                    ..Default::default()
-                })
-            }
-            _ => None,
-        })
-        .fold(vec![], |mut messages, message| match messages.last_mut() {
-            Some(last) if message.tool_calls.is_some() && last.tool_calls.is_some() => {
-                last.tool_calls
-                    .get_or_insert_default()
-                    .extend(message.tool_calls.unwrap_or_default());
-                messages
-            }
-            _ => {
-                messages.push(message);
-                messages
-            }
-        })
+#[derive(Debug, Deserialize)]
+struct ToolCallDelta {
+    #[serde(default)]
+    index: u32,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<FunctionDelta>,
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use jp_config::providers::llm::LlmProviderConfig;
-//     use jp_test::{Result, fn_name, mock::Vcr};
-//     use test_log::test;
-//
-//     use super::*;
-//
-//     fn vcr() -> Vcr {
-//         Vcr::new("http://127.0.0.1:8080", env!("CARGO_MANIFEST_DIR"))
-//     }
-//
-//     #[test(tokio::test)]
-//     async fn test_llamacpp_models() -> Result {
-//         let mut config = LlmProviderConfig::default().llamacpp;
-//         let vcr = vcr();
-//         vcr.cassette(
-//             fn_name!(),
-//             |rule| {
-//                 rule.filter(|when| {
-//                     when.any_request();
-//                 });
-//             },
-//             |_, url| async move {
-//                 config.base_url = url;
-//                 Llamacpp::try_from(&config).unwrap().models().await
-//             },
-//         )
-//         .await
-//     }
-//
-//     #[test(tokio::test)]
-//     async fn test_llamacpp_chat_completion() -> Result {
-//         let mut config = LlmProviderConfig::default().llamacpp;
-//         let model_id = "llamacpp/llama3:latest".parse().unwrap();
-//         let model = ModelDetails::empty(model_id);
-//         let query = ChatQuery {
-//             thread: Thread {
-//                 events: ConversationStream::default().with_chat_request("Test message"),
-//                 ..Default::default()
-//             },
-//             ..Default::default()
-//         };
-//
-//         let vcr = vcr();
-//         vcr.cassette(
-//             fn_name!(),
-//             |rule| {
-//                 rule.filter(|when| {
-//                     when.any_request();
-//                 });
-//             },
-//             |_, url| async move {
-//                 config.base_url = url;
-//
-//                 Llamacpp::try_from(&config)
-//                     .unwrap()
-//                     .chat_completion(&model, query)
-//                     .await
-//             },
-//         )
-//         .await
-//     }
-// }
+#[derive(Debug, Deserialize)]
+struct FunctionDelta {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
+}
+
+#[cfg(test)]
+#[path = "llamacpp_tests.rs"]
+mod tests;

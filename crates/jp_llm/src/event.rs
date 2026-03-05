@@ -14,8 +14,8 @@ use serde_json::Value;
 /// will have different `index` values corresponding to their relative order.
 ///
 /// Only after [`Event::Flush`] is produced with the given `index` value, should
-/// all previous parts be merged into a single [`ConversationEvent`], using
-/// `EventAggregator`.
+/// all previous parts be merged into a single [`ConversationEvent`] (e.g. via
+/// [`EventBuilder`](jp_conversation::event_builder::EventBuilder)).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// A part of a completed event.

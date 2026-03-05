@@ -50,6 +50,11 @@ impl ModelDetails {
     }
 
     #[must_use]
+    pub fn name(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.id.name)
+    }
+
+    #[must_use]
     pub fn custom_reasoning_config(
         &self,
         config: Option<ReasoningConfig>,
@@ -134,6 +139,21 @@ impl ModelDetails {
                 // Custom configuration, so use it.
                 Some(ReasoningConfig::Custom(custom)) => Some(custom),
             },
+
+            // Adaptive
+            Some(ReasoningDetails::Adaptive { .. }) => match config {
+                // Off, so disabled.
+                Some(ReasoningConfig::Off) => None,
+
+                // Unconfigured or auto, so use high effort (the API default).
+                None | Some(ReasoningConfig::Auto) => Some(CustomReasoningConfig {
+                    effort: ReasoningEffort::High,
+                    exclude: false,
+                }),
+
+                // Custom configuration, so use it.
+                Some(ReasoningConfig::Custom(custom)) => Some(custom),
+            },
         }
     }
 }
@@ -207,6 +227,18 @@ pub enum ReasoningDetails {
         /// Whether the model supports extremely high effort reasoning.
         xhigh: bool,
     },
+
+    /// Adaptive reasoning support.
+    ///
+    /// The model dynamically decides when and how much to think based on
+    /// task complexity. Uses effort levels (low/medium/high/max) instead of
+    /// token budgets.
+    ///
+    /// Currently only supported by Claude Opus 4.6+.
+    Adaptive {
+        /// Whether the model supports `max` effort level.
+        max: bool,
+    },
 }
 
 impl ReasoningDetails {
@@ -231,6 +263,11 @@ impl ReasoningDetails {
     }
 
     #[must_use]
+    pub fn adaptive(max: bool) -> Self {
+        Self::Adaptive { max }
+    }
+
+    #[must_use]
     pub fn unsupported() -> Self {
         Self::Unsupported
     }
@@ -239,7 +276,7 @@ impl ReasoningDetails {
     pub fn min_tokens(&self) -> u32 {
         match self {
             Self::Budgetted { min_tokens, .. } => *min_tokens,
-            Self::Leveled { .. } | Self::Unsupported => 0,
+            Self::Leveled { .. } | Self::Adaptive { .. } | Self::Unsupported => 0,
         }
     }
 
@@ -247,7 +284,42 @@ impl ReasoningDetails {
     pub fn max_tokens(&self) -> Option<u32> {
         match self {
             Self::Budgetted { max_tokens, .. } => *max_tokens,
-            Self::Leveled { .. } | Self::Unsupported => None,
+            Self::Leveled { .. } | Self::Adaptive { .. } | Self::Unsupported => None,
+        }
+    }
+
+    /// Returns the lowest reasoning effort level supported by this model, if
+    /// known.
+    ///
+    /// `Leveled` models return their lowest supported level. Other variants
+    /// return `Option::None` — callers should decide how to handle "disable
+    /// reasoning" for their provider (e.g. token budget 0, effort `minimal`,
+    /// `thinking: disabled`, etc.).
+    #[must_use]
+    pub fn lowest_effort(&self) -> Option<ReasoningEffort> {
+        match self {
+            Self::Leveled {
+                xlow,
+                low,
+                medium,
+                high,
+                xhigh,
+            } => {
+                if *xlow {
+                    Some(ReasoningEffort::Xlow)
+                } else if *low {
+                    Some(ReasoningEffort::Low)
+                } else if *medium {
+                    Some(ReasoningEffort::Medium)
+                } else if *high {
+                    Some(ReasoningEffort::High)
+                } else if *xhigh {
+                    Some(ReasoningEffort::XHigh)
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 
@@ -264,5 +336,10 @@ impl ReasoningDetails {
     #[must_use]
     pub fn is_leveled(&self) -> bool {
         matches!(self, Self::Leveled { .. })
+    }
+
+    #[must_use]
+    pub fn is_adaptive(&self) -> bool {
+        matches!(self, Self::Adaptive { .. })
     }
 }
