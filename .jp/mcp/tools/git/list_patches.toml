@@ -1,20 +1,24 @@
 [conversation.tools.git_list_patches]
-enable = false
+enable = "explicit"
 run = "unattended"
 style.inline_results = "full"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+summary = "List all patches for a given file that can be staged with `git_stage_patch`."
 description = """
-List all patches for a given file that can be staged with `git_stage_patch`. The listed patches \
-have a unique identifier, which can be used in `git_stage_patch` to stage the patch in the \
-repository cache.
+The listed patches have a unique identifier, which can be used in \
+`git_stage_patch` to stage the patch in the repository cache.
+"""
+
+examples = """
+```json
+{"files": ["crates/jp_config/src/conversation/tool.rs", "crates/jp_llm/src/builtin.rs"]}
+```
 """
 
 [conversation.tools.git_list_patches.parameters.files]
 type = "array"
 required = true
 items.type = "string"
-description = """
-One or more files to list Git patches for.
-"""
+summary = "One or more files to list Git patches for."

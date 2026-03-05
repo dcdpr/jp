@@ -15,10 +15,10 @@ hunks in git repositories. The following tools help you with this:
 """
 
 [conversation.tools]
-git_diff = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-git_list_patches = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "full" }
-git_stage_patch = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-git_unstage = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+git_diff = { enable = "explicit", run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+git_list_patches = { enable = "explicit", run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "full" }
+git_stage_patch = { enable = "explicit", run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+git_unstage = { enable = "explicit", run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 
 [[assistant.instructions]]
 title = "Git Staging: How To Determine Change Set Grouping"

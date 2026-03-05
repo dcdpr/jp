@@ -1,0 +1,29 @@
+[conversation.tools.fs_move_file]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Move a file in the project's local filesystem."
+
+examples = """
+```json
+{"path": "src/old_name.rs", "new_path": "src/new_name.rs"}
+```
+"""
+
+[conversation.tools.fs_move_file.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.fs_move_file.parameters.source]
+type = "string"
+required = true
+summary = "The current path of the file to move. The path must be relative to the project's root."
+
+[conversation.tools.fs_move_file.parameters.target]
+type = "string"
+required = true
+summary = "The new path for the file. The path must be relative to the project's root."
+description = """
+Parent directories will be created if they don't exist.
+"""

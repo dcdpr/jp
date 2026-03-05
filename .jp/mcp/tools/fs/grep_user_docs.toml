@@ -1,25 +1,38 @@
 [conversation.tools.fs_grep_user_docs]
 enable = false
 run = "unattended"
-style.inline_results = "off"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-description = "Grep the project's user documentation."
+summary = "Grep the project's user documentation."
+
+examples = """
+Search for a topic:
+```json
+{"pattern": "tool configuration"}
+```
+
+Return entire matching files:
+```json
+{"pattern": "attachments", "return_entire_file": true}
+```
+"""
+
+[conversation.tools.fs_grep_user_docs.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
 
 [conversation.tools.fs_grep_user_docs.parameters.pattern]
 type = "string"
 required = true
-description = """
-Regular expression to filter the results by.
-"""
+summary = "Regular expression to filter the results by."
 
 [conversation.tools.fs_grep_user_docs.parameters.return_entire_file]
 type = "boolean"
 default = false
+summary = "Whether to return the entire file contents."
 description = """
-Whether to return the entire file contents.
-
 If enabled, the tool will return the entire file contents of any files matching
 the pattern. If disabled (the default), only the matching lines and 5 contextual
 lines above and below the matching lines will be returned.

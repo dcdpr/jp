@@ -5,13 +5,25 @@ style.inline_results = "off"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-description = "Expand the auto-generated Rust code for the given item."
+summary = "Expand the auto-generated Rust code for the given item."
+
+examples = """
+Expand a module in a workspace package:
+```json
+{"package": "jp_config", "item": "conversation::tool"}
+```
+
+Expand a top-level item:
+```json
+{"item": "os::unix::ffi"}
+```
+"""
 
 [conversation.tools.cargo_expand.parameters.package]
-description = "Package to find the item in, required if working with a workspace."
+summary = "Package to find the item in, required if working with a workspace."
 type = "string"
 
 [conversation.tools.cargo_expand.parameters.item]
-description = "Local path to module or other named item to expand, e.g. os::unix::ffi"
+summary = "Local path to module or other named item to expand, e.g. os::unix::ffi"
 required = true
 type = "string"
