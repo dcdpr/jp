@@ -1,22 +1,23 @@
 pub mod error;
 pub mod value;
 
+pub mod load;
+pub mod persist;
+
 use std::{cell::OnceCell, fs, io::BufReader, iter};
 
-use ahash::{HashMap, HashMapExt};
-use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
+use camino::{FromPathBufError, Utf8DirEntry, Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, NaiveDateTime, Utc};
 pub use error::Error;
 use jp_conversation::{Conversation, ConversationId, ConversationStream, ConversationsMetadata};
 use jp_id::Id as _;
 use jp_tombmap::TombMap;
-use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
+pub use load::LoadError;
+use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
+use relative_path::RelativePath;
 use tracing::{trace, warn};
 
-use crate::{
-    error::Result,
-    value::{read_json, write_json},
-};
+use crate::{error::Result, value::write_json};
 
 pub const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
@@ -57,21 +58,25 @@ impl Storage {
     pub fn with_user_storage(
         mut self,
         root: &Utf8Path,
-        name: impl Into<String>,
+        name: impl AsRef<str>,
         id: impl Into<String>,
     ) -> Result<Self> {
-        let name: String = name.into();
+        let name = name.as_ref();
         let id: String = id.into();
         let dirname = format!("{name}-{id}");
         let mut path = root.join(&dirname);
 
         // Create user storage directory, if needed.
         if root.exists()
-            && let Some(mut existing_path) = root.read_dir_utf8()?.find_map(|entry| {
-                let path = entry.ok()?.into_path();
-                path.to_string().ends_with(&id).then_some(path)
+            && let Some(existing_path) = fs::read_dir(root)?.find_map(|entry| {
+                let path = entry.ok()?.path();
+                path.to_string_lossy().ends_with(&id).then_some(path)
             })
         {
+            let mut existing_path: Utf8PathBuf = existing_path
+                .try_into()
+                .map_err(FromPathBufError::into_io_error)?;
+
             if !existing_path.is_dir() {
                 return Err(Error::NotDir(existing_path));
             }
@@ -147,118 +152,29 @@ impl Storage {
         self.user.as_deref()
     }
 
-    /// Loads the conversations metadata from storage.
-    ///
-    /// This loads the file from user storage if configured, otherwise the
-    /// workspace storage is used.
-    ///
-    /// If the file does not exist, return default conversations metadata.
-    pub fn load_conversations_metadata(&self) -> Result<ConversationsMetadata> {
-        let root = self.user.as_deref().unwrap_or(self.root.as_path());
-        let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
-        trace!(path = %metadata_path, "Loading user conversations metadata.");
-
-        if !metadata_path.exists() {
-            return Ok(ConversationsMetadata::default());
-        }
-
-        read_json(&metadata_path)
-    }
-
-    pub fn load_conversation_metadata(&self, id: &ConversationId) -> Result<Conversation> {
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
-                continue;
-            };
-
-            let Some(conv_dir) = find_conversation_dir_path(root, id) else {
-                continue;
-            };
-
-            let path = conv_dir.join(METADATA_FILE);
-            if !path.is_file() {
-                continue;
-            }
-
-            let mut conversation: Conversation = read_json(&path)?;
-            conversation.user = Some(root) == self.user.as_ref();
-            (conversation.events_count, conversation.last_event_at) =
-                load_count_and_timestamp_events(&conv_dir).unwrap_or((0, None));
-
-            return Ok(conversation);
-        }
-
-        Err(jp_conversation::Error::UnknownId(*id).into())
-    }
-
+    /// Return the absolute path to the given relative path, starting from the
+    /// storage root.
+    #[expect(clippy::missing_panics_doc)]
     #[must_use]
-    pub fn load_all_conversations_details(&self) -> HashMap<ConversationId, Conversation> {
-        let mut conversations = HashMap::new();
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
-                continue;
-            };
-
-            let path = root.join(CONVERSATIONS_DIR);
-            let details = dir_entries(&path)
-                .collect::<Vec<_>>()
-                .into_par_iter()
-                .filter_map(|entry| {
-                    let (id, mut conversation) = load_conversation_metadata(&entry)?;
-                    conversation.user = Some(root) == self.user.as_ref();
-                    (conversation.events_count, conversation.last_event_at) =
-                        load_count_and_timestamp_events(entry.path()).unwrap_or((0, None));
-
-                    Some((id, conversation))
-                })
-                .collect::<Vec<_>>();
-
-            conversations.extend(details);
-        }
-        conversations
+    pub fn root_with_path(&self, path: &RelativePath) -> Utf8PathBuf {
+        Utf8PathBuf::from_path_buf(path.to_logical_path(&self.root))
+            .expect("relative path is Unicode, as is the root")
     }
 
-    pub fn load_all_conversation_ids(&self) -> Vec<ConversationId> {
-        let mut conversations = vec![];
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
-                continue;
-            };
-
-            let path = root.join(CONVERSATIONS_DIR);
-            conversations.extend(
-                dir_entries(&path)
-                    .collect::<Vec<_>>()
-                    .par_iter()
-                    .filter_map(load_conversation_id_from_entry)
-                    .collect::<Vec<_>>(),
-            );
-        }
-
-        conversations.sort();
-        conversations
+    /// Return the absolute path to the given relative path, starting from the
+    /// user storage directory.
+    #[must_use]
+    pub fn user_storage_with_path(&self, path: &RelativePath) -> Option<Utf8PathBuf> {
+        let user = self.user.as_deref()?;
+        path.to_logical_path(user).try_into().ok()
     }
 
-    pub fn load_conversation_events(&self, id: &ConversationId) -> Result<ConversationStream> {
-        let this = &self;
-        for root in [Some(&this.root), this.user.as_ref()] {
-            let Some(root) = root else {
-                continue;
-            };
-
-            let Some(path) = find_conversation_dir_path(root, id).map(|v| v.join(EVENTS_FILE))
-            else {
-                continue;
-            };
-
-            if !path.is_file() {
-                continue;
-            }
-
-            return read_json(&path);
-        }
-
-        Err(jp_conversation::Error::UnknownId(*id).into())
+    /// Return the absolute path to the given relative path, starting from the
+    /// user or workspace storage directory.
+    #[must_use]
+    pub fn user_or_root_with_path(&self, path: &RelativePath) -> Utf8PathBuf {
+        self.user_storage_with_path(path)
+            .unwrap_or_else(|| self.root_with_path(path))
     }
 
     pub fn persist_conversations_and_events(
@@ -275,8 +191,8 @@ impl Storage {
         let user_conversations_dir = user.join(CONVERSATIONS_DIR);
 
         trace!(
-            global = conversations_dir.as_str(),
-            user = user_conversations_dir.as_str(),
+            global = %conversations_dir,
+            user = %user_conversations_dir,
             "Persisting conversations."
         );
 
@@ -302,7 +218,7 @@ impl Storage {
             let loaded_stream;
             if stream.is_none()
                 && (conversations.is_modified(id) || id == active_conversation_id)
-                && let Ok(s) = self.load_conversation_events(id)
+                && let Ok(s) = self.load_conversation_stream(id)
             {
                 loaded_stream = Some(s);
                 stream = loaded_stream.as_ref();
@@ -321,6 +237,11 @@ impl Storage {
                 )?;
             }
 
+            // Don't write metadata for non-existent conversations.
+            let Some(stream) = stream else {
+                continue;
+            };
+
             fs::create_dir_all(&conv_dir)?;
 
             // Write conversation metadata
@@ -328,9 +249,7 @@ impl Storage {
             write_json(&meta_path, conversation)?;
 
             let events_path = conv_dir.join(EVENTS_FILE);
-            if let Some(stream) = stream {
-                write_json(&events_path, stream)?;
-            }
+            write_json(&events_path, stream)?;
         }
 
         // Don't mark active conversation as removed.
@@ -341,14 +260,13 @@ impl Storage {
 
         for dir in [&conversations_dir, &user_conversations_dir] {
             let mut deleted = Vec::new();
-            for entry in dir.read_dir_utf8()?.flatten() {
+            for entry in dir_entries(&dir) {
                 let path = entry.path();
                 let dir_matches_id = path.file_name().is_some_and(|v| {
                     removed_ids.iter().any(|d| {
-                        let file_name = v.to_string();
                         let removed_id = d.target_id();
 
-                        file_name == *removed_id || file_name.starts_with(&format!("{removed_id}-"))
+                        v == &*removed_id || v.starts_with(&format!("{removed_id}-"))
                     })
                 });
 
@@ -370,12 +288,17 @@ impl Storage {
         &mut self,
         metadata: &ConversationsMetadata,
     ) -> Result<()> {
+        // Only persist metadata if the active conversation exists.
+        if self
+            .load_conversation_stream(&metadata.active_conversation_id)
+            .is_err()
+        {
+            return Ok(());
+        }
+
         let root = self.user.as_deref().unwrap_or(self.root.as_path());
         let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
-        trace!(
-            path = metadata_path.as_str(),
-            "Persisting user conversations metadata."
-        );
+        trace!(path = %metadata_path, "Persisting user conversations metadata.");
 
         write_json(&metadata_path, metadata)?;
 
@@ -410,7 +333,7 @@ impl Storage {
                 .for_each(|path| {
                     if let Err(error) = fs::remove_dir_all(&path) {
                         warn!(
-                            path = path.as_str(),
+                            path = %path,
                             error = error.to_string(),
                             "Failed to remove ephemeral conversation."
                         );
@@ -431,40 +354,6 @@ fn parse_datetime(s: &str) -> Option<DateTime<Utc>> {
         })
 }
 
-fn load_count_and_timestamp_events(root: &Utf8Path) -> Option<(usize, Option<DateTime<Utc>>)> {
-    #[derive(serde::Deserialize)]
-    struct RawEvent {
-        timestamp: Box<serde_json::value::RawValue>,
-    }
-    let path = root.join(EVENTS_FILE);
-    let file = fs::File::open(&path).ok()?;
-    let reader = BufReader::new(file);
-
-    let events: Vec<RawEvent> = match serde_json::from_reader(reader) {
-        Ok(events) => events,
-        Err(error) => {
-            warn!(
-                error = error.to_string(),
-                path = path.as_str(),
-                "Error parsing JSON event file."
-            );
-            return None;
-        }
-    };
-
-    let mut event_count = 0;
-    let mut last_timestamp = None;
-    for event in events {
-        event_count += 1;
-        let ts = event.timestamp.get();
-        if ts.len() >= 2 && ts.starts_with('"') && ts.ends_with('"') {
-            last_timestamp = parse_datetime(&ts[1..ts.len() - 1]);
-        }
-    }
-
-    Some((event_count, last_timestamp))
-}
-
 /// Get the `expires_at` timestamp from the conversation metadata file, if the
 /// file exists, and the `expires_at` timestamp is set.
 ///
@@ -482,11 +371,7 @@ fn get_expiring_timestamp(root: &Utf8Path) -> Option<DateTime<Utc>> {
     let conversation: RawConversation = match serde_json::from_reader(reader) {
         Ok(conversation) => conversation,
         Err(error) => {
-            warn!(
-                error = error.to_string(),
-                path = path.as_str(),
-                "Error parsing JSON metadata file."
-            );
+            warn!(%error, path = %path, "Error parsing JSON metadata file.");
             return None;
         }
     };
@@ -500,46 +385,55 @@ fn get_expiring_timestamp(root: &Utf8Path) -> Option<DateTime<Utc>> {
     parse_datetime(&ts[1..ts.len() - 1])
 }
 
-fn dir_entries(path: &Utf8Path) -> impl Iterator<Item = Utf8DirEntry> {
-    path.read_dir_utf8()
+fn dir_entries(path: impl AsRef<Utf8Path>) -> impl Iterator<Item = Utf8DirEntry> {
+    path.as_ref()
+        .read_dir_utf8()
         .into_iter()
         .flatten()
         .filter_map(std::result::Result::ok)
 }
 
 fn find_conversation_dir_path(root: &Utf8Path, id: &ConversationId) -> Option<Utf8PathBuf> {
-    root.join(CONVERSATIONS_DIR)
-        .read_dir_utf8()
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(std::result::Result::ok)
+    dir_entries(root.join(CONVERSATIONS_DIR))
         .find(|entry| entry.file_name().starts_with(&id.to_dirname(None)))
         .map(Utf8DirEntry::into_path)
 }
 
-fn load_conversation_metadata(entry: &Utf8DirEntry) -> Option<(ConversationId, Conversation)> {
-    let conversation_id = load_conversation_id_from_entry(entry)?;
-
-    let path = entry.path();
-
-    let conversation = {
-        let metadata_path = path.join(METADATA_FILE);
-        match read_json::<Conversation>(&metadata_path) {
-            Ok(c) => c,
-            Err(error) => {
-                warn!(
-                    %error,
-                    path = metadata_path.to_string(),
-                    "Failed to load conversation metadata. Skipping."
-                );
-                return None;
-            }
-        }
-    };
-
-    Some((conversation_id, conversation))
+/// Builds the path prefix to the directory for a given conversation ID.
+///
+/// This path does NOT include the optional conversation title, so it can't be
+/// used directly to load any conversation data, but can be used as a starting
+/// point for building the full path to a conversation directory.
+///
+/// For example, if a conversation `x` has the title `foo`, then
+/// `build_conversation_dir_prefix` will return `{root}/conversations/x`, but
+/// the actual conversation directory will be `{root}/conversations/x-foo`.
+fn build_conversation_dir_prefix(root: &Utf8Path, id: &ConversationId) -> Utf8PathBuf {
+    root.join(CONVERSATIONS_DIR).join(id.to_dirname(None))
 }
+
+// fn load_conversation_metadata(entry: &Utf8DirEntry) -> Option<(ConversationId, Conversation)> {
+//     let conversation_id = load_conversation_id_from_entry(entry)?;
+//
+//     let path = entry.path();
+//
+//     let conversation = {
+//         let metadata_path = path.join(METADATA_FILE);
+//         match read_json::<Conversation>(&metadata_path) {
+//             Ok(c) => c,
+//             Err(error) => {
+//                 warn!(
+//                     %error,
+//                     path = %metadata_path,
+//                     "Failed to load conversation metadata. Skipping."
+//                 );
+//                 return None;
+//             }
+//         }
+//     };
+//
+//     Some((conversation_id, conversation))
+// }
 
 fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<ConversationId> {
     if !entry.file_type().ok()?.is_dir() {
@@ -568,8 +462,8 @@ fn remove_unused_conversation_dirs(
     for conversations_dir in &[workspace_conversations_dir, user_conversations_dir] {
         let pat = id.to_dirname(None);
         dirs.push(conversations_dir.join(&pat));
-        for entry in conversations_dir.read_dir_utf8().ok().into_iter().flatten() {
-            let path = entry?.into_path();
+        for entry in dir_entries(conversations_dir) {
+            let path = entry.into_path();
             if !path.is_dir() {
                 continue;
             }
@@ -612,7 +506,7 @@ fn remove_deleted(
             fs::remove_dir_all(&path)?;
         } else {
             warn!(
-                path = path.to_string(),
+                path = %path,
                 "File or directory marked for deletion not found. Skipping."
             );
         }
@@ -622,7 +516,7 @@ fn remove_deleted(
             if parent.as_os_str() == "" || parent == root || !parent.is_dir() {
                 break;
             }
-            if fs::read_dir(parent)?.count() != 0 {
+            if dir_entries(parent).count() != 0 {
                 break;
             }
 

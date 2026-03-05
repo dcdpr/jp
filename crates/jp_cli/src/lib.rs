@@ -2,26 +2,32 @@ mod cmd;
 mod ctx;
 mod editor;
 mod error;
+mod format;
+mod output;
 mod parser;
+mod schema;
 mod signals;
 
 use std::{
-    error::Error as _,
     fmt,
-    io::{IsTerminal as _, stdout},
-    num::{NonZeroU8, NonZeroUsize},
+    io::{IsTerminal as _, stderr, stdout},
+    num::NonZeroUsize,
     process::ExitCode,
     str::FromStr,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
 use camino::{FromPathBufError, Utf8PathBuf, absolute_utf8};
+use camino_tempfile::NamedUtf8TempFile;
 use clap::{
     ArgAction, Parser,
     builder::{BoolValueParser, TypedValueParser as _},
 };
-use cmd::{Commands, Output, Success};
+use cmd::Commands;
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::Stylize as _;
 use ctx::{Ctx, IntoPartialAppConfig};
@@ -35,7 +41,8 @@ use jp_config::{
         load_partial_at_path_recursive, load_partials_with_inheritance,
     },
 };
-use jp_printer::Printer;
+use jp_printer::{OutputFormat, Printer};
+use jp_term::table::{details, details_markdown};
 use jp_workspace::{Workspace, user_data_dir};
 use serde_json::Value;
 use tokio::runtime::{self, Runtime};
@@ -114,28 +121,21 @@ struct Globals {
     #[arg(short = 'q', long, global = true)]
     quiet: bool,
 
-    /// Use OCI-compliant terminal links.
+    /// The output format.
+    ///
+    /// - `auto`: Automatically detect based on terminal.
+    /// - `text`: Plain text, no ANSI colors or unicode decorations.
+    /// - `text-pretty`: Rich text with ANSI colors and hyperlinks.
+    /// - `json`: Compact JSON output.
+    /// - `json-pretty`: Pretty-printed JSON output.
     #[arg(
-        short = 'H',
-        long = "no-hyperlinks",
+        short = 'F',
+        long = "format",
         global = true,
-        default_value_t = false,
-        value_parser = BoolValueParser::new().map(|v| !v),
-        help = "Disable OCI-compliant terminal links.",
+        value_enum,
+        default_value_t = CliFormat::Auto,
     )]
-    hyperlinks: bool,
-
-    /// Use OCI-compliant terminal links.
-    #[arg(
-        short = 'C',
-        long = "no-color",
-        alias = "no-colors",
-        global = true,
-        default_value_t = false,
-        value_parser = BoolValueParser::new().map(|v| !v),
-        help = "Disable color in the output.",
-    )]
-    colors: bool,
+    format: CliFormat,
 
     /// Persist modified state to disk.
     ///
@@ -158,10 +158,27 @@ struct Globals {
     /// This can be either a path to a workspace directory, or a workspace ID.
     #[arg(short = 'w', long, global = true)]
     workspace: Option<WorkspaceIdOrPath>,
-    // TODO
-    // /// The format of the output.
-    // #[arg(long, global = true, value_enum, default_value_t = Format::Text)]
-    // format: Format,
+
+    /// The format of the log output written to stderr.
+    ///
+    /// Defaults to "text" when stderr is a terminal, and "json" when stderr
+    /// is redirected to a file or pipe.
+    #[arg(long, global = true, value_enum, default_value_t = LogFormat::Auto)]
+    log_format: LogFormat,
+}
+
+/// The format used for log output on stderr.
+#[derive(Debug, Default, Clone, Copy, clap::ValueEnum)]
+pub(crate) enum LogFormat {
+    /// Automatically detect: use "text" for terminals, "json" otherwise.
+    #[default]
+    Auto,
+
+    /// Human-readable compact text format with ANSI colors.
+    Text,
+
+    /// Machine-readable JSON format, one object per line.
+    Json,
 }
 
 #[derive(Debug, Clone)]
@@ -207,22 +224,42 @@ impl FromStr for WorkspaceIdOrPath {
     }
 }
 
-// TODO
-// #[derive(Debug, Default, Clone, Copy, clap::ValueEnum)]
-// enum Format {
-//     /// Plain text output. No coloring or other formatting.
-//     Text,
-//
-//     /// Pretty-printed text output. Includes coloring and hyperlinks.
-//     #[default]
-//     TextPretty
-//
-//     /// Compact JSON output.
-//     Json,
-//
-//     /// Pretty-printed multi-line JSON output.
-//     JsonPretty,
-// }
+/// The format of the CLI output written to stdout.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum CliFormat {
+    /// Automatically detect: use "text-pretty" for terminals,
+    /// "text" otherwise.
+    #[default]
+    Auto,
+
+    /// Plain text output. No ANSI colors or unicode decorations.
+    Text,
+
+    /// Pretty-printed text output. Includes ANSI colors, unicode
+    /// decorations, and hyperlinks.
+    TextPretty,
+
+    /// Compact JSON output.
+    Json,
+
+    /// Pretty-printed multi-line JSON output.
+    JsonPretty,
+}
+
+impl CliFormat {
+    /// Resolve `Auto` based on TTY detection, returning the concrete
+    /// [`OutputFormat`].
+    #[must_use]
+    pub(crate) fn resolve(self, is_tty: bool) -> OutputFormat {
+        match self {
+            Self::Auto if is_tty => OutputFormat::TextPretty,
+            Self::Auto | Self::Text => OutputFormat::Text,
+            Self::TextPretty => OutputFormat::TextPretty,
+            Self::Json => OutputFormat::Json,
+            Self::JsonPretty => OutputFormat::JsonPretty,
+        }
+    }
+}
 
 impl fmt::Display for Cli {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -241,20 +278,45 @@ pub fn run() -> ExitCode {
     let cli = Cli::parse();
     let is_tty = stdout().is_terminal();
 
-    configure_logging(cli.globals.verbose, cli.globals.quiet);
-    trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
+    let format = cli.globals.format.resolve(is_tty);
 
-    let (code, output) = match run_inner(cli) {
-        Ok(output) if is_tty => (0, output_to_string(output)),
-        Ok(output) => (0, parse_json_output(output)),
-        Err(error) => parse_error(error, is_tty),
+    let guard = configure_logging(
+        cli.globals.verbose,
+        cli.globals.quiet,
+        cli.globals.log_format,
+        format,
+    );
+    trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
+    let (code, output) = match run_inner(cli, format) {
+        Ok(()) => (0, None),
+        Err(error) => {
+            let (code, msg) = parse_error(error.into(), format);
+            (code, Some(msg))
+        }
     };
 
     #[expect(clippy::print_stdout, clippy::print_stderr)]
-    if code == 0 {
-        println!("{output}");
-    } else {
-        eprintln!("{output}");
+    if let Some(output) = output {
+        if code == 0 {
+            println!("{output}");
+        } else {
+            eprintln!("{output}");
+        }
+    }
+
+    #[expect(clippy::print_stderr)]
+    if (code != 0
+        || std::env::var("JP_DEBUG")
+            .as_deref()
+            .is_ok_and(|v| v == "1" || v == "true"))
+        && let Some(path) = guard.and_then(TracingGuard::persist)
+    {
+        if format.is_json() {
+            let msg = serde_json::json!({ "trace_log": path.as_str() });
+            eprintln!("{msg}");
+        } else {
+            eprintln!("\nFull trace log written to: {path}");
+        }
     }
 
     #[cfg(feature = "dhat")]
@@ -266,8 +328,8 @@ pub fn run() -> ExitCode {
     ExitCode::from(code)
 }
 
-fn run_inner(cli: Cli) -> Result<Success> {
-    let printer = Printer::terminal(jp_printer::Format::Text);
+fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
+    let printer = Printer::terminal(format);
 
     match cli.command {
         Commands::Init(ref args) => args.run(&printer).map_err(Into::into),
@@ -278,10 +340,12 @@ fn run_inner(cli: Cli) -> Result<Success> {
             }
 
             let runtime = build_runtime(cli.root.threads, "jp-worker")?;
-            workspace.load()?;
+            if let Err(error) = workspace.load() {
+                tracing::error!(error = ?error, "Failed to load workspace.");
+            }
 
             let partial = load_partial_config(&cmd, Some(&workspace), &cli.globals.config)?;
-            let config = build(partial.clone())?;
+            let config = build(partial)?;
 
             let mut ctx = Ctx::new(workspace, runtime, cli.globals, config, printer);
             let handle = ctx.handle().clone();
@@ -293,6 +357,10 @@ fn run_inner(cli: Cli) -> Result<Success> {
                 tracing::info!("Error running command. Disabling workspace persistence.");
                 ctx.workspace.disable_persistence();
             }
+
+            // Flush the printer to ensure all queued typewriter output is
+            // fully written before background tasks log any errors.
+            ctx.printer.flush();
 
             // Wait for background tasks to complete and sync their results to
             // the workspace.
@@ -311,69 +379,38 @@ fn run_inner(cli: Cli) -> Result<Success> {
     }
 }
 
-fn output_to_string(output: Success) -> String {
-    match output {
-        Success::Ok => String::new(),
-        Success::Message(msg) => msg,
-        Success::Table { header, rows } => jp_term::table::list(header, rows),
-        Success::Details { title, rows } => jp_term::table::details(title.as_deref(), rows),
-        Success::Json(value) => format!("{value:#}"),
-    }
-}
+fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
+    let cmd::Error {
+        code,
+        message,
+        mut metadata,
+        ..
+    } = error;
 
-fn parse_json_output(output: Success) -> String {
-    let value = match output {
-        Success::Ok => serde_json::json!({}),
-        Success::Message(msg) => serde_json::json!({ "message": msg }),
-        Success::Table { header, rows } => jp_term::table::list_json(header, rows),
-        Success::Details { title, rows } => jp_term::table::details_json(title.as_deref(), rows),
-        Success::Json(value) => value,
-    };
+    if !format.is_json() {
+        let rows: Vec<Row> = metadata
+            .into_iter()
+            .map(|(k, v)| {
+                let mut row = Row::new();
+                row.add_cell(Cell::new(k).set_alignment(CellAlignment::Right))
+                    .add_cell(
+                        Cell::new(match v {
+                            Value::String(s) => s,
+                            v => format!("{v:#}"),
+                        })
+                        .set_alignment(CellAlignment::Left),
+                    );
+                row
+            })
+            .collect();
 
-    serde_json::to_string(&value).unwrap_or_else(|_| value.to_string())
-}
+        let rendered = if format.is_pretty() {
+            details(message.as_deref(), rows)
+        } else {
+            details_markdown(message.as_deref(), rows)
+        };
 
-fn parse_error(error: error::Error, is_tty: bool) -> (u8, String) {
-    let (code, message, mut metadata) = match error {
-        error::Error::Command(error) => (error.code, error.message, error.metadata),
-        _ => (
-            NonZeroU8::new(1).unwrap(),
-            Some(strip_ansi_escapes::strip_str(error.to_string())),
-            {
-                let mut metadata = vec![];
-                let mut source = error.source();
-                while let Some(error) = source {
-                    metadata.push((String::new(), error.to_string().into()));
-                    source = error.source();
-                }
-
-                metadata
-            },
-        ),
-    };
-
-    if is_tty {
-        return (
-            code.into(),
-            jp_term::table::details(
-                message.as_deref(),
-                metadata
-                    .into_iter()
-                    .map(|(k, v)| {
-                        let mut row = Row::new();
-                        row.add_cell(Cell::new(k).set_alignment(CellAlignment::Right))
-                            .add_cell(
-                                Cell::new(match v {
-                                    Value::String(s) => s,
-                                    v => format!("{v:#}"),
-                                })
-                                .set_alignment(CellAlignment::Left),
-                            );
-                        row
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-        );
+        return (code.into(), rendered);
     }
 
     let error = serde_json::json!({
@@ -382,7 +419,12 @@ fn parse_error(error: error::Error, is_tty: bool) -> (u8, String) {
         "code": code,
     });
 
-    let error = serde_json::to_string(&error).unwrap_or_else(|err| {
+    let error = if format.is_json_pretty() {
+        serde_json::to_string_pretty(&error)
+    } else {
+        serde_json::to_string(&error)
+    }
+    .unwrap_or_else(|err| {
         metadata.push(("source".to_owned(), Value::String(error.to_string())));
 
         let error = serde_json::json!({
@@ -590,7 +632,6 @@ fn load_workspace(workspace: Option<&WorkspaceIdOrPath>) -> Result<Workspace> {
         .flatten()
         .unwrap_or_default();
 
-    jp_id::global::set(id.to_string());
     trace!(%id, "Loaded unique workspace ID.");
 
     let workspace = Workspace::new_with_id(root, id)
@@ -602,9 +643,55 @@ fn load_workspace(workspace: Option<&WorkspaceIdOrPath>) -> Result<Workspace> {
     workspace.with_local_storage().map_err(Into::into)
 }
 
-fn configure_logging(verbose: u8, quiet: bool) {
+const JP_CRATES: &[&str] = &[
+    "attachment",
+    "attachment_bear_note",
+    "attachment_cmd_output",
+    "attachment_file_content",
+    "attachment_http_content",
+    "attachment_mcp_resources",
+    "cli",
+    "config",
+    "conversation",
+    "format",
+    "id",
+    "inquire",
+    "llm",
+    "macro",
+    "mcp",
+    "md",
+    "openrouter",
+    "printer",
+    "serde",
+    "storage",
+    "task",
+    "term",
+    "test",
+    "tombmap",
+    "tool",
+    "workspace",
+];
+
+pub struct TracingGuard {
+    file: Option<NamedUtf8TempFile>,
+}
+
+impl TracingGuard {
+    fn persist(mut self) -> Option<Utf8PathBuf> {
+        self.file
+            .take()
+            .and_then(|file| file.keep().ok().map(|(_file, path)| path))
+    }
+}
+
+fn configure_logging(
+    verbose: u8,
+    quiet: bool,
+    log_format: LogFormat,
+    output_format: OutputFormat,
+) -> Option<TracingGuard> {
     use tracing::level_filters::LevelFilter;
-    use tracing_subscriber::fmt;
+    use tracing_subscriber::{fmt, prelude::*};
 
     let (mut level, more) = match verbose {
         0 => (LevelFilter::ERROR, 0),
@@ -620,68 +707,86 @@ fn configure_logging(verbose: u8, quiet: bool) {
         level = LevelFilter::OFF;
     }
 
-    let mut filter: Vec<_> = match more {
+    let reasonable_more = [
+        "trace",
+        "h2=off",
+        "hyper_util=off",
+        "ignore=off",
+        "mio=off",
+        "reqwest=off",
+        "rustls=off",
+        "tokio=off",
+    ];
+
+    let mut term_filter: Vec<_> = match more {
         0 => vec!["off".to_owned()],
-        1 => vec![
-            [
-                "trace",
-                "h2=off",
-                "hyper_util=off",
-                "ignore=off",
-                "mio=off",
-                "reqwest=off",
-                "rustls=off",
-                "tokio=off",
-            ]
-            .to_vec()
-            .join(","),
-        ],
+        1 => vec![reasonable_more.to_vec().join(",")],
         _ => vec!["trace".to_owned()],
     };
 
-    for krate in [
-        "attachment",
-        "attachment_bear_note",
-        "attachment_cmd_output",
-        "attachment_file_content",
-        "attachment_mcp_resources",
-        "cli",
-        "config",
-        "conversation",
-        "format",
-        "id",
-        "llm",
-        "mcp",
-        "openrouter",
-        "query",
-        "storage",
-        "task",
-        "term",
-        "test",
-        "tombmap",
-        "workspace",
-    ] {
-        filter.push(format!("jp_{krate}={level}"));
+    for krate in JP_CRATES {
+        term_filter.push(format!("jp_{krate}={level}"));
     }
 
-    let format = fmt::format().with_target(more > 0).compact();
+    let term_env_filter = tracing_subscriber::EnvFilter::new(term_filter.join(","));
 
-    if level < LevelFilter::DEBUG {
-        tracing_subscriber::fmt()
-            .event_format(format)
-            .without_time()
-            .with_ansi(true)
-            .with_writer(std::io::stderr)
-            .with_env_filter(filter.join(","))
-            .init();
+    let mut file_filter = vec![reasonable_more.to_vec().join(",")];
+
+    for krate in JP_CRATES {
+        file_filter.push(format!("jp_{krate}=trace"));
+    }
+
+    let file_env_filter = tracing_subscriber::EnvFilter::new(file_filter.join(","));
+
+    let file = NamedUtf8TempFile::new().ok()?;
+    let file_writer = file.as_file().try_clone().ok()?;
+
+    let file_layer = fmt::layer()
+        .json()
+        .with_ansi(false)
+        .with_writer(Mutex::new(file_writer))
+        .with_filter(file_env_filter);
+
+    let registry = tracing_subscriber::registry().with(file_layer);
+
+    let use_json = match log_format {
+        LogFormat::Json => true,
+        LogFormat::Text => false,
+        // When stdout is JSON, force stderr logging to JSON too so
+        // consumers can parse both streams reliably.
+        LogFormat::Auto => output_format.is_json() || !stderr().is_terminal(),
+    };
+
+    if use_json {
+        let layer = fmt::layer()
+            .json()
+            .with_ansi(false)
+            .with_writer(std::io::stderr);
+
+        let layer = if level < LevelFilter::DEBUG {
+            layer.without_time().boxed()
+        } else {
+            layer.boxed()
+        };
+
+        registry.with(layer.with_filter(term_env_filter)).init();
     } else {
-        tracing_subscriber::fmt()
+        let format = fmt::format().with_target(more > 0).compact();
+        let layer = fmt::layer()
             .event_format(format)
             .with_ansi(true)
-            .with_writer(std::io::stderr)
-            .with_env_filter(filter.join(","))
-            .init();
+            .with_writer(std::io::stderr);
+
+        if level < LevelFilter::DEBUG {
+            registry
+                .with(layer.without_time().with_filter(term_env_filter))
+                .init();
+        } else {
+            registry.with(layer.with_filter(term_env_filter)).init();
+        }
     }
+
+    Some(TracingGuard { file: Some(file) })
 }
 
 /// Get the number of worker threads to use.

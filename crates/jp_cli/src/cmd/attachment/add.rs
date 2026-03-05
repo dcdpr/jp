@@ -2,7 +2,7 @@ use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 
 use super::validate_attachment;
-use crate::{IntoPartialAppConfig, Output, ctx::Ctx, parser::AttachmentUrlOrPath};
+use crate::{IntoPartialAppConfig, cmd::Output, ctx::Ctx, parser::AttachmentUrlOrPath};
 
 #[derive(Debug, clap::Args)]
 #[command(arg_required_else_help(true))]
@@ -21,7 +21,7 @@ impl Add {
     pub(crate) fn run(self, _: &mut Ctx) -> Output {
         // See `apply_cli_config` for implementation.
 
-        Ok(().into())
+        Ok(())
     }
 }
 

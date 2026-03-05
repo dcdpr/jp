@@ -4,7 +4,7 @@ use crossterm::style::{Color, Stylize as _};
 use jp_conversation::{Conversation, ConversationId};
 use jp_term::osc::hyperlink;
 
-use crate::{Output, cmd::Success, ctx::Ctx};
+use crate::{cmd::Output, ctx::Ctx, output::print_table};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Ls {
@@ -121,7 +121,8 @@ impl Ls {
             ));
         }
 
-        Ok(Success::Table { header, rows })
+        print_table(&ctx.printer, header, rows);
+        Ok(())
     }
 
     fn build_conversation_row(
@@ -148,11 +149,11 @@ impl Ls {
             id.to_string()
         };
 
-        if ctx.term.args.hyperlinks {
+        if ctx.printer.pretty_printing() {
             id_fmt = hyperlink(format!("jp://show-metadata/{id}"), id_fmt);
         }
 
-        let messages_fmt = if ctx.term.args.hyperlinks {
+        let messages_fmt = if ctx.printer.pretty_printing() {
             hyperlink(format!("jp://show-events/{id}"), messages.to_string())
         } else {
             messages.to_string()

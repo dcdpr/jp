@@ -1,5 +1,4 @@
 pub mod error;
-pub mod global;
 pub mod parts;
 pub mod serde;
 
@@ -7,7 +6,7 @@ use core::fmt;
 
 pub use error::Error;
 pub use parts::Parts;
-use parts::{GlobalId, TargetId, Variant};
+use parts::{TargetId, Variant};
 
 const ID_PREFIX: &str = "jp";
 pub const NANOSECONDS_PER_DECISECOND: u32 = 100_000_000;
@@ -28,17 +27,28 @@ pub trait Id: fmt::Display {
     /// This value has to be unique for a given global ID and variant.
     fn target_id(&self) -> TargetId;
 
-    /// The global ID for this ID type.
-    ///
-    /// This value has to be unique across all global IDs.
-    fn global_id(&self) -> GlobalId;
-
     /// Returns `true` if the ID is valid.
     fn is_valid(&self) -> bool {
-        Self::variant().is_valid() && self.target_id().is_valid() && self.global_id().is_valid()
+        Self::variant().is_valid() && self.target_id().is_valid()
     }
 
     /// Format the ID using the following format:
+    ///
+    /// ```text
+    /// jp-{variant}{target_id}
+    /// ```
+    ///
+    /// For example:
+    ///
+    /// ```text
+    /// jp-c17457886043
+    /// jp-pdefault
+    /// ```
+    fn format_id(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}-{}{}", ID_PREFIX, Self::variant(), self.target_id(),)
+    }
+
+    /// Format the ID with a global ID suffix:
     ///
     /// ```text
     /// jp-{variant}{target_id}-{global_id}
@@ -49,17 +59,14 @@ pub trait Id: fmt::Display {
     /// ```text
     /// jp-c17457886043-otvo8
     /// jp-pdefault-123
-    /// jp-pdefault-456
-    /// jp-mdefault-456
     /// ```
-    fn format_id(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
+    fn format_full(&self, global_id: &str) -> String {
+        format!(
             "{}-{}{}-{}",
             ID_PREFIX,
             Self::variant(),
             self.target_id(),
-            self.global_id()
+            global_id
         )
     }
 }

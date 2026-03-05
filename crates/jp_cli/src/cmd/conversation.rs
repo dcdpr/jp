@@ -3,7 +3,9 @@ use crate::ctx::Ctx;
 
 mod edit;
 mod fork;
+mod grep;
 mod ls;
+mod print;
 mod rm;
 mod show;
 mod use_;
@@ -23,6 +25,8 @@ impl Conversation {
             Commands::Use(args) => args.run(ctx),
             Commands::Edit(args) => args.run(ctx).await,
             Commands::Fork(args) => args.run(ctx),
+            Commands::Grep(args) => args.run(ctx),
+            Commands::Print(args) => args.run(ctx).await,
         }
     }
 }
@@ -51,4 +55,15 @@ enum Commands {
 
     /// Fork a conversation.
     Fork(fork::Fork),
+
+    /// Search through conversation history.
+    Grep(grep::Grep),
+
+    /// Print conversation history to the terminal.
+    Print(print::Print),
+    // /// Merge a conversation.
+    // Merge(merge::Merge),
+
+    // /// Rollback a conversation.
+    // Rollback(rollback::Rollback),
 }

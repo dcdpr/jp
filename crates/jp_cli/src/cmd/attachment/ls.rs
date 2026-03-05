@@ -1,6 +1,6 @@
 use comfy_table::{Cell, Row};
 
-use crate::{Output, cmd::Success, ctx::Ctx};
+use crate::{cmd::Output, ctx::Ctx, output::print_details};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Ls {}
@@ -11,7 +11,8 @@ impl Ls {
         let uris = &ctx.config().conversation.attachments;
 
         if uris.is_empty() {
-            return Ok("No attachments in current context.".into());
+            ctx.printer.println("No attachments in current context.");
+            return Ok(());
         }
 
         let title = Some("Attachments".to_owned());
@@ -23,6 +24,7 @@ impl Ls {
             rows.push(row);
         }
 
-        Ok(Success::Details { title, rows })
+        print_details(&ctx.printer, title.as_deref(), rows);
+        Ok(())
     }
 }

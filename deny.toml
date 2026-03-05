@@ -5,15 +5,14 @@ ignore = [
 ]
 
 [licenses]
+private = { ignore = true }
 allow = [
     "Apache-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "CDLA-Permissive-2.0",
     "ISC",
-    "LGPL-3.0-or-later",
     "MIT",
-    "MIT-0",
     "MPL-2.0",
     "Unicode-3.0",
     "Zlib",
@@ -33,8 +32,8 @@ allow-git = [
     "https://github.com/JeanMertz/httpmock?branch=tweaks",
     "https://github.com/JeanMertz/inquire?branch=submit-on-valid-parse",
     "https://github.com/JeanMertz/openai-responses-rs",
-    "https://github.com/JeanMertz/openai?branch=tmp",
     "https://github.com/JeanMertz/saphyr?branch=jean/fix-valid-literal-block-scalar-check",
     "https://github.com/JeanMertz/schematic?branch=merged",
     "https://github.com/modelcontextprotocol/rust-sdk",
+    "https://github.com/zkat/miette",
 ]

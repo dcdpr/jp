@@ -97,4 +97,10 @@ pub(crate) enum Error {
 
     #[error("Failed to write to buffer")]
     Fmt(#[from] std::fmt::Error),
+
+    #[error("Invalid schema: {0}")]
+    Schema(String),
+
+    #[error("No structured data in the assistant's response")]
+    MissingStructuredData,
 }

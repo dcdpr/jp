@@ -4,9 +4,8 @@ mod conversation;
 mod init;
 mod query;
 
-use std::{borrow::Cow, fmt, num::NonZeroU8};
+use std::{fmt, num::NonZeroU8};
 
-use comfy_table::Row;
 use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 use serde_json::Value;
@@ -96,59 +95,7 @@ impl IntoPartialAppConfig for Commands {
     }
 }
 
-pub(crate) type Output = std::result::Result<Success, Error>;
-
-/// The type of output that should be printed to the screen.
-#[derive(Debug)]
-pub(crate) enum Success {
-    /// The command was successful.
-    Ok,
-
-    /// Single message to be printed to the screen.
-    Message(String),
-
-    /// List of details to be printed in a table.
-    Table { header: Row, rows: Vec<Row> },
-
-    /// Details of a single item to be printed.
-    Details {
-        title: Option<String>,
-        rows: Vec<Row>,
-    },
-
-    /// JSON value to be printed.
-    Json(Value),
-}
-
-impl From<()> for Success {
-    fn from(_value: ()) -> Self {
-        Self::Ok
-    }
-}
-
-impl From<String> for Success {
-    fn from(value: String) -> Self {
-        Self::Message(value)
-    }
-}
-
-impl From<&str> for Success {
-    fn from(value: &str) -> Self {
-        value.to_string().into()
-    }
-}
-
-impl From<Cow<'_, str>> for Success {
-    fn from(value: Cow<'_, str>) -> Self {
-        value.to_string().into()
-    }
-}
-
-impl From<Value> for Success {
-    fn from(value: Value) -> Self {
-        Self::Json(value)
-    }
-}
+pub(crate) type Output = std::result::Result<(), Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) struct Error {
@@ -330,6 +277,10 @@ impl From<crate::error::Error> for Error {
             ]
             .into(),
             MissingEditor => [("message", "Missing editor".to_owned())].into(),
+            Schema(error) => [("message", "Invalid schema".to_owned()), ("error", error)].into(),
+            MissingStructuredData => {
+                [("message", "No structured data in response".to_owned())].into()
+            }
             CliConfig(error) => {
                 [("message", "CLI Config error".to_owned()), ("error", error)].into()
             }
@@ -379,6 +330,8 @@ impl_from_error!(
     "Key-value assignment error"
 );
 impl_from_error!(jp_config::Error, "Config error");
+impl_from_error!(jp_storage::LoadError, "Storage load error");
+impl_from_error!(jp_config::ConfigError, "Config error");
 impl_from_error!(jp_config::fs::ConfigLoaderError, "Config loader error");
 impl_from_error!(jp_conversation::Error, "Conversation error");
 impl_from_error!(jp_llm::ToolError, "Tool error");
@@ -427,9 +380,6 @@ impl From<jp_llm::Error> for Error {
                 ("error", error),
             ]
             .into(),
-            MissingStructuredData => {
-                [("message", "Missing structured data in response".into())].into()
-            }
             OpenaiClient(error) => with_cause(&error, "OpenAI client error"),
             OpenaiEvent(error) => with_cause(&error, "OpenAI stream error"),
             OpenaiResponse(error) => [
@@ -478,6 +428,12 @@ impl From<jp_llm::Error> for Error {
             ]
             .into(),
             UnknownModel(model) => [("message", "Unknown model".into()), ("model", model)].into(),
+            Stream(stream_error) => [
+                ("message", "Stream error".into()),
+                ("error", stream_error.to_string()),
+                ("kind", format!("{:?}", stream_error.kind)),
+            ]
+            .into(),
         };
 
         Self::from(metadata)
@@ -521,6 +477,7 @@ impl From<jp_workspace::Error> for Error {
         let metadata: Vec<(&str, Value)> = match error {
             Conversation(error) => return error.into(),
             Storage(error) => return error.into(),
+            Load(error) => return error.into(),
             Io(error) => return error.into(),
             Config(error) => return error.into(),
             NotDir(path) => [
@@ -600,9 +557,6 @@ impl From<jp_id::Error> for Error {
                 ("actual", actual.into()),
             ]
             .into(),
-            MissingVariantAndTargetId => {
-                [("message", "Missing variant and target ID".into())].into()
-            }
             MissingVariant => [("message", "Missing variant".into())].into(),
             InvalidVariant(variant) => [
                 ("message", "Invalid variant".into()),

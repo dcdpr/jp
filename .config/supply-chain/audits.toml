@@ -6,6 +6,26 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.49.0 -> 0.50.0"
 
+[[audits.fancy-regex]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.2 -> 0.17.0"
+
+[[audits.libsqlite3-sys]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.35.0 -> 0.36.0"
+
+[[audits.ollama-rs]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.3 -> 0.3.4"
+
+[[audits.quick-xml]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.38.4 -> 0.39.2"
+
 [[audits.rand_xorshift]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -15,11 +35,41 @@ delta = "0.3.0 -> 0.4.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.0 -> 0.4.0"
+
+[[audits.rsqlite-vfs]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.1.0"
+
+[[audits.rusqlite]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.37.0 -> 0.38.0"
+
+[[audits.schemars]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "1.1.0 -> 1.2.1"
+
+[[audits.schemars_derive]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.4 -> 1.2.1"
+
+[[audits.simd-adler32]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.7 -> 0.3.8"
 
 [[audits.siphasher]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "1.0.2"
+
+[[audits.sqlite-wasm-rs]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.5.2"
 
 [[audits.syntect]]
 who = "rgrant <rgrant@contract.design>"
@@ -31,10 +81,20 @@ who = "rgrant <rgrant@contract.design>"
 criteria = "safe-to-deploy"
 delta = "0.1.6 -> 0.1.8"
 
+[[audits.timeago]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.0 -> 0.6.0"
+
 [[audits.two-face]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.4.5"
+
+[[audits.two-face]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.5 -> 0.5.1"
 
 [[audits.unarray]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -131,6 +191,12 @@ user-id = 55123 # rust-lang-owner
 start = "2022-10-29"
 end = "2027-02-13"
 
+[[trusted.cc]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-lang/cc-rs"
+start = "2025-09-01"
+end = "2027-03-04"
+
 [[trusted.clap]]
 criteria = "safe-to-deploy"
 user-id = 6743 # Ed Page (epage)
@@ -190,6 +256,18 @@ criteria = "safe-to-deploy"
 user-id = 539 # Josh Stone (cuviper)
 start = "2025-08-29"
 end = "2027-02-13"
+
+[[trusted.find-msvc-tools]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-lang/cc-rs"
+start = "2025-09-05"
+end = "2027-03-04"
+
+[[trusted.flate2]]
+criteria = "safe-to-deploy"
+user-id = 980 # Sebastian Thiel (Byron)
+start = "2023-08-15"
+end = "2027-02-21"
 
 [[trusted.globset]]
 criteria = "safe-to-deploy"
@@ -298,6 +376,12 @@ criteria = "safe-to-deploy"
 user-id = 1 # Alex Crichton (alexcrichton)
 start = "2019-03-04"
 end = "2027-02-13"
+
+[[trusted.js-sys]]
+criteria = "safe-to-deploy"
+user-id = 145038 # Guy Bedford (guybedford)
+start = "2026-01-14"
+end = "2027-03-04"
 
 [[trusted.libc]]
 criteria = "safe-to-deploy"
@@ -587,6 +671,12 @@ user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2020-10-26"
 end = "2027-02-13"
 
+[[trusted.tokio-stream]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2021-01-04"
+end = "2027-03-04"
+
 [[trusted.tokio-util]]
 criteria = "safe-to-deploy"
 user-id = 6741 # Alice Ryhl (Darksonn)
@@ -713,6 +803,12 @@ user-id = 1 # Alex Crichton (alexcrichton)
 start = "2019-03-04"
 end = "2027-02-13"
 
+[[trusted.wasm-bindgen]]
+criteria = "safe-to-deploy"
+user-id = 145038 # Guy Bedford (guybedford)
+start = "2026-01-14"
+end = "2027-03-04"
+
 [[trusted.wasm-bindgen-backend]]
 criteria = "safe-to-deploy"
 user-id = 1 # Alex Crichton (alexcrichton)
@@ -725,11 +821,23 @@ user-id = 1 # Alex Crichton (alexcrichton)
 start = "2019-03-04"
 end = "2027-02-13"
 
+[[trusted.wasm-bindgen-futures]]
+criteria = "safe-to-deploy"
+user-id = 145038 # Guy Bedford (guybedford)
+start = "2026-01-14"
+end = "2027-03-04"
+
 [[trusted.wasm-bindgen-macro]]
 criteria = "safe-to-deploy"
 user-id = 1 # Alex Crichton (alexcrichton)
 start = "2019-03-04"
 end = "2027-02-13"
+
+[[trusted.wasm-bindgen-macro]]
+criteria = "safe-to-deploy"
+user-id = 145038 # Guy Bedford (guybedford)
+start = "2026-01-14"
+end = "2027-03-04"
 
 [[trusted.wasm-bindgen-macro-support]]
 criteria = "safe-to-deploy"
@@ -737,7 +845,25 @@ user-id = 1 # Alex Crichton (alexcrichton)
 start = "2019-03-04"
 end = "2027-02-13"
 
+[[trusted.wasm-bindgen-macro-support]]
+criteria = "safe-to-deploy"
+user-id = 145038 # Guy Bedford (guybedford)
+start = "2026-01-14"
+end = "2027-03-04"
+
 [[trusted.wasm-bindgen-shared]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-02-13"
+
+[[trusted.wasm-bindgen-shared]]
+criteria = "safe-to-deploy"
+user-id = 145038 # Guy Bedford (guybedford)
+start = "2026-01-15"
+end = "2027-03-04"
+
+[[trusted.web-sys]]
 criteria = "safe-to-deploy"
 user-id = 1 # Alex Crichton (alexcrichton)
 start = "2019-03-04"
@@ -745,9 +871,9 @@ end = "2027-02-13"
 
 [[trusted.web-sys]]
 criteria = "safe-to-deploy"
-user-id = 1 # Alex Crichton (alexcrichton)
-start = "2019-03-04"
-end = "2027-02-13"
+user-id = 145038 # Guy Bedford (guybedford)
+start = "2026-01-14"
+end = "2027-03-04"
 
 [[trusted.winapi-util]]
 criteria = "safe-to-deploy"

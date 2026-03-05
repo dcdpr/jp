@@ -71,7 +71,7 @@ impl InlineSelect {
         }
     }
 
-    /// Sets the default input.
+    /// Sets the default option.
     #[must_use]
     pub fn with_default(mut self, default: char) -> Self {
         self.default = Some(default);

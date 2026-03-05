@@ -3,9 +3,8 @@ use std::fmt::Write as _;
 use crossterm::style::Stylize as _;
 use inquire::Confirm;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
-use jp_format::conversation::DetailsFmt;
 
-use crate::{Output, cmd::Success, ctx::Ctx};
+use crate::{cmd::Output, ctx::Ctx, format::conversation::DetailsFmt};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Rm {
@@ -56,7 +55,8 @@ impl Rm {
             remove(ctx, id, self.yes)?;
         }
 
-        Ok(Success::Message("Conversation(s) removed.".into()))
+        ctx.printer.println("Conversation(s) removed.");
+        Ok(())
     }
 }
 
@@ -72,8 +72,7 @@ fn remove(ctx: &mut Ctx, id: ConversationId, force: bool) -> Output {
         .with_last_activated_at(conversation.map(|v| v.last_activated_at))
         .with_local_flag(conversation.is_some_and(|v| v.user))
         .with_active_conversation(active_id)
-        .with_hyperlinks(ctx.term.args.hyperlinks)
-        .with_color(ctx.term.args.colors);
+        .with_pretty_printing(ctx.printer.pretty_printing());
 
     if !force {
         details.title = Some(format!(
@@ -123,5 +122,5 @@ fn remove(ctx: &mut Ctx, id: ConversationId, force: bool) -> Output {
         .into());
     }
 
-    Ok(().into())
+    Ok(())
 }

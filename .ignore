@@ -1,18 +1,24 @@
-# .jp files
-.jp/conversations/**/messages.json
-.jp/QUERY_MESSAGE.md
+# Whitelist: ignore everything, then un-ignore desired trees
+*
+!/*
+!crates/
+!crates/**
+!docs/
+!docs/**
+!.jp/
+!.jp/**
+!.config/
+!.config/**
 
-# docs
+# Then the exclusions (applied within the un-ignored trees)
+.jp/conversations/
 docs/.yarn/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
 docs/.pnp.*
 docs/yarn.lock
-
-# rust
 **/target/**
-
-# misc
 .git/
 /tmp
 **/fixtures/
+docs2/

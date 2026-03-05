@@ -175,7 +175,7 @@ impl Workspace {
             // If the active conversation cannot be found on disk, we try to
             // load the last known conversation on disk, and if that fails, we
             // return an error.
-            Err(error @ jp_storage::Error::Conversation(jp_conversation::Error::UnknownId(_))) => {
+            Err(error) if error.kind().is_missing() => {
                 let last_conversation_id = conversation_ids.last().copied();
                 warn!(
                     %error,
@@ -213,7 +213,7 @@ impl Workspace {
             //
             // Instead, we should perhaps track "bad" conversation IDs and skip
             // them when retrying loading the workspace state.
-            .set(storage.load_conversation_events(&metadata.active_conversation_id)?);
+            .set(storage.load_conversation_stream(&metadata.active_conversation_id)?);
 
         self.state = State {
             local: LocalState {
@@ -244,7 +244,6 @@ impl Workspace {
             return Ok(());
         };
 
-        storage.persist_conversations_metadata(&self.state.user.conversations_metadata)?;
         storage.persist_conversations_and_events(
             &self.state.local.conversations,
             &self.state.local.events,
@@ -255,6 +254,7 @@ impl Workspace {
                 .active_conversation_id,
             &self.state.local.active_conversation,
         )?;
+        storage.persist_conversations_metadata(&self.state.user.conversations_metadata)?;
 
         info!(path = %self.root, "Persisted state.");
         Ok(())
@@ -325,11 +325,12 @@ impl Workspace {
             .local
             .conversations
             .remove(&id)
+            .inspect(|v| maybe_init_conversation(self.storage.as_ref(), (&id, v)))
             .and_then(|mut v| v.take())
             .ok_or(Error::not_found("Conversation", &id))?
             .with_last_activated_at(activation_timestamp);
 
-        // Replace the active conversation with the new one.
+        // Replace the current active conversation with the new one.
         let old_active_conversation = std::mem::replace(
             &mut self.state.local.active_conversation,
             new_active_conversation,
@@ -352,6 +353,7 @@ impl Workspace {
             .local
             .events
             .get(&old_active_conversation_id)
+            .inspect(|v| maybe_init_events(self.storage.as_ref(), (&old_active_conversation_id, v)))
             .and_then(|v| v.get())
             .is_some_and(|v| !v.is_empty())
         {
@@ -645,7 +647,7 @@ fn maybe_init_events<'a>(
     };
 
     if conversation.get().is_none() {
-        let Ok(stream) = storage.load_conversation_events(id) else {
+        let Ok(stream) = storage.load_conversation_stream(id) else {
             warn!(%id, "Failed to load conversation events. Skipping.");
             return;
         };
@@ -769,8 +771,6 @@ mod tests {
 
     #[test]
     fn test_workspace_persist_saves_in_memory_state() {
-        jp_id::global::set("foo".to_owned());
-
         let tmp = tempdir().unwrap();
         let root = tmp.path().join("root");
         let storage = root.join("storage");
@@ -903,8 +903,6 @@ mod tests {
 
     #[test]
     fn test_workspace_persist_active_conversation() {
-        jp_id::global::set("foo".to_owned());
-
         let tmp = tempdir().unwrap();
         let root = tmp.path().join("root");
         let storage = root.join("storage");

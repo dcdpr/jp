@@ -3,8 +3,8 @@
 //! This module provides functionality for generating and managing a globally
 //! unique workspace ID.
 //!
-//! The ID is stored in [`crate::Workspace::id`], but can also be stored and
-//! accessed globally using [`jp_id::global::set`] and [`jp_id::global::get`].
+//! The ID is stored in [`crate::Workspace::id`] and can be persisted to disk
+//! using [`Id::store`].
 
 use std::{
     fmt, fs, io,
@@ -30,10 +30,8 @@ pub struct Id(String);
 impl Id {
     /// Generate a globally unique workspace ID.
     ///
-    /// Generating a new ID **DOES NOT**:
-    ///
-    /// - persist it to disk. Use [`Id::store`].
-    /// - set it as the global ID. Use [`jp_id::global::set`].
+    /// Generating a new ID **DOES NOT** persist it to disk. Use [`Id::store`]
+    /// to persist the ID.
     #[must_use]
     pub fn new() -> Self {
         Self::default()

@@ -1,5 +1,5 @@
 [package]
-name = "jp_serde"
+name = "jp_editor"
 
 authors.workspace = true
 description.workspace = true
@@ -13,10 +13,10 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-base64 = { workspace = true, features = ["std"] }
-serde = { workspace = true, features = ["std", "derive"] }
-serde_json = { workspace = true, features = ["std", "preserve_order"] }
-test-log = { workspace = true }
+camino = { workspace = true }
+open-editor = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

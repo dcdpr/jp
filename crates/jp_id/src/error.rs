@@ -6,9 +6,6 @@ pub enum Error {
     #[error("Invalid prefix, must be {0}: {1}")]
     InvalidPrefix(&'static str, String),
 
-    #[error("Missing variant and target id")]
-    MissingVariantAndTargetId,
-
     #[error("Missing variant")]
     MissingVariant,
 

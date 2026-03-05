@@ -1,7 +1,6 @@
 use jp_conversation::{ConversationId, ConversationStream};
-use jp_format::conversation::DetailsFmt;
 
-use crate::{Output, cmd::Success, ctx::Ctx};
+use crate::{cmd::Output, ctx::Ctx, format::conversation::DetailsFmt, output::print_details};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Show {
@@ -27,14 +26,9 @@ impl Show {
             .with_local_flag(user)
             .with_active_conversation(active_id)
             .with_expires_at(conversation.and_then(|v| v.expires_at))
-            .with_hyperlinks(ctx.term.args.hyperlinks)
-            .with_color(ctx.term.args.colors);
+            .with_pretty_printing(ctx.printer.pretty_printing());
 
-        let rows = details.rows();
-
-        Ok(Success::Details {
-            title: details.title,
-            rows,
-        })
+        print_details(&ctx.printer, details.title.as_deref(), details.rows());
+        Ok(())
     }
 }

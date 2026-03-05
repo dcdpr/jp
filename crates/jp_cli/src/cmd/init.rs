@@ -1,18 +1,20 @@
-use std::{env, fs, io::Write as _, str::FromStr as _};
+use std::{env, fs, io, str::FromStr as _};
 
 use camino::{FromPathBufError, Utf8PathBuf};
 use clean_path::Clean as _;
 use crossterm::style::Stylize as _;
 use duct::cmd;
+use inquire::{Select, Text};
 use jp_config::{
-    PartialAppConfig,
+    AppConfig, PartialAppConfig,
     conversation::tool::RunMode,
-    model::id::{ModelIdConfig, Name, PartialModelIdConfig, ProviderId},
+    model::id::{ModelIdConfig, Name, ProviderId},
 };
 use jp_printer::Printer;
 use jp_workspace::Workspace;
+use schematic::{ConfigEnum as _, SchemaBuilder, Schematic as _};
 
-use crate::{DEFAULT_STORAGE_DIR, Output, ctx::IntoPartialAppConfig};
+use crate::{DEFAULT_STORAGE_DIR, cmd::Output, ctx::IntoPartialAppConfig};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Init {
@@ -21,6 +23,7 @@ pub(crate) struct Init {
 }
 
 impl Init {
+    #[expect(unused_assignments)]
     pub(crate) fn run(&self, printer: &Printer) -> Output {
         let cwd: Utf8PathBuf = std::env::current_dir()?
             .try_into()
@@ -43,7 +46,6 @@ impl Init {
 
         let storage = root.join(DEFAULT_STORAGE_DIR);
         let id = jp_workspace::Id::new();
-        jp_id::global::set(id.to_string());
 
         let mut workspace =
             Workspace::new_with_id(root.clone(), id.clone()).persisted_at(&storage)?;
@@ -52,28 +54,81 @@ impl Init {
 
         workspace = workspace.with_local_storage()?;
 
-        let mut config = default_config();
-        if let Some(id) = default_model() {
-            write!(
-                printer.out_writer(),
-                "Using model {}",
-                id.to_string().bold().blue()
-            )?;
-            let note = "  (to use a different model, update `.jp/config.toml`)".to_owned();
-            writeln!(printer.out_writer(), "{}\n", note.grey().italic())?;
+        // Interactive configuration
+        let _run_mode = Self::ask_run_mode(&mut printer.out_writer(), true)?;
+        let (_provider, _name) = Self::ask_model(&mut printer.out_writer())?;
 
-            config.assistant.model.id = PartialModelIdConfig {
-                provider: Some(id.provider),
-                name: Some(id.name),
-            }
-            .into();
-        }
+        let builder = SchemaBuilder::default();
+        let schema = AppConfig::build_schema(builder);
+        std::fs::write("schema.json", serde_json::to_string_pretty(&schema)?)?;
 
-        let data = toml::to_string_pretty(&config)?;
-        fs::write(storage.join("config.toml"), data)?;
-        fs::create_dir_all(storage.join("config.d"))?;
-
-        workspace.persist()?;
+        // // Generate Config
+        // let mut generator = SchemaGenerator::default();
+        // generator.add::<AppConfig>();
+        //
+        // // 1. conversation.tools.defaults.run
+        // let run_variants = RunMode::variants();
+        // let run_idx = run_variants
+        //     .iter()
+        //     .position(|v| *v == run_mode)
+        //     .unwrap_or(0);
+        //
+        // let run_schema = Schema::new(SchemaType::Enum(Box::new(EnumType {
+        //     values: run_variants
+        //         .iter()
+        //         .map(|v| LiteralValue::String(v.to_string()))
+        //         .collect(),
+        //     default_index: Some(run_idx),
+        //     ..Default::default()
+        // })));
+        //
+        // // 2. assistant.model.id
+        // // We override the leaf nodes for provider and name.
+        // let provider_schema = Schema::new(SchemaType::String(Box::new(StringType {
+        //     default: Some(LiteralValue::String(provider.to_string())),
+        //     ..Default::default()
+        // })));
+        //
+        // let name_schema = Schema::new(SchemaType::String(Box::new(StringType {
+        //     default: Some(LiteralValue::String(name.to_string())),
+        //     ..Default::default()
+        // })));
+        //
+        // let options = TemplateOptions {
+        //     header: indoc::formatdoc! {"
+        //         # This is a TOML config file.
+        //
+        //     "},
+        //     custom_values: HashMap::from([
+        //         ("conversation.tools.defaults.run".to_owned(), run_schema),
+        //         ("assistant.model.id.provider".to_owned(), provider_schema),
+        //         ("assistant.model.id.name".to_owned(), name_schema),
+        //     ]),
+        //     hide_fields: vec![
+        //         "inherit",
+        //         "extends",
+        //         "assistant.instructions",
+        //         // "assistant.name",
+        //         // "conversation.attachments",
+        //     ]
+        //     .into_iter()
+        //     .map(Into::into)
+        //     .collect(),
+        //
+        //     print_enum_values: false,
+        //
+        //     env_vars: AppConfig::envs().into_iter().collect(),
+        //     ..Default::default()
+        // };
+        // let renderer = TomlTemplateRenderer::new(options);
+        //
+        // let config_path = storage.join("test.toml");
+        // generator
+        //     .generate(&config_path, renderer)
+        //     .map_err(io::Error::other)?;
+        //
+        // // Create config.d directory as well
+        // // fs::create_dir_all(storage.join("config.d"))?;
 
         let loc = if root == cwd {
             "current directory".to_owned()
@@ -81,138 +136,170 @@ impl Init {
             root.to_string().bold().to_string()
         };
 
-        Ok(format!("Initialized workspace at {loc}").into())
-    }
-}
-
-#[expect(clippy::too_many_lines)]
-fn default_config() -> jp_config::PartialAppConfig {
-    let mut cfg = jp_config::PartialAppConfig::default();
-    cfg.extends
-        .get_or_insert_default()
-        .push("config.d/**/*".into());
-
-    // This is a required field without a default value (that is, the
-    // `ToolsDefaultsConfig` type does not set a default value for `run`).
-    //
-    // By setting it explicitly, we ensure that the default generated config
-    // file has this value set, which exposes it to the user. This is desired,
-    // as this is an important security feature, which we don't want users to
-    // have to rely on a default value that might change in the future.
-    cfg.conversation.tools.defaults.run = Some(RunMode::Ask);
-
-    if has_anthropic() {
-        cfg.providers.llm.aliases.extend([
-            ("anthropic".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Anthropic),
-                name: Some(Name("claude-sonnet-4-5".into())),
-            }),
-            ("claude".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Anthropic),
-                name: Some(Name("claude-sonnet-4-5".into())),
-            }),
-            ("sonnet".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Anthropic),
-                name: Some(Name("claude-sonnet-4-5".into())),
-            }),
-            ("opus".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Anthropic),
-                name: Some(Name("claude-opus-4-5".into())),
-            }),
-            ("haiku".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Anthropic),
-                name: Some(Name("claude-haiku-4-5".into())),
-            }),
-        ]);
+        printer.println(format!("Initialized workspace at {loc}"));
+        Ok(())
     }
 
-    if has_openai() {
-        cfg.providers.llm.aliases.extend([
-            ("openai".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.2".into())),
-            }),
-            ("chatgpt".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.2".into())),
-            }),
-            ("gpt".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.2".into())),
-            }),
-            ("gpt5".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.2".into())),
-            }),
-            ("gpt5-mini".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5-mini".into())),
-            }),
-            ("gpt-mini".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5-mini".into())),
-            }),
-            ("gpt5-nano".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5-nano".into())),
-            }),
-            ("gpt-nano".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5-nano".into())),
-            }),
-            ("o3-research".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("o3-deep-research".into())),
-            }),
-            ("o4-mini-research".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("o4-mini-deep-research".into())),
-            }),
-            ("codex".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.1-codex".into())),
-            }),
-            ("codex-max".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.1-codex-max".into())),
-            }),
-            ("gpt-5-codex".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.1-codex".into())),
-            }),
-            ("codex-mini".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Openai),
-                name: Some(Name("gpt-5.1-codex-mini".into())),
-            }),
-        ]);
+    fn ask_run_mode(
+        writer: &mut dyn io::Write,
+        help: bool,
+    ) -> Result<RunMode, Box<dyn std::error::Error + Send + Sync>> {
+        let mut options = vec![
+            format!("Yes {}", "(safest option)".green()),
+            format!("No  {}", "(potentially dangerous)".red()),
+        ];
+
+        if help {
+            options.push("Help…".to_owned());
+        }
+
+        let answer = Select::new("Confirm before running tools?", options)
+            .with_help_message(
+                "You can always configure individual tools you deem safe to run without \
+                 confirmation.",
+            )
+            .with_starting_cursor(0)
+            .prompt_with_writer(writer)?;
+
+        if answer == "Help…" {
+            let _err = indoc::writedoc!(
+                writer,
+                r"
+
+                    # Recommended Configuration
+
+                    Yes (confirm before running tools)
+
+                    # Summary
+
+                    The assistant runs tools on your local machine, these
+                    can perform destructive actions and should therefore
+                    be run with a human-in-the-loop confirmation.
+
+                    # Details
+
+                    When using JP, the assistant needs to run tools on
+                    your local machine to perform certain tasks such as
+                    modifying files, running CLI tools, etc.
+
+                    Most of these tools are safe to run, but some can
+                    be potentially dangerous, depending on the
+                    arguments provided to them.
+
+                    While all of JP's built-in tools are confined to the
+                    workspace root, externally supplied tools cannot be
+                    restricted in the same way, and can potentially run
+                    any command on your system.
+
+                    For example, a potentially external tool `rm` could
+                    take an argument `file`, which could be an absolute
+                    path to a file outside of your workspace root,
+                    deleting files from your system that you don't want
+                    to delete.
+
+                    To avoid this, you should configure the assistant to
+                    run these tools with a human-in-the-loop confirmation.
+                    This will ensure that the assistant only runs tools
+                    that you explicitly allow it to run.
+
+                    You can also configure the assistant to run tools
+                    automatically, which means it will run tools without
+                    asking you first.
+
+                    The answer to this question will be used as the default
+                    for all tools that are run by the assistant, but each
+                    tool can also be configured to run with a different
+                    mode, by editing your config file after the workspace
+                    is initialized.
+
+                "
+            );
+            writer.flush()?;
+
+            return Self::ask_run_mode(writer, false);
+        }
+
+        Ok(if answer.starts_with("Yes") {
+            RunMode::Unattended
+        } else {
+            RunMode::Ask
+        })
     }
 
-    if has_google() {
-        cfg.providers.llm.aliases.extend([
-            ("google".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Google),
-                name: Some(Name("gemini-3-pro-preview".into())),
-            }),
-            ("gemini".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Google),
-                name: Some(Name("gemini-3-pro-preview".into())),
-            }),
-            ("gemini-pro".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Google),
-                name: Some(Name("gemini-3-pro-preview".into())),
-            }),
-            ("gemini-flash".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Google),
-                name: Some(Name("gemini-3-flash-preview".into())),
-            }),
-            ("gemini-flash-lite".to_owned(), PartialModelIdConfig {
-                provider: Some(ProviderId::Google),
-                name: Some(Name("gemini-2.5-flash-lite".into())),
-            }),
-        ]);
+    fn ask_model(
+        writer: &mut dyn io::Write,
+    ) -> Result<(ProviderId, Name), Box<dyn std::error::Error + Send + Sync>> {
+        let models = Self::detect_models();
+
+        let mut options: Vec<String> = models.iter().map(ToString::to_string).collect();
+        options.push("Other (enter manually)".to_string());
+
+        let ans = Select::new("Select an AI model to use:", options.clone())
+            .with_help_message("We detected these models based on your environment.")
+            .prompt_with_writer(writer)?;
+
+        if ans == "Other (enter manually)" {
+            let providers = ProviderId::variants();
+            let provider_strs: Vec<String> = providers.iter().map(ToString::to_string).collect();
+
+            let provider_str =
+                Select::new("Select a provider:", provider_strs).prompt_with_writer(writer)?;
+
+            let provider =
+                ProviderId::from_str(&provider_str).map_err(|e| io::Error::other(e.to_string()))?;
+
+            let name = Text::new("Enter the model name:")
+                .with_placeholder("e.g. gpt-4o")
+                .prompt_with_writer(writer)?;
+
+            Ok((provider, Name(name)))
+        } else {
+            let m = models.iter().find(|m| m.to_string() == ans).unwrap();
+            Ok((m.provider, m.name.clone()))
+        }
     }
 
-    cfg
+    fn detect_models() -> Vec<ModelIdConfig> {
+        let mut models = Vec::new();
+
+        if has_anthropic()
+            && let Some(m) = default_model_id_for(ProviderId::Anthropic)
+        {
+            models.push(m);
+        }
+        if has_openai()
+            && let Some(m) = default_model_id_for(ProviderId::Openai)
+        {
+            models.push(m);
+        }
+        if has_google()
+            && let Some(m) = default_model_id_for(ProviderId::Google)
+        {
+            models.push(m);
+        }
+
+        if let Ok(output) = cmd!("ollama", "list").read() {
+            for line in output.lines().skip(1) {
+                let Some(name) = line.split_whitespace().next() else {
+                    continue;
+                };
+
+                if name.is_empty() {
+                    continue;
+                }
+
+                let name = name.split(':').next().unwrap_or(name);
+                models.push(ModelIdConfig {
+                    provider: ProviderId::Ollama,
+                    name: Name(name.to_owned()),
+                });
+            }
+        }
+
+        models.sort();
+        models.dedup();
+        models
+    }
 }
 
 fn has_anthropic() -> bool {
@@ -227,49 +314,15 @@ fn has_google() -> bool {
     env::var("GOOGLE_API_KEY").is_ok()
 }
 
-fn default_model() -> Option<ModelIdConfig> {
-    env::var("JP_CFG_ASSISTANT_MODEL_ID")
-        .ok()
-        .and_then(|v| ModelIdConfig::from_str(&v).ok())
-        .or_else(|| {
-            let models = cmd!("ollama", "list")
-                .pipe(cmd!("cut", "-d", " ", "-f1"))
-                .pipe(cmd!("tail", "-n+2"))
-                .read()
-                .unwrap_or_default();
+fn default_model_id_for(provider: ProviderId) -> Option<ModelIdConfig> {
+    let name = match provider {
+        ProviderId::Anthropic => Name("claude-sonnet-4-5".into()),
+        ProviderId::Google => Name("gemini-3-pro-preview".into()),
+        ProviderId::Openai => Name("gpt-5.2".into()),
+        _ => return None,
+    };
 
-            let models = models.lines().map(str::trim).collect::<Vec<_>>();
-            let model = if let Some(model) = models.iter().find(|m| m.starts_with("llama")) {
-                model
-            } else if let Some(model) = models.iter().find(|m| m.starts_with("gemma")) {
-                model
-            } else if let Some(model) = models.iter().find(|m| m.starts_with("qwen")) {
-                model
-            } else {
-                return None;
-            };
-
-            format!("ollama/{model}").parse().ok()
-        })
-        // TODO: Use `Config` env vars here.
-        .or_else(|| {
-            env::var("ANTHROPIC_API_KEY")
-                .is_ok()
-                .then(|| "anthropic/claude-sonnet-4-5".parse().ok())
-                .flatten()
-        })
-        .or_else(|| {
-            env::var("OPENAI_API_KEY")
-                .is_ok()
-                .then(|| "openai/gpt-5.1".parse().ok())
-                .flatten()
-        })
-        .or_else(|| {
-            env::var("GEMINI_API_KEY")
-                .is_ok()
-                .then(|| "google/gemini-3-pro-preview".parse().ok())
-                .flatten()
-        })
+    Some(ModelIdConfig { provider, name })
 }
 
 impl IntoPartialAppConfig for Init {
@@ -285,47 +338,13 @@ impl IntoPartialAppConfig for Init {
 
 #[cfg(test)]
 mod tests {
-    use serial_test::serial;
-    use test_log::test;
+    use schematic::{SchemaBuilder, Schematic as _};
 
-    use super::*;
-
-    pub(crate) struct EnvVarGuard {
-        name: String,
-        original_value: Option<String>,
-    }
-
-    impl EnvVarGuard {
-        pub fn set(name: &str, value: &str) -> Self {
-            let name = name.to_string();
-            let original_value = std::env::var(&name).ok();
-            unsafe { std::env::set_var(&name, value) };
-            Self {
-                name,
-                original_value,
-            }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            if let Some(ref original) = self.original_value {
-                unsafe { std::env::set_var(&self.name, original) };
-            } else {
-                unsafe { std::env::remove_var(&self.name) };
-            }
-        }
-    }
-
-    #[serial(env_vars)]
     #[test]
-    fn test_default_config() {
-        let _env1 = EnvVarGuard::set("ANTHROPIC_API_KEY", "foo");
-        let _env2 = EnvVarGuard::set("OPENAI_API_KEY", "bar");
-        let _env3 = EnvVarGuard::set("GOOGLE_API_KEY", "baz");
-
-        let config = default_config();
-
-        insta::assert_toml_snapshot!(config);
+    fn test_app_config_schema_serializes_to_json() {
+        let builder = SchemaBuilder::default();
+        let schema = jp_config::AppConfig::build_schema(builder);
+        serde_json::to_string_pretty(&schema)
+            .expect("AppConfig schema should serialize to JSON without errors");
     }
 }

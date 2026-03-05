@@ -279,6 +279,29 @@ impl Formatter {
             hl: syntect::easy::HighlightLines::new(syntax, &self.theme),
         })
     }
+
+    /// Reconstruct a [`CodeHighlighter`] from previously saved state.
+    ///
+    /// This re-borrows the formatter's theme, so the returned highlighter
+    /// has a fresh lifetime tied to `&self`.
+    #[must_use]
+    pub fn resume_code_highlighter(&self, saved: SavedHighlightState) -> CodeHighlighter<'_> {
+        CodeHighlighter::from_saved(&self.theme, saved)
+    }
+}
+
+/// Saved state from a [`CodeHighlighter`], allowing it to be suspended and
+/// resumed across borrow boundaries.
+///
+/// This is useful when the highlighter borrows from a struct field and
+/// cannot be stored alongside it. Call [`CodeHighlighter::save`] to obtain
+/// this, and [`Formatter::resume_code_highlighter`] to reconstruct the
+/// highlighter with a fresh theme borrow.
+pub struct SavedHighlightState {
+    /// The syntect highlight state (styling context).
+    highlight_state: syntect::highlighting::HighlightState,
+    /// The syntect parse state (grammar context).
+    parse_state: syntect::parsing::ParseState,
 }
 
 /// A stateful syntax highlighter for code blocks.
@@ -287,7 +310,7 @@ pub struct CodeHighlighter<'a> {
     hl: syntect::easy::HighlightLines<'a>,
 }
 
-impl CodeHighlighter<'_> {
+impl<'a> CodeHighlighter<'a> {
     /// Highlight a single line of code.
     ///
     /// # Errors
@@ -300,6 +323,30 @@ impl CodeHighlighter<'_> {
         let mut escaped = syntect::util::as_24_bit_terminal_escaped(&ranges, false);
         escaped.push_str("\x1b[0m");
         Ok(escaped)
+    }
+
+    /// Decompose this highlighter into owned state that can be stored
+    /// without borrowing the theme.
+    ///
+    /// Use [`Formatter::resume_code_highlighter`] to reconstruct it later.
+    #[must_use]
+    pub fn save(self) -> SavedHighlightState {
+        let (highlight_state, parse_state) = self.hl.state();
+        SavedHighlightState {
+            highlight_state,
+            parse_state,
+        }
+    }
+
+    /// Reconstruct a highlighter from previously saved state.
+    fn from_saved(theme: &'a Theme, saved: SavedHighlightState) -> Self {
+        Self {
+            hl: syntect::easy::HighlightLines::from_state(
+                theme,
+                saved.highlight_state,
+                saved.parse_state,
+            ),
+        }
     }
 }
 

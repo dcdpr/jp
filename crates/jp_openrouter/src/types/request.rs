@@ -1,4 +1,5 @@
 use serde::Serialize;
+use serde_json::Value;
 
 use super::{
     chat::{self, Transform},
@@ -53,6 +54,33 @@ pub struct ChatCompletion {
     /// Default is `false`.
     #[serde(skip_serializing_if = "is_false")]
     pub usage: bool,
+
+    /// Response format for structured output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<ResponseFormat>,
+}
+
+/// Response format for structured output in the chat completions API.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ResponseFormat {
+    /// JSON schema response format.
+    JsonSchema {
+        /// The schema configuration.
+        json_schema: JsonSchemaFormat,
+    },
+}
+
+/// Schema definition for structured JSON output.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct JsonSchemaFormat {
+    /// Name for the schema.
+    pub name: String,
+    /// The JSON schema.
+    pub schema: Value,
+    /// Whether to enforce strict schema adherence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Default)]
@@ -64,11 +92,13 @@ pub struct Reasoning {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningEffort {
-    XHigh,
-    High,
+    None,
+    Minimal,
+    Low,
     #[default]
     Medium,
-    Low,
+    High,
+    XHigh,
 }
 
 #[expect(clippy::trivially_copy_pass_by_ref)]

@@ -3,7 +3,7 @@ use std::{str::FromStr as _, time::Duration};
 use chrono::{DateTime, Utc};
 use jp_conversation::ConversationId;
 
-use crate::{Output, cmd::Success, ctx::Ctx};
+use crate::{cmd::Output, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Fork {
@@ -28,6 +28,10 @@ pub(crate) struct Fork {
     /// in combination with `--until`.
     #[arg(long, value_parser = parse_duration)]
     until: Option<DateTime<Utc>>,
+
+    /// Fork the last N turns of the conversation. Defaults to 1.
+    #[arg(long, short = 'l')]
+    last: Option<Option<usize>>,
 }
 
 fn parse_duration(s: &str) -> Result<DateTime<Utc>, String> {
@@ -64,6 +68,32 @@ impl Fork {
                 && self.until.is_none_or(|until| event.timestamp <= until)
         });
 
+        if let Some(last) = self.last {
+            let n = last.unwrap_or(1);
+            let turn_count = new_events
+                .iter()
+                .filter(|e| e.event.is_turn_start())
+                .count();
+
+            if turn_count > n {
+                let skip = turn_count - n;
+                let mut turns_seen = 0;
+                let mut keeping = false;
+
+                new_events.retain(|event| {
+                    if event.is_turn_start() {
+                        turns_seen += 1;
+                        if turns_seen > skip {
+                            keeping = true;
+                        }
+                    }
+                    keeping
+                });
+            }
+        }
+
+        new_events.sanitize();
+
         let new_id = ConversationId::try_from(ctx.now())?;
         ctx.workspace.create_conversation_with_id(
             new_id,
@@ -79,371 +109,11 @@ impl Fork {
             ctx.workspace.set_active_conversation_id(new_id, now)?;
         }
 
-        Ok(Success::Message("Conversation forked.".into()))
+        ctx.printer.println("Conversation forked.");
+        Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-
-    use assert_matches::assert_matches;
-    use camino_tempfile::tempdir;
-    use chrono::TimeZone as _;
-    use jp_config::AppConfig;
-    use jp_conversation::{
-        Conversation, ConversationEvent, ConversationStream,
-        event::{ChatRequest, ChatResponse},
-    };
-    use jp_printer::Printer;
-    use jp_workspace::Workspace;
-    use tokio::runtime::Runtime;
-
-    use super::*;
-    use crate::Globals;
-
-    #[test]
-    #[expect(clippy::too_many_lines)]
-    fn test_conversation_fork() {
-        struct TestCase {
-            args: Fork,
-            setup: fn(&mut Ctx),
-            assert: fn(Vec<(ConversationId, Conversation, ConversationStream)>, ConversationId),
-        }
-
-        jp_id::global::set("foo".to_owned());
-
-        let cases = vec![
-            ("no conversation", TestCase {
-                args: Fork {
-                    id: None,
-                    activate: false,
-                    from: None,
-                    until: None,
-                },
-                setup: |ctx| {
-                    let id = ConversationId::try_from(ctx.now()).unwrap();
-                    ctx.workspace.create_conversation_with_id(
-                        id,
-                        Conversation::default().with_last_activated_at(ctx.now()),
-                        ctx.config(),
-                    );
-                    ctx.workspace
-                        .set_active_conversation_id(id, ctx.now())
-                        .unwrap();
-                },
-
-                assert: |mut convs, active_id| {
-                    assert_eq!(convs.len(), 2);
-                    assert_eq!(active_id, convs[0].0);
-
-                    assert!(convs[0].1.last_activated_at < convs[1].1.last_activated_at);
-                    assert!(convs[0].2.created_at < convs[1].2.created_at);
-
-                    for (_, conv, stream) in &mut convs {
-                        conv.last_activated_at = DateTime::<Utc>::UNIX_EPOCH;
-                        stream.created_at = DateTime::<Utc>::UNIX_EPOCH;
-                    }
-
-                    assert!(convs[0].0.timestamp() < convs[1].0.timestamp());
-                    assert_eq!(convs[0].1, convs[1].1);
-                    assert_eq!(convs[0].2, convs[1].2);
-                },
-            }),
-            ("conversation with events", TestCase {
-                args: Fork {
-                    id: None,
-                    activate: false,
-                    from: None,
-                    until: None,
-                },
-                setup: |ctx| {
-                    let id = ConversationId::try_from(ctx.now()).unwrap();
-                    ctx.workspace.create_conversation_with_id(
-                        id,
-                        Conversation::default().with_last_activated_at(ctx.now()),
-                        ctx.config(),
-                    );
-
-                    ctx.workspace
-                        .set_active_conversation_id(id, ctx.now())
-                        .unwrap();
-                    ctx.workspace.get_events_mut(&id).unwrap().extend(vec![
-                        ConversationEvent::new(
-                            ChatRequest::from("foo"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("bar"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
-                        ),
-                    ]);
-                },
-                assert: |mut convs, active_id| {
-                    assert_eq!(convs.len(), 2);
-                    assert_eq!(active_id, convs[0].0);
-
-                    assert!(convs[0].1.last_activated_at < convs[1].1.last_activated_at);
-                    assert!(convs[0].2.created_at < convs[1].2.created_at);
-
-                    for (_, conv, stream) in &mut convs {
-                        conv.last_activated_at = DateTime::<Utc>::UNIX_EPOCH;
-                        stream.created_at = DateTime::<Utc>::UNIX_EPOCH;
-                    }
-
-                    assert!(convs[0].0.timestamp() < convs[1].0.timestamp());
-                    assert_eq!(convs[0].1, convs[1].1);
-                    assert_eq!(convs[0].2, convs[1].2);
-                },
-            }),
-            ("with activate", TestCase {
-                args: Fork {
-                    id: None,
-                    activate: true,
-                    from: None,
-                    until: None,
-                },
-                setup: |ctx| {
-                    let id = ConversationId::try_from(ctx.now()).unwrap();
-                    ctx.workspace.create_conversation_with_id(
-                        id,
-                        Conversation::default().with_last_activated_at(ctx.now()),
-                        ctx.config(),
-                    );
-                    ctx.workspace
-                        .set_active_conversation_id(id, ctx.now())
-                        .unwrap();
-                    ctx.workspace.get_events_mut(&id).unwrap().extend(vec![
-                        ConversationEvent::new(
-                            ChatRequest::from("foo"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("bar"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
-                        ),
-                    ]);
-                },
-
-                assert: |mut convs, active_id| {
-                    assert_eq!(convs.len(), 2);
-
-                    // active conversation is always the first one
-                    assert_eq!(active_id, convs[0].0);
-
-                    assert!(convs[0].1.last_activated_at > convs[1].1.last_activated_at);
-                    assert!(convs[0].2.created_at > convs[1].2.created_at);
-
-                    for (_, conv, stream) in &mut convs {
-                        conv.last_activated_at = DateTime::<Utc>::UNIX_EPOCH;
-                        stream.created_at = DateTime::<Utc>::UNIX_EPOCH;
-                    }
-
-                    assert!(convs[0].0.timestamp() > convs[1].0.timestamp());
-                    assert_eq!(convs[0].1, convs[1].1);
-                    assert_eq!(convs[0].2, convs[1].2);
-                },
-            }),
-            ("with from", TestCase {
-                args: Fork {
-                    id: None,
-                    activate: false,
-                    from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
-                    until: None,
-                },
-                setup: |ctx| {
-                    let id = ConversationId::try_from(ctx.now()).unwrap();
-                    ctx.workspace.create_conversation_with_id(
-                        id,
-                        Conversation::default().with_last_activated_at(ctx.now()),
-                        ctx.config(),
-                    );
-                    ctx.workspace
-                        .set_active_conversation_id(id, ctx.now())
-                        .unwrap();
-                    ctx.workspace.get_events_mut(&id).unwrap().extend(vec![
-                        ConversationEvent::new(
-                            ChatRequest::from("foo"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("bar"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("baz"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
-                        ),
-                    ]);
-                },
-
-                assert: |convs, _| {
-                    assert_eq!(convs.len(), 2);
-                    assert_eq!(convs[0].2.iter().count(), 3);
-                    assert_eq!(convs[1].2.iter().count(), 2);
-                    assert_eq!(
-                        convs[0].2.first().unwrap().event.timestamp,
-                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
-                    );
-                    assert_eq!(
-                        convs[1].2.first().unwrap().event.timestamp,
-                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()
-                    );
-                },
-            }),
-            ("with until", TestCase {
-                args: Fork {
-                    id: None,
-                    activate: false,
-                    from: None,
-                    until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
-                },
-                setup: |ctx| {
-                    let id = ConversationId::try_from(ctx.now()).unwrap();
-                    ctx.workspace.create_conversation_with_id(
-                        id,
-                        Conversation::default().with_last_activated_at(ctx.now()),
-                        ctx.config(),
-                    );
-                    ctx.workspace
-                        .set_active_conversation_id(id, ctx.now())
-                        .unwrap();
-                    ctx.workspace.get_events_mut(&id).unwrap().extend(vec![
-                        ConversationEvent::new(
-                            ChatRequest::from("foo"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("bar"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("baz"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
-                        ),
-                    ]);
-                },
-
-                assert: |convs, _| {
-                    assert_eq!(convs.len(), 2);
-                    assert_eq!(convs[0].2.iter().count(), 3);
-                    assert_eq!(convs[1].2.iter().count(), 2);
-                    assert_eq!(
-                        convs[0].2.last().unwrap().event.timestamp,
-                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()
-                    );
-                    assert_eq!(
-                        convs[1].2.last().unwrap().event.timestamp,
-                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()
-                    );
-                },
-            }),
-            ("with from and until", TestCase {
-                args: Fork {
-                    id: None,
-                    activate: false,
-                    from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
-                    until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()),
-                },
-                setup: |ctx| {
-                    let id = ConversationId::try_from(ctx.now()).unwrap();
-                    ctx.workspace.create_conversation_with_id(
-                        id,
-                        Conversation::default().with_last_activated_at(ctx.now()),
-                        ctx.config(),
-                    );
-                    ctx.workspace
-                        .set_active_conversation_id(id, ctx.now())
-                        .unwrap();
-                    ctx.workspace.get_events_mut(&id).unwrap().extend(vec![
-                        ConversationEvent::new(
-                            ChatRequest::from("foo"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("bar"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("baz"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("qux"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap(),
-                        ),
-                    ]);
-                },
-
-                assert: |convs, _| {
-                    assert_eq!(convs.len(), 2);
-                    assert_eq!(convs[0].2.iter().count(), 4);
-                    assert_eq!(convs[1].2.iter().count(), 2);
-                    assert_eq!(
-                        convs[0].2.first().unwrap().event.timestamp,
-                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
-                    );
-                    assert_eq!(
-                        convs[1].2.first().unwrap().event.timestamp,
-                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()
-                    );
-                    assert_eq!(
-                        convs[0].2.last().unwrap().event.timestamp,
-                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap()
-                    );
-                    assert_eq!(
-                        convs[1].2.last().unwrap().event.timestamp,
-                        Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()
-                    );
-                },
-            }),
-        ];
-
-        for (name, case) in cases {
-            let tmp = tempdir().unwrap();
-
-            let config = AppConfig::new_test();
-            let workspace = Workspace::new(tmp.path());
-            let mut ctx = Ctx::new(
-                workspace,
-                Runtime::new().unwrap(),
-                Globals::default(),
-                config,
-                Printer::terminal(jp_printer::Format::Text),
-            );
-
-            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| {
-                (case.setup)(&mut ctx);
-            })) {
-                eprintln!("Test case '{name}' panicked.");
-                resume_unwind(panic);
-            }
-
-            ctx.set_now(DateTime::<Utc>::UNIX_EPOCH + Duration::from_secs(1));
-
-            let msg =
-                assert_matches!(case.args.run(&mut ctx).unwrap(), Success::Message(msg) => msg);
-            assert_eq!(&msg, "Conversation forked.", "failed test case: '{name}'");
-
-            let conversations = ctx
-                .workspace
-                .conversations()
-                .map(|(id, conv)| (*id, conv.clone()))
-                .collect::<Vec<_>>();
-
-            let conversations = conversations
-                .into_iter()
-                .map(|(id, conv)| (id, conv, ctx.workspace.get_events(&id).unwrap().clone()))
-                .collect();
-
-            let active_id = ctx.workspace.active_conversation_id();
-
-            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| {
-                (case.assert)(conversations, active_id);
-            })) {
-                eprintln!("Test case '{name}' panicked.");
-                resume_unwind(panic);
-            }
-        }
-    }
-}
+#[path = "fork_tests.rs"]
+mod tests;

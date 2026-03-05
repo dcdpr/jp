@@ -4,11 +4,21 @@ use chrono::Utc;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _, model::id::PartialModelIdOrAliasConfig,
 };
-use jp_conversation::{ConversationId, ConversationStream};
-use jp_llm::{provider, structured};
+use jp_conversation::{
+    ConversationEvent, ConversationId, ConversationStream,
+    event::{ChatRequest, ChatResponse},
+    event_builder::EventBuilder,
+    thread::ThreadBuilder,
+};
+use jp_llm::{
+    event::Event,
+    provider,
+    retry::{RetryConfig, collect_with_retry},
+    title,
+};
 use jp_printer::PrinterWriter;
 
-use crate::{Output, cmd::Success, ctx::Ctx};
+use crate::{cmd::Output, ctx::Ctx};
 
 #[derive(Debug, clap::Args)]
 #[group(required = true, id = "edit")]
@@ -75,7 +85,8 @@ impl Edit {
             ctx.workspace.try_get_conversation_mut(&id)?.expires_at = None;
         }
 
-        Ok(Success::Message("Conversation updated.".into()))
+        ctx.printer.println("Conversation updated.");
+        Ok(())
     }
 }
 
@@ -101,8 +112,63 @@ async fn generate_titles(
     events.add_config_delta(partial);
 
     let provider = provider::get_provider(model_id.provider, &config.providers.llm)?;
-    let query = structured::titles::titles(count, events.clone(), &rejected)?;
-    let titles: Vec<String> = structured::completion(provider.as_ref(), &model_id, query).await?;
+    let model_details = provider.model_details(&model_id.name).await?;
+
+    let sections = title::title_instructions(count, &rejected);
+    let schema = title::title_schema(count);
+
+    let thread = ThreadBuilder::default()
+        .with_events(events.clone())
+        .with_sections(sections)
+        .build()?;
+
+    let mut thread_events = thread.events.clone();
+    thread_events.add_chat_request(ChatRequest {
+        content: "Generate titles for this conversation.".into(),
+        schema: Some(schema),
+    });
+
+    let query = jp_llm::query::ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            events: thread_events,
+            ..thread
+        },
+        tools: vec![],
+        tool_choice: jp_config::assistant::tool_choice::ToolChoice::default(),
+    };
+
+    let retry_config = RetryConfig::default();
+    let llm_events =
+        collect_with_retry(provider.as_ref(), &model_details, query, &retry_config).await?;
+
+    // Pipe raw streaming events through the EventBuilder so that
+    // structured JSON chunks are concatenated and parsed into a
+    // proper Value (rather than individual Value::String fragments).
+    let mut builder = EventBuilder::new();
+    let mut flushed = Vec::new();
+    for event in llm_events {
+        match event {
+            Event::Part { index, event } => builder.handle_part(index, event),
+            Event::Flush { index, metadata } => {
+                flushed.extend(builder.handle_flush(index, metadata));
+            }
+            Event::Finished(_) => flushed.extend(builder.drain()),
+        }
+    }
+
+    let structured_data = flushed
+        .into_iter()
+        .filter_map(ConversationEvent::into_chat_response)
+        .find_map(ChatResponse::into_structured_data);
+
+    let titles = structured_data
+        .as_ref()
+        .map(title::extract_titles)
+        .unwrap_or_default();
+
+    if titles.is_empty() {
+        return Err("No titles generated".into());
+    }
 
     let mut choices = titles.clone();
     choices.extend(rejected.clone());

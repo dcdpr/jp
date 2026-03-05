@@ -21,46 +21,5 @@ then:
   header:
     - name: content-type
       value: application/json
-  json_body_str: >-
-    {
-      "id": "gen-1765284708-CPUIAiT8S39Nc6B8XhZr",
-      "provider": "Anthropic",
-      "model": "anthropic/claude-3-haiku",
-      "object": "chat.completion",
-      "created": 1765284708,
-      "choices": [
-        {
-          "logprobs": null,
-          "finish_reason": "stop",
-          "native_finish_reason": "stop",
-          "index": 0,
-          "message": {
-            "role": "assistant",
-            "content": "Here is a haiku for your test:\\n\\nPencil in hand, poised\\nThoughts swirl, focus sharpens now\\nKnowledge takes its flight",
-            "refusal": null,
-            "reasoning": null
-          }
-        }
-      ],
-      "usage": {
-        "prompt_tokens": 17,
-        "completion_tokens": 37,
-        "total_tokens": 54,
-        "cost": 0.0000505,
-        "is_byok": false,
-        "prompt_tokens_details": {
-          "cached_tokens": 0,
-          "audio_tokens": 0,
-          "video_tokens": 0
-        },
-        "cost_details": {
-          "upstream_inference_cost": null,
-          "upstream_inference_prompt_cost": 4.25e-6,
-          "upstream_inference_completions_cost": 0.00004625
-        },
-        "completion_tokens_details": {
-          "reasoning_tokens": 0,
-          "image_tokens": 0
-        }
-      }
-    }
+  body: |-
+    {"id":"gen-1771242469-1gJ00iTGpZgjZ9IqqVVB","provider":"Amazon Bedrock","model":"anthropic/claude-3-haiku","object":"chat.completion","created":1771242469,"choices":[{"logprobs":null,"finish_reason":"stop","native_finish_reason":"stop","index":0,"message":{"role":"assistant","content":"Here's a haiku for your test:\n\nPen on paper flows,\nThoughts transformed into verses,\nPassing this test glows.","refusal":null,"reasoning":null}}],"usage":{"prompt_tokens":17,"completion_tokens":34,"total_tokens":51,"cost":0.00004675,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0},"cost_details":{"upstream_inference_cost":0.00004675,"upstream_inference_prompt_cost":0.00000425,"upstream_inference_completions_cost":0.0000425},"completion_tokens_details":{"reasoning_tokens":0}}}

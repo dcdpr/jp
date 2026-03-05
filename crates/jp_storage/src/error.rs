@@ -10,19 +10,19 @@ pub enum Error {
     #[error("Path is not a symlink: {0}")]
     NotSymlink(Utf8PathBuf),
 
-    #[error("Conversation error: {0}")]
+    #[error("conversation error")]
     Conversation(#[from] jp_conversation::Error),
 
-    #[error("Config error: {0}")]
+    #[error("configuration error")]
     Config(#[from] jp_config::error::Error),
 
-    #[error("IO error: {0}")]
+    #[error("IO error")]
     Io(#[from] std::io::Error),
 
-    #[error("JSON error: {0}")]
+    #[error("invalid JSON data")]
     Json(#[from] serde_json::Error),
 
-    #[error("TOML error: {0}")]
+    #[error("invalid TOML data")]
     Toml(#[from] toml::de::Error),
 }
 
