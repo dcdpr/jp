@@ -1,6 +1,6 @@
 # RFD 006: Turn-Scoped Stream Mutations
 
-- **Status**: Draft
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-18
@@ -15,8 +15,8 @@ public API.
 ## Motivation
 
 `ConversationStream` currently exposes raw `push`, `add_chat_request`,
-`add_chat_response`, and similar methods that allow callers to add events in
-any order. Nothing prevents creating a stream without a `TurnStart`, adding a
+`add_chat_response`, and similar methods that allow callers to add events in any
+order. Nothing prevents creating a stream without a `TurnStart`, adding a
 `ChatResponse` before a `ChatRequest`, or pushing events outside a turn
 boundary.
 
@@ -57,20 +57,20 @@ site to handle a `None`/`Err` for a case that shouldn't happen in practice.
 
 ### `TurnMut<'_>`
 
-`TurnMut` wraps `&mut ConversationStream` and buffers events internally.
-Events are validated, sanitized, and flushed to the stream when `build()` is
-called. This keeps the stream in a consistent state at all times — partial or
-invalid events never appear on the stream.
+`TurnMut` wraps `&mut ConversationStream` and buffers events internally. Events
+are validated, sanitized, and flushed to the stream when `build()` is called.
+This keeps the stream in a consistent state at all times — partial or invalid
+events never appear on the stream.
 
 The turn loop works naturally with this model because `TurnMut` is short-lived:
-grab a handle, add events, `build()`, release. Code that reads the stream
-(e.g., `build_thread` cloning the stream for each LLM cycle) always runs
-between `build()` calls, never while a `TurnMut` is held.
+grab a handle, add events, `build()`, release. Code that reads the stream (e.g.,
+`build_thread` cloning the stream for each LLM cycle) always runs between
+`build()` calls, never while a `TurnMut` is held.
 
 Two method styles for ergonomics:
 
-- **`with_xxx(&mut self, x: X) -> &mut TurnMut`** — borrowed, for chaining
-  on an existing binding.
+- **`with_xxx(&mut self, x: X) -> &mut TurnMut`** — borrowed, for chaining on an
+  existing binding.
 - **`add_xxx(mut self, x: X) -> TurnMut`** — owned, for fluent builder chains.
 - **`build(self) -> Result<()>`** — validates the buffered events, sanitizes
   them, flushes to the stream, and releases the borrow.
@@ -95,18 +95,18 @@ Does **not** expose:
 
 ### Visibility changes
 
-| Method | Current | Proposed |
-|--------|---------|----------|
-| `start_turn` | N/A (new) | `pub` |
-| `current_turn_mut` | N/A (new) | `pub` |
-| `push` | `pub` | `pub(crate)` |
-| `add_chat_request` | `pub` | `pub(crate)` |
-| `add_chat_response` | `pub` | `pub(crate)` |
-| `add_turn_start` | `pub` | `pub(crate)` |
-| `add_tool_call_*` | `pub` | `pub(crate)` |
-| `add_inquiry_*` | `pub` | `pub(crate)` |
-| `sanitize` | `pub` | `pub` (unchanged) |
-| `retain`, `iter`, etc. | `pub` | `pub` (unchanged) |
+| Method                 | Current   | Proposed          |
+|------------------------|-----------|-------------------|
+| `start_turn`           | N/A (new) | `pub`             |
+| `current_turn_mut`     | N/A (new) | `pub`             |
+| `push`                 | `pub`     | `pub(crate)`      |
+| `add_chat_request`     | `pub`     | `pub(crate)`      |
+| `add_chat_response`    | `pub`     | `pub(crate)`      |
+| `add_turn_start`       | `pub`     | `pub(crate)`      |
+| `add_tool_call_*`      | `pub`     | `pub(crate)`      |
+| `add_inquiry_*`        | `pub`     | `pub(crate)`      |
+| `sanitize`             | `pub`     | `pub` (unchanged) |
+| `retain`, `iter`, etc. | `pub`     | `pub` (unchanged) |
 
 Internal code (`sanitize`, `trim_trailing_empty_turn`) continues to access
 `self.events` directly. The builder guards the public API, not internal repair
@@ -117,8 +117,8 @@ logic.
 **`TurnCoordinator::start_turn`** — currently calls `add_turn_start` +
 `add_chat_request`. Becomes `stream.start_turn(request)`.
 
-**`TurnCoordinator` event handlers** — currently call `stream.add_chat_response`,
-`stream.add_tool_call_response`, etc. Become
+**`TurnCoordinator` event handlers** — currently call
+`stream.add_chat_response`, `stream.add_tool_call_response`, etc. Become
 `stream.current_turn_mut().with_chat_response(...).build()?`. The `TurnMut` is
 grabbed and consumed within each synchronous block, avoiding borrow conflicts
 across async boundaries.
@@ -137,8 +137,8 @@ operations that don't go through the turn API. No change needed.
 
 ## Drawbacks
 
-- **Moderate refactor scope.** Every caller of `add_*` methods in `jp_cli`
-  needs updating. The turn loop and coordinator are the main touchpoints.
+- **Moderate refactor scope.** Every caller of `add_*` methods in `jp_cli` needs
+  updating. The turn loop and coordinator are the main touchpoints.
 - **Test verbosity.** Constructing test streams requires going through
   `start_turn` + `current_turn_mut` instead of raw `push`. Mitigated by keeping
   `push` as `pub(crate)`.
@@ -170,12 +170,12 @@ events.
 
 ## Risks and Open Questions
 
-- **What should `build()` validate?** At minimum: the turn contains at least
-  one `ChatRequest`. Should it also check for orphaned tool call pairs, or
-  leave that to `sanitize()`?
-- **Should `start_turn` take ownership of `ChatRequest` or accept
-  `impl Into<ChatRequest>`?** The current `add_chat_request` uses
-  `impl Into<ChatRequest>`. Consistency suggests the same pattern.
+- **What should `build()` validate?** At minimum: the turn contains at least one
+  `ChatRequest`. Should it also check for orphaned tool call pairs, or leave
+  that to `sanitize()`?
+- **Should `start_turn` take ownership of `ChatRequest` or accept `impl
+  Into<ChatRequest>`?** The current `add_chat_request` uses `impl
+  Into<ChatRequest>`. Consistency suggests the same pattern.
 - **Config delta handling.** `push_with_config_delta` currently exists as a
   public method. It should likely move to `TurnMut` or become `pub(crate)`.
 - **Forgetting to call `build`.** `#[must_use]` on `TurnMut` warns at compile
@@ -187,8 +187,8 @@ events.
 ### Phase 1: Add the new API alongside the old one
 
 Add `start_turn` and `current_turn_mut` / `TurnMut` to `ConversationStream`.
-Keep existing `add_*` methods as `pub`. Migrate `TurnCoordinator` to use the
-new API. This can be merged independently.
+Keep existing `add_*` methods as `pub`. Migrate `TurnCoordinator` to use the new
+API. This can be merged independently.
 
 ### Phase 2: Migrate remaining callers
 

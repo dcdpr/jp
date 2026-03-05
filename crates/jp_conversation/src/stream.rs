@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 use tracing::error;
 
+pub mod turn_mut;
+pub use turn_mut::TurnMut;
+
 use crate::{
-    event::{
-        ChatRequest, ChatResponse, ConversationEvent, EventKind, InquiryId, InquiryRequest,
-        InquiryResponse, ToolCallRequest, ToolCallResponse, TurnStart,
-    },
+    event::{ChatRequest, ConversationEvent, EventKind, InquiryId, ToolCallResponse, TurnStart},
     storage::{decode_event_value, encode_event},
 };
 
@@ -297,11 +297,47 @@ impl ConversationStream {
         self
     }
 
+    /// Start a new turn with the given chat request.
+    ///
+    /// Atomically adds a [`TurnStart`] and the [`ChatRequest`] to the stream.
+    /// This is the only public way to create turn boundaries.
+    pub fn start_turn(&mut self, request: impl Into<ChatRequest>) {
+        self.push(ConversationEvent::now(TurnStart));
+        self.push(ConversationEvent::now(request.into()));
+    }
+
+    /// Start a new turn, returning `self` for builder chaining.
+    ///
+    /// See [`start_turn`](Self::start_turn).
+    #[must_use]
+    pub fn with_turn(mut self, request: impl Into<ChatRequest>) -> Self {
+        self.start_turn(request);
+        self
+    }
+
+    /// Get a mutable handle to the current (last) turn.
+    ///
+    /// If the stream has no turns yet, a [`TurnStart`] is injected
+    /// automatically. Returns a [`TurnMut`] that buffers events until
+    /// [`build()`](TurnMut::build) is called.
+    pub fn current_turn_mut(&mut self) -> TurnMut<'_> {
+        let has_turn = self
+            .events
+            .iter()
+            .any(|e| matches!(e, InternalEvent::Event(event) if event.is_turn_start()));
+
+        if !has_turn {
+            self.push(ConversationEvent::now(TurnStart));
+        }
+
+        TurnMut::new(self)
+    }
+
     /// Push an event with a config delta.
     ///
     /// If the event has a config delta that is not empty, it will be added to
     /// the stream *before* the event is pushed.
-    pub fn push_with_config_delta(&mut self, event: impl Into<ConversationEventWithConfig>) {
+    fn push_with_config_delta(&mut self, event: impl Into<ConversationEventWithConfig>) {
         let ConversationEventWithConfig { event, config } = event.into();
 
         let last_config = self
@@ -320,65 +356,9 @@ impl ConversationStream {
     }
 
     /// Push a [`ConversationEvent`] onto the stream.
-    pub fn push(&mut self, event: impl Into<ConversationEvent>) {
+    fn push(&mut self, event: impl Into<ConversationEvent>) {
         self.events
             .push(InternalEvent::Event(Box::new(event.into())));
-    }
-
-    /// Push a [`ConversationEvent`] of type [`EventKind::ChatRequest`] onto the
-    /// stream.
-    pub fn add_chat_request(&mut self, event: impl Into<ChatRequest>) {
-        self.push(ConversationEvent::now(event.into()));
-    }
-
-    /// Add a [`ConversationEvent`] of type [`EventKind::ChatRequest`] onto the
-    /// stream.
-    #[must_use]
-    pub fn with_chat_request(mut self, event: impl Into<ChatRequest>) -> Self {
-        self.add_chat_request(event);
-        self
-    }
-
-    /// Push a [`ConversationEvent`] of type [`EventKind::ChatResponse`] onto
-    /// the stream.
-    pub fn add_chat_response(&mut self, event: impl Into<ChatResponse>) {
-        self.push(ConversationEvent::now(event.into()));
-    }
-
-    /// Add a [`ConversationEvent`] of type [`EventKind::ChatResponse`] onto the
-    /// stream.
-    #[must_use]
-    pub fn with_chat_response(mut self, event: impl Into<ChatResponse>) -> Self {
-        self.add_chat_response(event);
-        self
-    }
-
-    /// Push a [`ConversationEvent`] of type [`EventKind::ToolCallRequest`] onto
-    /// the stream.
-    pub fn add_tool_call_request(&mut self, event: impl Into<ToolCallRequest>) {
-        self.push(ConversationEvent::now(event.into()));
-    }
-
-    /// Add a [`ConversationEvent`] of type [`EventKind::ToolCallRequest`] onto
-    /// the stream.
-    #[must_use]
-    pub fn with_tool_call_request(mut self, event: impl Into<ToolCallRequest>) -> Self {
-        self.add_tool_call_request(event);
-        self
-    }
-
-    /// Push a [`ConversationEvent`] of type [`EventKind::ToolCallResponse`] onto
-    /// the stream.
-    pub fn add_tool_call_response(&mut self, event: impl Into<ToolCallResponse>) {
-        self.push(ConversationEvent::now(event.into()));
-    }
-
-    /// Add a [`ConversationEvent`] of type [`EventKind::ToolCallResponse`] onto
-    /// the stream.
-    #[must_use]
-    pub fn with_tool_call_response(mut self, event: impl Into<ToolCallResponse>) -> Self {
-        self.add_tool_call_response(event);
-        self
     }
 
     /// Find a [`ToolCallResponse`] by ID.
@@ -391,48 +371,6 @@ impl ConversationStream {
                 EventKind::ToolCallResponse(response) if response.id == id => Some(response),
                 _ => None,
             })
-    }
-
-    /// Push a [`ConversationEvent`] of type [`EventKind::InquiryRequest`] onto
-    /// the stream.
-    pub fn add_inquiry_request(&mut self, event: impl Into<InquiryRequest>) {
-        self.push(ConversationEvent::now(event.into()));
-    }
-
-    /// Add a [`ConversationEvent`] of type [`EventKind::InquiryRequest`] onto
-    /// the stream.
-    #[must_use]
-    pub fn with_inquiry_request(mut self, event: impl Into<InquiryRequest>) -> Self {
-        self.add_inquiry_request(event);
-        self
-    }
-
-    /// Push a [`ConversationEvent`] of type [`EventKind::InquiryResponse`] onto
-    /// the stream.
-    pub fn add_inquiry_response(&mut self, event: impl Into<InquiryResponse>) {
-        self.push(ConversationEvent::now(event.into()));
-    }
-
-    /// Add a [`ConversationEvent`] of type [`EventKind::InquiryResponse`] onto
-    /// the stream.
-    #[must_use]
-    pub fn with_inquiry_response(mut self, event: impl Into<InquiryResponse>) -> Self {
-        self.add_inquiry_response(event);
-        self
-    }
-
-    /// Push a [`ConversationEvent`] of type [`EventKind::TurnStart`] onto
-    /// the stream.
-    pub fn add_turn_start(&mut self) {
-        self.push(ConversationEvent::now(TurnStart));
-    }
-
-    /// Add a [`ConversationEvent`] of type [`EventKind::TurnStart`] onto the
-    /// stream.
-    #[must_use]
-    pub fn with_turn_start(mut self) -> Self {
-        self.add_turn_start();
-        self
     }
 
     /// Returns the last [`ConversationEvent`] in the stream, wrapped in a
@@ -524,7 +462,7 @@ impl ConversationStream {
     }
 
     /// Repairs structural invariants that may be violated after arbitrary
-    /// filtering (e.g. `--from`/`--until` on fork).
+    /// filtering.
     ///
     /// Specifically:
     /// 1. Drops conversation events before the first [`ChatRequest`],
@@ -537,9 +475,15 @@ impl ConversationStream {
     ///    [`InquiryRequest`] is missing.
     /// 5. Removes orphaned [`InquiryRequest`]s whose matching
     ///    [`InquiryResponse`] is missing.
-    /// 6. Normalizes [`TurnStart`] events: ensures the stream begins
-    ///    with exactly one `TurnStart` and re-indexes all turn starts
-    ///    to a zero-based sequence.
+    /// 6. Normalizes [`TurnStart`] events: ensures the stream begins with
+    ///    exactly one `TurnStart` and re-indexes all turn starts to a
+    ///    zero-based sequence.
+    ///
+    /// [`ToolCallRequest`]: crate::event::ToolCallRequest
+    /// [`ToolCallResponse`]: crate::event::ToolCallResponse
+    /// [`InquiryRequest`]: crate::event::InquiryRequest
+    /// [`InquiryResponse`]: crate::event::InquiryResponse
+    /// [`TurnStart`]: crate::event::TurnStart
     pub fn sanitize(&mut self) {
         self.drop_leading_non_user_events();
         self.remove_orphaned_tool_call_responses();
@@ -549,11 +493,11 @@ impl ConversationStream {
         self.normalize_turn_starts();
     }
 
-    /// Drops conversation events before the first [`ChatRequest`] that
-    /// would be invalid as leading content (e.g. assistant responses,
-    /// tool call results). [`ConfigDelta`]s and [`TurnStart`]s are
-    /// preserved — config deltas maintain configuration state, and turn
-    /// markers are invisible to providers but useful for `--last`.
+    /// Drops conversation events before the first [`ChatRequest`] that would be
+    /// invalid as leading content (e.g. assistant responses, tool call
+    /// results). [`ConfigDelta`]s and [`TurnStart`]s are preserved — config
+    /// deltas maintain configuration state, and turn markers are invisible to
+    /// providers but useful for `--last`.
     fn drop_leading_non_user_events(&mut self) {
         let Some(pos) = self
             .events
@@ -579,6 +523,8 @@ impl ConversationStream {
 
     /// Removes [`ToolCallResponse`]s whose ID doesn't match any
     /// [`ToolCallRequest`] in the stream.
+    ///
+    /// [`ToolCallRequest`]: crate::event::ToolCallRequest
     fn remove_orphaned_tool_call_responses(&mut self) {
         let request_ids: Vec<String> = self
             .events
@@ -600,6 +546,9 @@ impl ConversationStream {
 
     /// Removes [`InquiryResponse`]s whose ID doesn't match any
     /// [`InquiryRequest`] in the stream.
+    ///
+    /// [`InquiryResponse`]: crate::event::InquiryResponse
+    /// [`InquiryRequest`]: crate::event::InquiryRequest
     fn remove_orphaned_inquiry_responses(&mut self) {
         let request_ids: Vec<InquiryId> = self
             .events
@@ -621,6 +570,9 @@ impl ConversationStream {
 
     /// Removes [`InquiryRequest`]s whose ID doesn't match any
     /// [`InquiryResponse`] in the stream.
+    ///
+    /// [`InquiryRequest`]: crate::event::InquiryRequest
+    /// [`InquiryResponse`]: crate::event::InquiryResponse
     fn remove_orphaned_inquiry_requests(&mut self) {
         let response_ids: Vec<InquiryId> = self
             .events
@@ -640,16 +592,16 @@ impl ConversationStream {
         });
     }
 
-    /// Ensures the stream has exactly one leading [`TurnStart`] and that
-    /// all `TurnStart` indices form a zero-based sequence.
+    /// Ensures the stream has exactly one leading [`TurnStart`] and that all
+    /// `TurnStart` indices form a zero-based sequence.
     ///
-    /// After filtering, the stream may have multiple stale `TurnStart`s
-    /// from earlier turns piled up at the front, or gaps in the index
-    /// sequence. This step:
-    /// - Inserts a `TurnStart(0)` if the stream has events but no
-    ///   leading `TurnStart`.
-    /// - Removes duplicate `TurnStart`s that precede the first
-    ///   `ChatRequest` (keeping only the last one).
+    /// After filtering, the stream may have multiple stale `TurnStart`s from
+    /// earlier turns piled up at the front, or gaps in the index sequence. This
+    /// step:
+    /// - Inserts a `TurnStart(0)` if the stream has events but no leading
+    ///   `TurnStart`.
+    /// - Removes duplicate `TurnStart`s that precede the first `ChatRequest`
+    ///   (keeping only the last one).
     /// - Re-indexes all `TurnStart` events to `0, 1, 2, …`.
     fn normalize_turn_starts(&mut self) {
         if self
@@ -667,9 +619,9 @@ impl ConversationStream {
             .iter()
             .position(|e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()));
 
-        // Remove all but the last TurnStart before the first ChatRequest.
-        // This collapses multiple stale turn markers from filtered turns
-        // into a single one.
+        // Remove all but the last TurnStart before the first ChatRequest. This
+        // collapses multiple stale turn markers from filtered turns into a
+        // single one.
         if let Some(chat_pos) = first_chat_pos {
             let leading_turn_starts: Vec<usize> = self.events[..chat_pos]
                 .iter()
@@ -727,13 +679,15 @@ impl ConversationStream {
     /// Injects synthetic [`ToolCallResponse`]s for any [`ToolCallRequest`]s
     /// that lack a matching response.
     ///
-    /// This can happen when the user interrupts tool execution (e.g. Ctrl+C
-    /// → "save & exit") after the request has been streamed but before
-    /// responses are recorded. Providers such as Anthropic reject streams
-    /// where a `tool_use` block has no corresponding `tool_result`.
+    /// This can happen when the user interrupts tool execution (e.g. Ctrl+C →
+    /// "save & exit") after the request has been streamed but before responses
+    /// are recorded. Providers such as Anthropic reject streams where a
+    /// `tool_use` block has no corresponding `tool_result`.
     ///
     /// The synthetic responses carry an error message explaining the
     /// interruption, preserving the context that a tool call was attempted.
+    ///
+    /// [`ToolCallRequest`]: crate::event::ToolCallRequest
     pub fn sanitize_orphaned_tool_calls(&mut self) {
         // Collect IDs that already have a response.
         let mut response_ids: Vec<String> = Vec::new();
@@ -776,11 +730,11 @@ impl ConversationStream {
         }
     }
 
-    /// Removes a trailing [`TurnStart`] event if it is the last
-    /// conversation event in the stream.
+    /// Removes a trailing [`TurnStart`] event if it is the last conversation
+    /// event in the stream.
     ///
-    /// This cleans up empty turns that can occur when the turn loop errors
-    /// out before any real events are added after the turn marker.
+    /// This cleans up empty turns that can occur when the turn loop errors out
+    /// before any real events are added after the turn marker.
     pub fn trim_trailing_empty_turn(&mut self) {
         // Walk backwards past any config deltas to find the last real event.
         if let Some(pos) = self
@@ -795,8 +749,8 @@ impl ConversationStream {
     }
 
     /// Returns an iterator over the events in the stream, wrapped in a
-    /// [`ConversationEventWithConfigRef`], containing the
-    /// [`PartialAppConfig`] at the time the event was added.
+    /// [`ConversationEventWithConfigRef`], containing the [`PartialAppConfig`]
+    /// at the time the event was added.
     #[must_use]
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = ConversationEventWithConfigRef<'_>> {
         Iter {
@@ -1214,15 +1168,54 @@ pub enum StreamError {
     /// An error occurred for the stream [`AppConfig`].
     #[error(transparent)]
     Config(#[from] jp_config::ConfigError),
+
+    /// A [`ToolCallResponse`] was pushed without a matching [`ToolCallRequest`]
+    /// in the stream.
+    ///
+    /// [`ToolCallRequest`]: crate::event::ToolCallRequest
+    #[error("ToolCallResponse references unknown request ID `{id}`")]
+    OrphanedToolCallResponse {
+        /// The unmatched response ID.
+        id: String,
+    },
+
+    /// A [`ToolCallResponse`] was pushed but one with the same ID already
+    /// exists in the stream.
+    #[error("Duplicate ToolCallResponse for ID `{id}`")]
+    DuplicateToolCallResponse {
+        /// The duplicated response ID.
+        id: String,
+    },
+
+    /// An [`InquiryResponse`] was pushed without a matching [`InquiryRequest`]
+    /// in the stream.
+    ///
+    /// [`InquiryResponse`]: crate::event::InquiryResponse
+    /// [`InquiryRequest`]: crate::event::InquiryRequest
+    #[error("InquiryResponse references unknown request ID `{id}`")]
+    OrphanedInquiryResponse {
+        /// The unmatched response ID.
+        id: String,
+    },
+
+    /// An [`InquiryResponse`] was pushed but one with the same ID already
+    /// exists in the stream.
+    ///
+    /// [`InquiryResponse`]: crate::event::InquiryResponse
+    #[error("Duplicate InquiryResponse for ID `{id}`")]
+    DuplicateInquiryResponse {
+        /// The duplicated response ID.
+        id: String,
+    },
 }
 
-// A custom deserializer for `InternalEvent` that avoids serde allocations
-// when trying to match `untagged` enum variants.
+// A custom deserializer for `InternalEvent` that avoids serde allocations when
+// trying to match `untagged` enum variants.
 //
-// Deserializes to a JSON `Value` first, then dispatches on the `type` tag.
-// This avoids the allocation overhead serde incurs when trying each variant
-// of an untagged enum. Base64-encoded storage fields are decoded before the
-// final deserialization into typed events.
+// Deserializes to a JSON `Value` first, then dispatches on the `type` tag. This
+// avoids the allocation overhead serde incurs when trying each variant of an
+// untagged enum. Base64-encoded storage fields are decoded before the final
+// deserialization into typed events.
 //
 // `cargo dhat` had shown the untagged approach to be a hotspot.
 impl<'de> Deserialize<'de> for InternalEvent {

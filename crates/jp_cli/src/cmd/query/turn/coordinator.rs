@@ -136,8 +136,8 @@ impl TurnCoordinator {
     ///
     /// [`TurnStart`]: jp_conversation::event::TurnStart
     pub fn start_turn(&mut self, stream: &mut ConversationStream, request: ChatRequest) {
-        stream.add_turn_start();
-        self.push_event(stream, request);
+        self.emit_json(&ConversationEvent::from(request.clone()));
+        stream.start_turn(request);
 
         self.state = TurnPhase::Streaming;
     }
@@ -379,7 +379,11 @@ impl TurnCoordinator {
     fn push_event(&self, stream: &mut ConversationStream, event: impl Into<ConversationEvent>) {
         let event = event.into();
         self.emit_json(&event);
-        stream.push(event);
+        stream
+            .current_turn_mut()
+            .add_event(event)
+            .build()
+            .expect("Invalid ConversationStream state");
     }
 
     /// Emit a conversation event as NDJSON if in JSON mode.

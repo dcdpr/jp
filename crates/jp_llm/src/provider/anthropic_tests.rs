@@ -2,7 +2,9 @@ use indexmap::IndexMap;
 use jp_config::model::parameters::{
     PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort,
 };
+use jp_conversation::{event::ChatRequest, thread::Thread};
 use jp_test::{Result, function_name};
+use serde_json::Map;
 use test_log::test;
 
 use super::*;
@@ -88,8 +90,6 @@ async fn test_opus_4_6_max_effort() -> Result {
 /// Unit test: Verify Opus 4.6 generates adaptive thinking request.
 #[test]
 fn test_opus_4_6_request_uses_adaptive_thinking() {
-    use jp_conversation::{ConversationStream, thread::Thread};
-
     let model = ModelDetails {
         id: (PROVIDER, "claude-opus-4-6").try_into().unwrap(),
         display_name: Some("Claude Opus 4.6".to_string()),
@@ -106,7 +106,7 @@ fn test_opus_4_6_request_uses_adaptive_thinking() {
             system_prompt: None,
             sections: vec![],
             attachments: vec![],
-            events: ConversationStream::new_test().with_chat_request("test"),
+            events: ConversationStream::new_test().with_turn("test"),
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -129,8 +129,6 @@ fn test_opus_4_6_request_uses_adaptive_thinking() {
 /// Unit test: Verify Max effort maps to `Effort::Max` for Opus 4.6.
 #[test]
 fn test_opus_4_6_max_effort_mapping() {
-    use jp_conversation::{ConversationStream, thread::Thread};
-
     let model = ModelDetails {
         id: (PROVIDER, "claude-opus-4-6").try_into().unwrap(),
         display_name: Some("Claude Opus 4.6".to_string()),
@@ -142,7 +140,7 @@ fn test_opus_4_6_max_effort_mapping() {
         features: vec!["adaptive-thinking"],
     };
 
-    let mut events = ConversationStream::new_test().with_chat_request("test");
+    let mut events = ConversationStream::new_test().with_turn("test");
     let mut delta = jp_config::PartialAppConfig::empty();
     delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Custom(
         PartialCustomReasoningConfig {
@@ -175,8 +173,6 @@ fn test_opus_4_6_max_effort_mapping() {
 /// Unit test: Verify budget-based model (Opus 4.5) still uses Enabled thinking.
 #[test]
 fn test_opus_4_5_uses_budgetted_thinking() {
-    use jp_conversation::{ConversationStream, thread::Thread};
-
     let model = ModelDetails {
         id: (PROVIDER, "claude-opus-4-5").try_into().unwrap(),
         display_name: Some("Claude Opus 4.5".to_string()),
@@ -193,7 +189,7 @@ fn test_opus_4_5_uses_budgetted_thinking() {
             system_prompt: None,
             sections: vec![],
             attachments: vec![],
-            events: ConversationStream::new_test().with_chat_request("test"),
+            events: ConversationStream::new_test().with_turn("test"),
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
@@ -216,9 +212,6 @@ fn test_opus_4_5_uses_budgetted_thinking() {
 /// is a `ChatRequest` with a schema.
 #[test]
 fn test_structured_output_sets_format() {
-    use jp_conversation::{ConversationStream, event::ChatRequest, thread::Thread};
-    use serde_json::json;
-
     let model = ModelDetails {
         id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
         display_name: Some("Claude Sonnet 4.5".to_string()),
@@ -230,12 +223,12 @@ fn test_structured_output_sets_format() {
         features: vec!["structured-outputs"],
     };
 
-    let schema = serde_json::Map::from_iter([
+    let schema = Map::from_iter([
         ("type".into(), json!("object")),
         ("properties".into(), json!({"name": {"type": "string"}})),
     ]);
 
-    let events = ConversationStream::new_test().with_chat_request(ChatRequest {
+    let events = ConversationStream::new_test().with_turn(ChatRequest {
         content: "Extract contacts".into(),
         schema: Some(schema),
     });
@@ -260,7 +253,7 @@ fn test_structured_output_sets_format() {
     // No adaptive thinking, so effort should be None.
     assert_eq!(output_config.effort, None);
     // transform_schema adds additionalProperties: false for objects.
-    let expected_schema = serde_json::Map::from_iter([
+    let expected_schema = Map::from_iter([
         ("type".into(), json!("object")),
         ("properties".into(), json!({"name": {"type": "string"}})),
         ("additionalProperties".into(), json!(false)),
@@ -278,13 +271,6 @@ fn test_structured_output_sets_format() {
 /// schema.
 #[test]
 fn test_schema_ignored_when_last_event_is_not_chat_request() {
-    use jp_conversation::{
-        ConversationStream,
-        event::{ChatRequest, ChatResponse},
-        thread::Thread,
-    };
-    use serde_json::json;
-
     let model = ModelDetails {
         id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
         display_name: None,
@@ -297,18 +283,22 @@ fn test_schema_ignored_when_last_event_is_not_chat_request() {
     };
 
     let mut events = ConversationStream::new_test();
+
     // First turn: structured request
-    events.add_chat_request(ChatRequest {
+    events.start_turn(ChatRequest {
         content: "Extract contacts".into(),
-        schema: Some(serde_json::Map::from_iter([(
-            "type".into(),
-            json!("object"),
-        )])),
+        schema: Some(Map::from_iter([("type".into(), json!("object"))])),
     });
+
     // Then a response (now the last event is not a ChatRequest)
-    events.add_chat_response(ChatResponse::structured(json!({"name": "Alice"})));
+    events
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::structured(json!({"name": "Alice"})))
+        .build()
+        .unwrap();
+
     // Follow-up without schema
-    events.add_chat_request(ChatRequest {
+    events.start_turn(ChatRequest {
         content: "Explain what you found".into(),
         schema: None,
     });
@@ -332,9 +322,6 @@ fn test_schema_ignored_when_last_event_is_not_chat_request() {
 /// Adaptive thinking + structured output should coexist on `OutputConfig`.
 #[test]
 fn test_adaptive_thinking_with_structured_output() {
-    use jp_conversation::{ConversationStream, event::ChatRequest, thread::Thread};
-    use serde_json::json;
-
     let model = ModelDetails {
         id: (PROVIDER, "claude-opus-4-6").try_into().unwrap(),
         display_name: Some("Claude Opus 4.6".to_string()),
@@ -346,9 +333,9 @@ fn test_adaptive_thinking_with_structured_output() {
         features: vec!["adaptive-thinking", "structured-outputs"],
     };
 
-    let schema = serde_json::Map::from_iter([("type".into(), json!("object"))]);
+    let schema = Map::from_iter([("type".into(), json!("object"))]);
 
-    let events = ConversationStream::new_test().with_chat_request(ChatRequest {
+    let events = ConversationStream::new_test().with_turn(ChatRequest {
         content: "Extract data".into(),
         schema: Some(schema),
     });
@@ -373,7 +360,7 @@ fn test_adaptive_thinking_with_structured_output() {
     let output_config = request.output_config.unwrap();
     // Both effort and format should be present.
     assert_eq!(output_config.effort, Some(Effort::High));
-    let expected_schema = serde_json::Map::from_iter([
+    let expected_schema = Map::from_iter([
         ("type".into(), json!("object")),
         ("additionalProperties".into(), json!(false)),
     ]);

@@ -2,19 +2,21 @@ use chrono::TimeZone as _;
 use serde_json::{Map, Value};
 
 use super::*;
-use crate::event::{InquiryQuestion, InquirySource};
+use crate::event::{
+    ChatResponse, InquiryQuestion, InquiryRequest, InquiryResponse, InquirySource, ToolCallRequest,
+};
 
 #[test]
 fn test_sanitize_orphaned_tool_calls_injects_directly_after_request() {
     let mut stream = ConversationStream::new_test();
 
-    stream.add_chat_request("Hello");
-    stream.add_tool_call_request(ToolCallRequest {
+    stream.push(ChatRequest::from("Hello"));
+    stream.push(ToolCallRequest {
         id: "orphan_1".into(),
         name: "some_tool".into(),
         arguments: Map::new(),
     });
-    stream.add_chat_response(ChatResponse::message("trailing"));
+    stream.push(ChatResponse::message("trailing"));
 
     stream.sanitize_orphaned_tool_calls();
 
@@ -24,8 +26,8 @@ fn test_sanitize_orphaned_tool_calls_injects_directly_after_request() {
     assert!(response.unwrap().result.is_err());
     assert!(response.unwrap().content().contains("interrupted"));
 
-    // Verify ordering: request must be immediately followed by
-    // its response — no events in between.
+    // Verify ordering: request must be immediately followed by its response -
+    // no events in between.
     let events: Vec<_> = stream.iter().collect();
     let req_pos = events
         .iter()
@@ -43,6 +45,7 @@ fn test_sanitize_orphaned_tool_calls_injects_directly_after_request() {
                 .is_some_and(|r| r.id == "orphan_1")
         })
         .unwrap();
+
     assert_eq!(
         resp_pos,
         req_pos + 1,
@@ -54,12 +57,12 @@ fn test_sanitize_orphaned_tool_calls_injects_directly_after_request() {
 fn test_sanitize_orphaned_tool_calls_leaves_matched_alone() {
     let mut stream = ConversationStream::new_test();
 
-    stream.add_tool_call_request(ToolCallRequest {
+    stream.push(ToolCallRequest {
         id: "matched_1".into(),
         name: "tool".into(),
         arguments: Map::new(),
     });
-    stream.add_tool_call_response(ToolCallResponse {
+    stream.push(ToolCallResponse {
         id: "matched_1".into(),
         result: Ok("ok".into()),
     });
@@ -74,17 +77,17 @@ fn test_sanitize_orphaned_tool_calls_handles_partial_set() {
     let mut stream = ConversationStream::new_test();
 
     // Two parallel requests, only 'a' has a response.
-    stream.add_tool_call_request(ToolCallRequest {
+    stream.push(ToolCallRequest {
         id: "a".into(),
         name: "tool".into(),
         arguments: Map::new(),
     });
-    stream.add_tool_call_request(ToolCallRequest {
+    stream.push(ToolCallRequest {
         id: "b".into(),
         name: "tool".into(),
         arguments: Map::new(),
     });
-    stream.add_tool_call_response(ToolCallResponse {
+    stream.push(ToolCallResponse {
         id: "a".into(),
         result: Ok("ok".into()),
     });
@@ -114,7 +117,7 @@ fn test_sanitize_orphaned_tool_calls_handles_partial_set() {
 #[test]
 fn test_trim_trailing_empty_turn_removes_lone_turn_start() {
     let mut stream = ConversationStream::new_test();
-    stream.add_turn_start();
+    stream.push(TurnStart);
     assert_eq!(stream.len(), 1);
 
     stream.trim_trailing_empty_turn();
@@ -124,8 +127,7 @@ fn test_trim_trailing_empty_turn_removes_lone_turn_start() {
 #[test]
 fn test_trim_trailing_empty_turn_keeps_non_empty_turn() {
     let mut stream = ConversationStream::new_test();
-    stream.add_turn_start();
-    stream.add_chat_request("Hello");
+    stream.start_turn("Hello");
     assert_eq!(stream.len(), 2);
 
     stream.trim_trailing_empty_turn();
@@ -165,12 +167,12 @@ fn test_serialization_base64_encodes_tool_call_fields() {
     let mut args = Map::new();
     args.insert("path".into(), Value::String("src/main.rs".into()));
 
-    stream.add_tool_call_request(ToolCallRequest {
+    stream.push(ToolCallRequest {
         id: "tc1".into(),
         name: "read_file".into(),
         arguments: args,
     });
-    stream.add_tool_call_response(ToolCallResponse {
+    stream.push(ToolCallResponse {
         id: "tc1".into(),
         result: Ok("file contents here".into()),
     });
@@ -413,9 +415,9 @@ fn test_sanitize_deduplicates_leading_turn_starts() {
 
     // Simulate --from keeping TurnStarts from multiple filtered turns
     // that all precede the first ChatRequest.
-    stream.add_turn_start();
-    stream.add_turn_start();
-    stream.add_turn_start();
+    stream.push(TurnStart);
+    stream.push(TurnStart);
+    stream.push(TurnStart);
     stream.push(ConversationEvent::new(
         ChatRequest::from("hello"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
@@ -436,7 +438,7 @@ fn test_sanitize_reindexes_turn_starts() {
     let mut stream = ConversationStream::new_test();
 
     // Two turns with non-sequential indices (from filtering).
-    stream.add_turn_start();
+    stream.push(TurnStart);
     stream.push(ConversationEvent::new(
         ChatRequest::from("first"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
@@ -445,7 +447,7 @@ fn test_sanitize_reindexes_turn_starts() {
         ChatResponse::message("reply"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
     ));
-    stream.add_turn_start();
+    stream.push(TurnStart);
     stream.push(ConversationEvent::new(
         ChatRequest::from("second"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
@@ -465,7 +467,7 @@ fn test_sanitize_reindexes_turn_starts() {
 fn test_sanitize_noop_on_healthy_stream() {
     let mut stream = ConversationStream::new_test();
 
-    stream.add_turn_start();
+    stream.push(TurnStart);
     stream.push(ConversationEvent::new(
         ChatRequest::from("hello"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),

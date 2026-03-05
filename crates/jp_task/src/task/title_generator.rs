@@ -94,7 +94,7 @@ impl TitleGeneratorTask {
 
         let schema = title::title_schema(1);
         let mut events = thread.events.clone();
-        events.add_chat_request(ChatRequest {
+        events.start_turn(ChatRequest {
             content: "Generate a title for this conversation.".into(),
             schema: Some(schema),
         });

@@ -38,7 +38,7 @@ pub mod thread;
 pub use conversation::{Conversation, ConversationId, ConversationsMetadata};
 pub use error::Error;
 pub use event::{ConversationEvent, EventKind};
-pub use stream::{ConversationStream, StreamError};
+pub use stream::{ConversationStream, StreamError, TurnMut};
 
 /// A wrapper around `DateTime<Utc>` that implements `Debug` to match `time`'s
 /// `OffsetDateTime` format (e.g. `2020-01-01 0:00:00.0 +00`).

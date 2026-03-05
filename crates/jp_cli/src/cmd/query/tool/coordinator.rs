@@ -628,7 +628,11 @@ impl ToolCoordinator {
                     Ok(answer) => {
                         if let Some(tool) = executing_tools.get_mut(&index) {
                             let id = inquiry::tool_call_inquiry_id(&tool.tool_id, &question_id);
-                            events.add_inquiry_response(InquiryResponse::new(id, answer.clone()));
+                            events
+                                .current_turn_mut()
+                                .add_inquiry_response(InquiryResponse::new(id, answer.clone()))
+                                .build()
+                                .expect("Invalid ConversationStream state");
 
                             tool.accumulated_answers.insert(question_id, answer);
                             self.set_tool_state(&tool.tool_id, ToolCallState::Running);
@@ -814,21 +818,25 @@ impl ToolCoordinator {
     fn spawn_inquiry(
         index: usize,
         inquiry_id: String,
-        tool_call_id: String,
+        id: String,
         question: Question,
         backend: Arc<dyn InquiryBackend>,
         mut events: ConversationStream,
         cancellation_token: CancellationToken,
         event_tx: mpsc::Sender<ExecutionEvent>,
     ) {
-        // Insert a ToolCallResponse into the cloned stream so the LLM sees
-        // the tool as "paused". The ID must match the original
-        // ToolCallRequest.id so providers (e.g. Google) can resolve the
-        // tool name when converting events to their wire format.
-        events.add_tool_call_response(jp_conversation::event::ToolCallResponse {
-            id: tool_call_id,
-            result: Ok(format!("Tool paused: {}", question.text)),
-        });
+        // Insert a ToolCallResponse into the cloned stream so the LLM sees the
+        // tool as "paused". The ID must match the original ToolCallRequest.id
+        // so providers can resolve the tool name when converting events to
+        // their wire format.
+        events
+            .current_turn_mut()
+            .add_tool_call_response(ToolCallResponse {
+                id,
+                result: Ok(format!("Tool paused: {}", question.text)),
+            })
+            .build()
+            .expect("Invalid ConversationStream state");
 
         tokio::spawn(async move {
             let result = backend
@@ -1022,11 +1030,15 @@ impl ToolCoordinator {
                     // snapshot.
                     let inquiry_id = inquiry::tool_call_inquiry_id(&tool_id, &question.id);
 
-                    events.add_inquiry_request(InquiryRequest::new(
-                        inquiry_id.clone(),
-                        InquirySource::tool(tool_name),
-                        tool_question_to_inquiry_question(&question),
-                    ));
+                    events
+                        .current_turn_mut()
+                        .add_inquiry_request(InquiryRequest::new(
+                            inquiry_id.clone(),
+                            InquirySource::tool(tool_name),
+                            tool_question_to_inquiry_question(&question),
+                        ))
+                        .build()
+                        .expect("Invalid ConversationStream state");
 
                     Self::spawn_inquiry(
                         index,
