@@ -106,12 +106,12 @@ const filtered = computed(() => {
 <colgroup>
     <col style="width: 4rem">
     <col>
-    <col v-if="showCategory" style="width: 7rem">
+    <col v-if="showCategory" class="rfd-col-category" style="width: 7rem">
     <col style="width: 8rem">
-    <col style="width: 8rem">
+    <col class="rfd-col-date" style="width: 8rem">
 </colgroup>
 <thead><tr>
-    <th v-for="col in columns" :key="col.key" class="rfd-sortable" @click="toggleSort(col.key)">
+    <th v-for="col in columns" :key="col.key" :class="['rfd-sortable', 'rfd-col-' + col.key]" @click="toggleSort(col.key)">
         {{ col.label }} <span class="rfd-sort-arrow">{{ sortKey === col.key ? (sortAsc ? '▲' : '▼') : '' }}</span>
     </th>
 </tr></thead>
@@ -122,9 +122,9 @@ const filtered = computed(() => {
         <a :href="'./' + rfd.slug">{{ rfd.title }}</a>
         <div v-if="showSummaries && rfd.summary" class="rfd-summary">{{ rfd.summary }}</div>
     </td>
-    <td v-if="showCategory">{{ rfd.category }}</td>
+    <td v-if="showCategory" class="rfd-col-category">{{ rfd.category }}</td>
     <td><span :class="'rfd-badge rfd-badge--' + (rfd.status?.toLowerCase() ?? 'unknown')">{{ rfd.status }}</span></td>
-    <td>{{ rfd.date }}</td>
+    <td class="rfd-col-date">{{ rfd.date }}</td>
 </tr>
 </tbody>
 </table>
@@ -268,5 +268,41 @@ const filtered = computed(() => {
 .dark .rfd-badge--abandoned {
     background: color-mix(in srgb, #ef4444 25%, transparent);
     color: #fca5a5;
+}
+@media (max-width: 767px) {
+    .rfd-col-date {
+        display: none;
+    }
+    .rfd-table {
+        table-layout: auto !important;
+    }
+}
+@media (max-width: 639px) {
+    .rfd-toolbar {
+        flex-wrap: wrap;
+    }
+    .rfd-filters {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .rfd-filter {
+        font-size: 0.8rem;
+        padding: 0.2rem 0.5rem;
+        white-space: nowrap;
+    }
+    .rfd-search {
+        flex: 1;
+        min-width: 0;
+        width: auto;
+        font-size: 1rem;
+    }
+    .rfd-col-category {
+        display: none;
+    }
+    .rfd-badge {
+        font-size: 0.75rem;
+        padding: 0.1rem 0.4rem;
+    }
 }
 </style>

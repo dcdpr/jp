@@ -427,7 +427,8 @@ rfd-list *CATEGORY:
 
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
-develop-docs: (_docs "dev" "--open")
+develop-docs *FLAGS="--open":
+    just _docs "dev" {{FLAGS}}
 
 # Build the statically built documentation.
 [group('docs')]
