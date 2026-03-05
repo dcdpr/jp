@@ -248,7 +248,7 @@ Can be merged independently.
 
 ## References
 
-- [`jp_printer::Printer`](../../crates/jp_printer/src/printer.rs) — the
-  current printer implementation.
-- [`jp_printer::Printer::memory()`](../../crates/jp_printer/src/printer.rs) —
+- `jp_printer::Printer` (`crates/jp_printer/src/printer.rs`) — the current
+  printer implementation.
+- `jp_printer::Printer::memory()` (`crates/jp_printer/src/printer.rs`) —
   existing memory-backed printer pattern using `SharedBuffer`.
