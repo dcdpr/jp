@@ -412,11 +412,11 @@ Depends on Phases 1–3.
 
 ## References
 
-- [`run_turn_loop`](../../crates/jp_cli/src/cmd/query/turn_loop.rs) — the
-  current turn loop implementation being extracted.
-- [`PromptBackend`](../../crates/jp_inquire/src/prompt.rs) — the existing
-  trait that enables I/O injection for prompts.
-- [`ExecutorSource`](../../crates/jp_llm/src/tool/executor.rs) — the existing
-  trait for tool executor creation.
+- `run_turn_loop` (`crates/jp_cli/src/cmd/query/turn_loop.rs` — the current turn
+  loop implementation being extracted.
+- `PromptBackend` (`crates/jp_inquire/src/prompt.rs`) — the existing trait that
+  enables I/O injection for prompts.
+- `ExecutorSource` (`crates/jp_llm/src/tool/executor.rs`) — the existing trait
+  for tool executor creation.
 - [yoagent](https://github.com/yologdev/yoagent) — prior art for a standalone
   Rust agent loop library.

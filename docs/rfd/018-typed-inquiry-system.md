@@ -219,9 +219,9 @@ simplification.
 ### Keep prompt types implicit
 
 Continue with the current approach where prompt type is determined by which
-code path you're in. Rejected because it makes the non-interactive mode
-([RFD 019]) and task model ([RFD 020]) significantly harder — every new
-routing policy would need to be implemented in three separate places.
+code path you're in. Rejected because it makes future improvements significantly
+harder — every new routing policy would need to be implemented in three separate
+places.
 
 ### `text()` method on the Inquiry enum
 
@@ -272,16 +272,3 @@ Update `ToolPrompter` to accept `Inquiry` variants. Consolidate
 a pattern-match on the enum. The rendering logic stays in the prompter.
 
 Depends on Phase 2.
-
-## References
-
-- [RFD 019: Non-Interactive Mode](019-non-interactive-mode.md) — extends the
-  routing function with configurable detached policies.
-- [RFD 020: Task Model](020-task-model.md) — task registry, prompt queuing,
-  attach/detach.
-- [RFD 028: Structured Inquiry System](028-structured-inquiry-system-for-tool-questions.md)
-  — the inquiry backend that handles `ToolQuestion` with
-  `QuestionTarget::Assistant`.
-
-[RFD 019]: 019-non-interactive-mode.md
-[RFD 020]: 020-task-model.md

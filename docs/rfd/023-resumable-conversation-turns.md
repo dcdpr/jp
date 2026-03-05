@@ -507,9 +507,9 @@ Depends on Phase 1.
   conversation locks that protect concurrent write access during incremental
   persistence.
 - [RFD 009: Stateful Tool Protocol](009-stateful-tool-protocol.md) — stateful
-  tools introduce process-bound handles that cannot be resumed after exit;
-  noted as a limitation.
-- [`ConversationStream::sanitize()`](../../crates/jp_conversation/src/stream.rs) —
+  tools introduce process-bound handles that cannot be resumed after exit; noted
+  as a limitation.
+- `ConversationStream::sanitize()` (`crates/jp_conversation/src/stream.rs`) —
   existing structural repair logic; scope narrowed by this RFD to only cover
   complete turns.
 
