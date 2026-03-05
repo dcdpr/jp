@@ -18,11 +18,10 @@ use crate::{
 #[config(serde(untagged), no_deserialize_derive)]
 pub enum MergeableString {
     /// A string that is merged using the [`schematic::merge::replace`]
-    #[setting(default)]
     String(String),
 
     /// A string that is merged using the specified merge strategy.
-    #[setting(nested)]
+    #[setting(nested, empty)]
     Merged(MergedString),
 }
 
@@ -100,9 +99,15 @@ impl PartialConfigDelta for PartialMergeableString {
 
 impl ToPartial for MergeableString {
     fn to_partial(&self) -> Self::Partial {
+        // Always flatten to `String` variant. The finalized value already
+        // reflects all prior merges (append/prepend), so preserving the
+        // `Merged` variant would cause `string_with_strategy` to re-apply
+        // the strategy when the partial is merged again (e.g. in
+        // `apply_conversation_config`), doubling the value.
         match self {
-            Self::String(v) => Self::Partial::String(v.clone()),
-            Self::Merged(v) => Self::Partial::Merged(v.to_partial()),
+            Self::String(v) | Self::Merged(MergedString { value: v, .. }) => {
+                Self::Partial::String(v.clone())
+            }
         }
     }
 }

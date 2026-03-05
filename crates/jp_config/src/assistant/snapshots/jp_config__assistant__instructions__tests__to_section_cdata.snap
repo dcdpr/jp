@@ -1,0 +1,9 @@
+---
+source: crates/jp_config/src/assistant/instructions.rs
+expression: section.render()
+---
+<instruction title="foo">
+<![CDATA[
+- bar <test>bar</test>
+]]>
+</instruction>

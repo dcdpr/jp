@@ -285,12 +285,25 @@ impl From<PartialCustomReasoningConfig> for PartialReasoningConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningEffort {
+    /// Disable reasoning entirely.
+    ///
+    /// Providers map this to their native "off" mechanism (e.g. OpenAI
+    /// `none`/`minimal`, Anthropic budget 0). If a provider doesn't support
+    /// fully disabling reasoning, it uses the lowest available effort level.
+    None,
+
     /// Allows the model to decide the effort to use. If the model does not
     /// support auto-mode, it will fall back to `Medium`.
     Auto,
 
-    /// Allocates an extremely large portion of tokens for reasoning (approximately 90% of
-    /// `max_tokens`)
+    /// Maximum effort with no constraints on token spending.
+    ///
+    /// Only supported by certain models (e.g., Claude Opus 4.6). For models
+    /// that don't support this level, it falls back to `XHigh`.
+    Max,
+
+    /// Allocates an extremely large portion of tokens for reasoning
+    /// (approximately 90% of `max_tokens`)
     XHigh,
 
     /// Allocates a large portion of tokens for reasoning (approximately 80% of
@@ -320,6 +333,8 @@ impl ReasoningEffort {
     #[must_use]
     pub const fn to_tokens(self, max_tokens: u32) -> u32 {
         match self {
+            Self::None => 0,
+            Self::Max => max_tokens,
             Self::XHigh => max_tokens.saturating_mul(90) / 100,
             Self::High => max_tokens.saturating_mul(80) / 100,
             Self::Auto | Self::Medium => max_tokens.saturating_mul(50) / 100,
@@ -332,19 +347,21 @@ impl ReasoningEffort {
     /// Convert the effort to a relative effort, based on the given maximum
     /// number of tokens.
     #[must_use]
-    pub const fn abs_to_rel(&self, max_tokens: Option<u32>) -> Self {
+    pub const fn abs_to_rel(&self, max_tokens: Option<u32>) -> Option<Self> {
         match (self, max_tokens) {
-            (Self::Absolute(Tokens(tokens)), Some(max)) => {
-                if *tokens > (max * 80) / 100 {
-                    Self::High
-                } else if *tokens > (max * 50) / 100 {
-                    Self::Medium
-                } else {
-                    Self::Low
-                }
-            }
-            (Self::Absolute(_), None) => Self::Medium,
-            (_, _) => *self,
+            (Self::Absolute(Tokens(tokens)), Some(max)) => Some(if *tokens > (max * 90) / 100 {
+                Self::Max
+            } else if *tokens > (max * 80) / 100 {
+                Self::XHigh
+            } else if *tokens > (max * 50) / 100 {
+                Self::High
+            } else if *tokens > (max * 20) / 100 {
+                Self::Medium
+            } else {
+                Self::Low
+            }),
+            (Self::Absolute(_), None) => None,
+            (_, _) => Some(*self),
         }
     }
 }

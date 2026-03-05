@@ -2,14 +2,14 @@
 
 use std::{fmt, num::ParseIntError};
 
-use schematic::{Config, ConfigEnum};
+use schematic::{Config, ConfigEnum, TransformResult};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
     model::{ModelConfig, PartialModelConfig},
-    partial::{ToPartial, partial_opt, partial_opt_config},
+    partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
 };
 
 /// Reasoning content style configuration.
@@ -34,6 +34,22 @@ pub struct ReasoningConfig {
     /// Only used when `display` is set to `summary`.
     #[setting(nested)]
     pub summary_model: Option<ModelConfig>,
+
+    /// Background color for reasoning content (ANSI 256-color index).
+    ///
+    /// When set, reasoning blocks are rendered with this background
+    /// color spanning the full terminal width, visually distinguishing
+    /// them from regular message content.
+    ///
+    /// Example: `236` for a subtle dark gray on dark terminals.
+    #[setting(default = default_reasoning_background)]
+    pub background: Option<u8>,
+}
+
+/// The default system prompt for the assistant.
+#[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
+const fn default_reasoning_background(_: &()) -> TransformResult<Option<u8>> {
+    Ok(Some(236))
 }
 
 impl AssignKeyValue for PartialReasoningConfig {
@@ -41,6 +57,7 @@ impl AssignKeyValue for PartialReasoningConfig {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
             "display" => self.display = kv.try_some_from_str()?,
+            "background" => self.background = kv.try_some_u8()?,
             _ if kv.p("summary_model") => self.summary_model.assign(kv)?,
             _ => return missing_key(&kv),
         }
@@ -54,6 +71,7 @@ impl PartialConfigDelta for PartialReasoningConfig {
         Self {
             display: delta_opt(self.display.as_ref(), next.display),
             summary_model: delta_opt_partial(self.summary_model.as_ref(), next.summary_model),
+            background: delta_opt(self.background.as_ref(), next.background),
         }
     }
 }
@@ -65,6 +83,7 @@ impl ToPartial for ReasoningConfig {
         Self::Partial {
             display: partial_opt(&self.display, defaults.display),
             summary_model: partial_opt_config(self.summary_model.as_ref(), defaults.summary_model),
+            background: partial_opts(self.background.as_ref(), defaults.background),
         }
     }
 }

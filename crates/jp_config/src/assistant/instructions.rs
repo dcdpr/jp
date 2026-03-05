@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     BoxedError,
     assignment::{AssignKeyValue, KvAssignment, missing_key},
+    assistant::sections::SectionConfig,
     partial::{ToPartial, partial_opt, partial_opts},
 };
 
@@ -103,102 +104,52 @@ impl InstructionsConfig {
         self
     }
 
-    /// Serialize the instructions to the proper XML representation.
+    /// Convert this instruction into a [`SectionConfig`].
     ///
-    /// # Errors
-    ///
-    /// Returns an error if the XML serialization fails.
-    pub fn try_to_xml(&self) -> Result<String, quick_xml::SeError> {
-        #[derive(Serialize)]
-        #[serde(rename = "instruction")]
-        pub struct XmlWrapper<'a> {
-            /// See [`InstructionsConfig::title`].
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub title: Option<&'a str>,
+    /// The instruction's structured data (description, items, examples)
+    /// is flattened into markdown content, and the result is wrapped in
+    /// an `<instruction>` tag via the section's `tag` field.
+    #[must_use]
+    #[expect(clippy::cast_possible_truncation)]
+    pub fn to_section(&self) -> SectionConfig {
+        use std::fmt::Write as _;
 
-            /// See [`InstructionsConfig::description`].
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pub description: Option<&'a str>,
+        let mut content = String::new();
 
-            /// See [`InstructionsConfig::items`].
-            #[serde(rename = "$value", skip_serializing_if = "Items::is_empty")]
-            pub items: Items<'a>,
-
-            /// See [`InstructionsConfig::examples`].
-            #[serde(skip_serializing_if = "Examples::is_empty")]
-            pub examples: Examples<'a>,
+        if let Some(desc) = &self.description {
+            let _ = writeln!(content, "{desc}");
+            content.push('\n');
         }
 
-        #[derive(Serialize)]
-        #[serde(rename = "items")]
-        struct Items<'a> {
-            /// See [`InstructionsConfig::items`].
-            #[serde(default, rename = "item")]
-            items: &'a [String],
+        for item in &self.items {
+            let _ = writeln!(content, "- {item}");
         }
 
-        impl Items<'_> {
-            /// Returns `true` if the items are empty.
-            #[must_use]
-            const fn is_empty(&self) -> bool {
-                self.items.is_empty()
+        if !self.examples.is_empty() {
+            let _ = write!(content, "\n**Examples**\n");
+            for example in &self.examples {
+                content.push('\n');
+                match example {
+                    ExampleConfig::Generic(text) => {
+                        let _ = writeln!(content, "{text}");
+                    }
+                    ExampleConfig::Contrast(c) => {
+                        let _ = writeln!(content, "Good: {}", c.good);
+                        let _ = writeln!(content, "Bad: {}", c.bad);
+                        if let Some(reason) = &c.reason {
+                            let _ = writeln!(content, "Reason: {reason}");
+                        }
+                    }
+                }
             }
         }
 
-        #[derive(Serialize)]
-        #[serde(rename = "examples")]
-        struct Examples<'a> {
-            /// See [`InstructionsConfig::examples`].
-            #[serde(default, rename = "$value")]
-            examples: Vec<Example<'a>>,
+        SectionConfig {
+            content: content.trim_end().to_owned(),
+            tag: Some("instruction".to_owned()),
+            title: self.title.clone(),
+            position: self.position as i32,
         }
-
-        impl Examples<'_> {
-            /// Returns `true` if the examples are empty.
-            #[must_use]
-            const fn is_empty(&self) -> bool {
-                self.examples.is_empty()
-            }
-        }
-
-        #[derive(Serialize)]
-        #[serde(rename_all = "snake_case")]
-        enum Example<'a> {
-            /// See [`ExampleConfig::Generic`].
-            Simple(&'a str),
-            /// See [`ExampleConfig::Contrast`].
-            Detailed(&'a ContrastConfig),
-        }
-
-        let Self {
-            title,
-            description,
-            items,
-            examples,
-            ..
-        } = self;
-
-        let wrapper = XmlWrapper {
-            title: title.as_deref(),
-            description: description.as_deref(),
-            items: Items { items },
-            examples: Examples {
-                examples: examples
-                    .iter()
-                    .map(|e| match e {
-                        ExampleConfig::Generic(text) => Example::Simple(text),
-                        ExampleConfig::Contrast(contrast) => Example::Detailed(contrast),
-                    })
-                    .collect::<Vec<_>>(),
-            },
-        };
-
-        let mut buffer = String::new();
-        let mut serializer = quick_xml::se::Serializer::new(&mut buffer);
-        serializer.indent(' ', 2);
-
-        wrapper.serialize(serializer)?;
-        Ok(buffer)
     }
 }
 
@@ -303,148 +254,5 @@ impl ToPartial for ContrastConfig {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_instructions_assign() {
-        let mut p = PartialInstructionsConfig::default();
-
-        let kv = KvAssignment::try_from_cli("title", "foo").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p.title, Some("foo".into()));
-
-        let kv = KvAssignment::try_from_cli("description", "bar").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p.description, Some("bar".into()));
-
-        let kv = KvAssignment::try_from_cli("items", "baz").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p.items, Some(vec!["baz".into()]));
-
-        let kv = KvAssignment::try_from_cli("items+", "quux").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p.items, Some(vec!["baz".into(), "quux".into()]));
-
-        let kv = KvAssignment::try_from_cli("items.0", "quuz").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p.items, Some(vec!["quuz".into(), "quux".into()]));
-
-        let kv = KvAssignment::try_from_cli("examples", "qux").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p.examples, vec![PartialExampleConfig::Generic(
-            "qux".into()
-        )]);
-
-        let kv = KvAssignment::try_from_cli("examples+", "quuz").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p.examples, vec![
-            PartialExampleConfig::Generic("qux".into()),
-            PartialExampleConfig::Generic("quuz".into())
-        ]);
-
-        let kv = KvAssignment::try_from_cli("examples.0", "quuz").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p.examples, vec![
-            PartialExampleConfig::Generic("quuz".into()),
-            PartialExampleConfig::Generic("quuz".into())
-        ]);
-    }
-
-    #[test]
-    fn test_example_assign() {
-        let mut p = PartialExampleConfig::default();
-
-        let kv = KvAssignment::try_from_cli("", "bar").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p, PartialExampleConfig::Generic("bar".into()));
-
-        let kv = KvAssignment::try_from_cli(":", r#""bar""#).unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p, PartialExampleConfig::Generic("bar".into()));
-
-        let kv = KvAssignment::try_from_cli(":", r#"{"good":"bar","bad":"baz"}"#).unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(
-            p,
-            PartialExampleConfig::Contrast(PartialContrastConfig {
-                good: Some("bar".into()),
-                bad: Some("baz".into()),
-                reason: None,
-            })
-        );
-
-        let kv = KvAssignment::try_from_cli("nope", "nope").unwrap();
-        assert_eq!(&p.assign(kv).unwrap_err().to_string(), "nope: unknown key");
-    }
-
-    #[test]
-    fn test_contrast_assign() {
-        let mut p = PartialContrastConfig::default();
-
-        let kv = KvAssignment::try_from_cli("good", "bar").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p, PartialContrastConfig {
-            good: Some("bar".into()),
-            bad: None,
-            reason: None,
-        });
-
-        let kv = KvAssignment::try_from_cli("bad", "baz").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p, PartialContrastConfig {
-            good: Some("bar".into()),
-            bad: Some("baz".into()),
-            reason: None,
-        });
-
-        let kv = KvAssignment::try_from_cli("reason", "qux").unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p, PartialContrastConfig {
-            good: Some("bar".into()),
-            bad: Some("baz".into()),
-            reason: Some("qux".into()),
-        });
-
-        let kv = KvAssignment::try_from_cli(":", r#"{"good":"one","bad":null}"#).unwrap();
-        p.assign(kv).unwrap();
-        assert_eq!(p, PartialContrastConfig {
-            good: Some("one".into()),
-            bad: None,
-            reason: None,
-        });
-
-        let kv = KvAssignment::try_from_cli("nope", "nope").unwrap();
-        assert_eq!(&p.assign(kv).unwrap_err().to_string(), "nope: unknown key");
-    }
-
-    #[test]
-    fn test_instructions_to_xml() {
-        let i = InstructionsConfig {
-            title: Some("foo".to_owned()),
-            description: Some("bar".to_owned()),
-            position: 0,
-            items: vec![
-                "foo".to_owned(),
-                "bar <test>bar</test>".to_owned(),
-                "baz]]> baz".to_owned(),
-            ],
-            examples: vec![
-                ExampleConfig::Generic("foo".to_owned()),
-                ExampleConfig::Contrast(ContrastConfig {
-                    good: "bar".to_owned(),
-                    bad: "baz".to_owned(),
-                    reason: Some("qux".to_owned()),
-                }),
-                ExampleConfig::Contrast(ContrastConfig {
-                    good: "quux".to_owned(),
-                    bad: "quuz".to_owned(),
-                    reason: None,
-                }),
-            ],
-        };
-
-        let xml = i.try_to_xml().unwrap();
-        insta::assert_snapshot!(xml);
-    }
-}
+#[path = "instructions_tests.rs"]
+mod tests;
