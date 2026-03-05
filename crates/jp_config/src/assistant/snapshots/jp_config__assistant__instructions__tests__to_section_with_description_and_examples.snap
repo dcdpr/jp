@@ -1,0 +1,21 @@
+---
+source: crates/jp_config/src/assistant/instructions.rs
+expression: section.render()
+---
+<instruction title="foo">
+bar
+
+- foo
+- bar
+
+**Examples**
+
+example one
+
+Good: good
+Bad: bad
+Reason: because
+
+Good: quux
+Bad: quuz
+</instruction>

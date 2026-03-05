@@ -3,6 +3,7 @@
 pub mod code;
 pub mod markdown;
 pub mod reasoning;
+pub mod streaming;
 pub mod tool_call;
 pub mod typewriter;
 
@@ -19,6 +20,7 @@ use crate::{
         code::{CodeConfig, PartialCodeConfig},
         markdown::{MarkdownConfig, PartialMarkdownConfig},
         reasoning::{PartialReasoningConfig, ReasoningConfig},
+        streaming::{PartialStreamingConfig, StreamingConfig},
         tool_call::{PartialToolCallConfig, ToolCallConfig},
         typewriter::{PartialTypewriterConfig, TypewriterConfig},
     },
@@ -47,6 +49,12 @@ pub struct StyleConfig {
     #[setting(nested)]
     pub reasoning: ReasoningConfig,
 
+    /// Streaming response style.
+    ///
+    /// Configures the waiting indicator shown while the LLM is processing.
+    #[setting(nested)]
+    pub streaming: StreamingConfig,
+
     /// Tool call content style.
     ///
     /// Configures how tool calls are displayed.
@@ -67,6 +75,7 @@ impl AssignKeyValue for PartialStyleConfig {
             _ if kv.p("code") => self.code.assign(kv)?,
             _ if kv.p("markdown") => self.markdown.assign(kv)?,
             _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
+            _ if kv.p("streaming") => self.streaming.assign(kv)?,
             _ if kv.p("tool_call") => self.tool_call.assign(kv)?,
             _ if kv.p("typewriter") => self.typewriter.assign(kv)?,
             _ => return missing_key(&kv),
@@ -82,6 +91,7 @@ impl PartialConfigDelta for PartialStyleConfig {
             code: self.code.delta(next.code),
             markdown: self.markdown.delta(next.markdown),
             reasoning: self.reasoning.delta(next.reasoning),
+            streaming: self.streaming.delta(next.streaming),
             tool_call: self.tool_call.delta(next.tool_call),
             typewriter: self.typewriter.delta(next.typewriter),
         }
@@ -94,6 +104,7 @@ impl ToPartial for StyleConfig {
             code: self.code.to_partial(),
             markdown: self.markdown.to_partial(),
             reasoning: self.reasoning.to_partial(),
+            streaming: self.streaming.to_partial(),
             tool_call: self.tool_call.to_partial(),
             typewriter: self.typewriter.to_partial(),
         }

@@ -33,6 +33,11 @@ PartialAppConfig {
                 other: None,
             },
         },
+        request: PartialRequestConfig {
+            max_retries: None,
+            base_backoff_ms: None,
+            max_backoff_secs: None,
+        },
     },
     conversation: PartialConversationConfig {
         title: PartialTitleConfig {
@@ -47,6 +52,7 @@ PartialAppConfig {
                 run: None,
                 result: None,
                 style: PartialDisplayStyleConfig {
+                    hidden: None,
                     inline_results: None,
                     results_file_link: None,
                     parameters: None,
@@ -73,9 +79,27 @@ PartialAppConfig {
         reasoning: PartialReasoningConfig {
             display: None,
             summary_model: None,
+            background: None,
+        },
+        streaming: PartialStreamingConfig {
+            progress: PartialProgressConfig {
+                show: None,
+                delay_secs: None,
+                interval_ms: None,
+            },
         },
         tool_call: PartialToolCallConfig {
             show: None,
+            progress: PartialProgressConfig {
+                show: None,
+                delay_secs: None,
+                interval_ms: None,
+            },
+            preparing: PartialPreparingConfig {
+                show: None,
+                delay_secs: None,
+                interval_ms: None,
+            },
         },
         typewriter: PartialTypewriterConfig {
             text_delay: None,

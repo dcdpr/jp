@@ -7,7 +7,7 @@ use std::{fmt, str::FromStr};
 use indexmap::IndexMap;
 use jp_id::{
     Id,
-    parts::{GlobalId, TargetId, Variant},
+    parts::{TargetId, Variant},
 };
 use schematic::{Config, ConfigEnum, PartialConfig as _, Schematic};
 use serde::{
@@ -31,10 +31,11 @@ pub enum ModelIdOrAliasConfig {
 
     /// A named alias for a model ID configuration.
     ///
-    /// The matching [`ModelIdConfig`] be fetched using
+    /// The matching [`ModelIdConfig`] can be fetched using
     /// [`LlmProviderConfig::aliases`].
     ///
-    /// [`LlmProviderConfig::aliases`]: crate::providers::llm::LlmProviderConfig::aliases
+    /// [`LlmProviderConfig::aliases`]:
+    /// crate::providers::llm::LlmProviderConfig::aliases
     #[setting(with = "alias")]
     Alias(String),
 }
@@ -399,6 +400,10 @@ pub enum ProviderId {
     Openrouter,
     /// xAI provider. See: <https://x.ai/api>. UNIMPLEMENTED.
     Xai,
+
+    /// Test provider for unit and integration tests. Not a real provider.
+    #[serde(skip)]
+    Test,
 }
 
 impl ProviderId {
@@ -414,6 +419,8 @@ impl ProviderId {
             Self::Openai => "openai",
             Self::Openrouter => "openrouter",
             Self::Xai => "xai",
+
+            Self::Test => "test",
         }
     }
 }
@@ -425,14 +432,6 @@ impl Id for ProviderId {
 
     fn target_id(&self) -> TargetId {
         self.to_string().into()
-    }
-
-    fn global_id(&self) -> GlobalId {
-        jp_id::global::get().into()
-    }
-
-    fn is_valid(&self) -> bool {
-        Self::variant().is_valid() && self.global_id().is_valid()
     }
 }
 
@@ -511,41 +510,5 @@ impl From<Name> for String {
 pub struct ModelIdError;
 
 #[cfg(test)]
-mod tests {
-    use serde_json::{Value, json};
-
-    use super::*;
-
-    #[test]
-    fn test_model_id_config_deserialize() {
-        struct TestCase {
-            data: Value,
-            expected: PartialModelIdConfig,
-        }
-
-        let cases = vec![
-            TestCase {
-                data: json!({
-                    "provider": "ollama",
-                    "name": "bar",
-                }),
-                expected: PartialModelIdConfig {
-                    provider: Some(ProviderId::Ollama),
-                    name: "bar".parse().ok(),
-                },
-            },
-            TestCase {
-                data: json!("llamacpp/bar"),
-                expected: PartialModelIdConfig {
-                    provider: Some(ProviderId::Llamacpp),
-                    name: "bar".parse().ok(),
-                },
-            },
-        ];
-
-        for TestCase { data, expected } in cases {
-            let result = serde_json::from_value::<PartialModelIdConfig>(data);
-            assert_eq!(result.unwrap(), expected);
-        }
-    }
-}
+#[path = "id_tests.rs"]
+mod tests;
