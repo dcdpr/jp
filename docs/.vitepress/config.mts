@@ -1,8 +1,12 @@
 import { defineConfig } from 'vitepress'
+import abnfGrammar from './grammars/abnf.tmLanguage.json'
 
 // https://vitepress.dev/reference/site-config
 
 export default defineConfig({
+    markdown: {
+        languages: [abnfGrammar],
+    },
     lang: 'en-US',
     base: '/', // https://jp.computer
     title: "Jean-Pierre",

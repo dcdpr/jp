@@ -1,0 +1,64 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "abnf",
+  "scopeName": "source.abnf",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#rule-def" },
+    { "include": "#expression" }
+  ],
+  "repository": {
+    "comment": {
+      "match": ";.*$",
+      "name": "comment.line.semicolon.abnf"
+    },
+    "rule-def": {
+      "match": "^([a-zA-Z][a-zA-Z0-9-]*)\\s*(=/|=)",
+      "captures": {
+        "1": { "name": "entity.name.function.abnf" },
+        "2": { "name": "keyword.operator.assignment.abnf" }
+      }
+    },
+    "expression": {
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#prose-val" },
+        { "include": "#numeric-val" },
+        { "include": "#repetition" },
+        { "include": "#operator" },
+        { "include": "#core-rule" },
+        { "include": "#rule-ref" }
+      ]
+    },
+    "string": {
+      "match": "\"[^\"]*\"",
+      "name": "string.quoted.double.abnf"
+    },
+    "prose-val": {
+      "begin": "<",
+      "end": ">",
+      "name": "string.unquoted.prose.abnf"
+    },
+    "numeric-val": {
+      "match": "%[bdx][0-9A-Fa-f]+([-\\.][0-9A-Fa-f]+)*",
+      "name": "constant.numeric.abnf"
+    },
+    "repetition": {
+      "match": "\\d+\\*\\d+|\\d+\\*|\\*\\d+|\\*|\\d+(?=[A-Z(\"<%])",
+      "name": "constant.numeric.repetition.abnf"
+    },
+    "operator": {
+      "match": "/",
+      "name": "keyword.operator.alternation.abnf"
+    },
+    "core-rule": {
+      "match": "\\b(ALPHA|BIT|CHAR|CR|CRLF|CTL|DIGIT|DQUOTE|HEXDIG|HTAB|LF|LWSP|OCTET|SP|VCHAR|WSP)\\b",
+      "name": "support.constant.core-rule.abnf"
+    },
+    "rule-ref": {
+      "match": "\\b[a-zA-Z][a-zA-Z0-9-]*\\b",
+      "name": "variable.other.rule-ref.abnf"
+    }
+  }
+}
