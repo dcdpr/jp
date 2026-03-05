@@ -1,10 +1,14 @@
-use crate::{Context, Tool, to_xml, util::ToolResult};
+use crate::{
+    Context, Tool, to_xml,
+    util::{OneOrMany, ToolResult},
+};
 
 mod create_file;
 mod delete_file;
 mod grep_files;
 mod list_files;
 mod modify_file;
+mod move_file;
 mod read_file;
 mod utils;
 
@@ -12,7 +16,8 @@ use create_file::fs_create_file;
 use delete_file::fs_delete_file;
 use grep_files::fs_grep_files;
 use list_files::fs_list_files;
-use modify_file::fs_modify_file;
+use modify_file::{Pattern, fs_modify_file};
+use move_file::fs_move_file;
 use read_file::fs_read_file;
 
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
@@ -54,14 +59,17 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
         "delete_file" => fs_delete_file(ctx.root, &t.answers, t.req("path")?).await,
 
+        "move_file" => fs_move_file(ctx.root, &t.answers, t.req("source")?, t.req("target")?).await,
+
         "modify_file" => {
             fs_modify_file(
                 ctx,
                 &t.answers,
                 t.req("path")?,
-                t.req("string_to_replace")?,
-                t.req("new_string")?,
-                t.req("replace_using_regex")?,
+                t.req::<OneOrMany<Pattern>>("patterns")?.into_vec(),
+                t.opt("replace_using_regex")?.unwrap_or(false),
+                t.opt("replace_all")?.unwrap_or(true),
+                t.opt("case_sensitive")?.unwrap_or(true),
             )
             .await
         }
