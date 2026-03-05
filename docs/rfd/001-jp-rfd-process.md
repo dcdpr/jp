@@ -1,6 +1,7 @@
 # RFD 001: The JP RFD Process
 
-- **Status**: Draft
+- **Status**: Accepted
+- **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
 
@@ -187,100 +188,62 @@ docs/rfd/NNN-short-title.md
 
 ### Templates
 
-RFDs come in two styles, each with its own template:
+Every RFD has a **Category** that describes its purpose. Each category has a
+corresponding template:
 
-| Style   | Template                | Use when                                 |
-|---------|-------------------------|------------------------------------------|
-| **rfd** | [`000-rfd-template.md`] | Proposing a feature, architectural       |
-|         |                         | change, or process change that needs a   |
-|         |                         | design.                                  |
-| **adr** | [`000-adr-template.md`] | Recording a decision that doesn't need a |
-|         |                         | full design — e.g., a technology choice, |
-|         |                         | a convention, a policy.                  |
+| Category       | Template                     | Use when                            |
+|----------------|------------------------------|-------------------------------------|
+| **Design**     | [`000-design-template.md`]   | Proposing a feature or              |
+|                |                              | architectural change that needs a   |
+|                |                              | design.                             |
+| **Decision**   | [`000-decision-template.md`] | Recording a decision — a technology |
+|                |                              | choice, a convention, a policy.     |
+| **Guide**      | [`000-guide-template.md`]    | How-tos, reference material, and    |
+|                |                              | contributor-facing documentation.   |
+| **Process**    | [`000-guide-template.md`]    | How the project operates:           |
+|                |                              | workflows, policies, values.        |
 
-Both styles share the same numbering scheme, directory, lifecycle, and review
-process. The difference is scope: an RFD-style document has a full design
-section and implementation plan; an ADR-style document has a concise context,
-decision, and consequences.
+All categories share the same numbering scheme, directory, lifecycle, and review
+process. The difference is purpose: a Design has a full design section and
+implementation plan; a Decision has concise context and consequences; a Guide
+or Process document is free-form.
 
-**The templates are starting points, not constraints.** Some documents don't fit
-either template — a policy statement, a values document, a process guideline.
-That's fine. Structure the document however it reads best. The only requirement
-is the metadata header (Status, Authors, Date) so the tooling and lifecycle
-work. Delete the template sections that don't apply, add sections that do, or
-write something entirely free-form.
+**The templates are starting points, not constraints.** Structure the document
+however it reads best. The only requirement is the metadata header (Status,
+Category, Authors, Date) so the tooling and lifecycle work. Delete the template
+sections that don't apply, add sections that do, or write something entirely
+free-form.
 
 To create a new draft:
 
 ```sh
-just rfd-draft rfd "My Feature Title"    # design proposal
-just rfd-draft adr "Use TOML for Config" # decision record
+just rfd-draft design "My Feature Title"        # design proposal
+just rfd-draft decision "Use TOML for Config"   # decision record
+just rfd-draft guide "Attachment Handler Guide" # how-to / reference
+just rfd-draft process "Release Process"        # workflow / policy
 ```
 
 This copies the appropriate template to the next available number (e.g.
-`docs/rfd/002-my-feature-title.md`), fills in the title, author, and today's
-date, and sets the status to **Draft**.
+`docs/rfd/021-my-feature-title.md`), fills in the title, author, date, and
+category, and sets the status to **Draft**.
 
-[`000-rfd-template.md`]: 000-rfd-template.md
-[`000-adr-template.md`]: 000-adr-template.md
+[`000-design-template.md`]: 000-design-template.md
+[`000-decision-template.md`]: 000-decision-template.md
+[`000-guide-template.md`]: 000-guide-template.md
 
-#### RFD sections
+#### Document sections
 
 Not all sections are required for every RFD — omit sections that genuinely don't
 apply — but think twice before skipping one. Every section can be brief. A
 one-sentence Alternatives section is better than no Alternatives section.
 
-| Section                      | Purpose                                  |
-|------------------------------|------------------------------------------|
-| **Summary**                  | One to three sentences. A reader should  |
-|                              | get the gist without reading further.    |
-| **Motivation**               | Why is this change needed? What happens  |
-|                              | if we do nothing? Start with "why"       |
-|                              | before "how."                            |
-| **Design**                   | The core proposal. Start with what the   |
-|                              | user or caller sees before describing    |
-|                              | internals. Structure freely — common     |
-|                              | subsections: Overview, Design Goals,     |
-|                              | Architecture, Data Flow, API Changes,    |
-|                              | Configuration Changes.                   |
-| **Drawbacks**                | Known costs of this approach. Argue      |
-|                              | honestly against your own proposal.      |
-| **Alternatives**             | What else was considered and why it was  |
-|                              | rejected.                                |
-| **Non-Goals**                | What this RFD explicitly does not aim to |
-|                              | achieve, even though a reader might      |
-|                              | expect it to.                            |
-| **Risks and Open Questions** | What could go wrong? What don't we know  |
-|                              | yet?                                     |
-| **Implementation Plan**      | Phases or steps. For each: what it       |
-|                              | includes, what it depends on, whether it |
-|                              | can be merged independently.             |
-| **References**               | Links to related RFDs, issues,           |
-|                              | documentation, or external resources.    |
-
-#### ADR sections
-
-ADRs are intentionally minimal. Four sections plus optional references:
-
-| Section                      | Purpose                                  |
-|------------------------------|------------------------------------------|
-| **Summary**                  | One to three sentences stating the       |
-|                              | decision.                                |
-| **Context**                  | The forces at play: constraints, needs,  |
-|                              | existing patterns. Facts, not opinions.  |
-| **Decision**                 | The choice, stated clearly. "We will use |
-|                              | X."                                      |
-| **Consequences**             | What follows — positive, negative, and   |
-|                              | neutral.                                 |
-| **References**               | Links to related RFDs, issues, or        |
-|                              | external resources.                      |
-
 #### Metadata header
 
-Both styles use the same metadata:
+All categories use the same metadata:
 
 ```markdown
-- **Status**: Draft | Discussion | Accepted | Implemented | Superseded | Abandoned
+- **Status**: Accepted | Discussion | Accepted | Implemented | Superseded | Abandoned
+- **Category**: Design | Decision | Guide | Process
 - **Authors**: Name <email> (or GitHub handle)
 - **Date**: YYYY-MM-DD
 - **Supersedes**: RFD NNN (if applicable)
@@ -305,8 +268,9 @@ Both styles use the same metadata:
 ### Creating an RFD
 
 1. Create a branch for your work.
-2. Run `just rfd-draft rfd Your Title` (or `just rfd-draft adr Your Title` for a
-   decision record) to generate the file from the appropriate template.
+2. Run `just rfd-draft CATEGORY Your Title` to generate the file from the
+   appropriate template. Category is one of: `design`, `decision`, `guide`,
+   `process`.
 3. Fill in the sections. Write your proposal.
 4. Push your branch. Iterate until you're ready for feedback.
 
@@ -339,16 +303,17 @@ Both styles use the same metadata:
 
 ### Tooling
 
-All RFD commands are in the `docs` group. Run `just --list --group docs`
+All RFD commands are in the `rfd` group. Run `just --list --group rfd`
 to see them.
 
 | Command | Description |
 |---|---|
-| `just rfd-draft rfd\|adr TITLE` | Create a new RFD from the appropriate template. |
+| `just rfd-draft CATEGORY TITLE` | Create a new RFD from the appropriate template. |
 | `just rfd-promote NNN` | Advance status: Draft → Discussion → Accepted → Implemented. |
 | `just rfd-supersede NNN MMM` | Mark RFD NNN as superseded by RFD MMM, updating both. |
 | `just rfd-abandon NNN REASON` | Mark RFD NNN as abandoned with the given reason. |
 | `just rfd-grep TERM` | Search across all RFD documents using `rg`. |
+| `just rfd-list [CATEGORY]` | List all RFDs, optionally filtered by category. |
 
 ## Relationship to Architecture Documents
 
@@ -427,8 +392,8 @@ example of a free-form RFD.
 This RFD is its own implementation. The steps are:
 
 1. Create the `docs/rfd/` directory.
-2. Add `000-rfd-template.md` for design proposals and `000-adr-template.md` for
-   decision records.
+2. Add `000-design-template.md`, `000-decision-template.md`,
+   `000-guide-template.md`, and `000-process-template.md`.
 3. Add `just` tasks for the RFD lifecycle: `rfd-draft`, `rfd-promote`,
    `rfd-supersede`, `rfd-abandon`, and `rfd-grep`.
 4. Add this document as `001-jp-rfd-process.md`.

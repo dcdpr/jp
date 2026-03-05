@@ -1,6 +1,7 @@
 # RFD 004: Streaming Markdown Parser and Terminal Renderer in `jp_md`
 
 - **Status**: Implemented
+- **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-19
 
