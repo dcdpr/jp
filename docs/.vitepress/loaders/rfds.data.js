@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const rfdDir = resolve(import.meta.dirname, '../../rfd')
-const cachePath = resolve(import.meta.dirname, '../cache/rfd-summaries.json')
+const cachePath = resolve(import.meta.dirname, '../rfd-summaries.json')
 
 function loadSummaries() {
     try {

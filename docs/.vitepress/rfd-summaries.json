@@ -1,0 +1,122 @@
+{
+  "001-jp-rfd-process.md": {
+    "hash": "79cadf180f30aea894bbb7c546f0226897ed482d053a98b138bf4832acb15d5a",
+    "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
+  },
+  "002-using-llms.md": {
+    "hash": "b159a47b9a1951a03b656b23746aa4055df1540a966ebe068d5fc478f0c05ea9",
+    "summary": "LLMs are tools; you own your output and bear responsibility for its quality regardless of how it was produced."
+  },
+  "004-streaming-md-parser-renderer.md": {
+    "hash": "cae18826a8f0da3c6cf90f9c9c9eb064fb7492f635bb3dd58cbfe2655a96cd74",
+    "summary": "JP streams markdown by segmenting blocks with custom Buffer, then renders them with ANSI-aware terminal renderer."
+  },
+  "005-first-class-inquiry-events.md": {
+    "hash": "d139575e477cb1974f8c551f18093c56441f9702f5d3a85f618a0df22018a0bd",
+    "summary": "Record inquiry events in conversation stream with centralized filtering to keep them hidden from LLM providers."
+  },
+  "006-turn-scoped-mutations.md": {
+    "hash": "6b3c3853081d8958fe1ff5dc5f4e03adad706aa05c30ad7f50972fa4f6f6fffd",
+    "summary": "Restrict stream mutations to turn-scoped accessors, preventing invalid event sequences through compile-time guarantees."
+  },
+  "007-llamacpp-reasoning.md": {
+    "hash": "c71cc82a5d9b014228dc0ec328e5d5ab387be6903a3e7bfe067c5c956b89edb3",
+    "summary": "Llamacpp provider will drop the openai crate to properly extract reasoning content from all three llama.cpp reasoning formats."
+  },
+  "008-knowledge-base.md": {
+    "hash": "d287c2288f41e60bb388a19175e4e1614dc6f0faee680e4ec1d2e54c7778d479",
+    "summary": "Proposes a file-based knowledge base system where assistants retrieve project-specific topics and subjects on-demand via a `learn` tool."
+  },
+  "009-stateful-tool-protocol.md": {
+    "hash": "252efb9eaaa9ce79ad1d598503f668cd7e86dc5ab3e6b2b7cd0dd18d9b9d39c1",
+    "summary": "Unifies one-shot and long-running tool execution under a stateful protocol enabling multi-step interactive workflows."
+  },
+  "010-pty-infrastructure-and-interactive-tool-sdk.md": {
+    "hash": "169f836a0b69b83edb58b79183624448efda52935b13b1f838cd5c05458d580d",
+    "summary": "Proposes jp_pty crate and interactive SDK for building stateful tools that wrap interactive CLI programs."
+  },
+  "011-system-message-queue.md": {
+    "hash": "ec1d22427517338cb857b904792804a09912f29834a5b8874d17eb71dabd6648",
+    "summary": "System message queue delivers asynchronous subsystem notifications to the assistant by embedding them in existing conversation messages."
+  },
+  "012-incremental-tool-call-argument-streaming.md": {
+    "hash": "00f3175cf2e7b82ebc9628309a6917cdd48f274a30ca3b60eb4baf55b5b6ea88",
+    "summary": "Parse tool call arguments incrementally as JSON streams in, emitting progress events before the full object completes."
+  },
+  "013-named-query-templates.md": {
+    "hash": "357bbe5a840673fdce2353334a88e1db8f41062d5f579a5849fa79606965709a",
+    "summary": "Add reusable, config-defined query templates with interactive prompts for collecting variables before rendering."
+  },
+  "014-attachment-handler-guide.md": {
+    "hash": "669c762ae58adcc0fb9199d45a890d1b88ab399b083d5962ef4b48399134db62",
+    "summary": "JP attachment handlers fetch context via URL schemes, supporting both opaque and hierarchical formats with add/remove/list/get trait methods."
+  },
+  "015-simplified-attachment-handler-trait.md": {
+    "hash": "c6e9cb2d3fff037e1cdfac2c855b1a279dbd62b196e17edff756f6356c6c70cb",
+    "summary": "Simplify attachment handlers from stateful (five methods) to stateless (three methods), moving URL tracking to the host."
+  },
+  "016-wasm-plugin-architecture.md": {
+    "hash": "5df08f4fa58c9c106e85002e5397fd874a31e62b2ab495b6ad2b999f83867ec4",
+    "summary": "Wasm-based plugin architecture enabling third-party extensibility with sandboxed capabilities through WIT interfaces."
+  },
+  "017-wasm-attachment-handlers.md": {
+    "hash": "50182f15c19329f873b875ebc1501494dbdd397f390d115cc1ea34bce4d09a4a",
+    "summary": "Wasm plugins export an attachment interface, wrapped in a native Handler adapter for transparent integration."
+  },
+  "018-typed-inquiry-system.md": {
+    "hash": "36e7521333b33754e34dd443ec320a186107721cba9f555df573032e1fad2a5d",
+    "summary": "Codify prompt types as `Inquiry` enum variants for unified routing, config, and extensibility."
+  },
+  "019-non-interactive-mode.md": {
+    "hash": "f8df765c0dea6c488562f5424b66fc0f8fcd4c119adbee2564abd963068028b1",
+    "summary": "Configurable fallback behavior for unattended prompts, with safe defaults and output channel separation."
+  },
+  "020-parallel-conversations.md": {
+    "hash": "33957f2787024160f2dfb5ae033286c2dfbd3c17c88dbbcfe216f2aaeb7f85c5",
+    "summary": "Replace global active conversation with per-session tracking and add conversation locks for parallel terminal work."
+  },
+  "021-printer-live-redirection.md": {
+    "hash": "876668f1458e1f0596db2834b95e750e566c76713321a7a0e90b8f86c47b6dfb",
+    "summary": "Adds runtime output redirection to Printer via SwapWriters command, enabling mid-stream destination changes without replacing instances."
+  },
+  "022-detached-conversations.md": {
+    "hash": "32572241f52e016c3cad78a554854a2a8358cd30444ccac583d0845b663d794e",
+    "summary": "Proposes detached query execution, process registry, and conversation attachment—abandoned and split into RFD 023 and 024."
+  },
+  "023-resumable-conversation-turns.md": {
+    "hash": "da2128e41bff54c376ed16ad4e81776dd13b37f65e0262abb348533446965a8f",
+    "summary": "Persist incomplete tool results and allow resuming interrupted turns via --continue flag."
+  },
+  "024-detached-query-execution.md": {
+    "hash": "f6fada08fa801a9a37dd0f39ecc7a3c983a604407cf74fe9291e1a7aab75e3b7",
+    "summary": "Detached query execution with process registry and queue policy for background conversations; superseded by RFD 027."
+  },
+  "025-live-re-attachment-to-detached-queries.md": {
+    "hash": "6d9f995427fbb9cbff81f60a0797f51bc0d7c2b02015fa3fdd690a48e9d1c3ff",
+    "summary": "Abandoned design for live re-attachment to detached query processes via Unix domain sockets; superseded by RFD 027."
+  },
+  "026-agent-loop-extraction.md": {
+    "hash": "9313e7a6500cd156b18401355d957528f0e9dd676a957c45f4f0c17c45029cbe",
+    "summary": "Extract the agent turn loop from jp_cli into a new jp_agent crate with trait-based I/O hooks."
+  },
+  "027-client-server-query-architecture.md": {
+    "hash": "3b39f9c40ea451bff0a6a1ffd02ebed2ee50931cc5229c82e5b6bc5a26b22d03",
+    "summary": "Restructure `jp query` as unified client-server architecture for foreground, detached, and reattached queries."
+  },
+  "028-structured-inquiry-system-for-tool-questions.md": {
+    "hash": "ac98a994a98b27ac240a65c7834e82c94a546bb0550e7e13a1c0d1c51a69ef42",
+    "summary": "Replace tool re-invocation with async inquiries to avoid token waste and latency when tools need LLM answers."
+  },
+  "003-jp-assisted-rfds.md": {
+    "hash": "6cd1f35b175a1fd5205c6bcfa1aa47e2b328aca93d1ef095a4609344f10e5d47",
+    "summary": "Propose an `rfd` skill configuration enabling JP to assist RFD writing through research, structure, and collaborative editing—not authorship."
+  },
+  "029-scriptable-structured-output.md": {
+    "hash": "825a9e3e35c112ee93784cd3f54a8cb50c6c292aa634fe30381c4f5ed852d653",
+    "summary": "Make JP usable in scripts by inferring clean JSON output and adding a concise schema syntax."
+  },
+  "030-schema-dsl.md": {
+    "hash": "6ad7b77699e9b0d29105793b92a958bb40e5c14a54bae41eda7c4eb970ac65ce",
+    "summary": "JP's concise DSL syntax for defining JSON Schema objects via command-line flags with types, descriptions, and nested structures."
+  }
+}

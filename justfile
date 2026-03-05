@@ -310,7 +310,7 @@ rfd-summaries *ARGS: _install-jp
     #!/usr/bin/env sh
     set -eu
 
-    CACHE="docs/.vitepress/cache/rfd-summaries.json"
+    CACHE="docs/.vitepress/rfd-summaries.json"
     MODEL="haiku"
     FORCE=false
     PROMPT="summarize this document in one sentence of max 20 words, don't start with 'The/This RFD ...'"
