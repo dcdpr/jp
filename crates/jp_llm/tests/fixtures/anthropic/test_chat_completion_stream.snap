@@ -10,11 +10,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "This is a simple test message. The user is just checking if I'm working and responsive. I should provide a friendly, brief confirmation that I'm ready to help.",
+                        reasoning: "The user has sent \"Test message\" which appears to be a simple test to see if I'm working and responding. I should acknowledge this in a friendly and helpful way.",
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("EsgCCkYICxgCKkANmWsZsSdW5VO5DoZz4QEk5/AntmcKvpA+7V9eOQoArrSvF3fgvswx9oYjGr9wP6NcUmlIYu4/TkbzsS+cHmabEgxBRacUyYpO+zSn2WoaDNMXg+8zilN01zP25yIwViATe/BNkfCbSmaCFZ6YNIVEdG/nem5drMXKDQ46R92yKSvv78M0k1t9tS95DreKKq8BWDSOh48xq3msqgWYx06t3XrUpdackM4QVs+E28DCGwjQ4mfQM9GDTGgSP/CQXZ60ImrY6pF8LbatPtsF2RJNEWiWgWbUsclTzxwB2KDOvOEai5l2absy1szd40UgDtZAEzbmQfBiAsyxXYXC7Bcqxf1BW6Q2h8yWtrLs1EHUPQmASOf8YovPFeeZ8u5skeHx+v5rzRMqJ2VWG2q7wGMBKfXhbUvLqWrIoWgq5Dmp5hgB"),
+                    "anthropic_thinking_signature": String("EsoCCkYICxgCKkDJyKbLg07EAYYyQJNONKrLTOuNC9dU0e49bspYIPvcJJG5fhfBP8Ct4aiiGLQucI2Nhpo4CDzN0GHBFqAbWz/gEgx13lQTbzvSgigqNC0aDAQm2rk8djph7kq+YSIw/5MGcnZ2DTH3UoTfHt7zq2083PHDdzVKK4Ury1ozbgAQeuN4Wyc14MmGhVsFKN4lKrEBDuSEah4NiedrMW87SFQJWNzAQ1PAnCAGgtDbU9f/c5gfoCUtK5DTLX2Z9zhKYAn+YUPkzDAxvW9IDekokPa9tUDHIJwrI9GEcH84xyoaMSzBwj0BSrb1HBps8OxCkilOs1tVh1HXyBLotI2k3woXPo/nlQ35Ys0XCTuZj5560Z56dn6RnjvD1JY8JEvocT1/Jug/97FDYsLnpfhtebs2ibYJ+CEywmEqsVsySGwWSZU/GAE="),
                 },
             },
         },
@@ -28,7 +28,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "# Hello! 👋\n\nI'm working and ready to help. What can I assist you with today?",
+                        message: "Hello! I'm working and ready to help. What can I assist you with today?",
                     },
                 ),
                 metadata: {},

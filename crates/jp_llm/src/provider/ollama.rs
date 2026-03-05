@@ -322,7 +322,11 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Result<Vec<ToolInfo>> {
                 function: ToolFunctionInfo {
                     parameters: tool.to_parameters_map().into(),
                     name: tool.name,
-                    description: tool.description.unwrap_or_default(),
+                    description: tool
+                        .docs
+                        .schema_description()
+                        .unwrap_or_default()
+                        .to_owned(),
                 },
             })
         })

@@ -41,7 +41,7 @@ impl ParameterDocs {
 }
 
 /// Documentation for a single tool.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ToolDocs {
     pub summary: Option<String>,
     pub description: Option<String>,
@@ -55,6 +55,53 @@ impl ToolDocs {
         self.description.is_none()
             && self.examples.is_none()
             && self.parameters.values().all(ParameterDocs::is_empty)
+    }
+
+    /// The short description used for the tool schema sent to the LLM.
+    ///
+    /// Returns `summary` if set, otherwise falls back to `description`.
+    #[must_use]
+    pub fn schema_description(&self) -> Option<&str> {
+        self.summary.as_deref().or(self.description.as_deref())
+    }
+
+    /// Build `ToolDocs` from a tool's configuration.
+    #[must_use]
+    pub fn from_config(config: &ToolConfigWithDefaults) -> Self {
+        let summary = config.summary().map(str::to_owned);
+        let description = config.description().map(str::to_owned);
+        let examples = config.examples().map(str::to_owned);
+
+        let parameters = config
+            .parameters()
+            .iter()
+            .filter_map(|(param_name, param_cfg)| {
+                let summary = param_cfg
+                    .summary
+                    .as_deref()
+                    .or(param_cfg.description.as_deref())
+                    .map(str::to_owned);
+                let desc = param_cfg.description.as_deref().map(str::to_owned);
+                let ex = param_cfg.examples.as_deref().map(str::to_owned);
+
+                if summary.is_none() && desc.is_none() && ex.is_none() {
+                    return None;
+                }
+
+                Some((param_name.to_owned(), ParameterDocs {
+                    summary,
+                    description: desc,
+                    examples: ex,
+                }))
+            })
+            .collect();
+
+        Self {
+            summary,
+            description,
+            examples,
+            parameters,
+        }
     }
 }
 
@@ -424,38 +471,11 @@ fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandR
 #[derive(Debug, Clone)]
 pub struct ToolDefinition {
     pub name: String,
-    pub description: Option<String>,
+    pub docs: ToolDocs,
     pub parameters: IndexMap<String, ToolParameterConfig>,
 }
 
 impl ToolDefinition {
-    pub async fn new(
-        name: &str,
-        source: &ToolSource,
-        description: Option<String>,
-        parameters: IndexMap<String, ToolParameterConfig>,
-        mcp_client: &jp_mcp::Client,
-    ) -> Result<Self, ToolError> {
-        match &source {
-            ToolSource::Local { .. } | ToolSource::Builtin { .. } => Ok(local_tool_definition(
-                name.to_owned(),
-                description,
-                parameters,
-            )),
-            ToolSource::Mcp { server, tool } => {
-                mcp_tool_definition(
-                    server.as_ref(),
-                    name,
-                    tool.as_deref(),
-                    description,
-                    parameters,
-                    mcp_client,
-                )
-                .await
-            }
-        }
-    }
-
     /// Execute the tool without any interactive prompts.
     ///
     /// This is a pure execution method that runs the tool's underlying command
@@ -893,38 +913,23 @@ fn validate_tool_arguments(
     Ok(())
 }
 
-/// Resolved tool definitions and their on-demand documentation.
-pub struct ResolvedTools {
-    /// Tool definitions sent to the LLM provider.
-    pub definitions: Vec<ToolDefinition>,
-
-    /// Per-tool documentation for `describe_tools`, keyed by tool name.
-    pub docs: IndexMap<String, ToolDocs>,
-}
-
+/// Resolve all enabled tool definitions from config.
 pub async fn tool_definitions(
     configs: impl Iterator<Item = (&str, ToolConfigWithDefaults)>,
     mcp_client: &jp_mcp::Client,
-) -> Result<ResolvedTools, ToolError> {
-    let mut definitions = vec![];
-    let mut docs = IndexMap::new();
+) -> Result<Vec<ToolDefinition>, ToolError> {
+    let mut definitions = Vec::new();
 
     for (name, config) in configs {
-        // Skip disabled tools.
         if !config.enable() {
             continue;
         }
 
-        let (definition, tool_docs) = resolve_tool(name, &config, mcp_client).await?;
-
-        if !tool_docs.is_empty() {
-            docs.insert(name.to_owned(), tool_docs);
-        }
-
+        let definition = resolve_tool(name, &config, mcp_client).await?;
         definitions.push(definition);
     }
 
-    Ok(ResolvedTools { definitions, docs })
+    Ok(definitions)
 }
 
 /// Resolve a single tool definition and its documentation.
@@ -932,182 +937,30 @@ async fn resolve_tool(
     name: &str,
     config: &ToolConfigWithDefaults,
     mcp_client: &jp_mcp::Client,
-) -> Result<(ToolDefinition, ToolDocs), ToolError> {
+) -> Result<ToolDefinition, ToolError> {
     match config.source() {
         ToolSource::Local { .. } | ToolSource::Builtin { .. } => {
-            // For local/builtin tools, docs come from config fields.
-            let definition = ToolDefinition::new(
-                name,
-                config.source(),
-                config.summary().map(str::to_owned),
-                config.parameters().clone(),
-                mcp_client,
-            )
-            .await?;
-
-            let tool_docs = docs_from_config(config);
-            Ok((definition, tool_docs))
+            let docs = ToolDocs::from_config(config);
+            Ok(ToolDefinition {
+                name: name.to_owned(),
+                docs,
+                parameters: config.parameters().clone(),
+            })
         }
-        ToolSource::Mcp { .. } => {
-            // For MCP tools, resolve against the server, then build docs
-            // from config overrides + auto-split of MCP descriptions.
-            resolve_mcp_tool(name, config, mcp_client).await
+        ToolSource::Mcp { server, tool } => {
+            resolve_mcp_tool(server.as_ref(), name, tool.as_deref(), config, mcp_client).await
         }
     }
 }
 
-/// Build `ToolDocs` from config fields (local/builtin tools).
-fn docs_from_config(config: &ToolConfigWithDefaults) -> ToolDocs {
-    let summary = config.summary().map(str::to_owned);
-    let description = config.description().map(str::to_owned);
-    let examples = config.examples().map(str::to_owned);
-
-    let parameters = config
-        .parameters()
-        .iter()
-        .filter_map(|(param_name, param_cfg)| {
-            let summary = param_cfg
-                .summary
-                .as_deref()
-                .or(param_cfg.description.as_deref())
-                .map(str::to_owned);
-            let desc = param_cfg.description.as_deref().map(str::to_owned);
-            let ex = param_cfg.examples.as_deref().map(str::to_owned);
-
-            if summary.is_none() && desc.is_none() && ex.is_none() {
-                return None;
-            }
-
-            Some((param_name.to_owned(), ParameterDocs {
-                summary,
-                description: desc,
-                examples: ex,
-            }))
-        })
-        .collect();
-
-    ToolDocs {
-        summary,
-        description,
-        examples,
-        parameters,
-    }
-}
-
-/// Resolve an MCP tool: build definition + docs with auto-split heuristic.
-async fn resolve_mcp_tool(
-    name: &str,
-    config: &ToolConfigWithDefaults,
-    mcp_client: &jp_mcp::Client,
-) -> Result<(ToolDefinition, ToolDocs), ToolError> {
-    let has_user_summary = config.summary().is_some();
-
-    let definition = ToolDefinition::new(
-        name,
-        config.source(),
-        config.summary().map(str::to_owned),
-        config.parameters().clone(),
-        mcp_client,
-    )
-    .await?;
-
-    // Build docs. If the user provided summary/description/examples in
-    // config, use those. Otherwise, auto-split the resolved MCP description.
-    let (summary, description) = if has_user_summary {
-        // User provided explicit summary — use config fields as-is.
-        (
-            config.summary().map(str::to_owned),
-            config.description().map(str::to_owned),
-        )
-    } else if let Some(resolved) = &definition.description {
-        // No user summary — auto-split the MCP description.
-        let (s, d) = split_description(resolved);
-        (Some(s), d)
-    } else {
-        (None, None)
-    };
-
-    let examples = config.examples().map(str::to_owned);
-
-    // Build parameter docs. For each parameter, check if the user
-    // provided an override. If not, auto-split the MCP description.
-    let parameters = definition
-        .parameters
-        .iter()
-        .filter_map(|(param_name, param_cfg)| {
-            let user_override = config.parameters().get(param_name);
-            let has_user_param_summary = user_override.and_then(|o| o.summary.as_ref()).is_some();
-
-            let (summary, desc) = if has_user_param_summary {
-                // User provided explicit summary for this parameter.
-                let summary = user_override
-                    .and_then(|o| o.summary.as_deref())
-                    .or(user_override.and_then(|o| o.description.as_deref()))
-                    .map(str::to_owned);
-                let desc = user_override
-                    .and_then(|o| o.description.as_deref())
-                    .map(str::to_owned);
-                (summary, desc)
-            } else if let Some(resolved) = &param_cfg.description {
-                // Auto-split the resolved (possibly MCP) description.
-                let (s, d) = split_description(resolved);
-                (Some(s), d)
-            } else {
-                (None, None)
-            };
-
-            let ex = user_override
-                .and_then(|o| o.examples.as_deref())
-                .map(str::to_owned);
-
-            if summary.is_none() && desc.is_none() && ex.is_none() {
-                return None;
-            }
-
-            Some((param_name.to_owned(), ParameterDocs {
-                summary,
-                description: desc,
-                examples: ex,
-            }))
-        })
-        .collect();
-
-    // The definition's description should be the summary (short) for the
-    // provider API. Replace it if we auto-split.
-    let mut definition = definition;
-    if !has_user_summary && let Some(ref s) = summary {
-        definition.description = Some(s.clone());
-    }
-
-    let tool_docs = ToolDocs {
-        summary,
-        description,
-        examples,
-        parameters,
-    };
-
-    Ok((definition, tool_docs))
-}
-
-fn local_tool_definition(
-    name: String,
-    description: Option<String>,
-    parameters: IndexMap<String, ToolParameterConfig>,
-) -> ToolDefinition {
-    ToolDefinition {
-        name,
-        description,
-        parameters,
-    }
-}
-
+/// Resolve an MCP tool: fetch from server, merge config overrides, auto-split
+/// descriptions into summary + detail.
 #[expect(clippy::too_many_lines)]
-async fn mcp_tool_definition(
+async fn resolve_mcp_tool(
     server: Option<&String>,
     name: &str,
     source_name: Option<&str>,
-    mut description: Option<String>,
-    parameters: IndexMap<String, ToolParameterConfig>,
+    config: &ToolConfigWithDefaults,
     mcp_client: &jp_mcp::Client,
 ) -> Result<ToolDefinition, ToolError> {
     let mcp_tool = {
@@ -1123,37 +976,35 @@ async fn mcp_tool_definition(
             .map_err(ToolError::McpGetToolError)
     }?;
 
-    match (description.as_mut(), mcp_tool.description) {
-        (None, Some(mcp)) => {
-            description = Some(mcp.to_string());
-        }
-        // TODO: should use `minijinja` instead.
-        (Some(desc), Some(mcp)) => *desc = desc.replace("{{description}}", mcp.as_ref()),
-        (Some(_) | None, None) => {}
-    }
+    let user_overrides = config.parameters();
 
+    // -- Merge tool-level description --
+    let merged_description = merge_description(
+        config.description().map(str::to_owned),
+        mcp_tool.description.as_deref(),
+    );
+
+    // -- Build parameters from MCP schema + user overrides --
     let schema = mcp_tool.input_schema.as_ref().clone();
-    let required_properties = schema
+    let required_properties: Vec<&str> = schema
         .get("required")
         .and_then(|v| v.as_array())
         .into_iter()
         .flatten()
         .filter_map(|v| v.as_str())
-        .collect::<Vec<_>>();
+        .collect();
 
     let mut params = IndexMap::new();
-    for (name, opts) in schema
+    for (param_name, opts) in schema
         .get("properties")
         .and_then(|v| v.as_object())
         .into_iter()
         .flatten()
     {
-        let override_cfg = parameters.get(name.as_str());
+        let override_cfg = user_overrides.get(param_name.as_str());
 
         let kind = match override_cfg.map(|v| v.kind.clone()) {
-            // Use `override` type if present.
             Some(kind) => kind,
-            // Or use the type from the schema.
             None => match opts.get("type").unwrap_or(&Value::Null) {
                 Value::String(v) => OneOrManyTypes::One(v.to_owned()),
                 Value::Array(v) => OneOrManyTypes::Many(
@@ -1179,7 +1030,7 @@ async fn mcp_tool_definition(
                         OneOrManyTypes::Many(any)
                     } else {
                         return Err(ToolError::InvalidType {
-                            key: name.to_owned(),
+                            key: param_name.to_owned(),
                             value: value.to_owned(),
                             need: vec!["string", "array"],
                         });
@@ -1192,18 +1043,10 @@ async fn mcp_tool_definition(
             .and_then(|v| v.default.clone())
             .or_else(|| opts.get("default").cloned());
 
-        let mut description = override_cfg.and_then(|v| v.description.clone());
-        match (
-            description.as_mut(),
+        let description = merge_description(
+            override_cfg.and_then(|v| v.description.clone()),
             opts.get("description").and_then(Value::as_str),
-        ) {
-            (None, Some(mcp)) => {
-                description = Some(mcp.to_string());
-            }
-            // TODO: should use `minijinja` instead.
-            (Some(desc), Some(mcp)) => *desc = desc.replace("{{description}}", mcp.as_ref()),
-            (Some(_) | None, None) => {}
-        }
+        );
 
         let mut enumeration: Vec<Value> = override_cfg
             .map(|v| v.enumeration.clone())
@@ -1224,14 +1067,14 @@ async fn mcp_tool_definition(
         // An MCP tool's parameter `requiredness` can be switched from `false`
         // to `true`, but not the other way around. This is because allowing
         // this could break the contract with the external tool's expectations.
-        let required = required_properties.iter().any(|p| p == name);
+        let required = required_properties.iter().any(|p| *p == param_name);
         let required = match (required, override_cfg.map(|v| v.required)) {
             (v, None) => v,
             (true, _) => true,
             (false, Some(cfg)) => cfg,
         };
 
-        params.insert(name.to_owned(), ToolParameterConfig {
+        params.insert(param_name.to_owned(), ToolParameterConfig {
             kind,
             default,
             required,
@@ -1265,11 +1108,91 @@ async fn mcp_tool_definition(
         });
     }
 
+    // -- Build docs with auto-split heuristic --
+    let has_user_summary = config.summary().is_some();
+
+    let (summary, description) = if has_user_summary {
+        // User provided explicit summary -- use config fields as-is.
+        (
+            config.summary().map(str::to_owned),
+            config.description().map(str::to_owned),
+        )
+    } else if let Some(ref desc) = merged_description {
+        let (s, d) = split_description(desc);
+        (Some(s), d)
+    } else {
+        (None, None)
+    };
+
+    let examples = config.examples().map(str::to_owned);
+
+    // Per-parameter docs: auto-split MCP descriptions when user didn't override.
+    let param_docs = params
+        .iter()
+        .filter_map(|(pname, pcfg)| {
+            let user_override = user_overrides.get(pname);
+            let has_user_param_summary = user_override.and_then(|o| o.summary.as_ref()).is_some();
+
+            let (summary, desc) = if has_user_param_summary {
+                let summary = user_override
+                    .and_then(|o| o.summary.as_deref())
+                    .or(user_override.and_then(|o| o.description.as_deref()))
+                    .map(str::to_owned);
+                let desc = user_override
+                    .and_then(|o| o.description.as_deref())
+                    .map(str::to_owned);
+                (summary, desc)
+            } else if let Some(resolved) = &pcfg.description {
+                let (s, d) = split_description(resolved);
+                (Some(s), d)
+            } else {
+                (None, None)
+            };
+
+            let ex = user_override
+                .and_then(|o| o.examples.as_deref())
+                .map(str::to_owned);
+
+            if summary.is_none() && desc.is_none() && ex.is_none() {
+                return None;
+            }
+
+            Some((pname.to_owned(), ParameterDocs {
+                summary,
+                description: desc,
+                examples: ex,
+            }))
+        })
+        .collect();
+
+    let docs = ToolDocs {
+        summary,
+        description,
+        examples,
+        parameters: param_docs,
+    };
+
     Ok(ToolDefinition {
         name: name.to_owned(),
-        description,
+        docs,
         parameters: params,
     })
+}
+
+/// Merge a user-provided description with an MCP server description.
+///
+/// If the user provided a description containing `{{description}}`, the MCP
+/// description is substituted in. If the user provided a description without
+/// the template, it takes precedence. If no user description exists, the MCP
+/// description is used as-is.
+fn merge_description(user: Option<String>, mcp: Option<&str>) -> Option<String> {
+    match (user, mcp) {
+        (None, Some(mcp)) => Some(mcp.to_owned()),
+        // TODO: should use `minijinja` instead of raw string replacement.
+        (Some(desc), Some(mcp)) => Some(desc.replace("{{description}}", mcp)),
+        (Some(desc), None) => Some(desc),
+        (None, None) => None,
+    }
 }
 
 #[cfg(test)]

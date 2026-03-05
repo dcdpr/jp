@@ -17,7 +17,7 @@ use jp_config::{
 use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest},
-    thread::{Document, Documents, Thread},
+    thread::ThreadParts,
 };
 use serde_json::{Map, Value};
 use tracing::{debug, trace};
@@ -145,21 +145,14 @@ fn create_request(
         tool_choice,
     } = query;
 
-    let Thread {
-        system_prompt,
-        sections,
-        attachments,
-        events,
-    } = thread;
-
-    // Only use the schema if the very last event is a ChatRequest with one.
-    let structured_schema = events
+    // Extract schema and config before into_parts() consumes the thread.
+    let structured_schema = thread
+        .events
         .last()
         .and_then(|e| e.event.as_chat_request())
         .and_then(|req| req.schema.clone());
     let is_structured = structured_schema.is_some();
-
-    let config = events.config()?;
+    let config = thread.events.config()?;
     let parameters = &config.assistant.model.parameters;
 
     let tools = convert_tools(tools);
@@ -259,38 +252,20 @@ fn create_request(
         None
     };
 
-    let parts = {
-        let mut parts = vec![];
-        if let Some(text) = system_prompt {
-            parts.push(types::ContentData::Text(text));
-        }
+    let ThreadParts {
+        system_parts,
+        events,
+    } = thread.into_parts()?;
 
-        for section in &sections {
-            parts.push(types::ContentData::Text(section.render()));
-        }
-
-        if !attachments.is_empty() {
-            let documents: Documents = attachments
-                .into_iter()
-                .enumerate()
-                .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
-                .map(Document::from)
-                .collect::<Vec<_>>()
-                .into();
-
-            parts.push(types::ContentData::Text(documents.try_to_xml()?));
-        }
-
-        parts
-            .into_iter()
-            .map(|data| types::ContentPart {
-                data,
-                thought: false,
-                metadata: None,
-                thought_signature: None,
-            })
-            .collect::<Vec<_>>()
-    };
+    let parts: Vec<_> = system_parts
+        .into_iter()
+        .map(|part| types::ContentPart {
+            data: types::ContentData::Text(part.into_inner()),
+            thought: false,
+            metadata: None,
+            thought_signature: None,
+        })
+        .collect();
 
     // Set structured output config on GenerationConfig when a schema is present.
     // We use `_responseJsonSchema` (the JSON Schema field) rather than
@@ -821,7 +796,11 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
                     parameters: None,
                     parameters_json_schema: Some(tool.to_parameters_schema()),
                     name: tool.name,
-                    description: tool.description.unwrap_or_default(),
+                    description: tool
+                        .docs
+                        .schema_description()
+                        .unwrap_or_default()
+                        .to_owned(),
                     response: None,
                 }],
             })

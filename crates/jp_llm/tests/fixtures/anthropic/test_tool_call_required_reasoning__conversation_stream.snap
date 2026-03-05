@@ -165,11 +165,10 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "toolu_01Gng3NhpxDTDFVY7gACxJAt",
+    "id": "toolu_01ELLqyECsLt1evNdEox3oZs",
     "name": "run_me",
     "arguments": {
-      "bar": "Zm9v",
-      "foo": "Zm9v"
+      "bar": "Zm9v"
     }
   },
   {
@@ -188,13 +187,13 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "toolu_01Gng3NhpxDTDFVY7gACxJAt",
+    "id": "toolu_01ELLqyECsLt1evNdEox3oZs",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Great! The tool ran successfully. I called the function with:\n- `bar`: \"foo\"\n- `foo`: \"foo\"\n\nAnd it returned \"working!\" - indicating the tool executed properly. Let me know if you'd like me to try it with different arguments!"
+    "message": "I've successfully run the tool with the argument `bar: \"foo\"` and it returned \"working!\" as the result."
   }
 ]

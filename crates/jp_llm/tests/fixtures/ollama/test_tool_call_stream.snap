@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "Okay, the user is asking me to run a tool and provide whatever arguments I want. Let me check the tools available. The tools section shows a function with the name \"run_me\" that takes no arguments, has no return value, and no parameters. So the function is defined as run_me with no parameters.\n\nSince the user wants me to run the tool, I should call the run_me function. The instructions say I can call one or more functions. But in this case, there's only one function available. The arguments section is empty, so I don't need to provide any arguments. The function doesn't require any parameters, so the tool call should just have the name \"run_me\" and an empty arguments object.\n\nI need to make sure the JSON is correctly formatted. The name is \"run_me\" and arguments is an empty object. Let me structure the tool_call accordingly.\n",
+                        reasoning: "Okay, the user wants me to run a tool and provide whatever arguments I want. Let me check the tools available. The tools section shows a function with the name \"run_me\" that takes no arguments. So, I can call that function without any parameters. Since there are no required arguments, I'll just trigger the function call.\n",
                     },
                 ),
                 metadata: {},
@@ -49,7 +49,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "Okay, the user asked me to run a tool, and I called the \"run_me\" function as instructed. The response from the tool was \"working!\", which indicates that the function executed successfully. Now, I need to relay this information back to the user in a clear and friendly manner.\n\nFirst, I should confirm that the tool was executed. Since the function didn't require any arguments, I can mention that I ran the tool without any parameters. Then, I should include the response from the tool to let the user know it worked. I should keep the response concise but informative, making sure to acknowledge the user's request and provide the result. Let me structure the response to be helpful and straightforward.\n",
+                        reasoning: "Okay, the user asked me to run a tool with whatever arguments I wanted. I checked the tools available and saw a function called \"run_me\" that takes no arguments. So I called that function without any parameters. The response came back as \"working!\", which seems like a confirmation that the tool executed successfully. Now I need to let the user know it worked. I should respond in a friendly way, maybe mention that the tool is running and offer further help if needed. Keep it simple and conversational.\n",
                     },
                 ),
                 metadata: {},
@@ -65,7 +65,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool \"run_me\" has been executed successfully! 🎉  \n**Response from the tool:**  \n`working!`  \n\nLet me know if you need further assistance!",
+                        message: "The tool \"run_me\" has been successfully executed! 🎉 Let me know if you need anything else.",
                     },
                 ),
                 metadata: {},

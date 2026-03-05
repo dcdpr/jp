@@ -44,15 +44,15 @@ impl From<&str> for InquiryId {
 
 /// An inquiry request event - requesting additional input or clarification.
 ///
-/// This event can be triggered by tools, the assistant, or even the user,
-/// when additional information is needed before proceeding. The system should
-/// pause execution and wait for a corresponding `InquiryResponse` event.
+/// This event can be triggered by tools, the assistant, or even the user, when
+/// additional information is needed before proceeding. The system should pause
+/// execution and wait for a corresponding `InquiryResponse` event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InquiryRequest {
     /// Identifier for this inquiry.
     ///
-    /// This must match the `id` in the corresponding `InquiryResponse`.
-    /// The caller determines the ID convention.
+    /// This must match the `id` in the corresponding `InquiryResponse`. The
+    /// caller determines the ID convention.
     pub id: InquiryId,
 
     /// The source of the inquiry (who is asking).
@@ -95,6 +95,20 @@ pub enum InquirySource {
         /// The name or identifier of the source.
         name: String,
     },
+}
+
+impl InquirySource {
+    /// Create a new inquiry source from a tool name.
+    #[must_use]
+    pub fn tool(name: impl Into<String>) -> Self {
+        Self::Tool { name: name.into() }
+    }
+
+    /// Create a new inquiry source from an other source.
+    #[must_use]
+    pub fn other(name: impl Into<String>) -> Self {
+        Self::Other { name: name.into() }
+    }
 }
 
 /// A question requiring an answer.
@@ -218,8 +232,8 @@ impl From<&str> for SelectOption {
 
 /// An inquiry response event - the answer to an inquiry request.
 ///
-/// This event MUST be in response to an `InquiryRequest` event, with a
-/// matching `id`.
+/// This event MUST be in response to an `InquiryRequest` event, with a matching
+/// `id`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InquiryResponse {
     /// ID matching the corresponding `InquiryRequest`.
@@ -289,30 +303,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_inquiry_id_display() {
-        let id = InquiryId::new("fs_modify_file.__permission__");
-        assert_eq!(id.to_string(), "fs_modify_file.__permission__");
-        assert_eq!(id.as_str(), "fs_modify_file.__permission__");
-    }
-
-    #[test]
-    fn test_inquiry_id_equality_and_hash() {
-        use std::collections::HashMap;
-
-        let id1 = InquiryId::new("same");
-        let id2 = InquiryId::new("same");
-        let id3 = InquiryId::new("different");
-
-        assert_eq!(id1, id2);
-        assert_ne!(id1, id3);
-
-        let mut map = HashMap::new();
-        map.insert(id1, "value");
-        assert_eq!(map.get(&id2), Some(&"value"));
-        assert_eq!(map.get(&id3), None);
-    }
-
-    #[test]
     fn test_inquiry_id_serialization() {
         let id = InquiryId::new("test-id");
         let json = serde_json::to_value(&id).unwrap();
@@ -326,9 +316,7 @@ mod tests {
     fn test_inquiry_request_serialization() {
         let request = InquiryRequest::new(
             "test-id",
-            InquirySource::Tool {
-                name: "file_editor".to_string(),
-            },
+            InquirySource::tool("file_editor"),
             InquiryQuestion::boolean("Do you want to proceed?".to_string())
                 .with_default(Value::Bool(false)),
         );

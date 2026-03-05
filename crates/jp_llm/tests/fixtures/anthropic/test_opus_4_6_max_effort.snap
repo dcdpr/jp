@@ -5,25 +5,25 @@ expression: v
 [
     [
         Part {
-            index: 1,
+            index: 0,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user is asking a simple arithmetic question.\n\n2 + 2 = 4",
+                        reasoning: "The user is asking a simple math question.",
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("EuEBCkYICxgCKkCPKGrRwPKSQgveXptDkTjOveepodrFdzK3+KYA5JfWOoiXaZbLQLZvysjKpK4Q2pk6Eyjwt0r2CCyGHkSEdpOsEgyrCL8z0l2rKmFzl30aDG+/Z2seBlZfyo2COyIwqLVHm2cDC5gsFE1LDd77dPWNOyva8ZEbTMDQ5GCfx3eRWTpfVyYdO24WTtqQ/tyjKkm9hkor8ggi6OZOKohzKNzC8kgHVRKUaNf0mNs8rRIE6t2zqt6t7D/f2PZM0PYbvgGVvXU6vOWgayYMhASshHaRnc7uyifbGOuRGAE="),
+                    "anthropic_thinking_signature": String("EtIBCkYICxgCKkBN5NJqJIeLCiAqkfpaWfsOkN1BR8OlbxUPrnJrvLg2wpB10LFEOdpBuDkqar3RoqRqnYDw3tWf0d8v3vqOZ741EgwcFNxoO4XttUTOs30aDJBSCDDS7MM12o/tKCIwBEsXqD98nDRhYwdqykW1nRvRO0gtiT6Yg+id8XgwgBQs8DazQhyqToQh4DH0UmbNKjo922mzjOT81xiWsuXze5CXHpy08TzdpvwPHvlL9yryWwGrvKWOr2fG6I8AgmWs9UQaVX0wUhy5jtpCGAE="),
                 },
             },
         },
         Flush {
-            index: 1,
+            index: 0,
             metadata: {},
         },
         Part {
-            index: 2,
+            index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
@@ -35,7 +35,7 @@ expression: v
             },
         },
         Flush {
-            index: 2,
+            index: 1,
             metadata: {},
         },
         Finished(

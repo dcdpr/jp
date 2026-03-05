@@ -121,10 +121,109 @@ pub struct Thread {
     pub events: ConversationStream,
 }
 
+/// A rendered piece of system content, tagged by origin.
+///
+/// Providers that need to apply per-part cache control (e.g. Anthropic,
+/// OpenRouter) can match on the variant to decide cache placement. Providers
+/// that don't care can call [`into_inner()`](SystemPart::into_inner) to get the
+/// plain string.
+#[derive(Debug, Clone)]
+pub enum SystemPart {
+    /// A prompt or section string (system prompt, instructions, context).
+    Prompt(String),
+
+    /// Rendered attachment XML.
+    Attachment(String),
+}
+
+impl SystemPart {
+    /// Consume the part and return the inner string.
+    #[must_use]
+    pub fn into_inner(self) -> String {
+        match self {
+            Self::Prompt(s) | Self::Attachment(s) => s,
+        }
+    }
+
+    /// Returns whether the part is a prompt.
+    #[must_use]
+    pub const fn is_prompt(&self) -> bool {
+        matches!(self, Self::Prompt(_))
+    }
+
+    /// Returns whether the part is an attachment.
+    #[must_use]
+    pub const fn is_attachment(&self) -> bool {
+        matches!(self, Self::Attachment(_))
+    }
+}
+
+/// The decomposed parts of a [`Thread`], ready for provider consumption.
+///
+/// System content (prompt, sections, attachments) is rendered to tagged
+/// [`SystemPart`]s. Conversation events are filtered to exclude internal types
+/// that providers should never see.
+pub struct ThreadParts {
+    /// Rendered system content, tagged by origin.
+    pub system_parts: Vec<SystemPart>,
+
+    /// Conversation events filtered to provider-visible events only.
+    pub events: ConversationStream,
+}
+
 impl Thread {
+    /// Decompose the thread into rendered system parts and filtered events.
+    ///
+    /// System prompt, sections, and attachments are rendered to strings. Events
+    /// are filtered via `EventKind::is_provider_visible()` to exclude internal
+    /// types.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if attachment XML serialization fails.
+    pub fn into_parts(self) -> Result<ThreadParts> {
+        let Self {
+            system_prompt,
+            sections,
+            attachments,
+            mut events,
+        } = self;
+
+        let mut system_parts = vec![];
+
+        if let Some(system_prompt) = system_prompt {
+            system_parts.push(SystemPart::Prompt(system_prompt));
+        }
+
+        for section in &sections {
+            system_parts.push(SystemPart::Prompt(section.render()));
+        }
+
+        if !attachments.is_empty() {
+            let documents: Documents = attachments
+                .into_iter()
+                .enumerate()
+                .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
+                .map(Document::from)
+                .collect::<Vec<_>>()
+                .into();
+
+            system_parts.push(SystemPart::Attachment(documents.try_to_xml()?));
+        }
+
+        events.retain(|e| e.kind.is_provider_visible());
+
+        Ok(ThreadParts {
+            system_parts,
+            events,
+        })
+    }
+
     /// Convert the thread into a list of messages.
     ///
-    /// Sections are rendered to strings via [`SectionConfig::render()`].
+    /// Delegates to [`into_parts()`](Self::into_parts) for system content
+    /// rendering and event filtering, then applies the provider-specific
+    /// conversion closures.
     ///
     /// # Errors
     ///
@@ -139,38 +238,16 @@ impl Thread {
         M: Fn(Vec<String>) -> U,
         S: Fn(ConversationStream) -> Vec<T>,
     {
-        let Self {
-            system_prompt,
-            sections,
-            attachments,
-            events,
-        } = self;
+        let parts = self.into_parts()?;
+        let strings: Vec<String> = parts
+            .system_parts
+            .into_iter()
+            .map(SystemPart::into_inner)
+            .collect();
 
         let mut items = vec![];
-        let mut parts = vec![];
-
-        if let Some(system_prompt) = system_prompt {
-            parts.push(system_prompt);
-        }
-
-        for section in &sections {
-            parts.push(section.render());
-        }
-
-        if !attachments.is_empty() {
-            let documents: Documents = attachments
-                .into_iter()
-                .enumerate()
-                .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
-                .map(Document::from)
-                .collect::<Vec<_>>()
-                .into();
-
-            parts.push(documents.try_to_xml()?);
-        }
-
-        items.extend(to_system_messages(parts));
-        items.extend(convert_stream(events));
+        items.extend(to_system_messages(strings));
+        items.extend(convert_stream(parts.events));
 
         Ok(items)
     }

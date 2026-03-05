@@ -165,14 +165,14 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "This is a simple test message. The user is just checking if I'm working and responsive. I should provide a friendly, brief confirmation that I'm ready to help.",
+    "reasoning": "The user has sent \"Test message\" which appears to be a simple test to see if I'm working and responding. I should acknowledge this in a friendly and helpful way.",
     "metadata": {
-      "anthropic_thinking_signature": "RXNnQ0NrWUlDeGdDS2tBTm1Xc1pzU2RXNVZPNURvWno0UUVrNS9BbnRtY0t2cEErN1Y5ZU9Rb0FyclN2RjNmZ3Zzd3g5b1lqR3I5d1A2TmNVbWxJWXU0L1RrYnpzUytjSG1hYkVneEJSYWNVeVlwTyt6U24yV29hRE5NWGcrOHppbE4wMXpQMjV5SXdWaUFUZS9CTmtmQ2JTbWFDRlo2WU5JVkVkRy9uZW01ZHJNWEtEUTQ2UjkyeUtTdnY3OE0wazF0OXRTOTVEcmVLS3E4QldEU09oNDh4cTNtc3FnV1l4MDZ0M1hyVXBkYWNrTTRRVnMrRTI4RENHd2pRNG1mUU05R0RUR2dTUC9DUVhaNjBJbXJZNnBGOExiYXRQdHNGMlJKTkVXaVdnV2JVc2NsVHp4d0IyS0RPdk9FYWk1bDJhYnN5MXN6ZDQwVWdEdFpBRXpibVFmQmlBc3l4WFlYQzdCY3F4ZjFCVzZRMmg4eVd0ckxzMUVIVVBRbUFTT2Y4WW92UEZlZVo4dTVza2VIeCt2NXJ6Uk1xSjJWV0cycTd3R01CS2ZYaGJVdkxxV3JJb1dncTVEbXA1aGdC"
+      "anthropic_thinking_signature": "RXNvQ0NrWUlDeGdDS2tESnlLYkxnMDdFQVlZeVFKTk9OS3JMVE91TkM5ZFUwZTQ5YnNwWUlQdmNKSkc1ZmhmQlA4Q3Q0YWlpR0xRdWNJMk5ocG80Q0R6TjBHSEJGcUFiV3ovZ0VneDEzbFFUYnp2U2dpZ3FOQzBhREFRbTJyazhkanBoN2txK1lTSXcvNU1HY25aMkRUSDNVb1RmSHQ3enEyMDgzUEhEZHpWS0s0VXJ5MW96YmdBUWV1TjRXeWMxNE1tR2hWc0ZLTjRsS3JFQkR1U0VhaDROaWVkck1XODdTRlFKV056QVExUEFuQ0FHZ3REYlU5Zi9jNWdmb0NVdEs1RFRMWDJaOXpoS1lBbitZVVBrekRBeHZXOUlEZWtva1BhOXRVREhJSndySTlHRWNIODR4eW9hTVN6QndqMEJTcmIxSEJwczhPeENraWxPczF0VmgxSFh5QkxvdEkyazN3b1hQby9ubFEzNVlzMFhDVHVaajU1NjBaNTZkbjZSbmp2RDFKWThKRXZvY1QxL0p1Zy85N0ZEWXNMbnBmaHRlYnMyaWJZSitDRXl3bUVxc1ZzeVNHd1dTWlUvR0FFPQ=="
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "# Hello! 👋\n\nI'm working and ready to help. What can I assist you with today?"
+    "message": "Hello! I'm working and ready to help. What can I assist you with today?"
   }
 ]

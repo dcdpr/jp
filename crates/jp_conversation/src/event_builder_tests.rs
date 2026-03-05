@@ -429,8 +429,6 @@ fn test_peek_partial_content_after_partial_flush() {
     );
 }
 
-// --- Structured response (Phase 2) ---
-
 #[test]
 fn test_accumulates_structured_chunks() {
     let mut builder = EventBuilder::new();

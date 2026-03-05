@@ -28,7 +28,7 @@ use crate::{
     model::{ModelDetails, ReasoningDetails},
     provider::get_provider,
     query::ChatQuery,
-    tool::ToolDefinition,
+    tool::{ToolDefinition, ToolDocs},
 };
 
 #[allow(clippy::large_enum_variant)]
@@ -180,7 +180,7 @@ impl TestRequest {
         if let Self::Chat { query, .. } = &mut self {
             query.tools.push(ToolDefinition {
                 name: name.into(),
-                description: None,
+                docs: ToolDocs::default(),
                 parameters: definitions
                     .into_iter()
                     .map(|(k, v)| (k.to_owned(), v))
