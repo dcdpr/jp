@@ -5,28 +5,12 @@ expression: v
 [
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "**Acknowledging the Prompt**\n\nI've received the test message. My immediate response is to acknowledge it in a friendly and neutral manner. Beyond that, I will offer the user further assistance, as is standard practice. It's a low-stakes interaction.\n\n\n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Understood! Message received.\n\nIs there anything I can help you with?",
+                        message: "Understood! I received your test message.\n\nHow can I help you?",
                     },
                 ),
                 metadata: {},

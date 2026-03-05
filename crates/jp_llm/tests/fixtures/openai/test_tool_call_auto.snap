@@ -5,36 +5,16 @@ expression: v
 [
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "",
-                    },
-                ),
-                metadata: {
-                    "openai_item_id": String("rs_014ee2e231e20d800169451a3629ac81a18df264fe3095d0a7"),
-                    "openai_encrypted_content": String("gAAAAABpRRo48hXi7Pt5wEHxt65THyf3Bpc-IXhIXntVvuAqfDGkSDlqpAJwDfkgCltYWY-L2ET9e7yRHR4SiEAxXgWNVmjLPA-_MtMBqpBENIWtjs9F7idAbgbavCJ_kido0G5bXgQ1MGOW8xlDwD18a0lfx6Wdfpd4zmwZyvdbFANOMqJipbvrhizk9elfh7AF1Sm-R3vfqTYEHC3IOG9bytdCw9SCEGHwte0NKL7VqZBf6WjMY21ZBil-PrTeefitgLIoqwLf7fsiRXv5StkwOWmcvJwM9QXuthVyhjmND9oYVYn5J9SH_Mg_C4x_FwigADUZYKqnZAacOgp-uW0ItBdHGXgYJ2xsGTKpRtccdquOsOls8juTrSVdRbc-gjCuo7YmcM-rxtuRyJVpzH3a8C7A0oxPF9nfhScWICniVhs7thDR1zJQ1ktuqjPCCroUa4xsI7CIhzL45Lrlrj-eN35ccuaVG9Pqbbs6L_tmmx6R90q8MIMV19J-ESpsogED0BYUDMC1lsLKre8ks5_lQ3vOtltFfjSvoeqaUwXqb_NddbwPZ3kDfyDkN5PeLZnEHby0FFlmFJRdIwxXU_qakscZTx2sZ4OkjaPNHlsiVo__Vn7GRutw3T6zRFvdNuZElCtpA_Xe4brSRLYb0G1AIKJ3VRhwhFFSXlHrB7wHDnZ0XaqNyiRCMOK6Op2OrxCBBHPAEUbxd9BP-rgO8Y9W5c8wA_oYR3zgPwmLHiCRIqnq6F00i9REBn_0r6c48GYgV5RhKATErU0CFOR3ATMfZ9KS9XJqGou9edn5x3ZEPi-inI_wBxiwYthsjH9EeFsU-TfoA7CtG4J-BULlL1TgxMxjME9oEZ-cefvfhob4DHsUEVYo8uL3u6IKgol02UcJ-hq4kLL7m-bnoUnKFaWXKrZ8rHCfvXT3Z_5AyQxpBHB0DlwDHyRj9fVw9z5oj9uT3yrU1xj_lo-WbGhDq6BGAvjkzanCEduLBM84rYVPKDoM26x1JLW4K8LZzyzHByK_vV04GHXMC6BRsMLSAwGBGvxq3bNzH8iT0BMMJFr3WFKu2Wm-vA9O7G5G6_pftTs-HS0WN4ZbdE6RhU-IJ3-1owjLmRq3jsKFED3Qu7ys0KBrYkSCGJdxMY2F7aeg-4cCzNJ4vfJX_vVUsViQpzAzUtnSsij9rdGxDp4rV-TJVnqqFAo-x3ZGnKW0IS7qkNn3x1mVErjZSHWfM9VzO6q8-0pgHx-ImxEpnBy947LGbem5kTvS3O1WI11A23nyPIcSWyRepbdZXYprTHe_5evA3gOnMzdDEasOYPrY0cm61byj1pjAohPLTkJVjIqFnqx2k62_B94yh2ymuodKCSLIXQPuA8YbRcQYHRmJaXeGSRqUruPpwJ55JGLa56lK8Cm9VQ8qoEXEEjmSFztwoC-tyFZC_tdxL2b9cnHZiwX4G2C7RzM88wexgef6QaWcjE4PW4oDGrzi53RnsWx8rbGxMuobvKZLd9rkjcF5FEYz3qHkmBsksb95b1DFYw0G3X2dwownZp7cX3C2u1hrGi7SN5nxAfNWDx-KFef0QyYVtTZ3xPy9ybVDI8MgAXmWcT4RfiFJXDpUUjQ-gg-1WA5rFU0I6rdTAyJ4aeukOnvbZJi5G_WLQaI2O4pZ9OM4CzOmlohZJqmTC_VbLbAIJYojsm1EU6pkP3AYGs9ctbYciqTryAZu2NyTknysMHmVC-slCrtTnSwdmH9qjh0X4y-uTHc2fMLFXXN81WWUSYorHunvsd02ivoVzDNEcFulJ5jjDOY2Bh7ZZYtI0ezwpxCgbo8uwLLziv2QR0hhkaJqaNZUftxQmWhoplFP3jBN0ctZuK86VWDuf5ed2YBvKh6IHzTEMrAYGz-DlMlcmCttnFT3vxkgBx4ZkvcEZGtDkUNVkg5ldTD0PPfZsg9ghc0YGE6QhFR1AuZa08mEEedXHZllzGLljFGuCsdK4EhhbcZTdFnWmbgD"),
-                },
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_9ZWJ1G7RAqQhpDRXNLnyPM63",
+                        id: "call_i0uruotigAMGRzlSVrivoXUS",
                         name: "run_me",
                         arguments: {
-                            "bar": String("foo"),
                             "foo": String("hello"),
-                            "note": String("running as requested"),
+                            "bar": String("foo"),
                         },
                     },
                 ),
@@ -51,21 +31,21 @@ expression: v
     ],
     [
         Part {
-            index: 0,
+            index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Tool run completed: working!",
+                        message: "I ran the tool with the arguments you provided. The tool returned:\n\nworking!\n\nIf you want me to run it again with different arguments, tell me what to change (or say “try random” and I’ll pick new ones).",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_014ee2e231e20d800169451a39db9481a1b2f9b7d7a5152293"),
+                    "openai_item_id": String("msg_0a06b2ff9f71a6a6016995b6bb5d788195b31228c17b0d570d"),
                 },
             },
         },
         Flush {
-            index: 0,
+            index: 1,
             metadata: {},
         },
         Finished(

@@ -5,6 +5,22 @@ expression: v
 [
     [
         Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Okay, the user is asking me to run a tool and provide whatever arguments I want. Let me check the tools available. The tools section shows a function named run_me with no parameters. So, I need to call run_me without any arguments. Since there are no parameters, I'll just trigger that function. No need for any arguments here. Let me make sure I'm not missing anything. The function's arguments are an empty object, so the tool call should be straightforward.\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
             index: 2,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
@@ -27,6 +43,38 @@ expression: v
         ),
     ],
     [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Okay, the user asked me to run a tool with whatever arguments I wanted. I checked the tools available and saw the 'run_me' function with no parameters. So I called run_me without any arguments. The response came back as \"working!\" which indicates the tool executed successfully. Now I need to let the user know it's done. Since there were no specific instructions on what to do next, I'll just confirm that the tool ran and offer further help if needed. Keeping it simple and friendly.\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool has been executed successfully! Let me know if you need anything else. 😊",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
         Finished(
             Completed,
         ),

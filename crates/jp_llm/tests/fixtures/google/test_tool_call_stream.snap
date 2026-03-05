@@ -13,11 +13,17 @@ expression: v
                         id: "run_me_0",
                         name: "run_me",
                         arguments: {
-                            "bar": String("foo"),
+                            "bar": Array [
+                                String("hello"),
+                                String("world"),
+                            ],
+                            "foo": String("test"),
                         },
                     },
                 ),
-                metadata: {},
+                metadata: {
+                    "google_thought_signature": String("Ci8Bvj72+2lG7Gpuyno22Xy8NHlkvt3r8iG4EQrTQ1fafLbjcumgsYOQC8KF+4HupQplAb4+9vvin22GY3VFr1/kOkriyZyR88P3nXRyrcn2QbUvdPRaq5YoxS3nVb6TTD6I72EHb1yQAlZXrTFhXAwRWhWX97oWB4G9kp8KJ06oimzwMh5d1sTWitzfYzAPqUnAyGR0u9UKwwEBvj72+2hXiNMP7Kry6Gr2qHVzxO5sWPcpMK9EqOqGs66MtiKn5TDGQeuANA+qDLfTiVVixgPDJIGehK73qIq43mGYm7zE6rJdR+jtvK8XS8AEg3UrbSxaVtkoA11WqVvj0KuzA74CQECbTSVODG3cR+YizoZWv6J6CPPLFJt2RspDfLo8JnHNIujlpaiRt1gepNNJlUsvx0Hq1J1WceXP1hmuj2/RDk4GaAVe1T70LMIkx4P7sRma9WttkPJhxu5PgG0K0wEBvj72+8h2aREsR/hBxCDngm8/KGgsX7gFo/97RMHLjV622IKY12cufBOZ/evz7aS96GaByuPEpSYbSqof52rBBa4jc1z1pFKPRlzndCYIFBOAKElIEmXUBhPUz3yB/iNBUIotyuTRY7XzZ3UlgUaZgOC5yJedVE6NwKGUbuNvMplYDGmajaFGVFrTNVRPEYrl5q43USgc4BIZsjA4RCzN21xPwz3bG96VsEIVsjFr0djZ/qvOvirkYFSZ2ug7nHHvUN7fme71d6XP48+gvJJZ7CkTCqsBAb4+9vtyT++DvxA1OJuFuem4tJGVF1UeXp1bSMGgtGAlFeBV+tI/6lFVOC3LEk/yJwVpA0L0zE6/MbEOZ47GljnPV2hCaX0mBGNfNlzOBUx+wyS+z4pgcUz6IHvquCKp8unDr9GN5XJAgI4FHaX7RNlePxZH2Rc3yVMxL6WrI4hpiFayfNuM+q8x9bEVf6UMKjg4F913aK+v6C4BmXAuwlFTKmX1vaFXI6WnCrgBAb4+9vsSSI4pb0/nxErY8UN0Img588uG0c4+u7qAGIHn4loDOjGqaJFGRqzQVsdpFHYIXJHScKB5BX6e7VjAJ9KsHEM6K1SR5YHa6/kKrjNmh413Uu73B+nHA7BMKIU22hf/aON4AqJb4ps2k0aaY3OQwQCjIUnqwKRKHNfcYq8QhM+SnXk0Y3KxrTK17xEGQOXS1Wtu+q5ZZQOvsGdizJiJpQmuYcnuArtni2Kuh9TWMs4D08g8bwpAAb4+9vuMOCtpcL/XO418+KP1FQj26FnDFbacLEumiCqF/d7PX/VOHk3BPBLRSxwrAk/GkGOI3EtbB8mzEyPU/w=="),
+                },
             },
         },
         Flush {
@@ -35,7 +41,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I ran the tool with the argument `bar=\"foo\"`. The tool returned `{\"run_me_response\": {\"content\": \"working!\"}}`.",
+                        message: "```json\n{\"run_me_response\": {\"content\": \"working!\"}}\n```",
                     },
                 ),
                 metadata: {},

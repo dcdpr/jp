@@ -13,11 +13,17 @@ expression: v
                         id: "run_me_0",
                         name: "run_me",
                         arguments: {
-                            "bar": String("foo"),
+                            "bar": Array [
+                                String("baz"),
+                                String("qux"),
+                            ],
+                            "foo": String("bar"),
                         },
                     },
                 ),
-                metadata: {},
+                metadata: {
+                    "google_thought_signature": String("Ci8Bvj72+8uU8PYtq1PG+wJitY+thHWxfcEmMeXGH2BBC7PGCHe4AMoE8tJK7wnxzApnAb4+9vusF2xoBmAyzNHBOzbKh1CHiYrMrplkweb+8vUnfZEdAT6EoUE9iU8qMuWV7QluoRu/w3TgYbtvIY/yOhnmQQkJOzwdKA4mvMzVjTvAbNvJMFiJhJsPQ/GOqMmkTVmj2rpcHQrZAQG+Pvb7ng1vsfAkl0+dupxeWk3IeyZgMQq0am+XjS5cYVj3MAavaUZ6RqYuwaxDWYlauQWIJWo13/OAdCNhc2TndfFv0E21Sz2XoQ2fdzkTGXOwhFCRMecR/IZEyDXeA9SEmjHT7k0/qiuSE42uVB1SaNrSWz7d/h7xolHaR6TJdH3iL1afzOWSg6luq+Ywo43oIpZUWzj/bVhlhoDwPAl0rHoqKofgFTpHomG1LLSec8Bmlm77d2fZMlNT+l1mHxKiMIsLVsSwBWcQAaAxgnK6Ii8+HS5fpsAKwQEBvj72+9Ka4am64qHduJLw/D7NY8hjmnvJXkmkzA78fGXd/DPEXjmc6fuGYwVO0XijDIsDO4pY8DceSdwbZJfSpWSsXncEBET0P+pKUc2iNIuQ/BpFkGuSSaoWi7Ti2EB4f3my/kpl60eaZFoAnrFrVaQMBYuAAgx78PEuh2QDQ7uQ9knAQWppOdlTtUkt+lctXW28HBQX3RQfsONRaRom09uaJnjWYe0W8GoGzRO31xlt7xV1MkBGXQEXY20vlmRtCs0BAb4+9vv74vmDJ2yq7vI5vH2IZaU9d8RTFdyAFPjE2q98xqb+ZRRovfFOgwpL4pWPAmULtU3e5sEZee1ykVci9O6uqDq+cm31t0T75D00ilN+jHNg1p3O5USqDEmxhD0rLF/15DoDqiyMJ9FdZw+KDMmPJ7l3gSlVGIDaed4kteOsewzZ8k32c2jSjsMXJNxjPEA7fDp3Q23Mzs7QpzGzTsccVL32KPDqbKNO1rA7BvEwZ41TQkc4x44ui+MwF9JDWTUQZfkqxaNKEftK2QprAb4+9vtCIKfMq4ot0Mz+gPl6R6uyNdcg9b3K0PQfDgwYQ7HJ2r+UyEUZ/YwSIgDjQ+kwlmuadx8bzbhFXjCRkr7pJhsAv+9/KpTiNC9zBdZHmHMQZQ/akTiPDzwmsZc+ER4gPFbDVvcLDvs="),
+                },
             },
         },
         Flush {
@@ -29,22 +35,6 @@ expression: v
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "The tool ran successfully and returned the following response: `{\"run_me_response\": {\"content\": \"working!\"}}`.",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
         Finished(
             Completed,
         ),

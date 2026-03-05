@@ -5,16 +5,16 @@ expression: v
 [
     [
         Part {
-            index: 0,
+            index: 2,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "QSXNsVc07RfbBfj0tQSpYlkKokWEyjaG",
+                        id: "gGsER0LA1uX0OmenHvdi7ryU3yI4KZfb",
                         name: "run_me",
                         arguments: {
+                            "foo": String("bar"),
                             "bar": String("foo"),
-                            "foo": String("test_value"),
                         },
                     },
                 ),
@@ -22,7 +22,7 @@ expression: v
             },
         },
         Flush {
-            index: 0,
+            index: 2,
             metadata: {},
         },
         Finished(
@@ -35,8 +35,8 @@ expression: v
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
-                    Message {
-                        message: "It looks like the tool executed successfully! Here is the response:\n\n```\nworking!\n```\n\nIf you need further assistance or if there's anything specific you want to achieve with this tool, feel free to let me know!",
+                    Reasoning {
+                        reasoning: "Okay, the user asked me to run a tool with whatever arguments I want. I chose the \"run_me\" tool and provided the arguments {\"foo\":\"bar\",\"bar\":\"foo\"}. The response came back as \"working!\", which is a positive sign. Now, I need to let the user know that the tool executed successfully. Since the user might be testing if the tool works, I should confirm the execution and maybe ask if they need anything else. I should keep the response friendly and open-ended to encourage further interaction. Let me check if there's anything else needed, but since the user didn't specify, a simple confirmation should suffice.",
                     },
                 ),
                 metadata: {},
@@ -44,6 +44,22 @@ expression: v
         },
         Flush {
             index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool \"run_me\" has been executed successfully with the provided arguments! 🎉 Let me know if you need further assistance or want to test something else.",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 1,
             metadata: {},
         },
         Finished(

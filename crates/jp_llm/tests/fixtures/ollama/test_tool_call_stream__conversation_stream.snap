@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -125,6 +148,11 @@ expression: v
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "Okay, the user is asking me to run a tool and provide whatever arguments I want. Let me check the tools available. The tools section shows a function with the name \"run_me\" that takes no arguments, has no return value, and no parameters. So the function is defined as run_me with no parameters.\n\nSince the user wants me to run the tool, I should call the run_me function. The instructions say I can call one or more functions. But in this case, there's only one function available. The arguments section is empty, so I don't need to provide any arguments. The function doesn't require any parameters, so the tool call should just have the name \"run_me\" and an empty arguments object.\n\nI need to make sure the JSON is correctly formatted. The name is \"run_me\" and arguments is an empty object. Let me structure the tool_call accordingly.\n"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
     "id": "",
     "name": "run_me",
@@ -136,5 +164,15 @@ expression: v
     "id": "",
     "content": "d29ya2luZyE=",
     "is_error": false
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "Okay, the user asked me to run a tool, and I called the \"run_me\" function as instructed. The response from the tool was \"working!\", which indicates that the function executed successfully. Now, I need to relay this information back to the user in a clear and friendly manner.\n\nFirst, I should confirm that the tool was executed. Since the function didn't require any arguments, I can mention that I ran the tool without any parameters. Then, I should include the response from the tool to let the user know it worked. I should keep the response concise but informative, making sure to acknowledge the user's request and provide the result. Let me structure the response to be helpful and straightforward.\n"
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "The tool \"run_me\" has been executed successfully! 🎉  \n**Response from the tool:**  \n`working!`  \n\nLet me know if you need further assistance!"
   }
 ]

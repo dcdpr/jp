@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -142,18 +165,18 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Acknowledging test message**\n\nThe user sent a \"Test message,\" so I should acknowledge that with a brief response. I’ll keep it short and also ask what they’d like to test. I could suggest some examples of tests like functionality, formatting, images, or code. My response will be concise, showing I'm ready to assist! I'll make sure to keep it friendly and open-ended to encourage the user to share more details.",
+    "reasoning": "I see that the user just sent a \"Test message.\" It seems like they might be looking for some acknowledgment, so I want to respond briefly and effectively. I’ll also offer my assistance and mention what I can do to help them. It’s important to be warm yet straightforward, making sure they feel welcome to ask anything they need. A simple and friendly response could go a long way here!",
     "metadata": {
-      "openai_item_id": "cnNfMDBiNDU1NzY2OGIyYTkyMzAxNjk0NTFhMWJkMTY0ODE5MjhjOGFiYjA2NjdkOWYwMDg=",
-      "openai_encrypted_content": "Z0FBQUFBQnBSUm9lUFhoaWRxcjJYMmFhMV9ZVEMwZzNFU1ZRTl9mN2FocnV6ZEhsdFhqeFJVSXg1QUxzbXp4MDF3RlNrV1lHbFoxdzZCbl9wSGFQMk0tdUVTRy1LRHdLZDB6N1VSNXgyVWdMa2VpMmtwRE03dkktb2gyT0lmNHZqM0NhRUhlMHRQOXlhcVB6YnQzX002ajdfUE1VX0hORUtRS05FUnBSbkdCZ3dvUko3SzN1aFJXMUNyX1RoRWl1bzBwa2F5VTJnTWxra3ZmZUR4a2c1VTNfZF9kSWdFSkF0V1NpSjJfa1BoVzdVYzVDeHhlLUpzWUxrZGtyLWM5cU0xYWo1dDlhdGtFLUJvSVowaHVkbFBOTHBITURsOVhxSC1jTUlLYUhOU3BPZU5wSVhzSDdsSzQyNmZXOS04MWg2MUNXemlWbEdoQTBaZ3c1Yk13cWpCQk9FbW9vTEZNZ3JXQmo5a1hobnpjT2d1b2FSZjd2NGZ3Y0JSYmJfd1dVd2xKbGxiTktVV1ZNWnhBTFZVLTJwcVhyTGc2UF9pNlBpRl8wWUZqT0MtN2haZmk0cDVKLTJ3bWpLQ1RVV3pLY2hoZ1NER1NnVGdPenlTVGctbWFsVWl3c3lhSFZDQ3B2Y2llMk5NSGxqR2cyeHphekFtSUJkV3FvQllfSFhmb2dHUUxHeXYzT1dfQ0tIb1hKMkF6dTh6cU5FaUsyd0VQLVZ6X2pxVE1BWVFfRGFYUFdyQlFadzhzN0tDOFhBMHlWUkhXYUVuZGp6bEFiMUtQMWVYTXlac0Q2dlZLZ1FWWVRoVmVFcVFidS04VmRDMEZoMXNtaXFvbnRqd2RSazdnbDQxSkFibGhvZ1dVb3BGcG81QktmVnFWT21ma1BHMGk2eUhPRWtabTNnRkx4Qndicm9Mb2M3ZF9HYldvSE1iWU80d1FnTkZUNjBjdTE2UWNwc2pscnBlRS1yQzVSYi0ydTBpSjhhd25kSmNFNFhtYi1mbzg1VWxGWGU4eVEwMy1na01qUHZHbllQY1Z5c1JCcGJhWW1oNUZRZlhUd2J1UFYzTndCY0dmOGo4ekp1bWM1WkkwcmVZWVd1WDBSNGYxTXBFbDljYWJBX0VnRmlyYTA1cmptNG1XalJ4bDBPM1pPLV9KVkNLcHc0TTc1d05oSmZGQW9xTlZHU2lodDlRRlkxVXZlS2NhZmVWUi13TUdETlVuU0JBdGVnSlpYSE9TQ1ZUa010ZXdBUVdrdmw0YTJna2lvZW5DNDd6Ym1OTHVsNVFocThNWGxDNlJrX2ZPU2xqdDVkaUtRUDhPQnhoNTZhY2p2ak1MOGE5T2tMQk9PMXc5eWxYa3ZZZUJNY2FxSzZhclRTYVE4WHQ1dHN3QXhXc1MwMWV5UHlVZTJ3S0dZaTZSZU9PWGRxS2hNd1hIdXlhVUFVclk5MFZBaHEwY3YyMjFEd1Fpb2V0SzlJVDJtQWhSX1JraWtyOHBuTzVPOGV2alpQYnZXZENFTGVqVHhxZkZWN3JrTVlBTDB6VWlGQy1jZjR0RE1UMUxtUmowbzkxZzZQNlAteGtRT2EwZmVHb0U1dVVJWkN1X0doX3VWZHplLTN1dkc1VlEtT0trYjNkVHRTLTc2Z0pBcQ=="
+      "openai_item_id": "cnNfMGYyYzAxMDM2YWJmOTExMTAxNjk5NWI2YjVjYjc0ODE5Mzg2NjJiYzIzNzlhM2ViNTQ=",
+      "openai_encrypted_content": "Z0FBQUFBQnBsYmE0WFFGQ2FsNDZ4ZnNHLUlEV1NDanNjYW9WM01scUtJbjd1OWpwT2llcUZFNklHN3VQSHdWekNBejdjc1VnYllsWHZaQnlnNXlYSzBXWTdrc0ZiQnJ6eTg1LTZTRUNFMnN0aWJSSl9JbllTdjJXUVNDbU5oZm9kakdCZ210RU1OcTdfVEpyRUEwVzF3NlIyeE9FTU1vdHo3XzhwSllVME9fQzdYeXo3YTlHbms0Ui1hSWd6bHJubEQ1Ui1RMS1ZNTJqZVFUdlg5eHl4TDNEYXZTZEFlVEtKWDZLVE53M1M1Tm41bmo1OEhNdXgzX1pXRGZoMTcxYmYyaGJCeVJsa3NzMEtOdndVdVJhQlMxNmU3alVNRE1sQ1BVSTNLajNPcHVKbzNRS0d5aEV0cng2X1N5a1dCZzBGOGNESFRPU1RpLVUwOUhmbUd6ZG92WEFFSzRtSXhCN3ZzVkZ1TGhqaTI3N09QNGZHQjFtdjVpMUl0dDcwd3N1dUhpaDNuZE5sSUd4SnRYTDd3OVYxUFBpX0NHdkxzdnhrSmFVWTJsTUhYelk4Ulhha1lPaTMtZHBjWThXY0dqcDlXTm9WbTRScjlsbVJPOF93dmk0QXlKV0M5bXlxaDRCaGd6bDlqaFNBVUdPM29iZmczVjZHVU90WFozTjFYRDdfbElnTGZKMkhHdFZGM1NURUtsX0tIaGFWWlZCVkprb2sxTmVPVWZuODVNdTlYMWl2aFhPTmNsU2hfOUY3b0Vodkl0MHl0d0F2WUp3MVpZbmtoNkVTRzhfZXFqam8xbGhPZzBBOElOaTNHVE12V1VxV0Y0ZzdKLVlTQnBJWnJLUFJ5dW9YVFVFVkx4QkpaME5qa0loWTl6elVmdzB1U1lPUUhyVzN2bk9OQkR5V3FwV1pOaXNiVUo0UVIwYXdSYUtZNU5udjg5R2RoQ3RVVGFZeVhZelhmUlQycm9VR1pJNXdNR0xYbmRDbjFwOEx4MGllZEtkdFprSzByUXdudXlPS3dFTDFwb2w3Y203WjZfdXU5MXpDU0pOVld4M1RsX2NmUFZ3YkRNcmlBT1ZlMmk2dXpHcGRyaWp2anZ1OEMwUWdMaTR3NWpfdnVqQ2ZzN2NOczRGeEVySGxLLWZhcDR3ejl1TVJKZGlQRllad2JkRXlTb0xSTkJ1b3NWem9Db1JJcFI0allYNVotSi1NRXhNMFloVVZLS01xWmkzRV9JX3YwRXZybE1ZV3ZLaGtyREpQS1hyZ0JqWWNZWHN3MzE0TEotLTN5U2lyRklvVUp2ejJsMU41YmNQQW00V3ZJMnBweGJoZUlremFfOTU0WWNiblQwd3oxaz0="
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Received your test message — everything looks good on my end. How would you like to proceed? Options I can help with:\n- Run a quick Q&A or knowledge test\n- Check formatting or output style (plain text, code blocks, JSON)\n- Test image or file handling\n- Run a short code snippet or math calculation\n\nTell me which you'd like to test or send another message.",
+    "message": "Received your test message. How can I help you today?",
     "metadata": {
-      "openai_item_id": "bXNnXzAwYjQ1NTc2NjhiMmE5MjMwMTY5NDUxYTFlNGFhNDgxOTI4MWU1NjFiN2ZjYmNkMzZj"
+      "openai_item_id": "bXNnXzBmMmMwMTAzNmFiZjkxMTEwMTY5OTViNmI4MmYyODgxOTM4YzAxMGU4NDgxNmZjZWMz"
     }
   }
 ]

@@ -22,139 +22,123 @@ then:
     - name: content-type
       value: application/x-ndjson
   body: |
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.321166Z","message":{"role":"assistant","content":"","thinking":"Okay"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.357993Z","message":{"role":"assistant","content":"","thinking":","},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.394615Z","message":{"role":"assistant","content":"","thinking":" the"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.431811Z","message":{"role":"assistant","content":"","thinking":" user"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.469701Z","message":{"role":"assistant","content":"","thinking":" sent"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.50664Z","message":{"role":"assistant","content":"","thinking":" \""},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.542942Z","message":{"role":"assistant","content":"","thinking":"Test"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.5814Z","message":{"role":"assistant","content":"","thinking":" message"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.617782Z","message":{"role":"assistant","content":"","thinking":" /"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.654482Z","message":{"role":"assistant","content":"","thinking":"think"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.735836Z","message":{"role":"assistant","content":"","thinking":"\"."},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.841432Z","message":{"role":"assistant","content":"","thinking":" Let"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:25.947761Z","message":{"role":"assistant","content":"","thinking":" me"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.050616Z","message":{"role":"assistant","content":"","thinking":" figure"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.161437Z","message":{"role":"assistant","content":"","thinking":" out"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.264638Z","message":{"role":"assistant","content":"","thinking":" how"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.375885Z","message":{"role":"assistant","content":"","thinking":" to"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.485677Z","message":{"role":"assistant","content":"","thinking":" respond"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.592866Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.616496Z","message":{"role":"assistant","content":"","thinking":" First"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.653534Z","message":{"role":"assistant","content":"","thinking":","},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.690314Z","message":{"role":"assistant","content":"","thinking":" I"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.728549Z","message":{"role":"assistant","content":"","thinking":" should"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.766385Z","message":{"role":"assistant","content":"","thinking":" acknowledge"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.802759Z","message":{"role":"assistant","content":"","thinking":" their"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.839098Z","message":{"role":"assistant","content":"","thinking":" test"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.87541Z","message":{"role":"assistant","content":"","thinking":" message"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.914097Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.952041Z","message":{"role":"assistant","content":"","thinking":" Maybe"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:26.992334Z","message":{"role":"assistant","content":"","thinking":" say"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.029251Z","message":{"role":"assistant","content":"","thinking":" something"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.06787Z","message":{"role":"assistant","content":"","thinking":" like"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.105926Z","message":{"role":"assistant","content":"","thinking":" \""},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.143962Z","message":{"role":"assistant","content":"","thinking":"Received"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.180634Z","message":{"role":"assistant","content":"","thinking":" your"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.218181Z","message":{"role":"assistant","content":"","thinking":" test"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.255911Z","message":{"role":"assistant","content":"","thinking":" message"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.303109Z","message":{"role":"assistant","content":"","thinking":"!\""},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.365041Z","message":{"role":"assistant","content":"","thinking":" to"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.428759Z","message":{"role":"assistant","content":"","thinking":" confirm"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.492431Z","message":{"role":"assistant","content":"","thinking":" I"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.535673Z","message":{"role":"assistant","content":"","thinking":" got"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.570708Z","message":{"role":"assistant","content":"","thinking":" it"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.601086Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.634899Z","message":{"role":"assistant","content":"","thinking":" Then"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.681713Z","message":{"role":"assistant","content":"","thinking":","},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.728981Z","message":{"role":"assistant","content":"","thinking":" offer"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.773138Z","message":{"role":"assistant","content":"","thinking":" help"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.81403Z","message":{"role":"assistant","content":"","thinking":" in"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.852701Z","message":{"role":"assistant","content":"","thinking":" case"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.891319Z","message":{"role":"assistant","content":"","thinking":" they"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.927746Z","message":{"role":"assistant","content":"","thinking":" need"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:27.964335Z","message":{"role":"assistant","content":"","thinking":" anything"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.001164Z","message":{"role":"assistant","content":"","thinking":" else"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.037909Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.074083Z","message":{"role":"assistant","content":"","thinking":" Keep"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.110771Z","message":{"role":"assistant","content":"","thinking":" it"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.148662Z","message":{"role":"assistant","content":"","thinking":" friendly"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.186678Z","message":{"role":"assistant","content":"","thinking":" and"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.22483Z","message":{"role":"assistant","content":"","thinking":" open"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.262113Z","message":{"role":"assistant","content":"","thinking":"-ended"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.299492Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.337572Z","message":{"role":"assistant","content":"","thinking":" Let"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.376242Z","message":{"role":"assistant","content":"","thinking":" me"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.412692Z","message":{"role":"assistant","content":"","thinking":" check"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.449485Z","message":{"role":"assistant","content":"","thinking":" if"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.486009Z","message":{"role":"assistant","content":"","thinking":" there"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.521665Z","message":{"role":"assistant","content":"","thinking":"'s"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.558266Z","message":{"role":"assistant","content":"","thinking":" anything"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.593711Z","message":{"role":"assistant","content":"","thinking":" else"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.629442Z","message":{"role":"assistant","content":"","thinking":" they"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.666813Z","message":{"role":"assistant","content":"","thinking":" might"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.703464Z","message":{"role":"assistant","content":"","thinking":" need"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.739655Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.774886Z","message":{"role":"assistant","content":"","thinking":" Since"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.81126Z","message":{"role":"assistant","content":"","thinking":" it"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.848399Z","message":{"role":"assistant","content":"","thinking":"'s"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.886909Z","message":{"role":"assistant","content":"","thinking":" a"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.931018Z","message":{"role":"assistant","content":"","thinking":" test"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:28.969231Z","message":{"role":"assistant","content":"","thinking":","},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.007406Z","message":{"role":"assistant","content":"","thinking":" they"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.045605Z","message":{"role":"assistant","content":"","thinking":" might"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.082621Z","message":{"role":"assistant","content":"","thinking":" just"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.120768Z","message":{"role":"assistant","content":"","thinking":" be"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.159166Z","message":{"role":"assistant","content":"","thinking":" checking"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.197583Z","message":{"role":"assistant","content":"","thinking":" if"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.234976Z","message":{"role":"assistant","content":"","thinking":" the"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.272901Z","message":{"role":"assistant","content":"","thinking":" system"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.311259Z","message":{"role":"assistant","content":"","thinking":" works"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.349004Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.385714Z","message":{"role":"assistant","content":"","thinking":" So"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.423555Z","message":{"role":"assistant","content":"","thinking":" a"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.461677Z","message":{"role":"assistant","content":"","thinking":" simple"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.499065Z","message":{"role":"assistant","content":"","thinking":","},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.537634Z","message":{"role":"assistant","content":"","thinking":" positive"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.575869Z","message":{"role":"assistant","content":"","thinking":" response"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.614689Z","message":{"role":"assistant","content":"","thinking":" should"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.652878Z","message":{"role":"assistant","content":"","thinking":" be"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.691834Z","message":{"role":"assistant","content":"","thinking":" good"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.728205Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.765829Z","message":{"role":"assistant","content":"","thinking":" Alright"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.804466Z","message":{"role":"assistant","content":"","thinking":","},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.843379Z","message":{"role":"assistant","content":"","thinking":" I"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.879249Z","message":{"role":"assistant","content":"","thinking":"'ll"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.917919Z","message":{"role":"assistant","content":"","thinking":" go"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.957087Z","message":{"role":"assistant","content":"","thinking":" with"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:29.994553Z","message":{"role":"assistant","content":"","thinking":" that"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.031279Z","message":{"role":"assistant","content":"","thinking":".\n"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.147079Z","message":{"role":"assistant","content":"Received"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.185768Z","message":{"role":"assistant","content":" your"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.222935Z","message":{"role":"assistant","content":" test"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.261503Z","message":{"role":"assistant","content":" message"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.299504Z","message":{"role":"assistant","content":"!"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.420451Z","message":{"role":"assistant","content":" 😊"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.483035Z","message":{"role":"assistant","content":" If"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.54758Z","message":{"role":"assistant","content":" you"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.613981Z","message":{"role":"assistant","content":" have"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.655345Z","message":{"role":"assistant","content":" any"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.684571Z","message":{"role":"assistant","content":" questions"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.717132Z","message":{"role":"assistant","content":" or"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.748297Z","message":{"role":"assistant","content":" need"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.780526Z","message":{"role":"assistant","content":" assistance"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.812332Z","message":{"role":"assistant","content":","},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.845227Z","message":{"role":"assistant","content":" feel"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.879438Z","message":{"role":"assistant","content":" free"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.916851Z","message":{"role":"assistant","content":" to"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.955052Z","message":{"role":"assistant","content":" ask"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:30.992573Z","message":{"role":"assistant","content":"."},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:31.03055Z","message":{"role":"assistant","content":" How"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:31.06682Z","message":{"role":"assistant","content":" can"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:31.105192Z","message":{"role":"assistant","content":" I"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:31.142278Z","message":{"role":"assistant","content":" help"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:31.18126Z","message":{"role":"assistant","content":" you"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:31.217563Z","message":{"role":"assistant","content":" today"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:31.255652Z","message":{"role":"assistant","content":"?"},"done":false}
-    {"model":"qwen3:8b","created_at":"2025-12-19T09:25:31.293241Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":12978918375,"load_duration":1368653208,"prompt_eval_count":12,"prompt_eval_duration":72044708,"eval_count":141,"eval_duration":6016519750}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.722429Z","message":{"role":"assistant","content":"","thinking":"Okay"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.74333Z","message":{"role":"assistant","content":"","thinking":","},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.763381Z","message":{"role":"assistant","content":"","thinking":" the"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.783982Z","message":{"role":"assistant","content":"","thinking":" user"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.804096Z","message":{"role":"assistant","content":"","thinking":" sent"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.824066Z","message":{"role":"assistant","content":"","thinking":" a"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.844399Z","message":{"role":"assistant","content":"","thinking":" test"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.864691Z","message":{"role":"assistant","content":"","thinking":" message"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.884745Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.906231Z","message":{"role":"assistant","content":"","thinking":" Let"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.926471Z","message":{"role":"assistant","content":"","thinking":" me"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.946358Z","message":{"role":"assistant","content":"","thinking":" see"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.96651Z","message":{"role":"assistant","content":"","thinking":"..."},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:26.98716Z","message":{"role":"assistant","content":"","thinking":" They"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.007831Z","message":{"role":"assistant","content":"","thinking":" wrote"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.029085Z","message":{"role":"assistant","content":"","thinking":" \""},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.049256Z","message":{"role":"assistant","content":"","thinking":"Test"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.069992Z","message":{"role":"assistant","content":"","thinking":" message"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.090032Z","message":{"role":"assistant","content":"","thinking":" /"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.110127Z","message":{"role":"assistant","content":"","thinking":"think"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.130693Z","message":{"role":"assistant","content":"","thinking":"\"."},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.150823Z","message":{"role":"assistant","content":"","thinking":" Hmm"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.171199Z","message":{"role":"assistant","content":"","thinking":","},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.191947Z","message":{"role":"assistant","content":"","thinking":" maybe"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.212019Z","message":{"role":"assistant","content":"","thinking":" they"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.232066Z","message":{"role":"assistant","content":"","thinking":"'re"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.252114Z","message":{"role":"assistant","content":"","thinking":" just"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.272331Z","message":{"role":"assistant","content":"","thinking":" checking"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.29307Z","message":{"role":"assistant","content":"","thinking":" if"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.313846Z","message":{"role":"assistant","content":"","thinking":" the"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.33382Z","message":{"role":"assistant","content":"","thinking":" system"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.35439Z","message":{"role":"assistant","content":"","thinking":" is"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.374493Z","message":{"role":"assistant","content":"","thinking":" working"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.394768Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.41484Z","message":{"role":"assistant","content":"","thinking":" I"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.434872Z","message":{"role":"assistant","content":"","thinking":" should"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.454945Z","message":{"role":"assistant","content":"","thinking":" respond"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.475381Z","message":{"role":"assistant","content":"","thinking":" in"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.495552Z","message":{"role":"assistant","content":"","thinking":" a"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.515704Z","message":{"role":"assistant","content":"","thinking":" friendly"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.535791Z","message":{"role":"assistant","content":"","thinking":" and"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.556004Z","message":{"role":"assistant","content":"","thinking":" helpful"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.575971Z","message":{"role":"assistant","content":"","thinking":" way"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.596711Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.61752Z","message":{"role":"assistant","content":"","thinking":" Let"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.637548Z","message":{"role":"assistant","content":"","thinking":" me"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.658237Z","message":{"role":"assistant","content":"","thinking":" make"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.678294Z","message":{"role":"assistant","content":"","thinking":" sure"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.698278Z","message":{"role":"assistant","content":"","thinking":" to"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.718288Z","message":{"role":"assistant","content":"","thinking":" acknowledge"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.738159Z","message":{"role":"assistant","content":"","thinking":" their"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.758243Z","message":{"role":"assistant","content":"","thinking":" message"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.778211Z","message":{"role":"assistant","content":"","thinking":" and"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.798357Z","message":{"role":"assistant","content":"","thinking":" offer"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.818467Z","message":{"role":"assistant","content":"","thinking":" assistance"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.838488Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.858558Z","message":{"role":"assistant","content":"","thinking":" Maybe"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.878829Z","message":{"role":"assistant","content":"","thinking":" something"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.899464Z","message":{"role":"assistant","content":"","thinking":" like"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.920295Z","message":{"role":"assistant","content":"","thinking":","},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.940401Z","message":{"role":"assistant","content":"","thinking":" \""},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.960423Z","message":{"role":"assistant","content":"","thinking":"Hello"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:27.980491Z","message":{"role":"assistant","content":"","thinking":"!"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.000577Z","message":{"role":"assistant","content":"","thinking":" This"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.020656Z","message":{"role":"assistant","content":"","thinking":" is"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.040663Z","message":{"role":"assistant","content":"","thinking":" a"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.060744Z","message":{"role":"assistant","content":"","thinking":" test"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.080692Z","message":{"role":"assistant","content":"","thinking":" message"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.100923Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.120804Z","message":{"role":"assistant","content":"","thinking":" How"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.141006Z","message":{"role":"assistant","content":"","thinking":" can"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.160947Z","message":{"role":"assistant","content":"","thinking":" I"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.181343Z","message":{"role":"assistant","content":"","thinking":" assist"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.201926Z","message":{"role":"assistant","content":"","thinking":" you"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.222638Z","message":{"role":"assistant","content":"","thinking":" today"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.242753Z","message":{"role":"assistant","content":"","thinking":"?\""},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.262835Z","message":{"role":"assistant","content":"","thinking":" That"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.282824Z","message":{"role":"assistant","content":"","thinking":" should"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.302828Z","message":{"role":"assistant","content":"","thinking":" cover"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.322723Z","message":{"role":"assistant","content":"","thinking":" it"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.343277Z","message":{"role":"assistant","content":"","thinking":"."},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.363407Z","message":{"role":"assistant","content":"","thinking":" I"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.383468Z","message":{"role":"assistant","content":"","thinking":" need"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.403622Z","message":{"role":"assistant","content":"","thinking":" to"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.423679Z","message":{"role":"assistant","content":"","thinking":" keep"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.443855Z","message":{"role":"assistant","content":"","thinking":" it"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.463975Z","message":{"role":"assistant","content":"","thinking":" simple"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.484057Z","message":{"role":"assistant","content":"","thinking":" and"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.505289Z","message":{"role":"assistant","content":"","thinking":" open"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.526256Z","message":{"role":"assistant","content":"","thinking":"-ended"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.546477Z","message":{"role":"assistant","content":"","thinking":" so"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.56793Z","message":{"role":"assistant","content":"","thinking":" they"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.588529Z","message":{"role":"assistant","content":"","thinking":" know"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.608623Z","message":{"role":"assistant","content":"","thinking":" I"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.62873Z","message":{"role":"assistant","content":"","thinking":"'m"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.648872Z","message":{"role":"assistant","content":"","thinking":" here"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.669549Z","message":{"role":"assistant","content":"","thinking":" to"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.689788Z","message":{"role":"assistant","content":"","thinking":" help"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.709875Z","message":{"role":"assistant","content":"","thinking":" with"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.730026Z","message":{"role":"assistant","content":"","thinking":" anything"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.750119Z","message":{"role":"assistant","content":"","thinking":" they"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.770313Z","message":{"role":"assistant","content":"","thinking":" need"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.790597Z","message":{"role":"assistant","content":"","thinking":".\n"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.852432Z","message":{"role":"assistant","content":"Hello"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.872589Z","message":{"role":"assistant","content":"!"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.893369Z","message":{"role":"assistant","content":" This"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.913514Z","message":{"role":"assistant","content":" is"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.933646Z","message":{"role":"assistant","content":" a"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.953723Z","message":{"role":"assistant","content":" test"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.973869Z","message":{"role":"assistant","content":" message"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:28.994269Z","message":{"role":"assistant","content":"."},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:29.014415Z","message":{"role":"assistant","content":" How"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:29.034524Z","message":{"role":"assistant","content":" can"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:29.054674Z","message":{"role":"assistant","content":" I"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:29.074854Z","message":{"role":"assistant","content":" assist"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:29.09517Z","message":{"role":"assistant","content":" you"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:29.116222Z","message":{"role":"assistant","content":" today"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:29.137047Z","message":{"role":"assistant","content":"?"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:29.177551Z","message":{"role":"assistant","content":" 😊"},"done":false}
+    {"model":"qwen3:8b","created_at":"2026-02-18T13:49:29.197923Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":12317455667,"load_duration":101786875,"prompt_eval_count":12,"prompt_eval_duration":39129083,"eval_count":125,"eval_duration":2494093957}

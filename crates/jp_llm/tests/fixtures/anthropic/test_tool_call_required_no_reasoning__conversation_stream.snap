@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -126,7 +149,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "toolu_019vC4caRFWmNSU9ryoL5xte",
+    "id": "toolu_01D2Ms5Ux5uh1U66hqnTNF4c",
     "name": "run_me",
     "arguments": {
       "bar": "Zm9v"
@@ -135,13 +158,13 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "toolu_019vC4caRFWmNSU9ryoL5xte",
+    "id": "toolu_01D2Ms5Ux5uh1U66hqnTNF4c",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Great! The tool ran successfully with the argument `bar: \"foo\"` and returned `\"working!\"`. It seems like a simple echo or validation tool that confirms execution."
+    "message": "Great! I ran the tool with the argument `bar` set to `\"foo\"` and it returned `\"working!\"` successfully."
   }
 ]

@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -142,6 +165,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Hello! How can I assist you today? If you have any questions or need any information, feel free to ask."
+    "reasoning": "Okay, the user sent a \"Test message.\" I need to respond appropriately. Since it's a test, they might be checking if the system is working or trying to see how I handle unexpected inputs.\n\nFirst, I should acknowledge their message to show I received it. Maybe say something like, \"Hello! This is a test message. How can I assist you today?\" That's friendly and opens the door for further conversation.\n\nI should keep the response simple and positive. Avoid any technical jargon. Make sure it's clear that I'm here to help with any questions or tasks they might have. Also, check if there's any specific context they want to test, but since it's just a test message, keep it general.\n\nWait, should I ask them to clarify their intent? Maybe not necessary unless they ask a follow-up. Just a straightforward reply should suffice. Let me make sure the tone is welcoming and helpful. Yep, that should cover it."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "message": "Hello! This is a test message. How can I assist you today? 😊"
   }
 ]

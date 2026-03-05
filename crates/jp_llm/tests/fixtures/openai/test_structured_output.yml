@@ -1,0 +1,142 @@
+when:
+  path: /v1/responses
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-5-mini",
+      "input": [
+        {
+          "type": "message",
+          "role": "system",
+          "content": []
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": "Generate a title for this conversation."
+        }
+      ],
+      "include": null,
+      "instructions": null,
+      "max_output_tokens": null,
+      "metadata": null,
+      "parallel_tool_calls": null,
+      "previous_response_id": null,
+      "reasoning": {
+        "effort": "minimal",
+        "summary": null
+      },
+      "service_tier": null,
+      "store": false,
+      "stream": true,
+      "temperature": null,
+      "text": {
+        "format": {
+          "type": "json_schema",
+          "schema": {
+            "type": "object",
+            "required": [
+              "titles"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "titles": {
+                "type": "array",
+                "maxItems": 1,
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "description": "A concise, descriptive title for the conversation"
+                }
+              }
+            }
+          },
+          "description": "Structured output",
+          "name": "structured_output",
+          "strict": true
+        }
+      },
+      "tool_choice": "auto",
+      "tools": [],
+      "top_p": null,
+      "truncation": "auto",
+      "user": null
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    event: response.created
+    data: {"type":"response.created","response":{"id":"resp_0f88d65ccbba21df016995b6b6e06881948aecb4f14aa684ed","object":"response","created_at":1771419318,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"minimal","summary":null},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"json_schema","description":"Structured output","name":"structured_output","schema":{"type":"object","required":["titles"],"additionalProperties":false,"properties":{"titles":{"type":"array","maxItems":1,"minItems":1,"items":{"type":"string","description":"A concise, descriptive title for the conversation"}}}},"strict":true},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+    
+    event: response.in_progress
+    data: {"type":"response.in_progress","response":{"id":"resp_0f88d65ccbba21df016995b6b6e06881948aecb4f14aa684ed","object":"response","created_at":1771419318,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"minimal","summary":null},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"json_schema","description":"Structured output","name":"structured_output","schema":{"type":"object","required":["titles"],"additionalProperties":false,"properties":{"titles":{"type":"array","maxItems":1,"minItems":1,"items":{"type":"string","description":"A concise, descriptive title for the conversation"}}}},"strict":true},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+    
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","item":{"id":"rs_0f88d65ccbba21df016995b6b70ee08194991e99e2bf7d7379","type":"reasoning","summary":[]},"output_index":0,"sequence_number":2}
+    
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","item":{"id":"rs_0f88d65ccbba21df016995b6b70ee08194991e99e2bf7d7379","type":"reasoning","summary":[]},"output_index":0,"sequence_number":3}
+    
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","item":{"id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","type":"message","status":"in_progress","content":[],"role":"assistant"},"output_index":1,"sequence_number":4}
+    
+    event: response.content_part.added
+    data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","output_index":1,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":5}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"{\"","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"wJxCVjJ2qbNfZ4","output_index":1,"sequence_number":6}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"titles","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"EyP1KCpDQz","output_index":1,"sequence_number":7}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"\":[\"","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"3AxYPURC1D5A","output_index":1,"sequence_number":8}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"Help","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"8s0MDkA4cMUd","output_index":1,"sequence_number":9}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" with","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"GGMTJZzxt71","output_index":1,"sequence_number":10}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" Herr","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"bSURyYnhbKv","output_index":1,"sequence_number":11}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"ington","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"EVW8jrftoA","output_index":1,"sequence_number":12}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" Hall","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"MjhxBPx6yFR","output_index":1,"sequence_number":13}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" classroom","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"vbm5eg","output_index":1,"sequence_number":14}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" assignment","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"z8spA","output_index":1,"sequence_number":15}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" and","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"Xvk3qwbkD3dc","output_index":1,"sequence_number":16}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":" images","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"3hhIaTrsC","output_index":1,"sequence_number":17}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"\"]","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"PeRMzPaDssmICD","output_index":1,"sequence_number":18}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"}","item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"obfuscation":"8S468dqu2jfiWAK","output_index":1,"sequence_number":19}
+    
+    event: response.output_text.done
+    data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","logprobs":[],"output_index":1,"sequence_number":20,"text":"{\"titles\":[\"Help with Herrington Hall classroom assignment and images\"]}"}
+    
+    event: response.content_part.done
+    data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","output_index":1,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"{\"titles\":[\"Help with Herrington Hall classroom assignment and images\"]}"},"sequence_number":21}
+    
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","item":{"id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"{\"titles\":[\"Help with Herrington Hall classroom assignment and images\"]}"}],"role":"assistant"},"output_index":1,"sequence_number":22}
+    
+    event: response.completed
+    data: {"type":"response.completed","response":{"id":"resp_0f88d65ccbba21df016995b6b6e06881948aecb4f14aa684ed","object":"response","created_at":1771419318,"status":"completed","background":false,"completed_at":1771419319,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-mini-2025-08-07","output":[{"id":"rs_0f88d65ccbba21df016995b6b70ee08194991e99e2bf7d7379","type":"reasoning","summary":[]},{"id":"msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"{\"titles\":[\"Help with Herrington Hall classroom assignment and images\"]}"}],"role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"minimal","summary":null},"safety_identifier":null,"service_tier":"default","store":false,"temperature":1.0,"text":{"format":{"type":"json_schema","description":"Structured output","name":"structured_output","schema":{"type":"object","required":["titles"],"additionalProperties":false,"properties":{"titles":{"type":"array","maxItems":1,"minItems":1,"items":{"type":"string","description":"A concise, descriptive title for the conversation"}}}},"strict":true},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"auto","usage":{"input_tokens":56,"input_tokens_details":{"cached_tokens":0},"output_tokens":36,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":92},"user":null,"metadata":{}},"sequence_number":23}
+    

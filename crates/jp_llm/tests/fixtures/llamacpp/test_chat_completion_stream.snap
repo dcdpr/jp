@@ -9,276 +9,32 @@ expression: v
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
-                    Message {
-                        message: "Hel",
+                    Reasoning {
+                        reasoning: "Okay, the user sent a \"Test message.\" I need to respond appropriately. Since it's a test, they might be checking if the system is working or trying to see how I handle unexpected inputs.\n\nFirst, I should acknowledge their message to show I received it. Maybe say something like, \"Hello! This is a test message. How can I assist you today?\" That's friendly and opens the door for further conversation.\n\nI should keep the response simple and positive. Avoid any technical jargon. Make sure it's clear that I'm here to help with any questions or tasks they might have. Also, check if there's any specific context they want to test, but since it's just a test message, keep it general.\n\nWait, should I ask them to clarify their intent? Maybe not necessary unless they ask a follow-up. Just a straightforward reply should suffice. Let me make sure the tone is welcoming and helpful. Yep, that should cover it.",
                     },
                 ),
                 metadata: {},
             },
         },
-        Part {
+        Flush {
             index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "lo! ",
+                        message: "Hello! This is a test message. How can I assist you today? 😊",
                     },
                 ),
                 metadata: {},
             },
         },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "Ho",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "w can I",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " ass",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "ist yo",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "u",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " to",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "day?",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " If y",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "ou h",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "ave any qu",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "est",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "ions ",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "or n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "eed any info",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "r",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "matio",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "n, fe",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "el ",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "free",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: " ",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "to ask.",
-                    },
-                ),
-                metadata: {},
-            },
+        Flush {
+            index: 1,
+            metadata: {},
         },
         Finished(
             Completed,

@@ -14,10 +14,13 @@ expression: v
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
+                            "foo": String("bar"),
                         },
                     },
                 ),
-                metadata: {},
+                metadata: {
+                    "google_thought_signature": String("CiQBvj72+/amGwPgUZ3oQqITI+ZyIQARKKeowZH2aKRDQ24TudMKXgG+Pvb7sIxjClGcxZc7cf9Tk8XrIhJJbR4NBDEre13bP2hZjBBOFlnV71Syjl0+xiYCAUDEFra6p8HC1atySvibSS/NLTdNuJxjyBHvlfW5BQXU61fomF8BzXT98vMK0wEBvj72+2RUe96x51uzPhF9nzEUZnxM9c/tPmF3WFg2Wa1J6wpCVwJOGklI1YJajpBwDGoDW1rhp32ZNTVuUgP+Bjr3RNj07wfU7TXwpkw5Xrfz0/3FiKj9B+TS6jyPD596ASgbZnx1aos8beS7ZiObhBrdNwqcDNm8GTEvpCA+qahI2VbqTnAfoHnPUr7/zielefUerk9j2FW+iOIKP0ql6d5O3pAWwZuBL40xo0xKierdrrtTnlztSwhlCxJcLgdngxIh2F+qsMdIlanLuMeG8AdBCtgBAb4+9vv0Pg/t1vkMcP3q5qJM9NfAFkRgFv+JloTQLZOsbM4VRVVUqyEkbqR63Au5+NsxfnxbLRYAKZ4VOigiHWMnkz2Y3xgpS1NIxC0TqAKbW+NFhvR20tLAPv8whgfoU33pmS1mBNFJBNfWhej52IGF3R15oVqboYKZmZlzP3KoYLg59lxV6ht5tqmO0wfcAVadRCGWQZFwhHet+dlNygbwrVXp72xhjxzjn4Rb624GSdF4yN1LDlDUsy6W+S2E7wXYNJJJA1QE26uBfQVAzzHYhimj8frKCroBAb4+9vske6/6F9lmb98qM+pTZZWHBCfU+xf+jrTzHAVJQdbIbrwOW7F1AzoXG4ntJezVUfwl0j+iYemwPc2EpYjdC7BkwDOxmCKGvoLyqHy5EVJiMWq9Rv0XZsIXEQv5hQL3yPlu31GZ4frqhldltg+gIvVFYV1rPhe8rar9TaC4U2Xx1G2ynz1Ca9WbUuN7ODpG1d5TAHU3RcosMmxMsnxyQik0YEjllUgbO6UgdayMJBi6SMjYr3ZnCqoBAb4+9vso/ia45pIJxLOFSSyG5EQrqGTEVUONzyRkd6owwvOOIiVza0jFQpAl6JPH1yAWxd3F7pcssWkNZkFYjPTDwldeUq9hHRe2Qg764muxIeGEgkljDCsc1lxJzuD+2ApArGl+ybJ5tjhJFeywmPUaTAVgY335nMRWaeiAnc/UbC+ii0f7x3nQY3h33uGfIlTpdtpovmXiDVR47nPVeV8Z7kfDUKJA+Xo="),
+                },
             },
         },
         Flush {
@@ -29,22 +32,6 @@ expression: v
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "Hello there! I'm ready to help. What would you like to do next?",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
         Finished(
             Completed,
         ),

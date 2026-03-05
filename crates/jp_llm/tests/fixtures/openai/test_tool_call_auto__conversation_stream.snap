@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -125,37 +148,27 @@ expression: v
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "",
-    "metadata": {
-      "openai_item_id": "cnNfMDE0ZWUyZTIzMWUyMGQ4MDAxNjk0NTFhMzYyOWFjODFhMThkZjI2NGZlMzA5NWQwYTc=",
-      "openai_encrypted_content": "Z0FBQUFBQnBSUm80OGhYaTdQdDV3RUh4dDY1VEh5ZjNCcGMtSVhoSVhudFZ2dUFxZkRHa1NEbHFwQUp3RGZrZ0NsdFlXWS1MMkVUOWU3eVJIUjRTaUVBeFhnV05WbWpMUEEtX010TUJxcEJFTklXdGpzOUY3aWRBYmdiYXZDSl9raWRvMEc1YlhnUTFNR09XOHhsRHdEMThhMGxmeDZXZGZwZDR6bXdaeXZkYkZBTk9NcUppcGJ2cmhpems5ZWxmaDdBRjFTbS1SM3ZmcVRZRUhDM0lPRzlieXRkQ3c5U0NFR0h3dGUwTktMN1ZxWkJmNldqTVkyMVpCaWwtUHJUZWVmaXRnTElvcXdMZjdmc2lSWHY1U3Rrd09XbWN2SndNOVFYdXRoVnloam1ORDlvWVZZbjVKOVNIX01nX0M0eF9Gd2lnQURVWllLcW5aQWFjT2dwLXVXMEl0QmRIR1hnWUoyeHNHVEtwUnRjY2RxdU9zT2xzOGp1VHJTVmRSYmMtZ2pDdW83WW1jTS1yeHR1UnlKVnB6SDNhOEM3QTBveFBGOW5maFNjV0lDbmlWaHM3dGhEUjF6SlExa3R1cWpQQ0Nyb1VhNHhzSTdDSWh6TDQ1THJscmotZU4zNWNjdWFWRzlQcWJiczZMX3RtbXg2UjkwcThNSU1WMTlKLUVTcHNvZ0VEMEJZVURNQzFsc0xLcmU4a3M1X2xRM3ZPdGx0RmZqU3ZvZXFhVXdYcWJfTmRkYndQWjNrRGZ5RGtONVBlTFpuRUhieTBGRmxtRkpSZEl3eFhVX3Fha3NjWlR4MnNaNE9ramFQTkhsc2lWb19fVm43R1J1dHczVDZ6UkZ2ZE51WkVsQ3RwQV9YZTRiclNSTFliMEcxQUlLSjNWUmh3aEZGU1hsSHJCN3dIRG5aMFhhcU55aVJDTU9LNk9wMk9yeENCQkhQQUVVYnhkOUJQLXJnTzhZOVc1Yzh3QV9vWVIzemdQd21MSGlDUklxbnE2RjAwaTlSRUJuXzByNmM0OEdZZ1Y1UmhLQVRFclUwQ0ZPUjNBVE1mWjlLUzlYSnFHb3U5ZWRuNXgzWkVQaS1pbklfd0J4aXdZdGhzakg5RWVGc1UtVGZvQTdDdEc0Si1CVUxsTDFUZ3hNeGpNRTlvRVotY2VmdmZob2I0REhzVUVWWW84dUwzdTZJS2dvbDAyVWNKLWhxNGtMTDdtLWJub1VuS0ZhV1hLclo4ckhDZnZYVDNaXzVBeVF4cEJIQjBEbHdESHlSajlmVnc5ejVvajl1VDN5clUxeGpfbG8tV2JHaERxNkJHQXZqa3phbkNFZHVMQk04NHJZVlBLRG9NMjZ4MUpMVzRLOExaenl6SEJ5S192VjA0R0hYTUM2QlJzTUxTQXdHQkd2eHEzYk56SDhpVDBCTU1KRnIzV0ZLdTJXbS12QTlPN0c1RzZfcGZ0VHMtSFMwV040WmJkRTZSaFUtSUozLTFvd2pMbVJxM2pzS0ZFRDNRdTd5czBLQnJZa1NDR0pkeE1ZMkY3YWVnLTRjQ3pOSjR2ZkpYX3ZWVXNWaVFwekF6VXRuU3NpajlyZEd4RHA0clYtVEpWbnFxRkFvLXgzWkduS1cwSVM3cWtObjN4MW1WRXJqWlNIV2ZNOVZ6TzZxOC0wcGdIeC1JbXhFcG5CeTk0N0xHYmVtNWtUdlMzTzFXSTExQTIzbnlQSWNTV3lSZXBiZFpYWXByVEhlXzVldkEzZ09uTXpkREVhc09ZUHJZMGNtNjFieWoxcGpBb2hQTFRrSlZqSXFGbnF4Mms2Ml9COTR5aDJ5bXVvZEtDU0xJWFFQdUE4WWJSY1FZSFJtSmFYZUdTUnFVcnVQcHdKNTVKR0xhNTZsSzhDbTlWUThxb0VYRUVqbVNGenR3b0MtdHlGWkNfdGR4TDJiOWNuSFppd1g0RzJDN1J6TTg4d2V4Z2VmNlFhV2NqRTRQVzRvREdyemk1M1Juc1d4OHJiR3hNdW9idktaTGQ5cmtqY0Y1RkVZejNxSGttQnNrc2I5NWIxREZZdzBHM1gyZHdvd25acDdjWDNDMnUxaHJHaTdTTjVueEFmTldEeC1LRmVmMFF5WVZ0VFozeFB5OXliVkRJOE1nQVhtV2NUNFJmaUZKWERwVVVqUS1nZy0xV0E1ckZVMEk2cmRUQXlKNGFldWtPbnZiWkppNUdfV0xRYUkyTzRwWjlPTTRDek9tbG9oWkpxbVRDX1ZiTGJBSUpZb2pzbTFFVTZwa1AzQVlHczljdGJZY2lxVHJ5QVp1Mk55VGtueXNNSG1WQy1zbENydFRuU3dkbUg5cWpoMFg0eS11VEhjMmZNTEZYWE44MVdXVVNZb3JIdW52c2QwMml2b1Z6RE5FY0Z1bEo1ampET1kyQmg3WlpZdEkwZXp3cHhDZ2JvOHV3TEx6aXYyUVIwaGhrYUpxYU5aVWZ0eFFtV2hvcGxGUDNqQk4wY3RadUs4NlZXRHVmNWVkMllCdktoNklIelRFTXJBWUd6LURsTWxjbUN0dG5GVDN2eGtnQng0Wmt2Y0VaR3REa1VOVmtnNWxkVEQwUFBmWnNnOWdoYzBZR0U2UWhGUjFBdVphMDhtRUVlZFhIWmxsekdMbGpGR3VDc2RLNEVoaGJjWlRkRm5XbWJnRA=="
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "call_9ZWJ1G7RAqQhpDRXNLnyPM63",
+    "id": "call_i0uruotigAMGRzlSVrivoXUS",
     "name": "run_me",
     "arguments": {
-      "bar": "Zm9v",
       "foo": "aGVsbG8=",
-      "note": "cnVubmluZyBhcyByZXF1ZXN0ZWQ="
+      "bar": "Zm9v"
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "call_9ZWJ1G7RAqQhpDRXNLnyPM63",
+    "id": "call_i0uruotigAMGRzlSVrivoXUS",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Tool run completed: working!",
+    "message": "I ran the tool with the arguments you provided. The tool returned:\n\nworking!\n\nIf you want me to run it again with different arguments, tell me what to change (or say “try random” and I’ll pick new ones).",
     "metadata": {
-      "openai_item_id": "bXNnXzAxNGVlMmUyMzFlMjBkODAwMTY5NDUxYTM5ZGI5NDgxYTFiMmY5YjdkN2E1MTUyMjkz"
+      "openai_item_id": "bXNnXzBhMDZiMmZmOWY3MWE2YTYwMTY5OTViNmJiNWQ3ODgxOTViMzEyMjhjMTdiMGQ1NzBk"
     }
   }
 ]

@@ -1,7 +1,0 @@
----
-source: crates/jp_test/src/mock.rs
-expression: v
----
-[
-  "Error::MissingStructuredData"
-]

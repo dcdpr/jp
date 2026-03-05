@@ -10,8 +10,8 @@ then:
     {
       "models": [
         {
-          "name": "/Users/jean/Library/Caches/llama.cpp/bartowski_Qwen2.5-7B-Instruct-GGUF_Qwen2.5-7B-Instruct-Q4_K_M.gguf",
-          "model": "/Users/jean/Library/Caches/llama.cpp/bartowski_Qwen2.5-7B-Instruct-GGUF_Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+          "name": "/Users/jean/Library/Caches/llama.cpp/unsloth_Qwen3-8B-GGUF_Qwen3-8B-Q4_K_M.gguf",
+          "model": "/Users/jean/Library/Caches/llama.cpp/unsloth_Qwen3-8B-GGUF_Qwen3-8B-Q4_K_M.gguf",
           "modified_at": "",
           "size": "",
           "digest": "",
@@ -39,17 +39,17 @@ then:
       "object": "list",
       "data": [
         {
-          "id": "/Users/jean/Library/Caches/llama.cpp/bartowski_Qwen2.5-7B-Instruct-GGUF_Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+          "id": "/Users/jean/Library/Caches/llama.cpp/unsloth_Qwen3-8B-GGUF_Qwen3-8B-Q4_K_M.gguf",
           "object": "model",
-          "created": 1766136306,
+          "created": 1771429121,
           "owned_by": "llamacpp",
           "meta": {
             "vocab_type": 2,
-            "n_vocab": 152064,
-            "n_ctx_train": 32768,
-            "n_embd": 3584,
-            "n_params": 7615616512,
-            "size": 4677120000
+            "n_vocab": 151936,
+            "n_ctx_train": 40960,
+            "n_embd": 4096,
+            "n_params": 8190735360,
+            "size": 5021827072
           }
         }
       ]

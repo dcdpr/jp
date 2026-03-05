@@ -22,6 +22,11 @@ expression: v
             "stop_words": [],
             "other": {}
           }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
         }
       },
       "conversation": {
@@ -35,6 +40,7 @@ expression: v
             "run": "ask",
             "result": "unattended",
             "style": {
+              "hidden": false,
               "inline_results": {
                 "truncate": {
                   "lines": 10
@@ -62,8 +68,25 @@ expression: v
         "reasoning": {
           "display": "full"
         },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
         "tool_call": {
-          "show": false
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
         },
         "typewriter": {
           "text_delay": {
@@ -142,14 +165,14 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "The user has sent \"Test message\" - this appears to be a simple test to see if I'm working and responding. I should provide a friendly, helpful response confirming that I'm functioning properly and ready to assist them.",
+    "reasoning": "This is a simple test message. The user is just checking if I'm working and responsive. I should provide a friendly, brief confirmation that I'm ready to help.",
     "metadata": {
-      "anthropic_thinking_signature": "RW9NRENrWUlDaGdDS2tCcW41ZGJucG1XcnRobVFCZkhWWXpYS2o5WlhKdE9RVkRMZnNVcDVQbGZKaFMwZlJqVzdibW1hMkE3T3lDZ1pOa0pVN2VwWVhkVXBqK0x1d2FYN1ZCMEVnd3BTclBSa0NoWDFsZXROcG9hREFXL2FEMGFYa2JCblBaOFdTSXdJRUpCYzllTEw1V3VnNlVlbDlickdZb0NENG51d2x0WlJpazM2N2YrUk5yK01ZelY0aThaaUNvVWppb1laNkU4S3VvQjE4cm01MmtGbVY5Y1VxYU9zbnRlWEJ6cU0zemhvb3BqaWdaOXhHMG1XcXFmTlBGakU2OTVkRXdrU09ZRk5aUE1XalJlRHNkczdrcmpTbzlMby9pTjFSRmhJMGxmRXkvVVZyZGxPcVVDcnZ6Vi8vaGp6UHZOTW8yTHZxZDZPbldqQm9KcFJFL1dQVk5tdnFvZjMxQUdVSHFra1JxQ25vWGM0KzhkOC9IQWx1NVJlZUdiOGRYQWs2UUd6Zmpybm1Oc2lGby80VDZjMmp1OENVcTM3WEUyL3R2eFE4bTRWQWFtWmV2bmVKVTg0cEpTL055Y1N3MklWbitleXZCS3FlcTg0c2ZjTTBvYnRRUVc3R3luQkcwcjZOSlZKSzR2MVc4SW5NeDdReUJlKzJtajJIT1V6VXFXWlBlQ0dBRT0="
+      "anthropic_thinking_signature": "RXNnQ0NrWUlDeGdDS2tBTm1Xc1pzU2RXNVZPNURvWno0UUVrNS9BbnRtY0t2cEErN1Y5ZU9Rb0FyclN2RjNmZ3Zzd3g5b1lqR3I5d1A2TmNVbWxJWXU0L1RrYnpzUytjSG1hYkVneEJSYWNVeVlwTyt6U24yV29hRE5NWGcrOHppbE4wMXpQMjV5SXdWaUFUZS9CTmtmQ2JTbWFDRlo2WU5JVkVkRy9uZW01ZHJNWEtEUTQ2UjkyeUtTdnY3OE0wazF0OXRTOTVEcmVLS3E4QldEU09oNDh4cTNtc3FnV1l4MDZ0M1hyVXBkYWNrTTRRVnMrRTI4RENHd2pRNG1mUU05R0RUR2dTUC9DUVhaNjBJbXJZNnBGOExiYXRQdHNGMlJKTkVXaVdnV2JVc2NsVHp4d0IyS0RPdk9FYWk1bDJhYnN5MXN6ZDQwVWdEdFpBRXpibVFmQmlBc3l4WFlYQzdCY3F4ZjFCVzZRMmg4eVd0ckxzMUVIVVBRbUFTT2Y4WW92UEZlZVo4dTVza2VIeCt2NXJ6Uk1xSjJWV0cycTd3R01CS2ZYaGJVdkxxV3JJb1dncTVEbXA1aGdC"
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Hello! I'm working and ready to help. Feel free to ask me any questions or let me know what you'd like assistance with. 😊"
+    "message": "# Hello! 👋\n\nI'm working and ready to help. What can I assist you with today?"
   }
 ]

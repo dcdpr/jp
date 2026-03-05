@@ -10,19 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Testing System Functionality**\n\nI've analyzed the \"Test message\" input. My current focus is on the user's probable intent: checking for responsiveness or basic functionality. This is the equivalent of a \"ping\" or simple \"hello world\" test.\n\n\n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "**Formulating Response Options**\n\nI've crafted a few response options, striving for a balance of professionalism and friendliness. Option 3 initially seemed promising, but upon further reflection, simplicity emerged as key. I finalized on \"Message received! I am online and working correctly. How can I help you today?\" which feels appropriate for a general use AI.\n\n\n",
+                        reasoning: "**Acknowledge the Test**\n\nI've acknowledged the \"Test message\" input. My intent analysis identifies this as a system check to gauge functionality. Currently, I'm determining the most appropriate and concise response to ensure responsiveness.\n\n\n",
                     },
                 ),
                 metadata: {},
@@ -38,24 +26,10 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Message received! I am online and functioning correctly. How can I help you today?",
+                        message: "Message received loud and clear! I am functioning correctly. How can I help you today?",
                     },
                 ),
                 metadata: {},
-            },
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Message {
-                        message: "",
-                    },
-                ),
-                metadata: {
-                    "google_thought_signature": String("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"),
-                },
             },
         },
         Flush {

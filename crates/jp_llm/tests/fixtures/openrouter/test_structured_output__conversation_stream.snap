@@ -1,0 +1,191 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+  {
+    "type": "config_delta",
+    "timestamp": "2020-01-01 00:00:00.0",
+    "delta": {
+      "inherit": false,
+      "config_load_paths": [],
+      "extends": [],
+      "assistant": {
+        "tool_choice": "auto",
+        "model": {
+          "id": {
+            "provider": "openrouter",
+            "name": "test"
+          },
+          "parameters": {
+            "reasoning": "off",
+            "stop_words": [],
+            "other": {}
+          }
+        },
+        "request": {
+          "max_retries": 0,
+          "base_backoff_ms": 0,
+          "max_backoff_secs": 0
+        }
+      },
+      "conversation": {
+        "title": {
+          "generate": {
+            "auto": false
+          }
+        },
+        "tools": {
+          "*": {
+            "run": "ask",
+            "result": "unattended",
+            "style": {
+              "hidden": false,
+              "inline_results": {
+                "truncate": {
+                  "lines": 10
+                }
+              },
+              "results_file_link": "full",
+              "parameters": "json"
+            }
+          }
+        }
+      },
+      "style": {
+        "code": {
+          "theme": "",
+          "color": false,
+          "line_numbers": false,
+          "file_link": "osc8",
+          "copy_link": "osc8"
+        },
+        "markdown": {
+          "wrap_width": 0,
+          "table_max_column_width": 0,
+          "hr_style": "line"
+        },
+        "reasoning": {
+          "display": "full"
+        },
+        "streaming": {
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
+        "tool_call": {
+          "show": false,
+          "progress": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          },
+          "preparing": {
+            "show": false,
+            "delay_secs": 0,
+            "interval_ms": 0
+          }
+        },
+        "typewriter": {
+          "text_delay": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "code_delay": {
+            "secs": 0,
+            "nanos": 0
+          }
+        }
+      },
+      "editor": {
+        "envs": []
+      },
+      "template": {
+        "values": {}
+      },
+      "providers": {
+        "llm": {
+          "anthropic": {
+            "api_key_env": "",
+            "base_url": "",
+            "chain_on_max_tokens": false,
+            "beta_headers": []
+          },
+          "deepseek": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "google": {
+            "api_key_env": "",
+            "base_url": ""
+          },
+          "llamacpp": {
+            "base_url": ""
+          },
+          "ollama": {
+            "base_url": ""
+          },
+          "openai": {
+            "api_key_env": "",
+            "base_url": "",
+            "base_url_env": ""
+          },
+          "openrouter": {
+            "api_key_env": "",
+            "app_name": "",
+            "base_url": ""
+          }
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Generate a title for this conversation.",
+    "schema": {
+      "type": "object",
+      "required": [
+        "titles"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "titles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "A concise, descriptive title for the conversation"
+          },
+          "minItems": 1,
+          "maxItems": 1
+        }
+      }
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Generating titles in JSON**\n\nThe user wants a concise title for our conversation, so I'll provide a few options. I think something like \"Title Generation Request\" or \"Generate a Conversation Title\" could work well. I want to give them five brief titles total, in a valid JSON format, as expected. \n\nI'll finalize with options like: \"Generate a Title for This Conversation,\" \"Conversation Title Request,\" \"Create a Conversation Title,\" \"Naming This Conversation,\" and \"Conversation Title Generator.\" I’ll structure it in JSON format only.",
+    "metadata": {
+      "openai_encrypted_content": "Z0FBQUFBQnBsYmJLbkpsNllnQ0V0RVdra25RZU11S3Y4UVJZU0ZObFRBZkpGMEt5amZhMW9zOFJNX3NEdnJlVDVQaDZZcEptMDV1a21IckczTHBfLWktMzZ1aEFKcVMxcDFkU3BKdERWYUwtNGtHellnOFpyRkdSRERReWJuSkF6dzRuNWt1Mm1saG9RUnExMUtrblpROVRELUhvamlTa0JkVEltSEhlZVZkQVp4ZVczdUtpUDFFVUxJa2UzMUIzdVNXRVctcVlZSlJTcHdUWXVwTVBaaU1VZ2VwYU9WRTByZG00SElUbmlUWUh3aTdaSl9MbmxIWVdqMVFEa2JtUHgzZXl1TzhlcW4xYmh4ZUE2bGMzOWxFU0ZUUFpYekNqOFlHZDVXRUZQVjNqZXd0eGdBTU9TMUhlN0NTZjJialhHZDBHd3g0NDNseC10UnhReG16aFVaQ0J4U0paRmpuTzkwTk0tWDhHSHliRVQtMlZPWnVmb0M5M1hlc3lRSjhHOHJHRHdpWF9TYk01QnIwN3JOcVdlVkpyVW9ZSy1JRjJTZzJTT3pUaFM4Q0NTZFVaeXl1YzRBS1dRVzF1M29abHRfY2NUMU9wY0RtNHZxR2VkY1JVS0VFY0ZTWk9QeU1VNk9IUjd6TS1XYjNHY0otTlhCb09weENfRkw3MUFPNjNiVzRGLVY1MWtmcXV1STRBWHdjX1g0cGtMV3FRZ3JrelJac29qb0ZDcEctWjRQMzM4ZjVsdzdzbURWUkpJYkJCRl90aFk5MVh1U0h6MHNrVzNiR0E4bWFmRm9lY193YkU5X2Z3ZkJVWkFiUzVGM1VpNDlPNndta3p2ZzBlSE9ack1tX3Z0aTdMaXJXNnJLbFVGOTB5Z0VMQ3FDOWJ5bVVFZTJaTWlGTXVEZHJVS0wxNnQ0am9TTTRfc0lDVWNBb0lzZGx2WEtwWHUtUGZOZ2xqMl9SSFlzVGtsY2hHT2EzcmRLSURrVXBIVmRUTVhRSHFBemJoNkZMUk9qa3ZKS3VYTE1rUXNDNkdtUFN4THZiamJjNWo2N0Jmb3RxV3VZdndBUlgtTlYtWGtzdnk2cVdDYmJYT1I5Nkl0SXc0NkF5Y1VORUxpaVRyMVdiYVNpR2dDN3FhdmZoUUw0ekN2SjdXSHQwd2Nzckl6TUFPeTM5UVhzalZuT0RacFVpZTg1RWlxNmVPUmdsdnJfRWVhbWlhSXhKVkh4QkJkOVNwYWlETHRaUWhSdzJrbEVyZ1dLejdwRnU2QXpITGxxTGVvanVFTU5KNGZDZ0tkZzdDN3A4TlpNQmlqWERTN0I0NldKZlRrTHNZM2xfMzBQWjNCMzlKQWV2M1d5QmdHcTdqbWZUdjAtbWNxekVPbmFXSzROWlV0M0dFbnBCcFh3UXR0aGgwMEJPR1VGcmh0YmZOY29paVZlZmowOXpmZWU5UnoxY0pqR3YyYkhvOTVtcWF0cVlIWkxLMG9TV1ZtMUxTN0REYjFHZ0FTQzhOWS1EN0hEejhrM2JRR2h4M2Q2eFRYTGdLVFlsbGtLSG1RTzQtc0M2empOMi1iOGxJS0RJS2c3WW5Va0xWaEpvM0xsZl96VDNoaW1sdmRLNUVDV2NDbXVsUTF1SlNha2FacDhmZlJFeS05Tkl1RmlkXzZ6eHZzOFJCdWxPdGtMRmJmSjRQdlQ5NmdIaGpEMlpKM2JmMm9USVo0SDJ4UVdsYTNqZ3kyRm82OV9Hekh0WldLNy16bXZtYk5Db2padElWQzNhUGdOTTM1Ml9nanRCdi16V2xqMkFiMXBydjNoQU9Lb0M5ajBTRU5zLWV2QmNYWFp6RVR5Qy1lN0ZRaUJ5WVM3Sk9XS2VLLWNXQlM3aDVSYVZSb0Y4bGlwQVNkSEFLajZFQUlpYW5ReEpOejVVZnZncFBvenJxUHJtVERYZ3lpMXE2ek1wcWJkdXJNSUJkU2FLYTJDRy1DYnpJNEx1VkhrQ0h0Rkh6VGRPM0JEZTJ1MGxEWGl4YjNMd0JVUXpKLTVrOFg3ZW9ZeUc3N0xyT2VEaFFQcjlxY210WVBLalBEVnhnNnZzeW5ZcWNJYUxIdFlrMFFHQzdyemlFMVgwRDk2SUtLZVREcldzRmtlZmcyOUNYYnVVdzYzZlFRX0kxRVUxQUdLVnJhcndVamxzeU1qVTVCV0FlNVZUUG1xM1I0SmozZWNsMjBoNy1QaGxYbkFwMUJDdklZbk1kOElLR3Z4Y2x5dWRtX3paQng1cURkajg4SE83S0JJbnhMUWRpOVBDeXZ1Y1JxWjhUYWtxczhQaVd3T2JWcXRUSF81X0ZyVWNxQzRIVDR0eUpkWi16RFRydi1sWGI5bFVyUFdNSXNMcGg1UENfbUwyYUFaazlOSFlWakdGUy1GMUhuTWpwVFZRcmRQRkxDRVhHY21wUTZwMFpldlNlR3NqaE1LTXFCQmxkb2JRbzlpR3c0NHVncDVTaFNRRWh3UjVrRDRJQVl5TWo3aFJvcUhyYllBQ3BjQ0tFOUFYMVNEYU1Zajc2OWtXWHNwaUU0Ynl5SmVVZkVHa2JHT1FCc3ZwOFIyazBaRVNSWUNZWFU1dnVDQzdNZ0VqRzB3MFV5RF9TS0JUMkFFcE5waUFKUDhhSDVXS0x6eU55alNDZmYxbnp2Ujl3eHlMM2tHMVNSQXR1Nm9JX2dQWExCT0dfaTRNTms5N19UeTJ6QWxjZTZ2bU11S3NXMGRHY0lRVWQ5b1REVlc1QjhKNjlZaU1GWV9ILUxCTXhOSVc4N2thaWR5NUJRSmc5aFdFRnRPaGEwdGE4MlpGQTNfRnpGcHdUdW9rTjlrRTVmNC1xZzVCY0djVXNwVGFiWi1FMGMydHU5Zz09",
+      "openrouter_metadata": [
+        {
+          "id": "cnNfMDkzNDRiMWZjM2M5Y2Y2ZDAxNjk5NWI2YzUwNTBjODE5NGIwOGEzNjgxOTFjYWJjNjU=",
+          "index": 0,
+          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "data": {
+      "titles": [
+        "Generate a Title for This Conversation','Conversation Title Request','Create a Conversation Title','Naming This Conversation','Conversation Title Generator"
+      ]
+    }
+  }
+]

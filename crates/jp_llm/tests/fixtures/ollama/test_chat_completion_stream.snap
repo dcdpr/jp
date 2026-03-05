@@ -4,9 +4,33 @@ expression: v
 ---
 [
     [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Okay, the user sent a test message. Let me see... They wrote \"Test message /think\". Hmm, maybe they're just checking if the system is working. I should respond in a friendly and helpful way. Let me make sure to acknowledge their message and offer assistance. Maybe something like, \"Hello! This is a test message. How can I assist you today?\" That should cover it. I need to keep it simple and open-ended so they know I'm here to help with anything they need.\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
         Flush {
             index: 0,
             metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Hello! This is a test message. How can I assist you today? 😊",
+                    },
+                ),
+                metadata: {},
+            },
         },
         Flush {
             index: 1,

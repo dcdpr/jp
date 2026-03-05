@@ -5,36 +5,16 @@ expression: v
 [
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "",
-                    },
-                ),
-                metadata: {
-                    "openai_item_id": String("rs_0ea13b1f0e74bfde0169451a3ffef4819ca862f57c01e0c582"),
-                    "openai_encrypted_content": String("gAAAAABpRRpCa6IRZV4ypgTcQzWKKJICEvX2zv6JoXu4203P1CcjqTXTwL7QvLhNFqoHC7yWGoeT5mg8cLum7_p4S56aPKQo8eCEcB8KsSmmN6TthEdOe1IMb0ChQAizTNTDIhl1ML12MN99loR2HRLLYVCdCqjNC6wjIgVH4GopVgUCZRr1ZQdEbEe5oDG_oiomBYFH0ha7UQ6vs-rEACKi_VlntgXJAcTlQVwwsnYyxzaE0PAWSQnL6GsnroIPwJqle_VWELHHXH-tyIyGbUa-pR3AjTcY3Pwq-qloOB6hc2BLYUwuhnmJGuMb6fb7LKOv3iDY5EOBgCCkXLayynD6D56qHW98Gqilbzy8Y28l9tyU3Ga5IzH3lW3uuQFcbBlDdjjivon8Ss_goyZQ-K7a9X9cjCWdPYom9eaA-Cup5MLVxVraO99m72vTAVj0oC0lr3au5-oMCgRzivecu3Yjl1gXcpjwputU-xDEizvJBk-sqkqMblL1dERqmZmJKAHpCRAa_nw78bIrx1JRiIH6G_iqA5ykh08_hKQac4EaubTnkfZDWQMtOx_KOIaI970IclbgrskSvH089Q9vyT_yOH6HEJjRqPO81OyLYUZmxM_1lyXsqHNhZmpu82WWDQ3ZCWqmokqMDn7BKMbQXE3pAIWakegPMA0WueMt2U5KwfXETT5jiSdmG_OI-lztHiNoJzpk3_ro2xhi8lP5jluvtqwcY-bTZZHi3WLywww2nl0hPGEdb93ttYsH9lv0zLmR09jT_jznl-vIBcalaGy3qPfxfckm7LILlEpPipMry9PPjMV6uj2FFxeCfJztxNamVKcgUzJ9BZJis7tZ1cWt-lme6090igh8Q9V9TRRHjtKMG5C-Lip9Y0ZpwvS5tvU4ODxqwoegZc-gRjowNiApYaxNezm-szlJETqZ4z9rorSqC7J78YQdL-e91PYhi8UexB6uI3CV9jLTKswYAXSvHLlULl3p20G-UbKALGzSMc8zm9_PVgibf1qzgxZMYIY48zDx2lu6z-gbaK8qM14aG3iYl6jrsMKGY_FpjFStSn3SZlLcNyKLhdQaWfJI10vBERkalXS6IMMt2fkYeESq1SGfN_9nGgqp2SGmGFmBCsugvMKkFFTYH2JrmJ1gfG__JNQ160PcxqTIjV3zPboGtX0957lIs_hCF8fRzg8WXyfsaiO6-MZrOam-QdMQ7s21PkwDmAczuYi_quUlyF67L3AZRehCCCu7bJl62OOVtku5IVPypg5HntkbDp1VgimsTU2y6c4mF4CLdTmL9lbs1SeRNEXfiyJ6eM4jfTvTwUh4C5fJT_6heAUHvn6bMXazRpGqu1MLPRNn2VMa-Fph-MaaUeXWjzrbdfO_BmIMIhxpr8TOT_7cRTN2Ftr8c4LHOO_K3LyL5CUG7YRZkuoWHgfeizhdNZrfW6FsrCQUq05ya6YfZ0_GkRIwg_jHa-pg-30nFSoXUd8xF_If3EIl7TzT94LZSsQj3NctROKaofqfLXco5_muQFCCwGf0wdlHui_T0-joBSnx3X0Dtb0bH6FwUBRGHVKcz_EHOKELExRQJwNu67OXvTHMUx3paGGZl7DBOy2a_jSuR7IoIMJIBOpR-8Z8Ef9UIw0STPIvR1ff65yomAFVBggBGwkdeWCD96k5pY916e51qxZ2rwA8_nxmuO_dmLjjP2OJC4rAkAHHCiCVy_bI4wPlTvRGt-pcRc9xmyHTAiMY34aCuOuG7l7gcv2UiSNAexoIbWFdzqF_ymnOqrIGyjO6YDIZNFQ17ovQxGlD4Njy0wRljon16u496j9thZL88zQjaQM63o4TW7Edn59eP0gDIOzUsb3ysxEOWINL1X4UxwFHYDR9TNGT5kl1LA=="),
-                },
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_UB1R1p6VZcxmUcAlKjDcsZN5",
+                        id: "call_3mSe2vH8iaSV26W6gQZM57ZW",
                         name: "run_me",
                         arguments: {
+                            "foo": String("run with foo"),
                             "bar": String("foo"),
-                            "foo": String("ran"),
-                            "extra_info": String("called by assistant per user request"),
                         },
                     },
                 ),
@@ -51,21 +31,21 @@ expression: v
     ],
     [
         Part {
-            index: 0,
+            index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Tool ran successfully and returned: \"working!\"",
+                        message: "Done — I ran the tool with {\"foo\":\"run with foo\",\"bar\":\"foo\"} and it responded: \"working!\"",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_0ea13b1f0e74bfde0169451a43a088819cbb05fdf75fca065f"),
+                    "openai_item_id": String("msg_036a6ed1df999103016995b6be41e08192bc609baaf0911a6e"),
                 },
             },
         },
         Flush {
-            index: 0,
+            index: 1,
             metadata: {},
         },
         Finished(
