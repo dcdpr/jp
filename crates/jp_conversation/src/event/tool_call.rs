@@ -36,12 +36,6 @@ impl Serialize for ToolCallRequest {
     where
         Ser: Serializer,
     {
-        #[derive(Serialize)]
-        #[serde(transparent)]
-        struct Wrapper<'a>(
-            #[serde(with = "jp_serde::repr::base64_json_map")] &'a Map<String, Value>,
-        );
-
         let mut arguments = self.arguments.clone();
         let tool_answers = arguments
             .remove("tool_answers")
@@ -59,10 +53,10 @@ impl Serialize for ToolCallRequest {
 
         state.serialize_field("id", &self.id)?;
         state.serialize_field("name", &self.name)?;
-        state.serialize_field("arguments", &Wrapper(&arguments))?;
+        state.serialize_field("arguments", &arguments)?;
 
         if !tool_answers.is_empty() {
-            state.serialize_field("tool_answers", &Wrapper(&tool_answers))?;
+            state.serialize_field("tool_answers", &tool_answers)?;
         }
 
         state.end()
@@ -79,9 +73,9 @@ impl<'de> Deserialize<'de> for ToolCallRequest {
         struct Helper {
             id: String,
             name: String,
-            #[serde(default, with = "jp_serde::repr::base64_json_map")]
+            #[serde(default)]
             arguments: Map<String, Value>,
-            #[serde(default, with = "jp_serde::repr::base64_json_map")]
+            #[serde(default)]
             tool_answers: Map<String, Value>,
         }
 
@@ -143,7 +137,6 @@ impl Serialize for ToolCallResponse {
         #[allow(clippy::allow_attributes, clippy::missing_docs_in_private_items)]
         struct Helper<'a> {
             id: &'a str,
-            #[serde(with = "jp_serde::repr::base64_string")]
             content: &'a str,
             is_error: bool,
         }
@@ -172,7 +165,6 @@ impl<'de> Deserialize<'de> for ToolCallResponse {
         #[allow(clippy::allow_attributes, clippy::missing_docs_in_private_items)]
         struct Helper {
             id: String,
-            #[serde(with = "jp_serde::repr::base64_string")]
             content: String,
             is_error: bool,
         }
