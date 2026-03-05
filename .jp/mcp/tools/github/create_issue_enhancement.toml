@@ -2,9 +2,8 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+summary = "File a new enhancement request in the project's GitHub repository."
 description = """
-File a new enhancement request in the project's GitHub repository.
-
 - MOST IMPORTANTLY: Avoid fluff, and focus on the enhancement at hand. Do not
   add more text than is necessary to explain the enhancement.
 
@@ -29,12 +28,22 @@ File a new enhancement request in the project's GitHub repository.
   using lists, unless they are necessary to convey details about the issue.
 """
 
+examples = """
+```json
+{
+  "title": "Support lazy loading of tool descriptions",
+  "description": "Tool descriptions consume significant context. Allow LLMs to load details on demand.",
+  "context": "Large tool descriptions eat into the context window, reducing space for conversation history.",
+  "complexity": "medium"
+}
+```
+"""
+
 [conversation.tools.github_create_issue_enhancement.parameters.title]
 type = "string"
 required = true
+summary = "The title of the enhancement to track."
 description = """
-The title of the enhancement to track.
-
 Should be a single line, not include any markdown except for backticks (`) where
 applicable. Keep the title short and descriptive.
 """
@@ -42,90 +51,71 @@ applicable. Keep the title short and descriptive.
 [conversation.tools.github_create_issue_enhancement.parameters.description]
 type = "string"
 required = true
+summary = "A clear and concise description of what the enhancement request is about."
 description = """
-A clear and concise description of what the enhancement request is about.
+Explain the motivation for creating the issue.
 """
 
 [conversation.tools.github_create_issue_enhancement.parameters.context]
 type = "string"
 required = true
+summary = "What are you trying to do and how would you want it to be different?"
 description = """
-What are you trying to do and how would you want to do it differently? Is it
-something you currently you cannot do? Is this related to an issue/problem?
+Is it something you currently cannot do? Is this related to an issue/problem?
 """
 
 [conversation.tools.github_create_issue_enhancement.parameters.complexity]
 type = "string"
 enum = ["low", "medium", "high"]
 required = true
+summary = "Complexity of the enhancement."
 description = """
-Complexity of the enhancement request.
-
 This is used to estimate the effort required to implement the enhancement.
 """
 
 [conversation.tools.github_create_issue_enhancement.parameters.alternatives]
 type = "string"
+summary = "Can the same result be achieved in an alternative way?"
 description = """
-Can you achieve the same result doing it in an alternative way? Is the
-alternative considerable?
+Is the alternative considerable?
 """
 
 [conversation.tools.github_create_issue_enhancement.parameters.proposed_implementation]
 type = "string"
+summary = "Optional proposed implementation for the enhancement."
 description = """
-Optional proposed implementation for the enhancement.
-
-This should be a high-level, SHORT description of the implementation you would
-propose. It should be brief, not go into too much detail, and IF code is added,
-it should be limited in size, and optionally be pseudo-code to avoid making the
-implementation obsolete if the code is later changed.
+Should be a high-level, SHORT description. Keep it brief, avoid detail.
+If code is added, use pseudo-code to avoid obsolescence.
 """
 
 [conversation.tools.github_create_issue_enhancement.parameters.tasks]
 type = "array"
 items.type = "string"
+summary = "Optional ordered tasks to implement the enhancement."
 description = """
-Optional tasks in the order they need to be done in to implement the
-enhancement. Include links to specific lines of code where the task should
-happen at.
+Include links to specific lines of code where the task should happen at.
 """
 
 [conversation.tools.github_create_issue_enhancement.parameters.resource_links]
 type = "array"
 items.type = "string"
+summary = "Optional list of resource links relevant to the issue."
 description = """
-Optional list of resources relevant to the issue.
+Links should only contain the path, not the full URL.
 
-The links should only contain the path to the resource, not the full URL.
-
-The following resource links are supported:
-
-- issue: issues/{issue number}
-
-  These could be issues related to the current enhancement request, either bugs
-  or other enhancement requests. This can also include issues with similar
-  feature requests.
-
-- pull: pull/{pull request number}
-
-  Any pull requests related to the current enhancement request.
-
-- commit: commit/{commit hash}
-- file: blob/{commit hash}/{file path}
-
-  relevant files for this issue. This will help people navigate the project and
-  offer some clues of where to start.
-
-- lines: blob/{commit hash}/{file path}#L{start line}-L{end line}
+Supported formats:
+- issue: issues/{number}
+- pull: pull/{number}
+- commit: commit/{hash}
+- file: blob/{hash}/{path}
+- lines: blob/{hash}/{path}#L{start}-L{end}
 """
 
 [conversation.tools.github_create_issue_enhancement.parameters.labels]
 type = "array"
 items.type = "string"
+summary = "Additional labels to add to the issue."
 description = """
-Additional labels to add to the issue.
-
 - The issue will always be assigned the `enhancement` label.
 - If unspecified, no additional labels will be added.
 - Only labels that exist on the project can be added, non-existing labels will
@@ -135,9 +125,8 @@ Additional labels to add to the issue.
 [conversation.tools.github_create_issue_enhancement.parameters.assignees]
 type = "array"
 items.type = "string"
+summary = "Assignees to add to the issue."
 description = """
-Assignees to add to the issue.
-
 - You should only add assignees if explicitly requested by the user.
 - If unspecified, no assignees will be added.
 - Only collaborators on the project can be added, non-existing assignees will

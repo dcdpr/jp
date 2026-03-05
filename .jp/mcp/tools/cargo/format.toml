@@ -1,0 +1,15 @@
+[conversation.tools.cargo_format]
+enable = false
+run = "unattended"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+description = "run `cargo fmt`"
+
+[conversation.tools.cargo_format.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.cargo_format.parameters.package]
+description = "Package to format, if unspecified, all workspace packages will be formatted."
+type = "string"

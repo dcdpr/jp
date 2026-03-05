@@ -1,18 +1,20 @@
 [conversation.tools.git_unstage]
-enable = false
+enable = "explicit"
 run = "unattended"
 style.inline_results = "full"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-description = """
-Unstage (restore/reset) one or more staged files, undoing the effects of `git_stage_patch`.
+summary = "Unstage (restore/reset) one or more staged files, undoing the effects of `git_stage_patch`."
+
+examples = """
+```json
+{"paths": ["src/lib.rs", "src/main.rs"]}
+```
 """
 
 [conversation.tools.git_unstage.parameters.paths]
 type = "array"
 items.type = "string"
 required = true
-description = """
-List of paths to unstage. Can be a single path or a list of paths.
-"""
+summary = "List of paths to unstage. Can be a single path or a list of paths."

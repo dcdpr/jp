@@ -1,18 +1,19 @@
 [conversation.tools.git_commit]
-enable = false
+enable = "explicit"
 run = "ask"
 style.inline_results = "full"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-description = """
-Commit the staged changes to the local git repository using the provided
-message.
+summary = "Commit the staged changes to the local git repository."
+
+examples = """
+```json
+{"message": "feat: add lazy loading for tool descriptions\n\nSplit tool descriptions into summary and detail fields."}
+```
 """
 
 [conversation.tools.git_commit.parameters.message]
 type = "string"
 required = true
-description = """
-The commit message to use. Can be multiline.
-"""
+summary = "The commit message to use. Can be multiline."

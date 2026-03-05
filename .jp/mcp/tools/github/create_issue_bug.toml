@@ -2,9 +2,8 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+summary = "Track a new bug in the project's GitHub repository."
 description = """
-Track a new bug in the project's GitHub repository.
-
 - MOST IMPORTANTLY: Avoid fluff, and focus on the issue at hand. Do not add more
   text than is necessary to explain the issue.
 
@@ -29,12 +28,23 @@ Track a new bug in the project's GitHub repository.
   using lists, unless they are necessary to convey details about the issue.
 """
 
+examples = """
+```json
+{
+  "title": "`ToolCoordinator` panics on empty tool call list",
+  "description": "When the LLM returns an empty tool call list, the coordinator panics at an unwrap.",
+  "expected_behavior": "The coordinator should handle empty tool call lists gracefully.",
+  "actual_behavior": "Panic at coordinator.rs:245 with 'called unwrap on None'.",
+  "complexity": "low"
+}
+```
+"""
+
 [conversation.tools.github_create_issue_bug.parameters.title]
 type = "string"
 required = true
+summary = "The title of the bug to track."
 description = """
-The title of the bug to track.
-
 Should be a single line, not include any markdown except for backticks (`) where
 applicable. Keep the title short and descriptive.
 """
@@ -42,83 +52,71 @@ applicable. Keep the title short and descriptive.
 [conversation.tools.github_create_issue_bug.parameters.description]
 type = "string"
 required = true
-description = "A clear and concise description of what the issue is about."
+summary = "A clear and concise description of what the issue is about."
 
 [conversation.tools.github_create_issue_bug.parameters.expected_behavior]
 type = "string"
 required = true
-description = "A description of the expected behavior."
+summary = "A description of the expected behavior."
 
 [conversation.tools.github_create_issue_bug.parameters.actual_behavior]
 type = "string"
 required = true
-description = "A description of the actual behavior."
+summary = "A description of the actual behavior."
 
 [conversation.tools.github_create_issue_bug.parameters.complexity]
 type = "string"
 enum = ["low", "medium", "high"]
 required = true
+summary = "Complexity of the issue."
 description = """
-Complexity of the issue.
-
 This is used to estimate the effort required to fix the issue.
 """
 
 [conversation.tools.github_create_issue_bug.parameters.reproduce]
 type = "string"
+summary = "Optional notes on how to reproduce the issue."
 description = """
-Optional notes on how to reproduce the issue.
-
-This is only needed if the combination of `description`, `expected_behavior`,
-and `actual_behavior` is not sufficient to explain the issue.
+Only needed if `description`, `expected_behavior`, and `actual_behavior`
+are not sufficient to explain the issue.
 """
 
 [conversation.tools.github_create_issue_bug.parameters.proposed_solution]
 type = "string"
+summary = "Optional proposed solution to the issue."
 description = """
-Optional proposed solution to the issue.
-
-This should be a high-level, SHORT description of the solution you would
-propose. It should be brief, not go into too much detail, and IF code is added,
-it should be limited in size, and optionally be pseudo-code to avoid making the
-solution obsolete if the code is later changed.
+Should be a high-level, SHORT description. Keep it brief, avoid detail.
+If code is added, use pseudo-code to avoid obsolescence.
 """
 
 [conversation.tools.github_create_issue_bug.parameters.tasks]
 type = "array"
 items.type = "string"
+summary = "Optional ordered tasks to resolve the bug."
 description = """
-Optional tasks in the order they need to be done in to resolve the bug. Include
-links to specific lines of code where the task should happen at.
+Include links to specific lines of code where the task should happen at.
 """
 
 [conversation.tools.github_create_issue_bug.parameters.resource_links]
 type = "array"
 items.type = "string"
+summary = "Optional list of resource links relevant to the issue."
 description = """
-Optional list of resources relevant to the issue.
+Links should only contain the path, not the full URL.
 
-The links should only contain the path to the resource, not the full URL.
-
-The following resource links are supported:
-
-- issue: issues/{issue number}
-- pull: pull/{pull request number}
-- commit: commit/{commit hash}
-- file: blob/{commit hash}/{file path}
-
-  relevant files for this issue. This will help people navigate the project and
-  offer some clues of where to start.
-
-- lines: blob/{commit hash}/{file path}#L{start line}-L{end line}
+Supported formats:
+- issue: issues/{number}
+- pull: pull/{number}
+- commit: commit/{hash}
+- file: blob/{hash}/{path}
+- lines: blob/{hash}/{path}#L{start}-L{end}
 """
 
 [conversation.tools.github_create_issue_bug.parameters.labels]
 type = "array"
 items.type = "string"
+summary = "Additional labels to add to the issue."
 description = """
-Additional labels to add to the issue.
-
 - The issue will always be assigned the `bug` label.
 - If unspecified, no additional labels will be added.
 - Only labels that exist on the project can be added, non-existing labels will
@@ -128,9 +126,8 @@ Additional labels to add to the issue.
 [conversation.tools.github_create_issue_bug.parameters.assignees]
 type = "array"
 items.type = "string"
+summary = "Assignees to add to the issue."
 description = """
-Assignees to add to the issue.
-
 - You should only add assignees if explicitly requested by the user.
 - If unspecified, no assignees will be added.
 - Only collaborators on the project can be added, non-existing assignees will

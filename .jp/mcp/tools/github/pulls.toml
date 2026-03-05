@@ -5,13 +5,24 @@ style.inline_results = "off"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-description = "Find one or more pull requests in the project's GitHub repository."
+summary = "Find one or more pull requests in the project's GitHub repository."
+
+examples = """
+List open pull requests:
+```json
+{"state": "open"}
+```
+
+Get a PR with file diffs:
+```json
+{"number": 15, "file_diffs": ["crates/jp_llm/src/builtin.rs"]}
+```
+"""
 
 [conversation.tools.github_pulls.parameters.number]
 type = "integer"
+summary = "Pull request number to get information about."
 description = """
-Pull request number to get information about.
-
 If unspecified, a list of all pull requests will be returned, without the
 pull request contents. You can re-run the tool with the correct pull request
 number to get more details about a pull request.
@@ -20,9 +31,8 @@ number to get more details about a pull request.
 [conversation.tools.github_pulls.parameters.state]
 type = "string"
 enum = ["open", "closed"]
+summary = "Filter pull requests by their state."
 description = """
-Filter pull requests by their state.
-
 If unspecified, all pull requests will be returned.
 """
 
@@ -30,9 +40,8 @@ If unspecified, all pull requests will be returned.
 # TODO: ["string", "array"], because I've seen LLMs trip over this one.
 type = "array"
 items.type = "string"
+summary = "List of changed file paths to get the diff for."
 description = """
-List of changed file paths to get the diff for.
-
 If unspecified, only the list of changed files will be returned, but not the
 actual diff. You can re-run the tool with the correct file path to get the
 diff.

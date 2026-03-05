@@ -3,7 +3,18 @@ enable = false
 run = "unattended"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-description = "Run `cargo check` for the given package, validating if the code compiles."
+summary = "Run `cargo check` for the given package, validating if the code compiles."
+
+examples = """
+```json
+{"package": "jp_cli"}
+```
+
+```json
+{}
+```
+When no package is specified, all workspace packages will be checked.
+"""
 
 [conversation.tools.cargo_check.style]
 inline_results = "full"
@@ -11,5 +22,5 @@ results_file_link = "off"
 parameters = "function_call"
 
 [conversation.tools.cargo_check.parameters.package]
-description = "Package to run check for, if unspecified, all workspace packages will be checked."
+summary = "Package to run check for, if unspecified, all workspace packages will be checked."
 type = "string"

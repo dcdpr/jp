@@ -2,9 +2,8 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+summary = "Find code matching a query in any GitHub repository."
 description = """
-Find code matching a query in any GitHub repository.
-
 This tool returns a list of matched files, to fetch the actual code of a
 file, use the `github_read_file` tool.
 
@@ -12,20 +11,30 @@ NOTE: Code search always searches the repository's default branch (usually
 `main`), it is not possible to search in a specific branch or tag.
 """
 
+examples = """
+Search for a symbol in the current repo:
+```json
+{"query": "symbol:BuiltinRegistry language:rust"}
+```
+
+Search in another repository:
+```json
+{"query": "json in:file filename:package.json NOT path:tests/", "repository": "denoland/deno"}
+```
+"""
+
 [conversation.tools.github_code_search.parameters.repository]
 type = "string"
+summary = "Repository to search for code."
 description = """
-Repository to search for code.
-
 If unspecified, it defaults to the current project's GitHub repository.
 """
 
 [conversation.tools.github_code_search.parameters.query]
 type = "string"
 required = true
+summary = "Search query to find code."
 description = '''
-Search query to find code.
-
 GitHub code-search supports:
 
 - Bare terms (`http-push`) and quoted phrases (`"sparse index"`)

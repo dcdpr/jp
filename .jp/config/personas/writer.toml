@@ -1,3 +1,5 @@
+inherit = false
+
 [conversation.tools]
 '*'.run = "unattended"
 fs_read_file.enable = true
