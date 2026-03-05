@@ -208,18 +208,14 @@ impl<'a> TurnMut<'a> {
                         || buffer_has_inquiry_request(&events[..i], id);
 
                     if !has_request {
-                        return Err(StreamError::OrphanedInquiryResponse {
-                            id: id.to_string(),
-                        });
+                        return Err(StreamError::OrphanedInquiryResponse { id: id.to_string() });
                     }
 
                     let has_dup = stream_has_inquiry_response(&stream.events, id)
                         || buffer_has_inquiry_response(&events[..i], id);
 
                     if has_dup {
-                        return Err(StreamError::DuplicateInquiryResponse {
-                            id: id.to_string(),
-                        });
+                        return Err(StreamError::DuplicateInquiryResponse { id: id.to_string() });
                     }
                 }
                 _ => {}
@@ -284,20 +280,14 @@ fn buffer_has_tool_call_response(events: &[ConversationEvent], id: &str) -> bool
 }
 
 /// Whether earlier buffer events contain an `InquiryRequest` with the given ID.
-fn buffer_has_inquiry_request(
-    events: &[ConversationEvent],
-    id: &crate::event::InquiryId,
-) -> bool {
+fn buffer_has_inquiry_request(events: &[ConversationEvent], id: &crate::event::InquiryId) -> bool {
     events
         .iter()
         .any(|e| e.as_inquiry_request().is_some_and(|r| r.id == *id))
 }
 
 /// Whether earlier buffer events contain an `InquiryResponse` with the given ID.
-fn buffer_has_inquiry_response(
-    events: &[ConversationEvent],
-    id: &crate::event::InquiryId,
-) -> bool {
+fn buffer_has_inquiry_response(events: &[ConversationEvent], id: &crate::event::InquiryId) -> bool {
     events
         .iter()
         .any(|e| e.as_inquiry_response().is_some_and(|r| r.id == *id))

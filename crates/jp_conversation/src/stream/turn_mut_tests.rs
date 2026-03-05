@@ -3,8 +3,8 @@ use serde_json::Map;
 use crate::{
     ConversationStream, StreamError,
     event::{
-        ChatRequest, ChatResponse, InquiryQuestion, InquiryRequest, InquiryResponse,
-        InquirySource, ToolCallRequest, ToolCallResponse, TurnStart,
+        ChatRequest, ChatResponse, InquiryQuestion, InquiryRequest, InquiryResponse, InquirySource,
+        ToolCallRequest, ToolCallResponse, TurnStart,
     },
 };
 
