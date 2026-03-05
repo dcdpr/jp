@@ -64,7 +64,7 @@
     "summary": "Wasm plugins export an attachment interface, wrapped in a native Handler adapter for transparent integration."
   },
   "018-typed-inquiry-system.md": {
-    "hash": "36e7521333b33754e34dd443ec320a186107721cba9f555df573032e1fad2a5d",
+    "hash": "7a10c16aa8e318a704d76e0d6f141f08f943cabf9e61e35fbf52af1367d46057",
     "summary": "Codify prompt types as `Inquiry` enum variants for unified routing, config, and extensibility."
   },
   "019-non-interactive-mode.md": {
@@ -76,7 +76,7 @@
     "summary": "Replace global active conversation with per-session tracking and add conversation locks for parallel terminal work."
   },
   "021-printer-live-redirection.md": {
-    "hash": "876668f1458e1f0596db2834b95e750e566c76713321a7a0e90b8f86c47b6dfb",
+    "hash": "ba1d703a4cd8e04f13c89b6a5e04eefec834fab6b6a43fd3137234f8274af45f",
     "summary": "Adds runtime output redirection to Printer via SwapWriters command, enabling mid-stream destination changes without replacing instances."
   },
   "022-detached-conversations.md": {
@@ -84,8 +84,8 @@
     "summary": "Proposes detached query execution, process registry, and conversation attachment—abandoned and split into RFD 023 and 024."
   },
   "023-resumable-conversation-turns.md": {
-    "hash": "da2128e41bff54c376ed16ad4e81776dd13b37f65e0262abb348533446965a8f",
-    "summary": "Persist incomplete tool results and allow resuming interrupted turns via --continue flag."
+    "hash": "6b1211b1b33edabbc2f707e53ccdd9af6ec92b4720352685af86f23c209ab284",
+    "summary": "Split incomplete turns from stream, persist tool results incrementally, resume with --continue flag."
   },
   "024-detached-query-execution.md": {
     "hash": "f6fada08fa801a9a37dd0f39ecc7a3c983a604407cf74fe9291e1a7aab75e3b7",
@@ -96,7 +96,7 @@
     "summary": "Abandoned design for live re-attachment to detached query processes via Unix domain sockets; superseded by RFD 027."
   },
   "026-agent-loop-extraction.md": {
-    "hash": "9313e7a6500cd156b18401355d957528f0e9dd676a957c45f4f0c17c45029cbe",
+    "hash": "a919cf75382c2349f70d708de1c17aa167a440227fb68484a1ae096cfb94fe90",
     "summary": "Extract the agent turn loop from jp_cli into a new jp_agent crate with trait-based I/O hooks."
   },
   "027-client-server-query-architecture.md": {
@@ -118,5 +118,9 @@
   "030-schema-dsl.md": {
     "hash": "6ad7b77699e9b0d29105793b92a958bb40e5c14a54bae41eda7c4eb970ac65ce",
     "summary": "JP's concise DSL syntax for defining JSON Schema objects via command-line flags with types, descriptions, and nested structures."
+  },
+  "031-durable-conversation-storage-with-workspace-projection.md": {
+    "hash": "0313f86d5cf10756ee8fb7707eeb0ed168dbe6179bcf2e12c2ebe8b4ab3271ae",
+    "summary": "Make user-local storage the durable source; workspace copies become optional projections for git visibility."
   }
 }
