@@ -152,7 +152,7 @@ impl TestRequest {
             return self;
         };
 
-        thread.events.push(event.into());
+        thread.events.extend(std::iter::once(event.into()));
         self
     }
 
@@ -470,7 +470,7 @@ pub async fn run_chat_completion(
                                             event: event.clone(),
                                             config: config.clone(),
                                         });
-                                        stream.push(event);
+                                        stream.extend(std::iter::once(event));
                                     }
                                 }
                                 Event::Finished(reason) => {
@@ -488,7 +488,7 @@ pub async fn run_chat_completion(
                                             event: event.clone(),
                                             config: config.clone(),
                                         });
-                                        stream.push(event);
+                                        stream.extend(std::iter::once(event));
                                     }
 
                                     all_events[index].push(Event::Finished(reason));

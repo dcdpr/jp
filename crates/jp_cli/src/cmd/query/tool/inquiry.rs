@@ -256,7 +256,7 @@ impl InquiryBackend for LlmInquiryBackend {
         // Append the user-facing question with the structured output schema.
         // The caller is responsible for any context events (e.g. a
         // ToolCallResponse) that should precede this in the stream.
-        events.add_chat_request(ChatRequest {
+        events.start_turn(ChatRequest {
             content: format!(
                 "A tool requires additional input.\n\n{}\n\nProvide your answer based on the \
                  conversation context.",
@@ -570,7 +570,7 @@ mod tests {
     }
 
     fn test_events() -> ConversationStream {
-        ConversationStream::new_test().with_chat_request("Modify file X")
+        ConversationStream::new_test().with_turn("Modify file X")
     }
 
     #[tokio::test]

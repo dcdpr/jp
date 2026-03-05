@@ -132,16 +132,18 @@ fn convert_events_merges_consecutive_tool_calls() {
     use jp_conversation::event::ToolCallRequest;
 
     let mut events = ConversationStream::new_test();
-    events.push(ConversationEvent::now(ToolCallRequest {
-        id: "call_1".into(),
-        name: "tool_a".into(),
-        arguments: serde_json::Map::new(),
-    }));
-    events.push(ConversationEvent::now(ToolCallRequest {
-        id: "call_2".into(),
-        name: "tool_b".into(),
-        arguments: serde_json::Map::new(),
-    }));
+    events.extend([
+        ConversationEvent::now(ToolCallRequest {
+            id: "call_1".into(),
+            name: "tool_a".into(),
+            arguments: serde_json::Map::new(),
+        }),
+        ConversationEvent::now(ToolCallRequest {
+            id: "call_2".into(),
+            name: "tool_b".into(),
+            arguments: serde_json::Map::new(),
+        }),
+    ]);
 
     let messages = convert_events(events);
 
@@ -156,8 +158,8 @@ fn convert_events_merges_consecutive_tool_calls() {
 #[test]
 fn convert_events_wraps_reasoning_in_think_tags() {
     let mut events = ConversationStream::new_test();
-    events.push(ConversationEvent::now(ChatResponse::reasoning(
-        "step 1: think hard",
+    events.extend(std::iter::once(ConversationEvent::now(
+        ChatResponse::reasoning("step 1: think hard"),
     )));
 
     let messages = convert_events(events);

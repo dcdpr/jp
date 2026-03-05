@@ -77,15 +77,22 @@ fn test_continues_after_tool_execution() {
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
     let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
 
-    // Manually set state to Executing (since we test transition above)
-    // Ideally we drive it there, but for unit testing internal methods or state setup:
+    // Drive the coordinator to Executing by simulating a tool call in the
+    // stream, then test that handle_tool_responses transitions back to
+    // Streaming.
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
-    coordinator.pending_tool_calls.push(ToolCallRequest {
-        id: "1".into(),
-        name: "t".into(),
-        arguments: Map::default(),
+
+    // Simulate LLM producing a tool call (Part + Flush + Finished).
+    coordinator.handle_event(&mut stream, Event::Part {
+        index: 0,
+        event: ConversationEvent::now(ToolCallRequest {
+            id: "1".into(),
+            name: "t".into(),
+            arguments: Map::default(),
+        }),
     });
-    coordinator.transition_from_streaming(FinishReason::Completed);
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
     assert_eq!(coordinator.current_phase(), TurnPhase::Executing);
 
@@ -103,8 +110,8 @@ fn test_continues_after_tool_execution() {
         _ => panic!("Expected SendFollowUp action"),
     }
 
-    // Stream has: TurnStart + ChatRequest (from start_turn) + ToolCallResponse
-    assert_eq!(stream.len(), 3);
+    // Stream has: TurnStart + ChatRequest + ToolCallRequest + ToolCallResponse
+    assert_eq!(stream.len(), 4);
 }
 
 #[test]

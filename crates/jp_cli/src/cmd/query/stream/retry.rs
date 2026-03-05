@@ -27,7 +27,7 @@
 use std::sync::Arc;
 
 use jp_config::assistant::request::RequestConfig;
-use jp_conversation::ConversationStream;
+use jp_conversation::{ConversationStream, event::ChatResponse};
 use jp_llm::{StreamError, exponential_backoff};
 use jp_printer::Printer;
 use tracing::{error, warn};
@@ -132,7 +132,10 @@ pub async fn handle_stream_error(
     //    it will be included when the thread is rebuilt for the retry.
     if let Some(content) = turn_coordinator.peek_partial_content() {
         conversation_stream
-            .add_chat_response(jp_conversation::event::ChatResponse::message(&content));
+            .current_turn_mut()
+            .add_chat_response(ChatResponse::message(&content))
+            .build()
+            .expect("Invalid ConversationStream state");
     }
     turn_coordinator.prepare_continuation();
 

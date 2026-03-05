@@ -371,7 +371,7 @@ impl Query {
         {
             debug!("Generating title for new conversation");
             let mut stream = stream.clone();
-            stream.add_chat_request(chat_request.clone());
+            stream.start_turn(chat_request.clone());
             ctx.task_handler
                 .spawn(TitleGeneratorTask::new(cid, stream, &cfg)?);
         }

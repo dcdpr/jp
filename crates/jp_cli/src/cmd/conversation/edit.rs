@@ -123,7 +123,7 @@ async fn generate_titles(
         .build()?;
 
     let mut thread_events = thread.events.clone();
-    thread_events.add_chat_request(ChatRequest {
+    thread_events.start_turn(ChatRequest {
         content: "Generate titles for this conversation.".into(),
         schema: Some(schema),
     });
