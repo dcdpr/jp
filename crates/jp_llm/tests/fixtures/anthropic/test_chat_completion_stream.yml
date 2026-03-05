@@ -9,10 +9,7 @@ when:
           "content": [
             {
               "type": "text",
-              "text": "Test message",
-              "cache_control": {
-                "type": "ephemeral"
-              }
+              "text": "Test message"
             }
           ]
         }
@@ -23,7 +20,10 @@ when:
         "type": "enabled",
         "budget_tokens": 12800
       },
-      "stream": true
+      "stream": true,
+      "cache_control": {
+        "type": "ephemeral"
+      }
     }
 then:
   status: 200
@@ -32,107 +32,95 @@ then:
       value: text/event-stream; charset=utf-8
   body: |+
     event: message_start
-    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01Ek9JKaK4oDndYwZmaSFcQF","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":38,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"}}     }
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_018seD6jcRrJrKHcjyeh3akR","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":38,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":3,"service_tier":"standard","inference_geo":"not_available"}}         }
     
     event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}       }
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}    }
     
     event: ping
     data: {"type": "ping"}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"This"}            }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user has"}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" is"}          }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" sent"}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a simple"}          }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \""}      }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" test"}  }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Test message\" which appears to be a"}        }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" message. The"}             }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" simple"}       }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" user is"}              }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" test"}     }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" just"} }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" to"}        }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" checking"}     }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" see if I'm working and"}       }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" if"}               }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" responding"}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I'm"}             }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"."}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" working"}  }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I"}              }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" and responsive"} }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" should acknowledge"}         }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":". I should provide"}               }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" this in"}             }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a friendly, brief"}             }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a friendly and helpful way."}     }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" confirmation"}             }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}   }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" that"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I'm ready to help."}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EsgCCkYICxgCKkANmWsZsSdW5VO5DoZz4QEk5/AntmcKvpA+7V9eOQoArrSvF3fgvswx9oYjGr9wP6NcUmlIYu4/TkbzsS+cHmabEgxBRacUyYpO+zSn2WoaDNMXg+8zilN01zP25yIwViATe/BNkfCbSmaCFZ6YNIVEdG/nem5drMXKDQ46R92yKSvv78M0k1t9tS95DreKKq8BWDSOh48xq3msqgWYx06t3XrUpdackM4QVs+E28DCGwjQ4mfQM9GDTGgSP/CQXZ60ImrY6pF8LbatPtsF2RJNEWiWgWbUsclTzxwB2KDOvOEai5l2absy1szd40UgDtZAEzbmQfBiAsyxXYXC7Bcqxf1BW6Q2h8yWtrLs1EHUPQmASOf8YovPFeeZ8u5skeHx+v5rzRMqJ2VWG2q7wGMBKfXhbUvLqWrIoWgq5Dmp5hgB"}             }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EsoCCkYICxgCKkDJyKbLg07EAYYyQJNONKrLTOuNC9dU0e49bspYIPvcJJG5fhfBP8Ct4aiiGLQucI2Nhpo4CDzN0GHBFqAbWz/gEgx13lQTbzvSgigqNC0aDAQm2rk8djph7kq+YSIw/5MGcnZ2DTH3UoTfHt7zq2083PHDdzVKK4Ury1ozbgAQeuN4Wyc14MmGhVsFKN4lKrEBDuSEah4NiedrMW87SFQJWNzAQ1PAnCAGgtDbU9f/c5gfoCUtK5DTLX2Z9zhKYAn+YUPkzDAxvW9IDekokPa9tUDHIJwrI9GEcH84xyoaMSzBwj0BSrb1HBps8OxCkilOs1tVh1HXyBLotI2k3woXPo/nlQ35Ys0XCTuZj5560Z56dn6RnjvD1JY8JEvocT1/Jug/97FDYsLnpfhtebs2ibYJ+CEywmEqsVsySGwWSZU/GAE="}         }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":0 }
+    data: {"type":"content_block_stop","index":0}
     
     event: content_block_start
-    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}              }
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"#"} }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Hello! I"}  }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Hello"}      }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"'m working"}   }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"! "}      }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" and"}    }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"👋\n\nI'm working"}       }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" ready to help."}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" an"}      }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" What"}}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"d ready to help."}   }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" can"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" What"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" can I assist you with today?"}  }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" I assist you with today?"}            }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":1         }
+    data: {"type":"content_block_stop","index":1      }
     
     event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":38,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":68} }
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":38,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":64}             }
     
     event: message_stop
-    data: {"type":"message_stop"        }
+    data: {"type":"message_stop"}
     

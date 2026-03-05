@@ -149,12 +149,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "Okay, the user sent a test message with the content \"Test message /think\". I need to respond appropriately. Since it's a test, my response should be friendly and acknowledge that it's a test. I'll let them know I'm here to help and ask if there's anything specific they need assistance with. Keeping it simple and open-ended should work.\n"
+    "reasoning": "Okay, the user sent \"Test message /think\". Let me figure out what they need.\n\nFirst, \"Test message\" is probably just a test to see if the system is working. They might be checking if the response is coming through. The \"/think\" part could be a command, but I'm not sure. Maybe they're using a specific format or want me to think about the response.\n\nI should respond in a friendly and helpful way. Let me acknowledge the test and ask if there's anything specific they need help with. That way, I cover both possibilities: they might just be testing, or they have a real question. Keep it open-ended so they can clarify if needed.\n"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Hello! It looks like you've sent a test message. How can I assist you today? If you have any questions or need help with something, feel free to let me know! 😊"
+    "message": "Hello! It looks like you've sent a test message. How can I assist you today? 😊"
   },
   {
     "type": "config_delta",
@@ -180,12 +180,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "Okay, the user asked me to repeat their previous message. Let me check the conversation history.\n\nThe first message was \"Test message\" from the user. Then I responded with a greeting and an offer to help. Now the user is saying \"Repeat my previous message\". \n\nSo, they want me to repeat the first message they sent, which was \"Test message\". I need to make sure I don't include my own response. Just the original message. \n\nI should confirm that I'm repeating the correct message. Since there's no confusion in the history, it's straightforward. The user might be testing if I can recall past messages or just wants to see the repetition. \n\nNo need to add anything else, just the exact message. Let me make sure there's no other message before that. Yep, the first one was \"Test message\". So the answer is simply \"Test message\".\n"
+    "reasoning": "Okay, the user just asked me to repeat their previous message. Let me check the conversation history.\n\nLooking back, the user first sent \"Test message\" and I responded with a greeting. Then they asked to repeat their previous message. So, the previous message they want me to repeat is \"Test message\". \n\nI need to make sure I'm not confusing the current message with the one they want. The user is probably testing if I can recall past messages or if there's a feature to repeat them. Since I don't have a built-in function to store or repeat past messages, I should inform them that I can't do that. But I should also be polite and offer help with something else. \n\nWait, maybe they just want confirmation that I remember their message. In that case, I can acknowledge their request and explain my limitations. Let me phrase it clearly and keep the tone friendly. \n\nYes, that makes sense. I'll respond by stating I can't repeat messages but offer assistance with other tasks. That should cover it without confusion.\n"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Test message"
+    "message": "I can't repeat messages, but I'm here to help with anything you need! 😊 What would you like assistance with?"
   },
   {
     "type": "config_delta",
@@ -208,7 +208,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "Okay, the user is asking me to run the tool with whatever arguments I want. Let me check the available functions again. The only function provided is 'run_me' which has no parameters. Since there are no arguments specified for 'run_me', I should call it without any arguments. The user probably wants to see the function being executed, so I'll generate the tool call accordingly.\n"
+    "reasoning": "Okay, the user is asking me to run the tool with whatever arguments I want. Let me check the tools available. The only tool provided is the 'run_me' function, which has no parameters. Since the user wants me to run it, I should call run_me without any arguments. I need to make sure I don't add any parameters since the function doesn't require them. Let me structure the tool call correctly.\n"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
@@ -227,12 +227,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "Okay, the user asked me to run the tool with whatever arguments I wanted. The function provided was 'run_me' with no parameters. So I called it without any arguments. The response from the tool was \"The secret code is: 42\". Now I need to present this result to the user.\n\nI should start by acknowledging that the tool was executed. Then, share the secret code they provided. Maybe add a friendly note about the code being a well-known answer to life's questions. Keep the tone positive and engaging. Let me make sure the response is clear and concise.\n"
+    "reasoning": "Okay, the user asked me to run the tool with whatever arguments I want. I checked the available tools and saw that there's a 'run_me' function with no parameters. So I called that function without any arguments. The response from the tool was \"The secret code is: 42\". Now I need to present this information to the user. Since the user wanted me to run the tool, I should just relay the result. I'll make sure to mention the secret code clearly and maybe add a friendly note to see if they need anything else. Let me check if there's anything else required, but it seems straightforward. Alright, time to respond.\n"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "The tool has been executed, and here's the result:\n\n**The secret code is: 42**\n\nAh, the answer to life, the universe, and everything! 😄 Let me know if you need further assistance."
+    "message": "The tool returned the secret code: **42** 🕵️‍♂️\n\nLet me know if you need anything else! 😊"
   },
   {
     "type": "config_delta",
@@ -258,11 +258,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "Okay, the user is asking about the result of the previous tool call. Let me check the history.\n\nLooking back, the user first sent \"Test message,\" then asked to repeat it. Then they told me to run a tool with whatever arguments. I responded by executing the tool and providing the secret code 42. The user then asked what the result was, and I mentioned the secret code again.\n\nWait, the user's current question is \"What was the result of the previous tool call?\" So they want confirmation of the result from the tool run. The tool's output was \"The secret code is: 42,\" which I already shared. Since the user is asking again, maybe they want a recap or more details. But since the tool's result was already given, I should just restate that. Also, the user might be testing if I remember the previous interaction. I need to make sure to clearly state the result again without adding extra info unless needed. Let me confirm there's no other data from the tool. No, it was straightforward. So the answer is the secret code 42.\n"
+    "reasoning": "Okay, the user is asking about the result of the previous tool call. Let me check the history.\n\nEarlier, they asked to run a tool with whatever arguments I wanted. I responded by saying the secret code is 42. Then the user asked what the result was, and I mentioned the secret code 42 again. Now they're asking again, maybe they didn't see the first response or want confirmation.\n\nI should confirm that the result was indeed the secret code 42. Keep it friendly and straightforward. Maybe add an emoji to keep the tone light. Make sure there's no confusion and offer further help if needed.\n"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "The result of the previous tool call was:  \n**\"The secret code is: 42\"**  \n\nLet me know if you need further clarification! 😊"
+    "message": "The result of the previous tool call was the secret code: **42** 🕵️‍♂️ Let me know if you need anything else! 😊"
   }
 ]

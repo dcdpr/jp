@@ -14,7 +14,7 @@ use jp_config::{
 use jp_conversation::{
     ConversationEvent, ConversationStream,
     event::{ChatResponse, EventKind},
-    thread::{Document, Documents, Thread},
+    thread::{SystemPart, Thread, ThreadParts},
 };
 use jp_openrouter::{
     Client,
@@ -467,7 +467,7 @@ fn build_request(
             function: ToolFunction {
                 parameters: parameters_with_strict_mode(tool.parameters, true),
                 name: tool.name,
-                description: tool.description,
+                description: tool.docs.schema_description().map(str::to_owned),
                 strict: true,
             },
         })
@@ -574,74 +574,40 @@ impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
     type Error = Error;
 
     fn try_from((model_id, thread): (&ModelIdConfig, Thread)) -> Result<Self> {
-        let Thread {
-            system_prompt,
-            sections,
-            attachments,
+        let ThreadParts {
+            system_parts,
             events,
-        } = thread;
+        } = thread.into_parts()?;
 
         let mut messages = vec![];
 
-        // Build system prompt with instructions and attachments
+        // Cache breakpoints:
+        // - Always cache the prompt (index 0)
+        // - Cache the last section (last Prompt at index > 0), if any
+        // - Cache the last attachment, if any
         let mut content = vec![];
+        let last_section_idx = system_parts
+            .iter()
+            .enumerate()
+            .rfind(|(i, p)| *i > 0 && matches!(p, SystemPart::Prompt(_)))
+            .map(|(i, _)| i);
+        let last_attachment_idx = system_parts
+            .iter()
+            .rposition(|p| matches!(p, SystemPart::Attachment(_)));
 
-        // System message first, if any.
-        //
-        // Cached (1/4), as it's not expected to change.
-        if let Some(system_prompt) = system_prompt {
+        for (i, part) in system_parts.into_iter().enumerate() {
+            let cache = i == 0 || Some(i) == last_section_idx || Some(i) == last_attachment_idx;
             content.push(Content::Text {
-                text: system_prompt,
-                cache_control: Some(CacheControl::Ephemeral),
+                text: part.into_inner(),
+                cache_control: cache.then_some(CacheControl::Ephemeral),
             });
         }
 
-        if !sections.is_empty() {
-            content.push(Content::Text {
-                text: "Before we continue, here are some contextual details that will help you \
-                       generate a better response."
-                    .to_string(),
-                cache_control: None,
-            });
-
-            // Then sections as rendered text.
-            //
-            // Cached (3/4), (for the last section), as it's not expected to
-            // change.
-            let mut sections = sections.iter().peekable();
-            while let Some(section) = sections.next() {
-                content.push(Content::Text {
-                    text: section.render(),
-                    cache_control: sections
-                        .peek()
-                        .map_or(Some(CacheControl::Ephemeral), |_| None),
-                });
-            }
-        }
-
-        if !attachments.is_empty() {
-            let documents: Documents = attachments
-                .into_iter()
-                .enumerate()
-                .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
-                .map(Document::from)
-                .collect::<Vec<_>>()
-                .into();
-
-            content.push(Content::Text {
-                text: documents.try_to_xml()?,
-                cache_control: Some(CacheControl::Ephemeral),
-            });
-        }
-
-        // Add system message if we have any system content
         if !content.is_empty() {
             messages.push(Message::default().with_content(content).system());
         }
 
-        // Convert all events to messages
-        let event_messages = convert_events(events);
-        messages.extend(event_messages);
+        messages.extend(convert_events(events));
 
         // Only Anthropic and Google models support explicit caching.
         if !model_id.name.starts_with("anthropic") && !model_id.name.starts_with("google") {
@@ -658,7 +624,10 @@ impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
     }
 }
 
-/// Converts a single event into `OpenRouter` request messages.
+/// Converts conversation events into OpenRouter request messages.
+///
+/// Expects a pre-filtered stream (internal events already removed by
+/// [`Thread::into_parts`]).
 fn convert_events(events: ConversationStream) -> Vec<RequestMessage> {
     events
         .into_iter()
@@ -708,9 +677,9 @@ fn convert_events(events: ConversationStream) -> Vec<RequestMessage> {
                     name: None,
                 })]
             }
-            EventKind::InquiryRequest(_)
-            | EventKind::InquiryResponse(_)
-            | EventKind::TurnStart(_) => vec![],
+            // Internal events are filtered by into_parts(), but we still need
+            // an exhaustive match.
+            _ => vec![],
         })
         .collect()
 }

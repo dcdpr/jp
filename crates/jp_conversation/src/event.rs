@@ -399,6 +399,23 @@ impl EventKind {
             Self::InquiryResponse(_) => "InquiryResponse",
         }
     }
+
+    /// Whether this event should be included when building provider messages.
+    ///
+    /// Internal events (turn markers, inquiry exchanges) are filtered out
+    /// before the conversation stream reaches any provider's message conversion
+    /// logic. Uses an allowlist so new event types are invisible to providers
+    /// by default.
+    #[must_use]
+    pub const fn is_provider_visible(&self) -> bool {
+        matches!(
+            self,
+            Self::ChatRequest(_)
+                | Self::ChatResponse(_)
+                | Self::ToolCallRequest(_)
+                | Self::ToolCallResponse(_)
+        )
+    }
 }
 
 impl From<ChatRequest> for EventKind {

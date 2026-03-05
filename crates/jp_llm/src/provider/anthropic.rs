@@ -1,4 +1,4 @@
-use std::{env, future, time::Duration};
+use std::{env, future, mem, time::Duration};
 
 use async_anthropic::{
     Client,
@@ -25,7 +25,7 @@ use jp_config::{
 use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest},
-    thread::{Document, Documents, Thread},
+    thread::SystemPart,
 };
 use serde_json::{Map, Value, json};
 use tracing::{debug, info, trace, warn};
@@ -48,11 +48,16 @@ use crate::{
 
 static PROVIDER: ProviderId = ProviderId::Anthropic;
 
-/// Anthropic limits the number of cache points to 4 per request. Returning an API error if the
-/// request exceeds this limit.
+/// Anthropic limits the number of explicit cache breakpoints to 4 per request,
+/// returning an API error if the request exceeds this limit.
 ///
-/// We detect where we inject cache controls and make sure to not exceed this limit.
-const MAX_CACHE_CONTROL_COUNT: usize = 4;
+/// We use automatic caching (top-level `cache_control` on the request) to
+/// handle the growing message history, which consumes 1 of the 4 slots. The
+/// remaining 3 are allocated to stable, explicitly-cached content: system
+/// prompt, attachments, and tools.
+///
+/// See: <https://platform.claude.com/docs/en/build-with-claude/prompt-caching#combining-with-block-level-caching>
+const MAX_EXPLICIT_CACHE_CONTROL_COUNT: usize = 3;
 
 const THINKING_SIGNATURE_KEY: &str = "anthropic_thinking_signature";
 const REDACTED_THINKING_KEY: &str = "anthropic_redacted_thinking";
@@ -415,7 +420,7 @@ fn create_request(
     beta: &BetaFeatures,
 ) -> Result<(types::CreateMessagesRequest, bool)> {
     let ChatQuery {
-        thread,
+        mut thread,
         tools,
         mut tool_choice,
     } = query;
@@ -424,17 +429,9 @@ fn create_request(
 
     builder.stream(stream);
 
-    let Thread {
-        system_prompt,
-        sections,
-        attachments,
-        events,
-    } = thread;
-
-    // Request a structured response if the very last event is a ChatRequest
-    // with a schema attached. The schema is transformed to strip unsupported
-    // properties (moving them into `description` fields as hints).
-    let format = events
+    // Extract schema and config before into_parts() consumes the thread.
+    let format = thread
+        .events
         .last()
         .and_then(|e| e.event.as_chat_request())
         .and_then(|req| req.schema.clone())
@@ -442,80 +439,103 @@ fn create_request(
             schema: transform_schema(schema),
         });
 
-    let mut cache_control_count = MAX_CACHE_CONTROL_COUNT;
-    let config = events.config()?;
+    let mut cache_budget = MAX_EXPLICIT_CACHE_CONTROL_COUNT;
+    let config = thread.events.config()?;
 
-    builder
-        .model(model.id.name.clone())
-        .messages(AnthropicMessages::build(events, &mut cache_control_count).0);
+    // Extract attachments before into_parts() serializes them to XML. They'll
+    // be sent as native document blocks in the first user message.
+    let attachments = mem::take(&mut thread.attachments);
+    let thread_parts = thread.into_parts()?;
 
-    let strict_tools = model.features.contains(&"structured-outputs") && beta.structured_outputs();
-    let tools = convert_tools(tools, strict_tools, &mut cache_control_count);
+    // Build messages from conversation events, then prepend any attachments as
+    // document blocks to the first user message.
+    let mut messages = convert_events(thread_parts.events);
 
-    let mut system_content = vec![];
-
-    if let Some(text) = system_prompt {
-        system_content.push(types::SystemContent::Text(types::Text {
-            text,
-            cache_control: (cache_control_count > 0).then_some({
-                cache_control_count = cache_control_count.saturating_sub(1);
-                types::CacheControl::default()
-            }),
-        }));
-    }
-
-    // FIXME: Somehow the system_prompt is being duplicated. It has to do with
-    // `impl PartialConfigDelta`?
-    // dbg!(&system_content);
-
-    if !sections.is_empty() {
-        // Each section gets its own system content block. Cache control
-        // is placed on the last section, as section content is unlikely
-        // to change between requests.
-        let mut sections = sections.iter().peekable();
-        while let Some(section) = sections.next() {
-            system_content.push(types::SystemContent::Text(types::Text {
-                text: section.render(),
-                cache_control: sections.peek().map_or_else(
-                    || {
-                        (cache_control_count > 0).then(|| {
-                            cache_control_count = cache_control_count.saturating_sub(1);
-                            types::CacheControl::default()
-                        })
+    if !attachments.is_empty() {
+        let mut doc_blocks: Vec<_> = attachments
+            .into_iter()
+            .map(|attachment| {
+                types::MessageContent::Document(types::Document {
+                    source: types::DocumentSource::Text {
+                        media_type: types::PlainTextMediaType::default(),
+                        data: attachment.content,
                     },
-                    |_| None,
-                ),
-            }));
+                    title: Some(attachment.source),
+                    context: attachment.description,
+                    citations: None,
+                    cache_control: None,
+                })
+            })
+            .collect();
+
+        // Place a cache breakpoint on the last document block so the
+        // entire prefix (system prompt + documents) is cached.
+        if let Some(types::MessageContent::Document(doc)) = doc_blocks.last_mut()
+            && cache_budget > 0
+        {
+            doc.cache_control = Some(types::CacheControl::default());
+            cache_budget -= 1;
+        }
+
+        // Prepend document blocks to the first user message.
+        if let Some(first_user) = messages
+            .iter_mut()
+            .find(|m| m.role == types::MessageRole::User)
+        {
+            let existing = mem::take(&mut first_user.content.0);
+            first_user.content.0 = doc_blocks;
+            first_user.content.0.extend(existing);
         }
     }
 
-    if !attachments.is_empty() {
-        let documents: Documents = attachments
-            .into_iter()
-            .enumerate()
-            .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
-            .map(Document::from)
-            .collect::<Vec<_>>()
-            .into();
+    // Automatic caching handles the growing message history. The API places a
+    // cache breakpoint on the last cacheable block (the latest message),
+    // consuming 1 of the 4 available slots.
+    builder
+        .cache_control(types::CacheControl::default())
+        .model(model.id.name.clone())
+        .messages(messages);
 
-        system_content.push(types::SystemContent::Text(types::Text {
-            text: documents.try_to_xml()?,
+    // Explicit breakpoints are allocated to stable content, in request
+    // structure order (system > documents > tools). System content gets
+    // priority because it changes least frequently.
+    //
+    // Cache breakpoints (budget permitting):
+    // - Last system Prompt block (captures system prompt + all sections)
+    // - Last document block in first user message (attachments)
+    // - Last tool definition (extends through tools)
+    let last_prompt_idx = thread_parts
+        .system_parts
+        .iter()
+        .rposition(SystemPart::is_prompt);
 
-            // Anthropic limits the number of cache points to 4 per request. We
-            // currently use 5 cache points, so this one is optional, depending
-            // on whether we have any tools or not, making sure we stay within
-            // the limit.
-            cache_control: (cache_control_count > 0).then_some({
-                _ = cache_control_count.saturating_sub(1);
-                types::CacheControl::default()
-            }),
-        }));
-    }
+    let mut system_content: Vec<types::SystemContent> = thread_parts
+        .system_parts
+        .into_iter()
+        .enumerate()
+        .map(|(i, part)| {
+            let cache_control = if Some(i) == last_prompt_idx && cache_budget > 0 {
+                cache_budget -= 1;
+                Some(types::CacheControl::default())
+            } else {
+                None
+            };
+
+            types::SystemContent::Text(types::Text {
+                text: part.into_inner(),
+                cache_control,
+            })
+        })
+        .collect();
+
+    let strict_tools = model.features.contains(&"structured-outputs") && beta.structured_outputs();
+    let tools = convert_tools(tools, strict_tools, &mut cache_budget);
 
     // From testing, it seems that sending a single tool with the
     // "function" tool choice can result in incorrect API responses from
     // Anthropic. I (Jean) have an open support case with Anthropic to dig into
-    // this finding more.
+    // this finding more. UPDATE: This has been confirmed as a "quirk" of their
+    // API, and the fix here is what they recommend as well.
     if tools.len() == 1 && matches!(tool_choice, ToolChoice::Function(_)) {
         tool_choice = ToolChoice::Required;
     }
@@ -1027,14 +1047,14 @@ fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {
 fn convert_tools(
     tools: Vec<ToolDefinition>,
     strict: bool,
-    cache_controls: &mut usize,
+    cache_budget: &mut usize,
 ) -> Vec<types::Tool> {
     let mut tools: Vec<_> = tools
         .into_iter()
         .map(|tool| {
             types::Tool::Custom(types::CustomTool {
                 name: tool.name,
-                description: tool.description,
+                description: tool.docs.schema_description().map(str::to_owned),
                 strict: strict.then_some(true),
                 input_schema: {
                     let required = tool
@@ -1063,7 +1083,7 @@ fn convert_tools(
         .collect();
 
     // Cache tool definitions, as they are unlikely to change.
-    if *cache_controls > 0
+    if *cache_budget > 0
         && let Some(tool) = tools.last_mut()
     {
         let cache_control = match tool {
@@ -1094,40 +1114,10 @@ fn convert_tools(
         };
 
         *cache_control = Some(types::CacheControl::default());
-        *cache_controls = cache_controls.saturating_sub(1);
+        *cache_budget = cache_budget.saturating_sub(1);
     }
 
     tools
-}
-
-struct AnthropicMessages(Vec<types::Message>);
-
-impl AnthropicMessages {
-    fn build(events: ConversationStream, cache_controls: &mut usize) -> Self {
-        let mut messages = convert_events(events);
-
-        // Make sure to add cache control to the last history message.
-        if *cache_controls > 0
-            && let Some(message) = messages.last_mut().and_then(|m| m.content.0.last_mut())
-        {
-            *cache_controls = cache_controls.saturating_sub(1);
-
-            match message {
-                types::MessageContent::Text(m) => {
-                    m.cache_control = Some(types::CacheControl::default());
-                }
-                types::MessageContent::ToolUse(m) => {
-                    m.cache_control = Some(types::CacheControl::default());
-                }
-                types::MessageContent::ToolResult(m) => {
-                    m.cache_control = Some(types::CacheControl::default());
-                }
-                _ => {}
-            }
-        }
-
-        Self(messages)
-    }
 }
 
 /// Groups consecutive events into messages by role.
@@ -1253,10 +1243,9 @@ fn convert_event(
                 }),
             ))
         }
-        EventKind::ChatRequest(_)
-        | EventKind::InquiryRequest(_)
-        | EventKind::InquiryResponse(_)
-        | EventKind::TurnStart(_) => None,
+        // ChatRequest is handled as the role boundary (not a message).
+        // Internal events are filtered by into_parts().
+        _ => None,
     }
 }
 
@@ -1288,7 +1277,7 @@ fn map_content_start(
         }
         Text(text) if is_structured => ChatResponse::structured(Value::String(text.text)).into(),
         Text(text) if !text.text.is_empty() => ChatResponse::message(text.text).into(),
-        Text(_) => return None,
+        Document(_) | Text(_) => return None,
         Thinking(types::Thinking {
             thinking,
             signature,

@@ -999,7 +999,7 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
         .map(|tool| types::Tool::Function {
             name: tool.name,
             strict: true,
-            description: tool.description,
+            description: tool.docs.schema_description().map(str::to_owned),
             parameters: parameters_with_strict_mode(tool.parameters, true).into(),
         })
         .collect()

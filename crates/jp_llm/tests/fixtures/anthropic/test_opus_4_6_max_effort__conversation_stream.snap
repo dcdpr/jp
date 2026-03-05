@@ -168,9 +168,9 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "The user is asking a simple arithmetic question.\n\n2 + 2 = 4",
+    "reasoning": "The user is asking a simple math question.",
     "metadata": {
-      "anthropic_thinking_signature": "RXVFQkNrWUlDeGdDS2tDUEtHclJ3UEtTUWd2ZVhwdERrVGpPdmVlcG9kckZkekszK0tZQTVKZldPb2lYYVpiTFFMWnZ5c2pLcEs0UTJwazZFeWp3dDByMkNDeUdIa1NFZHBPc0VneXJDTDh6MGwyckttRnpsMzBhREcrL1oyc2VCbFpmeW8yQ095SXdxTFZIbTJjREM1Z3NGRTFMRGQ3N2RQV05PeXZhOFpFYlRNRFE1R0NmeDNlUldUcGZWeVlkTzI0V1R0cVEvdHlqS2ttOWhrb3I4Z2dpNk9aT0tvaHpLTnpDOGtnSFZSS1VhTmYwbU5zOHJSSUU2dDJ6cXQ2dDdEL2YyUFpNMFBZYnZnR1Z2WFU2dk9XZ2F5WU1oQVNzaEhhUm5jN3V5aWZiR091UkdBRT0="
+      "anthropic_thinking_signature": "RXRJQkNrWUlDeGdDS2tCTjVOSnFKSWVMQ2lBcWtmcGFXZnNPa04xQlI4T2xieFVQcm5KcnZMZzJ3cEIxMExGRU9kcEJ1RGtxYXIzUm9xUnFuWUR3M3RXZjBkOHYzdnFPWjc0MUVnd2NGTnhvTzRYdHRVVE9zMzBhREpCU0NERFM3TU0xMm8vdEtDSXdCRXNYcUQ5OG5EUmhZd2RxeWtXMW5SdlJPMGd0aVQ2WWcraWQ4WGd3Z0JRczhEYXpRaHlxVG9RaDRESDBVbWJOS2pvOTIybXpqT1Q4MXhpV3N1WHplNUNYSHB5MDhUemRwdndQSHZsTDl5cnlXd0dydktXT3IyZkc2SThBZ21XczlVUWFWWDB3VWh5NWp0cENHQUU9"
     }
   },
   {

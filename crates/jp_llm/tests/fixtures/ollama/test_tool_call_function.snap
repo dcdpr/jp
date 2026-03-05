@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "Okay, the user is asking me to run the tool, specifically the 'run_me' function, and they mentioned providing whatever arguments I want. Let me check the tools section again.\n\nThe tools provided have a function called 'run_me' with no parameters. The function signature shows it's defined with <nil> for parameters, so it doesn't require any arguments. But the user wants me to provide arguments. Wait, maybe the function can accept arguments even if they're not specified? Or perhaps the user just wants me to call it without any arguments since the tool doesn't require any. \n\nSince the function doesn't have any parameters, I should call it without arguments. The user might be testing if I can execute the function correctly. I need to make sure I follow the directive to use the 'run_me' function and not ask for more context. So the correct action is to generate a tool call for 'run_me' with an empty arguments object.\n",
+                        reasoning: "Okay, the user wants me to run the 'run_me' function with whatever arguments I choose. Let me check the tools provided. The function 'run_me' has no required parameters, as indicated by the empty arguments array and the nil values. So I can pass any arguments I want, or maybe none. Since the user didn't specify any particular arguments, I'll just use the default. Let me structure the tool call accordingly. The function name is 'run_me' and the arguments are an empty object. That should work.\n",
                     },
                 ),
                 metadata: {},
@@ -49,7 +49,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "Okay, the user asked me to run the tool with whatever arguments I want. Let me check the tools again.\n\nThe available tool is 'run_me' with no parameters. So the function doesn't require any arguments. But the user wants me to provide arguments. Wait, maybe they just want me to call the function without any arguments since there are none specified. I should call 'run_me' with an empty arguments object. That's the correct approach here. Let me make sure I'm not missing any hidden parameters or requirements. No, the function is defined with <nil> for parameters, so it's safe to call it without any. Alright, I'll generate the tool call accordingly.\n",
+                        reasoning: "Okay, the user asked me to run the 'run_me' function with whatever arguments I wanted. I checked the tools provided and saw that 'run_me' has no required parameters. So I decided to call it with an empty arguments object. The response came back as \"working!\", which seems like a success. Now I need to let the user know it worked. I should confirm that the function was executed and maybe ask if they need anything else. Keep it friendly and straightforward.\n",
                     },
                 ),
                 metadata: {},
@@ -65,7 +65,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "```json\n{\n  \"tool\": \"run_me\",\n  \"arguments\": {}\n}\n```",
+                        message: "The function `run_me` has been successfully executed with no required arguments! 🎉  \n\nLet me know if you'd like to run it again or need further assistance.",
                     },
                 ),
                 metadata: {},

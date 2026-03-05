@@ -236,7 +236,6 @@ fn test_sanitize_drops_leading_non_user_events() {
 fn test_sanitize_removes_orphaned_tool_call_response() {
     let mut stream = ConversationStream::new_test();
 
-    // --from removed the ToolCallRequest but kept the response.
     stream.push(ConversationEvent::new(
         ChatRequest::from("question"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
@@ -349,9 +348,7 @@ fn test_sanitize_keeps_matched_pairs_intact() {
     stream.push(ConversationEvent::new(
         InquiryRequest::new(
             "iq1",
-            InquirySource::Tool {
-                name: "read_file".into(),
-            },
+            InquirySource::tool("read_file"),
             InquiryQuestion::boolean("proceed?".into()),
         ),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),

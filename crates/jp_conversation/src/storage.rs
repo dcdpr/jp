@@ -62,7 +62,7 @@ pub fn encode_event(value: &mut Value, kind: &EventKind) {
     // NOTE: don't forget to update `decode_event_value` when adding new
     // variants!
     let fields: &[Field] = match kind {
-        EventKind::ToolCallRequest(_) => &[Field::Map("arguments"), Field::Map("tool_answers")],
+        EventKind::ToolCallRequest(_) => &[Field::Map("arguments")],
         EventKind::ToolCallResponse(_) => &[Field::String("content")],
         EventKind::TurnStart(_)
         | EventKind::ChatRequest(_)
@@ -95,9 +95,6 @@ pub fn decode_event_value(value: &mut Value) {
     match tag {
         "tool_call_request" => {
             if let Some(v) = obj.get_mut("arguments") {
-                decode_map_strings(v);
-            }
-            if let Some(v) = obj.get_mut("tool_answers") {
                 decode_map_strings(v);
             }
         }

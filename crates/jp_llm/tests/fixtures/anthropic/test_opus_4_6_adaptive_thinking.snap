@@ -5,7 +5,7 @@ expression: v
 [
     [
         Part {
-            index: 1,
+            index: 0,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
@@ -14,16 +14,16 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("EqkBCkYICxgCKkDo5w3BcOFDM2J7MsIKxgUfuba9NpwDavusotnNesPeZa7anZZRQjr0ND/Y4T9kgQgbRz4ipY8/DiooFD5PtwvCEgyG6uQ+pIe1Miqg6T8aDDOqoanY2Yj6TkYPgyIwQw6GDWq4f68+ADBe9bjIWrknSYf5zqw3b6HwveQd5SRniCxzG0BXWKM0sbHKGDo8KhFIISG1NzvILBukDtU05lhNaRgB"),
+                    "anthropic_thinking_signature": String("EqkBCkYICxgCKkDo5w3BcOFDM2J7MsIKxgUfuba9NpwDavusotnNesPeZa7anZZRQjr0ND/Y4T9kgQgbRz4ipY8/DiooFD5PtwvCEgxCrzRQWKp3DFaDFpUaDHk19S7V88wZwgPfoCIwGRx3KbxmvLkdgwSTzHJF2hRQn+hgOS7KFdKl1m/iTlZEGv3rG1C6839Uav6sSIzTKhE/X1Lmefe/CmpfaYUh+i74kBgB"),
                 },
             },
         },
         Flush {
-            index: 1,
+            index: 0,
             metadata: {},
         },
         Part {
-            index: 2,
+            index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
@@ -35,7 +35,7 @@ expression: v
             },
         },
         Flush {
-            index: 2,
+            index: 1,
             metadata: {},
         },
         Finished(
