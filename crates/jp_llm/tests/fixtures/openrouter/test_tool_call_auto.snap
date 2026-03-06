@@ -14,10 +14,10 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABplbbH__xAnTShaCLAPX5JO4uNv64a1XZQzly7Xc8SflLl5E5sx35XFp4Q-QEK1J5c8W69ZqV7uW5W6qNHI1NsXIW-458i-Vo4gU80oGNtPO2WpESnskkY0YWRmpWnOrTWHO-yB51eXcoMUiAVx0DlfZv_6cI6Gp3bzeQV-mcjb27VctKvlhOMa66gNvRYIZNLjJjRXfDCTuGIo44yBPnj40RAoVvaSnkkWE473Lqd1EwpAhArCQVCXXpZsGTJmHUQdTzdmzbinpVO5rNxB8dm_j5gtaDgXVzqSybMvxeJx6W0y765VCYrU6xGUwvRWKNVmX-BYqfyP1P_jM-bh-osdJ_42guYxcQExRYrwmJoKmOfxaWUhcH7lE8XCMiSbPUVmTbSn_vAp43u3iTpaOTtJbUnMh0BU-LeqMITX0nrP8GE9FEjBTy0ccEimL9uE9Ap-2-fpEYmPG6_968ioJGcoq0s_sOx56PJa3Ff-uqNBtE6dvr9CioXpgg8xLw0Q6JnkSKkFES0W7MxPbjotCBYgoURQVfuc-e_wo0fCgv4HoXVelCy19F2tbeJpFZgtTlkqYyU0dFiX3I1wZwoiWFfDQH6ushUO_mp-Z6-B9WDZZZgy4tprjKwX4fX9NbtbO0fxaZfPkLWl-B9PP93pan6QqWEsMzcHx7PH-R1HNEeo7yEkapD7mEgBrvZ6sGptnXgYyww_ZWp1GhpxZSx6gCs1CBxNoSxi1IxvHWgVHJRJ-XX2R7IEwQpSKyW9olc5l3jqZ0N0fXKGQgWYtR-T2h8t6SW_pEhro2h0ryNaQJ86QJIpa81fIHLlkiuIBW4w7JTPUuLUS5LlZ1zW8H_5VlNbZOg96RrYaP9_Qm9p-_1ZbtLTtgzJCLQrnAwa47s1zma8ydOvLquf_ZC3b1SWYpfZF-nMU5mybck5d4FaopmqlsR2A8WEvcEhrjsketslB1DL_fJWVaji-MhJ40PRNH5It7SLhh2P5WbsG2vVA0Sw4WzjW-iooOMWMjyBwEt1VcKmwvKom_k8Ig5QfnGP0tqMplroAb9LGPl2i4zCm-1pIDhkJJqxY5SLmC9IfZETX1xqTJI0pen6AaNDx5aUjuXAF94c8ySXWacmejQ0RsZuvGhSbzrwDZ3gEkFcEcyAqsVOo3l5F52bHGXcVWP1thd4WQFwE1etGs8NXc_3fazILK3bLzq5TmiW3Fb6w-DlPvkZyzUevAzGmoQ_zPvpVWBEUvE2xZdXlSMGBFPJKTq9Fz45yUlXxEq6ziAl-M1gap_KlePvrAlbZaD8RL6m-2IDPI31p_0Su8s4QC4j1Uz75ynf9jvM3mXFT5_QPPRRbDccOhXVJ6WB2mlEiWBOndZsOL1YrB9Ld6lXwBQwQYsTPYsH8WShWQ7Ph_BGXzb-S-2_VnPmLdxY-mPiAYzYB_nVMDBnDkTubs8U5exFHSz97u0dmRKDs1kN5kE3IoFhaFU2avDG6-igxuBRhWoxSjlPOuosw4xSlsNmW0jxJA6RHv4GKdEmw7cBTvl0jEfSgTjUZRkcodFDRSUqW_e_6hW_PrrWxdmuiRY7oHMyi2a8h1c21ha0VaZdDIvSLkKvDVRisx2mcX71WVEaLyTHk_ha83RABdFpsbDW9vrQY6B5aeZKq8="),
+                    "openai_encrypted_content": String("gAAAAABpquoX5XVn9WN8APifWU9fJ8duire1ZuM-06ab-zP4GvuTgsTQMfv-w5Pw6NQn750rL2MmibXDkTYFaDmkTmY7OKtin4TfjSDG8GPFvoTtW1wsxcE7Wieo_1Zcl9O053cg4xgsB08S3gPTelIxffP356whbldAMp243_4jiLm5kGlOBeeunty_DWAQ_oGE3RhbIx8zSG6l75BjEd7GDbZbiw6GMRu6-OWFVj59InchdMY7AM4X33qtplfVXylcKGJ4SQKrA1WI6dYnVzHAHBZP_EfmQc5Zj7Aq57ubiFzQoV4xUIff9atq0-J4vBJsnGF7Jl04rirVGN7JFOzgvs4VMBzXere2sAB_Id2IgtXYKVWnsc05U5PclZqBUDG0ZQOUqsmKXtPYtQElM5-gWGQ08wUVn6TrNdLawIHYk6-wmo7JoEktKEL_qNVEd6iWLV7nTDHPvPs_YW-6pWx5grjXeVVTN-yU5GzdWhAE7p0c5TMMJxFwQYJAEHgLcLKEN7l3p43MyU_hcsjNl7P8M4fiLU-9t2YmrsrDbkRGNEj-gshfYjLvP1mSWwMvZ3LJBHNdN1oHv4T_diIEZcQYhhSOV_VGYSVZewgEYYZ76FgVkoQ1ksbw1KGMEo1h1k-ZRSp-5xJF8CKW4XKgP5QoduXDDeqQOVUqI--mHWQc8K1kvvB2ioYGSSY72KS0tH916UxOHAX4RDaNcPYCK4boQg_83hpQWfIqQ2idkxpXRQuYzix78nMa6B4LMSdCNpr5JROtPizZQezQyai0_Bg3m-LED9dTliXrhEFp_0swAsk14sCIlf_OP5UQ4F2zR9AMzZxaf0QDitdYxQhCofMz_tD0I5upASRAPC8weuy5eKeOecoqatQTRwYV_ZS16vnIZjgzW1CF"),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_0efd221888905def016995b6c5262481949db8c0ebdab73384"),
+                            "id": String("rs_00f1e562d37139030169aaea16a8ac81958f44e475e997470f"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -35,7 +35,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_mg1RHMbEbsxl4ExKCV83dgdS",
+                        id: "call_YO2XYnNpcUNBw2RPB6bEWHot",
                         name: "run_me",
                         arguments: {
                             "foo": String("hello"),
@@ -63,14 +63,14 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "I need to present the function's response to the user after I receive it. The system will simulate the function response, so I should call it using functions.run_me. I’ll make sure to include a comment to specify the call and then handle the response properly. It's important to ensure everything goes smoothly for the user, so I'm focused on making that work well! Let's move forward with this.",
+                        reasoning: "",
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABplbbOozLF0Jz862YeQM343fJQHKl_Z7FWHj47e9tWQrheQ5L0FKrtk-f8-8RPPb-HbsF4cx6gi3iIHrep0jQDAmJ7pBoMaQqAC1BhHjO0bJvK3EYzeO0O9P0NDlq1nsEuRl5ycKNhDT31oI22wsAAdnR-lDxui9qBgdxsKKSWs0eJKZzeDYtVO5Eb06FRNV7Kh0Kg_McKygYeZ99HG8bOhp9ALDn9rGFz_e9b5kN8qbEGudEA-Ye8nMAgWIEDYaBagyWzsWVFVGhIGWbFnYF0qM6gY1LZ9Xa1fASSY2ycnZmAZdkJ6Wuf-2eQ5hnuXahXzPb61FrrUS5q2yPPrdTKWz6U_GcHFXqX9G7XXKtRhlYbiDQKYa8CSmZG60BEAplwtedyi0Qf1CQrtlLxHO21xf8oi2BFl4lWA5Buxp3NrFvWj2UA8PFprTZ4K5XMyoUFy2C03SBu51JKO_8BqAJ4wvJheV-Wnu0O-4q0YOqqz1bMFtW0mlHcOEVdijHwmXL0Tsgcuqw5t4y0wlFe4MTeN8YOXnpCsMbteDb405uqwnwEX4bq-FSWmTEdzENZuBaRq1ZXNlWBvnogrGO6ucPBYr3v6jTfpEwtr6Kq9nMLIVn3-bs-RA41rKKAY8zS76vEEMO0QQthTa3IzRDbx4l4-GU4LZZlKQTA0H_Je8FYmzYDhLMcjCRgeAUsGkKA2L-DYZgzV9Jk6oe9VJtMHwg57cjXOjy7Yvnqxf-_3dG5VJrwFri6LROSn1UvpzhK7_0UYk9AcYZmzRwogHlV2SlRPnSE8DsVuP4-gVR5iJ3PDXaACZH_R3rXAtZFqDHczgwwOADUgJDEwgU1lx3qYDL8SYBdCbqb3M_V7afpddDG5nvRP-JUmL7JffBvcqKIFgpHdAKiU4hedhD88Fdjbfv9ZBTYTItmrMQkPcdVEyMZUUP5TRCrGA7ShtTLieu7f41qfJB0vjH0QvB9GrW-tb0NmQpH-pv-746N8CfRBx5dJWDRCqO4Wpn1yOC3Xlz5Fe2j7w3-Hciy5nwu4jEqNidO6-mZea1dGaLtZO2dWVzXx-O7LZKSG31jJdL0uukcbG5hizeyGYzvQW7OA8-Ebnjc_tdNp8mx8HAgzqvkioYWvkVXw5S8Ohr3l7GjQ0QXL7aJeZ2vqeDOMqqhJQKj_uoxxmvo3qTWoz1vWVwDaK0hjd11J5dLgN97HKrzBVVqr7MtfJQIURUHI9rySfmWNuQ94Lp-tdniNhf9e7-nPXiBnomb7gRXiXsl8KdQhFBgOS106Sv9O6YTswDNIKzUXphGiwyHOO6u0TwkkxwTZmtj-dEDxZsnrAbeFWPNJaDeqOXNyhJrVPYEy6F0d0w2sBrobEiZdAFmSax-j_HuzkLcZ2lLnt2NtxRalsOMgpBSS53H24S_mDZ7TFiYsQ0mo9LG797HXojQ2USriAuPm5ycWIPdykBdGwFiLC0toPmzUunM4MBzxJwcZH4ko-3lRcAoPSZCC6mKB4_X9gmxnUJ7-M_gvCwJ2xNgK06M-OjEl4k_1kSo2fpD5sUoHO8XcLg9jUoV4Wq6sfIXUUdozlS6SD5W3iZZNT20jP8nYcrTknXB6fJZhDTD93GlYDhrKGdeOF3BX-rpKFfmuBlxXMofYXv47Et1eaOfHqk1ahCD-yK1IaEx6O00PzGprg2WNNUP1qcOazq-LyaH0uwnuxKNzXTDTM0R8MTe3V-MJiaxebPixnTn8YDrU7iElugVDLrxTdcy-Lk8pG0WMpcV9TUg8lILnjCxREx134F0erVzr3uCchQFsNVeHDEoh73FVgQCcgbZtDZJIkUjOgTbFp72lmq8vG1otqPEoFeTSAV7THyjTDxjcBJQqotFOJ9kmVIL5l-rRNVVYLxolperT4mtgP3SQqAlXoOgkjny3sBDlmg2bD2cZHvtOHyuZ69QjHgeUFyDOIu9JAMmgRgchuqb2UL0Pc-kxE1-Yb-oomQP-BDLX7q3GuyITCeAUYjNR1M18JRhFdGHlB61iXm5Txh0KOK7SpH-LojT7cAJ2r9lkunshWbe_Uetrj6hP-HTI5zIGr0x4N2VSFnhRBh2lzcwN_ww2j3Ps3wiCgh88vdYZPL6TK1iDEfdvSApyNT_7PENESgH1-cgIlzYxhOy-gFwvc9BStPHAyjrNtHkR3UJ81crcesigHlZVB76XCgLOf8wGRl6LiK_gh-ZXsdYcCmy1NpkKjPbRp1wJEIbDPaBMz8099eEOjkPl3KilLPZ-wQKFwuA0jJzWQ-28lxiuBTOc_7MKFHrDvfYm_yA_bt2e6yQ39sKy65PI9_r7nSKKXPrySPVRGqRUPCgIP23swqmx_MWlhqdm1bPpWhUC-yTsl2Uoo6TIdOQz3zKkrXsJ91CaeWNiD_bbP8aEQCMRS9YMmhPoHvW2A-YhNrRbx_C1QBSCWyqSjOPBNvP43jyZRvTCIYb6usQ_xeJUJ3aXqdrgI85SEAgO3tZ4Pb7-k0UDqOogKwRl5WqT45-OrpsMckkyQjOOU3QeFMr70wNr1SLtaUAOczSmXAldAQHX9qmORDZu1AP"),
+                    "openai_encrypted_content": String("gAAAAABpquoYXrqs2RqcMb6HuFZfth8P-MqGj-8kbrdCxmQ-AhzGsSH1folTtKkRIQ1vXHMlb3T5LwNA-oR9V4KvTOf1U_oif5PdiGA4e6AOlFrKcOkSiyDqiI-JOAp7_RWcfrmq4b8UxgKGt3NXCIjhoOmsDkkEZnsWHIHAY_B55ELoTEeXM9TnCIbLFXsvY67upvHGGolhk8zX5karnJvkEypYonjnN5PCk6LTKoTX3pM0o1F5Luil7aovWUpLwTJk9W3AWynmNnDaZ4z43c8IuMejnFsL0L0mE9qhYLCa-FTnohswL7wgd60FBC55xajOC-019zBC0uZsjhlfzEAEUFwNf6cQF47aEXvtPb0k4W9522FVPmk7DYd_9gX_1HK4eSIdwLY7Ax8Jq3tWxbL16JX5yUqqjilnrN1PXCsF0mayJha-DLwct7e1MzJszAUU8j4iEUqujVmthFQf9IHCH4XMMYPhdiddrb1weh3vwihlotq3cMAnJ__Iydpnk036OA9pgix4sa6JIAchxn42w75Zwt3rlPllEEodPUI1NkqbiIzVqwIrpcpT2LroTtebx5DMhp1xLjA1ALxkK-4AmnC8_108lIaIPIfV_Jqzz3ZaH_U485ENxqeIYAX27l3pTkN4vNnxOroOLz_PffE8phlxJSfCadAlcMiSHUrHttTN7kXfeavSECUmWTiemC0-RHTcUoeDwfk5jRJCAyUmMOTe8ThSbhhEKZEXV43xRJ0TlgX1FDD8DTu-cXODpjULBjhsiVOXpjMX8Ld2q27cHlzYT7rRgSX0DWC8V2QmhHyd9KMxCyYM8fkOdAERhhtVOfZu0VpO2GlnRfDVvjQTGJRvSxFim3evVc_9Qxjy-M9N7oKHmaMwSHLXZqTTrSjCluXXXl7V"),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_014c9c195375e8b9016995b6c831b48197b917958a24b2c0d2"),
+                            "id": String("rs_0f23f98973d0e5ba0169aaea183e4c8194ae991cd1439ea559"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -88,7 +88,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Calling the tool again with new arguments...{\"foo\":\"second\",\"bar\":\"call\",\"num\":2}working!Tool run completed. Result: working!",
+                        message: "I ran the tool for you with the arguments {\"foo\":\"hello\",\"bar\":\"foo\"}. The tool responded: \"working!\"\n\nIf you want different arguments or want me to run it again, tell me what to pass.",
                     },
                 ),
                 metadata: {},

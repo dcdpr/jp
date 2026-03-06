@@ -284,13 +284,13 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(ChatMessage
 
     request = request.options(options);
 
-    // Reasoning for local models has to be explicitly enabled. This is because
-    // there are too many models that do not support reasoning, and we have no
-    // way (currently) to detect whether a model supports reasoning or not,
-    // resulting in an error if the default reasoning of "auto" is used.
-    if !matches!(parameters.reasoning, None | Some(ReasoningConfig::Off)) {
-        request = request.think(true);
-    }
+    // Ollama models may default to thinking-on, so we must explicitly set the
+    // flag in both directions. `None` is treated as off because we can't know
+    // whether an arbitrary local model supports reasoning.
+    request = request.think(!matches!(
+        parameters.reasoning,
+        None | Some(ReasoningConfig::Off)
+    ));
 
     if let Some(schema) = structured_schema {
         request = request.format(schema);

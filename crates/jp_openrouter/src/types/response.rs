@@ -246,6 +246,9 @@ pub enum ReasoningDetailsKind {
         text: Option<String>,
         signature: Option<String>,
     },
+
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -303,7 +306,7 @@ pub enum ErrorMetadata {
         flagged_input: String,
 
         /// The name of the provider that requested moderation.
-        provider_name: String,
+        provider_name: Option<String>,
 
         /// The slug of the model that was used.
         model_slug: String,
@@ -313,11 +316,14 @@ pub enum ErrorMetadata {
     /// information about the issue.
     Provider {
         /// The name of the provider that encountered the error.
-        provider_name: String,
+        provider_name: Option<String>,
 
         /// The raw error from the provider.
         raw: Value,
     },
+
+    /// Catch-all for metadata shapes we don't recognize.
+    Other(Value),
 }
 
 /// API error codes returned by the Openrouter API.

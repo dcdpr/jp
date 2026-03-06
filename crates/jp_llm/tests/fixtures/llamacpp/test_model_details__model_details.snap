@@ -7,7 +7,7 @@ expression: v
         id: ModelIdConfig {
             provider: Llamacpp,
             name: Name(
-                "llama3:latest",
+                "qwen3.5:9b",
             ),
         },
         display_name: None,

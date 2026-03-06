@@ -17,11 +17,12 @@ when:
       "model": "claude-haiku-4-5",
       "max_tokens": 64000,
       "thinking": {
-        "type": "disabled"
+        "type": "enabled",
+        "budget_tokens": 12800
       },
       "stream": true,
       "tool_choice": {
-        "type": "any",
+        "type": "auto",
         "disable_parallel_tool_use": false
       },
       "tools": [
@@ -61,6 +62,12 @@ when:
           }
         }
       ],
+      "system": [
+        {
+          "type": "text",
+          "text": "IMPORTANT: You MUST use AT LEAST ONE tool available to you. DO NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR DETAILS. JUST RUN IT."
+        }
+      ],
       "cache_control": {
         "type": "ephemeral"
       }
@@ -72,31 +79,343 @@ then:
       value: text/event-stream; charset=utf-8
   body: |+
     event: message_start
-    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01Qas86WUCiFbjhbUTqQ9a9b","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":691,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":8,"service_tier":"standard","inference_geo":"not_available"}}           }
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01Diu2oxD3kQ4XmaX18w5btx","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":672,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":8,"service_tier":"standard","inference_geo":"not_available"}}     }
     
     event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01ELLqyECsLt1evNdEox3oZs","name":"run_me","input":{},"caller":{"type":"direct"}}      }
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}
     
     event: ping
     data: {"type": "ping"}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}   }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user is asking me to run the"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"bar\": \"fo"}    }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" tool with whatever"}   }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"o\"}"}           }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" arguments I want. Let"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" me look at the"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" function"}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" signature"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":":\n\n```\n{"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n  \"name\": \"run_"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"me\",\n  \"parameters\": {"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n    \"properties\": {\n      "}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\"bar\": {\n        \"enum"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\": [\"foo\", [\"foo\", \""}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"bar\"]"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"],\n        \"items\": {\""}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"type\": \"string\"},\n        \""}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"type\": [\"string\", \"array\"]"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n      },\n      \"foo\":"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" {\n        \"default\": \"foo"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\",\n        \"type\": \"string"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\"\n      }\n    },"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n    \"required\": [\"bar\"],"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n    \"type\": \"object\""}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n  }\n}\n```\n\nSo"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" function has:\n- `bar`"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" (required): Can"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" be a"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" string or array."}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" The"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" enum shows"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" it"}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" can be \"foo\" or [\"foo"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\", \"bar\"]"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n- `foo` (optional"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"): A"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" string"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" with"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" default value"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \"foo\"\n\nThe instruction"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" says I"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" MUST use AT LEAST ONE tool and"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" should NOT question this. The"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" user is explicitly"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" asking me to run the tool with whatever"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" arguments I want.\n\nLet"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" me call it"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" with:"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n- `"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"bar`: \"foo\" (valid"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" from"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" enum)\n- `foo`: I"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" could"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" use the"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" default or"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" provide a custom"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" value."}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"'ll provide"}          }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \""} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"test"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\" to"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" show"}          }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" something"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" different"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":".\n\nActually,"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" looking"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" more carefully at the enum"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":":"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" `"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"[\"foo\", [\"foo\", \"bar"}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\"]]` - this means bar"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" can be either the"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" string \"foo\" OR"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the array [\"foo\", \"bar\"]."}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nI'll call"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" it with:\n- `bar`:"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \"foo\""}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" (a"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" string)\n- `foo`: \""}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"test\" (a custom"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" value)"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nOr"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" could use"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" bar"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" as an"}          }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" array: `[\"foo\", \"bar"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\"]`"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nLet"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" me go with the simple approach first using"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the string"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" value"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" for"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" bar."} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"ErMLCkYICxgCKkAZPBzddcN9WKOtCpIVRLxjvNt/iXZtZZdznpQtDKjl4PY72onw2qyg8RE7DV/bwga3eNO69jKVVgU9Li4jIw7wEgx0eylPBakCcZs9lnEaDJGrsvnI5e9iI8wKrCIwkTxA6wfvTyrdrzv5bq6sBXMj7tvJWBLiOLXtVGpTwhybSDvZz8xpTgsTC06JLAmUKpoKnEZmEn6zukuV07Ztvwh0R/BbRtvNttbUYg7dqVFhjERN52HZUG1Lqe50Guux5eCWvEstt1OFYp612uEWcLQPg86M4k8qhBA4b0OpZOCNXyG/aBohySQoGEUMQxntKNY3NVXT6nyXlBmNkzEnNMMYDjfT4/wrPc3U61HRCNLI9MyaqfkuncvA9pQ09f0UdlxLSd1YLuatWUnnh8tFhQL7wVInc+s/qmrNB8JHmhhnFfettI+gEvMhmOZ4g/fBQaaaM/vUJ3NgkRBBmQTRU06zLAPudvOEobPTNV7TScPNvlkcAQTp1fBU8v5y1KZ4MTON0HUvbRiLYg7x/cjA1IjYjktzvSE4+a/6/Kbdhf5VH6TTyhLXa163tshT4E4swuHOAuO+dEph72N3hEWnwHOHhQ6QP9XEUDiDJSQI0Y2rF9bZd4oEF53wI/+CNaAXNoP/KoyqLxlt6euPKu653LWmOx4YyOJs7LN8PIzUH3NMQmIejDnu1nsnz0qgiOToY287LTlruC8gIJBl6UhYUn1XNqh0F7xaWXb+w3/kGd7hmW7ZingjbnEXb0LkhGdAxJoO1D5hMTtL2PuWIIlsvVWOfdi1pbiJpjjHtY1p5o6kWdg/fLbae49qClQuddelTytyZrF9dA8MCRcrxOBnkydPSPomfI8B4KGBLvInxhu5M55MdmiehyuZpAPbkplnurxyroz2GROS0URFjRP/ZS6si6yvWGVxdZ1MG7/bUlNENMkhCw0rntP/8+nje7D1g0uMQtTiRwI3km7SqIBqQVqHBqUoFkkKZVkjOqWxydLPOE8T6t9SR029ndAknnzrhyY8TCKCGOPrxddCFRNWmn72wJNeoqo4xl98P7hGWVCIMod5ctW6z4hcFwgfvSjKtOKyGsRZ1W3/GrDtKamzWi7vTTARiw/BKqZRQK0JPECqKyUD9vwxhiRKOrN5Xex1k261lw3kclUJwezgdTRbqQuMLUR265q0C14ovUmxSD0p3lbdBolfDvkcvB7XJ7+rAQWGJMwyFOTIXxR2XEjWQmeHfZhbyHlJbc5X1lelPv57IfgBR30cYd/ySRo9kkmy9K1BLgdYmHv89sz6E6Ul4vQb0IuxjwtqKF6fcWE/ZozpT1KCMWCkHDQeiZnjrko7ZLuoYO/grTZ8fHJEhSKcaJn/wz2CEraL1fED3EpZQr4KQorCgz1Q+TXYo2mRLyb78xTGUUdQVWTnfztAbyktqX5IozwBTNB6+fnw01T3TEegZ3soQvekHiIe3ZiAzDZ545EUUR5ChTQpcVJzkoE68UPT5eYciQWr3zM5BZ1TO/T4GGXh0bQXE8fHV7MpRfjTfnfRTQR5e1XdPNn0+wuYhXf3NZCnSGEoerYgjsXr+EQirTjLufokvhPRxvMwOQdN6MqLK3uPN8TrA+KT79j1kfmhQxTyv45FnauJpFcNVA7wOKZqPevMlLstXmOeZ64hbwS0U/kvGUYQGX6THkYEGujCmtXRO80HNRAn6sjRwM0D+sSd0twsibMiyF76v41gTOpfOYbJ6ivgf21QNOzSYkHvdwnCtF/6RBvvd3yhqSSUApBxw/7BkxkSZywDl/Rtb8M+bwmTH6cbfW88NNGAmIaZ+7J2hX0rnTG+CLeI/jtsjzHnEBN+FQPE/FreL+O2nXa48sNuXJ9jz0+YX3MJryLboMB960t4Zh3xFJXnkmxj3AQKDiNznsaMf43Svio9KA6G/KHIWvtA5s8kjhgB"}    }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":0               }
+    data: {"type":"content_block_stop","index":0           }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_01KoWfFjUMnyBN2denqPofkG","name":"run_me","input":{},"caller":{"type":"direct"}}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":""}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"bar"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\": \"foo\""}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":", \"f"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"oo\""}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":": \"hel"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"lo\"}"}          }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":1              }
     
     event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":691,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":38}       }
+    data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":672,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":470} }
     
     event: message_stop
-    data: {"type":"message_stop"}
+    data: {"type":"message_stop"       }
     
 ---
 when:
@@ -118,10 +437,16 @@ when:
           "role": "assistant",
           "content": [
             {
+              "type": "thinking",
+              "thinking": "The user is asking me to run the tool with whatever arguments I want. Let me look at the function signature:\n\n```\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\", [\"foo\", \"bar\"]],\n        \"items\": {\"type\": \"string\"},\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the function has:\n- `bar` (required): Can be a string or array. The enum shows it can be \"foo\" or [\"foo\", \"bar\"]\n- `foo` (optional): A string with default value \"foo\"\n\nThe instruction says I MUST use AT LEAST ONE tool and I should NOT question this. The user is explicitly asking me to run the tool with whatever arguments I want.\n\nLet me call it with:\n- `bar`: \"foo\" (valid from the enum)\n- `foo`: I could use the default or provide a custom value. I'll provide \"test\" to show something different.\n\nActually, looking more carefully at the enum: `[\"foo\", [\"foo\", \"bar\"]]` - this means bar can be either the string \"foo\" OR the array [\"foo\", \"bar\"].\n\nI'll call it with:\n- `bar`: \"foo\" (a string)\n- `foo`: \"test\" (a custom value)\n\nOr I could use bar as an array: `[\"foo\", \"bar\"]`\n\nLet me go with the simple approach first using the string value for bar.",
+              "signature": "ErMLCkYICxgCKkAZPBzddcN9WKOtCpIVRLxjvNt/iXZtZZdznpQtDKjl4PY72onw2qyg8RE7DV/bwga3eNO69jKVVgU9Li4jIw7wEgx0eylPBakCcZs9lnEaDJGrsvnI5e9iI8wKrCIwkTxA6wfvTyrdrzv5bq6sBXMj7tvJWBLiOLXtVGpTwhybSDvZz8xpTgsTC06JLAmUKpoKnEZmEn6zukuV07Ztvwh0R/BbRtvNttbUYg7dqVFhjERN52HZUG1Lqe50Guux5eCWvEstt1OFYp612uEWcLQPg86M4k8qhBA4b0OpZOCNXyG/aBohySQoGEUMQxntKNY3NVXT6nyXlBmNkzEnNMMYDjfT4/wrPc3U61HRCNLI9MyaqfkuncvA9pQ09f0UdlxLSd1YLuatWUnnh8tFhQL7wVInc+s/qmrNB8JHmhhnFfettI+gEvMhmOZ4g/fBQaaaM/vUJ3NgkRBBmQTRU06zLAPudvOEobPTNV7TScPNvlkcAQTp1fBU8v5y1KZ4MTON0HUvbRiLYg7x/cjA1IjYjktzvSE4+a/6/Kbdhf5VH6TTyhLXa163tshT4E4swuHOAuO+dEph72N3hEWnwHOHhQ6QP9XEUDiDJSQI0Y2rF9bZd4oEF53wI/+CNaAXNoP/KoyqLxlt6euPKu653LWmOx4YyOJs7LN8PIzUH3NMQmIejDnu1nsnz0qgiOToY287LTlruC8gIJBl6UhYUn1XNqh0F7xaWXb+w3/kGd7hmW7ZingjbnEXb0LkhGdAxJoO1D5hMTtL2PuWIIlsvVWOfdi1pbiJpjjHtY1p5o6kWdg/fLbae49qClQuddelTytyZrF9dA8MCRcrxOBnkydPSPomfI8B4KGBLvInxhu5M55MdmiehyuZpAPbkplnurxyroz2GROS0URFjRP/ZS6si6yvWGVxdZ1MG7/bUlNENMkhCw0rntP/8+nje7D1g0uMQtTiRwI3km7SqIBqQVqHBqUoFkkKZVkjOqWxydLPOE8T6t9SR029ndAknnzrhyY8TCKCGOPrxddCFRNWmn72wJNeoqo4xl98P7hGWVCIMod5ctW6z4hcFwgfvSjKtOKyGsRZ1W3/GrDtKamzWi7vTTARiw/BKqZRQK0JPECqKyUD9vwxhiRKOrN5Xex1k261lw3kclUJwezgdTRbqQuMLUR265q0C14ovUmxSD0p3lbdBolfDvkcvB7XJ7+rAQWGJMwyFOTIXxR2XEjWQmeHfZhbyHlJbc5X1lelPv57IfgBR30cYd/ySRo9kkmy9K1BLgdYmHv89sz6E6Ul4vQb0IuxjwtqKF6fcWE/ZozpT1KCMWCkHDQeiZnjrko7ZLuoYO/grTZ8fHJEhSKcaJn/wz2CEraL1fED3EpZQr4KQorCgz1Q+TXYo2mRLyb78xTGUUdQVWTnfztAbyktqX5IozwBTNB6+fnw01T3TEegZ3soQvekHiIe3ZiAzDZ545EUUR5ChTQpcVJzkoE68UPT5eYciQWr3zM5BZ1TO/T4GGXh0bQXE8fHV7MpRfjTfnfRTQR5e1XdPNn0+wuYhXf3NZCnSGEoerYgjsXr+EQirTjLufokvhPRxvMwOQdN6MqLK3uPN8TrA+KT79j1kfmhQxTyv45FnauJpFcNVA7wOKZqPevMlLstXmOeZ64hbwS0U/kvGUYQGX6THkYEGujCmtXRO80HNRAn6sjRwM0D+sSd0twsibMiyF76v41gTOpfOYbJ6ivgf21QNOzSYkHvdwnCtF/6RBvvd3yhqSSUApBxw/7BkxkSZywDl/Rtb8M+bwmTH6cbfW88NNGAmIaZ+7J2hX0rnTG+CLeI/jtsjzHnEBN+FQPE/FreL+O2nXa48sNuXJ9jz0+YX3MJryLboMB960t4Zh3xFJXnkmxj3AQKDiNznsaMf43Svio9KA6G/KHIWvtA5s8kjhgB"
+            },
+            {
               "type": "tool_use",
-              "id": "toolu_01ELLqyECsLt1evNdEox3oZs",
+              "id": "toolu_01KoWfFjUMnyBN2denqPofkG",
               "input": {
-                "bar": "foo"
+                "bar": "foo",
+                "foo": "hello"
               },
               "name": "run_me"
             }
@@ -132,7 +457,7 @@ when:
           "content": [
             {
               "type": "tool_result",
-              "tool_use_id": "toolu_01ELLqyECsLt1evNdEox3oZs",
+              "tool_use_id": "toolu_01KoWfFjUMnyBN2denqPofkG",
               "content": "working!",
               "is_error": false
             }
@@ -156,53 +481,53 @@ then:
       value: text/event-stream; charset=utf-8
   body: |+
     event: message_start
-    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01J4EtwY75NJKgg2CZkqTbGK","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":85,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":2,"service_tier":"standard","inference_geo":"not_available"}}          }
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01F42iu3DTqWzaTRodmW6i9k","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":497,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"}}    }
     
     event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}  }
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}        }
     
     event: ping
     data: {"type": "ping"}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I've"}   }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done"}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" successfully run the tool with"}             }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"! I called"}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" the argument"}       }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" the `"}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" `"}             }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"run_me` tool"}     }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"bar"}             }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" with:"}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":": \""} }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n- `bar`: \"foo\""}   }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"foo\"` and it"}}
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n- `foo`: \"hello\""}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" returned"}   }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\nAnd"}      }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" \"working!\""}               }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" it returned:"}       }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" as the"}              }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" **"}   }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" result."}              }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"working!**"}       }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":0}
+    data: {"type":"content_block_stop","index":0   }
     
     event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":85,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":29}       }
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":497,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":41}         }
     
     event: message_stop
-    data: {"type":"message_stop"               }
+    data: {"type":"message_stop"       }
     

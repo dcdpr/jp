@@ -5,22 +5,6 @@ expression: v
 [
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "Okay, the user is asking me to run a tool and provide whatever arguments I want. Let me check the tools available. The tools section shows a function named run_me with no parameters. So, I need to call run_me without any arguments. Since there are no parameters, I'll just trigger that function. No arguments needed here. Let me make sure I'm not missing anything. The user probably wants to test if the tool can be invoked. Alright, I'll proceed with the tool call.\n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 2,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
@@ -28,7 +12,9 @@ expression: v
                     ToolCallRequest {
                         id: "",
                         name: "run_me",
-                        arguments: {},
+                        arguments: {
+                            "command": String("ls -la /home"),
+                        },
                     },
                 ),
                 metadata: {},
@@ -44,28 +30,12 @@ expression: v
     ],
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "Okay, the user asked me to run a tool with whatever arguments I wanted. I checked the available tools and saw there's a function called run_me with no parameters. So I called run_me without any arguments. The response came back as \"working!\", which probably means the tool executed successfully. Now the user might be expecting a confirmation or more details. Since the tool's response is brief, I should acknowledge that it worked and maybe ask if they need anything else. Let me make sure to keep the reply friendly and open for further requests.\n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool `run_me` has been successfully executed! 🎉  \n\nLet me know if you'd like to try another tool or need further assistance.",
+                        message: "The command has executed successfully. Would you like to try a different command or have me run something else? 😊",
                     },
                 ),
                 metadata: {},

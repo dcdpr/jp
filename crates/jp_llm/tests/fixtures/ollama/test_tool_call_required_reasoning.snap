@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "Okay, the user is asking me to run a tool with whatever arguments I want. Let me check the tools provided. The tools section has a function named run_me with no parameters. Since there are no arguments specified, I just need to call that function without any parameters. I'll make sure to structure the tool call correctly in JSON within the specified XML tags.\n",
+                        reasoning: "The user is asking me to run a tool with whatever arguments I want. Looking at the available tools, there's only one tool called \"run_me\" which takes no parameters according to its schema. This seems like a simple tool that doesn't require any specific arguments.\n\nLet me call this tool without any parameters since it has no required parameters and the user said \"whatever arguments you want\" - I'll just use none since none are available/needed.",
                     },
                 ),
                 metadata: {},
@@ -44,28 +44,12 @@ expression: v
     ],
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "Okay, the user asked me to run a tool with whatever arguments I wanted. I checked the tools provided and saw that there's a function called run_me with no parameters. So, I just need to call that function without any arguments. Let me make sure I format the tool call correctly in JSON within the XML tags. The response from the tool was \"working!\", so I should let the user know it's done and mention the response. Alright, that should cover it.\n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool has been executed successfully. The response from the tool is: \"working!\"",
+                        message: "The tool has executed successfully with `working!`. Let me know if you'd like to try different arguments or explore specific functionalities! 🛠\u{fe0f}",
                     },
                 ),
                 metadata: {},

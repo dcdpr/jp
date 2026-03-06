@@ -7,12 +7,10 @@ expression: v
         id: ModelIdConfig {
             provider: Ollama,
             name: Name(
-                "qwen3:8b",
+                "qwen3.5:9b",
             ),
         },
-        display_name: Some(
-            "qwen3:8b",
-        ),
+        display_name: None,
         context_window: None,
         max_output_tokens: None,
         reasoning: None,

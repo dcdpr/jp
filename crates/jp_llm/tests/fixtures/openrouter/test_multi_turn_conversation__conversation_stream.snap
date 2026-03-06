@@ -18,7 +18,10 @@ expression: v
             "name": "test"
           },
           "parameters": {
-            "reasoning": "off",
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            },
             "stop_words": [],
             "other": {}
           }
@@ -142,6 +145,19 @@ expression: v
     }
   },
   {
+    "type": "config_delta",
+    "timestamp": "2020-01-01 00:00:00.0",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": "off"
+          }
+        }
+      }
+    }
+  },
+  {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
     "content": "Test message"
@@ -149,12 +165,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Acknowledging the test message**\n\nThe user sent a \"Test message,\" which likely means they want to check something. I'll keep my response concise and acknowledge their message. Perhaps I'll ask if they need assistance with anything specific or if there's something they want to test out. It's a good opportunity for me to offer help in a friendly way while ensuring my response is brief. Keeping it clear and open for follow-up sounds like a solid plan!",
+    "reasoning": "",
     "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBsYmJGTzdsTnFwT2FDZGNrX09TQTVRcmw3eEZwSEVIUVE0X2VLWXVwNHZXTFZ6VUZTRENjOVhqbS13YW1HVW9nUENsTl9QYlMtVTNoMGhTX0pFV21zVWVTUExfWTdlS1pFdVdvczRLYjlZd3ZEclJ0R3E0ZmJKQS14aGwtZU9wNkxFVGZhMndhRFRpOUhBVGdvbmlQcXRtNXZWMS0zeTViTFRROFZ0bW9la0FhZHRpR3lGQ1Mya3FPNEV4OTFRSVlOQ2g4bE5HcHZqNmlBV3Jkajg0Sm9rTFN0WUNReWZad0RVMFgwbWtvN243ZVp5UFUwclQ5LTRVVzFxTGk3WF85YVFPOHh0RzhwZ0UyX1pLZXFMZTZYQmtDbC1TeFQ1OXgwYjc3VXNKOVBfNWZ0RTJsUFJ6TW9mZ2JTRDhzY0tuNUsxd2NrWEQtMmZudVo5bE5yd1I1VXZJNUhKRV91TGF3MVBycmg4T0FfOTY1R241Q2RBNzhtV204Ny0tTVByRkY4Q0J4NFd2YUZTbmJ4TG1CLWUtcFkyRVBURl9fbHJwYVZIQWE0b3VBNkRzM2thd3JTaWliUUVJWEFuaWRTejhNdVZ6RVowUk1WS2ZMZmhETVZOYV96RmN1a3hlcFl0WkdrSkFYYk5qbWZQTVhpZl9LSXlmQTFlOFhWTHFjaEI3Ym0zdlRvcHZZMGowVlprYlU0dFlHbkkzU2ZOUmJKVl9zT2ZaUU54SG02THd0ZndZdU55dFV2VFpPN0FmRjQ4UzVnZnFMZFl3LUJURlEybFNZSHh3Sk9ndWYtdlg5ZnZfMGE4d01MeHRMVWgyc2FHd1lIaHdVM0V4NjF0a0w4VnNYM1F1WWhBaDBOZnFiUVc5bUlrR0VmRXVjeTZ5NlpqOUx0eTg5d0d6c2s1NEh2aF9Tb190SXJ4TldGaEhhZ1pjb3Rmb3Z4YWxnVDhtbjlITnZjZ0pRbkFJX1YtX01TeTJDYXotVUNtdmUxRVc1N3AwNkdIS3k1ZDJGU2czZGQ3eUgxaEVWNjZkWEZKMWMzR1otSGotblN1T2JTVDZfZ1NZbjVzV0NLTVF0OHBQbVFpdWZXekJqeDM1RkJjRms1NnhKeERYOFVycE1FNG5JNTZrcEk4MktRMXB2SlNiOFlHdHN3dTlZeFpjcU9RNXZIWWxYa19JZ3F0MEotMWp5ak1GQmZNYXpWSlZiVnZFVHRHb1JCYVBzekZNLXowRGJfMjF2MDMza0N1dV9RNDcwWjNsdmg4dFR1Rmhjb2dTR2VBSXBybzVOLXI5YkY3NTlDWUFmUDdvc291eXJuMGt2R09IYWRkNFJBNEtfRkNvbWNPb1VUQ1p2RUVUT0UxV0M3WWFEYUZBUm1CbHJScXFRd3RlUldHSEdNWHotVHc9PQ==",
+      "openai_encrypted_content": "Z0FBQUFBQnBxdW9VSFVpal90YkpZSHl0UkJpZVhKY0lEeHRvTVFrTkJWcVlRMEZ6aHhXMjB0RzFMWnFmdVYwb2U3ejFESkJkR0VNQThDSmM5V18tazdNWU05bW45c0RvaF9tMWhaTWd0elpaaV9PQmJWNFgyVlY5dU4ydXFYUFNVdThYaE9Mcm5wbmtlLVZmTDQ5NnVMT2dpZlRRdlkwdzFSNGF0bE0xYXIxd1Y4U2Z6QXZob0dxaTQ5NTh1RGpHZU1mLTZZSS0zY21UaUVEM0NQRFVOLTB5TEV2Uy01aG5Nd3Rsdk4xUGxjckk3ajhOUlc2aktycWNzX2tYN3JXVDU1bDc1MHhoaG5DZ1l1QWl6Vjd1dGFGWTY2RTNNSkppd3AtemlOdmNHY3hMYWpQUzRfaFFKQXZGbjF4UC1vNHpwQV9ieEVGWXVZWHUyZmQ5eWRwb1otNEMzNk1FSFBuV2U3c3dZOFNfU2dtckloUmxRQTBwa3NNblFFZHNtdXlMbmVIWU51QW91SjlMem9uUzBDNnNGaXZyLVQzSmh3NDZkSFBXb0tQUXdzUGtpOFhoV2w3RkZQOUk1MUZ0NnFvOFZuT3RSdTl4LUtESXdKSlFScFlUQk9DTk15dkd2V3JmbXhueERPSEZjU1lRTTM1UFRoWXNKRFFabE5aVklxSVg3ZkFnMDJhTlphZUVjVUhGM3FjTWdxLUNYdjZYMUhxUVI3cGk0Ump6c1ZBa2lJazBPX3U0NnpJNUVSd01tQUQ1cF9qSVptXzlNQ1F3NGhsaDRIeHR3b2lwYzhzVXJiX2FadHdtOTNzMDlQd3RjNmRSaXFwMEphaE9mTjZvcFh1cWVnZlpyLWpMLXJTZTA4RS16SXZNc2h2T3BWbGdEVWViSk4xdU5ldUY4UUQ0WnFYaW5ZYWR1SWtPYnVxTTdaWkE5UE4yb21qVFF5MnZ5bEVfVWE1R3p3aG9TM1NvWl8ycEVCejdfVDR0dG5rbi12UUMtRnpXNG9zb0RPVngtZkZfSGRoN2pITEkxbm50eERUUlBLbkFTZjI3TmZKTVVGc1R1R3dvdmUtVHNBQ2t0el9halBweGVmVUMxQk9mUWIzNzBLRlBodVJTLTNZR2x4UFlJLXU2RFJ1b29tdnpZaU9rcFAwbm5EUTktMFIyanJFYktYTGgtR3RMWEsyLVNuby1aRWVmNnUtNDYtSnA=",
       "openrouter_metadata": [
         {
-          "id": "cnNfMGFmNmM0MDdlMWQzNjhlYTAxNjk5NWI2YzM1NzM4ODE5Njk0OWYwY2VjNTRkYjA5NzI=",
+          "id": "cnNfMDBjYTUwNTlmZWFkNzAyYzAxNjlhYWVhMTRiMWY0ODE5NDkwZjRkNDg3NzQxNzY5ZTc=",
           "index": 0,
           "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
         }
@@ -164,7 +180,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Received — test message acknowledged. How can I help you today?"
+    "message": "Received your test message. Anything specific you'd like to try or confirm?"
   },
   {
     "type": "config_delta",
@@ -190,12 +206,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "I see that the user is asking me to repeat the previous message. That message was just \"Test message.\" So, I think the best move here is to respond clearly and concisely by simply repeating it. I want to make sure I stick to the user's request without adding anything unnecessary. Here goes: I'll just say \"Test message.\" That seems like the straightforward approach!",
+    "reasoning": "**Repeating user message**\n\nThe user is asking me to repeat their previous message, which was \"Test message.\" I think it's pretty clear they want that repeated back to them. So, I'll keep it concise and just reply with \"Test message.\" It's nice and straightforward, and it shows I'm paying attention to what they've said!",
     "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBsYmJJZXRZVGxYdXJMT3M1NXVrWUt0TEx5Y1RKb21KZEhIY1ExTXBiUFRBNVFYTGU5NEVaQVppLWVjV3hVVFprV1lZOGx5UnRLU0J2Ylh4bmJTS29lYmNZcG93aTQyVkllV3lOZkgycmVVdWM1Q0g3eEFrTlRXWUlaanpabDlRYzJyV3BBd0JkSE5Ja2dIZFVhbHc1OUE4Um45ZUNVRnJPZDVZYnd4VDVIZDdQZVF0U2VKMDFud1E3czBwZnZnN1V3TU5VUi02UUFPOEVlNXBFTHplNEZ3MjkwdHNnVmlUQU1JdGhKVURPWWJIV1ZTN0dGOHhubi1DWE53dkphTWNwSEhrUVhOV2hBZFFZT2lxMk9BTEFadjEyREdIYVlHRjduQ21nWS16S0p0azIyb1cyRTdLMEIxMFAyY2dSYnYtQXZaN05pNDBqX1lQa1FYQnhEczlETi1VcGFiU0didndFT2trazFNM3E4YncxWlVDQnRieGdUOWJyWFpaOXVYbGd3THp3NTY5NDU4bWt0YWZfN0JXRHVqQmh5TE9KeVp5Sk04dW1kVjZtYTloNEthNGgxdWc5WUVHQ3otU0FwSm14QVdPZkpvLWFQU2VOTUxPc0cwbU9yQnpsbGZ3ODhUQUlodTFZUXJjc2dudnlTWmRMQWlkZ1Rja1N1dElHNmtIUmN3cjA1VWpsN2Roc1g0YmpTNENtVmptZ19yOF8xdUdsdGdlRmtPemY4bTZKU1ZMRHhFRFRULWpxd19aVzhtVlRuY1BZbDZBY1M1YUF5clQzNHd6X3ZWSGxlLVNPSXk5aUloRlVZRF9vbEVTOVp5SVN2TlNwMmdMcDVVdkZhNlVWVWhoOElEWEpzcFNseXpJUU1pX3QxMkMtTzlIVGNfMkMwUGtsTEFka1RZUzdiczFzSU9wc3FWTktUQUZlamx6NnpSdnNYcENZZGE1UVpuT21pMjB0VE5uX0FESTBfMTZaSjc3RWVka1Q2ZTUzeW52dUI2UUpkZnAyd0ZpdkdxakM5bjNzYXVMTWdXaTJzbFppWWhCTG9zcDNkMUNOMkowZG5xQ2JINmNpVHhvZVNHRlVMTEtoc3hDS1o0TjA1NnBYbEI3Q090eUdwTkJmMnY4YU5HZTlWaDRJNEdkTmE1eHItYlUtalVkSFRpVm9wS2ZVYTZqdVV2bVIxcGFpMHktN0llLTlxdkZ2T2tKTDBYeEpYSmY1eWpROEZKbnRtYm1MaFNHZG5mZWJJQXlnTF9DRGVfYjFLVUsycEJLNU5KYzV5U2dBTm1sYjNTQ0g1aThMR1ozRVpSV25EYUhpVGVCLWIzODBIWXpDVTUtV3E0dz0=",
+      "openai_encrypted_content": "Z0FBQUFBQnBxdW9YTUpuazBrZ2drR2VZQTRSd0k2RklnQ0d4SUo1eUROWnFYZ05GdFRsNlEzR29PWWJJcWdQQnBlaEFkTnhtd25qZkRhZWwyeDhsRkRXZUVmdkIwRlBPSGNWaEJoLVFkT2FFNGQzRm9fUllBeVd5enhrZkhiOVF2SEh6aW5JT3JPSDlZbGVjUS1GS3Y1bWs3dldNbEJNREZKNjFMRmZGVjZhQk9kVjI0TnRZZTZsU29oU0hReldhcHprZlFidHhLV1JZX19qTXlEVXNfbFF5bGcwSEY4RTlCQm0wWFFuQkJ0dVFzRjBHUnNOY3JQY18wOF9rWjZBUTNuUnBxVFZGVEN0enIxX1U3XzdVem5FdnBFNUlaNk81bkNyY0hPdC1laU9qN2c0bVR3UnRvVGZmNGROUDU5ZGhobWFuRnJSUXVQMFlqMFlfOVdJOGhFVFlsSFdzRTBKMEt3ai1aZS1aWUR5RUNHY2FuWFo5MUFyaDJUNmtPaHB2QmJvQ014X21LWW1WQk9oVlQwcVJDMlYwQmozUExGLThtQi1nNHpUY1k1VEJTbGZCQ0RTQWJKdG5BbjI5S3RET1BzNUNTN0Z6enA3REd4d1VMVEMyTlgtQWk4OUR3elBBUHRWNDRCRGp1dUJBNFdwcGFGVTljSTJwaVNsZGgydVBmbjl2aFh6enZPOHQtZG1sNEcxYlJ0V1B1YVFHN3RPc3BpSnRicWk2dThxanFSbjFMbHFndlhiRkVfU3d0eHlsdmZGZFJrdkJVZENPMzUzeS13SEoxc3VzVUU3LS04MlZvaGVPall4UXotcDl6X2t1WGlsRlotb1VXSlRmQ2ltM2VSbGlLY0gtZU96Tzd0U090UUFyelYtTFh3aUhLWE9iS21BZm9oTzFLM2lrNjlUYjAyMEtjLTFSSE1JVnktR2p3N2tnclVnODlNcHpSWnBiUmE4dnBjUUhaN3NibU1fVW12VlR4UFo2RHhtcnQ3cWNlWE8xc0hjSkpQZTNIbXNWWXlnY1JSZjJWZlNsd1VidVhHVzVKT1pHN2dCSm5QZ2t4Q0dhX2FqVVdyd0JIZGZ5NjVKdl9SNkhiZHdXX0ZLX0xhTGVlLTZwWURqMVJubHpUbWRMQWFjV0lReGVwUFhTazR1RlMxT0FLbkpSNVpRaG5LdmlncC1KS3NucmZLN3JBX1ozaGxrdmpFX2l2a19xeXU2cDlEcTBRaWF3cEZtTEFfY2d4ZkNROTJiY25tT3NFRDJOQmlyWlR2aWwyVTJfRWNuQW5IM2N0VUFUM3lpTzVneGZRdVlZWF9ISUduQTNqYjlXWTFfWnV3dmtJYUZUVTJiS1FEeEFPdXMtaHV1bHdWVEhEbmpUM193MXVzYWV5bkZib0ZvcE14YThSc29fdFlzdFFoRkRXUWhHX3lUbXI2eDZkdnpWNk90d3Z5d0YxVEtKdkdabUJjeGNONENtLUsya29oRUhMMERIdlpXcEN5MlRrcE1vcUU2VDJwenJRb2pFNVRzPQ==",
       "openrouter_metadata": [
         {
-          "id": "cnNfMDRhMGJjMjhjYTYxNzA4ODAxNjk5NWI2YzY5NzgwODE5NzkyMzcxZDliMzhhYWE4YTQ=",
+          "id": "cnNfMDQ4NGIwZGE2NzlhZWYzNzAxNjlhYWVhMTViMmYwODE5MGFkOTIzM2MzM2I5MDA5MjI=",
           "index": 0,
           "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
         }
@@ -228,12 +244,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Running the tool**\n\nI need to use the functions.run_me tool right away. Once I call it and it returns results, I’ll create a user-friendly message to indicate that I ran the tool successfully. The developer mentioned not to reveal the exact name of the tool, so I’ll just say, \"I ran the requested tool\" or something similar without specifying its name. Okay, I’ll go ahead and invoke it now!",
+    "reasoning": "",
     "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBsYmJQNjF0UXhLV1lUZm5VUDlRUzRHUzJVbFE2LVVEUHBxbkI5LUhsdFZOUlllcTlKV0w5Z2RFeFRjaG1XclQ4QXNzSWRzUzB0U01EVmhRa3ZmZDN3dnlUbEtKejJaRWRYRDZrVHZjbkxHNnVUMHZHUDlTQ0dHR0dHYXpvQnlsbHRUeHZTbzZ5SmpMTGdyQ0JnMDdDbTc0RHZCVWlCSERxNzZTQUNSNld3anJVVmdwY2J4VUJ5UTJGcFU2RjRadUJNS3kzdFozZC0tVXZOT0JyUmd4cUNRREdjWUJtY25lMnpyUElBN3RQZWVnY2FyX1kxMkhIYWhuN1pRYk1BOE1RZnBaeWxvZU4xOG5zdEJ2MW5vbS1ZSVBKTGFsM2d2UVpwUi1ScGFuTUFUQm9PMTRyMGJucGw3ajNwSWZqV0JwbldEQ1VFbGFjQWFBX2liUXNZWXpwVXl5akhQc0FYR0hhd0ZUZzJ0MzJ1WDFwMm1yczAwenNEem1pSllKdDBheklvczhGTS1MODdpSFpVcWhSZ2d0VE1XbjEwd3A4aU5MLUo4RVV0d0xMaVItQ0YzSmpSSWxmV29MRTBiS3R2bTVvZGMyTUdjTXNwY29OZ3hmdVRrNndHdTg1bkxod0Zmb1JuQVRVM2Uwb0tsSkVkcjZ6QTVhYm5vbWJhLXBpaGo2NEI1TWczN1pTbUloSHNTY1FZcnlZYzVIN0VhNlYybldRcmZsVmc5NnQwZkgwRWJaN05BSWR0TVVKbDJaQ29hUnZBS21yblFvdmtNdnF0RC1vNnhaVm10M0J0WWN1eFBvYTlrNWIwc2lwQmphdkZaWTIzM1hUdTBQS216YXZGNC02dDcxRGF0UzNoRS1UdmY0cU5HMkM4SjdvdThONldjRGJHckVsU3lsRzVPVW1aNC1VMG1ULUhaMW0yMUpvOVFZdjBIYUVCaG5aNHZtOUVGa3dYV1ljelk3a1dhZEl2bml6UkZkcXNJektTSzUzTTBJakZuMjFVcVFCT2EtYnpsNzZFVmZvbnFuQWgwS3BPN3NhZE1aX2U3UVZJZUxCUzc5TmU3d3Y1TUVlZC1zazR1SWNqXzB2SUNPWDJaZENXSTl3OFZGOGc2RVZTaDV1NnpRTFRsZkp5UmdKRXBTSjhKUi1KRXhpY1lnTEFYN1FleHZsdjZManVhYXlua3BZTzhIQXZIbFFxd2tkMFFSUkdQUE0zZ1RhYzM2ajlxV0NuelZqUTcyVFF4WV9MMnM0cFgyY3M2b2pPNDI4b0dNdHZqcnFuX1dRYktfcklLTDZLdDk2elhEN0lmd2ZOR21JcktKdjVFWWNJZ3hsakxZZUhhUTlmaWp1WWtrYjRiTkNaMzZIUmdnZUoyTGhPeDAxZldLdjNES3NiQjh5cEhsQ3hsOTVyQTE4eVNVLWFtMTd6cHZpMGJGdXVScW5INHpVdlhqT2xzMUU5MXI1SmdJclBKdktPS1VFZWdIVE9XRkUwVWI4N2FxU3dBWmRDbnlMekdjbTU3a2tCMjRCWFRVRFNMR2pSMlJISU1fckU5OHBhVEM4WGs4eVZzWTFKTVViY3NUQnhEbXdKUGZOaVE1RjBpX1BaY3dGaEgybGl3WXhIaXBsc1h4cWtqN3Y2QnRVWFJpS19Jajg3ZXI1U1lFc2k4clF4RXVLZFJ4cTJFaVNHbnh0TlpaQ05IeDAyS2NTSzY3M0RoRUxCUUVEUWRXZnh4ZnVtbDFvenNFcmxpNHktX29NTnRZZ3BqbElxYmMxdGFoR2p3TDdNbVUySThWTUhsbTEzSVpMQ3lYWGFXdDJxTEY3ZmJpdFEwN0o5bFI4bjh4MzI5SEdiNnItTDVKR0lGaXRSdUVwcGtyRlhWSV9PSXY5S2YxanNQdUpGY2lhOGlMak1kOXVNTHU5SklLRzhXR2VQM3hvd2prZ0VZVDczTjB1VDl6SDMxOGc3bW4xbUg5bXIwbW0yUlF5Ty1NdHRSX0k3Ty1QTlFKMnpqZUFjdnRMODlxYmltM3hMcmJYaFpkMEFhSHRVQVQ3UGdscldFcHc0ZjI5c21FcHNSVC1jOWVGTkN0NDJ0eTZsT0tIeVhvd3RSNnB3NnVXamlMNnFwcHJHeWQxeVBtcW5uWTAzRjhFazJyRVhwMHZZcHlKT19Nc28tLVl3bDF0Q0x2a2RCWHotNENrdHh2dW92RVdKRTlEUG16N3pNbndxZWd1d2EtemVsbDBLWFdtTXYxT0drUTM2VVZfUUpGcHEyT3ZMTl9zR2wyNDBrcm1TNEVEeG1zbjFsWUsyaEM1QzNzWjhVWUtkdUtyM0ZNLWtsSmxBRm5xQ1c4MTRQTHBMak1TR2hBMlZkX254NDEtYWdHV1pkTUhQaVRZT0plYkluX3lMSE9mcGVIeFkzOHNXaGh0QmpYQ0taNGhTaTh0dHQ0U0JlZFVMQnI4b25qTGtzUndmbnJZM2ZfdEVISV9MVUtFeXVTY3oxYm9IaG1kM29TUVR0SkpacnM2U3R1RXlnMlpfVmFYZTFDUTFMcUZKbmdTQ251bWpRRm1aaEItY2VsUjBQSVB1SER0VUxfM1dJU3dZQzRNTW9ZVjVhU3ZjX2NyTktreFBOSlpHX3dCaFhIUXNKNndmUTJ5M2x4VlBUNEF1b0FjdTZhZ0dzNW91RGIwcnRKeFlGb2dYRHFzbmdCWFhKeDRUVXpNZnBxbXNwbXRuWFNnMnNINUZrV09xQkQzaDNqMFg3OEZ1TjFiVkVtMDJWZGtjWFdHM3ZqSGlNdTZ6M191WXgxQTYtUS1FRnVHSVZaOXlEZmFQRXZWWXkyNllRYUdlQnpZTlJ6TkhobHR1X2c0eHA3SnNHWWpiY2lWQm1PeDY4amV5bkFnQ1pvY2RfREUwYXY1YkZ3OFVzSTlfT25FYVg5RUtRVklHYm9Dd3BsWlF3QUVhYU10TGg0WjRmRng3eXZRdWtkNkkzc0Z4VDhqMUtDQVhDT3h0YnJoWjJhQmtSaXd1UUhSa1hQRUUwaWpTSTU0T0JSbWxHakw4REFCNlJUWC1CV3c1T2pUeE5XdmxlTFBOcFlQaGhyc1NUVDhRRHYxc2oxTllMM2JLRlJHbzFGbWdEUjhXZVhEcEZTb2NFaFk5UDFjZVIzX291LTJaS1lWN284WlZ6d0JZSFVEaHRHdEJ3X2NnRDd3QkwwTDNMV0U4Z3YtalUtR3ZDN2ptQzlkTFFxenV4bGlLQmZMRnBpU0VIdWl3Rjc0bWdoY3VDZ0hXbGdXTkFybGxoUUR2UDZxYUJaSGZwSmtsQWx5cnhZbUY5VmFBOVNOTnYwZ09tdjRZY28tdGpnRC1PeXJvUnp3NWtsSnBnUG0wbW9veFhvRzZ2MnA3RkU0Szljdmx2QVlfUE56YkRrTFBJLUFDN2x2eDBwMkVUdlh4dzQ0aHlIdGVCdXg2RjVxMVJqMVgydk5vSkZfY25MMFVMSW9vSndMcVJNa2NidkdRb3JidUJuemdYS1AyWHlYZ3JvNFRLR29CY09mOVBWRDA4RU5sSmdqTUxUYnhnPT0=",
+      "openai_encrypted_content": "Z0FBQUFBQnBxdW9ZQjFlLU9ZYU1wb3c1SWI0dE1UQndMdWhyLUFIaUkwRkhISVM0Ympqa0FWUkNlWFN2UklDOTdCUDhOaU1hNDZNNzI4cHQ2dktBT1oxelhBU1NFM3R1Z2pXRzFTOWV6R29kdlJGZHhEdnFZRlV0TGl0bmtUNW5OY2pfcW1jTEN2TXRjX0EzT3ctVkppUENJRHZBdHRIOE9mUDNnMTQxLWFjMEhmTzNubmdWOElKNUZpSTBkRXBDcGNYNG9lRjNQNVQ0ZUFJR01JaEdvaFFLUkJVUDJZNXdtQnB4MGUyb2FDMFp2OW5MbE1sclFmbGdSWHAwZGRXamRNZHYtNmU4M3FubU9KUG5Xc05OTDNndTdFZWlUYUdsclc0ZG8tZ1UxVUtKR3UwUUstclp3ei1vVHpoWHlVTFkwd01hcFJubHExSml3X09RYktNZ1otdEh3empka3dCUDdxYnNpQXA2OEwwN0Y5RS1oOEZUT1pKUmtra0JxU2Z0SGdPbFIwbE5xVVFqLU5OYl9DNXR1RWpQX1RwcGRucjJaWkdpem1hMzNGRkFYd2VoSm5EOUUzYnBicjFJUnBVY2ZIV19XdmhHTWduTmwteFpoVUF0T3pqWUhmZlpEakw0Ui1DRU1rR1hfSTR3WGEtUU9yRXRYVFo1bnFTR1gwWWxCdmkzUzNlWXJjbGtBWFJfLWpOQmN1QkhVUVE1RnVaZnItT0M4OW9LLUctelk5b0s0N0ZBTkdrazRNY3RkMExsZkxCNWlFVy1QaXNFNnlFX2FtN2NTSDhsbEtQaDNtck42YkdpOTJuWUNaaWsxekVLdDNkWnA2T0drVndNeTN2ZUduSnhYblVvV21SSzdYT0RvOHc4YU1GY25qOU4wUXdLdHVValNzTFlBeTBpaWpwekpjQnF1eS1faXNGZ1F6RDk4SEtGeHFIUGhYbGxnbmdVRHhpRWh0WlhaYmluSTBvcWlVYXhQN2pVRU9SWW9JOE1HSVp6d2l5LVhDSEJaTUlYR3pNQUxBVGhQM1FmZUJDLWhjbzlxVGE5MWdPRm9qNU9UN3NpLVVVd1A1WTNHQUdSeFU5NTNscmcwbzFxSGN2Wnk4d1d1NHpQRmdsOW9mc3pQTmRHRUZBblhTOU4zZ0QtUjdoRU85S2lTQTBHUDBYVkJ6RW9fbjNhOG1MeUVGWVpvWUJLZUotWWNUVFVlQ3NnNUhrSlRQdTA2M240c2NVazBnPT0=",
       "openrouter_metadata": [
         {
-          "id": "cnNfMDdlMWM4OWI1MTJlYTg3ZjAxNjk5NWI2Yzk3NmUwODE5NWE0YWU1YmM4NzZmZjkxNGE=",
+          "id": "cnNfMDMzMGQ3ODA3NGE0YTRhMTAxNjlhYWVhMTg1ZTc0ODE5MDgwMGEyZWExMDE4OTY0OTI=",
           "index": 0,
           "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
         }
@@ -243,29 +259,29 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "call_02P68YP1inp6THZ0a1DgBNu6",
+    "id": "call_9NiOxr9CbNNm4FD5cLEyiAkN",
     "name": "run_me",
     "arguments": {
-      "foo": "cmFuLWJ5LWFzc2lzdGFudA==",
+      "foo": "YmFy",
       "bar": "Zm9v"
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "call_02P68YP1inp6THZ0a1DgBNu6",
+    "id": "call_9NiOxr9CbNNm4FD5cLEyiAkN",
     "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Crafting a response**\n\nI'm thinking about how to respond clearly. I ran the tool with specific arguments: foo as 'ran-by-assistant' and bar as 'foo'. The output I got is: 'The secret code is: 42'. Now, I'm wondering if the user wants me to run it again with different arguments or if they want to do something with that code. I’ll keep the response simple and direct!",
+    "reasoning": "",
     "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBsYmJXcy1DZE9BMWdEaEFsdG1zVFZnTmRVc1ZGTEl0VUZUbG9pemdxVDZyR2xOa1BaNDhLN0tnZmtxc1M0bjdLZDZ3cmxNbFlkYTRqSnI2VzJNQ25qVWFhd1A5OG0zVHhwNVRfOGNxdWx6YWs5VU5va240cTFYbldEb1V2SWw0Z2FPekphNUI1NVlMclhValA5c0pvMlYtQWxHQWg5NmYzeHg5elFZaVplRGd2bWdwMWNwd1dNSXBIUmdKY09zbFIxUWw2cnRPV2lROUZlTnp5YVBOa1ZSYnV4aW5ReUhkRjB4dkV0UE5IX0RJSjZRRU1tOXhXdkZ3bWdzTmdQdDZRbHpGQ3JMSFNab3FFSUh6TmFWTlh6XzZGWUVhVUd5TDFrTHYxNjk1RjlTRlJtUDFHcHVjdEtoQnJ6MHRURTZlZFBnZ0hhZkt3WnVhSl9JcXh3a0FHcXAwV0hIanh0QzJWcUowRy0yYWYwMG5FenhjNlQ4OFlWYkFVT2VMYzFJNlREOURMaHZmRW5Sb2ZiQjZ0R1hILTloSHdVX2ZQVXM2NFR3RDVRN3NlcVZWWkh1VkhJYndMNHR2bEpSNmlfbXZjSzljV3BZMVVsRm1pY0pGV1pQS0lzNTZmTGV4Wk5OZk5qLWVGbnMyeTM1OHQyM084Q3JWalItalM0cUIwT3JWak5sakxQRjR5TmMySmVsb1NrQUxOdTlkVFZlcmhkbFVmQnVrcThzWDcybWhLRm9lMVc3SkRaV0RlTUtjT2NsWjk4WGdCdnA4TWk3Q1ZZV3lkX21nZDZWZFNRNUN6UnBpWTI3VkhKYlk0XzNORmhHRkd5Yk03Y1dvbjM5aGRQSEVIbktZMHNEaHBqcVBERk1seVVfNUNUR0ttOVB0RnprRWFCTm42aHhPR0dFRFk5QUt0Sks3dlJZZ0hkc3AwWDR5LUlCVEI2aXBNdkN6TW50d1I0aW1FTXhUUy1UOHNMQXpodzktbS1vOU9aZXJINk5CM1BLQ1BqeDVTX1lMVlFPNjRGazE3ZzNGQUJXNHJqbUMwMkppbnRNSXVVajcyWUpEcEhabzhzbWZ0UVdqbTV2bHd0UTBrN3BVN0toRG5Dc3V1bkhUOV9lY0FsRkRyeDVNNU5tYjBHRE44bXlIQ1VOMHFYVXhuR2NZVjhkS1FoYWd6T193SGhaeVY2UVZ5M0dGZTdvbzd6X1pKYk5KbU9nVEo3UFFKWjEwTjJ6VmdIZXdqT2otM2JGOGVzWno5OURpSEpwdmNOWjIzRFNVUzc4LS1PeXEwcWFpNUNGbnRFSFdFOTZkRG10VEhxeFB6S0ZsX2xMb0huU01obUExMlVGbzEyUjB1a3ZqNGktNjhYOEtmMER6NXhqT3dSMFJobzByelY2QkR3eE5yRG80NzFMR3JaOHFIZl9oOTZQUHhvTlpSMVdRSFp4a1FjOXF5QXh5ZHB4S2VFd1lRZHg5UlYzeXJXXzR1Z1pyZlA4TnlwcGhLTTRGOVhtclF3ZVdPTUg4NlVOZERueGdUUk43U2o2aGJoNVNlWWgxM2tuWEl2ek9CeW5jd1hibjlvR3h6am84U2k0a05zNEl4LVZCaFpRZ21CTGNsbU8tM1Qtd3QwekRfMmpZT2RDc0c3NGFmU2ZGMGZXcDVraHRkU0x2aUVaeDJZR0daV09LUVMxNmwyajdxcXpHVXZzLUVrTnRDY3A2V01FWVpKWGdXWkdCT19IZzNBQl9maTB1bHE0VkoxYU96NGlacVhCejd4dTJxam91dkxWU3YwRFg3U29nVUJjbHdyMHFLNXJkUmtoSUplLWREQmJhblZ5ckpEeFotc0pERWZtSWU1ZWdwN2pYY0V5QzZOdGQ2YnFEc0ZnOU03UkxnTHR1dktvb200S3JXOEJzaWtsUnQ2MzJSY1REcmFIZThFYVctV282UEJYUEw0S1BUNFpUdW5oSWRuS1c4SVlnQnktMHZ1UVduOWFpcF96dDN1RmRTcEV3ekhvUGVpNC1lNzlVRURveE1IdmRzTFlNdk01cUtZbVpSWDdUb2ZjaFdKSUl5UjZKUVkzdUE3RHFqZzZSMi1zMFNpWlFlbTZzOWNUbmc5RWNiQlFDSlpEZnJ2U1lnWFRZNnZLWVhPbm1ERUxKbFp2eFVzOWhGbjJjTVhrTU5ZNF9pNWVfZTVIMV95UU0zOVR6a2g5ZVB0cXpsbUlyeGs1NktHTmstV3lLRlZoZkJJeEZuVEdBajRZNjdrNHdGZ3JNNXpxdEQ5SG1vNW82bm0wMUUyUXpvUkxJbGxWSlV3TkNIdVpMU0t4TXpNb082STJKcHNMQVRzV1RTcEVhR08tUVA1RkJ3WDJ6WEJ5N2R0ZlVLblhwV0FBcVkzTnduWWNwY21talhkUzJENWlURnRJOGU1RXZzX3BTY0hqWlB1N2hyR2s2V0xWNW5HMjNrSXZVNU5mQWpabDY2ZlRkQ1VtNlZhRnFGeVRQaXNRQkhfekRIc1NVcVhQQndoQ3FoeUV6NEZ3dGFfN01qZnJHQ2FnMmpqeFJkY2FLNG5pclNXREk1b2RiOC1rZXI5a2RXM2JKUmNuYXNHTFpjZkZxOTU5eUh2MlAwcmNZQ2ZZTV9RakNnbE1Kc3BROXYyMDMtY3NoRnUzOXhVWUMzQ09faHYyLVE4U2dYS203bjNRbkpHcUlERGNOV1dqbEpydEUtbU5PYktzclJjZnZwSTV6TXBSOTdyTFI2MDZMakFNLVBPa1FMSHQzS09TQmlOd09DU3JQbXh0VEZoX21YZHcwTkhfNmlkQzAxaVJsRzE1NVRKRDB4M3lwUkJBRUhYNG1iRFhSYnctbGNtaGhEUUIwQzhmcmY0Q3RoSXViMzFkZXlBTUlBdVUtVVR5ZWtqZVJvakRaXzNGR2tNeWxYRV9DQkFoWHA4R25wV1o1WS16X3VQcHMyNU1MUnM1QzRCNkFyaFpSdXJ1V3BBcVVEU0FyMktLS1ZyTWJ5Um5wVnpiNHlvNlJpSGNnWnc2V3JMc2NFYksyOHhmSXYtMnZvZ0YwX3RLaFV3WmVVOWJQLXZqNmEzUU53eVpYbHpvVkJwMGZZTlBkNDhwcEhKUXJzUGxudXFzeTRLSDlIbFYydGhrTW5DNnJIS29jX2MyYWpGVHp2WW8tSnBPUkk3Rl93TDRDZzd4U0RDQms0cEI2WWpERG1zV3VtempQSEw4RWlfeGd5Y24xUVI0V3hlZVhwa2FLdEJGTVJmWDRmc2NNNWo1NUFLVFB6Nlo0a1V5UFp1dlpNVTBKOE5nPT0=",
+      "openai_encrypted_content": "Z0FBQUFBQnBxdW9aUGVIdGVkXzhES28tWXQxQTc0UWxKYk12bk91eTdldEQxemJlWGRNMk1kS0Nfbnk4dW1VY2tRUDRMQlhEZktrX0N3c1RmY3g3eTU1ZVBNZnRscEs1bzB0MVRaNlBYUWFiNUs2emh2QlB3SWtyTjdtTEl2SjBWX0wycHN3WV9kVnYyTEFTSUpBUV94MGdiQWZZMGxveXJNWWQySGRrMWFISXk5WGFQemZxVHQ4eGJlUmk2MGlveUJWWUQ5S0JvQjgtU1Rfd1c4S1NqbDIxam5idllIN20yeGlsRGVkS3VtX3dEWGxWT3E5QWc3dGtLWlgxT3hJaGNVNi10d21XTlVUc0xYVG9lN3N2cjlPZTQxWXlmOEt3eVEzQWJJX3NhVFZFc1lteXI2MHFkektrNGVtbFprMEFNYWVPU2RtWVNGQW5nMjVMYVg2eG04ZGhwaDctbjV0UVRGSWVqbF9lSDVnSEJuMGplVFFqckFPUWFJbXJTY205bWd1UUQzNWR3NThiQnBjQ0pNMlBJSlZHazVJN2c0OGlsaFdmaEZ6SnIzWjduTVo2LXVVRV83WG04T3h3bDc0b3N4T2hVOVVoNFJtQVotV1h6QmZXQ09sT3ZFTWZpNUQ3NXFsTkNaMTlNVHpKaXRoNHNvZm45ZEtET3F2dEo1Sng5MXEwa21INGQ1WXFydE1YdVNSOE9kdllXRUxSWDV0Z2Z6QVdNQTJJT0w4YXNSNXRpczU1S0JmM2w4UG93MWFCREsyWFlxRDlLYVBtVU1NTW1SWUc5Szlna3NPQnhBQ1F6TTM3NkNSVG5UM3BHTUh3VVZFV196WnFFZHl2cGpoeVF1QkNFYVhDdzd4U0FReEgza1JDNnBTWklUdHNHVEtUMkdTMGxpSFFhMjZKSWdVUVE0N2dYMFRJS01oVkZZemxZTURyc2s5TW9zS0ZkVldOQUJ0eGpaYTBUbWpRd2ZjdGhUNmFOeEpJSmQyOVA0V3V0Nm01OHZjZE10ZWlBbkw5Xy1Ld0s1VmVUSlNhQ3ZLZVZraTRkbmdIN2E3MDRaTnE0Y09aRTNlMlh6Vnl3cUpKbnIzb3JvRnE1akktNUFGM2d6MGdBWVpRNzhraHFQVy1HNkNzNzJFV3BkZzh3b0RvQUNOSGlFTDBES2NGblhIQjZ5enlSaDdPOU1EOEtLZ002VHVkdUVVVFZ5Mlg=",
       "openrouter_metadata": [
         {
-          "id": "cnNfMDRlNWNhNDNlNmNhZDhjNDAxNjk5NWI2Y2ZlNmIwODE5MGI0YWQ1OWEzNWQ1MjU0MDE=",
+          "id": "cnNfMDk5ZjY1ZTc0ZmJmOTBjYzAxNjlhYWVhMTk1M2IwODE5Mzg2YWI3OGJiZjFlYzdiNmY=",
           "index": 0,
           "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
         }
@@ -275,7 +291,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I ran the tool with arguments {\"foo\": \"ran-by-assistant\", \"bar\": \"foo\"}. The tool returned:\n\nThe secret code is: 42\n\nWould you like me to run it again with different arguments or do anything else with that result?"
+    "message": "I ran the tool with arguments {\"foo\":\"bar\",\"bar\":\"foo\"} and it returned: \"The secret code is: 42\". Would you like me to run it again with different arguments or do something with that code?"
   },
   {
     "type": "config_delta",
@@ -301,12 +317,12 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "**Responding to user inquiry**\n\nThe user wants to know the result of the previous tool call. I already displayed that the tool returned: \"The secret code is: 42.\" So, I’ll keep my response brief and succinct. It might be a good idea to mention the arguments I used too, just to add a little clarity, but I’ll avoid being overly verbose. Keeping concise is key here! I'll aim for a clear and straightforward reply.",
+    "reasoning": "**Responding with tool result**\n\nThe user wants to know the result of the previous tool call, which returned, \"The secret code is: 42.\" I should concisely state that result and maybe include the arguments for clarity, since they specifically asked for the result. I’ll also suggest next actions they could take. Keeping the response short and to the point will ensure it’s effective and informative!",
     "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBsYmJaaVNZUkRSNmhyQW9fRUlON0FzbHBNUVMwYmQycGF1bVlkbzlhZkJBT3lwVHlPVXIxSXVwYjVtRGtzRm81TUZNQ1ZoUzZKWER3SjBNMmNkWEV1eU8wWmtHZlIwbXJLR29KdUJkN3V6REdqT0lUQk5BZFJiS25hN19jT2d1Vkw2NnJtVWdzRHlCOUVjLUlxVzlaMHRsY0cwaUFhbHhzWUdlMndXN1hpTWowYjFwS2pSdTRHRXdGWGNfTlFkRk9acXlyUDBKNHNnWk82dXlOZDNTOG84Si0yaWlGMkJMNmJCVTl1VlNEbXB6cl9MYVAwQWh0ZFpSTFJfN0NVRzdwSGl3Y01UUkRFNEtLR2pGZGhPTEU3ZlJwQ2RfYjNZRTlNQ0RlSGtZdWdHdEp1UmlLZk05bVNjejcwekxuQUFLbzRaMG5GUXlHUE15M21KazZSRFZrLURxOVd5RVkxTjlWNFlhNlV6LW1VeHhhZ3E1YTNoVDlFT3FPUzU1bnRybGx5WTIwd3NtTUlCbHpPcVpldmYzTVE2M2lWREhXV3ItV2VVdVpSUnlXS3d4Y21qNWtBN3ZxTldURlpxc1pqYTg5SjhFVXU1T1VFbDRNU1pJVE8wc0hOZDZSOE1SR2dJd0lzMklSR05xRWZQN21Sb0RzN191YU16OTNvTkNrZ05tQTlKLUc5dF9xaHRoYWZ5Nl9DTElIMEtGZExmLXV1ZHhoVzI3dnFOYTVMekNUWFFKbWFCTjFEQzM1M2JxRkc2RHNienBOak9mVkRmSmZzYXhVQi1WaUd1YzFLLV9GcEFxVU9xVWZMbmNZNXJRTVhGQlB4MU04dm5pZG51X1lRX3dYSVN5WkllSkFTRmVlNGtiQTdKWU5EMHg0V2N5bzhIMHJPeVNtaEI5WWNuckozcWhsX0tYcWlIeVJOaHBMd2hQelVmVTR4RFZIdDIwWmw5aDFlUnAwOUQ2RnV3ZTNDOGZqWDJwc21vemJ3UWF0cjFSZGkzVGt4d1BNLWt5WnNBR1BYOFVlQ0tTTGVXWUtzdk1oLXVnVkdzWWVnSEJzVDg1enVLeEFYM3R2WWc0RW4ySDkzN2hvUXlTV0VNdmVoREt0ZHpFMHEyeEZ5OXd0SEVZdGoyX3VDeGhlcnh1N1pkLVVoN1pUMUFkUjVuSWQzNkJoVmZfcnZzNEJWbEs3M18tSmE1dlFOTXI5aWNsbkNnQ0hsb0xzSUlBa21RWGtYdUhQVXp6b09ZbWxYb04zeW9PVTlmZDVTR3NxUHF1ZVROZU1rSEM2M2dyVkNiOVlKN3U3a3ktSEhZdll1Qk9HNzdDNjlIcXBXVHdNSTJUS2VYcFllc1RzaWc0a01GeXNiYjZSN2NLdmpPTjdGWXBKcUNoUGRvdElJTWdKZ1Q2d2FpenRadnBQSTJIWEkwanhFaTNMMGFUNzZqUU41cmhBcTFfakpBMGE2TE9wTFFxZ04yTmJMNUJCZTRhR3lBPT0=",
+      "openai_encrypted_content": "Z0FBQUFBQnBxdW9jS2RfQ3VIMjlvRGJVZ2t3eE8ySVo0NndNcXEySC1XSWVNWklJbGJZWkhDUmVrM0JXc0FFOGRfam1sZjcwc0ZQYmQ5VWJUTGYwMGdsck9DUmJvc2tSZmstRUNncEEwbjdnVWpmbFFZeXdzZ3VqX0FGemZudHN3OF9HQ2x1UE9XRmV2NDhJNlBLanNWMUpqQ0tEUklPSG4zdnhSR0VVWGtzZ0hQTllUSUVrWWpSeVBHTWExNkphNlpSYmtTOGV6UFhhNDBxNnBSTEVPTko4a21hRTd0a19VM2NXWUw4RTcyUW1OVWt2MDg2VW84V05NTjlSSE1LRndjU3FWeWcyV1lodUNxd1F1YmZXTG1JMUJZaVBUb1lVbllsYVd0blVZNTBjZEFWQnY2MjQwaUlRVDFTUm1mSE9qLUZ5czQwLVRwRzRGUzhkd1RWZmxGQ3lNVHk2Zk1yMndDaWV1dFRzYWVFMFJleUM0bG5xVm5VU205UzZMeGJ5UFhPemp6TnpGWk15bzJqNHVSQXlpWDVHTHZxNzAxZnRCZFYxT3ozQVRnRU9jZ3o0X0VRVHJ1M0FOOUxzMUs3bWRyV0Z5b1dkOEpqazhOMmtidlpvcUF1ZzhTTTJKY2lLMmJVMndoZl95dTdna2tPSmh0RHJCTFhCZ2ZlX1RMVDQ2dFJlYkJYdFJING5UczU4Z3hhY1F5bG00cHNVSTRzUk5oeVl2VkdobkNfQ0VzUFF1R2Z1eDVqT2p5dTNCVlZEbFpiVEVCc3pYeVZwdGs1MGNrRmVtbEhQYkR3NHdMTTBFTkViaGQ4SVpacFdiWjJvM2ZYbHVtNEI0aTdYLXJtZGNBT1VPXzB2QkFuV0FnT1R6WDFxZTc3NHd4Qm1hdkVJLWZhVnByd1RSbkstSmJVMVNnUm1JdHVPMjJuWGZlX0lNUlZVRE02d0xyZDk5dHc4aVo5RUpuNE1fRWswOFk2TnVHMTc1T2VraV9pQUwzRmRZbTZNbWo1eDhUclBaYmM1dVhjcERBSzhBb0FQSVhvZ0ZHNTVuQkFYT29OLWU0SGxmb3pqY3JYczU0LVJ0WjlXM3Znd1o1ZFhWU2dKU05DSWlzWjkyUGJDSHZmV3BWLXo4LW1GdDJfQVUwTlJnQ2RMbThBSlY3MDFhYktaUFRXcFBDNXRBYWhxd3hRalV1eGpfQ1dJZHFhNS0xenA3VUpFTDFnQjdnTkhfa1hoa0gwMElYakhKT0xIbDR3aHBZVWZuY1VQblc0SndlOXIyQkY5bldGVWVsTVJaYXZOUko1OHhOczhla3ZYNFJyZUxLTV9HWXlwc1NlY0NybXlMa3BUQXVTbGNfQTRUVEQ5WEQxbkdVS0luQ3Zvb3ZzbURqRVZXRjlvNnJLdkpIM3dBNkZKazNqWGtuUWh3dFRBN05oNzhZa0dMZFpMT2xianNyY29qbzBkOXkwR01HbkJPOEx5aGx5ekJsT1BkMk16b2x3enA5eEx4Ym5tVDRyZ0RlRWtTR1hmVlU3ZElEelN3b2Vkc0hadTN0ZjRDXzZZZkExSVpDZUxsVnJuRnoxSm4zU1FqYTFhS08zZTVHUkdTVjUtakZ0cHduYz0=",
       "openrouter_metadata": [
         {
-          "id": "cnNfMGJhYmY1NWRkY2NjMGRjMTAxNjk5NWI2ZDcxZGRjODE5M2E2MjI1ODU2YzBkOTI1YTQ=",
+          "id": "cnNfMDlkZThlYmU2NzAwOGE1ZjAxNjlhYWVhMWFhNWJjODE5MDg4ZjY0M2U0YzU1OTI0YTE=",
           "index": 0,
           "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
         }
@@ -316,6 +332,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "The tool returned: \"The secret code is: 42\". The arguments used were {\"foo\": \"ran-by-assistant\", \"bar\": \"foo\"}."
+    "message": "The tool returned: \"The secret code is: 42\". Would you like to run it again with different arguments or use that code somehow?"
   }
 ]

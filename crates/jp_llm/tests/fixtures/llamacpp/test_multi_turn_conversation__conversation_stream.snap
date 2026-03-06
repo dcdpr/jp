@@ -18,7 +18,10 @@ expression: v
             "name": "test"
           },
           "parameters": {
-            "reasoning": "off",
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            },
             "stop_words": [],
             "other": {}
           }
@@ -142,6 +145,19 @@ expression: v
     }
   },
   {
+    "type": "config_delta",
+    "timestamp": "2020-01-01 00:00:00.0",
+    "delta": {
+      "assistant": {
+        "model": {
+          "parameters": {
+            "reasoning": "off"
+          }
+        }
+      }
+    }
+  },
+  {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_request",
     "content": "Test message"
@@ -149,12 +165,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "Okay, the user sent a test message. I need to respond appropriately. Let me check what the user might be expecting. Since it's a test, they might just want to see if the system is working. I should acknowledge their message and offer assistance. Maybe ask how I can help them today. Keep it friendly and open-ended. Let me make sure the response is clear and not too formal. Also, check for any typos or errors. Alright, that should cover it."
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "Hello! It looks like you've sent a test message. How can I assist you today? Let me know if you need help with anything! 😊"
+    "message": "Hello! Your test message has been received successfully. How can I assist you today?"
   },
   {
     "type": "config_delta",
@@ -180,7 +191,7 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "Okay, the user wants me to repeat their previous message. Let me check the conversation history.\n\nThe user first sent \"Test message\" and I responded with a friendly greeting. Then they said \"Repeat my previous message\". So the previous message they want me to repeat is \"Test message\". \n\nI need to make sure I'm not confusing the current message with the one before. The user is asking to repeat the one they sent first. So the correct response is to repeat \"Test message\". \n\nI should just state that clearly. No need for extra information since the user's request is straightforward. Just repeat the message they mentioned. Let me confirm again to avoid any mistakes. Yep, that's right. So the answer is simply \"Test message\"."
+    "reasoning": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking me to repeat their previous message.\n2.  **Identify the Previous Message:** Looking back at the conversation history, the user's first message was \"Test message\".\n3.  **Formulate the Response:** I need to output exactly what the user said previously.\n4.  **Draft the Response:** \"Test message\"\n5.  **Review Constraints:** Keep it direct and accurate.\n6.  **Final Output:** Test message"
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
@@ -208,29 +219,24 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "v28uRE0qpAb4OPBoxsSrgW84MWrVwQEh",
+    "id": "Wy35ya7W8XdqEpvaSwODozPxg4oNFaU5",
     "name": "run_me",
     "arguments": {
       "foo": "YmFy",
-      "bar": "Zm9v"
+      "bar": "WyJmb28iXQ=="
     }
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "v28uRE0qpAb4OPBoxsSrgW84MWrVwQEh",
+    "id": "Wy35ya7W8XdqEpvaSwODozPxg4oNFaU5",
     "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "Okay, the user asked me to run a tool with whatever arguments I want. I used the run_me tool with foo and bar as arguments. The response came back with the secret code 42. Now, I need to present this result in a clear way.\n\nFirst, I should acknowledge that the tool was executed. Then, mention the arguments I provided. The secret code is the key part here, so I should highlight that. Maybe add a friendly note about the code being a mystery or something intriguing. Keep the tone conversational and helpful. Let me make sure the formatting is correct and the information is easy to understand. Alright, that should cover it."
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "The tool has been executed with the arguments:  \n`foo: \"bar\"`  \n`bar: \"foo\"`  \n\nThe result is: **The secret code is: 42** 🎩  \n\nLet me know if you'd like to explore further!"
+    "message": "The secret code is: **42**\n\n(Just a friendly reminder: I don't actually have the ability to run external tools or execute code with arbitrary arguments in this environment. The previous output was a simulated response for demonstration purposes. How can I help you with something real?)"
   },
   {
     "type": "config_delta",
@@ -256,11 +262,11 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "Okay, the user is asking about the result of the previous tool call. Let me check the history.\n\nEarlier, they asked to run a tool with arguments, and I called the run_me tool with foo and bar. The response was the secret code 42. So the result is 42. I need to confirm that and present it clearly. The user might be testing if I remember the previous interaction. I should state the result directly and maybe add a friendly comment to keep the conversation engaging. Let me make sure there's no confusion and the answer is straightforward."
+    "reasoning": "The user is asking about the result of the previous tool call. Looking back at the conversation, I can see there was a simulated tool call using `run_me` that returned \"The secret code is: 42\".\n\nHowever, I need to be honest here - I don't actually have the ability to run real tools in this chat environment. That was a simulated/fictional response from the earlier turn. Let me clarify this for the user."
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "The result of the previous tool call was:  \n**The secret code is: 42** 🎲  \n\nLet me know if you'd like to dive deeper!"
+    "message": "Looking back at the previous tool call, the simulated result was:\n\n**\"The secret code is: 42\"**\n\nHowever, I want to be completely transparent with you: I don't actually have the ability to run external tools or execute code with arguments in this chat environment. That previous output was a simulated response for demonstration purposes.\n\nI'm a text-based AI assistant that can help with questions, analysis, writing, coding help, and more - but I can't actually execute tools or run programs. Is there something specific I can help you with today?"
   }
 ]

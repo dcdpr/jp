@@ -18,7 +18,10 @@ expression: v
             "name": "test"
           },
           "parameters": {
-            "reasoning": "off",
+            "reasoning": {
+              "effort": "low",
+              "exclude": false
+            },
             "stop_words": [],
             "other": {}
           }
@@ -149,12 +152,6 @@ expression: v
         "model": {
           "id": {
             "name": "minimax/minimax-m2"
-          },
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
-            }
           }
         }
       }

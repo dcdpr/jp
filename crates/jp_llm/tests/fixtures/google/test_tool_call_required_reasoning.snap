@@ -8,9 +8,25 @@ expression: v
             index: 0,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Analyzing Tool Arguments**\n\nOkay, I'm currently assessing the best way to approach the arguments for this \"run_me\" tool. I'm focusing on \"bar\" and \"foo,\" which are the options. The \"bar\" argument seems interesting, with its dual nature of either a literal string, like \"foo\", or a list of strings, so I need to make the right choice between them. I'm prioritizing flexibility and effectiveness in my approach.\n\n\n**Refining Argument Selection**\n\nI've decided to provide a list of strings to the 'bar' argument, specifically `[\"apple\", \"banana\"]`, while omitting a value for 'foo', which defaults to \"foo\". This approach prioritizes demonstrating flexibility. I believe `default_api.run_me(bar=[\"apple\", \"banana\"])` is the most effective call for the \"run_me\" tool.\n\n\n",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "run_me_0",
+                        id: "run_me_1",
                         name: "run_me",
                         arguments: {
                             "bar": Array [
@@ -21,12 +37,12 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "google_thought_signature": String("CiQBvj72+3Eznyvg9jiUhca64XUHdbIbl2yoefaRAJAnVDXaBUwKYgG+Pvb7MiHOidVCCyQGer46ZwCsi/m+ml9PYqmKwKSPvwddg37xnCXeVzh6UlsIEi8XSbv2M3mb96e6YrgM45u0RbFV0zj8Ze8jTjGxFolzwmFydUNDfDFmJge3xxam0keyCs8BAb4+9vvK9a4syhCnXEr81PtJqTCzvShJm+TKuPXUnSZQ7ySrmGkVTVK6gzMpBnK0Kxn1j7uq8ds1onjvRIzVnJOvBDztJOsmzaUh9dXamrS2ALzHtPt1gXm/uNqFlNOU8YNYd35tS/AIMu+aZOb8Um/m6miBg6FstXpOfKdACaGtlDqHiPBheFjYXB+eq41EBA+qSCMsrUYMzEvqL8mJC+ssSLxXSUW9N85LUFEs6QZwCf+DBBzc2go7J2pRDdFlJttlHAJN8OUjnVkI1wJMCtkBAb4+9vuF7tGCYuDZdVNj/P0L3ND5mGWO6ZyzL0MXNQdGC4xDdfRZ9fC/BwVGCcqyp8TIjpYzkb2a7gVBObeoyOUeI3M+drvqsjJe1caLYBxnCUPEpM1wxvVNZQS5TXx1v8fY6G2xPqiyCvfJ6Gr4ygGMFK0QCzV/+zHeCLYbseHxCeZLF/gW0r5KUjCgfhKLUKNugUyZA8Qdo0Xsi8DY7bF1PFEvE5ViEnC7HgK0ay/glojnfvYggRH+kY4pLl8nORHOpjHesHFXX6X4OSLRGwCdrCYpXQX7lwq/AQG+Pvb7tGNvA/2jVEPz3OB9HhAluVNjTuugvZHMgVWVDeJ5/CM+sGwaxussuwNAEfOPUsgIoHi2VU3Cwo9GwkWmYCAtUYea7ipkEucJsrGTpIdqczBQYLoZjol5GMzLdrg3xgcDTcvRua8xL2JjxUZtOVEEHu7YpEQFGVtGBXgJ9kG+GsAzC74vUJOS6TxdA5iHD8pLTG0cys7W1eoL5BASzViwm6s7YhqnBZ9/vNwEpAVYqsCrLeYjwqQdIkhjCtoBAb4+9vvByQCQpgNr35GikMVmnlrKBw1I6Nr6MXPkQBoDVoMf8fJ5OrNlybvyzeMU4MF975F/g+cXLP+4vqU9sMnmsk8A8Yo7qGoq+TfzrF/VBpgI2NI2hwOoBn3f3iATj9+7lSgug11GB3ShWy0DdgzItvXyKuFC350Tge1fFIYelYyeUrpZ4K19P3rwNr6pCo0fDzOBRn5T4cIoS3Y8Xf4lQaaEm14NDY/fE5AQWmvE7d7OrbCA7Dp1t3yfHdvSW30a0qilTrXfClNcd/K99C3Wjp5NgoOSbeAKkwEBvj72+9Of8v2oCPkWuJl4LI66zvLbCC+H14bJfCoKwSdvwBIhnPZ4GA3oQQkHJwru6K+re+k/lZEj7stRvWdw8uHDyUBWtAwdY9XYv1GqSDBfV90dH60WsKmUtJRp5UauNs5uqUw6X3RFgZyk5BGJ9SF86nunumFJbTK5+1EhcDSNBWn23gVL0pRoC2z0PCXt2O0="),
+                    "google_thought_signature": String("CiQBvj72+/34HShSSwxZHdFYG/Uz79kQfaEtCJY4kUcuRwVmB8oKWgG+Pvb7TAxpZRLOS6xvWS4BBfo4TJwLrjSC47mnjZdpkv3Insht7YT1P659y3MWIWZlGYDuBbbcGfHhVoVMSdc0cM1lr9JWP1L8zMLXJl+nmHDSv92BIQYLjgrVAQG+Pvb7fzfxJOsj3rVWUY8w1//REQkU4hdjNy4fpIhahXiE+htLdjeN3KO4Suexk7SK5LT8zsZZsZiBXWuQz92DNlPhtbkpAvojwnrkSh2++2xJJgYym6Ehqe/u9ggVg12KAF3wf8riFXx5aIy3yFPwrnlHRlqbh3SzO82xxuXpgmhrqVu74yXaAXj3fPLxZcRPbis9qt1TnlUk3U7nORztpHA/bF18Y4TMJDY+2bC9O5vcHmvunNcazdKO0buNU5dmnfeVRXjYztobprUp4dSjdr0Z4grdAQG+Pvb7XlXYNdmCL7H3k5p2PC8zbgFi6HeJdBviSwJ/qRz7rMw1himJDOb7a3iCnUIlDkknZrtT5PRlnLey/uvtc8QG9V170c6ziVBcyAi89dntdB0ZIyEaS0FMjs6EPVcu47w0HfzmeKXpmq01lE9l3K8JQMFyVowy+rj8bWZAHs/1rVcLwtH6PZTth2env+DfpTF0dWcc/j8Xk7PK8c/8VKLqvRlZrh7PCNKBQCnckREX0H+Q4iNer8q4GqH/tBm1k7/ODiVltzjusGMqHrdomoFoLrS9nE2V7lQqCtUBAb4+9vvd3MDMKUnElgy6BkpJui4380Ewh1rjz/rIi+bzUJTJJv+zKgfyQzJAFfZaqZHzVMMbwkxZjfF0zw7kO/Y1aC0zD+vQgaTBTznnqSaZ9CinYizaqg0qwOfV5T6SNiFszHZch5BQiPFPgNsxQwPvG2PtV3k3G7baopyC+fOG/PCOz3ZG+C8cTLVRrdfuIL9u2Iig3ES92U9Hqj9H8357iReJoX7UoqOvIWDFwYCIbCUjF6AsyyauaGBeZjS3KJoYaX02qG33gu5JJ5dZUD6CFP7ACs4BAb4+9vsFcITNIYmu4c977pHmWY9EUCCZUgiGoxOeIUkJiCQW3pYBoEO9phUogA0JooFkOkXAj31YQBPFvY4xr87hl5wU5UgGYk7934Y9BrjlgLkjaxeeNSrB3M6sdNihagLu+REXtLHbhpTYGLAf7f/cMuQe6HDcmKXGwMyXB1FkpwZqa5j11e6Cg+KMMUJ45rZ3ksHztp3qLNuiufOfeitikTAk7E4HaJ89Nz+418V1OmC73Kh6YhKBrVBWFROmODnwE64Nbt05C6akF/4KTwG+Pvb7X7aQpOfbNbOqiREdeethDSKSNoyJo8eh8VgjX9g66bqHVNEFzFFVReqYN7hYt+57rZ0++6jjRtAUJeuhg5MRtNWf+Anpfqe4PMA="),
                 },
             },
         },
         Flush {
-            index: 0,
+            index: 1,
             metadata: {},
         },
         Finished(
@@ -34,6 +50,22 @@ expression: v
         ),
     ],
     [
+        Part {
+            index: 0,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool ran successfully and returned the following response: `{\"run_me_response\": {\"content\": \"working!\"}}`",
+                    },
+                ),
+                metadata: {},
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
         Finished(
             Completed,
         ),

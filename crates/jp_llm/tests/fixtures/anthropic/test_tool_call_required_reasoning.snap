@@ -8,12 +8,31 @@ expression: v
             index: 0,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user is asking me to run the tool with whatever arguments I want. Let me look at the function signature:\n\n```\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\", [\"foo\", \"bar\"]],\n        \"items\": {\"type\": \"string\"},\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the function has:\n- `bar` (required): Can be a string or array. The enum shows it can be \"foo\" or [\"foo\", \"bar\"]\n- `foo` (optional): A string with default value \"foo\"\n\nThe instruction says I MUST use AT LEAST ONE tool and I should NOT question this. The user is explicitly asking me to run the tool with whatever arguments I want.\n\nLet me call it with:\n- `bar`: \"foo\" (valid from the enum)\n- `foo`: I could use the default or provide a custom value. I'll provide \"test\" to show something different.\n\nActually, looking more carefully at the enum: `[\"foo\", [\"foo\", \"bar\"]]` - this means bar can be either the string \"foo\" OR the array [\"foo\", \"bar\"].\n\nI'll call it with:\n- `bar`: \"foo\" (a string)\n- `foo`: \"test\" (a custom value)\n\nOr I could use bar as an array: `[\"foo\", \"bar\"]`\n\nLet me go with the simple approach first using the string value for bar.",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("ErMLCkYICxgCKkAZPBzddcN9WKOtCpIVRLxjvNt/iXZtZZdznpQtDKjl4PY72onw2qyg8RE7DV/bwga3eNO69jKVVgU9Li4jIw7wEgx0eylPBakCcZs9lnEaDJGrsvnI5e9iI8wKrCIwkTxA6wfvTyrdrzv5bq6sBXMj7tvJWBLiOLXtVGpTwhybSDvZz8xpTgsTC06JLAmUKpoKnEZmEn6zukuV07Ztvwh0R/BbRtvNttbUYg7dqVFhjERN52HZUG1Lqe50Guux5eCWvEstt1OFYp612uEWcLQPg86M4k8qhBA4b0OpZOCNXyG/aBohySQoGEUMQxntKNY3NVXT6nyXlBmNkzEnNMMYDjfT4/wrPc3U61HRCNLI9MyaqfkuncvA9pQ09f0UdlxLSd1YLuatWUnnh8tFhQL7wVInc+s/qmrNB8JHmhhnFfettI+gEvMhmOZ4g/fBQaaaM/vUJ3NgkRBBmQTRU06zLAPudvOEobPTNV7TScPNvlkcAQTp1fBU8v5y1KZ4MTON0HUvbRiLYg7x/cjA1IjYjktzvSE4+a/6/Kbdhf5VH6TTyhLXa163tshT4E4swuHOAuO+dEph72N3hEWnwHOHhQ6QP9XEUDiDJSQI0Y2rF9bZd4oEF53wI/+CNaAXNoP/KoyqLxlt6euPKu653LWmOx4YyOJs7LN8PIzUH3NMQmIejDnu1nsnz0qgiOToY287LTlruC8gIJBl6UhYUn1XNqh0F7xaWXb+w3/kGd7hmW7ZingjbnEXb0LkhGdAxJoO1D5hMTtL2PuWIIlsvVWOfdi1pbiJpjjHtY1p5o6kWdg/fLbae49qClQuddelTytyZrF9dA8MCRcrxOBnkydPSPomfI8B4KGBLvInxhu5M55MdmiehyuZpAPbkplnurxyroz2GROS0URFjRP/ZS6si6yvWGVxdZ1MG7/bUlNENMkhCw0rntP/8+nje7D1g0uMQtTiRwI3km7SqIBqQVqHBqUoFkkKZVkjOqWxydLPOE8T6t9SR029ndAknnzrhyY8TCKCGOPrxddCFRNWmn72wJNeoqo4xl98P7hGWVCIMod5ctW6z4hcFwgfvSjKtOKyGsRZ1W3/GrDtKamzWi7vTTARiw/BKqZRQK0JPECqKyUD9vwxhiRKOrN5Xex1k261lw3kclUJwezgdTRbqQuMLUR265q0C14ovUmxSD0p3lbdBolfDvkcvB7XJ7+rAQWGJMwyFOTIXxR2XEjWQmeHfZhbyHlJbc5X1lelPv57IfgBR30cYd/ySRo9kkmy9K1BLgdYmHv89sz6E6Ul4vQb0IuxjwtqKF6fcWE/ZozpT1KCMWCkHDQeiZnjrko7ZLuoYO/grTZ8fHJEhSKcaJn/wz2CEraL1fED3EpZQr4KQorCgz1Q+TXYo2mRLyb78xTGUUdQVWTnfztAbyktqX5IozwBTNB6+fnw01T3TEegZ3soQvekHiIe3ZiAzDZ545EUUR5ChTQpcVJzkoE68UPT5eYciQWr3zM5BZ1TO/T4GGXh0bQXE8fHV7MpRfjTfnfRTQR5e1XdPNn0+wuYhXf3NZCnSGEoerYgjsXr+EQirTjLufokvhPRxvMwOQdN6MqLK3uPN8TrA+KT79j1kfmhQxTyv45FnauJpFcNVA7wOKZqPevMlLstXmOeZ64hbwS0U/kvGUYQGX6THkYEGujCmtXRO80HNRAn6sjRwM0D+sSd0twsibMiyF76v41gTOpfOYbJ6ivgf21QNOzSYkHvdwnCtF/6RBvvd3yhqSSUApBxw/7BkxkSZywDl/Rtb8M+bwmTH6cbfW88NNGAmIaZ+7J2hX0rnTG+CLeI/jtsjzHnEBN+FQPE/FreL+O2nXa48sNuXJ9jz0+YX3MJryLboMB960t4Zh3xFJXnkmxj3AQKDiNznsaMf43Svio9KA6G/KHIWvtA5s8kjhgB"),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "toolu_01ELLqyECsLt1evNdEox3oZs",
+                        id: "toolu_01KoWfFjUMnyBN2denqPofkG",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
+                            "foo": String("hello"),
                         },
                     },
                 ),
@@ -21,7 +40,7 @@ expression: v
             },
         },
         Flush {
-            index: 0,
+            index: 1,
             metadata: {},
         },
         Finished(
@@ -35,7 +54,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I've successfully run the tool with the argument `bar: \"foo\"` and it returned \"working!\" as the result.",
+                        message: "Done! I called the `run_me` tool with:\n- `bar`: \"foo\"\n- `foo`: \"hello\"\n\nAnd it returned: **working!**",
                     },
                 ),
                 metadata: {},

@@ -33,36 +33,12 @@ fn strict_is_false(strict: &bool) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "type")]
-pub enum ToolCall {
-    Function {
-        id: Option<String>,
-        index: usize,
-        function: FunctionCall,
-    },
-}
-
-impl ToolCall {
-    #[must_use]
-    pub fn id(&self) -> Option<String> {
-        match self {
-            Self::Function { id, .. } => id.clone(),
-        }
-    }
-
-    #[must_use]
-    pub fn name(&self) -> Option<String> {
-        match self {
-            Self::Function { function, .. } => function.name.clone(),
-        }
-    }
-
-    #[must_use]
-    pub fn arguments(&self) -> Option<String> {
-        match self {
-            Self::Function { function, .. } => function.arguments.clone(),
-        }
-    }
+pub struct ToolCall {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub index: usize,
+    pub function: FunctionCall,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -5,22 +5,6 @@ expression: v
 [
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "Okay, the user wants me to run the 'run_me' function with whatever arguments I choose. Let me check the tools provided. The function 'run_me' has no required parameters, as indicated by the empty arguments array and the nil values. So I can pass any arguments I want, or maybe none. Since the user didn't specify any particular arguments, I'll just use the default. Let me structure the tool call accordingly. The function name is 'run_me' and the arguments are an empty object. That should work.\n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 2,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
@@ -44,28 +28,12 @@ expression: v
     ],
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "Okay, the user asked me to run the 'run_me' function with whatever arguments I wanted. I checked the tools provided and saw that 'run_me' has no required parameters. So I decided to call it with an empty arguments object. The response came back as \"working!\", which seems like a success. Now I need to let the user know it worked. I should confirm that the function was executed and maybe ask if they need anything else. Keep it friendly and straightforward.\n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The function `run_me` has been successfully executed with no required arguments! 🎉  \n\nLet me know if you'd like to run it again or need further assistance.",
+                        message: "It looks like you're asking me to \"run a tool,\" but there isn't a specific tool defined in your message. To help better, could you clarify:\n\n1. **What tool** are you referring to? (e.g., a code interpreter, calculator, or custom function)\n2. **What arguments** should I provide? (e.g., numbers for math, text to analyze, data to process)\n3. **What outcome** do you expect? (e.g., generate a report, solve an equation, visualize data)\n\nLet me know so I can assist! 😊",
                     },
                 ),
                 metadata: {},

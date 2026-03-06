@@ -373,7 +373,7 @@ fn map_event(
 
     for (
         idx,
-        types::tool::ToolCall::Function {
+        types::tool::ToolCall {
             function,
             id,
             index,
@@ -494,27 +494,39 @@ fn build_request(
         request::ChatCompletion {
             model: slug,
             messages: messages.0,
-            reasoning: reasoning.map(|r| request::Reasoning {
-                exclude: r.exclude,
-                effort: match r
-                    .effort
-                    .abs_to_rel(model.max_output_tokens)
-                    .unwrap_or(ReasoningEffort::Auto)
-                {
-                    ReasoningEffort::Max | ReasoningEffort::XHigh => {
-                        request::ReasoningEffort::XHigh
-                    }
-                    ReasoningEffort::High => request::ReasoningEffort::High,
-                    ReasoningEffort::Auto | ReasoningEffort::Medium => {
-                        request::ReasoningEffort::Medium
-                    }
-                    ReasoningEffort::None => request::ReasoningEffort::None,
-                    ReasoningEffort::Xlow => request::ReasoningEffort::Minimal,
-                    ReasoningEffort::Low => request::ReasoningEffort::Low,
-                    ReasoningEffort::Absolute(_) => {
-                        debug_assert!(false, "Reasoning effort must be relative.");
-                        request::ReasoningEffort::Medium
-                    }
+            // OpenRouter doesn't expose per-model reasoning capabilities,
+            // so we always send a reasoning config. When reasoning is off,
+            // we use `effort: minimal` + `exclude: true` instead of
+            // `effort: none`, because some models (e.g. gpt-5-mini) reject
+            // fully disabled reasoning.
+            reasoning: Some(match reasoning {
+                Some(r) => request::Reasoning {
+                    exclude: r.exclude,
+                    effort: match r
+                        .effort
+                        .abs_to_rel(model.max_output_tokens)
+                        .unwrap_or(ReasoningEffort::Auto)
+                    {
+                        ReasoningEffort::Max | ReasoningEffort::XHigh => {
+                            request::ReasoningEffort::XHigh
+                        }
+                        ReasoningEffort::High => request::ReasoningEffort::High,
+                        ReasoningEffort::Auto | ReasoningEffort::Medium => {
+                            request::ReasoningEffort::Medium
+                        }
+                        ReasoningEffort::None | ReasoningEffort::Xlow => {
+                            request::ReasoningEffort::Minimal
+                        }
+                        ReasoningEffort::Low => request::ReasoningEffort::Low,
+                        ReasoningEffort::Absolute(_) => {
+                            debug_assert!(false, "Reasoning effort must be relative.");
+                            request::ReasoningEffort::Medium
+                        }
+                    },
+                },
+                None => request::Reasoning {
+                    exclude: true,
+                    effort: request::ReasoningEffort::Minimal,
                 },
             }),
             tools,
@@ -648,7 +660,7 @@ fn convert_events(events: ConversationStream) -> Vec<RequestMessage> {
             },
             EventKind::ToolCallRequest(request) => {
                 let message = Message {
-                    tool_calls: vec![ToolCall::Function {
+                    tool_calls: vec![ToolCall {
                         id: Some(request.id.clone()),
                         index: 0,
                         function: FunctionCall {

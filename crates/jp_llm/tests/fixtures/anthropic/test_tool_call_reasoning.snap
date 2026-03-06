@@ -8,13 +8,31 @@ expression: v
             index: 0,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user is asking me to run the `run_me` tool with whatever arguments I want. Let me look at the function signature:\n\n```json\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\", [\"foo\", \"bar\"]],\n        \"items\": {\"type\": \"string\"},\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the function has:\n- Required parameter `bar`: which can be either a string or an array of strings. The enum says it can be \"foo\" or [\"foo\", \"bar\"]\n- Optional parameter `foo`: which is a string with a default value of \"foo\"\n\nSince I can provide whatever arguments I want, I'll provide:\n- `bar`: I can use \"foo\" or [\"foo\", \"bar\"]. Let me use \"foo\" (the string version)\n- `foo`: optional, I could use the default or provide a custom value. Let me provide something custom to show I'm using the tool fully.\n\nLet me call it with:\n- bar: \"foo\"\n- foo: \"custom_value\"",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("EqEJCkYICxgCKkCt942VhV3cCD5lujcSWczK/l5kgA+UsxeGBPg19okdaJA0DTzJIngh2bMdHtL2NUs3CIYJRoeeYWlvxMFfiEr4EgyX9b1qgP72WUB0Nm4aDCZfi8pExftJDQazySIwZpbyc9J0LKUmFqZGlzZRVIkAlRhgRSX/Rad42x0mq1eFjzjYulocQgaobIjtyAlMKogIaidf31v17Y5+gp647S5gWQrbrQL1TLB0fGpNJ0k40IMHh3jm6WGi3HGpqK8zDurwgn8GeRm4MlX0YJjWVANbIIJ0/bGu3jlWxT7IEUaXdzEGhC7Kylrt2mLFdFPKYagAu9M9PCjhO3T67ZD20GnEr90PiAuYdhAYxgizP7wqb0E8CKXS0rlcHshvmhm1OLJ2DYXQDQGXeeygdk5HvWs01k94qSxkMA0RZCk7HWWDyR5GdXfDaGBXKNQAqVhJdlP44gVjaeeNh1E0Fi5iUwWyqck1fy/MXWse5+UlVFqMiU3nB1uasOcZ7+jT8JAyWyHHdOSVQt4czK/PRiPhyXJuvWKYPR9kukZVj4BeZZoKnld45yxJ5ryfvf+/LxAeUh7ertc3GrsZQvO2Gzx09J1BRaMyTBlnevcpYjRRCdcPRtUuULVurJWwCRsNZ9j6SscQddm5czPSAM6ppYJ413TNI4wmZWzm9ZNHbrTlGemAZopJqWoM4cVMqUPzD4H66DaRqpiaxkkivt5n4m1yRS2GDhBLw7JWFe5HjgtdnbSVZc11VcMKPzjVcqcb6wrUVq85rNUrug0zd54Z61MxWlo1mShesRZozwlbceS4osDvxDiSWGAlzLj2EukPcib5t5AEU723Lz+b268Wc2Q2ORrX6MF01leFiSfoaRPjdq/1a0Vo6c0C2UuQ+TOGwcUkwr6+7c1IE+RGpK1qLBazUBrcnBoM00XdmSZm11I3352c3wrNABM74wEpZCfcibQjpCkmc7vsBgXWkG3/VBVnTwKmdArSnmX+22ogEAolynWg3yvvQ4Co1qsfifQJ28LE5ksbUylZjhoMlwDqOrDu3zAAOa2fR/fc45qtRIENKzv9gxpTiYWcwe4pAqCL9XbPuTdWIw8pdjIU0MTutFzZ36S3Dt7d9Fu4q9jOjhxgOyOsecn+jQGmMclrfmPh/kvaRjvDmexeTsDtqSD7bk4QXNfE3jouwERNjNhUyVD8TKHHN/INgozc6sx1KAWqU+i/E+LesPE7S0fehVAhAmPI5I7O9S0LPEjdp74aCtILTna7Zl4plC15tNRUsHPpotaIJuLtQnmXLXoxnOWt845QVfncqefmJSGVnNF+h0ckHyPsIwjTjgpJvF1NQl9d1ArJEGkh0FONa4XmvPBBSiG1j6paFfq5viVLT4Q1DkZkzupDDenpGU7hYQGErOZMJqPubjlQB8SAnHYmUbPXo1NTLWT9TOgI+Z1aXoXiFAp5wO7EUkpY5ZtZai9MEuL9w0/EfoMJ5gg3sfZt2nK1B1NwUxLwIKRz/3BQOv5U8WkGWPcwOtubjHsoDqbbqji0QQ0c8hIpl4v/0k4bv7GaMpbbZckF+zg46TUe5JnOGAE="),
+                },
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            event: ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "toolu_01K91NzW9tCW65EJwfhcU2Zm",
+                        id: "toolu_01TUFYN1pewoPM9Y4h3paD29",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
-                            "foo": String("foo"),
+                            "foo": String("bar"),
                         },
                     },
                 ),
@@ -22,7 +40,7 @@ expression: v
             },
         },
         Flush {
-            index: 0,
+            index: 1,
             metadata: {},
         },
         Finished(
@@ -36,7 +54,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Great! The tool ran successfully with the arguments I provided (`bar=\"foo\"` and `foo=\"foo\"`), and it returned \"working!\" as the result.",
+                        message: "Great! The tool executed successfully with the arguments:\n- `bar`: \"foo\" (a required string parameter)\n- `foo`: \"bar\" (an optional string parameter)\n\nThe tool returned: **\"working!\"**",
                     },
                 ),
                 metadata: {},
