@@ -167,15 +167,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "Okay, the user wants me to generate a title for a conversation. But wait, they haven't provided the actual conversation content yet. Hmm, maybe they forgot to include it. Let me check the query again. The original instruction was just to generate a title, and the user hasn't given any specific details about the conversation's topic or content. \n\nWithout knowing the subject matter, it's hard to create an accurate title. The user might be referring to a previous conversation that's not included here. Or perhaps they're testing if I can ask for more information. I should respond by requesting the conversation details so I can properly generate a relevant title. That way, I can ensure the title is appropriate and meaningful. Let me make sure to prompt them to provide the necessary information.\n"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "data": {
-      "titles": [
-        "Title for the Conversation: [Please provide the conversation content or topic for a tailored title]"
-      ]
-    }
+    "data": "Conversation: Requesting a Title Generation"
   }
 ]

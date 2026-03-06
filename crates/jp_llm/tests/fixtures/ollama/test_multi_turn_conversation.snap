@@ -5,28 +5,12 @@ expression: v
 [
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "Okay, the user sent \"Test message /think\". Let me figure out what they need.\n\nFirst, \"Test message\" is probably just a test to see if the system is working. They might be checking if the response is coming through. The \"/think\" part could be a command, but I'm not sure. Maybe they're using a specific format or want me to think about the response.\n\nI should respond in a friendly and helpful way. Let me acknowledge the test and ask if there's anything specific they need help with. That way, I cover both possibilities: they might just be testing, or they have a real question. Keep it open-ended so they can clarify if needed.\n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Hello! It looks like you've sent a test message. How can I assist you today? 😊",
+                        message: "Got it! How can I help you? 😊",
                     },
                 ),
                 metadata: {},
@@ -47,7 +31,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "Okay, the user just asked me to repeat their previous message. Let me check the conversation history.\n\nLooking back, the user first sent \"Test message\" and I responded with a greeting. Then they asked to repeat their previous message. So, the previous message they want me to repeat is \"Test message\". \n\nI need to make sure I'm not confusing the current message with the one they want. The user is probably testing if I can recall past messages or if there's a feature to repeat them. Since I don't have a built-in function to store or repeat past messages, I should inform them that I can't do that. But I should also be polite and offer help with something else. \n\nWait, maybe they just want confirmation that I remember their message. In that case, I can acknowledge their request and explain my limitations. Let me phrase it clearly and keep the tone friendly. \n\nYes, that makes sense. I'll respond by stating I can't repeat messages but offer assistance with other tasks. That should cover it without confusion.\n",
+                        reasoning: "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking me to \"Repeat my previous message\".\n2.  **Identify the Previous Message:** Looking at the conversation history, the very first message from the user was \"Test message\".\n3.  **Check for Privacy/Policy Constraints:** There are no specific constraints against repeating text if it's harmless. However, I need to be careful not to reveal sensitive information if any were present (none in this case). The instruction is simple: repeat what they said before.\n4.  **Formulate the Output:** The previous message was \"Test message\".\n5.  **Final Decision:** Repeat \"Test message\" exactly or close to it, acknowledging the request.\n\n*Self-Correction/Refinement:* Wait, looking at the conversation structure:\nUser: \"Test message\"\nAssistant: \"Got it! How can I help you? 😊\"\nUser: \"Repeat my previous message\"\n\nThe \"previous message\" refers to the *user's* previous message before this one, which is \"Test message\". Or does it refer to the last thing I said? No, typically \"my previous message\" implies the user's own input. However, sometimes users are testing context retention. Let's look at the immediate predecessor in the chat history provided in the prompt.\nThe conversation flow is:\n1. User: Test message\n2. Model: Got it! How can I help you? 😊\n3. User: Repeat my previous message\n\nSo \"my previous message\" is \"Test message\".\n\nI should just output that text.\n\n*Wait, one more consideration:* In some contexts, if the user asks to repeat their message, they might be testing if the model remembers what they said earlier in the session. Yes, that's standard context memory.\nSo I will output: \"Test message\"\n\nLet's make it clear and direct. \"Test message\" is sufficient, but adding a sentence like \"Here is your previous message:\" is nicer. But strict adherence might be better. Let's just say \"Test message\". Or acknowledge the request. \"Your previous message was: Test message\".\nActually, the simplest is best. Just the text.\n\nWait, looking at the prompt instructions again. I am an AI assistant.\nOkay, let's keep it simple.\n\n\"Test message\"\n\nOr should I include the instruction? No, repeat the *message*.\nOkay, \"Test message\".\n\nLet's double-check the history provided in the `user` block.\nThe first user message is \"Test message\".\nThe second user message is \"Repeat my previous message\".\nSo the target text is indeed \"Test message\".\n\nI will respond with that text.cw",
                     },
                 ),
                 metadata: {},
@@ -63,7 +47,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I can't repeat messages, but I'm here to help with anything you need! 😊 What would you like assistance with?",
+                        message: "Test message",
                     },
                 ),
                 metadata: {},
@@ -78,22 +62,6 @@ expression: v
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "Okay, the user is asking me to run the tool with whatever arguments I want. Let me check the tools available. The only tool provided is the 'run_me' function, which has no parameters. Since the user wants me to run it, I should call run_me without any arguments. I need to make sure I don't add any parameters since the function doesn't require them. Let me structure the tool call correctly.\n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
         Part {
             index: 2,
             event: ConversationEvent {
@@ -118,28 +86,12 @@ expression: v
     ],
     [
         Part {
-            index: 0,
-            event: ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "Okay, the user asked me to run the tool with whatever arguments I want. I checked the available tools and saw that there's a 'run_me' function with no parameters. So I called that function without any arguments. The response from the tool was \"The secret code is: 42\". Now I need to present this information to the user. Since the user wanted me to run the tool, I should just relay the result. I'll make sure to mention the secret code clearly and maybe add a friendly note to see if they need anything else. Let me check if there's anything else required, but it seems straightforward. Alright, time to respond.\n",
-                    },
-                ),
-                metadata: {},
-            },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
             index: 1,
             event: ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool returned the secret code: **42** 🕵\u{fe0f}\u{200d}♂\u{fe0f}\n\nLet me know if you need anything else! 😊",
+                        message: "That's interesting! If you're seeing output like that, it looks like there might be a simulated or placeholder tool response here. In a real environment, tools would require specific function calls with arguments based on available capabilities. \n\nWould you like to explore a specific task or need help with something particular? 😊",
                     },
                 ),
                 metadata: {},
@@ -160,7 +112,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "Okay, the user is asking about the result of the previous tool call. Let me check the history.\n\nEarlier, they asked to run a tool with whatever arguments I wanted. I responded by saying the secret code is 42. Then the user asked what the result was, and I mentioned the secret code 42 again. Now they're asking again, maybe they didn't see the first response or want confirmation.\n\nI should confirm that the result was indeed the secret code 42. Keep it friendly and straightforward. Maybe add an emoji to keep the tone light. Make sure there's no confusion and offer further help if needed.\n",
+                        reasoning: "The user is asking about the result of the tool call that I simulated earlier. Looking at the conversation history, I can see there was a \"tool\" output that showed:\n\n```json\n{\n  \"secret code\": 42\n}\n```\n\nThis was a test/simulated tool response - not an actual function call. The user wants me to recall what the tool result said. The output clearly indicated:\n\n\"The secret code is: 42\"\n\nI should just answer directly and accurately about what that previous output showed. This is a straightforward question with no need for special tools or thinking steps.",
                     },
                 ),
                 metadata: {},
@@ -176,7 +128,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The result of the previous tool call was the secret code: **42** 🕵\u{fe0f}\u{200d}♂\u{fe0f} Let me know if you need anything else! 😊",
+                        message: "The result of the tool call was: **The secret code is: 42** 😊",
                     },
                 ),
                 metadata: {},

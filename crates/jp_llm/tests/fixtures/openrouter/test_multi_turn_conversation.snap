@@ -10,14 +10,14 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Acknowledging the test message**\n\nThe user sent a \"Test message,\" which likely means they want to check something. I'll keep my response concise and acknowledge their message. Perhaps I'll ask if they need assistance with anything specific or if there's something they want to test out. It's a good opportunity for me to offer help in a friendly way while ensuring my response is brief. Keeping it clear and open for follow-up sounds like a solid plan!",
+                        reasoning: "",
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABplbbFO7lNqpOaCdck_OSA5Qrl7xFpHEHQQ4_eKYup4vWLVzUFSDCc9Xjm-wamGUogPClN_PbS-U3h0hS_JEWmsUeSPL_Y7eKZEuWos4Kb9YwvDrRtGq4fbJA-xhl-eOp6LETfa2waDTi9HATgoniPqtm5vV1-3y5bLTQ8VtmoekAadtiGyFCS2kqO4Ex91QIYNCh8lNGpvj6iAWrdj84JokLStYCQyfZwDU0X0mko7n7eZyPU0rT9-4UW1qLi7X_9aQO8xtG8pgE2_ZKeqLe6XBkCl-SxT59x0b77UsJ9P_5ftE2lPRzMofgbSD8scKn5K1wckXD-2fnuZ9lNrwR5UvI5HJE_uLaw1Prrh8OA_965Gn5CdA78mWm87--MPrFF8CBx4WvaFSnbxLmB-e-pY2EPTF__lrpaVHAa4ouA6Ds3kawrSiibQEIXAnidSz8MuVzEZ0RMVKfLfhDMVNa_zFcukxepYtZGkJAXbNjmfPMXif_KIyfA1e8XVLqchB7bm3vTopvY0j0VZkbU4tYGnI3SfNRbJV_sOfZQNxHm6LwtfwYuNytUvTZO7AfF48S5gfqLdYw-BTFQ2lSYHxwJOguf-vX9fv_0a8wMLxtLUh2saGwYHhwU3Ex61tkL8VsX3QuYhAh0NfqbQW9mIkGEfEucy6y6Zj9Lty89wGzsk54Hvh_So_tIrxNWFhHagZcotfovxalgT8mn9HNvcgJQnAI_V-_MSy2Caz-UCmve1EW57p06GHKy5d2FSg3dd7yH1hEV66dXFJ1c3GZ-Hj-nSuObST6_gSYn5sWCKMQt8pPmQiufWzBjx35FBcFk56xJxDX8UrpME4nI56kpI82KQ1pvJSb8YGtswu9YxZcqOQ5vHYlXk_Igqt0J-1jyjMFBfMazVJVbVvETtGoRBaPszFM-z0Db_21v033kCuu_Q470Z3lvh8tTuFhcogSGeAIpro5N-r9bF759CYAfP7osouyrn0kvGOHadd4RA4K_FComcOoUTCZvEETOE1WC7YaDaFARmBlrRqqQwteRWGHGMXz-Tw=="),
+                    "openai_encrypted_content": String("gAAAAABpquoUHUij_tbJYHytRBieXJcIDxtoMQkNBVqYQ0FzhxW20tG1LZqfuV0oe7z1DJBdGEMA8CJc9W_-k7MYM9mn9sDoh_m1hZMgtzZZi_OBbV4X2VV9uN2uqXPSUu8XhOLrnpnke-VfL496uLOgifTQvY0w1R4atlM1ar1wV8SfzAvhoGqi4958uDjGeMf-6YI-3cmTiED3CPDUN-0yLEvS-5hnMwtlvN1PlcrI7j8NRW6jKrqcs_kX7rWT55l750xhhnCgYuAizV7utaFY66E3MJJiwp-ziNvcGcxLajPS4_hQJAvFn1xP-o4zpA_bxEFYuYXu2fd9ydpoZ-4C36MEHPnWe7swY8S_SgmrIhRlQA0pksMnQEdsmuyLneHYNuAouJ9LzonS0C6sFivr-T3Jhw46dHPWoKPQwsPki8XhWl7FFP9I51Ft6qo8VnOtRu9x-KDIwJJQRpYTBOCNMyvGvWrfmxnxDOHFcSYQM35PThYsJDQZlNZVIqIX7fAg02aNZaeEcUHF3qcMgq-CXv6X1HqQR7pi4RjzsVAkiIk0O_u46zI5ERwMmAD5p_jIZm_9MCQw4hlh4Hxtwoipc8sUrb_aZtwm93s09Pwtc6dRiqp0JahOfN6opXuqegfZr-jL-rSe08E-zIvMshvOpVlgDUebJN1uNeuF8QD4ZqXinYaduIkObuqM7ZZA9PN2omjTQy2vylE_Ua5GzwhoS3SoZ_2pEBz7_T4ttnkn-vQC-FzW4osoDOVx-fF_Hdh7jHLI1nntxDTRPKnASf27NfJMUFsTuGwove-TsACktz_ajPpxefUC1BOfQb370KFPhuRS-3YGlxPYI-u6DRuoomvzYiOkpP0nnDQ9-0R2jrEbKXLh-GtLXK2-Sno-ZEef6u-46-Jp"),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_0af6c407e1d368ea016995b6c357388196949f0cec54db0972"),
+                            "id": String("rs_00ca5059fead702c0169aaea14b1f4819490f4d487741769e7"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -35,7 +35,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Received — test message acknowledged. How can I help you today?",
+                        message: "Received your test message. Anything specific you'd like to try or confirm?",
                     },
                 ),
                 metadata: {},
@@ -56,14 +56,14 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "I see that the user is asking me to repeat the previous message. That message was just \"Test message.\" So, I think the best move here is to respond clearly and concisely by simply repeating it. I want to make sure I stick to the user's request without adding anything unnecessary. Here goes: I'll just say \"Test message.\" That seems like the straightforward approach!",
+                        reasoning: "**Repeating user message**\n\nThe user is asking me to repeat their previous message, which was \"Test message.\" I think it's pretty clear they want that repeated back to them. So, I'll keep it concise and just reply with \"Test message.\" It's nice and straightforward, and it shows I'm paying attention to what they've said!",
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABplbbIetYTlXurLOs55ukYKtLLycTJomJdHHcQ1MpbPTA5QXLe94EZAZi-ecWxUTZkWYY8lyRtKSBvbXxnbSKoebcYpowi42VIeWyNfH2reUuc5CH7xAkNTWYIZjzZl9Qc2rWpAwBdHNIkgHdUalw59A8Rn9eCUFrOd5YbwxT5Hd7PeQtSeJ01nwQ7s0pfvg7UwMNUR-6QAO8Ee5pELze4Fw290tsgViTAMIthJUDOYbHWVS7GF8xnn-CXNwvJaMcpHHkQXNWhAdQYOiq2OALAZv12DGHaYGF7nCmgY-zKJtk22oW2E7K0B10P2cgRbv-AvZ7Ni40j_YPkQXBxDs9DN-UpabSGbvwEOkkk1M3q8bw1ZUCBtbxgT9brXZZ9uXlgwLzw569458mktaf_7BWDujBhyLOJyZyJM8umdV6ma9h4Ka4h1ug9YEGCz-SApJmxAWOfJo-aPSeNMLOsG0mOrBzllfw88TAIhu1YQrcsgnvySZdLAidgTckSutIG6kHRcwr05Ujl7dhsX4bjS4CmVjmg_r8_1uGltgeFkOzf8m6JSVLDxEDTT-jqw_ZW8mVTncPYl6AcS5aAyrT34wz_vVHle-SOIy9iIhFUYD_olES9ZyISvNSp2gLp5UvFa6UVUhh8IDXJspSlyzIQMi_t12C-O9HTc_2C0PklLAdkTYS7bs1sIOpsqVNKTAFejlz6zRvsXpCYda5QZnOmi20tTNn_ADI0_16ZJ77EedkT6e53ynvuB6QJdfp2wFivGqjC9n3sauLMgWi2slZiYhBLosp3d1CN2J0dnqCbH6ciTxoeSGFULLKhsxCKZ4N056pXlB7COtyGpNBf2v8aNGe9Vh4I4GdNa5xr-bU-jUdHTiVopKfUa6juUvmR1pai0y-7Ie-9qvFvOkJL0XxJXJf5yjQ8FJntmbmLhSGdnfebIAygL_CDe_b1KUK2pBK5NJc5ySgANmlb3SCH5i8LGZ3EZRWnDaHiTeB-b380HYzCU5-Wq4w="),
+                    "openai_encrypted_content": String("gAAAAABpquoXMJnk0kggkGeYA4RwI6FIgCGxIJ5yDNZqXgNFtTl6Q3GoOYbIqgPBpehAdNxmwnjfDael2x8lFDWeEfvB0FPOHcVhBh-QdOaE4d3Fo_RYAyWyzxkfHb9QvHHzinIOrOH9YlecQ-FKv5mk7vWMlBMDFJ61LFfFV6aBOdV24NtYe6lSohSHQzWapzkfQbtxKWRY__jMyDUs_lQylg0HF8E9BBm0XQnBBtuQsF0GRsNcrPc_08_kZ6AQ3nRpqTVFTCtzr1_U7_7UznEvpE5IZ6O5nCrcHOt-eiOj7g4mTwRtoTff4dNP59dhhmanFrRQuP0Yj0Y_9WI8hETYlHWsE0J0Kwj-Ze-ZYDyECGcanXZ91Arh2T6kOhpvBboCMx_mKYmVBOhVT0qRC2V0Bj3PLF-8mB-g4zTcY5TBSlfBCDSAbJtnAn29KtDOPs5CS7Fzzp7DGxwULTC2NX-Ai89DwzPAPtV44BDjuuBA4WppaFU9cI2piSldh2uPfn9vhXzzvO8t-dml4G1bRtWPuaQG7tOspiJtbqi6u8qjqRn1LlqgvXbFE_SwtxylvfFdRkvBUdCO353y-wHJ1susUE7--82VoheOjYxQz-p9z_kuXilFZ-oUWJTfCim3eRliKcH-eOzO7tSOtQArzV-LXwiHKXObKmAfohO1K3ik69Tb020Kc-1RHMIVy-Gjw7kgrUg89MpzRZpbRa8vpcQHZ7sbmM_UmvVTxPZ6Dxmrt7qceXO1sHcJJPe3HmsVYygcRRf2VfSlwUbuXGW5JOZG7gBJnPgkxCGa_ajUWrwBHdfy65Jv_R6HbdwW_FK_LaLee-6pYDj1RnlzTmdLAacWIQxepPXSk4uFS1OAKnJR5ZQhnKvigp-JKsnrfK7rA_Z3hlkvjE_ivk_qyu6p9Dq0QiawpFmLA_cgxfCQ92bcnmOsED2NBirZTvil2U2_EcnAnH3ctUAT3yiO5gxfQuYYX_HIGnA3jb9WY1_ZuwvkIaFTU2bKQDxAOus-huulwVTHDnjT3_w1usaeynFboFopMxa8Rso_tYstQhFDWQhG_yTmr6x6dvzV6OtwvywF1TKJvGZmBcxcN4Cm-K2kohEHL0DHvZWpCy2TkpMoqE6T2pzrQojE5Ts="),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_04a0bc28ca617088016995b6c69780819792371d9b38aaa8a4"),
+                            "id": String("rs_0484b0da679aef370169aaea15b2f08190ad9233c33b900922"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -102,14 +102,14 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Running the tool**\n\nI need to use the functions.run_me tool right away. Once I call it and it returns results, I’ll create a user-friendly message to indicate that I ran the tool successfully. The developer mentioned not to reveal the exact name of the tool, so I’ll just say, \"I ran the requested tool\" or something similar without specifying its name. Okay, I’ll go ahead and invoke it now!",
+                        reasoning: "",
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABplbbP61tQxKWYTfnUP9QS4GS2UlQ6-UDPpqnB9-HltVNRYeq9JWL9gdExTchmWrT8AssIdsS0tSMDVhQkvfd3wvyTlKJz2ZEdXD6kTvcnLG6uT0vGP9SCGGGGGazoBylltTxvSo6yJjLLgrCBg07Cm74DvBUiBHDq76SACR6WwjrUVgpcbxUByQ2FpU6F4ZuBMKy3tZ3d--UvNOBrRgxqCQDGcYBmcne2zrPIA7tPeegcar_Y12HHahn7ZQbMA8MQfpZyloeN18nstBv1nom-YIPJLal3gvQZpR-RpanMATBoO14r0bnpl7j3pIfjWBpnWDCUElacAaA_ibQsYYzpUyyjHPsAXGHawFTg2t32uX1p2mrs00zsDzmiJYJt0azIos8FM-L87iHZUqhRggtTMWn10wp8iNL-J8EUtwLLiR-CF3JjRIlfWoLE0bKtvm5odc2MGcMspcoNgxfuTk6wGu85nLhwFfoRnATU3e0oKlJEdr6zA5abnomba-pihj64B5Mg37ZSmIhHsScQYryYc5H7Ea6V2nWQrflVg96t0fH0EbZ7NAIdtMUJl2ZCoaRvAKmrnQovkMvqtD-o6xZVmt3BtYcuxPoa9k5b0sipBjavFZY233XTu0PKmzavF4-6t71DatS3hE-Tvf4qNG2C8J7ou8N6WcDbGrElSylG5OUmZ4-U0mT-HZ1m21Jo9QYv0HaEBhnZ4vm9EFkwXWYczY7kWadIvnizRFdqsIzKSK53M0IjFn21UqQBOa-bzl76EVfonqnAh0KpO7sadMZ_e7QVIeLBS79Ne7wv5MEed-sk4uIcj_0vICOX2ZdCWI9w8VF8g6EVSh5u6zQLTlfJyRgJEpSJ8JR-JExicYgLAX7Qexvlv6LjuaaynkpYO8HAvHlQqwkd0QRRGPPM3gTac36j9qWCnzVjQ72TQxY_L2s4pX2cs6ojO428oGMtvjrqn_WQbK_rIKL6Kt96zXD7IfwfNGmIrKJv5EYcIgxljLYeHaQ9fijuYkkb4bNCZ36HRggeJ2LhOx01fWKv3DKsbB8ypHlCxl95rA18ySU-am17zpvi0bFuuRqnH4zUvXjOls1E91r5JgIrPJvKOKUEegHTOWFE0Ub87aqSwAZdCnyLzGcm57kkB24BXTUDSLGjR2RHIM_rE98paTC8Xk8yVsY1JMUbcsTBxDmwJPfNiQ5F0i_PZcwFhH2liwYxHiplsXxqkj7v6BtUXRiK_Ij87er5SYEsi8rQxEuKdRxq2EiSGnxtNZZCNHx02KcSK673DhELBQEDQdWfxxfuml1ozsErli4y-_oMNtYgpjlIqbc1tahGjwL7MmU2I8VMHlm13IZLCyXXaWt2qLF7fbitQ07J9lR8n8x329HGb6r-L5JGIFitRuEppkrFXVI_OIv9Kf1jsPuJFcia8iLjMd9uMLu9JIKG8WGeP3xowjkgEYT73N0uT9zH318g7mn1mH9mr0mm2RQyO-MttR_I7O-PNQJ2zjeAcvtL89qbim3xLrbXhZd0AaHtUAT7PglrWEpw4f29smEpsRT-c9eFNCt42ty6lOKHyXowtR6pw6uWjiL6qpprGyd1yPmqnnY03F8Ek2rEXp0vYpyJO_Mso--Ywl1tCLvkdBXz-4CktxvuovEWJE9DPmz7zMnwqeguwa-zell0KXWmMv1OGkQ36UV_QJFpq2OvLN_sGl240krmS4EDxmsn1lYK2hC5C3sZ8UYKduKr3FM-klJlAFnqCW814PLpLjMSGhA2Vd_nx41-agGWZdMHPiTYOJebIn_yLHOfpeHxY38sWhhtBjXCKZ4hSi8ttt4SBedULBr8onjLksRwfnrY3f_tEHI_LUKEyuScz1boHhmd3oSQTtJJZrs6StuEyg2Z_VaXe1CQ1LqFJngSCnumjQFmZhB-celR0PIPuHDtUL_3WISwYC4MMoYV5aSvc_crNKkxPNJZG_wBhXHQsJ6wfQ2y3lxVPT4AuoAcu6agGs5ouDb0rtJxYFogXDqsngBXXJx4TUzMfpqmspmtnXSg2sH5FkWOqBD3h3j0X78FuN1bVEm02VdkcXWG3vjHiMu6z3_uYx1A6-Q-EFuGIVZ9yDfaPEvVYy26YQaGeBzYNRzNHhltu_g4xp7JsGYjbciVBmOx68jeynAgCZocd_DE0av5bFw8UsI9_OnEaX9EKQVIGboCwplZQwAEaaMtLh4Z4fFx7yvQukd6I3sFxT8j1KCAXCOxtbrhZ2aBkRiwuQHRkXPEE0ijSI54OBRmlGjL8DAB6RTX-BWw5OjTxNWvleLPNpYPhhrsSTT8QDv1sj1NYL3bKFRGo1FmgDR8WeXDpFSocEhY9P1ceR3_ou-2ZKYV7o8ZVzwBYHUDhtGtBw_cgD7wBL0L3LWE8gv-jU-GvC7jmC9dLQqzuxliKBfLFpiSEHuiwF74mghcuCgHWlgWNArllhQDvP6qaBZHfpJklAlyrxYmF9VaA9SNNv0gOmv4Yco-tjgD-OyroRzw5klJpgPm0mooxXoG6v2p7FE4K9cvlvAY_PNzbDkLPI-AC7lvx0p2ETvXxw44hyHteBux6F5q1Rj1X2vNoJF_cnL0ULIooJwLqRMkcbvGQorbuBnzgXKP2XyXgro4TKGoBcOf9PVD08ENlJgjMLTbxg=="),
+                    "openai_encrypted_content": String("gAAAAABpquoYB1e-OYaMpow5Ib4tMTBwLuhr-AHiI0FHHIS4bjjkAVRCeXSvRIC97BP8NiMa46M728pt6vKAOZ1zXASSE3tugjWG1S9ezGodvRFdxDvqYFUtLitnkT5nNcj_qmcLCvMtc_A3Ow-VJiPCIDvAttH8OfP3g141-ac0HfO3nngV8IJ5FiI0dEpCpcX4oeF3P5T4eAIGMIhGohQKRBUP2Y5wmBpx0e2oaC0Zv9nLlMlrQflgRXp0ddWjdMdv-6e83qnmOJPnWsNNL3gu7EeiTaGlrW4do-gU1UKJGu0QK-rZwz-oTzhXyULY0wMapRnlq1Jiw_OQbKMgZ-tHwzjdkwBP7qbsiAp68L07F9E-h8FTOZJRkkkBqSftHgOlR0lNqUQj-NNb_C5tuEjP_Tppdnr2ZZGizma33FFAXwehJnD9E3bpbr1IRpUcfHW_WvhGMgnNl-xZhUAtOzjYHffZDjL4R-CEMkGX_I4wXa-QOrEtXTZ5nqSGX0YlBvi3S3eYrclkAXR_-jNBcuBHUQQ5FuZfr-OC89oK-G-zY9oK47FANGkk4Mctd0LlfLB5iEW-PisE6yE_am7cSH8llKPh3mrN6bGi92nYCZik1zEKt3dZp6OGkVwMy3veGnJxXnUoWmRK7XODo8w8aMFcnj9N0QwKtuUjSsLYAy0iijpzJcBquy-_isFgQzD98HKFxqHPhXllgngUDxiEhtZXZbinI0oqiUaxP7jUEORYoI8MGIZzwiy-XCHBZMIXGzMALAThP3QfeBC-hco9qTa91gOFoj5OT7si-UUwP5Y3GAGRxU953lrg0o1qHcvZy8wWu4zPFgl9ofszPNdGEFAnXS9N3gD-R7hEO9KiSA0GP0XVBzEo_n3a8mLyEFYZoYBKeJ-YcTTUeCsg5HkJTPu063n4scUk0g=="),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_07e1c89b512ea87f016995b6c976e08195a4ae5bc876ff914a"),
+                            "id": String("rs_0330d78074a4a4a10169aaea185e748190800a2ea101896492"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -127,10 +127,10 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_02P68YP1inp6THZ0a1DgBNu6",
+                        id: "call_9NiOxr9CbNNm4FD5cLEyiAkN",
                         name: "run_me",
                         arguments: {
-                            "foo": String("ran-by-assistant"),
+                            "foo": String("bar"),
                             "bar": String("foo"),
                         },
                     },
@@ -155,14 +155,14 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Crafting a response**\n\nI'm thinking about how to respond clearly. I ran the tool with specific arguments: foo as 'ran-by-assistant' and bar as 'foo'. The output I got is: 'The secret code is: 42'. Now, I'm wondering if the user wants me to run it again with different arguments or if they want to do something with that code. I’ll keep the response simple and direct!",
+                        reasoning: "",
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABplbbWs-CdOA1gDhAltmsTVgNdUsVFLItUFTloizgqT6rGlNkPZ48K7KgfkqsS4n7Kd6wrlMlYda4jJr6W2MCnjUaawP98m3Txp5T_8cqulzak9UNokn4q1XnWDoUvIl4gaOzJa5B55YLrXUjP9sJo2V-AlGAh96f3xx9zQYiZeDgvmgp1cpwWMIpHRgJcOslR1Ql6rtOWiQ9FeNzyaPNkVRbuxinQyHdF0xvEtPNH_DIJ6QEMm9xWvFwmgsNgPt6QlzFCrLHSZoqEIHzNaVNXz_6FYEaUGyL1kLv1695F9SFRmP1GpuctKhBrz0tTE6edPggHafKwZuaJ_IqxwkAGqp0WHHjxtC2VqJ0G-2af00nEzxc6T88YVbAUOeLc1I6TD9DLhvfEnRofbB6tGXH-9hHwU_fPUs64TwD5Q7seqVVZHuVHIbwL4tvlJR6i_mvcK9cWpY1UlFmicJFWZPKIs56fLexZNNfNj-eFns2y358t23O8CrVjR-jS4qB0OrVjNljLPF4yNc2JeloSkALNu9dTVerhdlUfBukq8sX72mhKFoe1W7JDZWDeMKcOclZ98XgBvp8Mi7CVYWyd_mgd6VdSQ5CzRpiY27VHJbY4_3NFhGFGybM7cWon39hdPHEHnKY0sDhpjqPDFMlyU_5CTGKm9PtFzkEaBNn6hxOGGEDY9AKtJK7vRYgHdsp0X4y-IBTB6ipMvCzMntwR4imEMxTS-T8sLAzhw9-m-o9OZerH6NB3PKCPjx5S_YLVQO64Fk17g3FABW4rjmC02JintMIuUj72YJDpHZo8smftQWjm5vlwtQ0k7pU7KhDnCsuunHT9_ecAlFDrx5M5Nmb0GDN8myHCUN0qXUxnGcYV8dKQhagzO_wHhZyV6QVy3GFe7oo7z_ZJbNJmOgTJ7PQJZ10N2zVgHewjOj-3bF8esZz99DiHJpvcNZ23DSUS78--Oyq0qai5CFntEHWE96dDmtTHqxPzKFl_lLoHnSMhmA12UFo12R0ukvj4i-68X8Kf0Dz5xjOwR0Rho0rzV6BDwxNrDo471LGrZ8qHf_h96PPxoNZR1WQHZxkQc9qyAxydpxKeEwYQdx9RV3yrW_4ugZrfP8NypphKM4F9XmrQweWOMH86UNdDnxgTRN7Sj6hbh5SeYh13knXIvzOByncwXbn9oGxzjo8Si4kNs4Ix-VBhZQgmBLclmO-3T-wt0zD_2jYOdCsG74afSfF0fWp5khtdSLviEZx2YGGZWOKQS16l2j7qqzGUvs-EkNtCcp6WMEYZJXgWZGBO_Hg3AB_fi0ulq4VJ1aOz4iZqXBz7xu2qjouvLVSv0DX7SogUBclwr0qK5rdRkhIJe-dDBbanVyrJDxZ-sJDEfmIe5egp7jXcEyC6Ntd6bqDsFg9M7RLgLtuvKoom4KrW8BsiklRt632RcTDraHe8EaW-Wo6PBXPL4KPT4ZTunhIdnKW8IYgBy-0vuQWn9aip_zt3uFdSpEwzHoPei4-e79UEDoxMHvdsLYMvM5qKYmZRX7TofchWJIIyR6JQY3uA7Dqjg6R2-s0SiZQem6s9cTng9EcbBQCJZDfrvSYgXTY6vKYXOnmDELJlZvxUs9hFn2cMXkMNY4_i5e_e5H1_yQM39Tzkh9ePtqzlmIrxk56KGNk-WyKFVhfBIxFnTGAj4Y67k4wFgrM5zqtD9Hmo5o6nm01E2QzoRLIllVJUwNCHuZLSKxMzMoO6I2JpsLATsWTSpEaGO-QP5FBwX2zXBy7dtfUKnXpWAAqY3NwnYcpcmmjXdS2D5iTFtI8e5Evs_pScHjZPu7hrGk6WLV5nG23kIvU5NfAjZl66fTdCUm6VaFqFyTPisQBH_zDHsSUqXPBwhCqhyEz4Fwta_7MjfrGCag2jjxRdcaK4nirSWDI5odb8-ker9kdW3bJRcnasGLZcfFq959yHv2P0rcYCfYM_QjCglMJspQ9v203-cshFu39xUYC3CO_hv2-Q8SgXKm7n3QnJGqIDDcNWWjlJrtE-mNObKsrRcfvpI5zMpR97rLR606LjAM-POkQLHt3KOSBiNwOCSrPmxtTFh_mXdw0NH_6idC01iRlG155TJD0x3ypRBAEHX4mbDXRbw-lcmhhDQB0C8frf4CthIub31deyAMIAuU-UTyekjeRojDZ_3FGkMylXE_CBAhXp8GnpWZ5Y-z_uPps25MLRs5C4B6ArhZRuruWpAqUDSAr2KKKVrMbyRnpVzb4yo6RiHcgZw6WrLscEbK28xfIv-2vogF0_tKhUwZeU9bP-vj6a3QNwyZXlzoVBp0fYNPd48ppHJQrsPlnuqsy4KH9HlV2thkMnC6rHKoc_c2ajFTzvYo-JpORI7F_wL4Cg7xSDCBk4pB6YjDDmsWumzjPHL8Ei_xgycn1QR4WxeeXpkaKtBFMRfX4fscM5j55AKTPz6Z4kUyPZuvZMU0J8Ng=="),
+                    "openai_encrypted_content": String("gAAAAABpquoZPeHted_8DKo-Yt1A74QlJbMvnOuy7etD1zbeXdM2MdKC_ny8umUckQP4LBXDfKk_CwsTfcx7y55ePMftlpK5o0t1TZ6PXQab5K6zhvBPwIkrN7mLIvJ0V_L2pswY_dVv2LASIJAQ_x0gbAfY0loyrMYd2Hdk1aHIy9XaPzfqTt8xbeRi60ioyBVYD9KBoB8-ST_wW8KSjl21jnbvYH7m2xilDedKum_wDXlVOq9Ag7tkKZX1OxIhcU6-twmWNUTsLXToe7svr9Oe41Yyf8KwyQ3AbI_saTVEsYmyr60qdzKk4emlZk0AMaeOSdmYSFAng25LaX6xm8dhph7-n5tQTFIejl_eH5gHBn0jeTQjrAOQaImrScm9mguQD35dw58bBpcCJM2PIJVGk5I7g48ilhWfhFzJr3Z7nMZ6-uUE_7Xm8Oxwl74osxOhU9Uh4RmAZ-WXzBfWCOlOvEMfi5D75qlNCZ19MTzJith4sofn9dKDOqvtJ5Jx91q0kmH4d5YqrtMXuSR8OdvYWELRX5tgfzAWMA2IOL8asR5tis55KBf3l8Pow1aBDK2XYqD9KaPmUMMMmRYG9K9gksOBxACQzM376CRTnT3pGMHwUVEW_zZqEdyvpjhyQuBCEaXCw7xSAQxH3kRC6pSZITtsGTKT2GS0liHQa26JIgUQQ47gX0TIKMhVFYzlYMDrsk9MosKFdVWNABtxjZa0TmjQwfcthT6aNxJIJd29P4Wut6m58vcdMteiAnL9_-KwK5VeTJSaCvKeVki4dngH7a704ZNq4cOZE3e2XzVywqJJnr3oroFq5jI-5AF3gz0gAYZQ78khqPW-G6Cs72EWpdg8woDoACNHiEL0DKcFnXHB6yzyRh7O9MD8KKgM6TuduEUTVy2X"),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_04e5ca43e6cad8c4016995b6cfe6b08190b4ad59a35d525401"),
+                            "id": String("rs_099f65e74fbf90cc0169aaea1953b0819386ab78bbf1ec7b6f"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -180,7 +180,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I ran the tool with arguments {\"foo\": \"ran-by-assistant\", \"bar\": \"foo\"}. The tool returned:\n\nThe secret code is: 42\n\nWould you like me to run it again with different arguments or do anything else with that result?",
+                        message: "I ran the tool with arguments {\"foo\":\"bar\",\"bar\":\"foo\"} and it returned: \"The secret code is: 42\". Would you like me to run it again with different arguments or do something with that code?",
                     },
                 ),
                 metadata: {},
@@ -201,14 +201,14 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Responding to user inquiry**\n\nThe user wants to know the result of the previous tool call. I already displayed that the tool returned: \"The secret code is: 42.\" So, I’ll keep my response brief and succinct. It might be a good idea to mention the arguments I used too, just to add a little clarity, but I’ll avoid being overly verbose. Keeping concise is key here! I'll aim for a clear and straightforward reply.",
+                        reasoning: "**Responding with tool result**\n\nThe user wants to know the result of the previous tool call, which returned, \"The secret code is: 42.\" I should concisely state that result and maybe include the arguments for clarity, since they specifically asked for the result. I’ll also suggest next actions they could take. Keeping the response short and to the point will ensure it’s effective and informative!",
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABplbbZiSYRDR6hrAo_EIN7AslpMQS0bd2paumYdo9afBAOypTyOUr1Iupb5mDksFo5MFMCVhS6JXDwJ0M2cdXEuyO0ZkGfR0mrKGoJuBd7uzDGjOITBNAdRbKna7_cOguVL66rmUgsDyB9Ec-IqW9Z0tlcG0iAalxsYGe2wW7XiMj0b1pKjRu4GEwFXc_NQdFOZqyrP0J4sgZO6uyNd3S8o8J-2iiF2BL6bBU9uVSDmpzr_LaP0AhtdZRLR_7CUG7pHiwcMTRDE4KKGjFdhOLE7fRpCd_b3YE9MCDeHkYugGtJuRiKfM9mScz70zLnAAKo4Z0nFQyGPMy3mJk6RDVk-Dq9WyEY1N9V4Ya6Uz-mUxxagq5a3hT9EOqOS55ntrllyY20wsmMIBlzOqZevf3MQ63iVDHWWr-WeUuZRRyWKwxcmj5kA7vqNWTFZqsZja89J8EUu5OUEl4MSZITO0sHNd6R8MRGgIwIs2IRGNqEfP7mRoDs7_uaMz93oNCkgNmA9J-G9t_qhthafy6_CLIH0KFdLf-uudxhW27vqNa5LzCTXQJmaBN1DC353bqFG6DsbzpNjOfVDfJfsaxUB-ViGuc1K-_FpAqUOqUfLncY5rQMXFBPx1M8vnidnu_YQ_wXISyZIeJASFee4kbA7JYND0x4Wcyo8H0rOySmhB9YcnrJ3qhl_KXqiHyRNhpLwhPzUfU4xDVHt20Zl9h1eRp09D6Fuwe3C8fjX2psmozbwQatr1Rdi3TkxwPM-kyZsAGPX8UeCKSLeWYKsvMh-ugVGsYegHBsT85zuKxAX3tvYg4En2H937hoQySWEMvehDKtdzE0q2xFy9wtHEYtj2_uCxherxu7Zd-Uh7ZT1AdR5nId36BhVf_rvs4BVlK73_-Ja5vQNMr9iclnCgCHloLsIIAkmQXkXuHPUzzoOYmlXoN3yoOU9fd5SGsqPqueTNeMkHC63grVCb9YJ7u7ky-HHYvYuBOG77C69HqpWTwMI2TKeXpYesTsig4kMFysbb6R7cKvjON7FYpJqChPdotIIMgJgT6waiztZvpPI2HXI0jxEi3L0aT76jQN5rhAq1_jJA0a6LOpLQqgN2NbL5BBe4aGyA=="),
+                    "openai_encrypted_content": String("gAAAAABpquocKd_CuH29oDbUgkwxO2IZ46wMqq2H-WIeMZIIlbYZHCRek3BWsAE8d_jmlf70sFPbd9UbTLf00glrOCRboskRfk-ECgpA0n7gUjflQYywsguj_AFzfntsw8_GCluPOWFev48I6PKjsV1JjCKDRIOHn3vxRGEUXksgHPNYTIEkYjRyPGMa16Ja6ZRbkS8ezPXa40q6pRLEONJ8kmaE7tk_U3cWYL8E72QmNUkv086Uo8WNMN9RHMKFwcSqVyg2WYhuCqwQubfWLmI1BYiPToYUnYlaWtnUY50cdAVBv6240iIQT1SRmfHOj-Fys40-TpG4FS8dwTVflFCyMTy6fMr2wCieutTsaeE0ReyC4lnqVnUSm9S6LxbyPXOzjzNzFZMyo2j4uRAyiX5GLvq701ftBdV1Oz3ATgEOcgz4_EQTru3AN9Ls1K7mdrWFyoWd8Jjk8N2kbvZoqAug8SM2JciK2bU2whf_yu7gkkOJhtDrBLXBgfe_TLT46tRebBXtRH4nTs58gxacQylm4psUI4sRNhyYvVGhnC_CEsPQuGfux5jOjyu3BVVDlZbTEBszXyVptk50ckFemlHPbDw4wLM0ENEbhd8IZZpWbZ2o3fXlum4B4i7X-rmdcAOUO_0vBAnWAgOTzX1qe774wxBmavEI-faVprwTRnK-JbU1SgRmItuO22nXfe_IMRVUDM6wLrd99tw8iZ9EJn4M_Ek08Y6NuG175Oeki_iAL3FdYm6Mmj5x8TrPZbc5uXcpDAK8AoAPIXogFG55nBAXOoN-e4HlfozjcrXs54-RtZ9W3vgwZ5dXVSgJSNCIisZ92PbCHvfWpV-z8-mFt2_AU0NRgCdLm8AJV701abKZPTWpPC5tAahqwxQjUuxj_CWIdqa5-1zp7UJEL1gB7gNH_kXhkH00IXjHJOLHl4whpYUfncUPnW4Jwe9r2BF9nWFUelMRZavNRJ58xNs8ekvX4RreLKM_GYypsSecCrmyLkpTAuSlc_A4TTD9XD1nGUKInCvoovsmDjEVWF9o6rKvJH3wA6FJk3jXknQhwtTA7Nh78YkGLdZLOlbjsrcojo0d9y0GMGnBO8LyhlyzBlOPd2Mzolwzp9xLxbnmT4rgDeEkSGXfVU7dIDzSwoedsHZu3tf4C_6YfA1IZCeLlVrnFz1Jn3SQja1aKO3e5GRGSV5-jFtpwnc="),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_0babf55ddccc0dc1016995b6d71ddc8193a6225856c0d925a4"),
+                            "id": String("rs_09de8ebe67008a5f0169aaea1aa5bc819088f643e4c55924a1"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -226,7 +226,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool returned: \"The secret code is: 42\". The arguments used were {\"foo\": \"ran-by-assistant\", \"bar\": \"foo\"}.",
+                        message: "The tool returned: \"The secret code is: 42\". Would you like to run it again with different arguments or use that code somehow?",
                     },
                 ),
                 metadata: {},

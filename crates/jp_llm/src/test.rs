@@ -140,10 +140,19 @@ impl TestRequest {
             return self;
         };
 
-        let mut delta = PartialAppConfig::empty();
-        delta.assistant.model.parameters.reasoning = reasoning;
+        // Set on the base config directly. The test infra rebuilds the stream
+        // via clear/extend which drops trailing ConfigDeltas (those placed
+        // after the last event in the stream).
+        let mut base = (*thread.events.base_config()).clone();
+        base.assistant.model.parameters.reasoning = reasoning
+            .map(|r| ReasoningConfig::from_partial(r, vec![]))
+            .transpose()
+            .expect("valid reasoning config");
 
-        thread.events.add_config_delta(delta);
+        let placeholder = ConversationStream::new(thread.events.base_config());
+        let stream = std::mem::replace(&mut thread.events, placeholder);
+        thread.events = stream.with_base_config(Arc::new(base));
+
         self
     }
 
@@ -572,7 +581,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             features: vec![],
         },
         ProviderId::Llamacpp => ModelDetails {
-            id: "llamacpp/llama3:latest".parse().unwrap(),
+            id: "llamacpp/qwen3.5:9b".parse().unwrap(),
             display_name: None,
             context_window: None,
             max_output_tokens: None,
@@ -582,7 +591,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             features: vec![],
         },
         ProviderId::Ollama => ModelDetails {
-            id: "ollama/qwen3:8b".parse().unwrap(),
+            id: "ollama/qwen3.5:9b".parse().unwrap(),
             display_name: None,
             context_window: None,
             max_output_tokens: None,

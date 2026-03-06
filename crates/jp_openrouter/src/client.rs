@@ -252,6 +252,11 @@ fn parse_chunk(chunk: &str) -> Result<response::ChatCompletion> {
     };
 
     let Ok(ChatCompletionError { error, .. }) = from_str::<ChatCompletionError>(chunk) else {
+        tracing::warn!(
+            chunk,
+            error = %json_error,
+            "Failed to parse OpenRouter streaming chunk."
+        );
         return Err(Error::Json(json_error));
     };
 
@@ -267,11 +272,16 @@ fn parse_chunk(chunk: &str) -> Result<response::ChatCompletion> {
                 reasons,
                 provider_name,
                 ..
-            } => format!(": ({provider_name}) {}", reasons.join("\n")),
-            response::ErrorMetadata::Provider { provider_name, raw } => {
-                let json = to_string_pretty(&raw).unwrap_or_default();
-                format!(": ({provider_name}) {json}")
+            } => {
+                let provider = provider_name.as_deref().unwrap_or("unknown");
+                format!(": ({provider}) {}", reasons.join("\n"))
             }
+            response::ErrorMetadata::Provider { provider_name, raw } => {
+                let provider = provider_name.as_deref().unwrap_or("unknown");
+                let json = to_string_pretty(&raw).unwrap_or_default();
+                format!(": ({provider}) {json}")
+            }
+            response::ErrorMetadata::Other(_) => String::new(),
         })
         .unwrap_or_default();
 

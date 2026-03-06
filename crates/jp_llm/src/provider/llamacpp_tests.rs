@@ -156,7 +156,7 @@ fn convert_events_merges_consecutive_tool_calls() {
 }
 
 #[test]
-fn convert_events_wraps_reasoning_in_think_tags() {
+fn convert_events_sends_reasoning_content_field() {
     let mut events = ConversationStream::new_test();
     events.extend(std::iter::once(ConversationEvent::now(
         ChatResponse::reasoning("step 1: think hard"),
@@ -165,10 +165,29 @@ fn convert_events_wraps_reasoning_in_think_tags() {
     let messages = convert_events(events);
 
     assert_eq!(messages.len(), 1);
-    let content = messages[0]["content"].as_str().unwrap();
-    assert!(content.starts_with("<think>"));
-    assert!(content.contains("step 1: think hard"));
-    assert!(content.ends_with("</think>"));
+    assert_eq!(
+        messages[0]["reasoning_content"].as_str().unwrap(),
+        "step 1: think hard"
+    );
+}
+
+#[test]
+fn convert_events_merges_reasoning_and_message() {
+    let mut events = ConversationStream::new_test();
+    events.extend([
+        ConversationEvent::now(ChatResponse::reasoning("let me think...")),
+        ConversationEvent::now(ChatResponse::message("the answer is 42")),
+    ]);
+
+    let messages = convert_events(events);
+
+    // Reasoning + message should be merged into a single assistant message.
+    assert_eq!(messages.len(), 1);
+    assert_eq!(
+        messages[0]["reasoning_content"].as_str().unwrap(),
+        "let me think..."
+    );
+    assert_eq!(messages[0]["content"].as_str().unwrap(), "the answer is 42");
 }
 
 #[test]

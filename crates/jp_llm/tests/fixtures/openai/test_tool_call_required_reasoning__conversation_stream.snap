@@ -142,11 +142,6 @@ expression: v
     }
   },
   {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Please run the tool, providing whatever arguments you want."
-  },
-  {
     "type": "config_delta",
     "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
@@ -164,11 +159,25 @@ expression: v
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Please run the tool, providing whatever arguments you want."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "**Using the tool**\n\nI need to call a tool before I respond to the user. I can use functions.run_me with certain parameters: foo can be any string, while bar must be set to \"foo.\" It's simpler if I just call functions.run_me. The user asked me to provide whatever arguments I want, so I’ll use foo set to \"executed\" and bar as \"foo.\" Once I get the output from the tool, I'll reply to the user!",
+    "metadata": {
+      "openai_item_id": "cnNfMDQ4N2VhNjc4ZTBmOTFhNzAxNjlhYWVhMTJlOTI4ODFhMjhiODM2ZjcwMjY5MjljMTE=",
+      "openai_encrypted_content": "Z0FBQUFBQnBxdW9WTEdQM3FGNi1kWW1NMU9BcVNSaGh0bHQxRmxxUjdXR0ZwNDRCdFdrNU42QllGQndtMkNObng3U1FLNGIxbHJ3SzlBNVlIaWlnQy1EaFJlM1NtcTFvbXJqNDhadldQOHJMbllpQU5vQWlFM3VSc1RPbWQyaVlJWElFSDdZcG1JMVUyMjdGdVNGTFd2TnpVWmRrekh3Y0d3NGh4ZGhiaThPdXpqbTlQWWw1ckVXZjYyNFp0SWI2QXIzeUI0YXFmanhINk5KZjc4R2pSaUNBeVJjdURNMWhPTlZNLVkzbDNmbTJ0TjRFYkFxbUZJVjNCWWJ6d3VSMDVtWTZIbkJfMl9fRmdORUVlZzJqNVA0VHVwNzN0TEZnN2FRanh1czcya1JKdlc1TUdaY3hmN1ZwQXB5d09PY2k3c294VXRDUmNfWEpvUVp1YkwweUtoNVJvcjRvWXp0UjRiY1k1QWlpVlRoTmFoMDMxZnVZNHZKQ1FqTDdWQWVydmthWGVhdU0zUmVJOUs5R0l4ejZGc1cyd3VBczZlYm9wVkw1UWt3VnlKMVRHbURjaGdkcTFYeHR5YVVMQUZyWGhxank1MGVOSVdTLVFLTkt0VnZ2VWNqWXhiZDdhRHJWNEROZWQyd0ZHcW5lLTlUcU9pXzloU1lMRE9nTmg4a2t1M0dwakVEb2NxMmNva29LT1RNU2VjNlhxTWJRSlpsbUQ5Vm00aF9sclZsLU1FbWZzRHZTbFhCSTlGNXJ4dkJUaVFneTdHU3VkNUozd1VSalVlaW53QUZtYVNxQmhZWDlEcmNXc3RvOTg1azgxWVloS1YwRlBnSWduUzFtMU9aNHFaQkNCTzhOODh4bW9VSjRpeXFrSDUtT3FWM0NTVk9qVl9TR0ZaRU5SdFExeFVRY2VkVS02Z3lDZ1d3SmxYRHlwcjJpYmZFLTR2eGVIQXhWeS1xS2hIeWdVS0hKMGN1WU9RQ2xxbFd5LUVYYTRDZVNDQjNOazlHUWYtYXh1a1g4RU1weXhvUlQ1MHRRdDdqRFBFRUFpaFRzbTdPMkVTQ2t6c2p0OTh0ZlRwZll4RzE5bVlHNTFIbWVkcDBKUjd1bm5SR1dlUWpYUTJ3VGxzS3E4bmJnMElBTlQ2dmdIa1Q3OGtRWE55WGpfdkpObURPbkh3UWVtRDh4bDYxS195UUhheWlNUEFTS19fVE1GUXpnWVpWTFBRY3VvbC1kemRKcDRZd2ppUGFVaHpLN25CNk5xOVE5WGY1ejVQb1RVc3k1bFB3RWQ4b09ZSWJuN0oxVk5NRDE5MjRnU0lSZWZjV1VlbVVrMWNKUFhaOWh0LUVhUEVhRVFWWWFZVk1ZNkdYaTJJVDhPMTdPMklrZm1XRHMxejluRjk1REY1VjhkakNYSkljTnBJd09pYkdUaENMSGpSbVZoNjUydFZ5dFBTMjJpSk1QdDRCb3U5cklqSW1DU0lSQWtQUGRLLU1NaTJBUmtHWmVpTmV0MWxlNmJCc0pGTkN5dFVZVllESGdjLTZLNjBqN1VFb3FVZ000QWxaUFUtWFd0cURCRm16U1dRaXNYdnFQNDBqU3dxQ3dPTGxtY1oyX2FZMWhOeWlIOVFmZXZDcUpUZUs2NkxWMldzLWdPSlFOYmExSDNMMUd1ajN1NjlQSGlSbUtHY25EOHBfejJ3TU1Qa3RENGVjOFZhQ1VIa0hWTUFQTU5CRi1wcXpZcDVrdkdyLWpHc1pjYUhxUHcyNFlSZDhmalVycmd6SUFfQzZKZFNDNWwtV1JkWHpfeUI5SzlqUDd4NWxBWXFGclRmRzV5YklMN0dlSEdRSzFneUMtYmd6NGw1aXQ2dnd2a0FhaGNaV19GUTFIYjZxNDFaLUxLbmljUjl6ZldZV0ZpTHVHZ1Y2MHMwTkllYThuWjJnT056UDZpcElpSWVpd29jNi1QbTdmOXJ2ZmtadDhGR0U5QTlFSVlvdHFoVzhTR1lsNVpfYmRWR1RoXzdDZlBveE56M3lOcFhoNWEyblE4WGlCbmVzZTFHQTZ6STJoZGRvLW1yNVUtWlY1NkE5dGRjLUExUmdLN1J1WG16WU95TGxmelExUURLUXZLUTREdnJ0V1lUcG4xV2ZEWERwd3BuSm1DMnc2SGJCSFZpME9rOGZ5czNWc2lzdThwTDhBZHc9PQ=="
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "call_3f9VdElzz9orDg2VLwzEdqrd",
+    "id": "call_QQuf1B1LkLboUYsCcYcBhyiz",
     "name": "run_me",
     "arguments": {
-      "foo": "cnVuIHdpdGggdGhpcyBhcmd1bWVudA==",
+      "foo": "ZXhlY3V0ZWQ=",
       "bar": "Zm9v"
     }
   },
@@ -188,16 +197,16 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "call_3f9VdElzz9orDg2VLwzEdqrd",
+    "id": "call_QQuf1B1LkLboUYsCcYcBhyiz",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I ran the tool with the arguments you provided. Output:\nworking!\n\nIf you want me to run it again with different arguments, tell me what to pass (or say \"choose arguments\" and I'll pick them).",
+    "message": "Tool ran successfully. Output: \"working!\"",
     "metadata": {
-      "openai_item_id": "bXNnXzBmMThkYjMxYzBlNDA5MDYwMTY5OTViNmMwMzdmNDgxOTM5Y2NiZjBjNDMyODFhNzZh"
+      "openai_item_id": "bXNnXzA0ODdlYTY3OGUwZjkxYTcwMTY5YWFlYTE2Njc3MDgxYTJhNTRiY2FhZmM3MDYzODc3"
     }
   }
 ]

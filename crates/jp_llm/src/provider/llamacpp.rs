@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use futures::{StreamExt as _, future, stream};
 use jp_config::{
     assistant::tool_choice::ToolChoice,
-    model::id::{ModelIdConfig, Name, ProviderId},
+    model::{
+        id::{ModelIdConfig, Name, ProviderId},
+        parameters::ReasoningConfig,
+    },
     providers::llm::llamacpp::LlamacppConfig,
 };
 use jp_conversation::{
@@ -238,6 +241,14 @@ fn handle_sse_event(
                             .map(Ok),
                     );
 
+                    // Flush reasoning and message content before tool calls
+                    // so they appear earlier in the conversation history.
+                    if !state.reasoning_flushed {
+                        events.push(Ok(Event::flush(0)));
+                        state.reasoning_flushed = true;
+                    }
+                    events.push(Ok(Event::flush(1)));
+
                     if matches!(reason.as_str(), "tool_calls" | "stop") {
                         events.extend(state.tool_calls.finalize_all().into_iter().flat_map(
                             |(index, result)| {
@@ -253,12 +264,6 @@ fn handle_sse_event(
                             },
                         ));
                     }
-
-                    if !state.reasoning_flushed {
-                        events.push(Ok(Event::flush(0)));
-                        state.reasoning_flushed = true;
-                    }
-                    events.push(Ok(Event::flush(1)));
 
                     // Per the OpenAI spec.
                     match reason.as_str() {
@@ -344,11 +349,34 @@ fn build_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool)
         "Built Llamacpp request."
     );
 
+    // Like Ollama, llama.cpp models may default to thinking-on, so we
+    // explicitly control reasoning via `reasoning_format` and
+    // `chat_template_kwargs.enable_thinking`. The former tells the server how
+    // to surface reasoning tokens (separate field vs raw in content); the
+    // latter tells the chat template whether to prompt the model to think at
+    // all. Models whose template doesn't use `enable_thinking` silently
+    // ignore the extra kwarg.
+    let reasoning_enabled = !matches!(parameters.reasoning, None | Some(ReasoningConfig::Off));
+
     let mut body = json!({
         "model": slug,
         "messages": messages,
         "stream": true,
+        "reasoning_format": if reasoning_enabled { "deepseek" } else { "none" },
+        "chat_template_kwargs": { "enable_thinking": reasoning_enabled },
     });
+
+    if let Some(temperature) = parameters.temperature {
+        body["temperature"] = json!(temperature);
+    }
+
+    if let Some(top_p) = parameters.top_p {
+        body["top_p"] = json!(top_p);
+    }
+
+    if let Some(max_tokens) = parameters.max_tokens {
+        body["max_tokens"] = json!(max_tokens);
+    }
 
     if !converted_tools.is_empty() {
         body["tools"] = json!(converted_tools);
@@ -389,11 +417,12 @@ fn convert_events(events: ConversationStream) -> Vec<Value> {
                     Some(json!({ "role": "assistant", "content": message }))
                 }
                 ChatResponse::Reasoning { reasoning } => {
-                    // Wrap reasoning in <think> tags so the model can pick up
-                    // its own chain-of-thought on the next turn.
+                    // Use the `reasoning_content` field so the server can
+                    // apply the correct template formatting. This avoids
+                    // manually wrapping in `<think>` tags.
                     Some(json!({
                         "role": "assistant",
-                        "content": format!("<think>\n{reasoning}\n</think>"),
+                        "reasoning_content": reasoning,
                     }))
                 }
                 ChatResponse::Structured { data } => {
@@ -421,19 +450,37 @@ fn convert_events(events: ConversationStream) -> Vec<Value> {
             _ => None,
         })
         .fold(vec![], |mut messages: Vec<Value>, message| {
-            // Merge consecutive assistant messages that carry tool_calls
-            // (same folding logic as the old openai-crate implementation).
-            if message.get("tool_calls").is_some()
-                && let Some(last) = messages.last_mut()
-                && last.get("tool_calls").is_some()
-                && let (Some(existing), Some(new)) = (
-                    last["tool_calls"].as_array_mut(),
-                    message["tool_calls"].as_array(),
-                )
+            if let Some(last) = messages.last_mut()
+                && last.get("role").and_then(Value::as_str) == Some("assistant")
+                && message.get("role").and_then(Value::as_str) == Some("assistant")
             {
-                existing.extend(new.iter().cloned());
+                // Merge consecutive assistant messages: fold
+                // `reasoning_content`, `content`, and `tool_calls` into a
+                // single message.
+                if let Some(tool_calls) = message.get("tool_calls")
+                    && let Some(new) = tool_calls.as_array()
+                {
+                    last["tool_calls"]
+                        .as_array_mut()
+                        .map(|existing| existing.extend(new.iter().cloned()))
+                        .unwrap_or_else(|| last["tool_calls"] = json!(new));
+                }
+
+                if let Some(rc) = message.get("reasoning_content")
+                    && rc.is_string()
+                {
+                    last["reasoning_content"] = rc.clone();
+                }
+
+                if let Some(c) = message.get("content")
+                    && c.is_string()
+                {
+                    last["content"] = c.clone();
+                }
+
                 return messages;
             }
+
             messages.push(message);
             messages
         })

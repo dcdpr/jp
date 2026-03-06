@@ -10,7 +10,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "Okay, the user sent a test message. Let me see... They wrote \"Test message /think\". Hmm, maybe they're just checking if the system is working. I should respond in a friendly and helpful way. Let me make sure to acknowledge their message and offer assistance. Maybe something like, \"Hello! This is a test message. How can I assist you today?\" That should cover it. I need to keep it simple and open-ended so they know I'm here to help with anything they need.\n",
+                        reasoning: "Okay, the user sent \"Test message\". This seems like a straightforward test to see if I'm responding properly.\n\nLet me check if there are any errors in my setup. Since I'm an AI model, maybe they want to confirm functionality.\n\nI should respond clearly that I received their message and offer assistance. Keep it friendly and helpful.\n\nMake sure not to include any technical details or overcomplicate the reply. Just a simple acknowledgment and offer help.",
                     },
                 ),
                 metadata: {},
@@ -26,7 +26,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Hello! This is a test message. How can I assist you today? 😊",
+                        message: "Hello! 👋 Your test message has been received successfully.  \n\nHow can I assist you today? Feel free to ask questions, request information, or need help with anything specific! 😊",
                     },
                 ),
                 metadata: {},

@@ -142,11 +142,6 @@ expression: v
     }
   },
   {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Please run the tool, providing whatever arguments you want."
-  },
-  {
     "type": "config_delta",
     "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
@@ -164,12 +159,25 @@ expression: v
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Please run the tool, providing whatever arguments you want."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "The user is asking me to run the `run_me` tool with whatever arguments I want. Let me look at the function signature:\n\n```json\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\", [\"foo\", \"bar\"]],\n        \"items\": {\"type\": \"string\"},\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the function has:\n- Required parameter `bar`: which can be either a string or an array of strings. The enum says it can be \"foo\" or [\"foo\", \"bar\"]\n- Optional parameter `foo`: which is a string with a default value of \"foo\"\n\nSince I can provide whatever arguments I want, I'll provide:\n- `bar`: I can use \"foo\" or [\"foo\", \"bar\"]. Let me use \"foo\" (the string version)\n- `foo`: optional, I could use the default or provide a custom value. Let me provide something custom to show I'm using the tool fully.\n\nLet me call it with:\n- bar: \"foo\"\n- foo: \"custom_value\"",
+    "metadata": {
+      "anthropic_thinking_signature": "RXFFSkNrWUlDeGdDS2tDdDk0MlZoVjNjQ0Q1bHVqY1NXY3pLL2w1a2dBK1VzeGVHQlBnMTlva2RhSkEwRFR6SkluZ2gyYk1kSHRMMk5VczNDSVlKUm9lZVlXbHZ4TUZmaUVyNEVneVg5YjFxZ1A3MldVQjBObTRhRENaZmk4cEV4ZnRKRFFhenlTSXdacGJ5YzlKMExLVW1GcVpHbHpaUlZJa0FsUmhnUlNYL1JhZDQyeDBtcTFlRmp6all1bG9jUWdhb2JJanR5QWxNS29nSWFpZGYzMXYxN1k1K2dwNjQ3UzVnV1FyYnJRTDFUTEIwZkdwTkowazQwSU1IaDNqbTZXR2kzSEdwcUs4ekR1cndnbjhHZVJtNE1sWDBZSmpXVkFOYklJSjAvYkd1M2psV3hUN0lFVWFYZHpFR2hDN0t5bHJ0Mm1MRmRGUEtZYWdBdTlNOVBDamhPM1Q2N1pEMjBHbkVyOTBQaUF1WWRoQVl4Z2l6UDd3cWIwRThDS1hTMHJsY0hzaHZtaG0xT0xKMkRZWFFEUUdYZWV5Z2RrNUh2V3MwMWs5NHFTeGtNQTBSWkNrN0hXV0R5UjVHZFhmRGFHQlhLTlFBcVZoSmRsUDQ0Z1ZqYWVlTmgxRTBGaTVpVXdXeXFjazFmeS9NWFdzZTUrVWxWRnFNaVUzbkIxdWFzT2NaNytqVDhKQXlXeUhIZE9TVlF0NGN6Sy9QUmlQaHlYSnV2V0tZUFI5a3VrWlZqNEJlWlpvS25sZDQ1eXhKNXJ5ZnZmKy9MeEFlVWg3ZXJ0YzNHcnNaUXZPMkd6eDA5SjFCUmFNeVRCbG5ldmNwWWpSUkNkY1BSdFV1VUxWdXJKV3dDUnNOWjlqNlNzY1FkZG01Y3pQU0FNNnBwWUo0MTNUTkk0d21aV3ptOVpOSGJyVGxHZW1BWm9wSnFXb000Y1ZNcVVQekQ0SDY2RGFScXBpYXhra2l2dDVuNG0xeVJTMkdEaEJMdzdKV0ZlNUhqZ3RkbmJTVlpjMTFWY01LUHpqVmNxY2I2d3JVVnE4NXJOVXJ1ZzB6ZDU0WjYxTXhXbG8xbVNoZXNSWm96d2xiY2VTNG9zRHZ4RGlTV0dBbHpMajJFdWtQY2liNXQ1QUVVNzIzTHorYjI2OFdjMlEyT1JyWDZNRjAxbGVGaVNmb2FSUGpkcS8xYTBWbzZjMEMyVXVRK1RPR3djVWt3cjYrN2MxSUUrUkdwSzFxTEJhelVCcmNuQm9NMDBYZG1TWm0xMUkzMzUyYzN3ck5BQk03NHdFcFpDZmNpYlFqcENrbWM3dnNCZ1hXa0czL1ZCVm5Ud0ttZEFyU25tWCsyMm9nRUFvbHluV2czeXZ2UTRDbzFxc2ZpZlFKMjhMRTVrc2JVeWxaamhvTWx3RHFPckR1M3pBQU9hMmZSL2ZjNDVxdFJJRU5LenY5Z3hwVGlZV2N3ZTRwQXFDTDlYYlB1VGRXSXc4cGRqSVUwTVR1dEZ6WjM2UzNEdDdkOUZ1NHE5ak9qaHhnT3lPc2VjbitqUUdtTWNscmZtUGgva3ZhUmp2RG1leGVUc0R0cVNEN2JrNFFYTmZFM2pvdXdFUk5qTmhVeVZEOFRLSEhOL0lOZ296YzZzeDFLQVdxVStpL0UrTGVzUEU3UzBmZWhWQWhBbVBJNUk3TzlTMExQRWpkcDc0YUN0SUxUbmE3Wmw0cGxDMTV0TlJVc0hQcG90YUlKdUx0UW5tWExYb3huT1d0ODQ1UVZmbmNxZWZtSlNHVm5ORitoMGNrSHlQc0l3alRqZ3BKdkYxTlFsOWQxQXJKRUdraDBGT05hNFhtdlBCQlNpRzFqNnBhRmZxNXZpVkxUNFExRGtaa3p1cEREZW5wR1U3aFlRR0VyT1pNSnFQdWJqbFFCOFNBbkhZbVViUFhvMU5UTFdUOVRPZ0krWjFhWG9YaUZBcDV3TzdFVWtwWTVadFphaTlNRXVMOXcwL0Vmb01KNWdnM3NmWnQybksxQjFOd1V4THdJS1J6LzNCUU92NVU4V2tHV1Bjd090dWJqSHNvRHFiYnFqaTBRUTBjOGhJcGw0di8wazRidjdHYU1wYmJaY2tGK3pnNDZUVWU1Sm5PR0FFPQ=="
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "toolu_01K91NzW9tCW65EJwfhcU2Zm",
+    "id": "toolu_01TUFYN1pewoPM9Y4h3paD29",
     "name": "run_me",
     "arguments": {
       "bar": "Zm9v",
-      "foo": "Zm9v"
+      "foo": "YmFy"
     }
   },
   {
@@ -188,13 +196,13 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "toolu_01K91NzW9tCW65EJwfhcU2Zm",
+    "id": "toolu_01TUFYN1pewoPM9Y4h3paD29",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "Great! The tool ran successfully with the arguments I provided (`bar=\"foo\"` and `foo=\"foo\"`), and it returned \"working!\" as the result."
+    "message": "Great! The tool executed successfully with the arguments:\n- `bar`: \"foo\" (a required string parameter)\n- `foo`: \"bar\" (an optional string parameter)\n\nThe tool returned: **\"working!\"**"
   }
 ]

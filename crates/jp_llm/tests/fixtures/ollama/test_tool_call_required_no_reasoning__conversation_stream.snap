@@ -148,11 +148,6 @@ expression: v
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "Okay, the user is asking me to run a tool with whatever arguments I want. Let me check the tools provided. The tools section has a function with the name \"run_me\" and no parameters. Since there are no arguments specified, I can call that function without any arguments. I just need to make sure to use the correct JSON structure for the tool call. Let me format that properly.\n"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
     "id": "",
     "name": "run_me",
@@ -168,11 +163,6 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "reasoning": "Okay, the user asked me to run a tool with whatever arguments I want. Let me check the tools provided. The tools section has a function called \"run_me\" with no parameters. So, I can call that function without any arguments. I need to make sure the tool call is formatted correctly in JSON. Let me structure the response with the tool name and an empty arguments object. That should work.\n"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "```json\n{\n  \"tool\": \"run_me\",\n  \"arguments\": {}\n}\n```"
+    "message": "It looks like the tool executed successfully and returned `working!`. Since I wasn't able to see the specific output of the tool, could you provide more details or let me know what kind of task you'd like it to perform? For example, if you want to run a mathematical calculation, analyze data, or interact with an API, please specify the arguments or context you need."
   }
 ]

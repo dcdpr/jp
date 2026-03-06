@@ -18,7 +18,10 @@ expression: v
             "name": "test"
           },
           "parameters": {
-            "reasoning": "off",
+            "reasoning": {
+              "effort": "max",
+              "exclude": false
+            },
             "stop_words": [],
             "other": {}
           }
@@ -149,12 +152,6 @@ expression: v
         "model": {
           "id": {
             "name": "claude-opus-4-6"
-          },
-          "parameters": {
-            "reasoning": {
-              "effort": "max",
-              "exclude": false
-            }
           }
         }
       }

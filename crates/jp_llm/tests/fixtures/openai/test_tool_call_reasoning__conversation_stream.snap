@@ -142,11 +142,6 @@ expression: v
     }
   },
   {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Please run the tool, providing whatever arguments you want."
-  },
-  {
     "type": "config_delta",
     "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
@@ -164,8 +159,22 @@ expression: v
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Please run the tool, providing whatever arguments you want."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "",
+    "metadata": {
+      "openai_item_id": "cnNfMDM3YjdhZWExYjU2MGIxOTAxNjlhYWVhMGVmYjcwODFhMTg5ZWVlZDVhZWY1ZDRhM2Q=",
+      "openai_encrypted_content": "Z0FBQUFBQnBxdW9RendRRFpVU3hPZnFHUl9RRGt6NVJEdEdMUmphWGRNd1JZMXFFM0hhZXRYRzQ2SzFNSzdCZVY4QTBKSU8xcVpSWkJjcEpLMlhOcnoza19sNUdKX3V4NDFrdHFMMk1QdGxkRWY4amF0c05NbnE4U0dKRUh4dGFQQzdjSGRhS3pkNG84SWJ3SE5ibW1zcC1Lc0RlQWtpaWx5OTF0WjRGMGtaaklyUmJqZV93UWI1cVhmaWpVYWx2aS1KUlo1alNraXJHRkxybkU4Z3JUUjJGYm5kd2c2ckV0dWxLYVVRTlNub0N5b3lubm8zcWNieE9pZTg3QUxsMkZiY2p4aGdGX1hfV01mdE0tYUcwN2NwdUdXRTk4cTVzMTQyQTFGOV9UX0pDVVk1LXItc25UcHZCbVU1dTY0ZWstYlZDczcyZzNyLXBfaUMxMC1yQkFaUVpjUWNUbFNLb3ppdEdLaWhYcWtpc1UteTBXSVU3c3J5UTRaYmg0UTBpUmlYZWRJanN5NU1ORWpWRkFscUplaUVwWnRMNUllalIzNVV2WmxiY1lBanNGU3A3NFpWOUVtX3JZSFFiMXVRZHp4STdzdUlpcTFmcl95bzR1b1Uxc25xUHVzSVpobmUtYkNCRS02VnNZdlZ5QjNaOWZDWVlmMWtZM0tQM3JLSHNyTklRdGRnQndfZVdrdXE5WTJzdFp1XzJTOWc3Vl9kejB0T0szYW9YbjdYdWZuQ1RPazhMd2Z3b0RzbHM4Z1hpdV9TR0dNYjBWVDIwVjVTOW9aaUtiT1haSnZXQS05WFdZNmRLOEFqdVNtZHdVR2dldFpQT09zMzJPYnZ3UFJoRlJFUkdkWk9kZHRUeFVwV1RwN0VDcEZaR0Y1U2xKSHV6UUZVVTBYSktoUk8za1Ffa2N0ZWY4N0JGdFg4QTRWb0lLSEU1N2dmZzF6dXNUYzBkTDl2REstVVYzdFkyNEZ0OFFCVWpBYl9GOEo4ams5UmttaENoUkJBeDVzQ1NaQUx5SUxNcWZYRVdiS0VzdkJzWG9DMXJtRWYxRU54MVl5eEduY2FIVGFGeUlUampmVDNoLWNkTVowdmYzQ2FuSjBoODNtZnlDam5weU9wMXI2NThLOGpzWU1QUGRhNHhqaVMzdmxsUWdtUG0wSE01M3RGejN3RDNSSzBxLW03YVplWTNkdHJtYXRfYnl1NHhvVEwyQThlY2dEVm0zeHlwOFZhNENzR1dtTGphdHBrRVhMX1FhV1pFbFYxMEFjU1M1emp3aWFsU29TRS1EZHlUSmEtYW5DLWxic3JTSXBPeTJ6bkZxQlRhTTN3cExlblc0UkpCMHg0U1BxQm1MX25NZmd3MDJSV3A4Vi1PbHBnV0V3OWFBQ0k0Mks2WUVsa0FaOC00dk5GNlhPWEhieGt1RVNKRC04M3F1LW53Q0Exb0lmY2ZuTVlQMEc4akg4YkN4QmNoTUFOQzQ3M29zcVU0ZVF4SUtZdXgzWUhORVFrQjhHRFRiWTVUaXFmSmtrWlIzNWpTTUlQQkhnYnpPeFZnRkNKcEZ2amdMWFFhSHVRcmZRSFRFaGw4SmVzOG9CWVIyZW5lYXk4anF4VW45dUNWaVo2NEhxenI5VWN2bkdySEFicm1SeTJEQzUyTWd1dmhFelV2Ri1SV3pTZUZuVWhPUXhpX3R1allHa2RzbG1IdzNnaFNuQWI3ekVURFl0Qkc="
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "call_UkRfXkTuMvWIch4qd4ZAJ5vE",
+    "id": "call_0pwvos4rXm5F15nb35SiYnMV",
     "name": "run_me",
     "arguments": {
       "foo": "aGVsbG8=",
@@ -188,16 +197,16 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "call_UkRfXkTuMvWIch4qd4ZAJ5vE",
+    "id": "call_0pwvos4rXm5F15nb35SiYnMV",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I ran the tool with the arguments {\"foo\":\"hello\",\"bar\":\"foo\"} and it returned: \"working!\"\n\nIf you want me to run it again with different arguments, tell me what to change (or say \"choose for me\") and I'll run it.",
+    "message": "working!",
     "metadata": {
-      "openai_item_id": "bXNnXzBiNjEwNDY3NGM0N2NjODQwMTY5OTViNmJmMDU2ODgxOWRiOWZjYWY2YjkyMDFmNjZk"
+      "openai_item_id": "bXNnXzAzN2I3YWVhMWI1NjBiMTkwMTY5YWFlYTExNWIwNDgxYTFiMWYyMmQ1ZDNmNGY1MjZj"
     }
   }
 ]

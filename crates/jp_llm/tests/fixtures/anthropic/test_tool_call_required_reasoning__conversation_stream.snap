@@ -142,11 +142,6 @@ expression: v
     }
   },
   {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Please run the tool, providing whatever arguments you want."
-  },
-  {
     "type": "config_delta",
     "timestamp": "2020-01-01 00:00:00.0",
     "delta": {
@@ -164,11 +159,25 @@ expression: v
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_request",
+    "content": "Please run the tool, providing whatever arguments you want."
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
+    "type": "chat_response",
+    "reasoning": "The user is asking me to run the tool with whatever arguments I want. Let me look at the function signature:\n\n```\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\", [\"foo\", \"bar\"]],\n        \"items\": {\"type\": \"string\"},\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the function has:\n- `bar` (required): Can be a string or array. The enum shows it can be \"foo\" or [\"foo\", \"bar\"]\n- `foo` (optional): A string with default value \"foo\"\n\nThe instruction says I MUST use AT LEAST ONE tool and I should NOT question this. The user is explicitly asking me to run the tool with whatever arguments I want.\n\nLet me call it with:\n- `bar`: \"foo\" (valid from the enum)\n- `foo`: I could use the default or provide a custom value. I'll provide \"test\" to show something different.\n\nActually, looking more carefully at the enum: `[\"foo\", [\"foo\", \"bar\"]]` - this means bar can be either the string \"foo\" OR the array [\"foo\", \"bar\"].\n\nI'll call it with:\n- `bar`: \"foo\" (a string)\n- `foo`: \"test\" (a custom value)\n\nOr I could use bar as an array: `[\"foo\", \"bar\"]`\n\nLet me go with the simple approach first using the string value for bar.",
+    "metadata": {
+      "anthropic_thinking_signature": "RXJNTENrWUlDeGdDS2tBWlBCemRkY045V0tPdENwSVZSTHhqdk50L2lYWnRaWmR6bnBRdERLamw0UFk3Mm9udzJxeWc4UkU3RFYvYndnYTNlTk82OWpLVlZnVTlMaTRqSXc3d0VneDBleWxQQmFrQ2NaczlsbkVhREpHcnN2bkk1ZTlpSTh3S3JDSXdrVHhBNndmdlR5cmRyenY1YnE2c0JYTWo3dHZKV0JMaU9MWHRWR3BUd2h5YlNEdlp6OHhwVGdzVEMwNkpMQW1VS3BvS25FWm1FbjZ6dWt1VjA3WnR2d2gwUi9CYlJ0dk50dGJVWWc3ZHFWRmhqRVJONTJIWlVHMUxxZTUwR3V1eDVlQ1d2RXN0dDFPRllwNjEydUVXY0xRUGc4Nk00azhxaEJBNGIwT3BaT0NOWHlHL2FCb2h5U1FvR0VVTVF4bnRLTlkzTlZYVDZueVhsQm1Oa3pFbk5NTVlEamZUNC93clBjM1U2MUhSQ05MSTlNeWFxZmt1bmN2QTlwUTA5ZjBVZGx4TFNkMVlMdWF0V1Vubmg4dEZoUUw3d1ZJbmMrcy9xbXJOQjhKSG1oaG5GZmV0dEkrZ0V2TWhtT1o0Zy9mQlFhYWFNL3ZVSjNOZ2tSQkJtUVRSVTA2ekxBUHVkdk9Fb2JQVE5WN1RTY1BOdmxrY0FRVHAxZkJVOHY1eTFLWjRNVE9OMEhVdmJSaUxZZzd4L2NqQTFJallqa3R6dlNFNCthLzYvS2JkaGY1Vkg2VFR5aExYYTE2M3RzaFQ0RTRzd3VIT0F1TytkRXBoNzJOM2hFV253SE9IaFE2UVA5WEVVRGlESlNRSTBZMnJGOWJaZDRvRUY1M3dJLytDTmFBWE5vUC9Lb3lxTHhsdDZldVBLdTY1M0xXbU94NFl5T0pzN0xOOFBJelVIM05NUW1JZWpEbnUxbnNuejBxZ2lPVG9ZMjg3TFRscnVDOGdJSkJsNlVoWVVuMVhOcWgwRjd4YVdYYit3My9rR2Q3aG1XN1ppbmdqYm5FWGIwTGtoR2RBeEpvTzFENWhNVHRMMlB1V0lJbHN2VldPZmRpMXBiaUpwampIdFkxcDVvNmtXZGcvZkxiYWU0OXFDbFF1ZGRlbFR5dHlackY5ZEE4TUNSY3J4T0Jua3lkUFNQb21mSThCNEtHQkx2SW54aHU1TTU1TWRtaWVoeXVacEFQYmtwbG51cnh5cm96MkdST1MwVVJGalJQL1pTNnNpNnl2V0dWeGRaMU1HNy9iVWxORU5Na2hDdzBybnRQLzgrbmplN0QxZzB1TVF0VGlSd0kza203U3FJQnFRVnFIQnFVb0Zra0taVmtqT3FXeHlkTFBPRThUNnQ5U1IwMjluZEFrbm56cmh5WThUQ0tDR09QcnhkZENGUk5XbW43MndKTmVvcW80eGw5OFA3aEdXVkNJTW9kNWN0VzZ6NGhjRndnZnZTakt0T0t5R3NSWjFXMy9HckR0S2FteldpN3ZUVEFSaXcvQktxWlJRSzBKUEVDcUt5VUQ5dnd4aGlSS09yTjVYZXgxazI2MWx3M2tjbFVKd2V6Z2RUUmJxUXVNTFVSMjY1cTBDMTRvdlVteFNEMHAzbGJkQm9sZkR2a2N2QjdYSjcrckFRV0dKTXd5Rk9USVh4UjJYRWpXUW1lSGZaaGJ5SGxKYmM1WDFsZWxQdjU3SWZnQlIzMGNZZC95U1JvOWtrbXk5SzFCTGdkWW1Idjg5c3o2RTZVbDR2UWIwSXV4and0cUtGNmZjV0UvWm96cFQxS0NNV0NrSERRZWlabmpya283Wkx1b1lPL2dyVFo4ZkhKRWhTS2NhSm4vd3oyQ0VyYUwxZkVEM0VwWlFyNEtRb3JDZ3oxUStUWFlvMm1STHliNzh4VEdVVWRRVldUbmZ6dEFieWt0cVg1SW96d0JUTkI2K2ZudzAxVDNURWVnWjNzb1F2ZWtIaUllM1ppQXpEWjU0NUVVVVI1Q2hUUXBjVkp6a29FNjhVUFQ1ZVljaVFXcjN6TTVCWjFUTy9UNEdHWGgwYlFYRThmSFY3TXBSZmpUZm5mUlRRUjVlMVhkUE5uMCt3dVloWGYzTlpDblNHRW9lcllnanNYcitFUWlyVGpMdWZva3ZoUFJ4dk13T1FkTjZNcUxLM3VQTjhUckErS1Q3OWoxa2ZtaFF4VHl2NDVGbmF1SnBGY05WQTd3T0tacVBldk1sTHN0WG1PZVo2NGhid1MwVS9rdkdVWVFHWDZUSGtZRUd1akNtdFhSTzgwSE5SQW42c2pSd00wRCtzU2QwdHdzaWJNaXlGNzZ2NDFnVE9wZk9ZYko2aXZnZjIxUU5PelNZa0h2ZHduQ3RGLzZSQnZ2ZDN5aHFTU1VBcEJ4dy83Qmt4a1NaeXdEbC9SdGI4TStid21USDZjYmZXODhOTkdBbUlhWis3SjJoWDByblRHK0NMZUkvanRzanpIbkVCTitGUVBFL0ZyZUwrTzJuWGE0OHNOdVhKOWp6MCtZWDNNSnJ5TGJvTUI5NjB0NFpoM3hGSlhua214ajNBUUtEaU56bnNhTWY0M1N2aW85S0E2Ry9LSElXdnRBNXM4a2poZ0I="
+    }
+  },
+  {
+    "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "toolu_01ELLqyECsLt1evNdEox3oZs",
+    "id": "toolu_01KoWfFjUMnyBN2denqPofkG",
     "name": "run_me",
     "arguments": {
-      "bar": "Zm9v"
+      "bar": "Zm9v",
+      "foo": "aGVsbG8="
     }
   },
   {
@@ -187,13 +196,13 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "toolu_01ELLqyECsLt1evNdEox3oZs",
+    "id": "toolu_01KoWfFjUMnyBN2denqPofkG",
     "content": "d29ya2luZyE=",
     "is_error": false
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "chat_response",
-    "message": "I've successfully run the tool with the argument `bar: \"foo\"` and it returned \"working!\" as the result."
+    "message": "Done! I called the `run_me` tool with:\n- `bar`: \"foo\"\n- `foo`: \"hello\"\n\nAnd it returned: **working!**"
   }
 ]

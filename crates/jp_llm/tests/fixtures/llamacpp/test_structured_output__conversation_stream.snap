@@ -163,14 +163,5 @@ expression: v
         }
       }
     }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "data": {
-      "titles": [
-        "Understanding the Impact of Climate Change on Coastal Communities"
-      ]
-    }
   }
 ]
