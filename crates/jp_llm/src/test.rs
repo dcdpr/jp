@@ -3,7 +3,7 @@ use std::{panic, sync::Arc};
 use chrono::{TimeZone as _, Utc};
 use futures::TryStreamExt as _;
 use jp_config::{
-    AppConfig, PartialAppConfig, ToPartial as _,
+    AppConfig, Config as _, PartialAppConfig, ToPartial as _,
     assistant::tool_choice::ToolChoice,
     conversation::tool::ToolParameterConfig,
     model::{
