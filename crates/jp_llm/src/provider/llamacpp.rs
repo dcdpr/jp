@@ -336,6 +336,8 @@ fn build_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool)
         .and_then(|req| req.schema.clone());
 
     let is_structured = structured_schema.is_some();
+    let config = thread.events.config()?;
+    let parameters = &config.assistant.model.parameters;
     let slug = model.id.name.to_string();
 
     let messages = thread.into_messages(to_system_messages, convert_events)?;
