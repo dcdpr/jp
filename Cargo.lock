@@ -157,7 +157,7 @@ name = "async-anthropic"
 version = "0.6.0"
 source = "git+https://github.com/JeanMertz/async-anthropic#5edba470a3aa912de2c9e815bdd71dfc20fdf54f"
 dependencies = [
- "backon 1.5.1",
+ "backon",
  "derive_builder",
  "reqwest",
  "reqwest-eventsource",
@@ -250,16 +250,6 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 name = "backon"
 version = "1.5.1"
 source = "git+https://github.com/JeanMertz/backon#341ea10a868218c5b1bcdfdd168df71b5e7e8c67"
-dependencies = [
- "fastrand",
- "tokio",
-]
-
-[[package]]
-name = "backon"
-version = "1.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "592277618714fbcecda9a02ba7a8781f319d26532a88553bbacc77ba5d2b3a8d"
 dependencies = [
  "fastrand",
  "tokio",
@@ -2089,7 +2079,7 @@ name = "jp_openrouter"
 version = "0.1.0"
 dependencies = [
  "async-stream",
- "backon 1.5.2",
+ "backon",
  "chrono",
  "futures",
  "jp_test",
