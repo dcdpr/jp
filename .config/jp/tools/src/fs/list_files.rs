@@ -189,7 +189,15 @@ mod tests {
 
             let files = fs_list_files(root, prefixes, extensions).await.unwrap();
 
-            assert_eq!(files.into_files(), expected, "test case: {name}");
+            assert_eq!(
+                files
+                    .into_files()
+                    .into_iter()
+                    .map(|s| s.replace('\\', "/"))
+                    .collect::<Vec<_>>(),
+                expected,
+                "test case: {name}"
+            );
         }
     }
 
