@@ -764,7 +764,7 @@ mod tests {
                 }
             }
 
-            let result = Workspace::find_root(cwd, case.workspace_dir_name.unwrap_or("default"));
+            let result = Workspace::find_root(cwd, case.workspace_dir_name.unwrap_or("non-exist"));
             assert_eq!(result, expected, "Failed test case: {name}");
         }
     }

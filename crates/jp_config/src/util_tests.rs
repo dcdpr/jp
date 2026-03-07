@@ -280,6 +280,7 @@ fn test_load_partial_at_path() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "overflows the stack on Windows")]
 fn test_load_partial_at_path_recursive() {
     struct TestCase {
         files: Vec<(&'static str, &'static str)>,
