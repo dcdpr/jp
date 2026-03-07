@@ -28,8 +28,6 @@ audit-as-crates-io = true
 [policy."backon:1.5.1@git:341ea10a868218c5b1bcdfdd168df71b5e7e8c67"]
 audit-as-crates-io = true
 
-[policy."backon:1.5.2"]
-
 [policy.gemini_client_rs]
 audit-as-crates-io = true
 
@@ -115,10 +113,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.backon]]
 version = "1.5.1@git:341ea10a868218c5b1bcdfdd168df71b5e7e8c67"
-criteria = "safe-to-deploy"
-
-[[exemptions.backon]]
-version = "1.5.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.bincode]]
