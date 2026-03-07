@@ -50,6 +50,7 @@ pub fn handle_streaming_signal(
     info!(?signal, "Received signal during streaming.");
 
     match signal {
+        #[cfg(any(unix, test))]
         SignalTo::Quit => {
             // Treat Quit like Stop: save partial content and exit gracefully.
             // This ensures we don't lose progress on hard quit signals.
@@ -81,6 +82,7 @@ pub fn handle_streaming_signal(
             }
         }
 
+        #[cfg(any(unix, test))]
         SignalTo::ReloadFromDisk => LoopAction::Continue,
     }
 }
@@ -140,6 +142,7 @@ pub fn handle_tool_signal(
     backend: &dyn PromptBackend,
 ) -> ToolSignalResult {
     match signal {
+        #[cfg(any(unix, test))]
         SignalTo::Quit => {
             // For hard quit during tool execution, we cancel and let the normal
             // flow handle persistence (responses will be cancelled).
@@ -177,6 +180,7 @@ pub fn handle_tool_signal(
             }
         }
 
+        #[cfg(any(unix, test))]
         SignalTo::ReloadFromDisk => ToolSignalResult::Continue,
     }
 }

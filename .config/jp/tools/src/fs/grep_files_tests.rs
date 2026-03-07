@@ -119,7 +119,8 @@ async fn test_grep_files() {
 
         let matches = fs_grep_files(root, pattern.to_owned(), Some(5), paths)
             .await
-            .unwrap();
+            .unwrap()
+            .replace('\\', "/");
 
         assert_eq!(matches, expected.join(""), "test case: {name}");
     }

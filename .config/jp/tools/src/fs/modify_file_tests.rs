@@ -123,8 +123,14 @@ fn test_validate_patterns() {
 
 #[test]
 fn test_validate_path() {
+    #[rustfmt::skip]
     let cases = [
+        #[cfg(unix)]
         ("absolute", "/absolute/path", Err("Path must be relative.")),
+
+        #[cfg(windows)]
+        ("absolute", "c:/absolute/path", Err("Path must be relative.")),
+
         ("relative", "src/main.rs", Ok(())),
     ];
 

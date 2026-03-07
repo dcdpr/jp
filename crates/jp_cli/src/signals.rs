@@ -1,7 +1,9 @@
 use async_stream::stream;
 use futures::{Stream, StreamExt as _};
 use tokio::{runtime::Runtime, sync::broadcast};
-use tracing::{error, info};
+use tracing::error;
+#[cfg(unix)]
+use tracing::info;
 
 pub type ShutdownTx = broadcast::Sender<()>;
 pub type SignalTx = broadcast::Sender<SignalTo>;
@@ -11,10 +13,12 @@ pub type SignalRx = broadcast::Receiver<SignalTo>;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SignalTo {
     /// Reload config from the filesystem.
+    #[cfg(any(unix, test))]
     ReloadFromDisk,
     /// Shutdown process, with a grace period.
     Shutdown,
     /// Shutdown process immediately.
+    #[cfg(any(unix, test))]
     Quit,
 }
 
@@ -153,7 +157,7 @@ fn os_signals() -> impl Stream<Item = SignalTo> {
 
     stream! {
         loop {
-            let signal = tokio::signal::ctrl_c().map(|_| SignalTo::Shutdown(None)).await;
+            let signal = tokio::signal::ctrl_c().map(|_| SignalTo::Shutdown).await;
 
             yield signal;
         }

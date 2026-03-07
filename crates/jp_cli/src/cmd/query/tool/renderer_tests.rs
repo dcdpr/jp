@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
+use camino_tempfile::Utf8TempDir;
 use jp_config::{
     AppConfig,
     conversation::tool::{CommandConfigOrString, style::ParametersStyle},
@@ -228,9 +229,11 @@ async fn test_format_args_function_call() {
 #[tokio::test]
 async fn test_format_args_custom_with_echo() {
     let mut args = Map::new();
-    args.insert("path".into(), Value::String("/tmp/test.txt".into()));
+    let root = Utf8TempDir::new().unwrap();
+    let path = root.path().join("test.txt");
+    args.insert("path".into(), Value::String(path.into()));
     let style = ParametersStyle::Custom(CommandConfigOrString::String("echo custom-output".into()));
-    let result = format_args("my_tool", &args, &style, Utf8Path::new("/tmp"))
+    let result = format_args("my_tool", &args, &style, root.path())
         .await
         .unwrap();
     assert_eq!(result, ":\n\ncustom-output");
@@ -239,9 +242,11 @@ async fn test_format_args_custom_with_echo() {
 #[tokio::test]
 async fn test_format_args_custom_empty_output_returns_empty() {
     let mut args = Map::new();
-    args.insert("path".into(), Value::String("/tmp/test.txt".into()));
+    let root = Utf8TempDir::new().unwrap();
+    let path = root.path().join("test.txt");
+    args.insert("path".into(), Value::String(path.into()));
     let style = ParametersStyle::Custom(CommandConfigOrString::String("true".into()));
-    let result = format_args("my_tool", &args, &style, Utf8Path::new("/tmp"))
+    let result = format_args("my_tool", &args, &style, root.path())
         .await
         .unwrap();
     assert_eq!(result, "");
