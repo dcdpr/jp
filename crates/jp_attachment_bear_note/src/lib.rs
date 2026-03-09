@@ -108,7 +108,11 @@ impl Handler for BearNotes {
         "bear"
     }
 
-    async fn add(&mut self, uri: &Url, _cwd: &Utf8Path) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn add(
+        &mut self,
+        uri: &Url,
+        _cwd: &Utf8Path,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.0.insert(uri_to_query(uri)?);
 
         Ok(())
