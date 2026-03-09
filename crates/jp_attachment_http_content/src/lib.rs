@@ -47,7 +47,11 @@ impl Handler for HttpContent<Http> {
         "http"
     }
 
-    async fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn add(
+        &mut self,
+        uri: &Url,
+        _cwd: &Utf8Path,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.urls.insert(uri.clone());
         Ok(())
     }
@@ -78,7 +82,11 @@ impl Handler for HttpContent<Https> {
         "https"
     }
 
-    async fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn add(
+        &mut self,
+        uri: &Url,
+        _cwd: &Utf8Path,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.urls.insert(uri.clone());
 
         Ok(())
@@ -115,11 +123,7 @@ async fn fetch_all(urls: &BTreeSet<Url>) -> Result<Vec<Attachment>, Box<dyn Erro
             }
         };
 
-        attachments.push(Attachment {
-            source: url.to_string(),
-            content,
-            ..Default::default()
-        });
+        attachments.push(Attachment::text(url.to_string(), content));
     }
 
     Ok(attachments)

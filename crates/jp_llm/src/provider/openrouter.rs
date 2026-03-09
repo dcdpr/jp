@@ -1,8 +1,10 @@
 use std::env;
 
 use async_trait::async_trait;
+use base64::Engine as _;
 use futures::{StreamExt as _, TryStreamExt as _, stream};
 use indexmap::IndexMap;
+use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
@@ -14,13 +16,13 @@ use jp_config::{
 use jp_conversation::{
     ConversationEvent, ConversationStream,
     event::{ChatResponse, EventKind},
-    thread::{SystemPart, Thread, ThreadParts},
+    thread::{Thread, ThreadParts, text_attachments_to_xml},
 };
 use jp_openrouter::{
     Client,
     types::{
         self,
-        chat::{CacheControl, Content, Message},
+        chat::{CacheControl, Content, FilePayload, Message},
         request::{self, JsonSchemaFormat, RequestMessage, ResponseFormat},
         response::{
             self, ChatCompletion as OpenRouterChunk, FinishReason, ReasoningDetails,
@@ -588,35 +590,71 @@ impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
     fn try_from((model_id, thread): (&ModelIdConfig, Thread)) -> Result<Self> {
         let ThreadParts {
             system_parts,
+            attachments,
             events,
-        } = thread.into_parts()?;
+        } = thread.into_parts();
 
         let mut messages = vec![];
 
-        // Cache breakpoints:
-        // - Always cache the prompt (index 0)
-        // - Cache the last section (last Prompt at index > 0), if any
-        // - Cache the last attachment, if any
-        let mut content = vec![];
-        let last_section_idx = system_parts
-            .iter()
-            .enumerate()
-            .rfind(|(i, p)| *i > 0 && matches!(p, SystemPart::Prompt(_)))
-            .map(|(i, _)| i);
-        let last_attachment_idx = system_parts
-            .iter()
-            .rposition(|p| matches!(p, SystemPart::Attachment(_)));
+        // Cache breakpoints on system parts:
+        // - Always cache the first part (index 0)
+        // - Cache the last part
+        let mut system_content = vec![];
+        let last_idx = system_parts.len().saturating_sub(1);
 
-        for (i, part) in system_parts.into_iter().enumerate() {
-            let cache = i == 0 || Some(i) == last_section_idx || Some(i) == last_attachment_idx;
-            content.push(Content::Text {
-                text: part.into_inner(),
+        for (i, text) in system_parts.into_iter().enumerate() {
+            let cache = i == 0 || i == last_idx;
+            system_content.push(Content::Text {
+                text,
                 cache_control: cache.then_some(CacheControl::Ephemeral),
             });
         }
 
-        if !content.is_empty() {
-            messages.push(Message::default().with_content(content).system());
+        if !system_content.is_empty() {
+            messages.push(Message::default().with_content(system_content).system());
+        }
+
+        // All attachments go in a user message before conversation events.
+        let mut attachment_blocks = vec![];
+
+        // Text attachments as XML to preserve source metadata.
+        if let Some(xml) = text_attachments_to_xml(&attachments)? {
+            attachment_blocks.push(Content::Text {
+                text: xml,
+                cache_control: None,
+            });
+        }
+
+        // Binary attachments, each preceded by a label.
+        for attachment in &attachments {
+            if let AttachmentContent::Binary { data, media_type } = &attachment.content {
+                let b64 = base64::engine::general_purpose::STANDARD.encode(data);
+
+                attachment_blocks.push(Content::Text {
+                    text: format!("[Attached file: {}]", attachment.source),
+                    cache_control: None,
+                });
+
+                if media_type.starts_with("image/") {
+                    attachment_blocks.push(Content::image_data_uri(format!(
+                        "data:{media_type};base64,{b64}",
+                    )));
+                } else {
+                    // OpenRouter accepts arbitrary files via its file content
+                    // type. For models that don't support file input natively,
+                    // OpenRouter parses the file server-side.
+                    attachment_blocks.push(Content::File {
+                        file: FilePayload {
+                            filename: attachment.source.clone(),
+                            file_data: format!("data:{media_type};base64,{b64}"),
+                        },
+                    });
+                }
+            }
+        }
+
+        if !attachment_blocks.is_empty() {
+            messages.push(Message::default().with_content(attachment_blocks).user());
         }
 
         messages.extend(convert_events(events));

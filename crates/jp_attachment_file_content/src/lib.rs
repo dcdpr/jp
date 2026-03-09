@@ -36,10 +36,28 @@ impl Handler for FileContent {
         "file"
     }
 
-    async fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn add(&mut self, uri: &Url, cwd: &Utf8Path) -> Result<(), Box<dyn Error + Send + Sync>> {
         let pattern = uri_to_pattern(uri)?;
+        let is_exclude = uri.query_pairs().any(|(k, _)| k == "exclude");
 
-        if uri.query_pairs().any(|(k, _)| k == "exclude") {
+        // For concrete file paths (no globs), validate size upfront so the
+        // user gets an immediate error rather than a silent skip at query time.
+        if !is_exclude && !pattern.as_str().contains(['*', '?', '[']) {
+            let rel = pattern.as_str().trim_start_matches('/');
+            let path = cwd.join(rel);
+            if path.is_file() {
+                let size = std::fs::metadata(&path)?.len();
+                if size > MAX_BINARY_SIZE {
+                    return Err(format!(
+                        "File '{rel}' is too large ({size} bytes, limit is {MAX_BINARY_SIZE} \
+                         bytes)."
+                    )
+                    .into());
+                }
+            }
+        }
+
+        if is_exclude {
             self.includes.remove(&pattern);
             self.excludes.insert(pattern);
         } else {
@@ -200,6 +218,11 @@ fn sanitize_pattern<'a>(mut pattern: &'a str, cwd: &Utf8Path) -> Cow<'a, str> {
     }
 }
 
+/// 10 MiB. Fits comfortably under every provider's inline limit (Anthropic
+/// 32 MB, OpenAI 20 MB, Gemini 20 MB) even after base64 expansion (~33%
+/// overhead).
+const MAX_BINARY_SIZE: u64 = 10 * 1024 * 1024;
+
 fn build_attachment(path: &Utf8Path, cwd: &Utf8Path) -> Option<Attachment> {
     let Ok(rel) = path.strip_prefix(cwd) else {
         warn!(
@@ -210,6 +233,51 @@ fn build_attachment(path: &Utf8Path, cwd: &Utf8Path) -> Option<Attachment> {
         return None;
     };
 
+    // Detect binary file types from magic bytes. `get_from_path` only reads the
+    // first few KB, so we don't load the entire file into memory just to check
+    // the type.
+    let inferred = match infer::get_from_path(path) {
+        Ok(kind) => kind,
+        Err(error) => {
+            warn!(path = %rel, %error, "Failed to read attachment for type detection.");
+            return None;
+        }
+    };
+
+    // If `infer` recognizes the file type, treat it as binary. Provider
+    // implementations are responsible for filtering to the MIME types they
+    // support and warning on unsupported ones.
+    if let Some(kind) = inferred {
+        let size = match fs::metadata(path) {
+            Ok(m) => m.len(),
+            Err(error) => {
+                warn!(path = %rel, %error, "Failed to stat binary attachment.");
+                return None;
+            }
+        };
+
+        if size > MAX_BINARY_SIZE {
+            warn!(
+                path = %rel,
+                size,
+                max = MAX_BINARY_SIZE,
+                "Binary attachment exceeds size limit, skipping."
+            );
+            return None;
+        }
+
+        let data = match fs::read(path) {
+            Ok(data) => data,
+            Err(error) => {
+                warn!(path = %rel, %error, "Failed to read binary attachment.");
+                return None;
+            }
+        };
+
+        return Some(Attachment::binary(rel.to_string(), data, kind.mime_type()));
+    }
+
+    // Not a recognized binary type - treat as text.
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) => {
@@ -218,11 +286,7 @@ fn build_attachment(path: &Utf8Path, cwd: &Utf8Path) -> Option<Attachment> {
         }
     };
 
-    Some(Attachment {
-        source: rel.to_string(),
-        content,
-        ..Default::default()
-    })
+    Some(Attachment::text(rel.to_string(), content))
 }
 
 /// We need to do some extra work to get the path relative to the
@@ -301,17 +365,24 @@ mod tests {
         let mut handler = FileContent::default();
 
         // Paths are relative, so the following sets are equivalent.
-        handler.add(&Url::parse("file:path/include.txt")?).await?;
-        handler.add(&Url::parse("file:/path/include.txt")?).await?;
-        handler.add(&Url::parse("file://path/include.txt")?).await?;
+        let cwd = Utf8Path::new("/");
         handler
-            .add(&Url::parse("file:///path/include.txt")?)
+            .add(&Url::parse("file:path/include.txt")?, cwd)
+            .await?;
+        handler
+            .add(&Url::parse("file:/path/include.txt")?, cwd)
+            .await?;
+        handler
+            .add(&Url::parse("file://path/include.txt")?, cwd)
+            .await?;
+        handler
+            .add(&Url::parse("file:///path/include.txt")?, cwd)
             .await?;
 
-        handler.add(&Url::parse("file:**/*.md")?).await?;
-        handler.add(&Url::parse("file:/**/*.md")?).await?;
-        handler.add(&Url::parse("file://**/*.md")?).await?;
-        handler.add(&Url::parse("file:///**/*.md")?).await?;
+        handler.add(&Url::parse("file:**/*.md")?, cwd).await?;
+        handler.add(&Url::parse("file:/**/*.md")?, cwd).await?;
+        handler.add(&Url::parse("file://**/*.md")?, cwd).await?;
+        handler.add(&Url::parse("file:///**/*.md")?, cwd).await?;
 
         assert_eq!(handler.includes.len(), 2);
         assert_eq!(handler.includes.iter().collect::<Vec<_>>(), vec![
@@ -328,7 +399,10 @@ mod tests {
     async fn test_file_add_exclude() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut handler = FileContent::default();
         handler
-            .add(&Url::parse("file://path/**/exclude.txt?exclude")?)
+            .add(
+                &Url::parse("file://path/**/exclude.txt?exclude")?,
+                Utf8Path::new("/"),
+            )
             .await?;
 
         assert_eq!(handler.excludes.len(), 1);
@@ -348,7 +422,8 @@ mod tests {
         let uri_exclude = Url::parse("file:/path/to/file.txt?exclude")?;
 
         // Add as include
-        handler.add(&uri_include).await?;
+        let cwd = Utf8Path::new("/");
+        handler.add(&uri_include, cwd).await?;
         assert!(
             handler
                 .includes
@@ -361,7 +436,7 @@ mod tests {
         );
 
         // Add same path as exclude
-        handler.add(&uri_exclude).await?;
+        handler.add(&uri_exclude, cwd).await?;
         assert!(
             !handler
                 .includes
@@ -382,8 +457,8 @@ mod tests {
         let mut handler = FileContent::default();
         let uri1 = Url::parse("file:/path/to/file1.txt")?;
         let uri2 = Url::parse("file:/path/to/file2.txt?exclude")?;
-        handler.add(&uri1).await?;
-        handler.add(&uri2).await?;
+        handler.add(&uri1, Utf8Path::new("/")).await?;
+        handler.add(&uri2, Utf8Path::new("/")).await?;
 
         assert_eq!(handler.includes.len(), 1);
         assert_eq!(handler.excludes.len(), 1);
@@ -409,13 +484,189 @@ mod tests {
         fs::write(&path, "content")?;
 
         let mut handler = FileContent::default();
-        handler.add(&Url::parse("file:/file.txt")?).await?;
+        handler
+            .add(&Url::parse("file:/file.txt")?, tmp.path())
+            .await?;
 
         let client = Client::new(IndexMap::default());
         let attachments = handler.get(tmp.path(), client).await?;
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].source, "file.txt");
-        assert_eq!(attachments[0].content, "content");
+        assert_eq!(attachments[0].as_text(), Some("content"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_file_get_image_png() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let tmp = tempdir()?;
+        // Full PNG magic signature
+        let png_bytes: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        fs::write(tmp.path().join("screenshot.png"), &png_bytes)?;
+
+        let mut handler = FileContent::default();
+        handler
+            .add(&Url::parse("file:/screenshot.png")?, tmp.path())
+            .await?;
+
+        let client = Client::new(IndexMap::default());
+        let attachments = handler.get(tmp.path(), client).await?;
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].source, "screenshot.png");
+        assert!(attachments[0].is_binary());
+        assert!(attachments[0].as_text().is_none());
+
+        match &attachments[0].content {
+            jp_attachment::AttachmentContent::Binary { data, media_type } => {
+                assert_eq!(media_type, "image/png");
+                assert_eq!(data, &png_bytes);
+            }
+            jp_attachment::AttachmentContent::Text(_) => panic!("expected binary attachment"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_file_get_image_jpeg() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let tmp = tempdir()?;
+        let jpg_bytes: Vec<u8> = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+        fs::write(tmp.path().join("photo.jpg"), &jpg_bytes)?;
+
+        let mut handler = FileContent::default();
+        handler
+            .add(&Url::parse("file:/photo.jpg")?, tmp.path())
+            .await?;
+
+        let client = Client::new(IndexMap::default());
+        let attachments = handler.get(tmp.path(), client).await?;
+        assert_eq!(attachments.len(), 1);
+
+        match &attachments[0].content {
+            jp_attachment::AttachmentContent::Binary { media_type, .. } => {
+                assert_eq!(media_type, "image/jpeg");
+            }
+            jp_attachment::AttachmentContent::Text(_) => panic!("expected binary attachment"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_file_get_pdf() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let tmp = tempdir()?;
+        // Minimal PDF: magic header followed by enough bytes for `infer` to
+        // match.
+        let pdf_bytes = b"%PDF-1.4 minimal";
+        fs::write(tmp.path().join("doc.pdf"), pdf_bytes)?;
+
+        let mut handler = FileContent::default();
+        handler
+            .add(&Url::parse("file:/doc.pdf")?, tmp.path())
+            .await?;
+
+        let client = Client::new(IndexMap::default());
+        let attachments = handler.get(tmp.path(), client).await?;
+        assert_eq!(attachments.len(), 1);
+        assert!(attachments[0].is_binary());
+
+        match &attachments[0].content {
+            jp_attachment::AttachmentContent::Binary { media_type, .. } => {
+                assert_eq!(media_type, "application/pdf");
+            }
+            jp_attachment::AttachmentContent::Text(_) => panic!("expected binary attachment"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_file_get_mixed_text_and_binary() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let tmp = tempdir()?;
+        fs::write(tmp.path().join("readme.md"), "# Hello")?;
+        // RIFF....WEBP magic bytes
+        fs::write(tmp.path().join("logo.webp"), [
+            0x52, 0x49, 0x46, 0x46, // RIFF
+            0x00, 0x00, 0x00, 0x00, // file size (don't care)
+            0x57, 0x45, 0x42, 0x50, // WEBP
+        ])?;
+
+        let mut handler = FileContent::default();
+        handler
+            .add(&Url::parse("file:/readme.md")?, tmp.path())
+            .await?;
+        handler
+            .add(&Url::parse("file:/logo.webp")?, tmp.path())
+            .await?;
+
+        let client = Client::new(IndexMap::default());
+        let attachments = handler.get(tmp.path(), client).await?;
+        assert_eq!(attachments.len(), 2);
+
+        let text_count = attachments.iter().filter(|a| a.is_text()).count();
+        let binary_count = attachments.iter().filter(|a| a.is_binary()).count();
+        assert_eq!(text_count, 1);
+        assert_eq!(binary_count, 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_file_get_wrong_extension_detected_by_magic_bytes()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let tmp = tempdir()?;
+        // PNG magic bytes, but with a .txt extension
+        let png_bytes: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        fs::write(tmp.path().join("not_text.txt"), &png_bytes)?;
+
+        let mut handler = FileContent::default();
+        handler
+            .add(&Url::parse("file:/not_text.txt")?, tmp.path())
+            .await?;
+
+        let client = Client::new(IndexMap::default());
+        let attachments = handler.get(tmp.path(), client).await?;
+        assert_eq!(attachments.len(), 1);
+        assert!(attachments[0].is_binary());
+
+        match &attachments[0].content {
+            jp_attachment::AttachmentContent::Binary { media_type, .. } => {
+                assert_eq!(media_type, "image/png");
+            }
+            jp_attachment::AttachmentContent::Text(_) => {
+                panic!("expected binary attachment")
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_file_add_rejects_oversized_binary() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let tmp = tempdir()?;
+
+        // PNG magic bytes followed by zeroes to exceed the limit.
+        let mut oversized = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        #[expect(clippy::cast_possible_truncation)]
+        oversized.resize(MAX_BINARY_SIZE as usize + 1, 0);
+        fs::write(tmp.path().join("huge.png"), &oversized)?;
+
+        let mut handler = FileContent::default();
+        let err = handler
+            .add(&Url::parse("file:/huge.png")?, tmp.path())
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("too large"),
+            "expected size error, got: {err}"
+        );
 
         Ok(())
     }
