@@ -669,9 +669,7 @@ impl ToolDefinition {
                             ResourceContents::TextResourceContents { text, .. } => Some(text),
                             ResourceContents::BlobResourceContents { blob, .. } => Some(blob),
                         },
-                        RawContent::Image(_)
-                        | RawContent::Audio(_)
-                        | RawContent::ResourceLink(_) => None,
+                        RawContent::Image(_) | RawContent::Audio(_) => None,
                     })
                     .collect::<Vec<_>>()
                     .join("\n\n");
