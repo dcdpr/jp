@@ -55,7 +55,11 @@ impl Handler for McpResources {
         "mcp"
     }
 
-    async fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn add(
+        &mut self,
+        uri: &Url,
+        _cwd: &Utf8Path,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.0.insert(uri.clone());
 
         Ok(())
@@ -91,11 +95,10 @@ impl Handler for McpResources {
                 .get_resource_contents(&server_id, resource_uri)
                 .await?;
 
-            attachments.push(Attachment {
-                source: uri.to_string(),
-                content: Resource::from(resource).try_to_xml()?,
-                ..Default::default()
-            });
+            attachments.push(Attachment::text(
+                uri.to_string(),
+                Resource::from(resource).try_to_xml()?,
+            ));
         }
 
         Ok(attachments)

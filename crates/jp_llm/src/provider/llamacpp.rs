@@ -1,7 +1,9 @@
 use std::mem;
 
 use async_trait::async_trait;
+use base64::Engine as _;
 use futures::{StreamExt as _, future, stream};
+use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
@@ -13,6 +15,7 @@ use jp_config::{
 use jp_conversation::{
     ConversationEvent, ConversationStream,
     event::{ChatResponse, EventKind, ToolCallResponse},
+    thread::text_attachments_to_xml,
 };
 use reqwest_eventsource::{Event as SseEvent, EventSource};
 use serde::Deserialize;
@@ -340,7 +343,52 @@ fn build_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool)
     let parameters = &config.assistant.model.parameters;
     let slug = model.id.name.to_string();
 
-    let messages = thread.into_messages(to_system_messages, convert_events)?;
+    let parts = thread.into_parts();
+
+    let mut system_parts = parts.system_parts;
+    if let Some(xml) = text_attachments_to_xml(&parts.attachments)? {
+        system_parts.push(xml);
+    }
+
+    let mut messages: Vec<Value> = to_system_messages(system_parts).collect();
+
+    // Prepend binary image attachments as a user message with image_url
+    // content blocks (OpenAI chat completions format).
+    let image_blocks: Vec<_> = parts
+        .attachments
+        .iter()
+        .filter_map(|a| match &a.content {
+            AttachmentContent::Binary { data, media_type } if media_type.starts_with("image/") => {
+                Some(json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!(
+                            "data:{media_type};base64,{}",
+                            base64::engine::general_purpose::STANDARD.encode(data),
+                        ),
+                    },
+                }))
+            }
+            AttachmentContent::Binary { media_type, .. } => {
+                warn!(
+                    source = %a.source,
+                    media_type,
+                    "Unsupported binary attachment media type for llama.cpp, skipping."
+                );
+                None
+            }
+            AttachmentContent::Text(_) => None,
+        })
+        .collect();
+
+    if !image_blocks.is_empty() {
+        messages.push(json!({
+            "role": "user",
+            "content": image_blocks,
+        }));
+    }
+
+    messages.extend(convert_events(parts.events));
     let converted_tools = convert_tools(tools, &tool_choice);
     let tool_choice_val = convert_tool_choice(&tool_choice);
 

@@ -1,7 +1,9 @@
 use std::str::FromStr as _;
 
 use async_trait::async_trait;
+use base64::Engine as _;
 use futures::{FutureExt as _, StreamExt as _, TryStreamExt as _, future, stream};
+use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
@@ -13,19 +15,21 @@ use jp_config::{
 use jp_conversation::{
     ConversationEvent, ConversationStream,
     event::{ChatResponse, EventKind, ToolCallRequest},
+    thread::text_attachments_to_xml,
 };
 use ollama_rs::{
     Ollama as Client,
     error::OllamaError,
     generation::{
         chat::{ChatMessage, ChatMessageResponse, MessageRole, request::ChatMessageRequest},
+        images::Image,
         parameters::{FormatType, JsonStructure, KeepAlive, TimeUnit},
         tools::{ToolCall, ToolCallFunction, ToolFunctionInfo, ToolInfo, ToolType},
     },
     models::{LocalModel, ModelOptions},
 };
 use serde_json::{Map, Value};
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 use url::Url;
 
 use super::{EventStream, ModelDetails, Provider};
@@ -201,6 +205,7 @@ fn map_event(
     events
 }
 
+#[expect(clippy::too_many_lines)]
 fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(ChatMessageRequest, bool)> {
     let ChatQuery {
         thread,
@@ -221,7 +226,48 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(ChatMessage
     let config = thread.events.config()?;
     let parameters = &config.assistant.model.parameters;
 
-    let mut messages = thread.into_messages(to_system_messages, convert_events)?;
+    let parts = thread.into_parts();
+
+    let mut system_parts = parts.system_parts;
+    if let Some(xml) = text_attachments_to_xml(&parts.attachments)? {
+        system_parts.push(xml);
+    }
+
+    let mut messages: Vec<ChatMessage> = to_system_messages(system_parts).collect();
+
+    // Prepend binary image attachments as a user message with base64 images.
+    let images: Vec<_> = parts
+        .attachments
+        .iter()
+        .filter_map(|a| match &a.content {
+            AttachmentContent::Binary { data, media_type } if media_type.starts_with("image/") => {
+                Some(Image::from_base64(
+                    base64::engine::general_purpose::STANDARD.encode(data),
+                ))
+            }
+            AttachmentContent::Binary { media_type, .. } => {
+                warn!(
+                    source = %a.source,
+                    media_type,
+                    "Unsupported binary attachment media type for Ollama, skipping."
+                );
+                None
+            }
+            AttachmentContent::Text(_) => None,
+        })
+        .collect();
+
+    if !images.is_empty() {
+        messages.push(ChatMessage {
+            role: MessageRole::User,
+            content: String::new(),
+            tool_calls: vec![],
+            images: Some(images),
+            thinking: None,
+        });
+    }
+
+    messages.extend(convert_events(parts.events));
 
     if let Some(tool_choice) = tool_choice_to_system_message(&tool_choice) {
         messages.push(tool_choice);

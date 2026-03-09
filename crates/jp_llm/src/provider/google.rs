@@ -2,10 +2,12 @@ use std::{collections::HashMap, env};
 
 use async_stream::stream;
 use async_trait::async_trait;
+use base64::Engine as _;
 use chrono::NaiveDate;
 use futures::{StreamExt as _, TryStreamExt as _};
 use gemini_client_rs::{GeminiClient, GeminiError, types};
 use indexmap::IndexMap;
+use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
@@ -17,7 +19,7 @@ use jp_config::{
 use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest},
-    thread::ThreadParts,
+    thread::{ThreadParts, text_attachments_to_xml},
 };
 use serde_json::{Map, Value};
 use tracing::{debug, trace};
@@ -254,18 +256,59 @@ fn create_request(
 
     let ThreadParts {
         system_parts,
+        attachments,
         events,
-    } = thread.into_parts()?;
+    } = thread.into_parts();
 
     let parts: Vec<_> = system_parts
         .into_iter()
-        .map(|part| types::ContentPart {
-            data: types::ContentData::Text(part.into_inner()),
+        .map(|text| types::ContentPart {
+            data: types::ContentData::Text(text),
             thought: false,
             metadata: None,
             thought_signature: None,
         })
         .collect();
+
+    // All attachments go in a user message before conversation events.
+    // Google's system instruction only supports text.
+    let mut attachment_parts = vec![];
+
+    // Text attachments are serialized to XML to preserve source metadata.
+    if let Some(xml) = text_attachments_to_xml(&attachments)? {
+        attachment_parts.push(types::ContentPart {
+            data: types::ContentData::Text(xml),
+            thought: false,
+            metadata: None,
+            thought_signature: None,
+        });
+    }
+
+    // Binary attachments as inline data, each preceded by a label.
+    for attachment in &attachments {
+        if let AttachmentContent::Binary { data, media_type } = &attachment.content {
+            attachment_parts.push(types::ContentPart {
+                data: types::ContentData::Text(format!("[Attached file: {}]", attachment.source)),
+                thought: false,
+                metadata: None,
+                thought_signature: None,
+            });
+            attachment_parts.push(types::ContentPart::new_inline_data(
+                media_type,
+                &base64::engine::general_purpose::STANDARD.encode(data),
+                false,
+            ));
+        }
+    }
+
+    let mut contents = vec![];
+    if !attachment_parts.is_empty() {
+        contents.push(types::Content {
+            parts: attachment_parts,
+            role: Some(types::Role::User),
+        });
+    }
+    contents.extend(convert_events(events));
 
     // Set structured output config on GenerationConfig when a schema is present.
     // We use `_responseJsonSchema` (the JSON Schema field) rather than
@@ -289,7 +332,7 @@ fn create_request(
             } else {
                 Some(types::Content { parts, role: None })
             },
-            contents: convert_events(events),
+            contents,
             tools,
             tool_config: Some(tool_config),
             generation_config: Some(types::GenerationConfig {

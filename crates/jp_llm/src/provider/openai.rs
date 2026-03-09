@@ -1,9 +1,11 @@
 use std::env;
 
 use async_trait::async_trait;
+use base64::Engine as _;
 use chrono::NaiveDate;
 use futures::{FutureExt as _, StreamExt as _, TryStreamExt as _, future, stream};
 use indexmap::{IndexMap, IndexSet};
+use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     conversation::tool::{OneOrManyTypes, ToolParameterConfig},
@@ -16,6 +18,7 @@ use jp_config::{
 use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest, ToolCallResponse},
+    thread::text_attachments_to_xml,
 };
 use openai_responses::{
     Client, CreateError, StreamError as OpenaiStreamError,
@@ -114,6 +117,7 @@ pub(crate) struct ModelResponse {
 /// Create a request for the given model and query details.
 ///
 /// Returns `(request, is_structured, reasoning_enabled)`.
+#[expect(clippy::too_many_lines)]
 fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bool, bool)> {
     let ChatQuery {
         thread,
@@ -170,7 +174,58 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     let reasoning_enabled = model
         .custom_reasoning_config(parameters.reasoning)
         .is_some();
-    let messages = thread.into_messages(to_system_messages, convert_events(supports_reasoning))?;
+    let parts = thread.into_parts();
+
+    let mut messages = vec![];
+    messages.push(to_system_messages(parts.system_parts).0);
+
+    // All attachments go in a user message before conversation events.
+    let mut attachment_items = vec![];
+
+    // Text attachments as XML to preserve source metadata.
+    if let Some(xml) = text_attachments_to_xml(&parts.attachments)? {
+        attachment_items.push(types::ContentItem::Text { text: xml });
+    }
+
+    // Binary attachments, each preceded by a label.
+    for attachment in &parts.attachments {
+        if let AttachmentContent::Binary { data, media_type } = &attachment.content {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(data);
+
+            attachment_items.push(types::ContentItem::Text {
+                text: format!("[Attached file: {}]", attachment.source),
+            });
+
+            if media_type.starts_with("image/") {
+                attachment_items.push(types::ContentItem::Image {
+                    detail: types::ImageDetail::Auto,
+                    file_id: None,
+                    image_url: Some(format!("data:{media_type};base64,{b64}")),
+                });
+            } else if media_type == "application/pdf" {
+                attachment_items.push(types::ContentItem::File {
+                    file_data: Some(format!("data:{media_type};base64,{b64}")),
+                    file_id: None,
+                    filename: Some(attachment.source.clone()),
+                });
+            } else {
+                warn!(
+                    source = %attachment.source,
+                    media_type,
+                    "Unsupported binary attachment media type for OpenAI, skipping."
+                );
+            }
+        }
+    }
+
+    if !attachment_items.is_empty() {
+        messages.push(types::InputListItem::Message(types::InputMessage {
+            role: types::Role::User,
+            content: types::ContentInput::List(attachment_items),
+        }));
+    }
+
+    messages.extend(convert_events(supports_reasoning)(parts.events));
     let request = Request {
         model: types::Model::Other(model.id.name.to_string()),
         input: types::Input::List(messages),

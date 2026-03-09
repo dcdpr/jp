@@ -78,6 +78,29 @@ pub enum Content {
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_control: Option<CacheControl>,
     },
+    #[serde(rename = "image_url")]
+    ImageUrl {
+        image_url: ImageUrlPayload,
+    },
+    File {
+        file: FilePayload,
+    },
+}
+
+/// Payload for a `file` content block (OpenRouter file input format).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FilePayload {
+    /// Original filename.
+    pub filename: String,
+    /// A URL or data-URI (`data:application/pdf;base64,...`).
+    pub file_data: String,
+}
+
+/// Payload for an `image_url` content block (OpenAI chat completions format).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImageUrlPayload {
+    /// A URL or data-URI (`data:image/png;base64,...`).
+    pub url: String,
 }
 
 impl Content {
@@ -88,9 +111,19 @@ impl Content {
         }
     }
 
+    /// Create an image content block from a data URI.
+    pub fn image_data_uri(data_uri: impl Into<String>) -> Self {
+        Self::ImageUrl {
+            image_url: ImageUrlPayload {
+                url: data_uri.into(),
+            },
+        }
+    }
+
     pub fn disable_cache(&mut self) {
         match self {
             Self::Text { cache_control, .. } => *cache_control = None,
+            Self::ImageUrl { .. } | Self::File { .. } => {}
         }
     }
 }

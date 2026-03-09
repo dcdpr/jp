@@ -81,7 +81,11 @@ impl Handler for Commands {
         "cmd"
     }
 
-    async fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn add(
+        &mut self,
+        uri: &Url,
+        _cwd: &Utf8Path,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.0.insert(uri_to_command(uri)?);
 
         Ok(())
@@ -125,14 +129,15 @@ impl Handler for Commands {
                 code: output.status.code().unwrap_or(0),
             };
 
-            attachments.push(Attachment {
-                source: std::iter::once(command.cmd.clone())
+            let mut attachment = Attachment::text(
+                std::iter::once(command.cmd.clone())
                     .chain(command.args.iter().cloned())
                     .collect::<Vec<_>>()
                     .join(" "),
-                content: output.try_to_xml()?,
-                description: command.description.clone(),
-            });
+                output.try_to_xml()?,
+            );
+            attachment.description = command.description.clone();
+            attachments.push(attachment);
         }
 
         Ok(attachments)
@@ -364,35 +369,21 @@ mod tests {
         let client = Client::new(IndexMap::default());
         let attachments = commands.get(path, client).await.unwrap();
         assert_eq!(attachments, vec![
-            Attachment {
-                source: "false".to_string(),
-                content: indoc::indoc! {"
+            Attachment::text("false", indoc::indoc! {"
                     <Output>
                       <code>1</code>
-                    </Output>"}
-                .to_owned(),
-                description: Some("Run false".to_owned()),
-            },
-            Attachment {
-                source: "ls".to_string(),
-                content: indoc::indoc! {"
+                    </Output>"},)
+            .with_description("Run false"),
+            Attachment::text("ls", indoc::indoc! {"
                     <Output>
                       <stdout>dir\nfile1\nfile2\n</stdout>
                       <code>0</code>
-                    </Output>"}
-                .to_owned(),
-                ..Default::default()
-            },
-            Attachment {
-                source: "ls -a".to_string(),
-                content: indoc::indoc! {"
+                    </Output>"},),
+            Attachment::text("ls -a", indoc::indoc! {"
                     <Output>
                       <stdout>.\n..\ndir\nfile1\nfile2\n</stdout>
                       <code>0</code>
-                    </Output>"}
-                .to_owned(),
-                ..Default::default()
-            },
+                    </Output>"},),
         ]);
     }
 }

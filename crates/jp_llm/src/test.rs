@@ -1,7 +1,8 @@
-use std::{panic, sync::Arc};
+use std::{panic, path::Path, sync::Arc};
 
 use chrono::{TimeZone as _, Utc};
 use futures::TryStreamExt as _;
+use jp_attachment::Attachment;
 use jp_config::{
     AppConfig, Config as _, PartialAppConfig, ToPartial as _,
     assistant::tool_choice::ToolChoice,
@@ -39,6 +40,9 @@ pub enum TestRequest {
         query: ChatQuery,
         #[expect(clippy::type_complexity)]
         assert: Arc<dyn Fn(&[Vec<Event>])>,
+        /// Runs after the turn completes, with the full conversation history.
+        #[expect(clippy::type_complexity)]
+        assert_history: Arc<dyn Fn(&[ConversationEventWithConfig])>,
     },
 
     /// List all models.
@@ -93,6 +97,7 @@ impl TestRequest {
                 tool_choice: ToolChoice::default(),
             },
             assert: Arc::new(|_| {}),
+            assert_history: Arc::new(|_| {}),
         }
     }
 
@@ -209,12 +214,35 @@ impl TestRequest {
         self
     }
 
+    /// Add an assertion that runs after this turn, with the full history.
+    pub fn assert_history(
+        mut self,
+        assert: impl Fn(&[ConversationEventWithConfig]) + 'static,
+    ) -> Self {
+        if let Self::Chat {
+            assert_history: a, ..
+        } = &mut self
+        {
+            *a = Arc::new(assert);
+        }
+
+        self
+    }
+
     #[expect(dead_code)]
     pub fn assert_models(mut self, assert: impl Fn(&[ModelDetails]) + 'static) -> Self {
         if let Self::Models { assert: a, .. } = &mut self {
             *a = Arc::new(assert);
         }
 
+        self
+    }
+
+    /// Add an attachment to the thread.
+    pub fn attachment(mut self, attachment: Attachment) -> Self {
+        if let Self::Chat { query, .. } = &mut self {
+            query.thread.attachments.push(attachment);
+        }
         self
     }
 
@@ -450,6 +478,7 @@ pub async fn run_chat_completion(
                         model,
                         query,
                         assert,
+                        assert_history,
                     } => {
                         let events: Vec<Event> = provider
                             .chat_completion_stream(&model, query)
@@ -515,6 +544,7 @@ pub async fn run_chat_completion(
                         }
 
                         assert(&all_events);
+                        assert_history(&history);
                     }
                     TestRequest::Models { assert } => {
                         let value = provider.models().await.unwrap();
@@ -555,6 +585,24 @@ pub async fn run_chat_completion(
     .await?;
 
     Ok(())
+}
+
+/// Load a test fixture file as a binary attachment.
+///
+/// The file is read from `crates/jp_llm/tests/fixtures/{path}` and its type
+/// is detected via `infer`.
+pub(crate) fn fixture_attachment(path: impl AsRef<Path>) -> Attachment {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let full = base.join(path.as_ref());
+    let data = std::fs::read(&full).unwrap_or_else(|e| {
+        panic!("Failed to read test fixture {}: {e}", full.display());
+    });
+
+    let kind =
+        infer::get(&data).unwrap_or_else(|| panic!("Could not detect type of {}", full.display()));
+    let media_type = kind.mime_type();
+
+    Attachment::binary(path.as_ref().display().to_string(), data, media_type)
 }
 
 pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {

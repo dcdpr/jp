@@ -9,7 +9,7 @@ use jp_conversation::event::ChatRequest;
 use jp_test::{Result, function_name};
 
 use super::*;
-use crate::test::{TestRequest, run_test, test_model_details};
+use crate::test::{TestRequest, fixture_attachment, run_test, test_model_details};
 
 macro_rules! test_all_providers {
         ($($fn:ident),* $(,)?) => {
@@ -156,6 +156,35 @@ async fn models(provider: ProviderId, test_name: &str) -> Result {
     run_test(provider, test_name, Some(request)).await
 }
 
+async fn image_attachment(provider: ProviderId, test_name: &str) -> Result {
+    let request = TestRequest::chat(provider)
+        .attachment(fixture_attachment("banana.jpg"))
+        .event(ChatRequest::from(
+            "What fruit is in this image? Answer with just the fruit name, nothing else.",
+        ))
+        .assert_history(|history| {
+            let response_text: String = history
+                .iter()
+                .filter_map(|e| e.event.as_chat_response())
+                .filter_map(|r| match r {
+                    jp_conversation::event::ChatResponse::Message { message } => {
+                        Some(message.as_str())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("")
+                .to_lowercase();
+
+            assert!(
+                response_text.contains("apple"),
+                "Expected the model to identify an apple, got: {response_text:?}"
+            );
+        });
+
+    run_test(provider, test_name, Some(request)).await
+}
+
 async fn structured_output(provider: ProviderId, test_name: &str) -> Result {
     let schema = crate::title::title_schema(1);
 
@@ -185,6 +214,7 @@ async fn multi_turn_conversation(provider: ProviderId, test_name: &str) -> Resul
 
 test_all_providers![
     chat_completion_stream,
+    image_attachment,
     tool_call_auto,
     tool_call_function,
     tool_call_reasoning,

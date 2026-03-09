@@ -97,7 +97,7 @@ pub(crate) async fn register_attachment(
     };
 
     handler
-        .add(uri)
+        .add(uri, ctx.workspace.root())
         .await
         .map_err(|e| Error::Attachment(e.to_string()))?;
 

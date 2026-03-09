@@ -11,9 +11,11 @@ use async_anthropic::{
 };
 use async_stream::try_stream;
 use async_trait::async_trait;
+use base64::Engine as _;
 use chrono::NaiveDate;
 use futures::{FutureExt as _, StreamExt as _, TryStreamExt as _, pin_mut, stream};
 use indexmap::IndexMap;
+use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
@@ -25,7 +27,6 @@ use jp_config::{
 use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest},
-    thread::SystemPart,
 };
 use serde_json::{Map, Value, json};
 use tracing::{debug, info, trace, warn};
@@ -420,7 +421,7 @@ fn create_request(
     beta: &BetaFeatures,
 ) -> Result<(types::CreateMessagesRequest, bool)> {
     let ChatQuery {
-        mut thread,
+        thread,
         tools,
         mut tool_choice,
     } = query;
@@ -442,29 +443,66 @@ fn create_request(
     let mut cache_budget = MAX_EXPLICIT_CACHE_CONTROL_COUNT;
     let config = thread.events.config()?;
 
-    // Extract attachments before into_parts() serializes them to XML. They'll
-    // be sent as native document blocks in the first user message.
-    let attachments = mem::take(&mut thread.attachments);
-    let thread_parts = thread.into_parts()?;
+    let thread_parts = thread.into_parts();
 
     // Build messages from conversation events, then prepend any attachments as
-    // document blocks to the first user message.
+    // native content blocks in the first user message.
     let mut messages = convert_events(thread_parts.events);
 
-    if !attachments.is_empty() {
-        let mut doc_blocks: Vec<_> = attachments
+    if !thread_parts.attachments.is_empty() {
+        let mut doc_blocks: Vec<_> = thread_parts
+            .attachments
             .into_iter()
-            .map(|attachment| {
-                types::MessageContent::Document(types::Document {
-                    source: types::DocumentSource::Text {
-                        media_type: types::PlainTextMediaType::default(),
-                        data: attachment.content,
-                    },
-                    title: Some(attachment.source),
-                    context: attachment.description,
-                    citations: None,
-                    cache_control: None,
-                })
+            .filter_map(|attachment| match attachment.content {
+                AttachmentContent::Text(text) => {
+                    Some(types::MessageContent::Document(types::Document {
+                        source: types::DocumentSource::Text {
+                            media_type: types::PlainTextMediaType::default(),
+                            data: text,
+                        },
+                        title: Some(attachment.source),
+                        context: attachment.description,
+                        citations: None,
+                        cache_control: None,
+                    }))
+                }
+                AttachmentContent::Binary { data, media_type } => {
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                    let source = if media_type == "application/pdf" {
+                        types::DocumentSource::Base64 {
+                            data: b64,
+                            media_type: types::PdfMediaType::default(),
+                        }
+                    } else if let Some(image_mt) = to_anthropic_image_media_type(&media_type) {
+                        types::DocumentSource::Content {
+                            content: types::DocumentSourceContent::Blocks(vec![
+                                types::ContentBlockSourceContent::Image {
+                                    source: types::ImageSource::Base64 {
+                                        data: b64,
+                                        media_type: image_mt,
+                                    },
+                                    cache_control: None,
+                                },
+                            ]),
+                        }
+                    } else {
+                        warn!(
+                            source = %attachment.source,
+                            media_type,
+                            "Unsupported binary attachment media type for Anthropic, skipping."
+                        );
+
+                        return None;
+                    };
+
+                    Some(types::MessageContent::Document(types::Document {
+                        source,
+                        title: Some(attachment.source),
+                        context: attachment.description,
+                        citations: None,
+                        cache_control: None,
+                    }))
+                }
             })
             .collect();
 
@@ -504,16 +542,13 @@ fn create_request(
     // - Last system Prompt block (captures system prompt + all sections)
     // - Last document block in first user message (attachments)
     // - Last tool definition (extends through tools)
-    let last_prompt_idx = thread_parts
-        .system_parts
-        .iter()
-        .rposition(SystemPart::is_prompt);
+    let last_prompt_idx = thread_parts.system_parts.len().checked_sub(1);
 
     let mut system_content: Vec<types::SystemContent> = thread_parts
         .system_parts
         .into_iter()
         .enumerate()
-        .map(|(i, part)| {
+        .map(|(i, text)| {
             let cache_control = if Some(i) == last_prompt_idx && cache_budget > 0 {
                 cache_budget -= 1;
                 Some(types::CacheControl::default())
@@ -522,7 +557,7 @@ fn create_request(
             };
 
             types::SystemContent::Text(types::Text {
-                text: part.into_inner(),
+                text,
                 cache_control,
             })
         })
@@ -1033,6 +1068,17 @@ fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
     }
 
     out
+}
+
+/// Map a MIME type string to Anthropic's `ImageMediaType` enum.
+fn to_anthropic_image_media_type(media_type: &str) -> Option<types::ImageMediaType> {
+    match media_type {
+        "image/jpeg" => Some(types::ImageMediaType::Jpeg),
+        "image/png" => Some(types::ImageMediaType::Png),
+        "image/gif" => Some(types::ImageMediaType::Gif),
+        "image/webp" => Some(types::ImageMediaType::Webp),
+        _ => None,
+    }
 }
 
 fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {

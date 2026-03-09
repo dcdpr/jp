@@ -110,8 +110,8 @@ pub struct Thread {
 
     /// The sections to include after the system prompt.
     ///
-    /// Each section is rendered via [`SectionConfig::render()`] before
-    /// being sent to the provider.
+    /// Each section is rendered via [`SectionConfig::render()`] before being
+    /// sent to the provider.
     pub sections: Vec<SectionConfig>,
 
     /// The attachments to use.
@@ -121,67 +121,36 @@ pub struct Thread {
     pub events: ConversationStream,
 }
 
-/// A rendered piece of system content, tagged by origin.
-///
-/// Providers that need to apply per-part cache control (e.g. Anthropic,
-/// OpenRouter) can match on the variant to decide cache placement. Providers
-/// that don't care can call [`into_inner()`](SystemPart::into_inner) to get the
-/// plain string.
-#[derive(Debug, Clone)]
-pub enum SystemPart {
-    /// A prompt or section string (system prompt, instructions, context).
-    Prompt(String),
-
-    /// Rendered attachment XML.
-    Attachment(String),
-}
-
-impl SystemPart {
-    /// Consume the part and return the inner string.
-    #[must_use]
-    pub fn into_inner(self) -> String {
-        match self {
-            Self::Prompt(s) | Self::Attachment(s) => s,
-        }
-    }
-
-    /// Returns whether the part is a prompt.
-    #[must_use]
-    pub const fn is_prompt(&self) -> bool {
-        matches!(self, Self::Prompt(_))
-    }
-
-    /// Returns whether the part is an attachment.
-    #[must_use]
-    pub const fn is_attachment(&self) -> bool {
-        matches!(self, Self::Attachment(_))
-    }
-}
-
 /// The decomposed parts of a [`Thread`], ready for provider consumption.
 ///
-/// System content (prompt, sections, attachments) is rendered to tagged
-/// [`SystemPart`]s. Conversation events are filtered to exclude internal types
-/// that providers should never see.
+/// System content (prompt, sections) is rendered to strings. Attachments are
+/// passed through as-is so that each provider can convert them to its native
+/// format. Conversation events are filtered to exclude internal types that
+/// providers should never see.
 pub struct ThreadParts {
-    /// Rendered system content, tagged by origin.
-    pub system_parts: Vec<SystemPart>,
+    /// Rendered system content (prompt + sections).
+    pub system_parts: Vec<String>,
+
+    /// Raw attachments for providers to handle natively.
+    pub attachments: Vec<Attachment>,
 
     /// Conversation events filtered to provider-visible events only.
     pub events: ConversationStream,
 }
 
 impl Thread {
-    /// Decompose the thread into rendered system parts and filtered events.
+    /// Decompose the thread into rendered system parts, raw attachments, and
+    /// filtered events.
     ///
-    /// System prompt, sections, and attachments are rendered to strings. Events
-    /// are filtered via `EventKind::is_provider_visible()` to exclude internal
-    /// types.
+    /// System prompt and sections are rendered to strings. Attachments are
+    /// passed through unconverted — each provider is responsible for converting
+    /// them to its native format (e.g. Anthropic document blocks, Gemini inline
+    /// data, or XML for providers without native support).
     ///
-    /// # Errors
-    ///
-    /// Returns an error if attachment XML serialization fails.
-    pub fn into_parts(self) -> Result<ThreadParts> {
+    /// Events are filtered via `EventKind::is_provider_visible()` to exclude
+    /// internal types.
+    #[must_use]
+    pub fn into_parts(self) -> ThreadParts {
         let Self {
             system_prompt,
             sections,
@@ -192,65 +161,54 @@ impl Thread {
         let mut system_parts = vec![];
 
         if let Some(system_prompt) = system_prompt {
-            system_parts.push(SystemPart::Prompt(system_prompt));
+            system_parts.push(system_prompt);
         }
 
         for section in &sections {
-            system_parts.push(SystemPart::Prompt(section.render()));
-        }
-
-        if !attachments.is_empty() {
-            let documents: Documents = attachments
-                .into_iter()
-                .enumerate()
-                .inspect(|(i, attachment)| trace!("Attaching {}: {}", i, attachment.source))
-                .map(Document::from)
-                .collect::<Vec<_>>()
-                .into();
-
-            system_parts.push(SystemPart::Attachment(documents.try_to_xml()?));
+            system_parts.push(section.render());
         }
 
         events.retain(|e| e.kind.is_provider_visible());
 
-        Ok(ThreadParts {
+        ThreadParts {
             system_parts,
+            attachments,
             events,
+        }
+    }
+}
+
+/// Serialize text attachments to an XML `<documents>` block.
+///
+/// Binary attachments are silently skipped. Callers that support binary
+/// content should handle those separately via the raw attachments.
+///
+/// # Errors
+///
+/// Returns an error if XML serialization fails.
+pub fn text_attachments_to_xml(attachments: &[Attachment]) -> Result<Option<String>> {
+    let docs: Vec<Document> = attachments
+        .iter()
+        .enumerate()
+        .filter_map(|(i, attachment)| {
+            let text = attachment.as_text()?;
+
+            trace!("Attaching {i}: {}", attachment.source);
+
+            Some(Document {
+                index: i,
+                source: attachment.source.clone(),
+                content: text.to_owned(),
+            })
         })
+        .collect();
+
+    if docs.is_empty() {
+        return Ok(None);
     }
 
-    /// Convert the thread into a list of messages.
-    ///
-    /// Delegates to [`into_parts()`](Self::into_parts) for system content
-    /// rendering and event filtering, then applies the provider-specific
-    /// conversion closures.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if XML serialization fails.
-    pub fn into_messages<T, U, M, S>(
-        self,
-        to_system_messages: M,
-        convert_stream: S,
-    ) -> Result<Vec<T>>
-    where
-        U: IntoIterator<Item = T>,
-        M: Fn(Vec<String>) -> U,
-        S: Fn(ConversationStream) -> Vec<T>,
-    {
-        let parts = self.into_parts()?;
-        let strings: Vec<String> = parts
-            .system_parts
-            .into_iter()
-            .map(SystemPart::into_inner)
-            .collect();
-
-        let mut items = vec![];
-        items.extend(to_system_messages(strings));
-        items.extend(convert_stream(parts.events));
-
-        Ok(items)
-    }
+    let documents = Documents { documents: docs };
+    documents.try_to_xml().map(Some)
 }
 
 /// Structure for document collection
@@ -300,20 +258,4 @@ pub struct Document {
 
     /// The content of the document.
     content: String,
-}
-
-impl From<(usize, Attachment)> for Document {
-    fn from((index, attachment): (usize, Attachment)) -> Self {
-        Self {
-            index,
-            source: attachment.source,
-            content: attachment.content,
-        }
-    }
-}
-
-impl From<Vec<Document>> for Documents {
-    fn from(documents: Vec<Document>) -> Self {
-        Self { documents }
-    }
 }

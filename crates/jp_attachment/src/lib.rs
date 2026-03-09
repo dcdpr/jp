@@ -27,7 +27,7 @@ pub fn find_handler_by_scheme(scheme: &str) -> Option<BoxedHandler> {
 }
 
 /// A piece of data that can be attached to a conversation.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Attachment {
     /// The source of the attachment, such as a URL or file path.
     pub source: String,
@@ -36,10 +36,73 @@ pub struct Attachment {
     pub description: Option<String>,
 
     /// The content of the attachment.
-    ///
-    /// This can be the content as-is, or a JSON or XML representation of any
-    /// structured data that is relevant to the attachment.
-    pub content: String,
+    pub content: AttachmentContent,
+}
+
+impl Attachment {
+    /// Create a text attachment.
+    pub fn text(source: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            source: source.into(),
+            description: None,
+            content: AttachmentContent::Text(content.into()),
+        }
+    }
+
+    /// Create a binary attachment with the given MIME type.
+    pub fn binary(source: impl Into<String>, data: Vec<u8>, media_type: impl Into<String>) -> Self {
+        Self {
+            source: source.into(),
+            description: None,
+            content: AttachmentContent::Binary {
+                data,
+                media_type: media_type.into(),
+            },
+        }
+    }
+
+    /// Set the description of the attachment.
+    #[must_use]
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Returns `true` if this attachment contains text content.
+    #[must_use]
+    pub const fn is_text(&self) -> bool {
+        matches!(self.content, AttachmentContent::Text(_))
+    }
+
+    /// Returns `true` if this attachment contains binary content.
+    #[must_use]
+    pub const fn is_binary(&self) -> bool {
+        matches!(self.content, AttachmentContent::Binary { .. })
+    }
+
+    /// Returns the text content, if this is a text attachment.
+    #[must_use]
+    pub fn as_text(&self) -> Option<&str> {
+        match &self.content {
+            AttachmentContent::Text(s) => Some(s),
+            AttachmentContent::Binary { .. } => None,
+        }
+    }
+}
+
+/// The content of an attachment, either UTF-8 text or binary data.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AttachmentContent {
+    /// UTF-8 text content (source code, markdown, config files, etc.)
+    Text(String),
+
+    /// Binary content with a MIME type (images, PDFs, etc.)
+    Binary {
+        /// The raw bytes.
+        data: Vec<u8>,
+        /// MIME type, e.g. `"image/png"`, `"application/pdf"`.
+        media_type: String,
+    },
 }
 
 /// A trait for handling attachments.
@@ -60,7 +123,11 @@ pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     fn scheme(&self) -> &'static str;
 
     /// Add a new attachment, using the given URL.
-    async fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>>;
+    ///
+    /// The `cwd` parameter is the current working directory, used by handlers
+    /// that need to resolve relative paths for validation (e.g. checking file
+    /// existence or size).
+    async fn add(&mut self, uri: &Url, cwd: &Utf8Path) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     /// Remove an attachment, using the given URL.
     async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>>;

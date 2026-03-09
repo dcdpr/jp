@@ -108,7 +108,11 @@ impl Handler for BearNotes {
         "bear"
     }
 
-    async fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn add(
+        &mut self,
+        uri: &Url,
+        _cwd: &Utf8Path,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.0.insert(uri_to_query(uri)?);
 
         Ok(())
@@ -141,11 +145,13 @@ impl Handler for BearNotes {
         let mut attachments = vec![];
         for query in &self.0 {
             for note in get_notes(query, &conn)? {
-                attachments.push(Attachment {
-                    source: format!("{}://get/{}", self.scheme(), &note.id),
-                    content: note.try_to_xml()?,
-                    description: Some("A note from the Bear note-taking app.".to_owned()),
-                });
+                attachments.push(
+                    Attachment::text(
+                        format!("{}://get/{}", self.scheme(), &note.id),
+                        note.try_to_xml()?,
+                    )
+                    .with_description("A note from the Bear note-taking app."),
+                );
             }
         }
 
