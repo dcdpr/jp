@@ -22,10 +22,6 @@
     rustdoc::all,
     unused_doc_comments
 )]
-#![expect(
-    clippy::multiple_crate_versions,
-    reason = "we need to update rmcp to update base64"
-)]
 
 pub mod conversation;
 pub mod error;

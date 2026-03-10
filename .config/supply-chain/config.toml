@@ -46,12 +46,6 @@ audit-as-crates-io = true
 [policy.openai_responses]
 audit-as-crates-io = true
 
-[policy.rmcp]
-audit-as-crates-io = true
-
-[policy.rmcp-macros]
-audit-as-crates-io = true
-
 [policy.saphyr]
 audit-as-crates-io = true
 
@@ -531,14 +525,6 @@ criteria = "safe-to-deploy"
 version = "0.17.14"
 criteria = "safe-to-deploy"
 
-[[exemptions.rmcp]]
-version = "0.1.5@git:18346b94e4e71463a06d93852cfc26c683ca5b83"
-criteria = "safe-to-deploy"
-
-[[exemptions.rmcp-macros]]
-version = "0.1.5@git:18346b94e4e71463a06d93852cfc26c683ca5b83"
-criteria = "safe-to-deploy"
-
 [[exemptions.rusqlite]]
 version = "0.37.0"
 criteria = "safe-to-deploy"
@@ -573,14 +559,6 @@ criteria = "safe-to-run"
 
 [[exemptions.schannel]]
 version = "0.1.28"
-criteria = "safe-to-deploy"
-
-[[exemptions.schemars]]
-version = "0.8.22"
-criteria = "safe-to-deploy"
-
-[[exemptions.schemars_derive]]
-version = "0.8.22"
 criteria = "safe-to-deploy"
 
 [[exemptions.schemars_derive]]

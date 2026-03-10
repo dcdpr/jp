@@ -7,7 +7,11 @@ doc-valid-idents = ["OpenAI", "OpenRouter", "CommonMark", "LlamaCPP", ".."]
 allow-unwrap-in-tests = true
 allow-print-in-tests = true
 allowed-duplicate-crates = [
+    "windows-core",
+    "windows-implement",
+    "windows-interface",
     "windows-link",
+    "windows-result",
     "windows-targets",
     "windows_aarch64_gnullvm",
     "windows_aarch64_msvc",

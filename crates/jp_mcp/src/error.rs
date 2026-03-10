@@ -9,9 +9,6 @@ pub enum Error {
     #[error("Service error: {0}")]
     Service(#[from] rmcp::ServiceError),
 
-    #[error("MCP error: {0}")]
-    Mcp(#[from] rmcp::Error),
-
     #[error("Timeout error: {0}")]
     Timeout(#[from] tokio::time::error::Elapsed),
 
@@ -45,12 +42,8 @@ pub enum Error {
         error: std::io::Error,
     },
 
-    #[error("Process error: {cmd}, error: {error}")]
-    ProcessError {
-        cmd: String,
-        #[source]
-        error: std::io::Error,
-    },
+    #[error("Server initialization error: {cmd}, error: {error}")]
+    InitializeError { cmd: String, error: String },
 
     #[error("Cannot read file: {path}, error: {error}")]
     CannotReadFile {
