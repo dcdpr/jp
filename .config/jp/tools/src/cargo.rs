@@ -17,7 +17,15 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     match t.name.trim_start_matches("cargo_") {
         "check" => cargo_check(&ctx, t.opt("package")?).await,
         "expand" => cargo_expand(&ctx, t.req("item")?, t.opt("package")?).await,
-        "test" => cargo_test(&ctx, t.opt("package")?, t.opt("testname")?).await,
+        "test" => {
+            cargo_test(
+                &ctx,
+                t.opt("package")?,
+                t.opt("testname")?,
+                t.opt("backtrace")?,
+            )
+            .await
+        }
         "format" => cargo_format(&ctx, t.opt("package")?).await,
         _ => unknown_tool(t),
     }

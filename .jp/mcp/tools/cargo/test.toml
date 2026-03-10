@@ -34,3 +34,7 @@ type = "string"
 [conversation.tools.cargo_test.parameters.testname]
 summary = "If specified, only run tests containing this string in their names."
 type = "string"
+
+[conversation.tools.cargo_test.parameters.backtrace]
+summary = "If true, include Rust backtraces in test failure output. Defaults to false."
+type = "boolean"
