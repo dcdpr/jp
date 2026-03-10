@@ -31,10 +31,20 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.35.0 -> 0.36.0"
 
+[[audits.nix]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.15.0"
+
 [[audits.ollama-rs]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.3 -> 0.3.4"
+
+[[audits.process-wrap]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "9.0.0"
 
 [[audits.quick-xml]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -50,6 +60,11 @@ delta = "0.3.0 -> 0.4.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.0 -> 0.4.0"
+
+[[audits.rmcp]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "1.1.1"
 
 [[audits.rsqlite-vfs]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -907,11 +922,23 @@ user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2021-01-15"
 end = "2027-02-13"
 
+[[trusted.windows-collections]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2025-02-06"
+end = "2027-03-10"
+
 [[trusted.windows-core]]
 criteria = "safe-to-deploy"
 user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2021-11-15"
 end = "2027-02-13"
+
+[[trusted.windows-future]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2025-02-10"
+end = "2027-03-10"
 
 [[trusted.windows-implement]]
 criteria = "safe-to-deploy"
@@ -925,11 +952,23 @@ user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2022-02-18"
 end = "2027-02-13"
 
+[[trusted.windows-numerics]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2023-05-15"
+end = "2027-03-10"
+
 [[trusted.windows-result]]
 criteria = "safe-to-deploy"
 user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2024-02-02"
 end = "2027-02-13"
+
+[[trusted.windows-strings]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2024-02-02"
+end = "2027-03-10"
 
 [[trusted.windows-sys]]
 criteria = "safe-to-deploy"
@@ -942,6 +981,12 @@ criteria = "safe-to-deploy"
 user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2022-09-09"
 end = "2027-02-13"
+
+[[trusted.windows-threading]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2025-04-29"
+end = "2027-03-10"
 
 [[trusted.windows_aarch64_gnullvm]]
 criteria = "safe-to-deploy"

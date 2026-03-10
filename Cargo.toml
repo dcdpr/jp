@@ -63,9 +63,9 @@ grep-searcher = { version = "0.1", default-features = false }
 httpmock = { git = "https://github.com/JeanMertz/httpmock", branch = "tweaks", default-features = false }
 humantime = { version = "2", default-features = false }
 ignore = { version = "0.4", default-features = false }
-infer = { version = "0.19", default-features = false }
 indexmap = { version = "2", default-features = false }
 indoc = { version = "2", default-features = false }
+infer = { version = "0.19", default-features = false }
 inquire = { git = "https://github.com/JeanMertz/inquire", branch = "merged", default-features = false } # <https://github.com/mikaelmello/inquire/pull/321>
 insta = { version = "1", default-features = false }
 linkme = { version = "0.3", default-features = false }
@@ -83,7 +83,7 @@ rayon = { version = "1", default-features = false }
 relative-path = { version = "2", default-features = false }
 reqwest = { version = "0.12", default-features = false }
 reqwest-eventsource = { version = "0.6", default-features = false }
-rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", rev = "18346b94e4e71463a06d93852cfc26c683ca5b83" }
+rmcp = { version = "1.1", default-features = false }
 rusqlite = { version = "0.38", default-features = false }
 saphyr = { git = "https://github.com/JeanMertz/saphyr", branch = "jean/fix-multinewline-endings", default-features = false } # <https://github.com/saphyr-rs/saphyr/pull/90>
 schemars = { version = "1.0.0-alpha.17", default-features = false }

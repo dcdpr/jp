@@ -11,8 +11,8 @@ use indexmap::IndexMap;
 use jp_config::providers::mcp::{AlgorithmConfig, McpProviderConfig};
 use rmcp::{
     model::{
-        CallToolRequestParam, CallToolResult, ReadResourceRequestParam, Resource, ResourceContents,
-        Tool,
+        CallToolRequestParams, CallToolResult, ReadResourceRequestParams, Resource,
+        ResourceContents, Tool,
     },
     service::{RoleClient, RunningService, ServiceExt},
     transport::TokioChildProcess,
@@ -135,12 +135,12 @@ impl Client {
                 continue;
             }
 
+            let mut call_params = CallToolRequestParams::new(tool_name.to_owned());
+            call_params.arguments = params.as_object().cloned();
+
             return client
                 .peer()
-                .call_tool(CallToolRequestParam {
-                    name: tool_name.to_owned().into(),
-                    arguments: params.as_object().cloned(),
-                })
+                .call_tool(call_params)
                 .await
                 .map_err(Into::into);
         }
@@ -174,7 +174,7 @@ impl Client {
 
         Ok(client
             .peer()
-            .read_resource(ReadResourceRequestParam { uri: uri.into() })
+            .read_resource(ReadResourceRequestParams::new(uri))
             .await?
             .contents)
     }
@@ -264,7 +264,6 @@ impl Client {
 
                 // Create command
                 let mut cmd = Command::new(&config.command);
-                cmd.stderr(Stdio::null());
                 cmd.args(&config.arguments);
 
                 // Add environment variables
@@ -273,12 +272,14 @@ impl Client {
                 }
 
                 // Create the child process transport
-                let child_process = TokioChildProcess::new(&mut cmd).map_err(|error| {
-                    Error::CannotSpawnProcess {
-                        cmd: cmd.as_std().get_program().to_string_lossy().to_string(),
+                let cmd_name = cmd.as_std().get_program().to_string_lossy().to_string();
+                let (child_process, _stderr) = TokioChildProcess::builder(cmd)
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|error| Error::CannotSpawnProcess {
+                        cmd: cmd_name.clone(),
                         error,
-                    }
-                })?;
+                    })?;
 
                 // Create a timeout for the connection
                 let timeout = Duration::from_mins(1);
@@ -286,9 +287,9 @@ impl Client {
                 // Serve the client with timeout
                 let client = tokio::time::timeout(timeout, async { ().serve(child_process).await })
                     .await?
-                    .map_err(|error| Error::ProcessError {
-                        cmd: cmd.as_std().get_program().to_string_lossy().to_string(),
-                        error,
+                    .map_err(|error| Error::InitializeError {
+                        cmd: cmd_name,
+                        error: error.to_string(),
                     })?;
 
                 Ok(client)
