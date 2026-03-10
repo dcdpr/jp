@@ -168,26 +168,38 @@ impl Workspace {
         );
 
         let conversation_ids = storage.load_all_conversation_ids();
-        let active_conversation = match storage
-            .load_conversation_metadata(&metadata.active_conversation_id)
-        {
-            Ok(conversation) => conversation,
-            // If the active conversation cannot be found on disk, we try to
-            // load the last known conversation on disk, and if that fails, we
-            // return an error.
-            Err(error) if error.kind().is_missing() => {
-                let last_conversation_id = conversation_ids.last().copied();
-                warn!(
-                    %error,
-                    missing_id = %metadata.active_conversation_id,
-                    new_id = %last_conversation_id.as_ref().map(ToString::to_string).unwrap_or_default(),
-                    "Failed to load active conversation, falling back to last stored conversation."
-                );
 
-                metadata.active_conversation_id = last_conversation_id.ok_or(error)?;
-                storage.load_conversation_metadata(&metadata.active_conversation_id)?
+        let mut all_ids = std::iter::once(metadata.active_conversation_id)
+            .chain(conversation_ids.iter().rev().copied())
+            .peekable();
+        let mut active_conversation = None;
+        while let Some(id) = all_ids.next() {
+            metadata.active_conversation_id = id;
+
+            match storage.load_conversation_metadata(&metadata.active_conversation_id) {
+                Ok(conversation) => {
+                    active_conversation = Some(conversation);
+                    break;
+                }
+
+                // If the active conversation cannot be found on disk, we try to
+                // load the last known conversation on disk, and if that fails,
+                // we return an error.
+                Err(error) if error.kind().is_missing() => {
+                    warn!(
+                        %error,
+                        missing_id = %metadata.active_conversation_id,
+                        new_id = %all_ids.peek().map(ToString::to_string).unwrap_or_default(),
+                        "Failed to load active conversation, trying to fall back to last stored conversation."
+                    );
+                }
+
+                Err(error) => return Err(error.into()),
             }
-            Err(error) => return Err(error.into()),
+        }
+
+        let Some(active_conversation) = active_conversation else {
+            return Err(Error::NotFound("Conversation", String::new()));
         };
 
         let conversations = conversation_ids
