@@ -267,6 +267,184 @@ fn inquiry_response_accepted_when_request_exists() {
 }
 
 #[test]
+fn same_tool_call_id_across_turns_is_allowed() {
+    let mut stream = ConversationStream::new_test();
+
+    // Turn 1: request + response with id "tc1"
+    stream.start_turn("first query");
+    stream
+        .current_turn_mut()
+        .add_tool_call_request(ToolCallRequest {
+            id: "tc1".into(),
+            name: "read_file".into(),
+            arguments: Map::new(),
+        })
+        .add_tool_call_response(ToolCallResponse {
+            id: "tc1".into(),
+            result: Ok("contents".into()),
+        })
+        .build()
+        .unwrap();
+
+    // Turn 2: reuse the same id "tc1" (as Google does with synthetic IDs)
+    stream.start_turn("second query");
+    stream
+        .current_turn_mut()
+        .add_tool_call_request(ToolCallRequest {
+            id: "tc1".into(),
+            name: "read_file".into(),
+            arguments: Map::new(),
+        })
+        .add_tool_call_response(ToolCallResponse {
+            id: "tc1".into(),
+            result: Ok("other contents".into()),
+        })
+        .build()
+        .unwrap();
+
+    // 2 turns x (TurnStart + ChatRequest + ToolCallRequest + ToolCallResponse)
+    assert_eq!(stream.len(), 8);
+}
+
+#[test]
+fn response_from_previous_turn_does_not_satisfy_current_turn() {
+    let mut stream = ConversationStream::new_test();
+
+    // Turn 1: request + response with id "tc1"
+    stream.start_turn("first query");
+    stream
+        .current_turn_mut()
+        .add_tool_call_request(ToolCallRequest {
+            id: "tc1".into(),
+            name: "tool".into(),
+            arguments: Map::new(),
+        })
+        .add_tool_call_response(ToolCallResponse {
+            id: "tc1".into(),
+            result: Ok("done".into()),
+        })
+        .build()
+        .unwrap();
+
+    // Turn 2: try to push a response for "tc1" without a request in this turn.
+    // The request from turn 1 should NOT satisfy the orphan check.
+    stream.start_turn("second query");
+    let result = stream
+        .current_turn_mut()
+        .add_tool_call_response(ToolCallResponse {
+            id: "tc1".into(),
+            result: Ok("orphan".into()),
+        })
+        .build();
+
+    assert!(matches!(
+        result,
+        Err(StreamError::OrphanedToolCallResponse { ref id }) if id == "tc1"
+    ));
+}
+
+#[test]
+fn same_tool_call_id_reused_within_turn_across_cycles() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("stage my changes");
+
+    // Cycle 1: request + response with id "tc1"
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("Let me check..."))
+        .add_tool_call_request(ToolCallRequest {
+            id: "tc1".into(),
+            name: "git_list_patches".into(),
+            arguments: Map::new(),
+        })
+        .build()
+        .unwrap();
+
+    stream
+        .current_turn_mut()
+        .add_tool_call_response(ToolCallResponse {
+            id: "tc1".into(),
+            result: Ok("patches for first set".into()),
+        })
+        .build()
+        .unwrap();
+
+    // Cycle 2: Google Gemini reuses the same id "tc1"
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("Now checking more files..."))
+        .add_tool_call_request(ToolCallRequest {
+            id: "tc1".into(),
+            name: "git_list_patches".into(),
+            arguments: Map::new(),
+        })
+        .build()
+        .unwrap();
+
+    // This must not panic or return DuplicateToolCallResponse.
+    stream
+        .current_turn_mut()
+        .add_tool_call_response(ToolCallResponse {
+            id: "tc1".into(),
+            result: Ok("patches for second set".into()),
+        })
+        .build()
+        .unwrap();
+
+    // TurnStart + ChatRequest + 2*(ChatResponse + ToolCallRequest + ToolCallResponse)
+    assert_eq!(stream.len(), 8);
+}
+
+#[test]
+fn reused_id_still_rejects_excess_responses() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("hello");
+
+    // 2 requests + 2 responses for the same id
+    stream
+        .current_turn_mut()
+        .add_tool_call_request(ToolCallRequest {
+            id: "tc1".into(),
+            name: "tool".into(),
+            arguments: Map::new(),
+        })
+        .add_tool_call_response(ToolCallResponse {
+            id: "tc1".into(),
+            result: Ok("first".into()),
+        })
+        .build()
+        .unwrap();
+
+    stream
+        .current_turn_mut()
+        .add_tool_call_request(ToolCallRequest {
+            id: "tc1".into(),
+            name: "tool".into(),
+            arguments: Map::new(),
+        })
+        .add_tool_call_response(ToolCallResponse {
+            id: "tc1".into(),
+            result: Ok("second".into()),
+        })
+        .build()
+        .unwrap();
+
+    // A third response without a third request should still fail.
+    let result = stream
+        .current_turn_mut()
+        .add_tool_call_response(ToolCallResponse {
+            id: "tc1".into(),
+            result: Ok("third".into()),
+        })
+        .build();
+
+    assert!(matches!(
+        result,
+        Err(StreamError::DuplicateToolCallResponse { ref id }) if id == "tc1"
+    ));
+}
+
+#[test]
 fn duplicate_inquiry_response_rejected() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn("hello");
