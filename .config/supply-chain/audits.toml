@@ -11,6 +11,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.49.0 -> 0.50.0"
 
+[[audits.datetime_literal]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.1.3"
+
 [[audits.fancy-regex]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"

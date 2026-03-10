@@ -685,8 +685,12 @@ mod tests {
     use std::{collections::HashMap, fs, time::Duration};
 
     use camino_tempfile::tempdir;
-    use chrono::TimeZone as _;
-    use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
+    use datetime_literal::datetime;
+    use jp_conversation::ConversationsMetadata;
+    use jp_storage::{
+        CONVERSATIONS_DIR, METADATA_FILE,
+        value::{read_json, write_json},
+    };
     use test_log::test;
 
     use super::*;
@@ -914,6 +918,110 @@ mod tests {
     }
 
     #[test]
+    fn test_load_falls_back_when_active_conversation_missing() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let storage = root.join("storage");
+
+        let id1 = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+        let id2 = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
+        let id3 = ConversationId::try_from(datetime!(2024-01-03 00:00:00 Z)).unwrap();
+
+        fs::create_dir_all(&storage).unwrap();
+        write_conversation_to_disk(&storage, &id2, &Conversation::default());
+        write_conversation_to_disk(&storage, &id3, &Conversation::default());
+
+        // Point metadata at a conversation that doesn't exist on disk.
+        write_conversations_metadata_to_disk(&storage, &id1);
+
+        let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
+        workspace.disable_persistence();
+        workspace.load().unwrap();
+
+        // Should fall back to the last conversation.
+        assert_eq!(workspace.active_conversation_id(), id3);
+    }
+
+    #[test]
+    fn test_load_falls_back_when_active_is_also_last_conversation() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let storage = root.join("storage");
+
+        let id1 = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+        let id2 = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
+        let id3 = ConversationId::try_from(datetime!(2024-01-03 00:00:00 Z)).unwrap();
+
+        fs::create_dir_all(&storage).unwrap();
+        write_conversation_to_disk(&storage, &id1, &Conversation::default());
+        write_conversation_to_disk(&storage, &id2, &Conversation::default());
+
+        // id3 has a directory on disk (so it shows up in conversation_ids) but
+        // it contains no metadata.json, so loading it will fail.
+        let id3_dir = storage.join(CONVERSATIONS_DIR).join(id3.to_dirname(None));
+        fs::create_dir_all(&id3_dir).unwrap();
+
+        // Point metadata at id3, which exists as a directory but has no
+        // metadata.json, so loading it will fail.
+        write_conversations_metadata_to_disk(&storage, &id3);
+
+        let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
+        workspace.disable_persistence();
+        workspace.load().unwrap();
+
+        // Should skip id3 (missing metadata), then try id2 (valid).
+        assert_eq!(workspace.active_conversation_id(), id2);
+    }
+
+    #[test]
+    fn test_load_fails_when_no_conversations_exist() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let storage = root.join("storage");
+
+        let missing_id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+
+        fs::create_dir_all(&storage).unwrap();
+        write_conversations_metadata_to_disk(&storage, &missing_id);
+
+        let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
+        workspace.disable_persistence();
+
+        let err = workspace.load().unwrap_err();
+        assert_eq!(err, Error::NotFound("Conversation", String::new()));
+    }
+
+    #[test]
+    fn test_load_skips_multiple_missing_conversations() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let storage = root.join("storage");
+
+        let id1 = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+        let id2 = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
+        let id3 = ConversationId::try_from(datetime!(2024-01-03 00:00:00 Z)).unwrap();
+        let id4 = ConversationId::try_from(datetime!(2024-01-04 00:00:00 Z)).unwrap();
+
+        fs::create_dir_all(&storage).unwrap();
+        // Only id1 is valid; id2, id3, id4 are directories without metadata.
+        write_conversation_to_disk(&storage, &id1, &Conversation::default());
+        for id in [&id2, &id3, &id4] {
+            let dir = storage.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+            fs::create_dir_all(&dir).unwrap();
+        }
+
+        // Point at id4 (missing metadata), reverse iteration: id4, id3, id2
+        // should all be skipped, landing on id1.
+        write_conversations_metadata_to_disk(&storage, &id4);
+
+        let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
+        workspace.disable_persistence();
+        workspace.load().unwrap();
+
+        assert_eq!(workspace.active_conversation_id(), id1);
+    }
+
+    #[test]
     fn test_workspace_persist_active_conversation() {
         let tmp = tempdir().unwrap();
         let root = tmp.path().join("root");
@@ -922,10 +1030,8 @@ mod tests {
         let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
         let config = Arc::new(AppConfig::new_test());
 
-        let id1 =
-            ConversationId::try_from(Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap()).unwrap();
-        let id2 =
-            ConversationId::try_from(Utc.with_ymd_and_hms(2023, 1, 2, 0, 0, 0).unwrap()).unwrap();
+        let id1 = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+        let id2 = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
 
         workspace.create_conversation_with_id(id1, Conversation::default(), config.clone());
         workspace.create_conversation_with_id(id2, Conversation::default(), config.clone());
@@ -948,5 +1054,30 @@ mod tests {
 
         assert!(id1_metadata_file.is_file());
         assert!(!id2_metadata_file.is_file());
+    }
+
+    /// Helper to write a conversation to disk in the expected storage layout.
+    ///
+    /// Creates `{storage}/conversations/{id}/metadata.json` and
+    /// `{storage}/conversations/{id}/events.json`.
+    fn write_conversation_to_disk(
+        storage: &Utf8Path,
+        id: &ConversationId,
+        conversation: &Conversation,
+    ) {
+        let conv_dir = storage.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+        fs::create_dir_all(&conv_dir).unwrap();
+        write_json(&conv_dir.join(METADATA_FILE), conversation).unwrap();
+
+        let stream = ConversationStream::new_test();
+        write_json(&conv_dir.join("events.json"), &stream).unwrap();
+    }
+
+    /// Write a `conversations/metadata.json` pointing to the given active ID.
+    fn write_conversations_metadata_to_disk(storage: &Utf8Path, active_id: &ConversationId) {
+        let meta_path = storage.join(CONVERSATIONS_DIR).join(METADATA_FILE);
+        let meta = ConversationsMetadata::new(*active_id);
+
+        write_json(&meta_path, &meta).unwrap();
     }
 }

@@ -425,7 +425,7 @@ dependencies = [
  "num-traits",
  "serde",
  "wasm-bindgen",
- "windows-link 0.2.0",
+ "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -735,6 +735,15 @@ dependencies = [
  "darling_core 0.23.0",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "datetime_literal"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcd4412a63631453298d1c8d9935baca734b58663adb3114bc872c6d13c0b5a6"
+dependencies = [
+ "chrono",
 ]
 
 [[package]]
@@ -2216,6 +2225,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "datetime_literal",
  "directories",
  "jp_config",
  "jp_conversation",
