@@ -125,6 +125,9 @@ fn cargo_test_impl<R: ProcessRunner>(
 
 #[cfg(test)]
 mod tests {
+    use std::{io, sync::Mutex};
+
+    use camino::Utf8Path;
     use camino_tempfile::tempdir;
     use jp_tool::Action;
 
@@ -182,21 +185,23 @@ mod tests {
             ```"});
     }
 
-    /// A runner that captures the environment variables passed to it,
-    /// so we can assert on the exact values.
+    /// A runner that captures the environment variables passed to it, so we can
+    /// assert on the exact values.
     struct EnvCapturingRunner {
         inner: MockProcessRunner,
-        captured_env: std::sync::Mutex<Vec<(String, String)>>,
+        captured_env: Mutex<Vec<(String, String)>>,
+    }
+
+    impl From<MockProcessRunner> for EnvCapturingRunner {
+        fn from(inner: MockProcessRunner) -> Self {
+            Self {
+                inner,
+                captured_env: Mutex::new(Vec::new()),
+            }
+        }
     }
 
     impl EnvCapturingRunner {
-        fn new(inner: MockProcessRunner) -> Self {
-            Self {
-                inner,
-                captured_env: std::sync::Mutex::new(Vec::new()),
-            }
-        }
-
         fn captured_env(&self) -> Vec<(String, String)> {
             self.captured_env.lock().unwrap().clone()
         }
@@ -207,14 +212,15 @@ mod tests {
             &self,
             program: &str,
             args: &[&str],
-            working_dir: &camino::Utf8Path,
+            working_dir: &Utf8Path,
             env: &[(&str, &str)],
             stdin: Option<&str>,
-        ) -> Result<ProcessOutput, std::io::Error> {
+        ) -> Result<ProcessOutput, io::Error> {
             *self.captured_env.lock().unwrap() = env
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect();
+
             self.inner
                 .run_with_env_and_stdin(program, args, working_dir, env, stdin)
         }
@@ -229,13 +235,13 @@ mod tests {
         };
 
         let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
-        let runner = EnvCapturingRunner::new(MockProcessRunner::success(stdout));
-
+        let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
         let _result = cargo_test_impl(&ctx, None, None, false, &runner).unwrap();
 
-        let env = runner.captured_env();
         assert_eq!(
-            env.iter()
+            runner
+                .captured_env()
+                .iter()
                 .find(|(k, _)| k == "RUST_BACKTRACE")
                 .map(|(_, v)| v.as_str()),
             Some("0"),
@@ -251,13 +257,13 @@ mod tests {
         };
 
         let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
-        let runner = EnvCapturingRunner::new(MockProcessRunner::success(stdout));
-
+        let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
         let _result = cargo_test_impl(&ctx, None, None, true, &runner).unwrap();
 
-        let env = runner.captured_env();
         assert_eq!(
-            env.iter()
+            runner
+                .captured_env()
+                .iter()
                 .find(|(k, _)| k == "RUST_BACKTRACE")
                 .map(|(_, v)| v.as_str()),
             Some("1"),
