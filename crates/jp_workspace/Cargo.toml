@@ -27,6 +27,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+datetime_literal = { workspace = true }
 test-log = { workspace = true }
 
 [lints]
