@@ -59,7 +59,6 @@ expression: v
       },
       "style": {
         "code": {
-          "theme": "",
           "color": false,
           "line_numbers": false,
           "file_link": "osc8",

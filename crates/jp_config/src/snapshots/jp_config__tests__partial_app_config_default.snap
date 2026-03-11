@@ -61,14 +61,25 @@ PartialAppConfig {
             tools: {},
         },
         attachments: [],
+        inquiry: PartialInquiryConfig {
+            assistant: PartialAssistantOverrideConfig {
+                system_prompt: None,
+                system_prompt_sections: [],
+                tool_choice: None,
+                model: None,
+                request: None,
+            },
+        },
     },
     style: PartialStyleConfig {
         code: PartialCodeConfig {
-            theme: None,
             color: None,
             line_numbers: None,
             file_link: None,
             copy_link: None,
+        },
+        inline_code: PartialInlineCodeConfig {
+            background: None,
         },
         markdown: PartialMarkdownConfig {
             wrap_width: None,
