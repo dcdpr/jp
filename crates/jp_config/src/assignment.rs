@@ -415,6 +415,42 @@ impl KvAssignment {
         self.try_from_str().map(Some)
     }
 
+    /// Like [`Self::try_from_str`], but also accepts JSON numbers by
+    /// converting them to their string representation first.
+    ///
+    /// Useful for types like [`Color`](crate::types::color::Color) that
+    /// accept both `236` (integer) and `"#504945"` (string).
+    pub(crate) fn try_number_or_from_str<T, E>(self) -> Result<T, KvAssignmentError>
+    where
+        T: FromStr<Err = E>,
+        E: Into<BoxedError>,
+    {
+        let Self { key, value, .. } = self;
+
+        match value {
+            KvValue::Json(Value::Number(n)) => {
+                let s = n.to_string();
+                T::from_str(&s)
+                    .map_err(Into::into)
+                    .or_else(|err| assignment_error(&key, Value::String(s), err))
+            }
+            KvValue::Json(Value::String(s)) | KvValue::String(s) => T::from_str(&s)
+                .map_err(Into::into)
+                .or_else(|err| assignment_error(&key, Value::String(s), err)),
+            KvValue::Json(_) => type_error(&key, &value, &["number", "string"]),
+        }
+    }
+
+    /// Convenience method for [`Self::try_number_or_from_str`] that wraps the
+    /// `Ok` value into `Some`.
+    pub(crate) fn try_some_number_or_from_str<T, E>(self) -> Result<Option<T>, KvAssignmentError>
+    where
+        T: FromStr<Err = E>,
+        E: Into<BoxedError>,
+    {
+        self.try_number_or_from_str().map(Some)
+    }
+
     /// Try to parse the value as a string.
     pub(crate) fn try_string(self) -> Result<String, KvAssignmentError> {
         let Self { key, value, .. } = self;
@@ -496,26 +532,6 @@ impl KvAssignment {
     /// `Some`.
     pub(crate) fn try_some_u32(self) -> Result<Option<u32>, KvAssignmentError> {
         self.try_u32().map(Some)
-    }
-
-    /// Try to parse the value as an unsigned 8-bit integer.
-    pub(crate) fn try_u8(self) -> Result<u8, KvAssignmentError> {
-        let Self { key, value, .. } = self;
-
-        match value {
-            #[expect(clippy::cast_possible_truncation)]
-            KvValue::Json(Value::Number(v)) if v.is_u64() => Ok(v.as_u64().expect("is u64") as u8),
-            KvValue::Json(_) => type_error(&key, &value, &["number", "string"]),
-            KvValue::String(v) => Ok(v
-                .parse()
-                .map_err(|err| KvAssignmentError::new(key.full_path.clone(), err))?),
-        }
-    }
-
-    /// Convenience method for [`Self::try_u8`] that wraps the `Ok` value into
-    /// `Some`.
-    pub(crate) fn try_some_u8(self) -> Result<Option<u8>, KvAssignmentError> {
-        self.try_u8().map(Some)
     }
 
     /// Try to parse the value as a 32-bit floating point number.

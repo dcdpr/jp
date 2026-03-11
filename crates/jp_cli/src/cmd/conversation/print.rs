@@ -207,6 +207,12 @@ fn build_formatter(cfg: &AppConfig, pretty: bool) -> Formatter {
             None
         })
         .pretty_hr(pretty && cfg.style.markdown.hr_style.is_line())
+        .inline_code_bg(
+            cfg.style
+                .inline_code
+                .background
+                .map(crate::format::color_to_bg_param),
+        )
 }
 
 #[cfg(test)]

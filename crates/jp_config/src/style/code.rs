@@ -13,12 +13,6 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct CodeConfig {
-    /// Theme to use for code blocks.
-    ///
-    /// This uses [syntect](https://github.com/trishume/syntect) theme names.
-    #[setting(default = "base16-mocha.dark")]
-    pub theme: String,
-
     /// Whether to colorize code blocks.
     #[setting(default = true)]
     pub color: bool,
@@ -65,7 +59,6 @@ impl AssignKeyValue for PartialCodeConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
-            "theme" => self.theme = kv.try_some_string()?,
             "color" => self.color = kv.try_some_bool()?,
             "line_numbers" => self.line_numbers = kv.try_some_bool()?,
             "file_link" => self.file_link = kv.try_some_from_str()?,
@@ -80,7 +73,6 @@ impl AssignKeyValue for PartialCodeConfig {
 impl PartialConfigDelta for PartialCodeConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            theme: delta_opt(self.theme.as_ref(), next.theme),
             color: delta_opt(self.color.as_ref(), next.color),
             line_numbers: delta_opt(self.line_numbers.as_ref(), next.line_numbers),
             file_link: delta_opt(self.file_link.as_ref(), next.file_link),
@@ -94,7 +86,6 @@ impl ToPartial for CodeConfig {
         let defaults = Self::Partial::default();
 
         Self::Partial {
-            theme: partial_opt(&self.theme, defaults.theme),
             color: partial_opt(&self.color, defaults.color),
             line_numbers: partial_opt(&self.line_numbers, defaults.line_numbers),
             file_link: partial_opt(&self.file_link, defaults.file_link),

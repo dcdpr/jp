@@ -64,11 +64,13 @@ PartialAppConfig {
     },
     style: PartialStyleConfig {
         code: PartialCodeConfig {
-            theme: None,
             color: None,
             line_numbers: None,
             file_link: None,
             copy_link: None,
+        },
+        inline_code: PartialInlineCodeConfig {
+            background: None,
         },
         markdown: PartialMarkdownConfig {
             wrap_width: None,

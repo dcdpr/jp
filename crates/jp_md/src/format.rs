@@ -48,17 +48,17 @@ pub enum HrStyle {
 
 /// A default background color applied to all content, with a fill mode
 /// controlling how far it extends on each line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefaultBackground {
-    /// ANSI 256-color index.
-    pub color: u8,
+    /// SGR background parameter, e.g. `"48;5;236"` or `"48;2;80;73;69"`.
+    pub param: String,
 
     /// How far the background extends on each line.
     pub fill: BackgroundFill,
 }
 
 /// Per-call options for [`Formatter::format_terminal_with`].
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TerminalOptions {
     /// Default background color applied to all content in this block.
     ///
@@ -87,6 +87,12 @@ pub struct Formatter {
     /// terminal width. When `None`, the configured `width` is used as a
     /// fallback.
     terminal_width: Option<usize>,
+
+    /// Override background color for inline code spans.
+    ///
+    /// When set, inline code uses this color instead of the theme's background.
+    /// Stored as a pre-resolved `(sgr_param, full_escape)` pair.
+    inline_code_bg: Option<(String, String)>,
 }
 
 impl fmt::Debug for Formatter {
@@ -97,6 +103,7 @@ impl fmt::Debug for Formatter {
             .field("theme", &"<syntect::Theme>")
             .field("hr_style", &self.hr_style)
             .field("terminal_width", &self.terminal_width)
+            .field("inline_code_bg", &self.inline_code_bg)
             .finish()
     }
 }
@@ -117,6 +124,7 @@ impl Formatter {
             theme: theme::resolve(None),
             hr_style: HrStyle::default(),
             terminal_width: None,
+            inline_code_bg: None,
         }
     }
 
@@ -131,6 +139,7 @@ impl Formatter {
             theme: theme::resolve(None),
             hr_style: HrStyle::default(),
             terminal_width: None,
+            inline_code_bg: None,
         }
     }
 
@@ -167,6 +176,19 @@ impl Formatter {
     #[must_use]
     pub const fn terminal_width(mut self, width: usize) -> Self {
         self.terminal_width = Some(width);
+        self
+    }
+
+    /// Override the background color for inline code spans.
+    ///
+    /// When set, inline code uses this color instead of the theme's
+    /// background. The color is pre-resolved to an SGR `(param, escape)` pair.
+    #[must_use]
+    pub fn inline_code_bg(mut self, param: Option<String>) -> Self {
+        self.inline_code_bg = param.map(|p| {
+            let escape = format!("\x1b[{p}m");
+            (p, escape)
+        });
         self
     }
 
@@ -222,6 +244,7 @@ impl Formatter {
             &hr_options,
             &self.theme,
             options.default_background.as_ref(),
+            self.inline_code_bg.as_ref(),
             &mut buf,
         )?;
         Ok(buf)

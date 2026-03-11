@@ -30,7 +30,6 @@ use std::sync::Arc;
 
 use jp_config::style::{
     StyleConfig,
-    markdown::MarkdownConfig,
     reasoning::{ReasoningDisplayConfig, TruncateChars},
 };
 use jp_conversation::event::ChatResponse;
@@ -68,7 +67,7 @@ pub struct ChatResponseRenderer {
 impl ChatResponseRenderer {
     pub fn new(printer: Arc<Printer>, config: StyleConfig) -> Self {
         let pretty = printer.pretty_printing();
-        let formatter = formatter_from_config(&config.markdown, pretty);
+        let formatter = formatter_from_config(&config, pretty);
         Self {
             buffer: Buffer::new(),
             formatter,
@@ -241,16 +240,16 @@ impl ChatResponseRenderer {
         // so the background is continuous across paragraphs.
         match opts.default_background {
             Some(DefaultBackground {
-                color,
+                ref param,
                 fill: BackgroundFill::Terminal,
             }) => {
-                formatted.push_str(&format!("\x1b[48;5;{color}m\x1b[K\x1b[49m\n"));
+                formatted.push_str(&format!("\x1b[{param}m\x1b[K\x1b[49m\n"));
             }
             Some(DefaultBackground {
-                color,
+                ref param,
                 fill: BackgroundFill::Column(width),
             }) => {
-                formatted.push_str(&format!("\x1b[48;5;{color}m"));
+                formatted.push_str(&format!("\x1b[{param}m"));
                 for _ in 0..width {
                     formatted.push(' ');
                 }
@@ -271,7 +270,7 @@ impl ChatResponseRenderer {
                     .reasoning
                     .background
                     .map(|color| DefaultBackground {
-                        color,
+                        param: crate::format::color_to_bg_param(color),
                         fill: BackgroundFill::Terminal,
                     })
             } else {
@@ -310,22 +309,28 @@ impl ChatResponseRenderer {
     pub fn reset(&mut self) {
         self.buffer = Buffer::new();
         let pretty = self.printer.pretty_printing();
-        self.formatter = formatter_from_config(&self.config.markdown, pretty);
+        self.formatter = formatter_from_config(&self.config, pretty);
         self.last_content_kind = None;
         self.reasoning_chars_count = 0;
         self.code_highlight = None;
     }
 }
 
-fn formatter_from_config(config: &MarkdownConfig, pretty: bool) -> Formatter {
-    Formatter::with_width(config.wrap_width)
-        .table_max_column_width(config.table_max_column_width)
+fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {
+    Formatter::with_width(config.markdown.wrap_width)
+        .table_max_column_width(config.markdown.table_max_column_width)
         .theme(if pretty {
-            config.theme.as_deref()
+            config.markdown.theme.as_deref()
         } else {
             None
         })
-        .pretty_hr(pretty && config.hr_style.is_line())
+        .pretty_hr(pretty && config.markdown.hr_style.is_line())
+        .inline_code_bg(
+            config
+                .inline_code
+                .background
+                .map(crate::format::color_to_bg_param),
+        )
 }
 
 #[cfg(test)]

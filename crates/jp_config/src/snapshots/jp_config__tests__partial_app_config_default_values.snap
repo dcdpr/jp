@@ -117,9 +117,6 @@ Ok(
             },
             style: PartialStyleConfig {
                 code: PartialCodeConfig {
-                    theme: Some(
-                        "base16-mocha.dark",
-                    ),
                     color: Some(
                         true,
                     ),
@@ -132,6 +129,9 @@ Ok(
                     copy_link: Some(
                         Off,
                     ),
+                },
+                inline_code: PartialInlineCodeConfig {
+                    background: None,
                 },
                 markdown: PartialMarkdownConfig {
                     wrap_width: Some(
@@ -149,7 +149,9 @@ Ok(
                     display: None,
                     summary_model: None,
                     background: Some(
-                        236,
+                        Ansi256(
+                            236,
+                        ),
                     ),
                 },
                 streaming: PartialStreamingConfig {
