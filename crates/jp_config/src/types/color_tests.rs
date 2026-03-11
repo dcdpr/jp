@@ -11,26 +11,21 @@ fn parse_ansi256_from_str() {
 
 #[test]
 fn parse_hex_rgb_from_str() {
-    assert_eq!(
-        "#504945".parse::<Color>().unwrap(),
-        Color::Rgb {
-            r: 80,
-            g: 73,
-            b: 69
-        }
-    );
-    assert_eq!(
-        "#FFFFFF".parse::<Color>().unwrap(),
-        Color::Rgb {
-            r: 255,
-            g: 255,
-            b: 255
-        }
-    );
-    assert_eq!(
-        "#000000".parse::<Color>().unwrap(),
-        Color::Rgb { r: 0, g: 0, b: 0 }
-    );
+    assert_eq!("#504945".parse::<Color>().unwrap(), Color::Rgb {
+        r: 80,
+        g: 73,
+        b: 69
+    });
+    assert_eq!("#FFFFFF".parse::<Color>().unwrap(), Color::Rgb {
+        r: 255,
+        g: 255,
+        b: 255
+    });
+    assert_eq!("#000000".parse::<Color>().unwrap(), Color::Rgb {
+        r: 0,
+        g: 0,
+        b: 0
+    });
 }
 
 #[test]

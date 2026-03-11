@@ -90,9 +90,7 @@ impl Serialize for Color {
     {
         match self {
             Self::Ansi256(n) => serializer.serialize_u8(*n),
-            Self::Rgb { r, g, b } => {
-                serializer.serialize_str(&format!("#{r:02x}{g:02x}{b:02x}"))
-            }
+            Self::Rgb { r, g, b } => serializer.serialize_str(&format!("#{r:02x}{g:02x}{b:02x}")),
         }
     }
 }
