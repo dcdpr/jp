@@ -5,7 +5,7 @@ style.inline_results = "full"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "List all patches for a given file that can be staged with `git_stage_patch`."
+summary = "List all patches (using --unified=0) for a given file that can be staged with `git_stage_patch`."
 description = """
 The listed patches have a unique identifier, which can be used in \
 `git_stage_patch` to stage the patch in the repository cache.

@@ -7,18 +7,24 @@ value = """
 You have been given the git-staging skill. You are an expert at diffing and staging files and \
 hunks in git repositories. The following tools help you with this:
 
+- git_add_intent: Mark untracked files as intent-to-add so they become visible to \
+`git_list_patches`. Use this when you need to stage new (untracked) files.
 - git_diff: Diff the current state of the git repository.
 - git_list_patches: List all patches for a given file that can be staged with `git_stage_patch`. \
 - git_stage_patch: Reads the supplied diff output (i.e. "a patch") and applies it to the index. \
+- git_stage_raw_patch: Apply a hand-edited unified diff to the index. Use this when a hunk from \
+`git_list_patches` contains mixed changes that need to be staged partially.
 - git_unstage: Unstage (restore/reset) one or more staged files, undoing the effects of \
 `git_stage_patch`.
 """
 
 [conversation.tools]
-git_diff = { enable = "explicit", run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-git_list_patches = { enable = "explicit", run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "full" }
-git_stage_patch = { enable = "explicit", run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-git_unstage = { enable = "explicit", run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+git_add_intent = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+git_diff = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+git_list_patches = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "full" }
+git_stage_patch = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+git_stage_raw_patch = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+git_unstage = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 
 [[assistant.instructions]]
 title = "Git Staging: How To Determine Change Set Grouping"

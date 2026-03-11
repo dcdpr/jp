@@ -1,0 +1,31 @@
+[conversation.tools.git_add_intent]
+enable = "explicit"
+run = "unattended"
+style.inline_results = "full"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Mark untracked files as intent-to-add, making them visible to `git_list_patches`."
+description = """
+Runs `git add --intent-to-add` for each path. This records the file in the \
+index as an empty blob, so `git_list_patches` will show the entire file \
+content as insertions. From there, use `git_stage_patch` or \
+`git_stage_raw_patch` to stage all or part of the file.
+"""
+
+examples = """
+```json
+{"paths": ["crates/jp_new_crate/src/lib.rs"]}
+```
+
+Multiple files:
+```json
+{"paths": ["src/new_module.rs", "src/new_module_tests.rs"]}
+```
+"""
+
+[conversation.tools.git_add_intent.parameters.paths]
+type = "array"
+required = true
+items.type = "string"
+summary = "One or more file paths to mark as intent-to-add."

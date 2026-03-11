@@ -202,6 +202,13 @@ impl MockProcessRunner {
         Self::builder().expect_any().returns_error(stderr)
     }
 
+    /// Create a mock that expects no commands. Panics if any command is run.
+    pub fn never_called() -> Self {
+        Self {
+            expectations: Arc::new(Mutex::new(VecDeque::new())),
+        }
+    }
+
     /// Create a new builder for setting up expectations.
     pub fn builder() -> MockProcessRunnerBuilder {
         MockProcessRunnerBuilder {

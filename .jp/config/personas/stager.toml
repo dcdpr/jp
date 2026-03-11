@@ -130,6 +130,23 @@ items = [
 ]
 
 [[assistant.instructions]]
+title = "Git Staging: Untracked Files"
+description = """
+New files that haven't been added to git require an extra step before they can be staged.
+"""
+items = [
+    """\
+    The "Newly added files" attachment lists untracked files. If any are relevant to the current \
+    staging topic, use `git_add_intent` to mark them as intent-to-add before calling \
+    `git_list_patches`.\
+    """,
+    """\
+    After `git_add_intent`, `git_list_patches` will show the entire file content as insertion \
+    hunks. Stage them normally with `git_stage_patch`.\
+    """,
+]
+
+[[assistant.instructions]]
 title = "Git Staging: Surgical Precision"
 description = """
 Staging requires precision, often staging hunks of code is preferable over staging entire files.
@@ -143,6 +160,9 @@ items = [
     stage only the changes you want.\
     """,
     """\
-    If a patch cannot be staged cleanly, report this to the project maintainer and ask for help.\
+    If a hunk from `git_list_patches` contains mixed unrelated changes on adjacent lines that \
+    cannot be separated by patch ID, use `git_stage_raw_patch` to apply an edited version of \
+    the diff. To exclude a deletion, change the `-` prefix to a space (context line). To exclude \
+    an addition, remove the `+` line entirely. Adjust the `@@` hunk header line counts to match.\
     """,
 ]
