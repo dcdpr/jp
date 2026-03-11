@@ -98,6 +98,7 @@ assert_matches = { workspace = true }
 camino-tempfile = { workspace = true }
 indoc = { workspace = true }
 pretty_assertions = { workspace = true, features = ["std"] }
+serial_test = { workspace = true }
 test-log = { workspace = true }
 
 [lints]
