@@ -14,7 +14,7 @@ pub enum SignalTo {
     Shutdown,
 
     /// Shutdown process immediately.
-    #[cfg_attr(windows, expect(dead_code))]
+    #[cfg_attr(windows, allow(clippy::allow_attributes, dead_code))]
     Quit,
 }
 
