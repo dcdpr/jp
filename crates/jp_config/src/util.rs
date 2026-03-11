@@ -1,6 +1,9 @@
 //! Configuration utilities.
 
-use std::path::{Path, PathBuf};
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+};
 
 use camino::Utf8Path;
 use glob::glob;
@@ -112,8 +115,12 @@ pub fn load_partial_at_path<P: Into<PathBuf>>(path: P) -> Result<Option<PartialA
     loader.load_partial(&()).map(Some).map_err(Into::into)
 }
 
-/// Load a partial configuration from a file at `path`, recursing upwards until
-/// either `/` or `root` is reached.
+/// Load a partial configuration from a file at `path`, walking upwards until
+/// either the filesystem root or `root` is reached.
+///
+/// At each directory level, it attempts to load a config file with the same
+/// file name (e.g. `config.toml`). All found configs are merged together, with
+/// deeper (more specific) paths taking precedence over shallower ones.
 ///
 /// # Errors
 ///
@@ -124,43 +131,53 @@ pub fn load_partial_at_path_recursive<P: Into<PathBuf>>(
 ) -> Result<Option<PartialAppConfig>, Error> {
     let path: PathBuf = path.into();
 
-    // Try and load the provided path as a partial.
-    // e.g. `/foo/bar/config.toml`
-    let partial = load_partial_at_path(&path)?;
-
-    // Take the file name of the provided path.
-    // e.g. `config.toml`
-    let mut iter = path.iter();
-    let Some(file_name) = iter.next_back() else {
-        return Ok(partial);
+    // Extract the file name component (e.g. `config.toml`) that we'll look
+    // for at every ancestor directory.
+    let Some(file_name) = path.file_name().map(OsStr::to_os_string) else {
+        return load_partial_at_path(&path).map(|p| p.filter(|_| path.is_file()));
     };
 
-    // Check if `/foo/bar` is the same as the provided root, if it is, we're done.
-    if root.is_some_and(|root| root == iter.as_path()) {
-        return Ok(partial);
-    }
+    // Collect candidate paths from deepest to shallowest.
+    //
+    // Uses `Path::parent()` to walk up the tree instead of manual iterator
+    // manipulation, which avoids an infinite loop on Windows where
+    // `Prefix("C:")` and `RootDir("\\"`) are separate components in
+    // `Path::iter()` — stripping the root dir leaves the prefix, and
+    // re-joining with the file name recreates the original absolute path.
+    let mut candidates = vec![path.clone()];
+    let mut dir = path.parent();
 
-    // Remove the path segment *before* the file name.
-    // e.g. `bar`, or return early if there are no more path segments.
-    if iter.next_back().is_none() {
-        return Ok(partial);
-    }
-
-    // Try and load `/foo/config.toml`
-    let path = iter.as_path().join(file_name);
-    let fallback = load_partial_at_path_recursive(path, root)?;
-
-    match (partial, fallback) {
-        // If we found both `/foo/bar/config.toml` AND `/foo/config.toml`, merge
-        // them (longer path taking precedence).
-        (Some(partial), Some(mut fallback)) => {
-            fallback.merge(&(), partial)?;
-            Ok(Some(fallback))
+    while let Some(current) = dir {
+        // Stop if we've reached the configured root.
+        if root.is_some_and(|root| root == current) {
+            break;
         }
 
-        // otherwise, return either one, or none.
-        (partial, fallback) => Ok(partial.or(fallback)),
+        let Some(parent) = current.parent() else {
+            break;
+        };
+
+        candidates.push(parent.join(&file_name));
+        dir = Some(parent);
     }
+
+    // Load and merge from shallowest to deepest, so that deeper (more specific)
+    // paths take precedence.
+    let mut result: Option<PartialAppConfig> = None;
+
+    for candidate in candidates.into_iter().rev() {
+        let partial = load_partial_at_path(&candidate)?;
+
+        result = match (result, partial) {
+            (Some(mut base), Some(specific)) => {
+                base.merge(&(), specific)?;
+                Some(base)
+            }
+            (base, specific) => base.or(specific),
+        };
+    }
+
+    Ok(result)
 }
 
 /// Build a final configuration from merged partial configurations.

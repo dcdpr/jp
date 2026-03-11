@@ -283,7 +283,6 @@ impl TurnCoordinator {
     ///
     /// Used when handling hard quit signals (SIGQUIT) where we want to save
     /// progress and exit gracefully without showing an interrupt menu.
-    #[cfg(any(unix, test))]
     pub fn force_complete(&mut self) {
         self.state = TurnPhase::Complete;
     }
@@ -292,7 +291,6 @@ impl TurnCoordinator {
     ///
     /// Injects any partial content into the stream and transitions to
     /// Complete so that the turn loop persists and exits.
-    #[cfg(any(unix, test))]
     pub fn handle_quit(&mut self, stream: &mut ConversationStream) {
         if let Some(content) = self.peek_partial_content() {
             self.push_event(stream, ChatResponse::message(&content));
