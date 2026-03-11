@@ -1,4 +1,4 @@
-use jp_config::AppConfig;
+use jp_config::{AppConfig, types::color::Color};
 use jp_printer::{OutputFormat, SharedBuffer};
 
 use super::*;
@@ -216,7 +216,7 @@ fn test_whitespace_only_block_not_printed() {
 fn test_reasoning_background_color_applied() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
-    config.style.reasoning.background = Some(236);
+    config.style.reasoning.background = Some(Color::Ansi256(236));
     let (mut renderer, out) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Reasoning {
@@ -243,7 +243,7 @@ fn test_reasoning_background_color_applied() {
 fn test_reasoning_background_not_applied_to_messages() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
-    config.style.reasoning.background = Some(236);
+    config.style.reasoning.background = Some(Color::Ansi256(236));
     let (mut renderer, out) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Message {

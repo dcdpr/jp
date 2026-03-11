@@ -10,6 +10,7 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
+    types::color::Color,
 };
 
 /// Reasoning content style configuration.
@@ -35,21 +36,22 @@ pub struct ReasoningConfig {
     #[setting(nested)]
     pub summary_model: Option<ModelConfig>,
 
-    /// Background color for reasoning content (ANSI 256-color index).
+    /// Background color for reasoning content.
     ///
     /// When set, reasoning blocks are rendered with this background
     /// color spanning the full terminal width, visually distinguishing
     /// them from regular message content.
     ///
-    /// Example: `236` for a subtle dark gray on dark terminals.
+    /// Accepts either an ANSI 256-color index (e.g. `236`) or a hex RGB
+    /// string (e.g. `"#1d2021"`).
     #[setting(default = default_reasoning_background)]
-    pub background: Option<u8>,
+    pub background: Option<Color>,
 }
 
-/// The default system prompt for the assistant.
+/// The default reasoning background color.
 #[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
-const fn default_reasoning_background(_: &()) -> TransformResult<Option<u8>> {
-    Ok(Some(236))
+const fn default_reasoning_background(_: &()) -> TransformResult<Option<Color>> {
+    Ok(Some(Color::Ansi256(236)))
 }
 
 impl AssignKeyValue for PartialReasoningConfig {
@@ -57,7 +59,7 @@ impl AssignKeyValue for PartialReasoningConfig {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
             "display" => self.display = kv.try_some_from_str()?,
-            "background" => self.background = kv.try_some_u8()?,
+            "background" => self.background = kv.try_some_from_str()?,
             _ if kv.p("summary_model") => self.summary_model.assign(kv)?,
             _ => return missing_key(&kv),
         }

@@ -288,7 +288,7 @@ fn test_terminal_blockquote_nested() {
 fn test_default_background_terminal_fill() {
     let opts = TerminalOptions {
         default_background: Some(DefaultBackground {
-            color: 236,
+            param: "48;5;236".into(),
             fill: BackgroundFill::Terminal,
         }),
     };

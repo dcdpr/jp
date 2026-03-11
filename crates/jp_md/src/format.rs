@@ -48,17 +48,17 @@ pub enum HrStyle {
 
 /// A default background color applied to all content, with a fill mode
 /// controlling how far it extends on each line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefaultBackground {
-    /// ANSI 256-color index.
-    pub color: u8,
+    /// SGR background parameter, e.g. `"48;5;236"` or `"48;2;80;73;69"`.
+    pub param: String,
 
     /// How far the background extends on each line.
     pub fill: BackgroundFill,
 }
 
 /// Per-call options for [`Formatter::format_terminal_with`].
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TerminalOptions {
     /// Default background color applied to all content in this block.
     ///
@@ -182,10 +182,13 @@ impl Formatter {
     /// Override the background color for inline code spans.
     ///
     /// When set, inline code uses this color instead of the theme's
-    /// background. Accepts a hex RGB string (e.g. `"#504945"`).
+    /// background. The color is pre-resolved to an SGR `(param, escape)` pair.
     #[must_use]
-    pub fn inline_code_bg(mut self, hex: Option<&str>) -> Self {
-        self.inline_code_bg = hex.and_then(parse_hex_bg);
+    pub fn inline_code_bg(mut self, param: Option<String>) -> Self {
+        self.inline_code_bg = param.map(|p| {
+            let escape = format!("\x1b[{p}m");
+            (p, escape)
+        });
         self
     }
 
@@ -368,23 +371,6 @@ impl<'a> CodeHighlighter<'a> {
             ),
         }
     }
-}
-
-/// Parse a hex RGB color string into an SGR `(param, escape)` pair.
-///
-/// Accepts `#RRGGBB` (case-insensitive, leading `#` required).
-/// Returns `None` if the input is malformed.
-fn parse_hex_bg(hex: &str) -> Option<(String, String)> {
-    let hex = hex.strip_prefix('#')?;
-    if hex.len() != 6 {
-        return None;
-    }
-    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-    let param = format!("48;2;{r};{g};{b}");
-    let escape = format!("\x1b[{param}m");
-    Some((param, escape))
 }
 
 #[cfg(test)]

@@ -240,16 +240,16 @@ impl ChatResponseRenderer {
         // so the background is continuous across paragraphs.
         match opts.default_background {
             Some(DefaultBackground {
-                color,
+                ref param,
                 fill: BackgroundFill::Terminal,
             }) => {
-                formatted.push_str(&format!("\x1b[48;5;{color}m\x1b[K\x1b[49m\n"));
+                formatted.push_str(&format!("\x1b[{param}m\x1b[K\x1b[49m\n"));
             }
             Some(DefaultBackground {
-                color,
+                ref param,
                 fill: BackgroundFill::Column(width),
             }) => {
-                formatted.push_str(&format!("\x1b[48;5;{color}m"));
+                formatted.push_str(&format!("\x1b[{param}m"));
                 for _ in 0..width {
                     formatted.push(' ');
                 }
@@ -270,7 +270,7 @@ impl ChatResponseRenderer {
                     .reasoning
                     .background
                     .map(|color| DefaultBackground {
-                        color,
+                        param: color.to_ansi_bg_param(),
                         fill: BackgroundFill::Terminal,
                     })
             } else {
@@ -325,7 +325,7 @@ fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {
             None
         })
         .pretty_hr(pretty && config.markdown.hr_style.is_line())
-        .inline_code_bg(config.inline_code.background.as_deref())
+        .inline_code_bg(config.inline_code.background.map(|c| c.to_ansi_bg_param()))
 }
 
 #[cfg(test)]

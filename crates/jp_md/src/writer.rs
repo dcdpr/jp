@@ -84,12 +84,12 @@ impl<'w> TerminalWriter<'w> {
         width: usize,
         default_background: Option<&DefaultBackground>,
     ) -> Self {
-        let default_background = default_background.copied();
+        let default_background = default_background.cloned();
 
         // Pre-populate attrs so the restore logic keeps the default background
         // active across line breaks.
-        let attrs = default_background.map_or_else(AnsiState::default, |bg| AnsiState {
-            background: Some(format!("48;5;{}", bg.color)),
+        let attrs = default_background.as_ref().map_or_else(AnsiState::default, |bg| AnsiState {
+            background: Some(bg.param.clone()),
             ..Default::default()
         });
 
@@ -261,7 +261,7 @@ impl<'w> TerminalWriter<'w> {
     /// - pads with spaces to a fixed column (`Column`),
     /// - emits `\x1b[K` to fill to the terminal edge (`Terminal`).
     fn emit_line_fill(&mut self) -> fmt::Result {
-        let Some(bg) = self.default_background else {
+        let Some(ref bg) = self.default_background else {
             return Ok(());
         };
 
@@ -289,7 +289,7 @@ impl<'w> TerminalWriter<'w> {
     /// Like [`emit_line_fill`](Self::emit_line_fill) but writes directly to the
     /// output writer. Used in the wrap-break path.
     fn emit_line_fill_direct(&mut self) -> fmt::Result {
-        let Some(bg) = self.default_background else {
+        let Some(ref bg) = self.default_background else {
             return Ok(());
         };
 

@@ -498,26 +498,6 @@ impl KvAssignment {
         self.try_u32().map(Some)
     }
 
-    /// Try to parse the value as an unsigned 8-bit integer.
-    pub(crate) fn try_u8(self) -> Result<u8, KvAssignmentError> {
-        let Self { key, value, .. } = self;
-
-        match value {
-            #[expect(clippy::cast_possible_truncation)]
-            KvValue::Json(Value::Number(v)) if v.is_u64() => Ok(v.as_u64().expect("is u64") as u8),
-            KvValue::Json(_) => type_error(&key, &value, &["number", "string"]),
-            KvValue::String(v) => Ok(v
-                .parse()
-                .map_err(|err| KvAssignmentError::new(key.full_path.clone(), err))?),
-        }
-    }
-
-    /// Convenience method for [`Self::try_u8`] that wraps the `Ok` value into
-    /// `Some`.
-    pub(crate) fn try_some_u8(self) -> Result<Option<u8>, KvAssignmentError> {
-        self.try_u8().map(Some)
-    }
-
     /// Try to parse the value as a 32-bit floating point number.
     pub(crate) fn try_f32(self) -> Result<f32, KvAssignmentError> {
         let Self { key, value, .. } = self;

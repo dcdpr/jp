@@ -153,9 +153,9 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         }
 
         // Emit the default background escape at the very start.
-        if let Some(bg) = self.writer.default_background {
+        if let Some(ref bg) = self.writer.default_background {
             self.writer
-                .write_escape(&format!("\x1b[48;5;{}m", bg.color))?;
+                .write_escape(&format!("\x1b[{}m", bg.param))?;
         }
         let mut stack = vec![(root, Phase::Pre)];
 
@@ -613,8 +613,8 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         }
 
         // Restore default background if one is set, otherwise clear.
-        if let Some(bg) = self.writer.default_background {
-            let param = format!("48;5;{}", bg.color);
+        if let Some(ref bg) = self.writer.default_background {
+            let param = bg.param.clone();
             let esc = format!("\x1b[{param}m");
             self.writer.attrs.background = Some(param);
             self.writer.write_escape(&esc)?;
