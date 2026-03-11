@@ -101,8 +101,8 @@ trait-based.
 The concrete dependencies that need abstraction or relocation:
 
 **`SignalTo`** — currently defined in `jp_cli::signals`. This is a simple enum
-(`Shutdown`, `Quit`, `ReloadFromDisk`). It moves to `jp_agent` since the agent
-loop needs to react to signals regardless of where they originate.
+(`Shutdown`, `Quit`). It moves to `jp_agent` since the agent loop needs to react
+to signals regardless of where they originate.
 
 **`crate::error::Error`** — the turn loop returns `crate::error::Error`, which
 is CLI-specific. `jp_agent` defines its own error type that the CLI wraps.

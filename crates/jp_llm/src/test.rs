@@ -348,20 +348,13 @@ pub async fn run_chat_completion(
 
             if !recording {
                 // dummy api key value when replaying a cassette
-                #[cfg(unix)]
+                let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+
                 match provider_id {
-                    ProviderId::Anthropic => config.anthropic.api_key_env = "USER".to_owned(),
-                    ProviderId::Google => config.google.api_key_env = "USER".to_owned(),
-                    ProviderId::Openai => config.openai.api_key_env = "USER".to_owned(),
-                    ProviderId::Openrouter => config.openrouter.api_key_env = "USER".to_owned(),
-                    _ => {}
-                }
-                #[cfg(windows)]
-                match provider_id {
-                    ProviderId::Anthropic => config.anthropic.api_key_env = "USERNAME".to_owned(),
-                    ProviderId::Google => config.google.api_key_env = "USERNAME".to_owned(),
-                    ProviderId::Openai => config.openai.api_key_env = "USERNAME".to_owned(),
-                    ProviderId::Openrouter => config.openrouter.api_key_env = "USERNAME".to_owned(),
+                    ProviderId::Anthropic => config.anthropic.api_key_env = env,
+                    ProviderId::Google => config.google.api_key_env = env,
+                    ProviderId::Openai => config.openai.api_key_env = env,
+                    ProviderId::Openrouter => config.openrouter.api_key_env = env,
                     _ => {}
                 }
             }

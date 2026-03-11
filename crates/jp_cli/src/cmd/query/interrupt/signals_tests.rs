@@ -40,24 +40,6 @@ fn streaming_signal_quit_breaks_for_persist() {
 }
 
 #[test]
-fn streaming_signal_reload_continues() {
-    let printer = make_printer();
-    let mut turn_coordinator = make_turn_coordinator();
-    let mut stream = ConversationStream::new_test();
-
-    let result = handle_streaming_signal(
-        SignalTo::ReloadFromDisk,
-        &mut turn_coordinator,
-        &mut stream,
-        &printer,
-        &TerminalPromptBackend,
-        false, // stream not finished
-    );
-
-    assert_matches!(result, LoopAction::Continue);
-}
-
-#[test]
 fn tool_signal_quit_cancels_and_continues() {
     let printer = make_printer();
     let token = CancellationToken::new();
@@ -76,25 +58,6 @@ fn tool_signal_quit_cancels_and_continues() {
     assert_eq!(result, ToolSignalResult::Continue);
     assert!(token.is_cancelled());
     assert_eq!(turn_coordinator.current_phase(), TurnPhase::Complete);
-}
-
-#[test]
-fn tool_signal_reload_continues() {
-    let printer = make_printer();
-    let token = CancellationToken::new();
-    let mut turn_coordinator = make_turn_coordinator();
-
-    let result = handle_tool_signal(
-        SignalTo::ReloadFromDisk,
-        &token,
-        &mut turn_coordinator,
-        false, // not prompting
-        &printer,
-        &TerminalPromptBackend,
-    );
-
-    assert_eq!(result, ToolSignalResult::Continue);
-    assert!(!token.is_cancelled());
 }
 
 #[test]

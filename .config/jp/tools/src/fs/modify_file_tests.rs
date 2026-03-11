@@ -123,19 +123,18 @@ fn test_validate_patterns() {
 
 #[test]
 fn test_validate_path() {
-    #[rustfmt::skip]
     let cases = [
-        #[cfg(unix)]
         ("absolute", "/absolute/path", Err("Path must be relative.")),
-
-        #[cfg(windows)]
-        ("absolute", "c:/absolute/path", Err("Path must be relative.")),
-
         ("relative", "src/main.rs", Ok(())),
     ];
 
     for (name, path, expected) in cases {
-        assert_eq!(validate_path(path), expected, "test case: {name}");
+        let mut path = path.to_owned();
+        if cfg!(windows) && path.starts_with('/') {
+            path = format!("c:{path}");
+        }
+
+        assert_eq!(validate_path(&path), expected, "test case: {name}");
     }
 }
 

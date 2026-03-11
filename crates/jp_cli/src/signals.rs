@@ -2,8 +2,6 @@ use async_stream::stream;
 use futures::{Stream, StreamExt as _};
 use tokio::{runtime::Runtime, sync::broadcast};
 use tracing::error;
-#[cfg(unix)]
-use tracing::info;
 
 pub type ShutdownTx = broadcast::Sender<()>;
 pub type SignalTx = broadcast::Sender<SignalTo>;
@@ -12,13 +10,10 @@ pub type SignalRx = broadcast::Receiver<SignalTo>;
 /// Control messages used to drive application lifecycle events.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SignalTo {
-    /// Reload config from the filesystem.
-    #[cfg(any(unix, test))]
-    ReloadFromDisk,
     /// Shutdown process, with a grace period.
     Shutdown,
+
     /// Shutdown process immediately.
-    #[cfg(any(unix, test))]
     Quit,
 }
 
@@ -110,6 +105,7 @@ impl SignalHandler {
 #[cfg(unix)]
 fn os_signals(runtime: &Runtime) -> impl Stream<Item = SignalTo> + use<> {
     use tokio::signal::unix::{SignalKind, signal};
+    use tracing::info;
 
     // The `signal` function must be run within the context of a Tokio runtime.
     runtime.block_on(async {
@@ -117,12 +113,11 @@ fn os_signals(runtime: &Runtime) -> impl Stream<Item = SignalTo> + use<> {
         let mut sigterm =
             signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler.");
         let mut sigquit = signal(SignalKind::quit()).expect("Failed to set up SIGQUIT handler.");
-        let mut sighup = signal(SignalKind::hangup()).expect("Failed to set up SIGHUP handler.");
 
         stream!({
             loop {
                 let signal = jp_macro::select!(
-                    sigint.recv(),
+                    sigint.recv(), // ctrl-c
                     |_signal| {
                         info!(message = "Signal received.", signal = "SIGINT");
                         SignalTo::Shutdown
@@ -136,11 +131,6 @@ fn os_signals(runtime: &Runtime) -> impl Stream<Item = SignalTo> + use<> {
                     |_signal| {
                         info!(message = "Signal received.", signal = "SIGQUIT");
                         SignalTo::Quit
-                    },
-                    sighup.recv(),
-                    |_signal| {
-                        info!(message = "Signal received.", signal = "SIGHUP");
-                        SignalTo::ReloadFromDisk
                     },
                 );
 
