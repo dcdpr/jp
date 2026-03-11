@@ -43,36 +43,6 @@ fn parse_invalid() {
 }
 
 #[test]
-fn to_ansi_bg_param_ansi256() {
-    assert_eq!(Color::Ansi256(236).to_ansi_bg_param(), "48;5;236");
-}
-
-#[test]
-fn to_ansi_bg_param_rgb() {
-    let c = Color::Rgb {
-        r: 80,
-        g: 73,
-        b: 69,
-    };
-    assert_eq!(c.to_ansi_bg_param(), "48;2;80;73;69");
-}
-
-#[test]
-fn display_ansi256() {
-    assert_eq!(Color::Ansi256(236).to_string(), "236");
-}
-
-#[test]
-fn display_rgb() {
-    let c = Color::Rgb {
-        r: 80,
-        g: 73,
-        b: 69,
-    };
-    assert_eq!(c.to_string(), "#504945");
-}
-
-#[test]
 fn serde_roundtrip_ansi256() {
     let c = Color::Ansi256(236);
     let json = to_string(&c).unwrap();
@@ -94,6 +64,5 @@ fn serde_roundtrip_rgb() {
 
 #[test]
 fn deserialize_string_number() {
-    // A number as a string should parse as Ansi256 via FromStr.
     assert_eq!(from_str::<Color>("\"236\"").unwrap(), Color::Ansi256(236));
 }

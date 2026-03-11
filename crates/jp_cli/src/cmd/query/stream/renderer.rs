@@ -270,7 +270,7 @@ impl ChatResponseRenderer {
                     .reasoning
                     .background
                     .map(|color| DefaultBackground {
-                        param: color.to_ansi_bg_param(),
+                        param: crate::format::color_to_bg_param(color),
                         fill: BackgroundFill::Terminal,
                     })
             } else {
@@ -325,7 +325,7 @@ fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {
             None
         })
         .pretty_hr(pretty && config.markdown.hr_style.is_line())
-        .inline_code_bg(config.inline_code.background.map(|c| c.to_ansi_bg_param()))
+        .inline_code_bg(config.inline_code.background.map(crate::format::color_to_bg_param))
 }
 
 #[cfg(test)]

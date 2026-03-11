@@ -41,39 +41,14 @@ impl Schematic for Color {
         Some("Color".into())
     }
 
-    fn build_schema(_schema: SchemaBuilder) -> Schema {
-        // Color is either a u8 or a hex string; model as a generic string
-        // in the schema since TOML/JSON can't express union types directly.
-        Schema::new(schematic::SchemaType::String(Box::default()))
-    }
-}
-
-impl Color {
-    /// Returns the SGR background parameter for this color.
-    ///
-    /// - `Ansi256(n)` → `"48;5;n"`
-    /// - `Rgb { r, g, b }` → `"48;2;r;g;b"`
-    #[must_use]
-    pub fn to_ansi_bg_param(&self) -> String {
-        match self {
-            Self::Ansi256(n) => format!("48;5;{n}"),
-            Self::Rgb { r, g, b } => format!("48;2;{r};{g};{b}"),
-        }
-    }
-
-    /// Returns the full ANSI escape sequence for this color as a background.
-    #[must_use]
-    pub fn to_ansi_bg_escape(&self) -> String {
-        format!("\x1b[{}m", self.to_ansi_bg_param())
-    }
-}
-
-impl fmt::Display for Color {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Ansi256(n) => write!(f, "{n}"),
-            Self::Rgb { r, g, b } => write!(f, "#{r:02x}{g:02x}{b:02x}"),
-        }
+    fn build_schema(mut schema: SchemaBuilder) -> Schema {
+        schema.union(schematic::schema::UnionType {
+            variants_types: vec![
+                Box::new(schema.infer::<u8>()),
+                Box::new(schema.infer::<String>()),
+            ],
+            ..Default::default()
+        })
     }
 }
 
@@ -115,7 +90,9 @@ impl Serialize for Color {
     {
         match self {
             Self::Ansi256(n) => serializer.serialize_u8(*n),
-            Self::Rgb { .. } => serializer.serialize_str(&self.to_string()),
+            Self::Rgb { r, g, b } => {
+                serializer.serialize_str(&format!("#{r:02x}{g:02x}{b:02x}"))
+            }
         }
     }
 }

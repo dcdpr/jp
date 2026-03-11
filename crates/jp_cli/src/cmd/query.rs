@@ -346,7 +346,7 @@ impl Query {
                     None
                 })
                 .pretty_hr(pretty && cfg.style.markdown.hr_style.is_line())
-                .inline_code_bg(cfg.style.inline_code.background.map(|c| c.to_ansi_bg_param()));
+                .inline_code_bg(cfg.style.inline_code.background.map(crate::format::color_to_bg_param));
 
             let formatted =
                 formatter.format_terminal(&format!("{}\n\n---\n\n", chat_request.content))?;
