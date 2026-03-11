@@ -22,8 +22,11 @@ pub(crate) enum Error {
     KeyValue(#[from] jp_config::assignment::KvAssignmentError),
 
     /// Missing config file.
-    #[error("Config file not found: {0}")]
-    MissingConfigFile(Utf8PathBuf),
+    #[error("Config file not found: {path}")]
+    MissingConfigFile {
+        path: Utf8PathBuf,
+        searched: Vec<Utf8PathBuf>,
+    },
 
     #[error("CLI Config error: {0}")]
     CliConfig(String),

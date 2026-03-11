@@ -290,11 +290,21 @@ impl From<crate::error::Error> for Error {
                 ("available", available.join(", ")),
             ]
             .into(),
-            MissingConfigFile(path) => [
-                ("message", "Missing config file".into()),
-                ("path", path.to_string()),
-            ]
-            .into(),
+            MissingConfigFile { path, searched } => {
+                let mut meta = vec![
+                    ("message", "Missing config file".into()),
+                    ("path", path.to_string()),
+                ];
+                if !searched.is_empty() {
+                    let dirs = searched
+                        .iter()
+                        .map(|p| format!("  - {p}"))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    meta.push(("searched", format!("Searched in:\n{dirs}")));
+                }
+                meta
+            }
         };
 
         Self::from(metadata)
