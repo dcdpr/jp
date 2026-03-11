@@ -443,9 +443,7 @@ impl KvAssignment {
 
     /// Convenience method for [`Self::try_number_or_from_str`] that wraps the
     /// `Ok` value into `Some`.
-    pub(crate) fn try_some_number_or_from_str<T, E>(
-        self,
-    ) -> Result<Option<T>, KvAssignmentError>
+    pub(crate) fn try_some_number_or_from_str<T, E>(self) -> Result<Option<T>, KvAssignmentError>
     where
         T: FromStr<Err = E>,
         E: Into<BoxedError>,
