@@ -161,40 +161,12 @@ pub fn load_partial_at_path_recursive<P: Into<PathBuf>>(
         dir = Some(parent);
     }
 
-    #[cfg(test)]
-    #[allow(clippy::allow_attributes, clippy::print_stdout)]
-    {
-        println!("[debug] candidates ({count}):", count = candidates.len());
-        for c in &candidates {
-            println!("[debug]   {}", c.display());
-        }
-    }
-
     // Load and merge from shallowest to deepest, so that deeper (more specific)
     // paths take precedence.
     let mut result: Option<PartialAppConfig> = None;
 
     for candidate in candidates.into_iter().rev() {
-        #[cfg(test)]
-        #[allow(clippy::allow_attributes, clippy::print_stdout)]
-        {
-            println!("[debug] loading: {}", candidate.display());
-        }
-
         let partial = load_partial_at_path(&candidate)?;
-
-        #[cfg(test)]
-        #[allow(clippy::allow_attributes, clippy::print_stdout)]
-        {
-            println!(
-                "[debug]   result: {}",
-                if partial.is_some() {
-                    "found"
-                } else {
-                    "not found"
-                }
-            );
-        }
 
         result = match (result, partial) {
             (Some(mut base), Some(specific)) => {
@@ -294,17 +266,6 @@ fn load_config_file_with_extends(
         .flatten()
         .partition(ExtendingRelativePath::is_before);
 
-    #[cfg(test)]
-    #[allow(clippy::allow_attributes, clippy::print_stdout)]
-    if !before.is_empty() || !after.is_empty() {
-        println!(
-            "[debug] extends for {}: before={}, after={}",
-            path.display(),
-            before.len(),
-            after.len(),
-        );
-    }
-
     load_optional_paths(before, root.as_deref(), loader)?;
 
     if optional {
@@ -340,14 +301,6 @@ fn load_optional_paths(
             continue;
         }
 
-        #[cfg(test)]
-        #[allow(clippy::allow_attributes, clippy::print_stdout)]
-        {
-            println!("[debug] globbing: {path_str}");
-        }
-
-        #[cfg(test)]
-        let mut glob_count: usize = 0;
         for entry in glob(path_str)? {
             let path = match entry {
                 Ok(path) => path,
@@ -357,20 +310,7 @@ fn load_optional_paths(
                 }
             };
 
-            #[cfg(test)]
-            #[allow(clippy::allow_attributes, clippy::print_stdout)]
-            {
-                glob_count += 1;
-                println!("[debug]   glob match: {}", path.display());
-            }
-
             load_config_file_at_path(&path, loader, true)?;
-        }
-
-        #[cfg(test)]
-        #[allow(clippy::allow_attributes, clippy::print_stdout)]
-        if glob_count > 0 {
-            println!("[debug]   glob total matches: {glob_count}");
         }
     }
 
