@@ -59,7 +59,7 @@ impl AssignKeyValue for PartialReasoningConfig {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
             "display" => self.display = kv.try_some_from_str()?,
-            "background" => self.background = kv.try_some_from_str()?,
+            "background" => self.background = kv.try_some_number_or_from_str()?,
             _ if kv.p("summary_model") => self.summary_model.assign(kv)?,
             _ => return missing_key(&kv),
         }

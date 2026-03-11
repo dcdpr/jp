@@ -30,7 +30,7 @@ impl AssignKeyValue for PartialInlineCodeConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
-            "background" => self.background = kv.try_some_from_str()?,
+            "background" => self.background = kv.try_some_number_or_from_str()?,
             _ => return missing_key(&kv),
         }
 
