@@ -88,10 +88,12 @@ impl<'w> TerminalWriter<'w> {
 
         // Pre-populate attrs so the restore logic keeps the default background
         // active across line breaks.
-        let attrs = default_background.as_ref().map_or_else(AnsiState::default, |bg| AnsiState {
-            background: Some(bg.param.clone()),
-            ..Default::default()
-        });
+        let attrs = default_background
+            .as_ref()
+            .map_or_else(AnsiState::default, |bg| AnsiState {
+                background: Some(bg.param.clone()),
+                ..Default::default()
+            });
 
         Self {
             output,

@@ -154,8 +154,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         // Emit the default background escape at the very start.
         if let Some(ref bg) = self.writer.default_background {
-            self.writer
-                .write_escape(&format!("\x1b[{}m", bg.param))?;
+            self.writer.write_escape(&format!("\x1b[{}m", bg.param))?;
         }
         let mut stack = vec![(root, Phase::Pre)];
 
