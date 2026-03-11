@@ -111,7 +111,7 @@ fn test_format_simple_table() {
         style: HrStyle::Markdown,
         terminal_width: None,
     };
-    let result = format_table(table_node, &opts, &hr_opts, &theme, None).expect("should format");
+    let result = format_table(table_node, &opts, &hr_opts, &theme, None, None).expect("should format");
 
     // Verify alignment: all columns should have consistent pipe positions.
     let lines: Vec<&str> = result.trim().lines().collect();
@@ -160,7 +160,7 @@ fn test_format_table_with_wrapping() {
         style: HrStyle::Markdown,
         terminal_width: None,
     };
-    let result = format_table(table_node, &opts, &hr_opts, &theme, None).expect("should format");
+    let result = format_table(table_node, &opts, &hr_opts, &theme, None, None).expect("should format");
 
     // Every line must respect the width cap.
     for line in result.lines() {
@@ -211,7 +211,7 @@ fn test_format_table_wrapping_respects_alignment() {
         style: HrStyle::Markdown,
         terminal_width: None,
     };
-    let result = format_table(table_node, &opts, &hr_opts, &theme, None).expect("should format");
+    let result = format_table(table_node, &opts, &hr_opts, &theme, None, None).expect("should format");
 
     // All data lines should have consistent pipe positions.
     let data_lines: Vec<&str> = result
@@ -273,7 +273,7 @@ fn test_format_aligned_table() {
         style: HrStyle::Markdown,
         terminal_width: None,
     };
-    let result = format_table(table_node, &opts, &hr_opts, &theme, None).expect("should format");
+    let result = format_table(table_node, &opts, &hr_opts, &theme, None, None).expect("should format");
 
     // Separator should contain alignment markers.
     let lines: Vec<&str> = result.trim().lines().collect();
