@@ -14,6 +14,7 @@ pub enum SignalTo {
     Shutdown,
 
     /// Shutdown process immediately.
+    #[cfg_attr(windows, expect(dead_code))]
     Quit,
 }
 
