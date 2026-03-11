@@ -149,7 +149,9 @@ fn test_load_cli_cfg_args_missing_file_reports_searched_paths() {
         Error::MissingConfigFile { path, searched } => {
             assert_eq!(path.as_str(), "skill/missing");
             assert!(
-                searched.iter().any(|p| p.as_str().contains(".jp/config")),
+                searched
+                    .iter()
+                    .any(|p| p.as_str().replace('\\', "/").contains(".jp/config")),
                 "Expected searched paths to contain workspace load path, got: {searched:?}"
             );
         }
