@@ -114,15 +114,6 @@ Ok(
                     tools: {},
                 },
                 attachments: [],
-                inquiry: PartialInquiryConfig {
-                    assistant: PartialAssistantOverrideConfig {
-                        system_prompt: None,
-                        system_prompt_sections: [],
-                        tool_choice: None,
-                        model: None,
-                        request: None,
-                    },
-                },
             },
             style: PartialStyleConfig {
                 code: PartialCodeConfig {
