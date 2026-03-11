@@ -113,7 +113,7 @@ pub fn load_partial_at_path<P: Into<PathBuf>>(path: P) -> Result<Option<PartialA
 }
 
 /// Load a partial configuration from a file at `path`, walking upwards until
-/// either `/` or `root` is reached.
+/// either the filesystem root or `root` is reached.
 ///
 /// At each directory level, it attempts to load a config file with the same
 /// file name (e.g. `config.toml`). All found configs are merged together, with
@@ -128,33 +128,34 @@ pub fn load_partial_at_path_recursive<P: Into<PathBuf>>(
 ) -> Result<Option<PartialAppConfig>, Error> {
     let path: PathBuf = path.into();
 
+    // Extract the file name component (e.g. `config.toml`) that we'll look
+    // for at every ancestor directory.
+    let Some(file_name) = path.file_name().map(OsStr::to_os_string) else {
+        return load_partial_at_path(&path).map(|p| p.filter(|_| path.is_file()));
+    };
+
     // Collect candidate paths from deepest to shallowest.
     //
-    // We do this iteratively to avoid stack overflows on platforms where temp
-    // paths are deep (e.g. Windows: `C:\Users\...\AppData\Local\Temp\...`).
+    // Uses `Path::parent()` to walk up the tree instead of manual iterator
+    // manipulation, which avoids an infinite loop on Windows where
+    // `Prefix("C:")` and `RootDir("\\"`) are separate components in
+    // `Path::iter()` — stripping the root dir leaves the prefix, and
+    // re-joining with the file name recreates the original absolute path.
     let mut candidates = vec![path.clone()];
-    let mut current = path;
+    let mut dir = path.parent();
 
-    loop {
-        let mut iter = current.iter();
+    while let Some(current) = dir {
+        // Stop if we've reached the configured root.
+        if root.is_some_and(|root| root == current) {
+            break;
+        }
 
-        // Take the file name (e.g. `config.toml`).
-        let Some(file_name) = iter.next_back() else {
+        let Some(parent) = current.parent() else {
             break;
         };
 
-        // Stop if we've reached the configured root.
-        if root.is_some_and(|root| root == iter.as_path()) {
-            break;
-        }
-
-        // Strip the directory component before the file name.
-        if iter.next_back().is_none() {
-            break;
-        }
-
-        current = iter.as_path().join(file_name);
-        candidates.push(current.clone());
+        candidates.push(parent.join(&file_name));
+        dir = Some(parent);
     }
 
     // Load and merge from shallowest to deepest, so that deeper (more specific)
