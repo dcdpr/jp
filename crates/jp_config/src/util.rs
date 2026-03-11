@@ -112,8 +112,12 @@ pub fn load_partial_at_path<P: Into<PathBuf>>(path: P) -> Result<Option<PartialA
     loader.load_partial(&()).map(Some).map_err(Into::into)
 }
 
-/// Load a partial configuration from a file at `path`, recursing upwards until
+/// Load a partial configuration from a file at `path`, walking upwards until
 /// either `/` or `root` is reached.
+///
+/// At each directory level, it attempts to load a config file with the same
+/// file name (e.g. `config.toml`). All found configs are merged together, with
+/// deeper (more specific) paths taking precedence over shallower ones.
 ///
 /// # Errors
 ///
@@ -124,43 +128,52 @@ pub fn load_partial_at_path_recursive<P: Into<PathBuf>>(
 ) -> Result<Option<PartialAppConfig>, Error> {
     let path: PathBuf = path.into();
 
-    // Try and load the provided path as a partial.
-    // e.g. `/foo/bar/config.toml`
-    let partial = load_partial_at_path(&path)?;
+    // Collect candidate paths from deepest to shallowest.
+    //
+    // We do this iteratively to avoid stack overflows on platforms where temp
+    // paths are deep (e.g. Windows: `C:\Users\...\AppData\Local\Temp\...`).
+    let mut candidates = vec![path.clone()];
+    let mut current = path;
 
-    // Take the file name of the provided path.
-    // e.g. `config.toml`
-    let mut iter = path.iter();
-    let Some(file_name) = iter.next_back() else {
-        return Ok(partial);
-    };
+    loop {
+        let mut iter = current.iter();
 
-    // Check if `/foo/bar` is the same as the provided root, if it is, we're done.
-    if root.is_some_and(|root| root == iter.as_path()) {
-        return Ok(partial);
-    }
+        // Take the file name (e.g. `config.toml`).
+        let Some(file_name) = iter.next_back() else {
+            break;
+        };
 
-    // Remove the path segment *before* the file name.
-    // e.g. `bar`, or return early if there are no more path segments.
-    if iter.next_back().is_none() {
-        return Ok(partial);
-    }
-
-    // Try and load `/foo/config.toml`
-    let path = iter.as_path().join(file_name);
-    let fallback = load_partial_at_path_recursive(path, root)?;
-
-    match (partial, fallback) {
-        // If we found both `/foo/bar/config.toml` AND `/foo/config.toml`, merge
-        // them (longer path taking precedence).
-        (Some(partial), Some(mut fallback)) => {
-            fallback.merge(&(), partial)?;
-            Ok(Some(fallback))
+        // Stop if we've reached the configured root.
+        if root.is_some_and(|root| root == iter.as_path()) {
+            break;
         }
 
-        // otherwise, return either one, or none.
-        (partial, fallback) => Ok(partial.or(fallback)),
+        // Strip the directory component before the file name.
+        if iter.next_back().is_none() {
+            break;
+        }
+
+        current = iter.as_path().join(file_name);
+        candidates.push(current.clone());
     }
+
+    // Load and merge from shallowest to deepest, so that deeper (more specific)
+    // paths take precedence.
+    let mut result: Option<PartialAppConfig> = None;
+
+    for candidate in candidates.into_iter().rev() {
+        let partial = load_partial_at_path(&candidate)?;
+
+        result = match (result, partial) {
+            (Some(mut base), Some(specific)) => {
+                base.merge(&(), specific)?;
+                Some(base)
+            }
+            (base, specific) => base.or(specific),
+        };
+    }
+
+    Ok(result)
 }
 
 /// Build a final configuration from merged partial configurations.
