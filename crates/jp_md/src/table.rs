@@ -62,8 +62,10 @@ pub fn format_table(
     hr_options: &HrOptions,
     theme: &Theme,
     default_background: Option<&DefaultBackground>,
+    inline_code_bg: Option<&(String, String)>,
 ) -> Option<String> {
-    let (alignments, rows) = extract_table(node, options, hr_options, theme, default_background)?;
+    let (alignments, rows) =
+        extract_table(node, options, hr_options, theme, default_background, inline_code_bg)?;
 
     // Compute visual widths for each column.
     let num_cols = alignments.len();
@@ -154,6 +156,7 @@ fn extract_table(
     hr_options: &HrOptions,
     theme: &Theme,
     default_background: Option<&DefaultBackground>,
+    inline_code_bg: Option<&(String, String)>,
 ) -> Option<(Vec<TableAlignment>, Vec<Vec<RenderedCell>>)> {
     let alignments = match node.data().value {
         NodeValue::Table(ref nt) => nt.alignments.clone(),
@@ -173,8 +176,14 @@ fn extract_table(
                 continue;
             }
 
-            let rendered =
-                render_cell_content(cell_node, options, hr_options, theme, default_background);
+            let rendered = render_cell_content(
+                cell_node,
+                options,
+                hr_options,
+                theme,
+                default_background,
+                inline_code_bg,
+            );
             cells.push(RenderedCell { rendered });
         }
         rows.push(cells);
@@ -192,6 +201,7 @@ fn render_cell_content(
     hr_options: &HrOptions,
     theme: &Theme,
     default_background: Option<&DefaultBackground>,
+    inline_code_bg: Option<&(String, String)>,
 ) -> String {
     let mut buf = String::new();
     {
@@ -210,6 +220,7 @@ fn render_cell_content(
             hr_options,
             theme,
             default_background,
+            inline_code_bg,
             &mut buf,
         );
 

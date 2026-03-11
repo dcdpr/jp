@@ -68,6 +68,7 @@ pub fn format_terminal(
     hr_options: &HrOptions,
     theme: &Theme,
     default_background: Option<&DefaultBackground>,
+    inline_code_bg: Option<&(String, String)>,
     output: &mut dyn Write,
 ) -> fmt::Result {
     let mut f = TerminalFormatter::new(
@@ -77,6 +78,7 @@ pub fn format_terminal(
         hr_options,
         theme,
         default_background,
+        inline_code_bg,
         output,
     );
     f.format(root)
@@ -102,6 +104,9 @@ pub struct TerminalFormatter<'a, 'w> {
     /// Syntax highlighting theme.
     theme: &'w Theme,
 
+    /// Override background for inline code spans, if configured.
+    inline_code_bg: Option<&'w (String, String)>,
+
     /// Stack of ordered list start numbers.
     ol_stack: Vec<usize>,
 
@@ -121,6 +126,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         hr_options: &'w HrOptions,
         theme: &'w Theme,
         default_background: Option<&DefaultBackground>,
+        inline_code_bg: Option<&'w (String, String)>,
         output: &'w mut dyn Write,
     ) -> Self {
         Self {
@@ -129,6 +135,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             table_options,
             hr_options,
             theme,
+            inline_code_bg,
             ol_stack: vec![],
             blockquote_depth: 0,
             blockquote_fg: theme_blockquote_fg(theme),
@@ -574,7 +581,9 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         let numticks = shortest_unused_sequence(literal.as_bytes(), b'`');
 
-        let (bg_param, bg_escape) = theme_bg(self.theme);
+        let (bg_param, bg_escape) = self
+            .inline_code_bg
+            .map_or_else(|| theme_bg(self.theme), |(p, e)| (p.clone(), e.clone()));
         self.writer.attrs.background = Some(bg_param);
         self.writer.write_escape(&bg_escape)?;
 
@@ -802,6 +811,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             self.hr_options,
             self.theme,
             self.writer.default_background.as_ref(),
+            self.inline_code_bg,
         ) {
             self.writer.output(&rendered, false)?;
         }

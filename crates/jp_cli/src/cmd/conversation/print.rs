@@ -207,6 +207,7 @@ fn build_formatter(cfg: &AppConfig, pretty: bool) -> Formatter {
             None
         })
         .pretty_hr(pretty && cfg.style.markdown.hr_style.is_line())
+        .inline_code_bg(cfg.style.inline_code.background.as_deref())
 }
 
 #[cfg(test)]

@@ -87,6 +87,12 @@ pub struct Formatter {
     /// terminal width. When `None`, the configured `width` is used as a
     /// fallback.
     terminal_width: Option<usize>,
+
+    /// Override background color for inline code spans.
+    ///
+    /// When set, inline code uses this color instead of the theme's background.
+    /// Stored as a pre-resolved `(sgr_param, full_escape)` pair.
+    inline_code_bg: Option<(String, String)>,
 }
 
 impl fmt::Debug for Formatter {
@@ -97,6 +103,7 @@ impl fmt::Debug for Formatter {
             .field("theme", &"<syntect::Theme>")
             .field("hr_style", &self.hr_style)
             .field("terminal_width", &self.terminal_width)
+            .field("inline_code_bg", &self.inline_code_bg)
             .finish()
     }
 }
@@ -117,6 +124,7 @@ impl Formatter {
             theme: theme::resolve(None),
             hr_style: HrStyle::default(),
             terminal_width: None,
+            inline_code_bg: None,
         }
     }
 
@@ -131,6 +139,7 @@ impl Formatter {
             theme: theme::resolve(None),
             hr_style: HrStyle::default(),
             terminal_width: None,
+            inline_code_bg: None,
         }
     }
 
@@ -167,6 +176,16 @@ impl Formatter {
     #[must_use]
     pub const fn terminal_width(mut self, width: usize) -> Self {
         self.terminal_width = Some(width);
+        self
+    }
+
+    /// Override the background color for inline code spans.
+    ///
+    /// When set, inline code uses this color instead of the theme's
+    /// background. Accepts a hex RGB string (e.g. `"#504945"`).
+    #[must_use]
+    pub fn inline_code_bg(mut self, hex: Option<&str>) -> Self {
+        self.inline_code_bg = hex.and_then(parse_hex_bg);
         self
     }
 
@@ -222,6 +241,7 @@ impl Formatter {
             &hr_options,
             &self.theme,
             options.default_background.as_ref(),
+            self.inline_code_bg.as_ref(),
             &mut buf,
         )?;
         Ok(buf)
@@ -348,6 +368,23 @@ impl<'a> CodeHighlighter<'a> {
             ),
         }
     }
+}
+
+/// Parse a hex RGB color string into an SGR `(param, escape)` pair.
+///
+/// Accepts `#RRGGBB` (case-insensitive, leading `#` required).
+/// Returns `None` if the input is malformed.
+fn parse_hex_bg(hex: &str) -> Option<(String, String)> {
+    let hex = hex.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    let param = format!("48;2;{r};{g};{b}");
+    let escape = format!("\x1b[{param}m");
+    Some((param, escape))
 }
 
 #[cfg(test)]
