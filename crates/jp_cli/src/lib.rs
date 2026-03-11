@@ -485,6 +485,8 @@ fn load_cli_cfg_args(
     overrides: &[KeyValueOrPath],
     workspace: Option<&Workspace>,
 ) -> Result<PartialAppConfig> {
+    let home = std::env::home_dir().and_then(|p| Utf8PathBuf::from_path_buf(p).ok());
+
     for field in overrides {
         match field {
             KeyValueOrPath::Path(path) if path.exists() => {
@@ -493,43 +495,76 @@ fn load_cli_cfg_args(
                 }
             }
             KeyValueOrPath::Path(path) => {
-                // Get the list of `config_load_paths`
+                // Build search roots in precedence order (lowest first).
                 //
-                // We do this on every iteration of `overrides`, to allow
-                // additional load paths to be added using `--cfg`.
-                let config_load_paths = workspace.iter().flat_map(|w| {
-                    partial.config_load_paths.iter().flatten().filter_map(|p| {
-                        Utf8PathBuf::try_from(p.to_path(w.root()))
-                            .inspect_err(|e| {
-                                tracing::error!(
-                                    path = p.to_string(),
-                                    error = e.to_string(),
-                                    "Not a valid UTF-8 path"
-                                );
-                            })
-                            .ok()
-                    })
-                });
+                // 1. User-global:    $XDG_CONFIG_HOME/jp/config/
+                // 2. Workspace:      <workspace_root>/
+                // 3. User-workspace: $XDG_DATA_HOME/jp/workspace/<id>/config/
+                let mut roots: Vec<Utf8PathBuf> = Vec::new();
 
-                let mut found = false;
-                for load_path in config_load_paths {
-                    debug!(
-                        path = path.as_str(),
-                        load_path = load_path.as_str(),
-                        "Trying to load partial from config load path"
-                    );
+                if let Some(global_dir) = user_global_config_path(home.as_deref()) {
+                    roots.push(global_dir.join("config"));
+                }
+                if let Some(w) = workspace {
+                    roots.push(w.root().to_owned());
+                }
+                if let Some(user_ws_dir) = workspace.and_then(Workspace::user_storage_path) {
+                    roots.push(user_ws_dir.join("config"));
+                }
 
-                    if let Some(path) = find_file_in_load_path(path, &load_path) {
-                        if let Some(p) = load_partial_at_path(path)? {
-                            partial = load_partial(partial, p)?;
+                let mut matches: Vec<PartialAppConfig> = Vec::new();
+                let mut searched: Vec<Utf8PathBuf> = Vec::new();
+
+                // Search each root independently. Within a single root, the
+                // first `config_load_paths` entry that produces a match wins.
+                // Across roots, all matches are collected for merging.
+                for root in &roots {
+                    let load_paths: Vec<Utf8PathBuf> = partial
+                        .config_load_paths
+                        .iter()
+                        .flatten()
+                        .filter_map(|p| {
+                            Utf8PathBuf::try_from(p.to_path(root))
+                                .inspect_err(|e| {
+                                    tracing::error!(
+                                        path = p.to_string(),
+                                        error = e.to_string(),
+                                        "Not a valid UTF-8 path"
+                                    );
+                                })
+                                .ok()
+                        })
+                        .collect();
+
+                    for load_path in &load_paths {
+                        searched.push(load_path.clone());
+
+                        debug!(
+                            path = path.as_str(),
+                            load_path = load_path.as_str(),
+                            root = root.as_str(),
+                            "Trying to load partial from config load path"
+                        );
+
+                        if let Some(file) = find_file_in_load_path(path, load_path) {
+                            if let Some(p) = load_partial_at_path(file)? {
+                                matches.push(p);
+                            }
+
+                            break; // first match within this root
                         }
-                        found = true;
-                        break;
                     }
                 }
 
-                if !found {
-                    return Err(Error::MissingConfigFile(path.clone()));
+                if matches.is_empty() {
+                    return Err(Error::MissingConfigFile {
+                        path: path.clone(),
+                        searched,
+                    });
+                }
+
+                for p in matches {
+                    partial = load_partial(partial, p)?;
                 }
             }
             KeyValueOrPath::KeyValue(kv) => partial
@@ -846,14 +881,5 @@ fn run_dhat() -> dhat::Profiler {
 }
 
 #[cfg(test)]
-mod tests {
-    use clap::CommandFactory;
-    use test_log::test;
-
-    use super::*;
-
-    #[test]
-    fn test_cli() {
-        Cli::command().debug_assert();
-    }
-}
+#[path = "lib_tests.rs"]
+mod lib_tests;

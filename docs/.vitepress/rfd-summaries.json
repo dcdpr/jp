@@ -122,5 +122,9 @@
   "031-durable-conversation-storage-with-workspace-projection.md": {
     "hash": "0313f86d5cf10756ee8fb7707eeb0ed168dbe6179bcf2e12c2ebe8b4ab3271ae",
     "summary": "Make user-local storage the durable source; workspace copies become optional projections for git visibility."
+  },
+  "035-multi-root-config-load-path-resolution.md": {
+    "hash": "5a18ca4b0f9fbf0758644942e446d90816a9b0f23e60502cb01b75e7760f7ae9",
+    "summary": "Extend `--cfg` path resolution to search user-global, workspace, and user-workspace config roots, merging matches."
   }
 }

@@ -1924,6 +1924,7 @@ dependencies = [
  "schematic",
  "serde",
  "serde_json",
+ "serial_test",
  "strip-ansi-escapes",
  "syntect",
  "test-log",
