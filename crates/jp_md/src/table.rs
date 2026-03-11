@@ -64,8 +64,14 @@ pub fn format_table(
     default_background: Option<&DefaultBackground>,
     inline_code_bg: Option<&(String, String)>,
 ) -> Option<String> {
-    let (alignments, rows) =
-        extract_table(node, options, hr_options, theme, default_background, inline_code_bg)?;
+    let (alignments, rows) = extract_table(
+        node,
+        options,
+        hr_options,
+        theme,
+        default_background,
+        inline_code_bg,
+    )?;
 
     // Compute visual widths for each column.
     let num_cols = alignments.len();
