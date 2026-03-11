@@ -572,6 +572,8 @@ fn test_load_partial_at_path_recursive() {
     ];
 
     for (name, case) in cases {
+        println!("running test case: {name}");
+
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         for (file, data) in case.files {
