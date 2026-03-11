@@ -1,6 +1,7 @@
 //! Style configuration for output formatting.
 
 pub mod code;
+pub mod inline_code;
 pub mod markdown;
 pub mod reasoning;
 pub mod streaming;
@@ -18,6 +19,7 @@ use crate::{
     partial::ToPartial,
     style::{
         code::{CodeConfig, PartialCodeConfig},
+        inline_code::{InlineCodeConfig, PartialInlineCodeConfig},
         markdown::{MarkdownConfig, PartialMarkdownConfig},
         reasoning::{PartialReasoningConfig, ReasoningConfig},
         streaming::{PartialStreamingConfig, StreamingConfig},
@@ -35,6 +37,12 @@ pub struct StyleConfig {
     /// Configures how code blocks in the assistant's response are rendered.
     #[setting(nested)]
     pub code: CodeConfig,
+
+    /// Inline code span style.
+    ///
+    /// Configures how inline code (`` `like this` ``) is rendered.
+    #[setting(nested)]
+    pub inline_code: InlineCodeConfig,
 
     /// Markdown rendering style.
     ///
@@ -73,6 +81,7 @@ impl AssignKeyValue for PartialStyleConfig {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object()?,
             _ if kv.p("code") => self.code.assign(kv)?,
+            _ if kv.p("inline_code") => self.inline_code.assign(kv)?,
             _ if kv.p("markdown") => self.markdown.assign(kv)?,
             _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
             _ if kv.p("streaming") => self.streaming.assign(kv)?,
@@ -89,6 +98,7 @@ impl PartialConfigDelta for PartialStyleConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             code: self.code.delta(next.code),
+            inline_code: self.inline_code.delta(next.inline_code),
             markdown: self.markdown.delta(next.markdown),
             reasoning: self.reasoning.delta(next.reasoning),
             streaming: self.streaming.delta(next.streaming),
@@ -102,6 +112,7 @@ impl ToPartial for StyleConfig {
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
             code: self.code.to_partial(),
+            inline_code: self.inline_code.to_partial(),
             markdown: self.markdown.to_partial(),
             reasoning: self.reasoning.to_partial(),
             streaming: self.streaming.to_partial(),
