@@ -186,7 +186,14 @@ pub fn load_partial_at_path_recursive<P: Into<PathBuf>>(
         #[cfg(test)]
         #[allow(clippy::allow_attributes, clippy::print_stdout)]
         {
-            println!("[debug]   result: {}", if partial.is_some() { "found" } else { "not found" });
+            println!(
+                "[debug]   result: {}",
+                if partial.is_some() {
+                    "found"
+                } else {
+                    "not found"
+                }
+            );
         }
 
         result = match (result, partial) {
