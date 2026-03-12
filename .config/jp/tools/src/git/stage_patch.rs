@@ -1,105 +1,56 @@
-use std::path::{Path, PathBuf};
-
 use jp_tool::{AnswerType, Context, Outcome, Question};
+use serde::Deserialize;
 use serde_json::{Map, Value};
 
+use super::apply::apply_patch_to_index;
 use crate::util::{
     OneOrMany, ToolResult,
     runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
 };
 
+#[derive(Debug, Deserialize)]
+pub struct PatchTarget {
+    path: String,
+    ids: OneOrMany<usize>,
+}
+
 pub(crate) async fn git_stage_patch(
     ctx: Context,
     answers: &Map<String, Value>,
-    path: PathBuf,
-    patch_ids: OneOrMany<usize>,
+    patches: OneOrMany<PatchTarget>,
 ) -> ToolResult {
-    git_stage_patch_impl(&ctx, answers, &path, &patch_ids, &DuctProcessRunner)
+    git_stage_patch_impl(&ctx, answers, &patches, &DuctProcessRunner)
 }
 
 fn git_stage_patch_impl<R: ProcessRunner>(
     ctx: &Context,
     answers: &Map<String, Value>,
-    path: &Path,
-    patch_ids: &[usize],
+    patches: &[PatchTarget],
     runner: &R,
 ) -> ToolResult {
-    let path_str = path.to_str().unwrap_or_default();
+    // Build patches for all targets, collecting errors per file.
+    let mut built: Vec<(&str, String)> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
 
-    let ProcessOutput {
-        stdout,
-        stderr,
-        status,
-    } = runner.run("git", &["ls-files", path_str], &ctx.root)?;
-
-    if !status.is_success() {
-        return Err(format!("Failed to list staged changes: {stderr}").into());
-    }
-
-    let ProcessOutput {
-        stdout,
-        stderr,
-        status,
-    } = if stdout.is_empty() {
-        // Untracked files.
-        runner.run(
-            "git",
-            &[
-                "diff",
-                "--no-index",
-                "--minimal",
-                "--unified=0",
-                "--",
-                "/dev/null",
-                path_str,
-            ],
-            &ctx.root,
-        )?
-    } else {
-        // Tracked files.
-        runner.run(
-            "git",
-            &[
-                "diff-files",
-                "-p",
-                "--minimal",
-                "--unified=0",
-                "--",
-                path_str,
-            ],
-            &ctx.root,
-        )?
-    };
-
-    if !status.is_success() {
-        return Err(format!("Failed to get patch for `{}`: {stderr}", path.display()).into());
-    }
-
-    let mut hunks = vec![];
-    for (id, hunk) in stdout.split("\n@@ ").skip(1).enumerate() {
-        if !patch_ids.contains(&id) {
-            continue;
+    for target in patches {
+        match build_file_patch(ctx, &target.path, &target.ids, runner) {
+            Ok(patch) => built.push((&target.path, patch)),
+            Err(e) => errors.push(format!("{}: {e}", target.path)),
         }
-
-        hunks.push(format!("@@ {hunk}"));
     }
 
-    if hunks.is_empty() {
-        return Err(format!("Failed to find patch for `{}`: {stdout}", path.display()).into());
+    if built.is_empty() {
+        return Err(format!("Failed to build patches:\n{}", errors.join("\n")).into());
     }
 
-    let patch_hunks = hunks.join("\n");
-
-    let path_display = path.display().to_string();
-    let patch = indoc::formatdoc! {"
-            diff --git a/{path_display} b/{path_display}
-            --- a/{path_display}
-            +++ b/{path_display}
-            {patch_hunks}
-        "};
-
+    // For format_arguments, show what would be applied.
+    let combined: String = built
+        .iter()
+        .map(|(_, p)| p.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     if ctx.action.is_format_arguments() {
-        return Ok(patch.into());
+        return Ok(combined.into());
     }
 
     match answers.get("stage_changes").and_then(Value::as_bool) {
@@ -111,7 +62,7 @@ fn git_stage_patch_impl<R: ProcessRunner>(
             return Ok(Outcome::NeedsInput {
                 question: Question {
                     id: "stage_changes".to_string(),
-                    text: format!("Do you want to stage the following patch?\n\n{patch}"),
+                    text: format!("Do you want to stage the following patch?\n\n{combined}"),
                     answer_type: AnswerType::Boolean,
                     default: Some(Value::Bool(true)),
                 },
@@ -119,72 +70,102 @@ fn git_stage_patch_impl<R: ProcessRunner>(
         }
     }
 
-    let ProcessOutput { stderr, status, .. } = runner.run_with_env_and_stdin(
-        "git",
-        &["apply", "--cached", "--unidiff-zero", "-"],
-        &ctx.root,
-        &[],
-        Some(&patch),
-    )?;
+    // Apply each file's patch individually so partial success is possible.
+    let mut staged: Vec<&str> = Vec::new();
 
-    if !status.is_success() {
-        return Err(format!("Failed to apply patch: {stderr}").into());
+    for (path, patch) in &built {
+        match apply_patch_to_index(patch, &ctx.root, runner) {
+            Ok(()) => staged.push(path),
+            Err(e) => errors.push(format!("{path}: {e}")),
+        }
     }
 
-    Ok("Patch applied.".into())
+    if errors.is_empty() {
+        return Ok("Patch applied.".into());
+    }
+
+    let mut msg = String::new();
+    if !staged.is_empty() {
+        msg.push_str(&format!("Staged: {}\n", staged.join(", ")));
+    }
+    msg.push_str(&format!("Failed:\n{}", errors.join("\n")));
+
+    if staged.is_empty() {
+        Err(msg.into())
+    } else {
+        Ok(msg.into())
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use camino_tempfile::tempdir;
-    use jp_tool::Action;
-    use serde_json::json;
+fn build_file_patch<R: ProcessRunner>(
+    ctx: &Context,
+    path: &str,
+    patch_ids: &[usize],
+    runner: &R,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let ProcessOutput {
+        stdout,
+        stderr,
+        status,
+    } = runner.run("git", &["ls-files", path], &ctx.root)?;
 
-    use super::*;
-    use crate::util::runner::MockProcessRunner;
+    if !status.is_success() {
+        return Err(format!("Failed to check tracking status: {stderr}").into());
+    }
 
-    #[test]
-    fn test_git_stage_patch_success() {
-        let dir = tempdir().unwrap();
-        let ctx = Context {
-            root: dir.path().to_owned(),
-            action: Action::Run,
-        };
-
-        let mut answers = serde_json::Map::new();
-        answers.insert("stage_changes".to_string(), json!(true));
-
-        let runner = MockProcessRunner::builder()
-            .expect("git")
-            .args(&["ls-files", "test.rs"])
-            .returns_success("test.rs\n")
-            .expect("git")
-            .args(&[
-                "diff-files",
-                "-p",
+    let ProcessOutput {
+        stdout,
+        stderr,
+        status,
+    } = if stdout.is_empty() {
+        runner.run(
+            "git",
+            &[
+                "diff",
+                "--no-index",
                 "--minimal",
                 "--unified=0",
                 "--",
-                "test.rs",
-            ])
-            .returns_success(
-                "diff --git a/test.rs b/test.rs\n--- a/test.rs\n+++ b/test.rs\n@@ -1 +1 \
-                 @@\n-old\n+new\n",
-            )
-            .expect("git")
-            .args(&["apply", "--cached", "--unidiff-zero", "-"])
-            .returns_success("");
+                "/dev/null",
+                path,
+            ],
+            &ctx.root,
+        )?
+    } else {
+        runner.run(
+            "git",
+            &["diff-files", "-p", "--minimal", "--unified=0", "--", path],
+            &ctx.root,
+        )?
+    };
 
-        let result = git_stage_patch_impl(
-            &ctx,
-            &answers,
-            &std::path::PathBuf::from("test.rs"),
-            &[0],
-            &runner,
-        )
-        .unwrap();
-
-        let content = result.into_content().unwrap();
-        assert_eq!(content, "Patch applied.");
+    if !status.is_success() {
+        return Err(format!("Failed to get diff: {stderr}").into());
     }
+
+    // Preserve the original diff header (everything before the first hunk).
+    // This keeps special headers like `deleted file mode` and `+++ /dev/null`
+    // that git needs to correctly stage deletions, renames, etc.
+    let Some((header, _)) = stdout.split_once("\n@@ ") else {
+        return Err("No hunks found".into());
+    };
+
+    let mut hunks = vec![];
+    for (id, hunk) in stdout.split("\n@@ ").skip(1).enumerate() {
+        if !patch_ids.contains(&id) {
+            continue;
+        }
+        hunks.push(format!("@@ {hunk}"));
+    }
+
+    if hunks.is_empty() {
+        let available: Vec<usize> = (0..stdout.split("\n@@ ").skip(1).count()).collect();
+        return Err(format!("Patch IDs {patch_ids:?} not found (available: {available:?})").into());
+    }
+
+    Ok(format!("{header}\n{}", hunks.join("\n")))
 }
+
+#[cfg(test)]
+#[path = "stage_patch_tests.rs"]
+mod tests;

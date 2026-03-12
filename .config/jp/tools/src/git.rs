@@ -4,11 +4,12 @@ use crate::{
 };
 
 mod add_intent;
+mod apply;
 mod commit;
 mod diff;
 mod list_patches;
 mod stage_patch;
-mod stage_raw_patch;
+mod stage_patch_lines;
 mod unstage;
 
 use add_intent::git_add_intent;
@@ -16,7 +17,7 @@ use commit::git_commit;
 use diff::git_diff;
 use list_patches::git_list_patches;
 use stage_patch::git_stage_patch;
-use stage_raw_patch::git_stage_raw_patch;
+use stage_patch_lines::git_stage_patch_lines;
 use unstage::git_unstage;
 
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
@@ -25,11 +26,14 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
         "commit" => git_commit(ctx.root, t.req("message")?).await,
 
-        "stage_patch" => {
-            git_stage_patch(ctx, &t.answers, t.req("path")?, t.req("patch_ids")?).await
-        }
+        "stage_patch" => git_stage_patch(ctx, &t.answers, t.req("patches")?).await,
 
-        "stage_raw_patch" => git_stage_raw_patch(ctx, t.req("path")?, t.req("diff")?).await,
+        "stage_patch_lines" => {
+            let path: String = t.req("path")?;
+            let patch_id: usize = t.req("patch_id")?;
+            let lines: Vec<usize> = t.req("lines")?;
+            git_stage_patch_lines(&ctx.root, &path, patch_id, &lines)
+        }
 
         "list_patches" => git_list_patches(&ctx.root, t.req("files")?),
 
