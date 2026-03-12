@@ -3,7 +3,16 @@ disallowed-methods = []
 disallowed-types = []
 
 too-many-arguments-threshold = 10
-doc-valid-idents = ["OpenAI", "OpenRouter", "CommonMark", "LlamaCPP", ".."]
+doc-valid-idents = [
+    "CommonMark",
+    "LlamaCPP",
+    "OpenAI",
+    "OpenRouter",
+    "SQLite",
+
+    # Append Clippy's own list of valid identifiers.
+    "..",
+]
 allow-unwrap-in-tests = true
 allow-print-in-tests = true
 allowed-duplicate-crates = [

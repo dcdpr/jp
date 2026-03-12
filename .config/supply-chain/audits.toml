@@ -41,6 +41,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.3 -> 0.3.4"
 
+[[audits.pastey]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.2.1"
+
 [[audits.process-wrap]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -62,6 +67,11 @@ criteria = "safe-to-deploy"
 delta = "0.3.0 -> 0.4.0"
 
 [[audits.rmcp]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "1.1.1"
+
+[[audits.rmcp-macros]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "1.1.1"

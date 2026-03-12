@@ -1,23 +1,16 @@
-use std::{collections::BTreeSet, error::Error, rc::Rc};
+use std::{collections::BTreeSet, error::Error};
 
 use async_trait::async_trait;
-use camino::{Utf8Path, Utf8PathBuf};
-use directories::BaseDirs;
+use camino::Utf8Path;
+use grizzly::{BearDb, search::SearchParams};
 use jp_attachment::{
     Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, percent_decode_str,
     percent_encode_str, typetag,
 };
 use jp_mcp::Client;
-use rusqlite::{Connection, OptionalExtension as _, params, types::Value};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, trace, warn};
+use tracing::debug;
 use url::Url;
-
-/// Path to the Bear Sqlite database.
-///
-/// See: <https://bear.app/faq/where-are-bears-notes-located/>
-static DB_PATH: &str =
-    "Library/Group Containers/9K33E3U3T4.net.shinyfrog.bear/Application Data/database.sqlite";
 
 #[distributed_slice(HANDLERS)]
 #[linkme(crate = linkme)]
@@ -31,7 +24,7 @@ fn handler() -> BoxedHandler {
 pub struct BearNotes(BTreeSet<Query>);
 
 impl BearNotes {
-    fn query_to_uri(&self, query: &Query) -> Result<Url, Box<dyn std::error::Error + Send + Sync>> {
+    fn query_to_uri(&self, query: &Query) -> Result<Url, Box<dyn Error + Send + Sync>> {
         let (host, path, query_pairs) = match query {
             Query::Get(path) => ("get", path, vec![]),
             Query::Search { query, tags } => (
@@ -74,7 +67,7 @@ enum Query {
     Search { query: String, tags: Vec<String> },
 }
 
-/// A note from the Bear note-taking app.
+/// A note from the Bear note-taking app, formatted for attachment XML output.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Note {
     /// The unique identifier of the note.
@@ -98,6 +91,17 @@ impl Note {
         serializer.indent(' ', 2);
         self.serialize(serializer)?;
         Ok(buffer)
+    }
+}
+
+impl From<grizzly::Note> for Note {
+    fn from(note: grizzly::Note) -> Self {
+        Self {
+            id: note.id,
+            title: note.title,
+            content: note.content.unwrap_or_default(),
+            tags: note.tags,
+        }
     }
 }
 
@@ -138,13 +142,11 @@ impl Handler for BearNotes {
         _: &Utf8Path,
         _: Client,
     ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
-        let db = get_database_path()?;
-        trace!(db = %db, "Connecting to Bear database.");
-        let conn = Connection::open(db)?;
+        let db = BearDb::open().map_err(|e| e.to_string())?;
 
         let mut attachments = vec![];
         for query in &self.0 {
-            for note in get_notes(query, &conn)? {
+            for note in get_notes(query, &db)? {
                 attachments.push(
                     Attachment::text(
                         format!("{}://get/{}", self.scheme(), &note.id),
@@ -190,107 +192,39 @@ fn uri_to_query(uri: &Url) -> Result<Query, Box<dyn Error + Send + Sync>> {
     Ok(query)
 }
 
-/// Retrieves notes from the Bear database based on the query.
-fn get_notes(query: &Query, conn: &Connection) -> Result<Vec<Note>, Box<dyn Error + Send + Sync>> {
-    rusqlite::vtab::array::load_module(conn)?;
+/// Retrieve notes from Bear using the grizzly database layer.
+fn get_notes(query: &Query, db: &BearDb) -> Result<Vec<Note>, Box<dyn Error + Send + Sync>> {
+    let notes: Vec<Note> = match query {
+        Query::Get(id) => db
+            .get_notes(&[id.as_str()])
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(Note::from)
+            .collect(),
 
-    let mut notes = Vec::new();
-
-    let ids = match query {
-        Query::Get(id) => vec![id.to_owned()],
         Query::Search { query, tags } => {
-            let pat = format!("%{query}%");
+            let matches = db
+                .search(&SearchParams {
+                    queries: vec![query.clone()],
+                    tags: tags.clone(),
+                    context: 0,
+                    ..Default::default()
+                })
+                .map_err(|e| e.to_string())?;
 
-            let sql = if tags.is_empty() {
-                "SELECT ZUNIQUEIDENTIFIER FROM ZSFNOTE N
-                  WHERE (N.ZTITLE LIKE ?1 OR N.ZTEXT LIKE ?1)
-                    AND N.ZTRASHED = 0 AND N.ZENCRYPTED = 0"
-            } else {
-                "SELECT N.ZUNIQUEIDENTIFIER
-                  FROM ZSFNOTE N
-                  JOIN Z_5TAGS NT ON N.Z_PK = NT.Z_5NOTES
-                  JOIN ZSFNOTETAG T ON NT.Z_13TAGS = T.Z_PK
-                  WHERE (N.ZTITLE LIKE ?1 OR N.ZTEXT LIKE ?1)
-                    AND T.ZTITLE IN rarray(?2)
-                    AND N.ZTRASHED = 0 AND N.ZENCRYPTED = 0
-                  GROUP BY N.ZUNIQUEIDENTIFIER"
-            };
-
-            let mut stmt = conn.prepare(sql)?;
-
-            if tags.is_empty() {
-                stmt.query_map(params![pat], |row| row.get(0))?
-                    .collect::<Result<Vec<String>, _>>()?
-            } else {
-                let values = Rc::new(
-                    tags.iter()
-                        .cloned()
-                        .map(Value::from)
-                        .collect::<Vec<Value>>(),
-                );
-                stmt.query_map(params![pat, values], |row| row.get(0))?
-                    .collect::<Result<Vec<String>, _>>()?
-            }
+            // For each matched note, fetch the full note
+            let ids: Vec<_> = matches.iter().map(|m| m.note_id.as_str()).collect();
+            db.get_notes(&ids)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(Note::from)
+                .collect()
         }
     };
 
-    let mut note_stmt = conn.prepare(
-        "SELECT Z_PK, ZTITLE, ZTEXT FROM ZSFNOTE
-         WHERE ZUNIQUEIDENTIFIER = ?1 AND ZTRASHED = 0 AND ZENCRYPTED = 0",
-    )?;
+    debug!(?query, notes = %notes.len(), "Query completed.");
 
-    let mut tag_stmt = conn.prepare(
-        "SELECT T.ZTITLE
-         FROM ZSFNOTETAG T
-         JOIN Z_5TAGS NT ON T.Z_PK = NT.Z_13TAGS
-         WHERE NT.Z_5NOTES = ?1",
-    )?;
-
-    for id in ids {
-        let row = note_stmt
-            .query_row(params![&id], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })
-            .optional()?;
-
-        let Some((pk, title, content)) = row else {
-            warn!(%id, "Note not found for given id");
-            continue;
-        };
-
-        let tags = tag_stmt
-            .query_map(params![pk], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<String>, _>>()?;
-
-        notes.push(Note {
-            id,
-            title,
-            content,
-            tags,
-        });
-    }
-
-    debug!(?query, notes = %notes.len(), "Query completed.",);
     Ok(notes)
-}
-
-/// Attempts to find the path to the Bear Sqlite database.
-/// Assumes the standard macOS location.
-fn get_database_path() -> Result<Utf8PathBuf, Box<dyn Error + Send + Sync>> {
-    let path = BaseDirs::new()
-        .ok_or("Could not find base directories")?
-        .home_dir()
-        .join(DB_PATH);
-
-    if !path.exists() {
-        return Err(format!("Missing Bear SQLite database at {}", path.display()).into());
-    }
-
-    path.try_into().map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -363,101 +297,5 @@ mod tests {
             let query = uri_to_query(&uri).map_err(|e| e.to_string());
             assert_eq!(query, expected);
         }
-    }
-
-    #[test]
-    fn test_get_notes() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(indoc::indoc! {"
-            CREATE TABLE ZSFNOTE (
-                Z_PK INTEGER PRIMARY KEY,
-                ZUNIQUEIDENTIFIER VARCHAR,
-                ZTEXT VARCHAR,
-                ZTITLE VARCHAR,
-                ZTRASHED INTEGER,
-                ZENCRYPTED INTEGER
-            );
-
-            INSERT INTO ZSFNOTE
-                (Z_PK, ZUNIQUEIDENTIFIER, ZTITLE, ZTEXT, ZTRASHED, ZENCRYPTED)
-            VALUES
-                (1, '1', 'Test Title', 'Testing content in XML', 0, 0),
-                (2, '2', 'Test Title 2', 'Testing content in XML 2', 0, 0);
-
-            CREATE TABLE Z_5TAGS (
-                Z_5NOTES INTEGER,
-                Z_13TAGS INTEGER
-            );
-
-            INSERT INTO Z_5TAGS
-                (Z_5NOTES, Z_13TAGS)
-            VALUES
-                (1, 1),
-                (2, 2);
-
-            CREATE TABLE ZSFNOTETAG (
-                Z_PK INTEGER PRIMARY KEY,
-                ZTITLE VARCHAR
-            );
-
-            INSERT INTO ZSFNOTETAG
-                (Z_PK, ZTITLE)
-            VALUES
-                (1, 'tag #1'),
-                (2, 'tag #2');
-        "})
-            .unwrap();
-
-        let notes = get_notes(&Query::Get("1".to_string()), &conn).unwrap();
-
-        assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0], Note {
-            id: "1".to_string(),
-            title: "Test Title".to_string(),
-            content: "Testing content in XML".to_string(),
-            tags: vec!["tag #1".to_string()],
-        });
-
-        let notes = get_notes(
-            &Query::Search {
-                query: "Testing content".to_string(),
-                tags: vec![],
-            },
-            &conn,
-        )
-        .unwrap();
-
-        assert_eq!(notes.len(), 2);
-        assert_eq!(notes, vec![
-            Note {
-                id: "1".to_string(),
-                title: "Test Title".to_string(),
-                content: "Testing content in XML".to_string(),
-                tags: vec!["tag #1".to_string()],
-            },
-            Note {
-                id: "2".to_string(),
-                title: "Test Title 2".to_string(),
-                content: "Testing content in XML 2".to_string(),
-                tags: vec!["tag #2".to_string()],
-            }
-        ]);
-
-        let notes = get_notes(
-            &Query::Search {
-                query: "Testing content".to_string(),
-                tags: vec!["tag #2".to_string()],
-            },
-            &conn,
-        )
-        .unwrap();
-
-        assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0], Note {
-            id: "2".to_string(),
-            title: "Test Title 2".to_string(),
-            content: "Testing content in XML 2".to_string(),
-            tags: vec!["tag #2".to_string()],
-        });
     }
 }
