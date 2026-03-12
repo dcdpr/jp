@@ -203,6 +203,7 @@ impl MockProcessRunner {
     }
 
     /// Create a mock that expects no commands. Panics if any command is run.
+    #[expect(dead_code)]
     pub fn never_called() -> Self {
         Self {
             expectations: Arc::new(Mutex::new(VecDeque::new())),
