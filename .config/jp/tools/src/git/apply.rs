@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use camino::Utf8Path;
 
 use crate::util::runner::{ProcessOutput, ProcessRunner};
@@ -20,7 +22,7 @@ pub fn apply_patch_to_index<R: ProcessRunner>(
     for attempt in 0..=MAX_RETRIES {
         if attempt > 0 {
             let delay = BASE_DELAY_MS * 2u64.pow(attempt - 1);
-            std::thread::sleep(std::time::Duration::from_millis(delay));
+            std::thread::sleep(Duration::from_millis(delay));
         }
 
         let ProcessOutput { stderr, status, .. } = runner
@@ -49,13 +51,13 @@ pub fn apply_patch_to_index<R: ProcessRunner>(
     ))
 }
 
-fn is_lock_contention(stderr: &str) -> bool {
-    stderr.contains("index.lock") && stderr.contains("File exists")
-}
-
 /// Build a full git patch string from a path and hunk content.
 pub fn build_patch(path: &str, hunks: &str) -> String {
     format!("diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n{hunks}")
+}
+
+fn is_lock_contention(stderr: &str) -> bool {
+    stderr.contains("index.lock") && stderr.contains("File exists")
 }
 
 #[cfg(test)]

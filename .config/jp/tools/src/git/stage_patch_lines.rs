@@ -12,7 +12,7 @@ pub(crate) fn git_stage_patch_lines(
     patch_id: usize,
     lines: &[usize],
 ) -> ToolResult {
-    git_stage_patch_lines_impl(root, path, patch_id, lines, &DuctProcessRunner)
+    git_stage_patch_lines_impl(root, &path, patch_id, &lines, &DuctProcessRunner)
 }
 
 fn git_stage_patch_lines_impl<R: ProcessRunner>(
@@ -55,7 +55,7 @@ struct HunkHeader {
 
 fn parse_hunk_header(header: &str) -> Result<HunkHeader, String> {
     // Format: "@@ -OLD[,COUNT] +NEW[,COUNT] @@..."
-    let parts: Vec<&str> = header.split_whitespace().collect();
+    let parts: Vec<_> = header.split_whitespace().collect();
     let old_part = parts
         .get(1)
         .ok_or("Invalid hunk header: missing old range")?;
@@ -67,7 +67,7 @@ fn parse_hunk_header(header: &str) -> Result<HunkHeader, String> {
 }
 
 fn parse_range(range: &str) -> Result<(usize, usize), String> {
-    let parts: Vec<&str> = range.split(',').collect();
+    let parts: Vec<_> = range.split(',').collect();
     let start: usize = parts[0]
         .parse()
         .map_err(|_| format!("Invalid line number: {}", parts[0]))?;
@@ -78,6 +78,7 @@ fn parse_range(range: &str) -> Result<(usize, usize), String> {
     } else {
         1
     };
+
     Ok((start, count))
 }
 
@@ -102,9 +103,9 @@ fn fetch_hunk<R: ProcessRunner>(
         return Err(format!("Failed to get diff for '{path}': {stderr}").into());
     }
 
-    // Split on `\n@@ ` and skip the diff header (everything before the
-    // first hunk). Each segment after skip(1) lacks the `@@ ` prefix, so
-    // we re-add it.
+    // Split on `\n@@ ` and skip the diff header (everything before the first
+    // hunk). Each segment after skip(1) lacks the `@@ ` prefix, so we re-add
+    // it.
     stdout
         .split("\n@@ ")
         .skip(1)
@@ -125,7 +126,7 @@ fn parse_hunk(hunk: &str) -> Result<(HunkHeader, Vec<DiffLine>), String> {
     let header_line = lines_iter.next().ok_or("Empty hunk")?;
     let header = parse_hunk_header(header_line)?;
 
-    let diff_lines: Vec<DiffLine> = lines_iter
+    let diff_lines: Vec<_> = lines_iter
         .filter_map(|line| {
             if let Some(content) = line.strip_prefix('-') {
                 Some(DiffLine {
@@ -185,39 +186,38 @@ fn build_sub_hunk(hunk: &str, selected: &[usize]) -> Result<String, String> {
                 old_start = old_pos;
                 found_removal = true;
             }
+
             old_pos += 1;
         }
     }
 
     // Build the body: removals first, then additions (git's format).
-    let mut removals = 0usize;
-    let mut additions = 0usize;
+    let mut removals = 0;
+    let mut additions = 0;
     let mut body = String::new();
 
     for &idx in &sorted {
         let line = &diff_lines[idx];
-        match line.kind {
-            DiffLineKind::Removal => {
-                removals += 1;
-                body.push('-');
-                body.push_str(&line.content);
-                body.push('\n');
-            }
-            DiffLineKind::Addition => {}
+        if !matches!(line.kind, DiffLineKind::Removal) {
+            continue;
         }
+
+        removals += 1;
+        body.push('-');
+        body.push_str(&line.content);
+        body.push('\n');
     }
 
     for &idx in &sorted {
         let line = &diff_lines[idx];
-        match line.kind {
-            DiffLineKind::Removal => {}
-            DiffLineKind::Addition => {
-                additions += 1;
-                body.push('+');
-                body.push_str(&line.content);
-                body.push('\n');
-            }
+        if matches!(line.kind, DiffLineKind::Removal) {
+            continue;
         }
+
+        additions += 1;
+        body.push('+');
+        body.push_str(&line.content);
+        body.push('\n');
     }
 
     let hunk_header = format!("@@ -{old_start},{removals} +{old_start},{additions} @@");

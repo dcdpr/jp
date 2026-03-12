@@ -20,7 +20,6 @@ fn non_lock_error_fails_immediately() {
         .returns_error("error: patch does not apply");
 
     let result = apply_patch_to_index("bad patch", "/tmp".into(), &runner);
-    assert!(result.is_err());
     assert!(result.unwrap_err().contains("patch does not apply"));
 }
 

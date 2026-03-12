@@ -39,7 +39,7 @@ fn stage_single_file() {
 
     let patches = vec![PatchTarget {
         path: "test.rs".to_string(),
-        ids: vec![0usize].into(),
+        ids: vec![0].into(),
     }];
 
     let result = git_stage_patch_impl(&ctx, &answers, &patches, &runner).unwrap();
@@ -96,11 +96,11 @@ fn partial_failure_stages_what_it_can() {
     let patches = vec![
         PatchTarget {
             path: "good.rs".to_string(),
-            ids: vec![0usize].into(),
+            ids: vec![0].into(),
         },
         PatchTarget {
             path: "bad.rs".to_string(),
-            ids: vec![0usize].into(),
+            ids: vec![0].into(),
         },
     ];
 

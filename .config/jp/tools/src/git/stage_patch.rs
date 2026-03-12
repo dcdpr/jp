@@ -29,13 +29,13 @@ fn git_stage_patch_impl<R: ProcessRunner>(
     runner: &R,
 ) -> ToolResult {
     // Build patches for all targets, collecting errors per file.
-    let mut built: Vec<(&str, String)> = Vec::new();
-    let mut errors: Vec<String> = Vec::new();
+    let mut built: Vec<(&str, String)> = vec![];
+    let mut errors: Vec<String> = vec![];
 
     for target in patches {
         match build_file_patch(ctx, &target.path, &target.ids, runner) {
             Ok(patch) => built.push((&target.path, patch)),
-            Err(e) => errors.push(format!("{}: {e}", target.path)),
+            Err(error) => errors.push(format!("{}: {error}", target.path)),
         }
     }
 
@@ -43,12 +43,13 @@ fn git_stage_patch_impl<R: ProcessRunner>(
         return Err(format!("Failed to build patches:\n{}", errors.join("\n")).into());
     }
 
-    // For format_arguments, show what would be applied.
+    // For `format_arguments`, show what would be applied.
     let combined: String = built
         .iter()
         .map(|(_, p)| p.as_str())
         .collect::<Vec<_>>()
         .join("\n");
+
     if ctx.action.is_format_arguments() {
         return Ok(combined.into());
     }
@@ -71,12 +72,12 @@ fn git_stage_patch_impl<R: ProcessRunner>(
     }
 
     // Apply each file's patch individually so partial success is possible.
-    let mut staged: Vec<&str> = Vec::new();
+    let mut staged: Vec<&str> = vec![];
 
     for (path, patch) in &built {
         match apply_patch_to_index(patch, &ctx.root, runner) {
             Ok(()) => staged.push(path),
-            Err(e) => errors.push(format!("{path}: {e}")),
+            Err(error) => errors.push(format!("{path}: {error}")),
         }
     }
 
@@ -155,11 +156,12 @@ fn build_file_patch<R: ProcessRunner>(
         if !patch_ids.contains(&id) {
             continue;
         }
+
         hunks.push(format!("@@ {hunk}"));
     }
 
     if hunks.is_empty() {
-        let available: Vec<usize> = (0..stdout.split("\n@@ ").skip(1).count()).collect();
+        let available: Vec<_> = (0..stdout.split("\n@@ ").skip(1).count()).collect();
         return Err(format!("Patch IDs {patch_ids:?} not found (available: {available:?})").into());
     }
 

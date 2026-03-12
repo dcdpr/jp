@@ -1,3 +1,5 @@
+use std::{cmp::min, fs};
+
 use camino::Utf8Path;
 use serde::Serialize;
 
@@ -57,6 +59,7 @@ fn git_list_patches_impl<R: ProcessRunner>(
             warnings.push(Warning {
                 message: format!("Failed to list patches for '{path}': {stderr}"),
             });
+
             continue;
         }
 
@@ -67,15 +70,16 @@ fn git_list_patches_impl<R: ProcessRunner>(
                     message: format!("File not found: {path}"),
                 });
             }
+
             // No changes for this file.
             continue;
         };
 
-        // For deleted files the working tree copy is gone, so context
-        // lines will be empty. For existing files we read them for
-        // pretty-printing context around each hunk.
-        let file_content = std::fs::read_to_string(root.join(path)).unwrap_or_default();
-        let source_lines: Vec<&str> = file_content.lines().collect();
+        // For deleted files the working tree copy is gone, so context lines
+        // will be empty. For existing files we read them for pretty-printing
+        // context around each hunk.
+        let file_content = fs::read_to_string(root.join(path)).unwrap_or_default();
+        let source_lines: Vec<_> = file_content.lines().collect();
 
         let mut tail = tail.to_string();
         tail.insert_str(0, "@@ ");
@@ -101,17 +105,17 @@ fn git_list_patches_impl<R: ProcessRunner>(
 
 /// Pretty print a git diff hunk with numbered change lines.
 ///
-/// Context lines (from the source file) get padding to align with the
-/// `[N] ` prefix on diff lines. Actual diff lines (`-`/`+`) are prefixed
-/// with `[N]` where N is a sequential index used by `git_stage_patch_lines`
-/// to select individual lines for staging.
+/// Context lines (from the source file) get padding to align with the `[N] `
+/// prefix on diff lines. Actual diff lines (`-`/`+`) are prefixed with `[N]`
+/// where N is a sequential index used by `git_stage_patch_lines` to select
+/// individual lines for staging.
 fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) -> String {
     // Parse the header to find coordinates.
-    let parts: Vec<&str> = hunk_with_header.split_whitespace().collect();
+    let parts: Vec<_> = hunk_with_header.split_whitespace().collect();
 
     // Find part starting with '+' (target file coordinates).
     let new_file_part = parts.iter().find(|p| p.starts_with('+')).unwrap_or(&"+0,0");
-    let coords: Vec<&str> = new_file_part.trim_start_matches('+').split(',').collect();
+    let coords: Vec<_> = new_file_part.trim_start_matches('+').split(',').collect();
 
     let start_line: usize = coords[0].parse().unwrap_or(0);
     let count: usize = if coords.len() > 1 {
@@ -135,7 +139,7 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
     // 3 lines after.
     let hunk_end_idx = line_idx + count;
     let ctx_after_start = hunk_end_idx;
-    let ctx_after_end = std::cmp::min(source_lines.len(), hunk_end_idx + 3);
+    let ctx_after_end = min(source_lines.len(), hunk_end_idx + 3);
 
     let mut result = String::new();
     let mut line_index = 0;
@@ -148,14 +152,13 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
     }
 
     // Actual changes — number each `-`/`+` line.
+    //
     // Skip the first line of raw_body, which contains the header info (e.g.,
     // "-1,1 +1,1 @@").
     for line in hunk.lines().skip(1) {
         let prefix = format!("[{line_index}] ");
         let padding = index_prefix_width - prefix.len();
-        for _ in 0..padding {
-            result.push(' ');
-        }
+        result.push_str(&" ".repeat(padding));
         result.push_str(&prefix);
         result.push_str(line);
         result.push('\n');
@@ -174,9 +177,7 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
 
 fn push_context_line(result: &mut String, line: &str, index_prefix_width: usize) {
     // Pad to align with `[N] -` / `[N] +` prefixed diff lines.
-    for _ in 0..index_prefix_width {
-        result.push(' ');
-    }
+    result.push_str(&" ".repeat(index_prefix_width));
     result.push(' ');
     result.push_str(line);
     result.push('\n');
