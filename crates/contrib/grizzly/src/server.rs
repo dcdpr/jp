@@ -231,7 +231,8 @@ impl GrizzlyService {
         let encoded = urlencoded(&body);
 
         // Build the x-callback-url
-        let url = format!("bear://x-callback-url/create?text={encoded}&open_note=no");
+        let url =
+            format!("bear://x-callback-url/create?text={encoded}&open_note=no&show_window=no");
 
         // Open via macOS `open` command
         let status = Command::new("open").arg(&url).status();
