@@ -72,7 +72,6 @@ fn tool(name: &str, arguments: &Value) -> Tool {
         name: name.to_string(),
         arguments: arguments.as_object().unwrap().clone(),
         answers: Map::new(),
-        options: Map::new(),
     }
 }
 
@@ -81,7 +80,6 @@ fn tool_with_answers(name: &str, arguments: &Value, answers: &Value) -> Tool {
         name: name.to_string(),
         arguments: arguments.as_object().unwrap().clone(),
         answers: answers.as_object().unwrap().clone(),
-        options: Map::new(),
     }
 }
 
