@@ -31,8 +31,8 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         "stage_patch_lines" => {
             let path: String = t.req("path")?;
             let patch_id: usize = t.req("patch_id")?;
-            let lines: Vec<usize> = t.req("lines")?;
-            git_stage_patch_lines(&ctx.root, &path, patch_id, &lines)
+            let lines: Vec<serde_json::Value> = t.req("lines")?;
+            git_stage_patch_lines(&ctx.root, &path, patch_id, lines)
         }
 
         "list_patches" => git_list_patches(&ctx.root, t.req("files")?),

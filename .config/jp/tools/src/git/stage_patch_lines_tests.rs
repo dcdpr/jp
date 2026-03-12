@@ -1,3 +1,5 @@
+use serde_json::json;
+
 use super::*;
 use crate::util::runner::MockProcessRunner;
 
@@ -108,6 +110,55 @@ fn fetch_hunk_produces_valid_header() {
     let (header, lines) = parse_hunk(&hunk).unwrap();
     assert_eq!(header.old_start, 1);
     assert_eq!(lines.len(), 2);
+}
+
+#[test]
+fn selectors_integers_only() {
+    let input = vec![json!(0), json!(2), json!(5)];
+    assert_eq!(parse_line_selectors(input).unwrap(), vec![0, 2, 5]);
+}
+
+#[test]
+fn selectors_range_only() {
+    let input = vec![json!("1:4")];
+    assert_eq!(parse_line_selectors(input).unwrap(), vec![1, 2, 3, 4]);
+}
+
+#[test]
+fn selectors_mixed() {
+    let input = vec![json!(0), json!("2:5"), json!(7)];
+    assert_eq!(parse_line_selectors(input).unwrap(), vec![0, 2, 3, 4, 5, 7]);
+}
+
+#[test]
+fn selectors_single_element_range() {
+    let input = vec![json!("3:3")];
+    assert_eq!(parse_line_selectors(input).unwrap(), vec![3]);
+}
+
+#[test]
+fn selectors_inverted_range_errors() {
+    let input = vec![json!("5:2")];
+    let err = parse_line_selectors(input).unwrap_err();
+    assert!(err.contains("start (5) must be <= end (2)"), "{err}");
+}
+
+#[test]
+fn selectors_bad_format_errors() {
+    let err = parse_line_selectors(vec![json!("nope")]).unwrap_err();
+    assert!(err.contains("Invalid range format"), "{err}");
+}
+
+#[test]
+fn selectors_negative_number_errors() {
+    let err = parse_line_selectors(vec![json!(-1)]).unwrap_err();
+    assert!(err.contains("Invalid line index"), "{err}");
+}
+
+#[test]
+fn selectors_bool_errors() {
+    let err = parse_line_selectors(vec![json!(true)]).unwrap_err();
+    assert!(err.contains("Invalid line selector"), "{err}");
 }
 
 #[test]

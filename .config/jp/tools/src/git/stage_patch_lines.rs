@@ -1,4 +1,5 @@
 use camino::Utf8Path;
+use serde_json::Value;
 
 use super::apply::{apply_patch_to_index, build_patch};
 use crate::util::{
@@ -10,9 +11,10 @@ pub(crate) fn git_stage_patch_lines(
     root: &Utf8Path,
     path: &str,
     patch_id: usize,
-    lines: &[usize],
+    lines: Vec<Value>,
 ) -> ToolResult {
-    git_stage_patch_lines_impl(root, &path, patch_id, &lines, &DuctProcessRunner)
+    let lines = parse_line_selectors(lines)?;
+    git_stage_patch_lines_impl(root, path, patch_id, &lines, &DuctProcessRunner)
 }
 
 fn git_stage_patch_lines_impl<R: ProcessRunner>(
@@ -222,6 +224,65 @@ fn build_sub_hunk(hunk: &str, selected: &[usize]) -> Result<String, String> {
 
     let hunk_header = format!("@@ -{old_start},{removals} +{old_start},{additions} @@");
     Ok(format!("{hunk_header}\n{body}"))
+}
+
+/// Expands a mixed array of line selectors into a flat list of indices.
+///
+/// Each element is either:
+/// - An integer (single line index, e.g. `42`)
+/// - A string range with inclusive bounds (e.g. `"1:50"`)
+fn parse_line_selectors(values: Vec<Value>) -> Result<Vec<usize>, String> {
+    let mut indices = vec![];
+    for value in values {
+        match value {
+            Value::Number(n) => {
+                let idx = n
+                    .as_u64()
+                    .ok_or_else(|| format!("Invalid line index: {n}"))?;
+                let idx =
+                    usize::try_from(idx).map_err(|_| format!("Line index too large: {idx}"))?;
+
+                indices.push(idx);
+            }
+            Value::String(s) => {
+                let (start, end) = parse_range_selector(&s)?;
+
+                indices.extend(start..=end);
+            }
+            other => {
+                return Err(format!(
+                    "Invalid line selector: {other}. Expected an integer or a range string like \
+                     \"1:50\"."
+                ));
+            }
+        }
+    }
+
+    Ok(indices)
+}
+
+fn parse_range_selector(s: &str) -> Result<(usize, usize), String> {
+    let Some((left, right)) = s.split_once(':') else {
+        return Err(format!(
+            "Invalid range format '{s}'. Expected 'start:end' (e.g. '1:50')."
+        ));
+    };
+
+    let start: usize = left
+        .parse()
+        .map_err(|_| format!("Invalid range start: '{left}'"))?;
+
+    let end: usize = right
+        .parse()
+        .map_err(|_| format!("Invalid range end: '{right}'"))?;
+
+    if start > end {
+        return Err(format!(
+            "Invalid range '{s}': start ({start}) must be <= end ({end})."
+        ));
+    }
+
+    Ok((start, end))
 }
 
 #[cfg(test)]

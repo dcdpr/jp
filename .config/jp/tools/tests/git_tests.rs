@@ -519,6 +519,52 @@ async fn stage_patch_lines_pure_addition_from_intent_to_add() {
 }
 
 #[tokio::test]
+async fn stage_patch_lines_with_range() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "rng.rs", "aaa\nbbb\nccc\n", "AAA\nBBB\nccc\n");
+
+    // Hunk: [0]-aaa [1]-bbb [2]+AAA [3]+BBB
+    // Stage all four lines via a single range.
+    run_ok(
+        ctx(&root),
+        tool(
+            "git_stage_patch_lines",
+            &json!({"path": "rng.rs", "patch_id": 0, "lines": ["0:3"]}),
+        ),
+    )
+    .await;
+
+    assert_eq!(staged_content(&root, "rng.rs"), "AAA\nBBB\nccc\n");
+}
+
+#[tokio::test]
+async fn stage_patch_lines_mixed_integers_and_ranges() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "mix2.rs", "aaa\nbbb\nccc\n", "AAA\nBBB\nccc\n");
+
+    // Hunk: [0]-aaa [1]-bbb [2]+AAA [3]+BBB
+    // Stage only the first replacement using mixed format: integer 0, range "2:2".
+    run_ok(
+        ctx(&root),
+        tool(
+            "git_stage_patch_lines",
+            &json!({"path": "mix2.rs", "patch_id": 0, "lines": [0, "2:2"]}),
+        ),
+    )
+    .await;
+
+    assert_eq!(staged_content(&root, "mix2.rs"), "AAA\nbbb\nccc\n");
+}
+
+#[tokio::test]
 async fn stage_patch_lines_out_of_range_error() {
     if !has_git() {
         return;
