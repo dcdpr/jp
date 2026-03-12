@@ -161,8 +161,8 @@ items = [
     """,
     """\
     If a hunk from `git_list_patches` contains mixed unrelated changes on adjacent lines that \
-    cannot be separated by patch ID, use `git_stage_raw_patch` to apply an edited version of \
-    the diff. To exclude a deletion, change the `-` prefix to a space (context line). To exclude \
-    an addition, remove the `+` line entirely. Adjust the `@@` hunk header line counts to match.\
+    cannot be separated by patch ID, use `git_stage_patch_lines` to select individual diff lines \
+    by their `[N]` index. For example, to stage only the first replacement pair from a hunk, \
+    pass the indices of the relevant `-` and `+` lines.\
     """,
 ]

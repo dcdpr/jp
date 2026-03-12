@@ -1,0 +1,73 @@
+[conversation.tools.git_stage_patch_lines]
+enable = "explicit"
+run = "unattended"
+style.inline_results = "full"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Stage individual lines from a patch, enabling surgical staging of partial hunks."
+description = """
+Selects specific diff lines from a patch listed by `git_list_patches` and \
+stages only those changes. Use this when a single hunk contains multiple \
+unrelated changes on adjacent lines that cannot be separated by patch ID.
+
+Each diff line in `git_list_patches` output is prefixed with `[N]` where N \
+is the line index. Pass the indices of the lines you want to stage.
+
+For example, if `git_list_patches` shows:
+```
+ fn foo() {
+[0] -    let x = old_x;
+[1] -    let y = old_y;
+[2] +    let x = new_x;
+[3] +    let y = new_y;
+ }
+```
+
+To stage only the x-related change, pass `lines: [0, 2]`.
+To stage only the y-related change, pass `lines: [1, 3]`.
+
+For large ranges, use `"start:end"` (inclusive) instead of listing every \
+index. You can mix integers and ranges freely.
+"""
+
+examples = """
+Stage specific lines from a patch:
+```json
+{"path": "src/lib.rs", "patch_id": 0, "lines": [0, 2]}
+```
+
+Stage a large contiguous range of lines:
+```json
+{"path": "src/lib.rs", "patch_id": 0, "lines": ["0:50"]}
+```
+
+Mix individual indices and ranges:
+```json
+{"path": "src/lib.rs", "patch_id": 0, "lines": [0, "2:10", 15]}
+```
+"""
+
+[conversation.tools.git_stage_patch_lines.parameters.path]
+type = "string"
+required = true
+summary = "The file path containing the patch."
+
+[conversation.tools.git_stage_patch_lines.parameters.patch_id]
+type = "integer"
+required = true
+summary = "The patch identifier from `git_list_patches`."
+
+[conversation.tools.git_stage_patch_lines.parameters.lines]
+type = "array"
+required = true
+items.type = ["integer", "string"]
+summary = """Indices (N or "N:M") of diff lines to stage."""
+description = """
+Line indices correspond to the `[N]` prefixes shown in `git_list_patches` \
+output. Only lines prefixed with `-` or `+` have indices; context lines \
+(prefixed with a space) do not.
+
+Each element can be an integer (e.g. `0`) or an inclusive range string \
+(e.g. `"1:50"` expands to lines 1 through 50). You can mix both freely.
+"""
