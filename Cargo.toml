@@ -1,5 +1,6 @@
 [workspace]
-members = ["crates/*", ".config/jp/tools/"]
+members = ["crates/*", "crates/contrib/grizzly", ".config/jp/tools/"]
+exclude = ["crates/contrib"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -28,6 +29,8 @@ jp_test = { path = "crates/jp_test" }
 jp_tombmap = { path = "crates/jp_tombmap" }
 jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
+
+grizzly = { path = "crates/contrib/grizzly" }
 
 ahash = { version = "0.8", default-features = false, features = ["runtime-rng", "std", "serde"] }
 assert_matches = { version = "1", default-features = false }
