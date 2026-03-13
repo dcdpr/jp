@@ -202,6 +202,10 @@ pub fn build(mut partial: PartialAppConfig) -> Result<AppConfig, Error> {
 
     let mut config: AppConfig = Config::from_partial(partial, vec![])?;
 
+    // Resolve model aliases so downstream code can assume all model IDs are
+    // concrete `ModelIdOrAliasConfig::Id` variants.
+    config.resolve_aliases()?;
+
     // Sort instructions by position.
     config.assistant.instructions.sort_by_key(|a| a.position);
 

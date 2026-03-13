@@ -56,8 +56,7 @@ impl TitleGeneratorTask {
                 parameters: ParametersConfig::default(),
             });
 
-        // Get the model ID from the model configuration.
-        let model_id = model.id.finalize(&config.providers.llm.aliases)?;
+        let model_id = model.id.resolved().clone();
 
         // If reasoning is explicitly enabled for title generation, use it,
         // otherwise limit it to low effort.

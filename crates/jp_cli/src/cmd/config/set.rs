@@ -49,6 +49,10 @@ impl Set {
             let mut new_config = PartialAppConfig::empty();
             new_config.assign(assignment)?;
 
+            // Resolve any model aliases before storing in the stream so
+            // that per-event configs always contain concrete model IDs.
+            new_config.resolve_model_aliases(&ctx.config().providers.llm.aliases);
+
             // Store the delta in the conversation stream.
             ctx.workspace
                 .try_get_events_mut(&id)?
