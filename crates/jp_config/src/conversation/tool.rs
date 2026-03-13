@@ -1488,13 +1488,6 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_source_schema() {
-        let schema = SchemaBuilder::build_root::<ToolSource>();
-        assert_eq!(schema.name, Some("tool_source".to_owned()));
-        assert_eq!(schema.ty, SchemaType::String(Box::default()));
-    }
-}
-    #[test]
     fn test_tool_config_json_merge_preserves_existing_fields() {
         let mut p = PartialToolsConfig::default_values(&()).unwrap().unwrap();
 
@@ -1582,3 +1575,10 @@ mod tests {
         assert!(err.contains("bogus"), "expected 'bogus' in error: {err}");
     }
 
+    #[test]
+    fn test_tool_source_schema() {
+        let schema = SchemaBuilder::build_root::<ToolSource>();
+        assert_eq!(schema.name, Some("tool_source".to_owned()));
+        assert_eq!(schema.ty, SchemaType::String(Box::default()));
+    }
+}
