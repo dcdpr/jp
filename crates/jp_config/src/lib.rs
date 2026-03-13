@@ -340,6 +340,42 @@ impl AppConfig {
     pub fn to_partial(&self) -> PartialAppConfig {
         <Self as ToPartial>::to_partial(self)
     }
+
+    /// Resolve all model ID aliases in the configuration.
+    ///
+    /// Converts every `ModelIdOrAliasConfig::Alias` to
+    /// `ModelIdOrAliasConfig::Id` using `providers.llm.aliases`. After this
+    /// call, no `Alias` variants remain in the configuration.
+    ///
+    /// This should be called once after `from_partial`, before the config
+    /// is shared via `Arc`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an alias cannot be resolved.
+    pub fn resolve_aliases(&mut self) -> Result<(), Error> {
+        let aliases = &self.providers.llm.aliases;
+
+        self.assistant
+            .model
+            .id
+            .resolve_in_place(aliases)
+            .map_err(|e| Error::Custom(format!("assistant.model.id: {e}").into()))?;
+
+        if let Some(ref mut model) = self.conversation.inquiry.assistant.model {
+            model.id.resolve_in_place(aliases).map_err(|e| {
+                Error::Custom(format!("conversation.inquiry.assistant.model.id: {e}").into())
+            })?;
+        }
+
+        if let Some(ref mut model) = self.conversation.title.generate.model {
+            model.id.resolve_in_place(aliases).map_err(|e| {
+                Error::Custom(format!("conversation.title.generate.model.id: {e}").into())
+            })?;
+        }
+
+        Ok(())
+    }
 }
 
 impl PartialAppConfig {
@@ -376,6 +412,30 @@ impl PartialAppConfig {
     #[must_use]
     pub fn delta(&self, next: Self) -> Self {
         <Self as PartialConfigDelta>::delta(self, next)
+    }
+
+    /// Resolve any model ID aliases in this partial config.
+    ///
+    /// Converts `PartialModelIdOrAliasConfig::Alias` variants to `Id` using
+    /// the given alias map. Unresolvable aliases are left as-is (they'll
+    /// produce errors when finalized into an `AppConfig`).
+    ///
+    /// Call this before storing a `PartialAppConfig` as a `ConfigDelta` in
+    /// a conversation stream to maintain the invariant that stream configs
+    /// contain only resolved model IDs.
+    pub fn resolve_model_aliases(
+        &mut self,
+        aliases: &indexmap::IndexMap<String, model::id::ModelIdConfig>,
+    ) {
+        self.assistant.model.id.resolve_in_place(aliases);
+
+        if let Some(ref mut model) = self.conversation.inquiry.assistant.model {
+            model.id.resolve_in_place(aliases);
+        }
+
+        if let Some(ref mut model) = self.conversation.title.generate.model {
+            model.id.resolve_in_place(aliases);
+        }
     }
 
     /// Create a new partial configuration with stub values for testing
@@ -520,5 +580,84 @@ mod tests {
             error,
             KvAssignmentErrorKind::Type { need, .. } if need == ["string"]
         );
+    }
+
+    #[test]
+    fn resolve_model_aliases_resolves_assistant_model() {
+        use crate::model::id::{ModelIdConfig, PartialModelIdOrAliasConfig, ProviderId};
+
+        let aliases = IndexMap::from([("haiku".to_owned(), ModelIdConfig {
+            provider: ProviderId::Anthropic,
+            name: "claude-haiku-4-5".parse().unwrap(),
+        })]);
+
+        let mut partial = PartialAppConfig::empty();
+        partial.assistant.model.id = PartialModelIdOrAliasConfig::Alias("haiku".into());
+
+        partial.resolve_model_aliases(&aliases);
+
+        match &partial.assistant.model.id {
+            PartialModelIdOrAliasConfig::Id(id) => {
+                assert_eq!(id.provider, Some(ProviderId::Anthropic));
+                assert_eq!(id.name.as_ref().unwrap().to_string(), "claude-haiku-4-5");
+            }
+            PartialModelIdOrAliasConfig::Alias(a) => panic!("expected Id, got Alias({a})"),
+        }
+    }
+
+    #[test]
+    fn resolve_model_aliases_leaves_direct_id_unchanged() {
+        use crate::model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId};
+
+        let aliases = IndexMap::new();
+        let mut partial = PartialAppConfig::empty();
+        partial.assistant.model.id = PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+            provider: Some(ProviderId::Google),
+            name: "gemini-pro".parse().ok(),
+        });
+
+        partial.resolve_model_aliases(&aliases);
+
+        match &partial.assistant.model.id {
+            PartialModelIdOrAliasConfig::Id(id) => {
+                assert_eq!(id.provider, Some(ProviderId::Google));
+            }
+            PartialModelIdOrAliasConfig::Alias(a) => panic!("expected Id, got Alias({a})"),
+        }
+    }
+
+    #[test]
+    fn build_resolves_aliases() {
+        use crate::{
+            conversation::tool::RunMode,
+            model::id::{
+                ModelIdConfig, ModelIdOrAliasConfig, PartialModelIdOrAliasConfig, ProviderId,
+            },
+            util::build,
+        };
+
+        let mut partial = PartialAppConfig::default();
+        partial.conversation.tools.defaults.run = Some(RunMode::Ask);
+        partial.providers.llm.aliases.insert(
+            "mymodel".to_owned(),
+            ModelIdConfig {
+                provider: ProviderId::Anthropic,
+                name: "claude-haiku-4-5".parse().unwrap(),
+            }
+            .to_partial(),
+        );
+        partial.assistant.model.id = PartialModelIdOrAliasConfig::Alias("mymodel".into());
+
+        let config = build(partial).expect("valid config");
+
+        assert!(
+            matches!(&config.assistant.model.id, ModelIdOrAliasConfig::Id(_)),
+            "expected Id variant after build, got: {:?}",
+            config.assistant.model.id
+        );
+
+        let resolved = config.assistant.model.id.resolved();
+        assert_eq!(resolved.provider, ProviderId::Anthropic);
+        assert_eq!(resolved.name.to_string(), "claude-haiku-4-5");
     }
 }

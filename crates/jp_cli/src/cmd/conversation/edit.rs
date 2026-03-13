@@ -105,7 +105,7 @@ async fn generate_titles(
         .clone()
         .unwrap_or_else(|| config.assistant.model.clone());
 
-    let model_id = model.id.finalize(&config.providers.llm.aliases)?;
+    let model_id = model.id.resolved();
 
     let mut partial = PartialAppConfig::empty();
     partial.assistant.model.id = PartialModelIdOrAliasConfig::Id(model_id.to_partial());

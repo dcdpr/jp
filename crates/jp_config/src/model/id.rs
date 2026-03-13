@@ -119,11 +119,30 @@ impl fmt::Display for PartialModelIdOrAliasConfig {
 }
 
 impl ModelIdOrAliasConfig {
-    /// Finalize the model ID configuration.
+    /// Returns the resolved model ID.
     ///
-    /// This will resolve to a [`ModelIdConfig`] if the configuration has one
-    /// defined, has an alias that can be resolved to one, or a name that can be
-    /// parsed into one.
+    /// # Panics
+    ///
+    /// Panics if the model ID is an unresolved alias.
+    /// After [`AppConfig::resolve_aliases()`] has been called, all model IDs
+    /// are guaranteed to be the `Id` variant.
+    ///
+    /// [`AppConfig::resolve_aliases()`]: crate::AppConfig::resolve_aliases
+    #[must_use]
+    pub fn resolved(&self) -> &ModelIdConfig {
+        match self {
+            Self::Id(id) => id,
+            Self::Alias(alias) => panic!(
+                "unresolved model alias '{alias}' — AppConfig::resolve_aliases() was not called"
+            ),
+        }
+    }
+
+    /// Resolve to a [`ModelIdConfig`] using the alias map.
+    ///
+    /// Prefer [`resolved()`](Self::resolved) when working with an
+    /// already-resolved `AppConfig`. This method is for the resolution step
+    /// itself and for code paths that work with partial/unresolved configs.
     ///
     /// # Errors
     ///
@@ -139,6 +158,23 @@ impl ModelIdOrAliasConfig {
                 .cloned()
                 .map_or_else(|| ModelIdConfig::from_str(alias), Ok),
         }
+    }
+
+    /// Resolve an `Alias` variant in place using the alias map.
+    ///
+    /// If this is already `Id`, this is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the alias cannot be resolved.
+    pub fn resolve_in_place(
+        &mut self,
+        aliases: &IndexMap<String, ModelIdConfig>,
+    ) -> Result<(), ModelIdConfigError> {
+        if let Self::Alias(_) = self {
+            *self = Self::Id(self.finalize(aliases)?);
+        }
+        Ok(())
     }
 }
 
@@ -158,6 +194,50 @@ impl PartialModelIdOrAliasConfig {
                 .get(alias)
                 .cloned()
                 .map_or_else(|| PartialModelIdConfig::from_str(alias), Ok),
+        }
+    }
+
+    /// Resolve to a concrete [`ModelIdConfig`] using the concrete alias map.
+    ///
+    /// This bridges partial config types (from e.g. `QuestionTarget::Assistant`)
+    /// with the concrete alias map in [`LlmProviderConfig::aliases`].
+    ///
+    /// [`LlmProviderConfig::aliases`]: crate::providers::llm::LlmProviderConfig::aliases
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the alias is unknown and cannot be parsed as a
+    /// `provider/name` model ID, or if a direct ID is missing the provider
+    /// or name fields.
+    pub fn resolve(
+        &self,
+        aliases: &IndexMap<String, ModelIdConfig>,
+    ) -> Result<ModelIdConfig, ModelIdConfigError> {
+        match self {
+            Self::Alias(alias) => aliases
+                .get(alias)
+                .cloned()
+                .map_or_else(|| ModelIdConfig::from_str(alias), Ok),
+            Self::Id(partial) => {
+                let provider = partial.provider.ok_or(ModelIdConfigError::StrParse)?;
+                let name = partial.name.clone().ok_or(ModelIdConfigError::StrParse)?;
+                Ok(ModelIdConfig { provider, name })
+            }
+        }
+    }
+
+    /// Resolve an `Alias` variant in place using the concrete alias map.
+    ///
+    /// If this is already an `Id`, this is a no-op. If it's an `Alias`, it's
+    /// replaced with `Id(resolved.to_partial())`.
+    ///
+    /// Used to sanitize `PartialAppConfig` values before storing them as
+    /// `ConfigDelta`s in the conversation stream.
+    pub fn resolve_in_place(&mut self, aliases: &IndexMap<String, ModelIdConfig>) {
+        if let Self::Alias(_) = self
+            && let Ok(resolved) = self.resolve(aliases)
+        {
+            *self = Self::Id(resolved.to_partial());
         }
     }
 }

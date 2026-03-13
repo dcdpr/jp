@@ -323,7 +323,7 @@ impl Query {
             .join(CONVERSATIONS_DIR)
             .join(cid.to_dirname(conversation.as_ref().and_then(|v| v.title.as_deref())));
 
-        let (query_file, editor_provided_config, chat_request) = self.build_conversation(
+        let (query_file, mut editor_provided_config, chat_request) = self.build_conversation(
             ctx.workspace.try_get_events_mut(&cid)?,
             &cfg,
             &conversation_path,
@@ -359,6 +359,9 @@ impl Query {
         }
 
         if !editor_provided_config.is_empty() {
+            // Resolve any model aliases before storing in the stream so
+            // that per-event configs always contain concrete model IDs.
+            editor_provided_config.resolve_model_aliases(&cfg.providers.llm.aliases);
             ctx.workspace
                 .try_get_events_mut(&cid)?
                 .add_config_delta(editor_provided_config);
@@ -652,11 +655,7 @@ impl Query {
         printer: Arc<Printer>,
         chat_request: ChatRequest,
     ) -> Result<()> {
-        let model_id = cfg
-            .assistant
-            .model
-            .id
-            .finalize(&cfg.providers.llm.aliases)?;
+        let model_id = cfg.assistant.model.id.resolved();
         let provider: Arc<dyn jp_llm::Provider> = Arc::from(provider::get_provider(
             model_id.provider,
             &cfg.providers.llm,
