@@ -185,7 +185,7 @@ fn map_event(
         events.push(Event::Part {
             index,
             event: ConversationEvent::now(ToolCallRequest {
-                id: String::new(),
+                id: format!("{name}_{index}"),
                 name,
                 arguments: match arguments {
                     Value::Object(map) => map,
