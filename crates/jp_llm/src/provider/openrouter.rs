@@ -550,6 +550,7 @@ fn map_model(model: response::Model) -> Result<ModelDetails> {
         reasoning: None,
         knowledge_cutoff: Some(model.created.0.date_naive()),
         deprecated: None,
+        structured_output: None,
         features: vec![],
     })
 }

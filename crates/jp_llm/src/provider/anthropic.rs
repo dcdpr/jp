@@ -579,7 +579,7 @@ fn create_request(
         })
         .collect();
 
-    let strict_tools = model.features.contains(&"structured-outputs") && beta.structured_outputs();
+    let strict_tools = model.supports_structured_output() && beta.structured_outputs();
     let tools = convert_tools(tools, strict_tools, &mut cache_budget);
 
     // From testing, it seems that sending a single tool with the
@@ -766,10 +766,10 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             reasoning: Some(ReasoningDetails::adaptive(true)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
+            structured_output: Some(true),
             features: vec![
                 "interleaved-thinking",
                 "context-editing",
-                "structured-outputs",
                 "adaptive-thinking",
             ],
         },
@@ -785,10 +785,10 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             reasoning: Some(ReasoningDetails::adaptive(true)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 5, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
+            structured_output: Some(true),
             features: vec![
                 "interleaved-thinking",
                 "context-editing",
-                "structured-outputs",
                 "adaptive-thinking",
             ],
         },
@@ -798,13 +798,10 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             context_window: Some(200_000),
             max_output_tokens: Some(64_000),
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap()),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
-            features: vec![
-                "interleaved-thinking",
-                "context-editing",
-                "structured-outputs",
-            ],
+            structured_output: Some(true),
+            features: vec!["interleaved-thinking", "context-editing"],
         },
         "claude-haiku-4-5" | "claude-haiku-4-5-20251001" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
@@ -814,6 +811,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
+            structured_output: Some(true),
             features: vec!["interleaved-thinking", "context-editing"],
         },
         "claude-sonnet-4-5" | "claude-sonnet-4-5-20250929" => ModelDetails {
@@ -828,11 +826,8 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
-            features: vec![
-                "interleaved-thinking",
-                "context-editing",
-                "structured-outputs",
-            ],
+            structured_output: Some(true),
+            features: vec!["interleaved-thinking", "context-editing"],
         },
         "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
@@ -842,11 +837,8 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
-            features: vec![
-                "interleaved-thinking",
-                "context-editing",
-                "structured-outputs",
-            ],
+            structured_output: Some(true),
+            features: vec!["interleaved-thinking", "context-editing"],
         },
         "claude-opus-4-0" | "claude-opus-4-20250514" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
@@ -856,6 +848,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
+            structured_output: Some(false),
             features: vec!["interleaved-thinking", "context-editing"],
         },
         "claude-sonnet-4-0" | "claude-sonnet-4-20250514" => ModelDetails {
@@ -870,6 +863,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
+            structured_output: Some(false),
             features: vec!["interleaved-thinking", "context-editing"],
         },
         "claude-3-haiku-20240307" => ModelDetails {
@@ -883,6 +877,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
                 &"recommended replacement: claude-haiku-4-5-20251001",
                 Some(NaiveDate::from_ymd_opt(2026, 4, 20).unwrap()),
             )),
+            structured_output: Some(false),
             features: vec![],
         },
         id => {
