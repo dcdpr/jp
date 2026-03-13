@@ -332,11 +332,7 @@ fn build_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool)
         tool_choice,
     } = query;
 
-    let structured_schema = thread
-        .events
-        .last()
-        .and_then(|e| e.event.as_chat_request())
-        .and_then(|req| req.schema.clone());
+    let structured_schema = thread.events.schema();
 
     let is_structured = structured_schema.is_some();
     let config = thread.events.config()?;

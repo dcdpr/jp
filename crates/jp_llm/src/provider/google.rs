@@ -148,11 +148,7 @@ fn create_request(
     } = query;
 
     // Extract schema and config before into_parts() consumes the thread.
-    let structured_schema = thread
-        .events
-        .last()
-        .and_then(|e| e.event.as_chat_request())
-        .and_then(|req| req.schema.clone());
+    let structured_schema = thread.events.schema();
     let is_structured = structured_schema.is_some();
     let config = thread.events.config()?;
     let parameters = &config.assistant.model.parameters;

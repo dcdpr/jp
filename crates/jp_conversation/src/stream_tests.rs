@@ -516,6 +516,98 @@ fn test_has_chat_request() {
 }
 
 #[test]
+fn test_schema_returns_none_when_no_schema() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+
+    assert!(stream.schema().is_none());
+}
+
+#[test]
+fn test_schema_from_initial_chat_request() {
+    let schema = Map::from_iter([("type".into(), Value::String("object".into()))]);
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest {
+        content: "query".into(),
+        schema: Some(schema.clone()),
+    });
+
+    assert_eq!(stream.schema(), Some(schema));
+}
+
+#[test]
+fn test_schema_survives_tool_use_round_trip() {
+    let schema = Map::from_iter([("type".into(), Value::String("object".into()))]);
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest {
+        content: "query".into(),
+        schema: Some(schema.clone()),
+    });
+
+    stream
+        .current_turn_mut()
+        .add_tool_call_request(ToolCallRequest {
+            id: "tc1".into(),
+            name: "my_tool".into(),
+            arguments: Map::new(),
+        })
+        .add_tool_call_response(ToolCallResponse {
+            id: "tc1".into(),
+            result: Ok("done".into()),
+        })
+        .build()
+        .unwrap();
+
+    assert_eq!(stream.schema(), Some(schema));
+}
+
+#[test]
+fn test_schema_not_inherited_from_previous_turn() {
+    let schema = Map::from_iter([("type".into(), Value::String("object".into()))]);
+    let mut stream = ConversationStream::new_test();
+
+    // First turn has a schema.
+    stream.start_turn(ChatRequest {
+        content: "structured query".into(),
+        schema: Some(schema),
+    });
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("response"))
+        .build()
+        .unwrap();
+
+    // Second turn has no schema.
+    stream.start_turn(ChatRequest::from("plain query"));
+
+    assert!(stream.schema().is_none());
+}
+
+#[test]
+fn test_schema_ignores_interrupt_reply() {
+    let schema = Map::from_iter([("type".into(), Value::String("object".into()))]);
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest {
+        content: "query".into(),
+        schema: Some(schema.clone()),
+    });
+
+    // Simulate an interrupt reply (schema: None).
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("partial"))
+        .add_chat_request(ChatRequest {
+            content: "continue".into(),
+            schema: None,
+        })
+        .build()
+        .unwrap();
+
+    // Should still find the original schema, not the interrupt's None.
+    assert_eq!(stream.schema(), Some(schema));
+}
+
+#[test]
 fn test_sanitize_noop_on_healthy_stream() {
     let mut stream = ConversationStream::new_test();
 

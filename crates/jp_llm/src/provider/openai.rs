@@ -117,7 +117,6 @@ pub(crate) struct ModelResponse {
 /// Create a request for the given model and query details.
 ///
 /// Returns `(request, is_structured, reasoning_enabled)`.
-#[expect(clippy::too_many_lines)]
 fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bool, bool)> {
     let ChatQuery {
         thread,
@@ -128,19 +127,14 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     // Only use the schema if the very last event is a ChatRequest with one.
     // Transform the schema for OpenAI's strict structured output mode
     // before passing it to the request.
-    let text = thread
-        .events
-        .last()
-        .and_then(|e| e.event.as_chat_request())
-        .and_then(|req| req.schema.clone())
-        .map(|schema| types::TextConfig {
-            format: types::TextFormat::JsonSchema {
-                schema: Value::Object(transform_schema(schema)),
-                description: "Structured output".to_owned(),
-                name: "structured_output".to_owned(),
-                strict: Some(true),
-            },
-        });
+    let text = thread.events.schema().map(|schema| types::TextConfig {
+        format: types::TextFormat::JsonSchema {
+            schema: Value::Object(transform_schema(schema)),
+            description: "Structured output".to_owned(),
+            name: "structured_output".to_owned(),
+            strict: Some(true),
+        },
+    });
 
     let is_structured = text.is_some();
     let parameters = thread.events.config()?.assistant.model.parameters;

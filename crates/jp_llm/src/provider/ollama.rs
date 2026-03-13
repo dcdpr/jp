@@ -216,9 +216,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(ChatMessage
 
     let structured_schema = thread
         .events
-        .last()
-        .and_then(|e| e.event.as_chat_request())
-        .and_then(|req| req.schema.clone())
+        .schema()
         .map(|schema| JsonStructure::new_for_schema(schema.into()))
         .map(|schema| FormatType::StructuredJson(Box::new(schema)));
 
