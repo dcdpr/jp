@@ -33,7 +33,7 @@ pub struct OpenrouterConfig {
 impl AssignKeyValue for PartialOpenrouterConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "api_key_env" => self.api_key_env = kv.try_some_string()?,
             "app_name" => self.app_name = kv.try_some_string()?,
             "app_referrer" => self.app_referrer = kv.try_some_string()?,

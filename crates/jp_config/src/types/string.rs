@@ -161,7 +161,7 @@ pub struct MergedString {
 impl AssignKeyValue for PartialMergedString {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "value" => self.value = kv.try_some_string()?,
             "strategy" => self.strategy = kv.try_some_from_str()?,
             "separator" => self.separator = kv.try_some_from_str()?,

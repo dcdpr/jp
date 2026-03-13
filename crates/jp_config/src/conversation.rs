@@ -44,7 +44,7 @@ pub struct ConversationConfig {
 impl AssignKeyValue for PartialConversationConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             _ if kv.p("title") => self.title.assign(kv)?,
             _ if kv.p("tools") => self.tools.assign(kv)?,
             _ if kv.p("attachments") => kv.try_vec_of_nested(&mut self.attachments)?,

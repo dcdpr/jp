@@ -39,7 +39,7 @@ pub struct ProviderConfig {
 impl AssignKeyValue for PartialProviderConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             _ if kv.p("llm") => self.llm.assign(kv)?,
             _ if kv.p("mcp") => match kv.trim_prefix_any() {
                 Some(name) => self.mcp.entry(name).or_default().assign(kv)?,

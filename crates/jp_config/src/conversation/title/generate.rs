@@ -31,7 +31,7 @@ pub struct GenerateConfig {
 impl AssignKeyValue for PartialGenerateConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "auto" => self.auto = kv.try_some_bool()?,
             _ if kv.p("model") => self.model.assign(kv)?,
             _ => return missing_key(&kv),

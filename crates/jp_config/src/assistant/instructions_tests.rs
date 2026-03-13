@@ -100,12 +100,14 @@ fn test_contrast_assign() {
         reason: Some("qux".into()),
     });
 
+    // Merge: only mentioned fields are changed. `reason` is preserved,
+    // `bad` is explicitly cleared via null.
     let kv = KvAssignment::try_from_cli(":", r#"{"good":"one","bad":null}"#).unwrap();
     p.assign(kv).unwrap();
     assert_eq!(p, PartialContrastConfig {
         good: Some("one".into()),
         bad: None,
-        reason: None,
+        reason: Some("qux".into()),
     });
 
     let kv = KvAssignment::try_from_cli("nope", "nope").unwrap();

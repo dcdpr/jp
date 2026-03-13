@@ -67,7 +67,7 @@ pub struct MarkdownConfig {
 impl AssignKeyValue for PartialMarkdownConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "wrap_width" => self.wrap_width = kv.try_some_from_str()?,
             "table_max_column_width" => {
                 self.table_max_column_width = kv.try_some_from_str()?;

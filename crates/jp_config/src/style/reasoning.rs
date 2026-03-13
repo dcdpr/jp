@@ -57,7 +57,7 @@ const fn default_reasoning_background(_: &()) -> TransformResult<Option<Color>> 
 impl AssignKeyValue for PartialReasoningConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "display" => self.display = kv.try_some_from_str()?,
             "background" => self.background = kv.try_some_number_or_from_str()?,
             _ if kv.p("summary_model") => self.summary_model.assign(kv)?,

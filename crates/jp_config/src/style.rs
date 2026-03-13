@@ -79,7 +79,7 @@ pub struct StyleConfig {
 impl AssignKeyValue for PartialStyleConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             _ if kv.p("code") => self.code.assign(kv)?,
             _ if kv.p("inline_code") => self.inline_code.assign(kv)?,
             _ if kv.p("markdown") => self.markdown.assign(kv)?,

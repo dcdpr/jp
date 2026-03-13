@@ -76,7 +76,7 @@ pub struct StdioConfig {
 impl AssignKeyValue for PartialStdioConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "command" => self.command = kv.try_some_from_str()?,
             _ if kv.p("args") => kv.try_some_vec_of_strings(&mut self.arguments)?,
             _ if kv.p("env") => kv.try_some_vec_of_strings(&mut self.variables)?,
@@ -116,7 +116,7 @@ pub struct ChecksumConfig {
 impl AssignKeyValue for PartialChecksumConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "algorithm" => self.algorithm = kv.try_some_from_str()?,
             "value" => self.value = kv.try_some_string()?,
             _ => return missing_key(&kv),

@@ -84,7 +84,7 @@ pub struct ParametersConfig {
 impl AssignKeyValue for PartialParametersConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "max_tokens" => self.max_tokens = kv.try_some_u32()?,
             "temperature" => self.temperature = kv.try_some_f32()?,
             "top_p" => self.top_p = kv.try_some_f32()?,
@@ -230,7 +230,7 @@ pub struct CustomReasoningConfig {
 impl AssignKeyValue for PartialCustomReasoningConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "effort" => self.effort = kv.try_some_from_str()?,
             "exclude" => self.exclude = kv.try_some_bool()?,
             _ => return missing_key(&kv),

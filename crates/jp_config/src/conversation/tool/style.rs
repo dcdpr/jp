@@ -53,7 +53,7 @@ pub struct DisplayStyleConfig {
 impl AssignKeyValue for PartialDisplayStyleConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "hidden" => self.hidden = kv.try_some_bool()?,
             "inline_results" => self.inline_results = kv.try_some_from_str()?,
             "results_file_link" => self.results_file_link = kv.try_some_from_str()?,

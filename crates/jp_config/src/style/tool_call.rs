@@ -85,7 +85,7 @@ pub struct PreparingConfig {
 impl AssignKeyValue for PartialToolCallConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "show" => self.show = kv.try_some_bool()?,
             _ if kv.p("progress") => self.progress.assign(kv)?,
             _ if kv.p("preparing") => self.preparing.assign(kv)?,
@@ -99,7 +99,7 @@ impl AssignKeyValue for PartialToolCallConfig {
 impl AssignKeyValue for PartialProgressConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "show" => self.show = kv.try_some_bool()?,
             "delay_secs" => self.delay_secs = kv.try_some_u32()?,
             "interval_ms" => self.interval_ms = kv.try_some_u32()?,
@@ -113,7 +113,7 @@ impl AssignKeyValue for PartialProgressConfig {
 impl AssignKeyValue for PartialPreparingConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "show" => self.show = kv.try_some_bool()?,
             "delay_secs" => self.delay_secs = kv.try_some_u32()?,
             "interval_ms" => self.interval_ms = kv.try_some_u32()?,

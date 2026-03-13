@@ -39,7 +39,7 @@ pub struct ToolsConfig {
 impl AssignKeyValue for PartialToolsConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             _ if kv.p("*") => self.defaults.assign(kv)?,
             _ => match kv.trim_prefix_any() {
                 Some(tool_id) => self.tools.entry(tool_id).or_default().assign(kv)?,
@@ -290,7 +290,7 @@ pub struct ToolConfig {
 impl AssignKeyValue for PartialToolConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "source" => self.source = kv.try_some_from_str()?,
             "enable" => self.enable = kv.try_some_bool_or_from_str()?,
             _ if kv.p("command") => self.command.assign(kv)?,
@@ -514,7 +514,7 @@ impl fmt::Display for ToolCommandConfig {
 impl AssignKeyValue for PartialToolCommandConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "program" => self.program = kv.try_some_string()?,
             _ if kv.p("args") => kv.try_some_vec_of_strings(&mut self.args)?,
             "shell" => self.shell = kv.try_some_bool()?,
@@ -1485,6 +1485,94 @@ mod tests {
             LiteralValue::String("explicit".into()),
             LiteralValue::String("always".into())
         ]);
+    }
+
+    #[test]
+    fn test_tool_config_json_merge_preserves_existing_fields() {
+        let mut p = PartialToolsConfig::default_values(&()).unwrap().unwrap();
+
+        // Pre-populate a tool with source and command.
+        p.tools.insert("my_tool".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            command: Some(PartialCommandConfigOrString::String(
+                "my-command".to_owned(),
+            )),
+            enable: Some(Enable::Off),
+            ..Default::default()
+        });
+
+        // Override only enable and run via a JSON object.
+        let kv = KvAssignment::try_from_cli("my_tool:", r#"{"enable":true,"run":"unattended"}"#)
+            .unwrap();
+        p.assign(kv).unwrap();
+
+        let tool = p.tools.get("my_tool").unwrap();
+        assert_eq!(tool.enable, Some(Enable::On));
+        assert_eq!(tool.run, Some(RunMode::Unattended));
+        // These must survive the merge.
+        assert_eq!(tool.source, Some(ToolSource::Local { tool: None }));
+        assert_eq!(
+            tool.command,
+            Some(PartialCommandConfigOrString::String(
+                "my-command".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_tool_config_json_merge_null_clears_field() {
+        let mut p = PartialToolsConfig::default_values(&()).unwrap().unwrap();
+
+        p.tools.insert("t".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            enable: Some(Enable::On),
+            run: Some(RunMode::Edit),
+            summary: Some("keep me".to_owned()),
+            ..Default::default()
+        });
+
+        // null clears enable and run; source and summary survive.
+        let kv = KvAssignment::try_from_cli("t:", r#"{"enable":null,"run":null}"#).unwrap();
+        p.assign(kv).unwrap();
+
+        let tool = p.tools.get("t").unwrap();
+        assert_eq!(tool.enable, None);
+        assert_eq!(tool.run, None);
+        assert_eq!(tool.source, Some(ToolSource::Local { tool: None }));
+        assert_eq!(tool.summary, Some("keep me".to_owned()));
+    }
+
+    #[test]
+    fn test_tool_config_json_merge_nested_object() {
+        let mut p = PartialToolsConfig::default_values(&()).unwrap().unwrap();
+
+        p.tools.insert("t".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            enable: Some(Enable::Off),
+            ..Default::default()
+        });
+
+        // Nested object for style is forwarded to DisplayStyleConfig::assign.
+        let kv =
+            KvAssignment::try_from_cli("t:", r#"{"enable":true,"style":{"hidden":true}}"#).unwrap();
+        p.assign(kv).unwrap();
+
+        let tool = p.tools.get("t").unwrap();
+        assert_eq!(tool.enable, Some(Enable::On));
+        assert_eq!(tool.source, Some(ToolSource::Local { tool: None }));
+
+        let style = tool.style.as_ref().unwrap();
+        assert_eq!(style.hidden, Some(true));
+    }
+
+    #[test]
+    fn test_tool_config_json_merge_unknown_key_errors() {
+        let mut p = PartialToolsConfig::default_values(&()).unwrap().unwrap();
+        p.tools.insert("t".to_owned(), PartialToolConfig::default());
+
+        let kv = KvAssignment::try_from_cli("t:", r#"{"bogus":"val"}"#).unwrap();
+        let err = p.assign(kv).unwrap_err().to_string();
+        assert!(err.contains("bogus"), "expected 'bogus' in error: {err}");
     }
 
     #[test]
