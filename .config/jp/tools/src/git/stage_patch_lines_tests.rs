@@ -103,7 +103,7 @@ fn fetch_hunk_produces_valid_header() {
     "};
 
     let runner = MockProcessRunner::success(diff_output);
-    let hunk = fetch_hunk("/tmp".into(), "test.rs", 0, &runner).unwrap();
+    let hunk = fetch_hunk("/tmp".into(), "test.rs", 0, &runner, &[]).unwrap();
 
     assert!(hunk.starts_with("@@ -"), "hunk header was: {hunk}");
 
@@ -177,7 +177,7 @@ fn fetch_hunk_second_of_two() {
     "};
 
     let runner = MockProcessRunner::success(diff_output);
-    let hunk = fetch_hunk("/tmp".into(), "test.rs", 1, &runner).unwrap();
+    let hunk = fetch_hunk("/tmp".into(), "test.rs", 1, &runner, &[]).unwrap();
 
     let (header, lines) = parse_hunk(&hunk).unwrap();
     assert_eq!(header.old_start, 5);

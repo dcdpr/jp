@@ -28,7 +28,7 @@ fn multiple_hunks() {
     "#};
 
     let runner = MockProcessRunner::success(mock_diff);
-    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner)
+    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner, &[])
         .unwrap()
         .into_content()
         .unwrap();
@@ -80,7 +80,7 @@ fn single_hunk() {
     "};
 
     let runner = MockProcessRunner::success(mock_diff);
-    let content = git_list_patches_impl(root, vec!["simple.rs".to_string()].into(), &runner)
+    let content = git_list_patches_impl(root, vec!["simple.rs".to_string()].into(), &runner, &[])
         .unwrap()
         .into_content()
         .unwrap();
@@ -109,7 +109,7 @@ fn no_changes() {
     fs::write(root.join(filename), "fn main() {}\n").unwrap();
 
     let runner = MockProcessRunner::success("");
-    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner)
+    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner, &[])
         .unwrap()
         .into_content()
         .unwrap();
@@ -127,7 +127,7 @@ fn git_command_fails_produces_warning() {
 
     let runner = MockProcessRunner::error("fatal: not a git repository");
 
-    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner)
+    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner, &[])
         .unwrap()
         .into_content()
         .unwrap();
@@ -156,7 +156,7 @@ fn context_lines_aligned_with_diff_lines() {
     "};
 
     let runner = MockProcessRunner::success(mock_diff);
-    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner)
+    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner, &[])
         .unwrap()
         .into_content()
         .unwrap();
@@ -227,6 +227,7 @@ fn missing_file_produces_warning_not_error() {
         root,
         vec!["missing.rs".to_string(), "exists.rs".to_string()].into(),
         &runner,
+        &[],
     )
     .unwrap()
     .into_content()

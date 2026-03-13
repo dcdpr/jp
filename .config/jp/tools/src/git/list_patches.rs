@@ -2,6 +2,7 @@ use std::{cmp::min, fs};
 
 use camino::Utf8Path;
 use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::{
     to_simple_xml_with_root,
@@ -30,14 +31,20 @@ struct Output {
     patches: Vec<Patch>,
 }
 
-pub(crate) fn git_list_patches(root: &Utf8Path, files: OneOrMany<String>) -> ToolResult {
-    git_list_patches_impl(root, files, &DuctProcessRunner)
+pub(crate) fn git_list_patches(
+    root: &Utf8Path,
+    files: OneOrMany<String>,
+    options: &Map<String, Value>,
+) -> ToolResult {
+    let env = super::env_from_options(options);
+    git_list_patches_impl(root, files, &DuctProcessRunner, &env)
 }
 
 fn git_list_patches_impl<R: ProcessRunner>(
     root: &Utf8Path,
     files: OneOrMany<String>,
     runner: &R,
+    env: &[(&str, &str)],
 ) -> ToolResult {
     let mut patches = vec![];
     let mut warnings = vec![];
@@ -49,10 +56,11 @@ fn git_list_patches_impl<R: ProcessRunner>(
             stdout,
             stderr,
             status,
-        } = runner.run(
+        } = runner.run_with_env(
             "git",
             &["diff-files", "-p", "--minimal", "--unified=0", "--", path],
             root,
+            env,
         )?;
 
         if !status.is_success() {

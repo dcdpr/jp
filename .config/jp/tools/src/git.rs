@@ -1,3 +1,5 @@
+use serde_json::{Map, Value};
+
 use crate::{
     Context, Tool,
     util::{ToolResult, unknown_tool},
@@ -21,26 +23,45 @@ use stage_patch_lines::git_stage_patch_lines;
 use unstage::git_unstage;
 
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
+    let opts = &t.options;
+
     match t.name.trim_start_matches("git_") {
-        "add_intent" => git_add_intent(&ctx.root, t.req("paths")?).await,
+        "add_intent" => git_add_intent(&ctx.root, t.req("paths")?, opts).await,
 
-        "commit" => git_commit(ctx.root, t.req("message")?).await,
+        "commit" => git_commit(ctx.root, t.req("message")?, opts).await,
 
-        "stage_patch" => git_stage_patch(ctx, &t.answers, t.req("patches")?).await,
+        "stage_patch" => git_stage_patch(ctx, &t.answers, t.req("patches")?, opts).await,
 
         "stage_patch_lines" => {
             let path: String = t.req("path")?;
             let patch_id: usize = t.req("patch_id")?;
-            let lines: Vec<serde_json::Value> = t.req("lines")?;
-            git_stage_patch_lines(&ctx.root, &path, patch_id, lines)
+            let lines: Vec<Value> = t.req("lines")?;
+            git_stage_patch_lines(&ctx.root, &path, patch_id, lines, opts)
         }
 
-        "list_patches" => git_list_patches(&ctx.root, t.req("files")?),
+        "list_patches" => git_list_patches(&ctx.root, t.req("files")?, opts),
 
-        "unstage" => git_unstage(&ctx.root, t.req("paths")?).await,
+        "unstage" => git_unstage(&ctx.root, t.req("paths")?, opts).await,
 
-        "diff" => git_diff(ctx.root, t.req("paths")?, t.opt("cached")?).await,
+        "diff" => git_diff(ctx.root, t.req("paths")?, t.opt("cached")?, opts).await,
 
         _ => unknown_tool(t),
     }
+}
+
+/// Extract environment variables from the `env` tool option.
+///
+/// Returns a list of (key, value) pairs that should be passed to git
+/// subprocesses. This allows callers (e.g. integration tests) to inject
+/// env vars like `GIT_CONFIG_GLOBAL` to isolate git from host config.
+fn env_from_options(options: &Map<String, Value>) -> Vec<(&str, &str)> {
+    options
+        .get("env")
+        .and_then(Value::as_object)
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.as_str(), s)))
+                .collect()
+        })
+        .unwrap_or_default()
 }

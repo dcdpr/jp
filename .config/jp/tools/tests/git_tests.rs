@@ -67,11 +67,29 @@ fn ctx(root: &Utf8Path) -> Context {
     }
 }
 
+/// Build the shared tool options that isolate git from host config.
+///
+/// Without this, tools that spawn git via `DuctProcessRunner` would inherit
+/// the developer's (or CI runner's) global git configuration, which can cause
+/// flaky failures (e.g. `commit.gpgsign = true`, global hooks, etc.).
+fn git_options() -> Map<String, Value> {
+    json!({
+        "env": {
+            "GIT_CONFIG_GLOBAL": "",
+            "GIT_CONFIG_SYSTEM": ""
+        }
+    })
+    .as_object()
+    .unwrap()
+    .clone()
+}
+
 fn tool(name: &str, arguments: &Value) -> Tool {
     Tool {
         name: name.to_string(),
         arguments: arguments.as_object().unwrap().clone(),
         answers: Map::new(),
+        options: git_options(),
     }
 }
 
@@ -80,6 +98,7 @@ fn tool_with_answers(name: &str, arguments: &Value, answers: &Value) -> Tool {
         name: name.to_string(),
         arguments: arguments.as_object().unwrap().clone(),
         answers: answers.as_object().unwrap().clone(),
+        options: git_options(),
     }
 }
 

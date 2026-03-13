@@ -1,5 +1,5 @@
 use camino::Utf8Path;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use super::apply::{apply_patch_to_index, build_patch};
 use crate::util::{
@@ -12,9 +12,11 @@ pub(crate) fn git_stage_patch_lines(
     path: &str,
     patch_id: usize,
     lines: Vec<Value>,
+    options: &Map<String, Value>,
 ) -> ToolResult {
     let lines = parse_line_selectors(lines)?;
-    git_stage_patch_lines_impl(root, path, patch_id, &lines, &DuctProcessRunner)
+    let env = super::env_from_options(options);
+    git_stage_patch_lines_impl(root, path, patch_id, &lines, &DuctProcessRunner, &env)
 }
 
 fn git_stage_patch_lines_impl<R: ProcessRunner>(
@@ -23,16 +25,17 @@ fn git_stage_patch_lines_impl<R: ProcessRunner>(
     patch_id: usize,
     lines: &[usize],
     runner: &R,
+    env: &[(&str, &str)],
 ) -> ToolResult {
     if lines.is_empty() {
         return Err("No lines selected for staging.".into());
     }
 
-    let hunk = fetch_hunk(root, path, patch_id, runner)?;
+    let hunk = fetch_hunk(root, path, patch_id, runner, env)?;
     let sub_hunk = build_sub_hunk(&hunk, lines)?;
     let patch = build_patch(path, &sub_hunk);
 
-    apply_patch_to_index(&patch, root, runner)?;
+    apply_patch_to_index(&patch, root, runner, env)?;
     Ok("Patch applied.".into())
 }
 
@@ -90,15 +93,17 @@ fn fetch_hunk<R: ProcessRunner>(
     path: &str,
     patch_id: usize,
     runner: &R,
+    env: &[(&str, &str)],
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let ProcessOutput {
         stdout,
         stderr,
         status,
-    } = runner.run(
+    } = runner.run_with_env(
         "git",
         &["diff-files", "-p", "--minimal", "--unified=0", "--", path],
         root,
+        env,
     )?;
 
     if !status.is_success() {

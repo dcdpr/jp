@@ -1,4 +1,5 @@
 use camino::{Utf8Path, Utf8PathBuf};
+use serde_json::{Map, Value};
 
 use crate::{
     to_simple_xml_with_root,
@@ -8,12 +9,27 @@ use crate::{
     },
 };
 
-pub(crate) async fn git_commit(root: Utf8PathBuf, message: String) -> ToolResult {
-    git_commit_impl(&root, &message, &DuctProcessRunner)
+pub(crate) async fn git_commit(
+    root: Utf8PathBuf,
+    message: String,
+    options: &Map<String, Value>,
+) -> ToolResult {
+    let env = super::env_from_options(options);
+    git_commit_impl(&root, &message, &DuctProcessRunner, &env)
 }
 
-fn git_commit_impl<R: ProcessRunner>(root: &Utf8Path, message: &str, runner: &R) -> ToolResult {
-    let output = runner.run("git", &["commit", "--signoff", "--message", message], root)?;
+fn git_commit_impl<R: ProcessRunner>(
+    root: &Utf8Path,
+    message: &str,
+    runner: &R,
+    env: &[(&str, &str)],
+) -> ToolResult {
+    let output = runner.run_with_env(
+        "git",
+        &["commit", "--signoff", "--message", message],
+        root,
+        env,
+    )?;
 
     to_simple_xml_with_root(&output, "git_commit").map(Into::into)
 }
@@ -32,7 +48,7 @@ mod tests {
         let mock_output = "[main abc1234] test commit\n 1 file changed, 1 insertion(+)\n";
         let runner = MockProcessRunner::success(mock_output);
 
-        let content = git_commit_impl(dir.path(), "test commit", &runner)
+        let content = git_commit_impl(dir.path(), "test commit", &runner, &[])
             .unwrap()
             .into_content()
             .unwrap();
@@ -53,7 +69,7 @@ mod tests {
 
         let runner = MockProcessRunner::error("nothing to commit");
 
-        let result = git_commit_impl(dir.path(), "test commit", &runner)
+        let result = git_commit_impl(dir.path(), "test commit", &runner, &[])
             .unwrap()
             .into_content()
             .unwrap();
