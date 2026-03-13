@@ -139,6 +139,10 @@
     "hash": "5a18ca4b0f9fbf0758644942e446d90816a9b0f23e60502cb01b75e7760f7ae9",
     "summary": "Extend `--cfg` path resolution to search user-global, workspace, and user-workspace config roots, merging matches."
   },
+  "036-conversation-compaction.md": {
+    "hash": "20ac71e5dcf878a3a8ec468293fee7a1aaa1b797638f7095f43c405e6d0f2cb3",
+    "summary": "Composable conversation compaction via mechanical strategies, tool-aware deduplication, LLM summarization, and protocol extensions for declarative compaction hints."
+  },
   "042-tool-options.md": {
     "hash": "d5c094882a3f52d471c2a0d156f018ca23bfb5464f47469de8d74954bf824c70",
     "summary": "Introduces per-tool options field for static user-defined configuration passed to tools at runtime."
