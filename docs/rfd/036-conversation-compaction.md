@@ -37,8 +37,6 @@ JP needs a way to *selectively* reduce conversation size while preserving the
 context that matters.
 
 Multiple existing RFDs defer to this one:
-- [RFD 008] (Knowledge Base): "subjects learned via tool calls may have been
-  compacted away from the context window"
 - [RFD 011] (System Message Queue): "If JP ever implements conversation
   compaction..."
 - [RFD 034] (Inquiry Config): "smarter compaction (summarization, middle-out
@@ -231,7 +229,7 @@ field in the tool configuration.
 ```toml
 [conversation.tools.fs_read_file.compaction]
 # Strategy for compacting this tool's responses
-response = "strip"  # "keep" | "strip" | "remove"
+response = "strip" # "keep" | "strip" | "remove"
 
 # Whether duplicate calls (same args) should be deduplicated
 dedup = true
@@ -266,8 +264,16 @@ and returns whether the first call is made obsolete by the second:
     "name": "fs_read_file",
     "action": "subsumes",
     "arguments": {
-      "earlier": { "path": "src/main.rs", "start_line": 2, "end_line": 5 },
-      "later": { "path": "src/main.rs", "start_line": 1, "end_line": 10 }
+      "earlier": {
+        "path": "src/main.rs",
+        "start_line": 2,
+        "end_line": 5
+      },
+      "later": {
+        "path": "src/main.rs",
+        "start_line": 1,
+        "end_line": 10
+      }
     }
   }
 }
@@ -276,7 +282,10 @@ and returns whether the first call is made obsolete by the second:
 The tool returns:
 
 ```json
-{ "type": "success", "content": "true" }
+{
+  "type": "success",
+  "content": "true"
+}
 ```
 
 This enables tool-specific logic like "`read_file(2,5)` is subsumed by
@@ -520,13 +529,11 @@ Depends on Phases 1-4.
 ## References
 
 - [Issue #57] — Make conversation management more powerful
-- [RFD 008] — Knowledge Base (compaction interaction)
 - [RFD 011] — System Message Queue (compaction interaction)
 - [RFD 034] — Inquiry-Specific Assistant Configuration (defers compaction)
-- [Multi-turn degradation paper](https://arxiv.org/abs/2505.06120) — cited
-  in Issue #57
+- [Multi-turn degradation paper](https://arxiv.org/abs/2505.06120) — cited in
+  Issue #57
 
 [Issue #57]: https://github.com/dcdpr/jp/issues/57
-[RFD 008]: D01-knowledge-base.md
 [RFD 011]: 011-system-message-queue.md
 [RFD 034]: 034-inquiry-specific-assistant-configuration.md
