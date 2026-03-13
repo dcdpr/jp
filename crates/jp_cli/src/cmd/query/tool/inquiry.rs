@@ -6,7 +6,7 @@
 //! event channel. The tool is then re-executed with the answer.
 //!
 //! This module provides:
-//! - Schema generation and answer extraction ([`ActiveInquiry`])
+//! - Schema generation and answer extraction
 //! - The [`InquiryBackend`] trait for testability
 //! - [`LlmInquiryBackend`] for real LLM calls
 //! - `MockInquiryBackend` for tests
