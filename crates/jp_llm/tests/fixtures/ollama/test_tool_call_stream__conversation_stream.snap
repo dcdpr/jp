@@ -149,14 +149,14 @@ expression: v
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_request",
-    "id": "",
+    "id": "run_me_2",
     "name": "run_me",
     "arguments": {}
   },
   {
     "timestamp": "2020-01-01 00:00:00.0",
     "type": "tool_call_response",
-    "id": "",
+    "id": "run_me_2",
     "content": "d29ya2luZyE=",
     "is_error": false
   },

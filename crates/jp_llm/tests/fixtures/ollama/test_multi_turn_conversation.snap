@@ -68,7 +68,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "",
+                        id: "run_me_2",
                         name: "run_me",
                         arguments: {},
                     },
