@@ -443,12 +443,9 @@ fn build_request(
     let config = thread.events.config()?;
     let parameters = &config.assistant.model.parameters;
 
-    // Only use the schema if the very last event is a ChatRequest with one.
     let response_format = thread
         .events
-        .last()
-        .and_then(|e| e.event.as_chat_request())
-        .and_then(|req| req.schema.clone())
+        .schema()
         .map(|schema| ResponseFormat::JsonSchema {
             json_schema: JsonSchemaFormat {
                 name: "structured_output".to_owned(),

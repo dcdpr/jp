@@ -433,9 +433,7 @@ fn create_request(
     // Extract schema and config before into_parts() consumes the thread.
     let format = thread
         .events
-        .last()
-        .and_then(|e| e.event.as_chat_request())
-        .and_then(|req| req.schema.clone())
+        .schema()
         .map(|schema| JsonOutputFormat::JsonSchema {
             schema: transform_schema(schema),
         });

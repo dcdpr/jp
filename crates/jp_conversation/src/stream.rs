@@ -369,6 +369,33 @@ impl ConversationStream {
             .push(InternalEvent::Event(Box::new(event.into())));
     }
 
+    /// Returns the structured output schema for the current turn.
+    ///
+    /// The schema lives on the first [`ChatRequest`] after the last
+    /// [`TurnStart`]. It is set once at the start of a turn and must
+    /// persist across tool-use round-trips within that turn. Interrupt
+    /// replies (`InterruptAction::Reply`) inject additional
+    /// `ChatRequest`s with `schema: None`, so we specifically want the
+    /// *first* request in the turn, not the last.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    #[must_use]
+    pub fn schema(&self) -> Option<serde_json::Map<String, serde_json::Value>> {
+        // Find the last TurnStart, then take the first ChatRequest after it.
+        let turn_start = self
+            .events
+            .iter()
+            .rposition(|e| matches!(e, InternalEvent::Event(ev) if ev.is_turn_start()));
+
+        let search_from = turn_start.map_or(0, |pos| pos + 1);
+
+        self.events[search_from..]
+            .iter()
+            .filter_map(InternalEvent::as_event)
+            .find_map(|e| e.as_chat_request())
+            .and_then(|req| req.schema.clone())
+    }
+
     /// Find a [`ToolCallResponse`] by ID.
     #[must_use]
     pub fn find_tool_call_response(&self, id: &str) -> Option<&ToolCallResponse> {
