@@ -423,10 +423,6 @@ impl PartialAppConfig {
     ) {
         self.assistant.model.id.resolve_in_place(aliases);
 
-        if let Some(ref mut model) = self.conversation.inquiry.assistant.model {
-            model.id.resolve_in_place(aliases);
-        }
-
         if let Some(ref mut model) = self.conversation.title.generate.model {
             model.id.resolve_in_place(aliases);
         }
