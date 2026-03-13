@@ -22,6 +22,7 @@ expression: v
             2025-08-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
 ]

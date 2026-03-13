@@ -30,10 +30,12 @@ expression: v
         deprecated: Some(
             Active,
         ),
+        structured_output: Some(
+            true,
+        ),
         features: [
             "interleaved-thinking",
             "context-editing",
-            "structured-outputs",
             "adaptive-thinking",
         ],
     },
@@ -64,10 +66,12 @@ expression: v
         deprecated: Some(
             Active,
         ),
+        structured_output: Some(
+            true,
+        ),
         features: [
             "interleaved-thinking",
             "context-editing",
-            "structured-outputs",
             "adaptive-thinking",
         ],
     },
@@ -94,15 +98,17 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2025-07-01,
+            2025-08-01,
         ),
         deprecated: Some(
             Active,
         ),
+        structured_output: Some(
+            true,
+        ),
         features: [
             "interleaved-thinking",
             "context-editing",
-            "structured-outputs",
         ],
     },
     ModelDetails {
@@ -132,6 +138,9 @@ expression: v
         ),
         deprecated: Some(
             Active,
+        ),
+        structured_output: Some(
+            true,
         ),
         features: [
             "interleaved-thinking",
@@ -166,10 +175,12 @@ expression: v
         deprecated: Some(
             Active,
         ),
+        structured_output: Some(
+            true,
+        ),
         features: [
             "interleaved-thinking",
             "context-editing",
-            "structured-outputs",
         ],
     },
     ModelDetails {
@@ -200,10 +211,12 @@ expression: v
         deprecated: Some(
             Active,
         ),
+        structured_output: Some(
+            true,
+        ),
         features: [
             "interleaved-thinking",
             "context-editing",
-            "structured-outputs",
         ],
     },
     ModelDetails {
@@ -233,6 +246,9 @@ expression: v
         ),
         deprecated: Some(
             Active,
+        ),
+        structured_output: Some(
+            false,
         ),
         features: [
             "interleaved-thinking",
@@ -266,6 +282,9 @@ expression: v
         ),
         deprecated: Some(
             Active,
+        ),
+        structured_output: Some(
+            false,
         ),
         features: [
             "interleaved-thinking",
@@ -301,6 +320,9 @@ expression: v
                     2026-04-20,
                 ),
             },
+        ),
+        structured_output: Some(
+            false,
         ),
         features: [],
     },
