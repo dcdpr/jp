@@ -887,6 +887,7 @@ async fn test_merged_stream_exits_after_tool_response() {
                 result: None,
                 style: None,
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
 
         let mut workspace = Workspace::new(root)
@@ -999,6 +1000,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 result: None,
                 style: None,
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
 
         let mut workspace = Workspace::new(root)
@@ -1142,6 +1144,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                 result: None,
                 style: None,
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
 
         let mut workspace = Workspace::new(root)
@@ -1292,6 +1295,7 @@ async fn test_tool_call_with_run_mode_unattended() {
                 result: None,
                 style: None,
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
 
         let mut workspace = Workspace::new(root)
@@ -1430,6 +1434,7 @@ async fn test_tool_call_with_run_mode_skip() {
                 result: None,
                 style: None,
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
 
         let mut workspace = Workspace::new(root)
@@ -1586,6 +1591,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 result: None,
                 style: None,
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
         // tool_unattended runs automatically
         config
@@ -1603,6 +1609,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 result: None,
                 style: None,
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
 
         let mut workspace = Workspace::new(root)
@@ -1803,6 +1810,7 @@ async fn test_tool_call_returns_error() {
                 result: None,
                 style: None,
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
 
         let mut workspace = Workspace::new(root)
@@ -2764,6 +2772,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 result: None,
                 style: fn_call_style.clone(),
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
         config
             .conversation
@@ -2780,6 +2789,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 result: None,
                 style: fn_call_style,
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
 
         let mut workspace = Workspace::new(root)
@@ -2960,6 +2970,7 @@ async fn test_single_tool_call_rendered_with_args() {
                 result: None,
                 style: None,
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
 
         let mut workspace = Workspace::new(root)
@@ -3247,6 +3258,7 @@ fn inquiry_tool_config(questions: &[&str]) -> ToolConfig {
                 })
             })
             .collect(),
+        options: serde_json::Map::new(),
     }
 }
 
@@ -3572,6 +3584,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 result: None,
                 style: None,
                 questions: IndexMap::new(),
+                options: serde_json::Map::new(),
             });
 
         let mut workspace = Workspace::new(root)

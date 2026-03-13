@@ -285,6 +285,14 @@ pub struct ToolConfig {
     /// `overwrite_file` when a file already exists.
     #[setting(nested, merge = merge_nested_indexmap)]
     pub questions: IndexMap<String, QuestionConfig>,
+
+    /// Per-tool options passed to the tool at runtime.
+    ///
+    /// A free-form map of key-value pairs that configure tool behavior.
+    /// Each tool defines its own supported options and defaults. Unknown
+    /// options are silently forwarded.
+    #[setting(default)]
+    pub options: Map<String, Value>,
 }
 
 impl AssignKeyValue for PartialToolConfig {
@@ -302,6 +310,7 @@ impl AssignKeyValue for PartialToolConfig {
             "result" => self.result = kv.try_some_from_str()?,
             _ if kv.p("style") => self.style.assign(kv)?,
             "questions" => self.questions = kv.try_object()?,
+            "options" => self.options = Some(kv.try_object()?),
             _ => return missing_key(&kv),
         }
 
@@ -355,6 +364,7 @@ impl PartialConfigDelta for PartialToolConfig {
                     Some((k, next))
                 })
                 .collect(),
+            options: delta_opt(self.options.as_ref(), next.options),
         }
     }
 }
@@ -383,6 +393,11 @@ impl ToPartial for ToolConfig {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.to_partial()))
                 .collect(),
+            options: if self.options.is_empty() {
+                None
+            } else {
+                Some(self.options.clone())
+            },
         }
     }
 }
@@ -1071,6 +1086,12 @@ impl ToolConfigWithDefaults {
     #[must_use]
     pub const fn questions(&self) -> &IndexMap<String, QuestionConfig> {
         &self.tool.questions
+    }
+
+    /// Return the per-tool options map.
+    #[must_use]
+    pub const fn options(&self) -> &Map<String, Value> {
+        &self.tool.options
     }
 
     /// Return the question target for the given question ID.

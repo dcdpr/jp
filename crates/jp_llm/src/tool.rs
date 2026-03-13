@@ -607,6 +607,7 @@ impl ToolDefinition {
                 "name": name,
                 "arguments": &arguments,
                 "answers": answers,
+                "options": config.options(),
             },
             "context": {
                 "action": Action::Run,
