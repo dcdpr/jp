@@ -362,12 +362,6 @@ impl AppConfig {
             .resolve_in_place(aliases)
             .map_err(|e| Error::Custom(format!("assistant.model.id: {e}").into()))?;
 
-        if let Some(ref mut model) = self.conversation.inquiry.assistant.model {
-            model.id.resolve_in_place(aliases).map_err(|e| {
-                Error::Custom(format!("conversation.inquiry.assistant.model.id: {e}").into())
-            })?;
-        }
-
         if let Some(ref mut model) = self.conversation.title.generate.model {
             model.id.resolve_in_place(aliases).map_err(|e| {
                 Error::Custom(format!("conversation.title.generate.model.id: {e}").into())
