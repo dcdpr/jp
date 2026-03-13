@@ -526,13 +526,29 @@ fn create_request(
         }
     }
 
-    // Automatic caching handles the growing message history. The API places a
-    // cache breakpoint on the last cacheable block (the latest message),
-    // consuming 1 of the 4 available slots.
-    builder
-        .cache_control(types::CacheControl::default())
-        .model(model.id.name.clone())
-        .messages(messages);
+    // Check if we used an explicit breakpoint in the messages (via
+    // CACHE_BREAKPOINT_KEY metadata).
+    let has_message_breakpoint = messages.iter().any(|m| {
+        m.content.0.iter().any(|c| match c {
+            types::MessageContent::Text(t) => t.cache_control.is_some(),
+            types::MessageContent::ToolUse(t) => t.cache_control.is_some(),
+            types::MessageContent::ToolResult(t) => t.cache_control.is_some(),
+            _ => false,
+        })
+    });
+
+    if has_message_breakpoint {
+        // If we explicitly placed a breakpoint in the messages, we consume 1
+        // budget
+        cache_budget = cache_budget.saturating_sub(1);
+    } else {
+        // Automatic caching handles the growing message history. The API places
+        // a cache breakpoint on the last cacheable block (the latest message),
+        // consuming 1 of the 4 available slots.
+        builder.cache_control(types::CacheControl::default());
+    }
+
+    builder.model(model.id.name.clone()).messages(messages);
 
     // Explicit breakpoints are allocated to stable content, in request
     // structure order (system > documents > tools). System content gets
@@ -1174,13 +1190,7 @@ fn convert_events(events: ConversationStream) -> Vec<types::Message> {
     events
         .into_iter()
         .filter_map(|event| {
-            // FIXME: `aliases` is empty here, because of an issue in `query.rs`
-            // where we merge different configs... It has to do with us using
-            // `PartialAppConfig::empty()` as a base config there.
             let aliases = &event.config.providers.llm.aliases;
-
-            // dbg!(&aliases);
-            // dbg!(&event.config.assistant.model.id);
 
             let is_anthropic = event
                 .config
@@ -1190,7 +1200,20 @@ fn convert_events(events: ConversationStream) -> Vec<types::Message> {
                 .finalize(aliases)
                 .is_ok_and(|id| id.provider == Some(PROVIDER));
 
-            convert_event(event.event, is_anthropic)
+            let has_cache_breakpoint = event
+                .event
+                .metadata
+                .get(jp_conversation::event::CACHE_BREAKPOINT_KEY)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+
+            convert_event(event.event, is_anthropic).map(|(role, mut content)| {
+                if has_cache_breakpoint {
+                    apply_cache_control(&mut content);
+                }
+
+                (role, content)
+            })
         })
         .fold(vec![], |mut messages, (role, content)| {
             match messages.last_mut() {
@@ -1207,6 +1230,21 @@ fn convert_events(events: ConversationStream) -> Vec<types::Message> {
         })
 }
 
+fn apply_cache_control(content: &mut types::MessageContent) {
+    match content {
+        types::MessageContent::Text(text) => {
+            text.cache_control = Some(types::CacheControl::default());
+        }
+        types::MessageContent::ToolUse(tu) => {
+            tu.cache_control = Some(types::CacheControl::default());
+        }
+        types::MessageContent::ToolResult(tr) => {
+            tr.cache_control = Some(types::CacheControl::default());
+        }
+        _ => {}
+    }
+}
+
 fn convert_event(
     event: ConversationEvent,
     is_anthropic: bool,
@@ -1219,10 +1257,6 @@ fn convert_event(
             types::MessageContent::Text(request.content.into()),
         )),
         EventKind::ChatResponse(response) => {
-            // Check if this came from Anthropic originally
-            // dbg!(&is_anthropic);
-            // dbg!(&metadata);
-
             let content = if is_anthropic
                 && response.is_reasoning()
                 && let signature = metadata

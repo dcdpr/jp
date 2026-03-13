@@ -160,7 +160,7 @@ fn test_question_target_with_configured_question() {
             source: Some(ToolSource::Builtin { tool: None }),
             questions: indexmap::indexmap! {
                 "confirm".to_string() => jp_config::conversation::tool::PartialQuestionConfig {
-                    target: Some(QuestionTarget::Assistant),
+                    target: Some(QuestionTarget::Assistant(Box::default())),
                     answer: None,
                 }
             },
@@ -178,7 +178,7 @@ fn test_question_target_with_configured_question() {
     // Configured question returns the target
     assert_eq!(
         coordinator.question_target("my_tool", "confirm"),
-        Some(QuestionTarget::Assistant)
+        Some(QuestionTarget::Assistant(Box::default()))
     );
 
     // Non-existent question returns None

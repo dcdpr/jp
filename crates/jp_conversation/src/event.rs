@@ -22,6 +22,10 @@ pub use self::{
     turn::TurnStart,
 };
 
+/// Key used in `ConversationEvent::metadata` to indicate that a cache breakpoint
+/// should be placed on this event.
+pub const CACHE_BREAKPOINT_KEY: &str = "cache_breakpoint";
+
 /// A single event in a conversation.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationEvent {

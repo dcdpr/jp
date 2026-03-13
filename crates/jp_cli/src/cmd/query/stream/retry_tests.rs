@@ -1,6 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
-use jp_config::{AppConfig, assistant::request::RequestConfig};
+use jp_config::{
+    AppConfig,
+    assistant::request::{CachePolicy, RequestConfig},
+};
 use jp_conversation::{
     ConversationStream,
     event::{ChatRequest, ChatResponse, ConversationEvent},
@@ -16,6 +19,7 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
         max_retries,
         base_backoff_ms: 1, // 1ms for fast tests
         max_backoff_secs: 1,
+        cache: CachePolicy::default(),
     };
     StreamRetryState::new(config)
 }
@@ -62,6 +66,7 @@ fn backoff_uses_retry_after_when_present() {
         max_retries: 3,
         base_backoff_ms: 1,
         max_backoff_secs: 120,
+        cache: CachePolicy::default(),
     };
     let state = StreamRetryState::new(config);
     let err = StreamError::rate_limit(Some(Duration::from_secs(42)));

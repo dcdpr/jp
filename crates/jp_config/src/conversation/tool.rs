@@ -3,7 +3,7 @@
 use std::{fmt, str::FromStr};
 
 use indexmap::IndexMap;
-use schematic::{Config, ConfigEnum};
+use schematic::{Config, ConfigEnum, PartialConfig as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tracing::warn;
@@ -11,6 +11,7 @@ use tracing::warn;
 use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    assistant::PartialAssistantConfig,
     conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_vec},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
@@ -1096,8 +1097,8 @@ impl ToolConfigWithDefaults {
 
     /// Return the question target for the given question ID.
     #[must_use]
-    pub fn question_target(&self, question_id: &str) -> Option<QuestionTarget> {
-        self.tool.questions.get(question_id).map(|q| q.target)
+    pub fn question_target(&self, question_id: &str) -> Option<&QuestionTarget> {
+        self.tool.questions.get(question_id).map(|q| &q.target)
     }
 
     /// Get an automated answer for a question.
@@ -1156,15 +1157,104 @@ impl ToPartial for QuestionConfig {
 }
 
 /// The target of a question.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
-#[serde(rename_all = "snake_case")]
+///
+/// Accepts a string (`"user"` or `"assistant"`) or a map with assistant
+/// config overrides for the inquiry model.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum QuestionTarget {
     /// Ask the question to the user.
     #[default]
     User,
 
     /// Ask the question to the assistant.
-    Assistant,
+    ///
+    /// The partial config overrides the global inquiry config, which in turn
+    /// overrides the parent assistant config. An empty partial (all `None`)
+    /// means "use global inquiry defaults."
+    Assistant(Box<PartialAssistantConfig>),
+}
+
+impl QuestionTarget {
+    /// Returns `true` if the target is the user.
+    #[must_use]
+    pub const fn is_user(&self) -> bool {
+        matches!(self, Self::User)
+    }
+
+    /// Returns `true` if the target is the assistant.
+    #[must_use]
+    pub const fn is_assistant(&self) -> bool {
+        matches!(self, Self::Assistant(_))
+    }
+}
+
+impl Serialize for QuestionTarget {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::User => serializer.serialize_str("user"),
+            Self::Assistant(config) if config.is_empty() => serializer.serialize_str("assistant"),
+            Self::Assistant(config) => config.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for QuestionTarget {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct QuestionTargetVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for QuestionTargetVisitor {
+            type Value = QuestionTarget;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter
+                    .write_str("\"user\", \"assistant\", or a map of assistant config overrides")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<QuestionTarget, E> {
+                match v {
+                    "user" => Ok(QuestionTarget::User),
+                    "assistant" => Ok(QuestionTarget::Assistant(Box::default())),
+                    _ => Err(serde::de::Error::unknown_variant(v, &["user", "assistant"])),
+                }
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<QuestionTarget, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let config = PartialAssistantConfig::deserialize(
+                    serde::de::value::MapAccessDeserializer::new(map),
+                )?;
+                Ok(QuestionTarget::Assistant(Box::new(config)))
+            }
+        }
+
+        deserializer.deserialize_any(QuestionTargetVisitor)
+    }
+}
+
+impl schematic::Schematic for QuestionTarget {
+    fn schema_name() -> Option<String> {
+        Some("QuestionTarget".to_owned())
+    }
+
+    fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
+        use schematic::schema::{EnumType, LiteralValue, UnionType};
+
+        schema.union(UnionType::new_any([
+            schema.nest().enumerable(EnumType::new([
+                LiteralValue::String("user".into()),
+                LiteralValue::String("assistant".into()),
+            ])),
+            schema.infer::<PartialAssistantConfig>(),
+        ]))
+    }
 }
 
 /// Whether a tool is enabled.

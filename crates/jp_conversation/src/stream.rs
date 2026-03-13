@@ -207,6 +207,14 @@ impl ConversationStream {
             .any(|e| matches!(e, InternalEvent::Event(_)))
     }
 
+    /// Returns `true` if the stream contains at least one [`ChatRequest`].
+    #[must_use]
+    pub fn has_chat_request(&self) -> bool {
+        self.events
+            .iter()
+            .any(|e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()))
+    }
+
     /// Returns the number of events in the stream. This only considers
     /// [`ConversationEvent`]s.
     #[must_use]

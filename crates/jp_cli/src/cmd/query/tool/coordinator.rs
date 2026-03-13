@@ -265,7 +265,7 @@ impl ToolCoordinator {
     ) -> Option<jp_config::conversation::tool::QuestionTarget> {
         self.tools_config
             .get(tool_name)
-            .and_then(|config| config.question_target(question_id))
+            .and_then(|config| config.question_target(question_id).cloned())
     }
 
     pub fn static_answer(&self, tool_name: &str, question_id: &str) -> Option<serde_json::Value> {
@@ -819,6 +819,7 @@ impl ToolCoordinator {
         index: usize,
         inquiry_id: String,
         id: String,
+        tool_name: String,
         question: Question,
         backend: Arc<dyn InquiryBackend>,
         mut events: ConversationStream,
@@ -840,7 +841,13 @@ impl ToolCoordinator {
 
         tokio::spawn(async move {
             let result = backend
-                .inquire(events, &inquiry_id, &question, cancellation_token)
+                .inquire(
+                    events,
+                    &inquiry_id,
+                    &tool_name,
+                    &question,
+                    cancellation_token,
+                )
                 .await
                 .map_err(|error| error.to_string());
 
@@ -1034,7 +1041,7 @@ impl ToolCoordinator {
                         .current_turn_mut()
                         .add_inquiry_request(InquiryRequest::new(
                             inquiry_id.clone(),
-                            InquirySource::tool(tool_name),
+                            InquirySource::tool(tool_name.clone()),
                             tool_question_to_inquiry_question(&question),
                         ))
                         .build()
@@ -1044,6 +1051,7 @@ impl ToolCoordinator {
                         index,
                         inquiry_id,
                         tool_id.clone(),
+                        tool_name,
                         question,
                         Arc::clone(inquiry_backend),
                         events.clone(),

@@ -3253,7 +3253,7 @@ fn inquiry_tool_config(questions: &[&str]) -> ToolConfig {
             .iter()
             .map(|id| {
                 (id.to_string(), QuestionConfig {
-                    target: QuestionTarget::Assistant,
+                    target: QuestionTarget::Assistant(Box::default()),
                     answer: None,
                 })
             })

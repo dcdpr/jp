@@ -464,6 +464,58 @@ fn test_sanitize_reindexes_turn_starts() {
 }
 
 #[test]
+/// When no `ChatRequest` exists, `sanitize` preserves the events (useful for
+/// fork/storage scenarios where a user will add a `ChatRequest` later).
+/// Provider-bound code must handle this separately.
+fn test_sanitize_preserves_events_when_no_chat_request() {
+    let mut stream = ConversationStream::new_test();
+
+    stream.push(ConversationEvent::new(
+        ChatResponse::reasoning("Thinking about it..."),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        ToolCallRequest {
+            id: "tc1".into(),
+            name: "git_stage_patch".into(),
+            arguments: Map::new(),
+        },
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        ToolCallResponse {
+            id: "tc1".into(),
+            result: Ok("Tool paused: confirm?".into()),
+        },
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+    ));
+
+    stream.sanitize();
+
+    // Events are preserved (TurnStart injected + 3 original events).
+    // sanitize does NOT drop content when there's no ChatRequest — that
+    // is the caller's responsibility when sending to a provider.
+    assert_eq!(stream.len(), 4);
+    assert!(stream.first().unwrap().event.is_turn_start());
+}
+
+#[test]
+fn test_has_chat_request() {
+    let empty = ConversationStream::new_test();
+    assert!(!empty.has_chat_request());
+
+    let with_request = ConversationStream::new_test().with_turn("hello");
+    assert!(with_request.has_chat_request());
+
+    let mut no_request = ConversationStream::new_test();
+    no_request.push(ConversationEvent::new(
+        ChatResponse::message("orphaned"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    ));
+    assert!(!no_request.has_chat_request());
+}
+
+#[test]
 fn test_sanitize_noop_on_healthy_stream() {
     let mut stream = ConversationStream::new_test();
 

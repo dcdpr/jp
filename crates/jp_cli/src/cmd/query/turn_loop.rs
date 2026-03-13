@@ -38,7 +38,7 @@ use super::{
     stream::{StreamRetryState, handle_stream_error},
     tool::{
         FormatResult, ToolCallState, ToolCoordinator, ToolPrompter, ToolRenderer,
-        inquiry::{InquiryBackend, LlmInquiryBackend},
+        inquiry::{InquiryBackend, InquiryConfig, LlmInquiryBackend},
     },
     turn::{Action, TurnCoordinator, TurnPhase, TurnState},
 };
@@ -164,13 +164,73 @@ pub(super) async fn run_turn_loop(
     );
 
     let sections = build_sections(&cfg.assistant, !tools.is_empty());
-    let inquiry_backend: Arc<dyn InquiryBackend> = Arc::new(LlmInquiryBackend::new(
-        Arc::clone(&provider),
-        model.clone(),
-        cfg.assistant.system_prompt.clone().map(String::from),
-        sections,
-        attachments.to_vec(),
-    ));
+    let inquiry_backend: Arc<dyn InquiryBackend> = {
+        let inquiry_override = &cfg.conversation.inquiry.assistant;
+
+        // Use the inquiry system prompt if configured, otherwise fall back to
+        // the parent assistant's system prompt.
+        let default_system_prompt = inquiry_override
+            .system_prompt
+            .clone()
+            .or_else(|| cfg.assistant.system_prompt.clone().map(String::from));
+
+        // Track providers we've already constructed to avoid duplicates.
+        let mut providers: indexmap::IndexMap<jp_config::model::id::ProviderId, Arc<dyn Provider>> =
+            indexmap::IndexMap::new();
+
+        // Build the default InquiryConfig from the global inquiry override
+        // merged with the parent assistant config.
+        let default_config = if let Some(inquiry_model_cfg) = inquiry_override.model.as_ref() {
+            let inquiry_model_id = inquiry_model_cfg.id.resolved();
+            let inquiry_provider: Arc<dyn Provider> = Arc::from(jp_llm::provider::get_provider(
+                inquiry_model_id.provider,
+                &cfg.providers.llm,
+            )?);
+            let inquiry_model = inquiry_provider
+                .model_details(&inquiry_model_id.name)
+                .await?;
+
+            if inquiry_model.structured_output == Some(false) {
+                warn!(
+                    model = %inquiry_model_id,
+                    "Inquiry model does not support structured output. \
+                     Inquiry responses may be unreliable.",
+                );
+            }
+
+            info!(
+                model = inquiry_model.name(),
+                "Using dedicated model for inquiries.",
+            );
+
+            providers.insert(inquiry_model_id.provider, Arc::clone(&inquiry_provider));
+
+            InquiryConfig {
+                provider: inquiry_provider,
+                model: inquiry_model,
+                system_prompt: default_system_prompt,
+                sections: sections.clone(),
+            }
+        } else {
+            providers.insert(model.id.provider, Arc::clone(&provider));
+
+            InquiryConfig {
+                provider: Arc::clone(&provider),
+                model: model.clone(),
+                system_prompt: default_system_prompt,
+                sections: sections.clone(),
+            }
+        };
+
+        let overrides = build_inquiry_overrides(cfg, &default_config, &mut providers).await?;
+
+        Arc::new(LlmInquiryBackend::new(
+            default_config,
+            overrides,
+            attachments.to_vec(),
+            tools.to_vec(),
+        ))
+    };
 
     info!(model = model.name(), "Starting conversation turn.");
 
@@ -533,6 +593,86 @@ pub(super) async fn run_turn_loop(
     }
 
     Ok(())
+}
+
+/// Walk active tool configs to build per-question [`InquiryConfig`] overrides
+/// from `QuestionTarget::Assistant(config)` entries that have non-empty config.
+async fn build_inquiry_overrides(
+    cfg: &AppConfig,
+    default_config: &InquiryConfig,
+    providers: &mut indexmap::IndexMap<jp_config::model::id::ProviderId, Arc<dyn Provider>>,
+) -> Result<indexmap::IndexMap<(String, String), InquiryConfig>, Error> {
+    let mut overrides = indexmap::IndexMap::new();
+
+    for (tool_name, tool_cfg) in cfg.conversation.tools.iter() {
+        for (question_id, question_cfg) in tool_cfg.questions() {
+            let jp_config::conversation::tool::QuestionTarget::Assistant(ref per_q) =
+                question_cfg.target
+            else {
+                continue;
+            };
+            if jp_config::PartialConfig::is_empty(per_q.as_ref()) {
+                continue;
+            }
+
+            // Resolve per-question model (if overridden), falling back to
+            // the default inquiry config's model.
+            let has_model_override = !jp_config::PartialConfig::is_empty(&per_q.model.id);
+            let (inq_provider, inq_model) = if has_model_override {
+                let model_id = per_q
+                    .model
+                    .id
+                    .resolve(&cfg.providers.llm.aliases)
+                    .map_err(|e| Error::CliConfig(e.to_string()))?;
+
+                let prov = if let Some(p) = providers.get(&model_id.provider) {
+                    Arc::clone(p)
+                } else {
+                    let p: Arc<dyn Provider> = Arc::from(jp_llm::provider::get_provider(
+                        model_id.provider,
+                        &cfg.providers.llm,
+                    )?);
+                    providers.insert(model_id.provider, Arc::clone(&p));
+                    p
+                };
+
+                let details = prov.model_details(&model_id.name).await?;
+
+                if details.structured_output == Some(false) {
+                    warn!(
+                        tool = %tool_name,
+                        question = %question_id,
+                        model = %model_id,
+                        "Per-question inquiry model does not support structured \
+                         output. Inquiry responses may be unreliable.",
+                    );
+                }
+
+                (prov, details)
+            } else {
+                (
+                    Arc::clone(&default_config.provider),
+                    default_config.model.clone(),
+                )
+            };
+
+            // System prompt: per-question -> global inquiry -> main.
+            let system_prompt = per_q
+                .system_prompt
+                .as_ref()
+                .map(|s| s.to_string())
+                .or_else(|| default_config.system_prompt.clone());
+
+            overrides.insert((tool_name.to_owned(), question_id.clone()), InquiryConfig {
+                provider: inq_provider,
+                model: inq_model,
+                system_prompt,
+                sections: default_config.sections.clone(),
+            });
+        }
+    }
+
+    Ok(overrides)
 }
 
 fn map_llm_error(error: jp_llm::Error, models: Vec<ModelDetails>) -> Error {

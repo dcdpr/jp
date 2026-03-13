@@ -915,14 +915,21 @@ fn validate_tool_arguments(
 }
 
 /// Resolve all enabled tool definitions from config.
+///
+/// If `forced_tool` is provided (e.g. from `ToolChoice::Function`), that
+/// tool is included even when its `enable()` check returns `false`. This
+/// prevents a mismatch between `tool_choice` and the declared tools list,
+/// which some providers (notably Google/Gemini) reject outright.
 pub async fn tool_definitions(
     configs: impl Iterator<Item = (&str, ToolConfigWithDefaults)>,
     mcp_client: &jp_mcp::Client,
+    forced_tool: Option<&str>,
 ) -> Result<Vec<ToolDefinition>, ToolError> {
     let mut definitions = Vec::new();
 
     for (name, config) in configs {
-        if !config.enable() {
+        let forced = forced_tool.is_some_and(|f| f == name);
+        if !forced && !config.enable() {
             continue;
         }
 
