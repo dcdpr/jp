@@ -347,6 +347,11 @@ impl KvAssignment {
         })
     }
 
+    /// Returns `true` if the value is JSON `null`.
+    const fn is_json_null(&self) -> bool {
+        matches!(&self.value, KvValue::Json(Value::Null))
+    }
+
     /// Try to parse the value as a JSON object.
     pub(crate) fn try_object<T: DeserializeOwned>(self) -> Result<T, KvAssignmentError> {
         let Self { key, value, .. } = self;
@@ -357,6 +362,50 @@ impl KvAssignment {
             }
             _ => type_error(&key, &value, &["object"]),
         }
+    }
+
+    /// Merge a JSON object value into a target, assigning each top-level key
+    /// individually.
+    ///
+    /// Unlike [`try_object`](Self::try_object), which deserializes the JSON
+    /// into a fresh value (replacing whatever was there), this iterates the
+    /// object's keys and calls [`AssignKeyValue::assign`] for each one. Fields
+    /// already present in `target` that are *not* mentioned in the JSON object
+    /// are left untouched.
+    ///
+    /// This is the right semantic for partial-config overrides where the caller
+    /// only wants to change specific fields (e.g. `enable` and `run`) without
+    /// wiping out fields loaded from earlier config layers (e.g. `source`).
+    pub(crate) fn try_merge_object<T: AssignKeyValue>(self, target: &mut T) -> AssignResult {
+        let Self {
+            key,
+            value,
+            strategy,
+        } = self;
+
+        let KvValue::Json(Value::Object(obj)) = value else {
+            return type_error(&key, &value, &["object"]).map_err(Into::into);
+        };
+
+        for (k, v) in obj {
+            let full_path = if key.full_path.is_empty() {
+                k.clone()
+            } else {
+                format!("{}{}{k}", key.full_path, key.delim.as_str())
+            };
+
+            target.assign(Self {
+                key: KvKey {
+                    path: k,
+                    delim: key.delim,
+                    full_path,
+                },
+                value: KvValue::Json(v),
+                strategy,
+            })?;
+        }
+
+        Ok(())
     }
 
     /// Try to parse the value as a JSON object or use [`FromStr`].
@@ -386,6 +435,9 @@ impl KvAssignment {
         T: DeserializeOwned + FromStr<Err = E>,
         E: Into<BoxedError>,
     {
+        if self.is_json_null() {
+            return Ok(None);
+        }
         self.try_object_or_from_str().map(Some)
     }
 
@@ -412,6 +464,9 @@ impl KvAssignment {
         T: FromStr<Err = E>,
         E: Into<BoxedError>,
     {
+        if self.is_json_null() {
+            return Ok(None);
+        }
         self.try_from_str().map(Some)
     }
 
@@ -448,6 +503,9 @@ impl KvAssignment {
         T: FromStr<Err = E>,
         E: Into<BoxedError>,
     {
+        if self.is_json_null() {
+            return Ok(None);
+        }
         self.try_number_or_from_str().map(Some)
     }
 
@@ -464,6 +522,9 @@ impl KvAssignment {
     /// Convenience method for [`Self::try_string`] that wraps the `Ok` value
     /// into `Some`.
     pub(crate) fn try_some_string(self) -> Result<Option<String>, KvAssignmentError> {
+        if self.is_json_null() {
+            return Ok(None);
+        }
         self.try_string().map(Some)
     }
 
@@ -483,6 +544,9 @@ impl KvAssignment {
     /// Convenience method for [`Self::try_bool`] that wraps the `Ok` value into
     /// `Some`.
     pub(crate) fn try_some_bool(self) -> Result<Option<bool>, KvAssignmentError> {
+        if self.is_json_null() {
+            return Ok(None);
+        }
         self.try_bool().map(Some)
     }
 
@@ -511,6 +575,9 @@ impl KvAssignment {
         T: From<bool> + FromStr<Err = E>,
         E: Into<BoxedError>,
     {
+        if self.is_json_null() {
+            return Ok(None);
+        }
         self.try_bool_or_from_str().map(Some)
     }
 
@@ -531,6 +598,9 @@ impl KvAssignment {
     /// Convenience method for [`Self::try_u32`] that wraps the `Ok` value into
     /// `Some`.
     pub(crate) fn try_some_u32(self) -> Result<Option<u32>, KvAssignmentError> {
+        if self.is_json_null() {
+            return Ok(None);
+        }
         self.try_u32().map(Some)
     }
 
@@ -551,6 +621,9 @@ impl KvAssignment {
     /// Convenience method for [`Self::try_f32`] that wraps the `Ok` value into
     /// `Some`.
     pub(crate) fn try_some_f32(self) -> Result<Option<f32>, KvAssignmentError> {
+        if self.is_json_null() {
+            return Ok(None);
+        }
         self.try_f32().map(Some)
     }
 
@@ -571,6 +644,9 @@ impl KvAssignment {
     /// Convenience method for [`Self::try_i32`] that wraps the `Ok` value into
     /// `Some`.
     pub(crate) fn try_some_i32(self) -> Result<Option<i32>, KvAssignmentError> {
+        if self.is_json_null() {
+            return Ok(None);
+        }
         self.try_i32().map(Some)
     }
 

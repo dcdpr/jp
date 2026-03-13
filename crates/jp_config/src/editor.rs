@@ -42,7 +42,7 @@ pub struct EditorConfig {
 impl AssignKeyValue for PartialEditorConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "cmd" => self.cmd = kv.try_some_string()?,
             _ if kv.p("envs") => kv.try_some_vec_of_strings(&mut self.envs)?,
             _ => return missing_key(&kv),

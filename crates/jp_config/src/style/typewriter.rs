@@ -43,7 +43,7 @@ pub struct TypewriterConfig {
 impl AssignKeyValue for PartialTypewriterConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "text_delay" => self.text_delay = kv.try_some_from_str()?,
             "code_delay" => self.code_delay = kv.try_some_from_str()?,
             _ => return missing_key(&kv),

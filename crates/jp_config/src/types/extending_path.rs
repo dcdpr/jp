@@ -137,7 +137,7 @@ pub struct RelativePathWithStrategy {
 impl AssignKeyValue for PartialRelativePathWithStrategy {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "path" => self.path = kv.try_some_string()?.map(RelativePathBuf::from),
             "strategy" => self.strategy = kv.try_some_from_str()?,
             _ => return missing_key(&kv),

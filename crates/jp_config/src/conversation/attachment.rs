@@ -126,7 +126,7 @@ pub struct AttachmentObjectConfig {
 impl AssignKeyValue for PartialAttachmentObjectConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "kind" => self.kind = kv.try_some_string()?,
             "path" => self.path = kv.try_some_string()?,
             "params" => kv.try_object()?,

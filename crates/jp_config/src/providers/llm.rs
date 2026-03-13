@@ -77,7 +77,7 @@ pub struct LlmProviderConfig {
 impl AssignKeyValue for PartialLlmProviderConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             _ if kv.p("aliases") => kv.try_object()?,
             _ if kv.p("anthropic") => self.anthropic.assign(kv)?,
             _ if kv.p("deepseek") => self.deepseek.assign(kv)?,

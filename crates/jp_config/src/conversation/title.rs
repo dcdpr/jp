@@ -26,7 +26,7 @@ pub struct TitleConfig {
 impl AssignKeyValue for PartialTitleConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             _ if kv.p("generate") => self.generate.assign(kv)?,
             _ => return missing_key(&kv),
         }

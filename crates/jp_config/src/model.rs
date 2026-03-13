@@ -36,7 +36,7 @@ pub struct ModelConfig {
 impl AssignKeyValue for PartialModelConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             _ if kv.p("id") => self.id.assign(kv)?,
             _ if kv.p("parameters") => self.parameters.assign(kv)?,
             _ => return missing_key(&kv),

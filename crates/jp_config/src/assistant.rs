@@ -78,7 +78,7 @@ pub struct AssistantConfig {
 impl AssignKeyValue for PartialAssistantConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "name" => self.name = kv.try_some_string()?,
             "system_prompt" => self.system_prompt = kv.try_some_object_or_from_str()?,
             _ if kv.p("instructions") => kv.try_vec_of_nested(self.instructions.as_mut())?,

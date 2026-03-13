@@ -230,7 +230,7 @@ pub struct ContrastConfig {
 impl AssignKeyValue for PartialContrastConfig {
     fn assign(&mut self, kv: KvAssignment) -> Result<(), BoxedError> {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "good" => self.good = kv.try_some_string()?,
             "bad" => self.bad = kv.try_some_string()?,
             "reason" => self.reason = kv.try_some_string()?,

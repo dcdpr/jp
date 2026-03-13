@@ -32,7 +32,7 @@ pub struct OpenaiConfig {
 impl AssignKeyValue for PartialOpenaiConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "api_key_env" => self.api_key_env = kv.try_some_string()?,
             "base_url" => self.base_url = kv.try_some_string()?,
             "base_url_env" => self.base_url_env = kv.try_some_string()?,

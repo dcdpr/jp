@@ -58,7 +58,7 @@ pub struct CodeConfig {
 impl AssignKeyValue for PartialCodeConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "color" => self.color = kv.try_some_bool()?,
             "line_numbers" => self.line_numbers = kv.try_some_bool()?,
             "file_link" => self.file_link = kv.try_some_from_str()?,

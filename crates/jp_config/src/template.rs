@@ -22,7 +22,7 @@ pub struct TemplateConfig {
 impl AssignKeyValue for PartialTemplateConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> Result<(), BoxedError> {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             _ if kv.p("values") => {
                 let remaining_key = kv.key_string();
                 if remaining_key.is_empty() {

@@ -49,7 +49,7 @@ pub struct RequestConfig {
 impl AssignKeyValue for PartialRequestConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object()?,
+            "" => kv.try_merge_object(self)?,
             "max_retries" => self.max_retries = kv.try_some_u32()?,
             "base_backoff_ms" => self.base_backoff_ms = kv.try_some_u32()?,
             "max_backoff_secs" => self.max_backoff_secs = kv.try_some_u32()?,
