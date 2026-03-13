@@ -42,7 +42,7 @@ fn stage_single_file() {
         ids: vec![0].into(),
     }];
 
-    let result = git_stage_patch_impl(&ctx, &answers, &patches, &runner).unwrap();
+    let result = git_stage_patch_impl(&ctx, &answers, &patches, &runner, &[]).unwrap();
 
     assert_eq!(result.into_content().unwrap(), "Patch applied.");
 }
@@ -104,7 +104,7 @@ fn partial_failure_stages_what_it_can() {
         },
     ];
 
-    let result = git_stage_patch_impl(&ctx, &answers, &patches, &runner).unwrap();
+    let result = git_stage_patch_impl(&ctx, &answers, &patches, &runner, &[]).unwrap();
     let content = result.into_content().unwrap();
 
     assert!(content.contains("Staged: good.rs"), "got: {content}");

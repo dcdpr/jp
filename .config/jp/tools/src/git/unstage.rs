@@ -1,4 +1,5 @@
 use camino::Utf8Path;
+use serde_json::{Map, Value};
 
 use crate::{
     to_xml_with_root,
@@ -8,15 +9,25 @@ use crate::{
     },
 };
 
-pub(crate) async fn git_unstage(root: &Utf8Path, paths: OneOrMany<String>) -> ToolResult {
-    git_unstage_impl(root, &paths, &DuctProcessRunner)
+pub(crate) async fn git_unstage(
+    root: &Utf8Path,
+    paths: OneOrMany<String>,
+    options: &Map<String, Value>,
+) -> ToolResult {
+    let env = super::env_from_options(options);
+    git_unstage_impl(root, &paths, &DuctProcessRunner, &env)
 }
 
-fn git_unstage_impl<R: ProcessRunner>(root: &Utf8Path, paths: &[String], runner: &R) -> ToolResult {
+fn git_unstage_impl<R: ProcessRunner>(
+    root: &Utf8Path,
+    paths: &[String],
+    runner: &R,
+    env: &[(&str, &str)],
+) -> ToolResult {
     let mut results = vec![];
 
     for path in paths {
-        let output = runner.run("git", &["restore", "--staged", "--", path], root)?;
+        let output = runner.run_with_env("git", &["restore", "--staged", "--", path], root, env)?;
 
         results.push(output);
     }
@@ -41,7 +52,7 @@ mod tests {
 
         let runner = MockProcessRunner::success("");
 
-        let result = git_unstage_impl(dir.path(), &["test.rs".to_string()], &runner)
+        let result = git_unstage_impl(dir.path(), &["test.rs".to_string()], &runner, &[])
             .unwrap()
             .into_content()
             .unwrap();
@@ -65,6 +76,7 @@ mod tests {
             dir.path(),
             &["file1.rs".to_string(), "file2.rs".to_string()],
             &runner,
+            &[],
         )
         .unwrap()
         .into_content()

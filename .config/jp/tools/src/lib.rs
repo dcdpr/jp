@@ -31,6 +31,8 @@ pub struct Tool {
     pub arguments: Map<String, Value>,
     #[serde(default)]
     pub answers: Map<String, Value>,
+    #[serde(default)]
+    pub options: Map<String, Value>,
 }
 
 impl Tool {
@@ -66,6 +68,17 @@ impl Tool {
                 _ => err,
             },
         }
+    }
+
+    /// Read a typed value from the options map, returning a default if the
+    /// key is missing or the value can't be deserialized to `T`.
+    #[expect(dead_code, reason = "no tool reads options yet")]
+    fn option_or<T: serde::de::DeserializeOwned>(&self, key: &str, default: T) -> T {
+        self.options
+            .get(key)
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or(default)
     }
 }
 

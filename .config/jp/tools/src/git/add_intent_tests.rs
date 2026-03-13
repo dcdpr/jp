@@ -12,7 +12,7 @@ fn test_add_intent_single_file() {
         .args(&["add", "--intent-to-add", "--", "new_file.rs"])
         .returns_success("");
 
-    let content = git_add_intent_impl(dir.path(), &["new_file.rs".to_string()], &runner)
+    let content = git_add_intent_impl(dir.path(), &["new_file.rs".to_string()], &runner, &[])
         .unwrap()
         .into_content()
         .unwrap();
@@ -39,6 +39,7 @@ fn test_add_intent_multiple_files() {
         dir.path(),
         &["a.rs".to_string(), "b.rs".to_string()],
         &runner,
+        &[],
     )
     .unwrap()
     .into_content()
@@ -59,7 +60,8 @@ fn test_add_intent_failure() {
         .args(&["add", "--intent-to-add", "--", "missing.rs"])
         .returns_error("fatal: pathspec 'missing.rs' did not match any files");
 
-    let err = git_add_intent_impl(dir.path(), &["missing.rs".to_string()], &runner).unwrap_err();
+    let err =
+        git_add_intent_impl(dir.path(), &["missing.rs".to_string()], &runner, &[]).unwrap_err();
 
     assert!(err.to_string().contains("Failed to intent-to-add"));
     assert!(err.to_string().contains("missing.rs"));

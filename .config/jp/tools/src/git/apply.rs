@@ -16,6 +16,7 @@ pub fn apply_patch_to_index<R: ProcessRunner>(
     patch: &str,
     root: &Utf8Path,
     runner: &R,
+    env: &[(&str, &str)],
 ) -> Result<(), String> {
     let mut last_err = String::new();
 
@@ -30,7 +31,7 @@ pub fn apply_patch_to_index<R: ProcessRunner>(
                 "git",
                 &["apply", "--cached", "--unidiff-zero", "-"],
                 root,
-                &[],
+                env,
                 Some(patch),
             )
             .map_err(|e| format!("Failed to run git apply: {e}"))?;

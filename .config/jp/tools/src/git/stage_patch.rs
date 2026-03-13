@@ -18,8 +18,10 @@ pub(crate) async fn git_stage_patch(
     ctx: Context,
     answers: &Map<String, Value>,
     patches: OneOrMany<PatchTarget>,
+    options: &Map<String, Value>,
 ) -> ToolResult {
-    git_stage_patch_impl(&ctx, answers, &patches, &DuctProcessRunner)
+    let env = super::env_from_options(options);
+    git_stage_patch_impl(&ctx, answers, &patches, &DuctProcessRunner, &env)
 }
 
 fn git_stage_patch_impl<R: ProcessRunner>(
@@ -27,13 +29,14 @@ fn git_stage_patch_impl<R: ProcessRunner>(
     answers: &Map<String, Value>,
     patches: &[PatchTarget],
     runner: &R,
+    env: &[(&str, &str)],
 ) -> ToolResult {
     // Build patches for all targets, collecting errors per file.
     let mut built: Vec<(&str, String)> = vec![];
     let mut errors: Vec<String> = vec![];
 
     for target in patches {
-        match build_file_patch(ctx, &target.path, &target.ids, runner) {
+        match build_file_patch(ctx, &target.path, &target.ids, runner, env) {
             Ok(patch) => built.push((&target.path, patch)),
             Err(error) => errors.push(format!("{}: {error}", target.path)),
         }
@@ -75,7 +78,7 @@ fn git_stage_patch_impl<R: ProcessRunner>(
     let mut staged: Vec<&str> = vec![];
 
     for (path, patch) in &built {
-        match apply_patch_to_index(patch, &ctx.root, runner) {
+        match apply_patch_to_index(patch, &ctx.root, runner, env) {
             Ok(()) => staged.push(path),
             Err(error) => errors.push(format!("{path}: {error}")),
         }
@@ -103,12 +106,13 @@ fn build_file_patch<R: ProcessRunner>(
     path: &str,
     patch_ids: &[usize],
     runner: &R,
+    env: &[(&str, &str)],
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let ProcessOutput {
         stdout,
         stderr,
         status,
-    } = runner.run("git", &["ls-files", path], &ctx.root)?;
+    } = runner.run_with_env("git", &["ls-files", path], &ctx.root, env)?;
 
     if !status.is_success() {
         return Err(format!("Failed to check tracking status: {stderr}").into());
@@ -119,7 +123,7 @@ fn build_file_patch<R: ProcessRunner>(
         stderr,
         status,
     } = if stdout.is_empty() {
-        runner.run(
+        runner.run_with_env(
             "git",
             &[
                 "diff",
@@ -131,12 +135,14 @@ fn build_file_patch<R: ProcessRunner>(
                 path,
             ],
             &ctx.root,
+            env,
         )?
     } else {
-        runner.run(
+        runner.run_with_env(
             "git",
             &["diff-files", "-p", "--minimal", "--unified=0", "--", path],
             &ctx.root,
+            env,
         )?
     };
 

@@ -8,7 +8,7 @@ fn succeeds_first_try() {
         .args(&["apply", "--cached", "--unidiff-zero", "-"])
         .returns_success("");
 
-    let result = apply_patch_to_index("some patch", "/tmp".into(), &runner);
+    let result = apply_patch_to_index("some patch", "/tmp".into(), &runner, &[]);
     assert!(result.is_ok());
 }
 
@@ -19,7 +19,7 @@ fn non_lock_error_fails_immediately() {
         .args(&["apply", "--cached", "--unidiff-zero", "-"])
         .returns_error("error: patch does not apply");
 
-    let result = apply_patch_to_index("bad patch", "/tmp".into(), &runner);
+    let result = apply_patch_to_index("bad patch", "/tmp".into(), &runner, &[]);
     assert!(result.unwrap_err().contains("patch does not apply"));
 }
 
@@ -36,6 +36,6 @@ fn retries_on_lock_contention() {
         .args(&["apply", "--cached", "--unidiff-zero", "-"])
         .returns_success("");
 
-    let result = apply_patch_to_index("some patch", "/tmp".into(), &runner);
+    let result = apply_patch_to_index("some patch", "/tmp".into(), &runner, &[]);
     assert!(result.is_ok());
 }
