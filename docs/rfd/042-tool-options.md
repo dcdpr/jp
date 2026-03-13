@@ -110,39 +110,6 @@ let ctx = json!({
 The same addition applies to the `FormatArguments` path in
 `crates/jp_cli/src/cmd/query/tool/renderer.rs`.
 
-### Tool Layer — `Tool` Struct
-
-Add `options` to the `Tool` struct in `.config/jp/tools/src/lib.rs`:
-
-```rust
-#[derive(Debug, serde::Deserialize)]
-pub struct Tool {
-    pub name: String,
-    pub arguments: Map<String, Value>,
-    #[serde(default)]
-    pub answers: Map<String, Value>,
-    #[serde(default)]
-    pub options: Map<String, Value>,
-}
-```
-
-Add a convenience accessor mirroring the existing `req`/`opt` helpers for
-arguments:
-
-```rust
-impl Tool {
-    /// Read a typed value from the options map, returning a default if the
-    /// key is missing or unparseable.
-    fn option_or<T: serde::de::DeserializeOwned>(&self, key: &str, default: T) -> T {
-        self.options
-            .get(key)
-            .cloned()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or(default)
-    }
-}
-```
-
 ### Applicability to Other Tool Sources
 
 Options only apply to **local** tools. For **MCP** tools, the server owns
@@ -219,34 +186,18 @@ worth keeping in mind.
 
 ## Implementation Plan
 
-### Phase 1: Config and plumbing
-
 1. Add `options: Map<String, Value>` to `ToolConfig` in `jp_config`.
 2. Implement `AssignKeyValue`, `PartialConfigDelta`, `ToPartial` for the new
    field.
 3. Add `options()` accessor to `ToolConfigWithDefaults`.
 4. Include `"options"` in the JSON context in `execute_local` and the
    `FormatArguments` path.
-5. Add `options` field and `option_or` helper to the tools binary's `Tool`
-   struct.
 
 This phase can be merged independently. No behavioral change — tools that don't
 read options are unaffected.
 
-### Phase 2: First consumer
-
-Update `fs_modify_file` to read an `apply_changes_trigger` option and implement
-the auto-approve heuristics behind it. This validates the design end-to-end and
-provides the first user-facing benefit.
-
 ## References
 
-- [RFD 034] — Inquiry-specific assistant configuration (the inquiry system that
-  `apply_changes` uses today)
 - `crates/jp_config/src/conversation/tool.rs` — `ToolConfig`,
   `ToolConfigWithDefaults`
 - `crates/jp_llm/src/tool.rs` — `execute_local`, JSON context construction
-- `.config/jp/tools/src/lib.rs` — `Tool` struct
-- `.config/jp/tools/src/fs/modify_file.rs` — `apply_changes` implementation
-
-[RFD 034]: 034-inquiry-specific-assistant-configuration.md
