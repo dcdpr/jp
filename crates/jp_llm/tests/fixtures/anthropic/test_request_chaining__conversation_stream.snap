@@ -31,7 +31,8 @@ expression: v
         "request": {
           "max_retries": 0,
           "base_backoff_ms": 0,
-          "max_backoff_secs": 0
+          "max_backoff_secs": 0,
+          "cache": true
         }
       },
       "conversation": {

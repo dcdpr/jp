@@ -18,6 +18,7 @@ expression: v
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -35,6 +36,7 @@ expression: v
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
+        structured_output: None,
         features: [],
     },
 ]

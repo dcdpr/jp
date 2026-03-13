@@ -608,6 +608,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: None,
             deprecated: None,
+            structured_output: None,
             features: vec!["interleaved-thinking", "context-editing"],
         },
         ProviderId::Google => ModelDetails {
@@ -618,6 +619,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
             knowledge_cutoff: None,
             deprecated: None,
+            structured_output: None,
             features: vec![],
         },
         ProviderId::Openai => ModelDetails {
@@ -628,6 +630,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: None,
             deprecated: None,
+            structured_output: None,
             features: vec![],
         },
         ProviderId::Llamacpp => ModelDetails {
@@ -638,6 +641,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             reasoning: None,
             knowledge_cutoff: None,
             deprecated: None,
+            structured_output: None,
             features: vec![],
         },
         ProviderId::Ollama => ModelDetails {
@@ -648,6 +652,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             reasoning: None,
             knowledge_cutoff: None,
             deprecated: None,
+            structured_output: None,
             features: vec![],
         },
         ProviderId::Openrouter => ModelDetails {
@@ -658,6 +663,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             reasoning: None,
             knowledge_cutoff: None,
             deprecated: None,
+            structured_output: None,
             features: vec![],
         },
         ProviderId::Test => ModelDetails::empty("test/mock-model".parse().unwrap()),

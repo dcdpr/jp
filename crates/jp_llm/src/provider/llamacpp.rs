@@ -586,6 +586,7 @@ fn map_model(model: &ModelResponse) -> Result<ModelDetails, Error> {
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
+        structured_output: None,
         features: vec![],
     })
 }

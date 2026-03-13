@@ -38,6 +38,7 @@ expression: v
                 ),
             },
         ),
+        structured_output: None,
         features: [],
     },
 ]

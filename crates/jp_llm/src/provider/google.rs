@@ -377,6 +377,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 reasoning: Some(ReasoningDetails::leveled(false, true, true, true, false)),
                 knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
                 deprecated: Some(ModelDeprecation::Active),
+                structured_output: None,
                 features: vec![],
             }
         }
@@ -388,6 +389,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             reasoning: Some(ReasoningDetails::leveled(false, true, false, true, false)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
+            structured_output: None,
             features: vec![],
         },
         "gemini-flash-latest" | "gemini-3-flash-preview" => ModelDetails {
@@ -398,6 +400,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             reasoning: Some(ReasoningDetails::leveled(true, true, true, true, false)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
+            structured_output: None,
             features: vec![],
         },
         "gemini-2.5-flash" => ModelDetails {
@@ -411,6 +414,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 &"recommended replacement: gemini-3-flash-preview",
                 Some(NaiveDate::from_ymd_opt(2026, 6, 17).unwrap()),
             )),
+            structured_output: None,
             features: vec![],
         },
         "gemini-flash-lite-latest"
@@ -426,6 +430,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 &"recommended replacement: unknown",
                 Some(NaiveDate::from_ymd_opt(2026, 7, 22).unwrap()),
             )),
+            structured_output: None,
             features: vec![],
         },
         "gemini-2.5-pro" => ModelDetails {
@@ -439,6 +444,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 &"recommended replacement: gemini-3-pro-preview",
                 Some(NaiveDate::from_ymd_opt(2026, 6, 17).unwrap()),
             )),
+            structured_output: None,
             features: vec![],
         },
         "gemini-2.0-flash" | "gemini-2.0-flash-001" => ModelDetails {
@@ -452,6 +458,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 &"recommended replacement: gemini-2.5-flash",
                 Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
             )),
+            structured_output: None,
             features: vec![],
         },
         "gemini-2.0-flash-lite" | "gemini-2.0-flash-lite-001" => ModelDetails {
@@ -465,6 +472,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 &"recommended replacement: gemini-2.5-flash-lite",
                 Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
             )),
+            structured_output: None,
             features: vec![],
         },
         id => {
@@ -487,6 +495,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 reasoning: None,
                 knowledge_cutoff: None,
                 deprecated: None,
+                structured_output: None,
                 features: vec![],
             }
         }

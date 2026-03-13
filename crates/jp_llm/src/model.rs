@@ -30,6 +30,12 @@ pub struct ModelDetails {
     /// Deprecation status of the model, if known.
     pub deprecated: Option<ModelDeprecation>,
 
+    /// Whether the model supports structured output (JSON schema responses).
+    ///
+    /// `None` means unknown (e.g. custom deployments). Providers should set
+    /// this to `Some(true)` or `Some(false)` for known models.
+    pub structured_output: Option<bool>,
+
     /// Provider-specific features.
     pub features: Vec<&'static str>,
 }
@@ -45,8 +51,15 @@ impl ModelDetails {
             reasoning: None,
             knowledge_cutoff: None,
             deprecated: None,
+            structured_output: None,
             features: vec![],
         }
+    }
+
+    /// Returns `true` if the model is known to support structured output.
+    #[must_use]
+    pub fn supports_structured_output(&self) -> bool {
+        self.structured_output.unwrap_or(false)
     }
 
     #[must_use]

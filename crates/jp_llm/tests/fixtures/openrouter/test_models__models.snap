@@ -22,6 +22,7 @@ expression: v
             2025-08-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -43,6 +44,7 @@ expression: v
             2025-02-04,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -64,6 +66,7 @@ expression: v
             2025-02-04,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -85,6 +88,7 @@ expression: v
             2025-02-04,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -106,6 +110,7 @@ expression: v
             2025-04-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -127,6 +132,7 @@ expression: v
             2025-09-18,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -148,6 +154,7 @@ expression: v
             2026-01-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -169,6 +176,7 @@ expression: v
             2025-03-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -190,6 +198,7 @@ expression: v
             2025-11-21,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -211,6 +220,7 @@ expression: v
             2025-11-21,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -232,6 +242,7 @@ expression: v
             2025-11-21,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -253,6 +264,7 @@ expression: v
             2026-01-06,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -274,6 +286,7 @@ expression: v
             2025-12-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -295,6 +308,7 @@ expression: v
             2023-11-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -316,6 +330,7 @@ expression: v
             2025-12-02,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -337,6 +352,7 @@ expression: v
             2024-12-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -358,6 +374,7 @@ expression: v
             2024-12-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -379,6 +396,7 @@ expression: v
             2025-10-31,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -400,6 +418,7 @@ expression: v
             2024-12-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -421,6 +440,7 @@ expression: v
             2024-10-22,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -442,6 +462,7 @@ expression: v
             2024-03-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -463,6 +484,7 @@ expression: v
             2024-11-04,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -484,6 +506,7 @@ expression: v
             2024-10-22,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -505,6 +528,7 @@ expression: v
             2025-02-24,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -526,6 +550,7 @@ expression: v
             2025-02-24,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -547,6 +572,7 @@ expression: v
             2025-10-15,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -568,6 +594,7 @@ expression: v
             2025-05-22,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -589,6 +616,7 @@ expression: v
             2025-08-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -610,6 +638,7 @@ expression: v
             2025-11-24,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -631,6 +660,7 @@ expression: v
             2026-02-04,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -652,6 +682,7 @@ expression: v
             2025-05-22,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -673,6 +704,7 @@ expression: v
             2025-09-29,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -694,6 +726,7 @@ expression: v
             2026-02-17,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -715,6 +748,7 @@ expression: v
             2025-05-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -736,6 +770,7 @@ expression: v
             2025-05-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -757,6 +792,7 @@ expression: v
             2025-05-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -778,6 +814,7 @@ expression: v
             2026-01-27,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -799,6 +836,7 @@ expression: v
             2025-12-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -820,6 +858,7 @@ expression: v
             2025-12-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -841,6 +880,7 @@ expression: v
             2025-05-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -862,6 +902,7 @@ expression: v
             2025-08-12,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -883,6 +924,7 @@ expression: v
             2025-10-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -904,6 +946,7 @@ expression: v
             2025-06-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -925,6 +968,7 @@ expression: v
             2025-08-12,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -946,6 +990,7 @@ expression: v
             2025-06-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -967,6 +1012,7 @@ expression: v
             2025-12-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -988,6 +1034,7 @@ expression: v
             2025-12-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1009,6 +1056,7 @@ expression: v
             2025-07-22,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1030,6 +1078,7 @@ expression: v
             2025-07-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1051,6 +1100,7 @@ expression: v
             2025-03-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1072,6 +1122,7 @@ expression: v
             2024-08-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1093,6 +1144,7 @@ expression: v
             2024-08-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1114,6 +1166,7 @@ expression: v
             2024-12-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1135,6 +1188,7 @@ expression: v
             2025-11-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1156,6 +1210,7 @@ expression: v
             2024-12-26,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1177,6 +1232,7 @@ expression: v
             2025-03-24,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1198,6 +1254,7 @@ expression: v
             2025-08-21,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1219,6 +1276,7 @@ expression: v
             2025-01-20,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1240,6 +1298,7 @@ expression: v
             2025-05-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1261,6 +1320,7 @@ expression: v
             2025-05-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1282,6 +1342,7 @@ expression: v
             2025-01-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1303,6 +1364,7 @@ expression: v
             2025-01-29,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1324,6 +1386,7 @@ expression: v
             2025-09-22,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1345,6 +1408,7 @@ expression: v
             2025-09-22,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1366,6 +1430,7 @@ expression: v
             2025-12-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1387,6 +1452,7 @@ expression: v
             2025-09-29,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1408,6 +1474,7 @@ expression: v
             2025-12-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1429,6 +1496,7 @@ expression: v
             2025-04-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1450,6 +1518,7 @@ expression: v
             2025-12-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1471,6 +1540,7 @@ expression: v
             2025-02-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1492,6 +1562,7 @@ expression: v
             2025-02-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1513,6 +1584,7 @@ expression: v
             2025-06-17,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1534,6 +1606,7 @@ expression: v
             2025-10-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1555,6 +1628,7 @@ expression: v
             2025-07-22,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1576,6 +1650,7 @@ expression: v
             2025-09-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1597,6 +1672,7 @@ expression: v
             2025-06-17,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1618,6 +1694,7 @@ expression: v
             2025-06-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1639,6 +1716,7 @@ expression: v
             2025-05-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1660,6 +1738,7 @@ expression: v
             2025-12-17,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1681,6 +1760,7 @@ expression: v
             2025-11-20,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1702,6 +1782,7 @@ expression: v
             2025-11-18,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1723,6 +1804,7 @@ expression: v
             2024-07-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1744,6 +1826,7 @@ expression: v
             2024-06-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1765,6 +1848,7 @@ expression: v
             2025-03-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1786,6 +1870,7 @@ expression: v
             2025-03-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1807,6 +1892,7 @@ expression: v
             2025-03-12,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1828,6 +1914,7 @@ expression: v
             2025-03-12,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1849,6 +1936,7 @@ expression: v
             2025-03-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1870,6 +1958,7 @@ expression: v
             2025-03-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1891,6 +1980,7 @@ expression: v
             2025-07-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1912,6 +2002,7 @@ expression: v
             2025-05-20,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1933,6 +2024,7 @@ expression: v
             2025-05-20,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1954,6 +2046,7 @@ expression: v
             2023-07-02,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1975,6 +2068,7 @@ expression: v
             2025-10-20,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -1996,6 +2090,7 @@ expression: v
             2025-06-26,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2017,6 +2112,7 @@ expression: v
             2025-04-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2038,6 +2134,7 @@ expression: v
             2024-10-11,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2059,6 +2156,7 @@ expression: v
             2024-10-11,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2080,6 +2178,7 @@ expression: v
             2025-11-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2101,6 +2200,7 @@ expression: v
             2025-10-20,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2122,6 +2222,7 @@ expression: v
             2026-01-20,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2143,6 +2244,7 @@ expression: v
             2026-01-20,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2164,6 +2266,7 @@ expression: v
             2025-10-20,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2185,6 +2288,7 @@ expression: v
             2023-08-02,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2206,6 +2310,7 @@ expression: v
             2025-09-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2227,6 +2332,7 @@ expression: v
             2024-04-18,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2248,6 +2354,7 @@ expression: v
             2024-04-18,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2269,6 +2376,7 @@ expression: v
             2024-08-02,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2290,6 +2398,7 @@ expression: v
             2024-07-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2311,6 +2420,7 @@ expression: v
             2024-07-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2332,6 +2442,7 @@ expression: v
             2024-07-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2353,6 +2464,7 @@ expression: v
             2024-09-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2374,6 +2486,7 @@ expression: v
             2024-09-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2395,6 +2508,7 @@ expression: v
             2024-09-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2416,6 +2530,7 @@ expression: v
             2024-09-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2437,6 +2552,7 @@ expression: v
             2024-12-06,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2458,6 +2574,7 @@ expression: v
             2024-12-06,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2479,6 +2596,7 @@ expression: v
             2025-04-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2500,6 +2618,7 @@ expression: v
             2025-04-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2521,6 +2640,7 @@ expression: v
             2024-05-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2542,6 +2662,7 @@ expression: v
             2025-02-12,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2563,6 +2684,7 @@ expression: v
             2025-04-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2584,6 +2706,7 @@ expression: v
             2025-01-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2605,6 +2728,7 @@ expression: v
             2024-04-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2626,6 +2750,7 @@ expression: v
             2025-01-15,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2647,6 +2772,7 @@ expression: v
             2025-06-17,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2668,6 +2794,7 @@ expression: v
             2025-10-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2689,6 +2816,7 @@ expression: v
             2026-01-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2710,6 +2838,7 @@ expression: v
             2025-12-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2731,6 +2860,7 @@ expression: v
             2026-02-12,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2752,6 +2882,7 @@ expression: v
             2025-08-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2773,6 +2904,7 @@ expression: v
             2025-12-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2794,6 +2926,7 @@ expression: v
             2025-07-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2815,6 +2948,7 @@ expression: v
             2025-07-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2836,6 +2970,7 @@ expression: v
             2025-12-02,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2857,6 +2992,7 @@ expression: v
             2025-12-02,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2878,6 +3014,7 @@ expression: v
             2025-12-02,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2899,6 +3036,7 @@ expression: v
             2024-05-27,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2920,6 +3058,7 @@ expression: v
             2023-09-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2941,6 +3080,7 @@ expression: v
             2023-12-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2962,6 +3102,7 @@ expression: v
             2024-05-27,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -2983,6 +3124,7 @@ expression: v
             2024-02-26,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3004,6 +3146,7 @@ expression: v
             2024-11-19,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3025,6 +3168,7 @@ expression: v
             2024-11-19,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3046,6 +3190,7 @@ expression: v
             2025-12-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3067,6 +3212,7 @@ expression: v
             2025-05-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3088,6 +3234,7 @@ expression: v
             2025-08-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3109,6 +3256,7 @@ expression: v
             2024-07-19,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3130,6 +3278,7 @@ expression: v
             2025-02-17,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3151,6 +3300,7 @@ expression: v
             2025-01-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3172,6 +3322,7 @@ expression: v
             2025-03-17,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3193,6 +3344,7 @@ expression: v
             2025-03-17,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3214,6 +3366,7 @@ expression: v
             2025-06-20,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3235,6 +3388,7 @@ expression: v
             2025-12-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3256,6 +3410,7 @@ expression: v
             2024-04-17,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3277,6 +3432,7 @@ expression: v
             2023-12-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3298,6 +3454,7 @@ expression: v
             2024-11-19,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3319,6 +3476,7 @@ expression: v
             2025-10-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3340,6 +3498,7 @@ expression: v
             2025-07-11,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3361,6 +3520,7 @@ expression: v
             2025-09-04,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3382,6 +3542,7 @@ expression: v
             2025-09-04,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3403,6 +3564,7 @@ expression: v
             2025-11-06,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3424,6 +3586,7 @@ expression: v
             2026-01-27,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3445,6 +3608,7 @@ expression: v
             2025-07-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3466,6 +3630,7 @@ expression: v
             2025-07-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3487,6 +3652,7 @@ expression: v
             2024-09-15,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3508,6 +3674,7 @@ expression: v
             2023-11-26,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3529,6 +3696,7 @@ expression: v
             2025-12-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3550,6 +3718,7 @@ expression: v
             2024-05-27,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3571,6 +3740,7 @@ expression: v
             2024-08-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3592,6 +3762,7 @@ expression: v
             2024-08-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3613,6 +3784,7 @@ expression: v
             2024-08-18,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3634,6 +3806,7 @@ expression: v
             2025-08-26,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3655,6 +3828,7 @@ expression: v
             2025-08-26,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3676,6 +3850,7 @@ expression: v
             2024-10-15,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3697,6 +3872,7 @@ expression: v
             2025-04-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3718,6 +3894,7 @@ expression: v
             2025-10-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3739,6 +3916,7 @@ expression: v
             2025-12-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3760,6 +3938,7 @@ expression: v
             2025-12-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3781,6 +3960,7 @@ expression: v
             2025-10-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3802,6 +3982,7 @@ expression: v
             2025-10-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3823,6 +4004,7 @@ expression: v
             2025-09-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3844,6 +4026,7 @@ expression: v
             2025-09-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3865,6 +4048,7 @@ expression: v
             2023-05-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3886,6 +4070,7 @@ expression: v
             2024-01-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3907,6 +4092,7 @@ expression: v
             2023-08-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3928,6 +4114,7 @@ expression: v
             2023-09-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3949,6 +4136,7 @@ expression: v
             2023-05-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3970,6 +4158,7 @@ expression: v
             2023-05-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -3991,6 +4180,7 @@ expression: v
             2023-11-06,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4012,6 +4202,7 @@ expression: v
             2024-04-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4033,6 +4224,7 @@ expression: v
             2024-01-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4054,6 +4246,7 @@ expression: v
             2025-04-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4075,6 +4268,7 @@ expression: v
             2025-04-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4096,6 +4290,7 @@ expression: v
             2025-04-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4117,6 +4312,7 @@ expression: v
             2024-05-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4138,6 +4334,7 @@ expression: v
             2024-05-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4159,6 +4356,7 @@ expression: v
             2024-08-06,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4180,6 +4378,7 @@ expression: v
             2024-11-20,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4201,6 +4400,7 @@ expression: v
             2025-08-15,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4222,6 +4422,7 @@ expression: v
             2024-07-18,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4243,6 +4444,7 @@ expression: v
             2024-07-18,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4264,6 +4466,7 @@ expression: v
             2025-03-12,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4285,6 +4488,7 @@ expression: v
             2025-03-12,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4306,6 +4510,7 @@ expression: v
             2024-05-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4327,6 +4532,7 @@ expression: v
             2025-08-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4348,6 +4554,7 @@ expression: v
             2025-08-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4369,6 +4576,7 @@ expression: v
             2025-09-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4390,6 +4598,7 @@ expression: v
             2025-10-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4411,6 +4620,7 @@ expression: v
             2025-10-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4432,6 +4642,7 @@ expression: v
             2025-08-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4453,6 +4664,7 @@ expression: v
             2025-08-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4474,6 +4686,7 @@ expression: v
             2025-10-06,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4495,6 +4708,7 @@ expression: v
             2025-11-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4516,6 +4730,7 @@ expression: v
             2025-11-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4537,6 +4752,7 @@ expression: v
             2025-11-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4558,6 +4774,7 @@ expression: v
             2025-12-04,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4579,6 +4796,7 @@ expression: v
             2025-11-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4600,6 +4818,7 @@ expression: v
             2025-12-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4621,6 +4840,7 @@ expression: v
             2025-12-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4642,6 +4862,7 @@ expression: v
             2026-01-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4663,6 +4884,7 @@ expression: v
             2025-12-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4684,6 +4906,7 @@ expression: v
             2026-01-19,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4705,6 +4928,7 @@ expression: v
             2026-01-19,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4726,6 +4950,7 @@ expression: v
             2025-08-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4747,6 +4972,7 @@ expression: v
             2025-08-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4768,6 +4994,7 @@ expression: v
             2025-08-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4789,6 +5016,7 @@ expression: v
             2025-08-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4810,6 +5038,7 @@ expression: v
             2025-08-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4831,6 +5060,7 @@ expression: v
             2025-10-29,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4852,6 +5082,7 @@ expression: v
             2024-12-17,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4873,6 +5104,7 @@ expression: v
             2025-03-19,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4894,6 +5126,7 @@ expression: v
             2025-04-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4915,6 +5148,7 @@ expression: v
             2025-10-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4936,6 +5170,7 @@ expression: v
             2025-01-31,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4957,6 +5192,7 @@ expression: v
             2025-02-12,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4978,6 +5214,7 @@ expression: v
             2025-06-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -4999,6 +5236,7 @@ expression: v
             2025-04-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5020,6 +5258,7 @@ expression: v
             2025-10-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5041,6 +5280,7 @@ expression: v
             2025-04-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5062,6 +5302,7 @@ expression: v
             2025-09-15,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5083,6 +5324,7 @@ expression: v
             2026-02-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5104,6 +5346,7 @@ expression: v
             2023-11-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5125,6 +5368,7 @@ expression: v
             2025-12-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5146,6 +5390,7 @@ expression: v
             2026-02-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5167,6 +5412,7 @@ expression: v
             2025-01-27,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5188,6 +5434,7 @@ expression: v
             2025-03-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5209,6 +5456,7 @@ expression: v
             2025-03-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5230,6 +5478,7 @@ expression: v
             2025-10-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5251,6 +5500,7 @@ expression: v
             2025-03-07,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5272,6 +5522,7 @@ expression: v
             2025-11-27,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5293,6 +5544,7 @@ expression: v
             2024-09-19,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5314,6 +5566,7 @@ expression: v
             2024-10-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5335,6 +5588,7 @@ expression: v
             2024-11-11,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5356,6 +5610,7 @@ expression: v
             2024-08-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5377,6 +5632,7 @@ expression: v
             2025-02-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5398,6 +5654,7 @@ expression: v
             2025-02-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5419,6 +5676,7 @@ expression: v
             2025-09-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5440,6 +5698,7 @@ expression: v
             2025-09-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5461,6 +5720,7 @@ expression: v
             2025-02-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5482,6 +5742,7 @@ expression: v
             2025-02-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5503,6 +5764,7 @@ expression: v
             2025-02-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5524,6 +5786,7 @@ expression: v
             2025-04-15,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5545,6 +5808,7 @@ expression: v
             2025-03-24,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5566,6 +5830,7 @@ expression: v
             2025-02-01,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5587,6 +5852,7 @@ expression: v
             2025-04-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5608,6 +5874,7 @@ expression: v
             2025-04-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5629,6 +5896,7 @@ expression: v
             2025-07-21,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5650,6 +5918,7 @@ expression: v
             2025-07-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5671,6 +5940,7 @@ expression: v
             2025-04-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5692,6 +5962,7 @@ expression: v
             2025-07-29,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5713,6 +5984,7 @@ expression: v
             2025-08-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5734,6 +6006,7 @@ expression: v
             2025-04-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5755,6 +6028,7 @@ expression: v
             2025-04-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5776,6 +6050,7 @@ expression: v
             2025-04-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5797,6 +6072,7 @@ expression: v
             2025-04-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5818,6 +6094,7 @@ expression: v
             2025-07-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5839,6 +6116,7 @@ expression: v
             2025-07-31,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5860,6 +6138,7 @@ expression: v
             2025-09-17,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5881,6 +6160,7 @@ expression: v
             2026-02-04,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5902,6 +6182,7 @@ expression: v
             2025-09-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5923,6 +6204,7 @@ expression: v
             2025-07-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5944,6 +6226,7 @@ expression: v
             2025-07-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5965,6 +6248,7 @@ expression: v
             2025-09-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -5986,6 +6270,7 @@ expression: v
             2026-02-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6007,6 +6292,7 @@ expression: v
             2025-09-11,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6028,6 +6314,7 @@ expression: v
             2025-09-11,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6049,6 +6336,7 @@ expression: v
             2025-09-11,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6070,6 +6358,7 @@ expression: v
             2025-09-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6091,6 +6380,7 @@ expression: v
             2025-09-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6112,6 +6402,7 @@ expression: v
             2025-10-06,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6133,6 +6424,7 @@ expression: v
             2025-10-06,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6154,6 +6446,7 @@ expression: v
             2025-10-23,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6175,6 +6468,7 @@ expression: v
             2025-10-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6196,6 +6490,7 @@ expression: v
             2025-10-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6217,6 +6512,7 @@ expression: v
             2026-02-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6238,6 +6534,7 @@ expression: v
             2026-02-16,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6259,6 +6556,7 @@ expression: v
             2025-03-05,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6280,6 +6578,7 @@ expression: v
             2024-11-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6301,6 +6600,7 @@ expression: v
             2025-09-26,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6322,6 +6622,7 @@ expression: v
             2025-12-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6343,6 +6644,7 @@ expression: v
             2024-06-18,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6364,6 +6666,7 @@ expression: v
             2024-08-13,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6385,6 +6688,7 @@ expression: v
             2025-01-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6406,6 +6710,7 @@ expression: v
             2024-08-28,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6427,6 +6732,7 @@ expression: v
             2024-12-18,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6448,6 +6754,7 @@ expression: v
             2026-01-29,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6469,6 +6776,7 @@ expression: v
             2026-01-29,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6490,6 +6798,7 @@ expression: v
             2025-07-11,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6511,6 +6820,7 @@ expression: v
             2025-07-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6532,6 +6842,7 @@ expression: v
             2025-09-27,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6553,6 +6864,7 @@ expression: v
             2024-09-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6574,6 +6886,7 @@ expression: v
             2025-03-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6595,6 +6908,7 @@ expression: v
             2024-11-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6616,6 +6930,7 @@ expression: v
             2025-04-27,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6637,6 +6952,7 @@ expression: v
             2025-07-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6658,6 +6974,7 @@ expression: v
             2023-07-22,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6679,6 +6996,7 @@ expression: v
             2026-01-27,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6700,6 +7018,7 @@ expression: v
             2026-01-21,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6721,6 +7040,7 @@ expression: v
             2025-06-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6742,6 +7062,7 @@ expression: v
             2025-04-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6763,6 +7084,7 @@ expression: v
             2025-06-10,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6784,6 +7106,7 @@ expression: v
             2025-04-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6805,6 +7128,7 @@ expression: v
             2025-07-09,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6826,6 +7150,7 @@ expression: v
             2025-09-19,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6847,6 +7172,7 @@ expression: v
             2025-11-19,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6868,6 +7194,7 @@ expression: v
             2025-08-26,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6889,6 +7216,7 @@ expression: v
             2025-12-14,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6910,6 +7238,7 @@ expression: v
             2025-07-24,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6931,6 +7260,7 @@ expression: v
             2025-07-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6952,6 +7282,7 @@ expression: v
             2025-07-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6973,6 +7304,7 @@ expression: v
             2025-07-25,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -6994,6 +7326,7 @@ expression: v
             2025-08-11,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -7015,6 +7348,7 @@ expression: v
             2025-09-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -7036,6 +7370,7 @@ expression: v
             2025-09-30,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -7057,6 +7392,7 @@ expression: v
             2025-12-08,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -7078,6 +7414,7 @@ expression: v
             2025-12-22,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -7099,6 +7436,7 @@ expression: v
             2026-01-19,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
     ModelDetails {
@@ -7120,6 +7458,7 @@ expression: v
             2026-02-11,
         ),
         deprecated: None,
+        structured_output: None,
         features: [],
     },
 ]

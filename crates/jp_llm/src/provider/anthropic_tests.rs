@@ -98,6 +98,7 @@ fn test_opus_4_6_request_uses_adaptive_thinking() {
         reasoning: Some(ReasoningDetails::adaptive(true)),
         knowledge_cutoff: None,
         deprecated: None,
+        structured_output: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -137,6 +138,7 @@ fn test_opus_4_6_max_effort_mapping() {
         reasoning: Some(ReasoningDetails::adaptive(true)), // supports max
         knowledge_cutoff: None,
         deprecated: None,
+        structured_output: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -181,6 +183,7 @@ fn test_opus_4_5_uses_budgetted_thinking() {
         reasoning: Some(ReasoningDetails::budgetted(1024, None)),
         knowledge_cutoff: None,
         deprecated: None,
+        structured_output: None,
         features: vec!["interleaved-thinking"],
     };
 
@@ -220,7 +223,8 @@ fn test_structured_output_sets_format() {
         reasoning: Some(ReasoningDetails::budgetted(1024, None)),
         knowledge_cutoff: None,
         deprecated: None,
-        features: vec!["structured-outputs"],
+        structured_output: Some(true),
+        features: vec![],
     };
 
     let schema = Map::from_iter([
@@ -279,6 +283,7 @@ fn test_schema_ignored_when_last_event_is_not_chat_request() {
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
+        structured_output: None,
         features: vec![],
     };
 
@@ -330,7 +335,8 @@ fn test_adaptive_thinking_with_structured_output() {
         reasoning: Some(ReasoningDetails::adaptive(true)),
         knowledge_cutoff: None,
         deprecated: None,
-        features: vec!["adaptive-thinking", "structured-outputs"],
+        structured_output: Some(true),
+        features: vec!["adaptive-thinking"],
     };
 
     let schema = Map::from_iter([("type".into(), json!("object"))]);

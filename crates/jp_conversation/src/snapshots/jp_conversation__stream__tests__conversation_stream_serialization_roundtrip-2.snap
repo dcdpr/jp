@@ -1,5 +1,5 @@
 ---
-source: crates/jp_conversation/src/stream.rs
+source: crates/jp_conversation/src/stream_tests.rs
 expression: "&stream"
 ---
 [
@@ -25,7 +25,8 @@ expression: "&stream"
         "request": {
           "max_retries": 0,
           "base_backoff_ms": 0,
-          "max_backoff_secs": 0
+          "max_backoff_secs": 0,
+          "cache": true
         }
       },
       "conversation": {

@@ -390,7 +390,9 @@ impl Query {
             result??;
         }
 
-        let tools = tool_definitions(cfg.conversation.tools.iter(), &ctx.mcp_client).await?;
+        let forced_tool = cfg.assistant.tool_choice.function_name();
+        let tools =
+            tool_definitions(cfg.conversation.tools.iter(), &ctx.mcp_client, forced_tool).await?;
 
         let mut attachments = vec![];
         for attachment in &cfg.conversation.attachments {

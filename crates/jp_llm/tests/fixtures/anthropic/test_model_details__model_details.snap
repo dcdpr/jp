@@ -31,6 +31,9 @@ expression: v
         deprecated: Some(
             Active,
         ),
+        structured_output: Some(
+            true,
+        ),
         features: [
             "interleaved-thinking",
             "context-editing",

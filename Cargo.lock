@@ -1969,6 +1969,7 @@ dependencies = [
  "duct",
  "duct_sh",
  "glob",
+ "humantime",
  "indexmap",
  "indoc",
  "insta",

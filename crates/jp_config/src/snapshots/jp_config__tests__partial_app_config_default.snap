@@ -37,6 +37,7 @@ PartialAppConfig {
             max_retries: None,
             base_backoff_ms: None,
             max_backoff_secs: None,
+            cache: None,
         },
     },
     conversation: PartialConversationConfig {
@@ -61,6 +62,15 @@ PartialAppConfig {
             tools: {},
         },
         attachments: [],
+        inquiry: PartialInquiryConfig {
+            assistant: PartialAssistantOverrideConfig {
+                system_prompt: None,
+                system_prompt_sections: [],
+                tool_choice: None,
+                model: None,
+                request: None,
+            },
+        },
     },
     style: PartialStyleConfig {
         code: PartialCodeConfig {

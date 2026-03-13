@@ -21,6 +21,7 @@ directories = { workspace = true }
 duct = { workspace = true }
 duct_sh = { workspace = true }
 glob = { workspace = true }
+humantime = { workspace = true }
 indexmap = { workspace = true }
 relative-path = { workspace = true, features = ["serde", "alloc", "std"] }
 schematic = { workspace = true, features = [

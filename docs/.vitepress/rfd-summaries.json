@@ -127,9 +127,21 @@
     "hash": "2da284db49973858e10beca9b22deeb752d81ac7a441ed875ad846e54eedaf4a",
     "summary": "Add FTS5 full-text search, typo tolerance, and local semantic vector search to grizzly's note_search tool."
   },
+  "033-cache-preserving-inquiry-via-tool-use.md": {
+    "hash": "9f0c7e70e7f42fe7f4b015a23b684449427937552130aa375e6091b2decc9407",
+    "summary": "Replace structured output with a tool-use-based inquiry system to preserve prompt cache and reduce LLM costs."
+  },
+  "034-inquiry-specific-assistant-configuration.md": {
+    "hash": "0d03bdb479f48b6df268582df2d1698ad55a0f612bf28a17055297d595287d7b",
+    "summary": "Route inquiries to cheaper models with stable schemas for 5-25x cost reduction via configurable assistant overrides."
+  },
   "035-multi-root-config-load-path-resolution.md": {
     "hash": "5a18ca4b0f9fbf0758644942e446d90816a9b0f23e60502cb01b75e7760f7ae9",
     "summary": "Extend `--cfg` path resolution to search user-global, workspace, and user-workspace config roots, merging matches."
+  },
+  "036-conversation-compaction.md": {
+    "hash": "20ac71e5dcf878a3a8ec468293fee7a1aaa1b797638f7095f43c405e6d0f2cb3",
+    "summary": "Composable conversation compaction via mechanical strategies, tool-aware deduplication, LLM summarization, and protocol extensions for declarative compaction hints."
   },
   "042-tool-options.md": {
     "hash": "d5c094882a3f52d471c2a0d156f018ca23bfb5464f47469de8d74954bf824c70",

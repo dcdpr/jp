@@ -113,6 +113,7 @@ fn map_model(model: LocalModel) -> Result<ModelDetails> {
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
+        structured_output: None,
         features: vec![],
     })
 }
