@@ -63,8 +63,8 @@ impl Init {
         // NOTE: The `defaults` field in `ToolsConfig` is `#[setting(rename = "*")]`,
         // so the TOML key must be `'*'`, not `defaults`.
         let config_content = format!(
-            "[assistant.model.id]\nprovider = \"{provider}\"\nname = \"{name}\"\n\n\
-             [conversation.tools.'*']\nrun = \"{run_mode}\"\n"
+            "[assistant.model.id]\nprovider = \"{provider}\"\nname = \
+             \"{name}\"\n\n[conversation.tools.'*']\nrun = \"{run_mode}\"\n"
         );
         fs::write(storage.join("config.toml"), config_content)?;
 

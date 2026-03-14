@@ -290,7 +290,7 @@ fn test_load_falls_back_when_active_is_also_last_conversation() {
 }
 
 #[test]
-fn test_load_fails_when_no_conversations_exist() {
+fn test_load_succeeds_when_no_conversations_exist() {
     let tmp = tempdir().unwrap();
     let root = tmp.path().join("root");
     let storage = root.join("storage");
@@ -303,8 +303,9 @@ fn test_load_fails_when_no_conversations_exist() {
     let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
     workspace.disable_persistence();
 
-    let err = workspace.load().unwrap_err();
-    assert_eq!(err, Error::NotFound("Conversation", String::new()));
+    // A fresh workspace with no conversations on disk is valid — load
+    // should succeed with default state.
+    workspace.load().unwrap();
 }
 
 #[test]

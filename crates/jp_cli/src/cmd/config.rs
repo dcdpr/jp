@@ -1,6 +1,5 @@
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
 use jp_config::fs::{ConfigFile, ConfigLoader, ConfigLoaderError, user_global_config_path};
-
 use jp_printer::Printer;
 
 use super::Output;
@@ -23,7 +22,10 @@ impl Config {
     /// config (e.g. `show`), `None` for those that do.
     pub(crate) fn try_run_standalone(&self, printer: &Printer) -> Option<Output> {
         match &self.command {
-            Commands::Show(args) => Some(args.run_standalone(printer)),
+            Commands::Show(args) => {
+                args.run_standalone(printer);
+                Some(Ok(()))
+            }
             _ => None,
         }
     }

@@ -3,8 +3,6 @@ use std::collections::BTreeMap;
 use jp_config::AppConfig;
 use jp_printer::Printer;
 
-use crate::cmd::Output;
-
 #[derive(Debug, clap::Args)]
 pub(crate) struct Show {
     /// Show the default configurations.
@@ -17,15 +15,14 @@ pub(crate) struct Show {
 }
 
 impl Show {
-    pub(crate) fn run_standalone(&self, printer: &Printer) -> Output {
+    pub(crate) fn run_standalone(&self, printer: &Printer) {
         if self.themes {
             printer.println(list_themes());
-            return Ok(());
+            return;
         }
 
         // Bare `config show` and `--defaults` both show defaults.
         printer.println(config_skeleton());
-        Ok(())
     }
 }
 
