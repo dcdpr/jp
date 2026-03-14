@@ -51,6 +51,13 @@ impl Commands {
         }
     }
 
+    pub(crate) fn is_help_request(&self) -> bool {
+        match self {
+            Commands::Query(q) => q.is_help_request(),
+            _ => false,
+        }
+    }
+
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Commands::Query(_) => "query",

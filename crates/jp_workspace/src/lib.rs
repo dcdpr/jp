@@ -199,7 +199,11 @@ impl Workspace {
         }
 
         let Some(active_conversation) = active_conversation else {
-            return Err(Error::NotFound("Conversation", String::new()));
+            // Fresh workspace with no conversations yet (e.g. right after
+            // `jp init`). This is a valid state — keep defaults and let the
+            // first `jp q --new` create the initial conversation.
+            debug!("No conversations found, workspace is fresh.");
+            return Ok(());
         };
 
         let conversations = conversation_ids

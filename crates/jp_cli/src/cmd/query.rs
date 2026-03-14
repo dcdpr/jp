@@ -295,6 +295,10 @@ pub(crate) struct Query {
 }
 
 impl Query {
+    pub(crate) fn is_help_request(&self) -> bool {
+        matches!(self.query.as_deref(), Some([s]) if s == "help")
+    }
+
     #[expect(clippy::too_many_lines)]
     pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         debug!("Running `query` command.");
