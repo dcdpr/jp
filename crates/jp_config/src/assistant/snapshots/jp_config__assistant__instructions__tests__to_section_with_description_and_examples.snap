@@ -1,5 +1,5 @@
 ---
-source: crates/jp_config/src/assistant/instructions.rs
+source: crates/jp_config/src/assistant/instructions_tests.rs
 expression: section.render()
 ---
 <instruction title="foo">
