@@ -127,8 +127,6 @@ profile-heap *ARGS:
     #!/usr/bin/env sh
     cargo run --profile profiling --features dhat -- "$@"
 
-# Create a new RFD draft. CATEGORY is 'design', 'decision', 'guide', or 'process'.
-[group('rfd')]
 # Ask JP to create a new RFD based on the current conversation context.
 [group('jp')]
 rfd-this:
@@ -147,8 +145,10 @@ rfd-this:
 
     jp query --cfg=skill/rfd $args
 
-rfd-draft CATEGORY +TITLE:
+# Create a new RFD draft. CATEGORY is 'design', 'decision', 'guide', or 'process'.
 # Drafts are created as DNN-slug.md — a permanent number is assigned at Discussion.
+[group('rfd')]
+rfd-draft CATEGORY +TITLE:
     #!/usr/bin/env sh
     set -eu
 
@@ -258,8 +258,6 @@ rfd-supersede NNN MMM:
     echo "${old_file}: Superseded by RFD ${new_num}"
     echo "${new_file}: Supersedes RFD ${old_num}"
 
-# Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
-[group('rfd')]
     # Remind the user to close the old tracking issue if one exists.
     old_tracking=$(sed -n 's/^- \*\*Tracking Issue\*\*: \[#\([0-9]*\)\].*/\1/p' "$old_file" | head -1)
     if [ -n "$old_tracking" ]; then
@@ -331,13 +329,15 @@ rfd-extend NNN MMM:
         echo "${new_file}: Extends RFD ${old_num}"
     fi
 
-rfd-promote NNN: _install-jp
+# Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
 #
 # For drafts (DNN-prefixed files), assigns the next available permanent number
 # and renames the file. When promoting to Accepted, creates a GitHub tracking
 # issue via `jp` and injects the link into the metadata.
 #
 # Accepts: a permanent number (41, 041) or a draft ID (D01).
+[group('rfd')]
+rfd-promote NNN: _install-jp
     #!/usr/bin/env sh
     set -eu
 
@@ -477,14 +477,14 @@ rfd-abandon NNN +REASON:
     ' "$file" > "${file}.tmp"
     mv "${file}.tmp" "$file"
 
-    echo "${file}: Abandoned (${current} -> Abandoned)"
-
     # Remind the user to close the tracking issue if one exists.
     tracking=$(sed -n 's/^- \*\*Tracking Issue\*\*: \[#\([0-9]*\)\].*/\1/p' "$file" | head -1)
-# Generate or update AI summaries for RFD documents.
+    echo "${file}: Abandoned (${current} -> Abandoned)"
     if [ -n "$tracking" ]; then
         echo "Remember to close the tracking issue: https://github.com/dcdpr/jp/issues/${tracking}"
     fi
+
+# Generate or update AI summaries for RFD documents.
 #
 # Only re-generates summaries for RFDs whose content has changed since
 # the last run (based on SHA-256). Pass `--force` to regenerate all.
