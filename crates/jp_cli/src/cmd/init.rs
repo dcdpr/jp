@@ -6,13 +6,13 @@ use crossterm::style::Stylize as _;
 use duct::cmd;
 use inquire::{Select, Text};
 use jp_config::{
-    AppConfig, PartialAppConfig,
+    PartialAppConfig,
     conversation::tool::RunMode,
     model::id::{ModelIdConfig, Name, ProviderId},
 };
 use jp_printer::Printer;
 use jp_workspace::Workspace;
-use schematic::{ConfigEnum as _, SchemaBuilder, Schematic as _};
+use schematic::ConfigEnum as _;
 
 use crate::{DEFAULT_STORAGE_DIR, cmd::Output, ctx::IntoPartialAppConfig};
 
@@ -55,80 +55,18 @@ impl Init {
         workspace = workspace.with_local_storage()?;
 
         // Interactive configuration
-        let _run_mode = Self::ask_run_mode(&mut printer.out_writer(), true)?;
-        let (_provider, _name) = Self::ask_model(&mut printer.out_writer())?;
+        let run_mode = Self::ask_run_mode(&mut printer.out_writer(), true)?;
+        let (provider, name) = Self::ask_model(&mut printer.out_writer())?;
 
-        let builder = SchemaBuilder::default();
-        let schema = AppConfig::build_schema(builder);
-        std::fs::write("schema.json", serde_json::to_string_pretty(&schema)?)?;
-
-        // // Generate Config
-        // let mut generator = SchemaGenerator::default();
-        // generator.add::<AppConfig>();
+        // Write workspace config
         //
-        // // 1. conversation.tools.defaults.run
-        // let run_variants = RunMode::variants();
-        // let run_idx = run_variants
-        //     .iter()
-        //     .position(|v| *v == run_mode)
-        //     .unwrap_or(0);
-        //
-        // let run_schema = Schema::new(SchemaType::Enum(Box::new(EnumType {
-        //     values: run_variants
-        //         .iter()
-        //         .map(|v| LiteralValue::String(v.to_string()))
-        //         .collect(),
-        //     default_index: Some(run_idx),
-        //     ..Default::default()
-        // })));
-        //
-        // // 2. assistant.model.id
-        // // We override the leaf nodes for provider and name.
-        // let provider_schema = Schema::new(SchemaType::String(Box::new(StringType {
-        //     default: Some(LiteralValue::String(provider.to_string())),
-        //     ..Default::default()
-        // })));
-        //
-        // let name_schema = Schema::new(SchemaType::String(Box::new(StringType {
-        //     default: Some(LiteralValue::String(name.to_string())),
-        //     ..Default::default()
-        // })));
-        //
-        // let options = TemplateOptions {
-        //     header: indoc::formatdoc! {"
-        //         # This is a TOML config file.
-        //
-        //     "},
-        //     custom_values: HashMap::from([
-        //         ("conversation.tools.defaults.run".to_owned(), run_schema),
-        //         ("assistant.model.id.provider".to_owned(), provider_schema),
-        //         ("assistant.model.id.name".to_owned(), name_schema),
-        //     ]),
-        //     hide_fields: vec![
-        //         "inherit",
-        //         "extends",
-        //         "assistant.instructions",
-        //         // "assistant.name",
-        //         // "conversation.attachments",
-        //     ]
-        //     .into_iter()
-        //     .map(Into::into)
-        //     .collect(),
-        //
-        //     print_enum_values: false,
-        //
-        //     env_vars: AppConfig::envs().into_iter().collect(),
-        //     ..Default::default()
-        // };
-        // let renderer = TomlTemplateRenderer::new(options);
-        //
-        // let config_path = storage.join("test.toml");
-        // generator
-        //     .generate(&config_path, renderer)
-        //     .map_err(io::Error::other)?;
-        //
-        // // Create config.d directory as well
-        // // fs::create_dir_all(storage.join("config.d"))?;
+        // NOTE: The `defaults` field in `ToolsConfig` is `#[setting(rename = "*")]`,
+        // so the TOML key must be `'*'`, not `defaults`.
+        let config_content = format!(
+            "[assistant.model.id]\nprovider = \"{provider}\"\nname = \"{name}\"\n\n\
+             [conversation.tools.'*']\nrun = \"{run_mode}\"\n"
+        );
+        fs::write(storage.join("config.toml"), config_content)?;
 
         let loc = if root == cwd {
             "current directory".to_owned()
