@@ -1,0 +1,54 @@
+[conversation.tools.github_create_issue_rfd_tracking]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Create a tracking issue for an RFD in the project's GitHub repository."
+description = """
+Creates a GitHub issue to track the implementation of an RFD. The issue \
+title, label, and body structure are fixed — you only provide the RFD \
+number, title, filename slug, and task list.
+
+Read the attached RFD carefully. Extract the number, title, and slug from \
+the filename. Derive tasks from the Implementation Plan section — use \
+phase names, step names, or a concise summary of each deliverable.
+"""
+
+examples = """
+```json
+{
+  "rfd_number": "042",
+  "rfd_title": "Conversation Compaction",
+  "rfd_slug": "042-conversation-compaction",
+  "tasks": [
+    "Phase 1: Mechanical compaction strategies",
+    "Phase 2: LLM-assisted summarization",
+    "Phase 3: Integration with conversation storage"
+  ]
+}
+```
+"""
+
+[conversation.tools.github_create_issue_rfd_tracking.parameters.rfd_number]
+type = "string"
+required = true
+summary = "The three-digit RFD number (e.g. '042')."
+
+[conversation.tools.github_create_issue_rfd_tracking.parameters.rfd_title]
+type = "string"
+required = true
+summary = "The RFD title text."
+
+[conversation.tools.github_create_issue_rfd_tracking.parameters.rfd_slug]
+type = "string"
+required = true
+summary = "The RFD filename without the .md extension (e.g. '042-conversation-compaction')."
+
+[conversation.tools.github_create_issue_rfd_tracking.parameters.tasks]
+type = "array"
+items.type = "string"
+required = true
+summary = "Task list derived from the RFD's Implementation Plan."
+description = """
+Each task becomes a checkbox in the issue body. Derive tasks from the \
+Implementation Plan section of the RFD.
+"""

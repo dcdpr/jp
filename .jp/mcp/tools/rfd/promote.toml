@@ -1,0 +1,20 @@
+[conversation.tools.rfd_promote]
+enable = false
+run = "ask"
+source = "local"
+command = "just rfd-promote {{tool.arguments.nnn}}"
+description = """Promote an RFD to the next stage (Draft -> Discussion -> Accepted -> Implemented).
+
+For drafts (DNN-prefixed), assigns a permanent number and renames the file. \
+When promoting to Accepted, creates a GitHub tracking issue via `jp`."""
+
+[conversation.tools.rfd_promote.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.rfd_promote.parameters.nnn]
+description = """ID of the RFD to promote. Accepts a permanent number (41, 041) or a \
+draft ID (D01)."""
+required = true
+type = "string"

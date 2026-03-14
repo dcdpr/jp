@@ -127,7 +127,26 @@ profile-heap *ARGS:
     #!/usr/bin/env sh
     cargo run --profile profiling --features dhat -- "$@"
 
+# Ask JP to create a new RFD based on the current conversation context.
+[group('jp')]
+rfd-this:
+    #!/usr/bin/env sh
+    args="$@"
+    msg="I gave you the RFD skill, use it to codify all that we just discussed and concluded in a feature request RFD"
+
+    starts_with() { case $2 in "$1"*) true;; *) false;; esac; }
+    contains() { case $2 in *"$1"*) true;; *) false;; esac; }
+    if starts_with "--" "$@"; then
+    elif starts_with "-" "$@" && ! contains "--" "$@"; then
+        args="$* -- $msg"
+    elif [ -z "$args" ]; then
+        args="$msg"
+    fi
+
+    jp query --cfg=skill/rfd $args
+
 # Create a new RFD draft. CATEGORY is 'design', 'decision', 'guide', or 'process'.
+# Drafts are created as DNN-slug.md — a permanent number is assigned at Discussion.
 [group('rfd')]
 rfd-draft CATEGORY +TITLE:
     #!/usr/bin/env sh
@@ -144,17 +163,19 @@ rfd-draft CATEGORY +TITLE:
         *) echo "Unknown category '$category'. Use 'design', 'decision', 'guide', or 'process'." >&2; exit 1 ;;
     esac
 
-    # Find the next available RFD number.
-    last=$(ls docs/rfd/[0-9][0-9][0-9]-*.md 2>/dev/null \
-        | sed 's|.*/||; s|-.*||' \
-        | sort -n \
-        | tail -1 \
-        || echo "000")
-
-    # Strip leading zeros to avoid octal interpretation in POSIX sh.
-    last=$(echo "$last" | sed 's/^0*//')
-    last=${last:-0}
-    next=$(printf "%03d" $((last + 1)))
+    # Find the first available draft number (D01–D99).
+    next=1
+    while [ "$next" -le 99 ]; do
+        draft_id=$(printf "D%02d" "$next")
+        if ! ls docs/rfd/${draft_id}-*.md >/dev/null 2>&1; then
+            break
+        fi
+        next=$((next + 1))
+    done
+    if [ "$next" -gt 99 ]; then
+        echo "No draft slots available (D01–D99 all in use)." >&2; exit 1
+    fi
+    draft_id=$(printf "D%02d" "$next")
 
     # Resolve the author from git config, falling back to $USER.
     git_name=$(git config user.name 2>/dev/null || true)
@@ -168,15 +189,15 @@ rfd-draft CATEGORY +TITLE:
     fi
 
     # Capitalize the category for the metadata header.
-    cap_category=$(echo "$category" | sed 's/^./\U&/')
+    cap_category=$(echo "$category" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
 
     # Build the filename slug from the title.
     slug=$(echo "{{TITLE}}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-')
-    file="docs/rfd/${next}-${slug}.md"
+    file="docs/rfd/${draft_id}-${slug}.md"
 
     # Copy the template and fill in metadata.
     sed \
-        -e "s/RFD NNN: TITLE/RFD ${next}: {{TITLE}}/" \
+        -e "s/RFD NNN: TITLE/RFD ${draft_id}: {{TITLE}}/" \
         -e "s/^- \*\*Category\*\*: .*/- **Category**: ${cap_category}/" \
         -e "s/AUTHOR/${author}/" \
         -e "s/DATE/$(date +%Y-%m-%d)/" \
@@ -237,17 +258,109 @@ rfd-supersede NNN MMM:
     echo "${old_file}: Superseded by RFD ${new_num}"
     echo "${new_file}: Supersedes RFD ${old_num}"
 
-# Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
+    # Remind the user to close the old tracking issue if one exists.
+    old_tracking=$(sed -n 's/^- \*\*Tracking Issue\*\*: \[#\([0-9]*\)\].*/\1/p' "$old_file" | head -1)
+    if [ -n "$old_tracking" ]; then
+        echo "Remember to close the superseded tracking issue: https://github.com/dcdpr/jp/issues/${old_tracking}"
+    fi
+
+# Record that RFD MMM extends RFD NNN, updating both documents.
 [group('rfd')]
-rfd-promote NNN:
+rfd-extend NNN MMM:
     #!/usr/bin/env sh
     set -eu
 
-    n=$(echo "{{NNN}}" | sed 's/^0*//')
-    num=$(printf "%03d" "${n:-0}")
-    file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
-    if [ -z "$file" ]; then
-        echo "No RFD found with number ${num}." >&2; exit 1
+    old_n=$(echo "{{NNN}}" | sed 's/^0*//')
+    old_num=$(printf "%03d" "${old_n:-0}")
+    new_n=$(echo "{{MMM}}" | sed 's/^0*//')
+    new_num=$(printf "%03d" "${new_n:-0}")
+    old_file=$(ls docs/rfd/${old_num}-*.md 2>/dev/null | head -1)
+    new_file=$(ls docs/rfd/${new_num}-*.md 2>/dev/null | head -1)
+    if [ -z "$old_file" ]; then
+        echo "No RFD found with number ${old_num}." >&2; exit 1
+    fi
+    if [ -z "$new_file" ]; then
+        echo "No RFD found with number ${new_num}." >&2; exit 1
+    fi
+
+    # Validate that the extended RFD is in Accepted or later status.
+    old_status=$(sed -n 's/^- \*\*Status\*\*: \(.*\)/\1/p' "$old_file" | head -1)
+    case "$old_status" in
+        Accepted|Implemented) ;;
+        *)
+            echo "Cannot extend RFD ${old_num} (status: '${old_status}')." >&2
+            echo "Only Accepted or Implemented RFDs can be extended." >&2
+            exit 1 ;;
+    esac
+
+    # Add "Extended by: RFD MMM" to the older RFD (NNN).
+    existing_eb=$(sed -n 's/^- \*\*Extended by\*\*: \(.*\)/\1/p' "$old_file" | head -1)
+    if echo "$existing_eb" | grep -q "RFD ${new_num}"; then
+        echo "${old_file}: already extended by RFD ${new_num}"
+    elif [ -n "$existing_eb" ]; then
+        sed "s/^- \*\*Extended by\*\*: .*/&, RFD ${new_num}/" "$old_file" > "${old_file}.tmp"
+        mv "${old_file}.tmp" "$old_file"
+        echo "${old_file}: Extended by ${existing_eb}, RFD ${new_num}"
+    else
+        last_meta=$(grep -n '^- \*\*' "$old_file" | tail -1 | cut -d: -f1)
+        awk -v ln="$last_meta" -v eb="- **Extended by**: RFD ${new_num}" '
+            NR == ln { print; print eb; next }
+            { print }
+        ' "$old_file" > "${old_file}.tmp"
+        mv "${old_file}.tmp" "$old_file"
+        echo "${old_file}: Extended by RFD ${new_num}"
+    fi
+
+    # Add "Extends: RFD NNN" to the newer RFD (MMM).
+    existing_ex=$(sed -n 's/^- \*\*Extends\*\*: \(.*\)/\1/p' "$new_file" | head -1)
+    if echo "$existing_ex" | grep -q "RFD ${old_num}"; then
+        echo "${new_file}: already extends RFD ${old_num}"
+    elif [ -n "$existing_ex" ]; then
+        sed "s/^- \*\*Extends\*\*: .*/&, RFD ${old_num}/" "$new_file" > "${new_file}.tmp"
+        mv "${new_file}.tmp" "$new_file"
+        echo "${new_file}: Extends ${existing_ex}, RFD ${old_num}"
+    else
+        last_meta=$(grep -n '^- \*\*' "$new_file" | tail -1 | cut -d: -f1)
+        awk -v ln="$last_meta" -v ex="- **Extends**: RFD ${old_num}" '
+            NR == ln { print; print ex; next }
+            { print }
+        ' "$new_file" > "${new_file}.tmp"
+        mv "${new_file}.tmp" "$new_file"
+        echo "${new_file}: Extends RFD ${old_num}"
+    fi
+
+# Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
+#
+# For drafts (DNN-prefixed files), assigns the next available permanent number
+# and renames the file. When promoting to Accepted, creates a GitHub tracking
+# issue via `jp` and injects the link into the metadata.
+#
+# Accepts: a permanent number (41, 041) or a draft ID (D01).
+[group('rfd')]
+rfd-promote NNN: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    arg="{{NNN}}"
+
+    # --- Resolve the RFD file from the argument. ---
+    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
+        # Draft ID (e.g. D01, D12).
+        draft_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
+        file=$(ls docs/rfd/${draft_id}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No draft RFD found with ID ${draft_id}." >&2; exit 1
+        fi
+    elif echo "$arg" | grep -qE '^[0-9]+$'; then
+        # Permanent number.
+        n=$(echo "$arg" | sed 's/^0*//')
+        num=$(printf "%03d" "${n:-0}")
+        file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No RFD found with number ${num}." >&2; exit 1
+        fi
+    else
+        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
     fi
 
     current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
@@ -261,9 +374,79 @@ rfd-promote NNN:
             exit 1 ;;
     esac
 
-    sed "s/^- \*\*Status\*\*: ${current}/- **Status**: ${next}/" "$file" > "${file}.tmp"
-    mv "${file}.tmp" "$file"
-    echo "${file}: ${current} -> ${next}"
+    # --- Draft -> Discussion: assign permanent number, rename file ---
+    if [ "$current" = "Draft" ]; then
+        basename_f=$(basename "$file")
+        slug=$(echo "$basename_f" | sed 's/^[A-Z]*[0-9]*-//; s/\.md$//')
+
+        # Assign next available permanent number.
+        existing=$(ls docs/rfd/[0-9][0-9][0-9]-*.md 2>/dev/null \
+            | sed 's|.*/||; s|-.*||' \
+            | sort -n)
+
+        next_num=1
+        for num_iter in $existing; do
+            n=$(echo "$num_iter" | sed 's/^0*//')
+            n=${n:-0}
+            [ "$n" -lt "$next_num" ] && continue
+            [ "$n" -gt "$next_num" ] && break
+            next_num=$((next_num + 1))
+        done
+        num=$(printf "%03d" "$next_num")
+        new_file="docs/rfd/${num}-${slug}.md"
+
+        # Rewrite heading and status.
+        sed \
+            -e "s/^# RFD [A-Z]*[0-9]*:/# RFD ${num}:/" \
+            -e "s/^- \*\*Status\*\*: Draft/- **Status**: Discussion/" \
+            "$file" > "$new_file"
+        rm "$file"
+
+        echo "${new_file}: Draft -> Discussion (assigned ${num})"
+
+    # --- Discussion -> Accepted: create tracking issue via jp ---
+    elif [ "$current" = "Discussion" ]; then
+        sed "s/^- \*\*Status\*\*: Discussion/- **Status**: Accepted/" "$file" > "${file}.tmp"
+        mv "${file}.tmp" "$file"
+
+        # Create tracking issue using jp + structured output.
+        SCHEMA='{"type":"object","properties":{"number":{"type":"integer","description":"GitHub issue number"},"url":{"type":"string","description":"GitHub issue URL"}},"required":["number","url"]}'
+        PROMPT="Read the attached RFD. Create a tracking issue for it by calling the github_create_issue_rfd_tracking tool. Return the issue number and url."
+        TOOL_CFG='conversation.tools.github_create_issue_rfd_tracking:={"enable":true,"run":"unattended"}'
+
+        result=$(
+            jp query --new --local --tmp=5m --format=json --no-reasoning \
+                -c "$TOOL_CFG" \
+                --schema "$SCHEMA" \
+                --attachment "$file" \
+                "$PROMPT" \
+            | jq -s '.[-1]' 2>/dev/null
+        ) || true
+
+        issue_num=$(echo "$result" | jq -r '.number // empty' 2>/dev/null || true)
+        issue_url=$(echo "$result" | jq -r '.url // empty' 2>/dev/null || true)
+
+        if [ -n "$issue_num" ] && [ -n "$issue_url" ]; then
+            last_meta=$(grep -n '^- \*\*' "$file" | tail -1 | cut -d: -f1)
+            awk -v ln="$last_meta" -v ti="- **Tracking Issue**: [#${issue_num}](${issue_url})" '
+                NR == ln { print; print ti; next }
+                { print }
+            ' "$file" > "${file}.tmp"
+            mv "${file}.tmp" "$file"
+            echo "${file}: Discussion -> Accepted"
+            echo "Tracking issue: #${issue_num} (${issue_url})"
+        else
+            echo "${file}: Discussion -> Accepted"
+            echo "Warning: tracking issue creation failed or was skipped." >&2
+            echo "Create one manually and add '- **Tracking Issue**: #NNN' to the metadata." >&2
+        fi
+
+    # --- Accepted -> Implemented ---
+    else
+        sed "s/^- \*\*Status\*\*: Accepted/- **Status**: Implemented/" "$file" > "${file}.tmp"
+        mv "${file}.tmp" "$file"
+        echo "${file}: Accepted -> Implemented"
+    fi
 
 # Mark an RFD as abandoned with the given reason.
 [group('rfd')]
@@ -294,7 +477,12 @@ rfd-abandon NNN +REASON:
     ' "$file" > "${file}.tmp"
     mv "${file}.tmp" "$file"
 
+    # Remind the user to close the tracking issue if one exists.
+    tracking=$(sed -n 's/^- \*\*Tracking Issue\*\*: \[#\([0-9]*\)\].*/\1/p' "$file" | head -1)
     echo "${file}: Abandoned (${current} -> Abandoned)"
+    if [ -n "$tracking" ]; then
+        echo "Remember to close the tracking issue: https://github.com/dcdpr/jp/issues/${tracking}"
+    fi
 
 # Generate or update AI summaries for RFD documents.
 #
@@ -399,7 +587,7 @@ rfd-list *CATEGORY:
 
     filter="{{CATEGORY}}"
 
-    for file in docs/rfd/[0-9][0-9][0-9]-*.md; do
+    for file in docs/rfd/[0-9][0-9][0-9]-*.md docs/rfd/D[0-9][0-9]-*.md; do
         [ -f "$file" ] || continue
 
         num=$(basename "$file" | sed 's/-.*//')
@@ -408,7 +596,7 @@ rfd-list *CATEGORY:
         [ "$num" = "000" ] && continue
         status=$(sed -n 's/^- \*\*Status\*\*: \(.*\)/\1/p' "$file" | head -1)
         category=$(sed -n 's/^- \*\*Category\*\*: \(.*\)/\1/p' "$file" | head -1)
-        title=$(sed -n 's/^# RFD [0-9]*: \(.*\)/\1/p' "$file" | head -1)
+        title=$(sed -n 's/^# RFD [0-9A-Z]*: \(.*\)/\1/p' "$file" | head -1)
 
         # Append the superseding RFD number to the status.
         if [ "$status" = "Superseded" ]; then
@@ -428,7 +616,7 @@ rfd-list *CATEGORY:
 
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
-develop-docs *FLAGS="--open":
+develop-docs *FLAGS="--open": rfd-summaries
     just _docs "dev" {{FLAGS}}
 
 # Build the statically built documentation.

@@ -9,8 +9,14 @@ attachments = [
 ]
 
 [conversation.tools]
-rfd_draft = { enable = true, run = "ask" }
-fs_modify_file = { enable = true, run = "ask" }
+rfd_draft = { enable = true, run = "unattended" }
+rfd_promote = { enable = true, run = "unattended" }
+rfd_supersede = { enable = true, run = "unattended" }
+rfd_abandon = { enable = true, run = "unattended" }
+rfd_extend = { enable = true, run = "unattended" }
+
+fs_modify_file = { enable = true, run = "unattended" }
+fs_create_file.questions.overwrite_file.answer = true
 
 [[assistant.system_prompt_sections]]
 tag = "rfd_skill"
@@ -39,8 +45,16 @@ You do NOT:
 process, templates, lifecycle, and writing style guidelines. Treat it \
 as the authoritative reference for all RFD conventions.
 
-`rfd_draft` is available to create new RFD drafts of the specified \
-variant (rfd or adr) and the given title.
+`rfd_draft` creates new RFD drafts as DNN-slug.md (e.g. D01-my-feature.md). \
+Permanent numbers are assigned when `rfd_promote` advances a draft to \
+Discussion status.
+
+`rfd_promote` handles deferred numbering: for DNN-prefixed drafts, it \
+assigns the next available permanent number and renames the file. When \
+promoting to Accepted, it creates a GitHub tracking issue.
+
+`rfd_extend` records extension relationships between RFDs \
+(adds Extends/Extended by metadata to both documents).
 
 `fs_modify_file` is available but runs in confirmation mode — the user \
 sees a diff and approves or rejects each edit. Make targeted, minimal \
@@ -60,9 +74,9 @@ to solutions.
 prior RFDs. Use `github_issues` and `github_pulls` to find related \
 discussions.
 
-3. **Suggest structure**: Based on the topic, suggest which RFD style \
-(rfd or adr) fits best, and which sections are most important. Not \
-every RFD needs every section.
+3. **Suggest structure**: Based on the topic, suggest which RFD category \
+(design, decision, guide, or process) fits best, and which sections are \
+most important. Not every RFD needs every section.
 
 4. **Split Multi-Topcic RFDs**: If the RFD is multi-topical, split it into \
 multiple RFDs. This allows for easier review and editing.
@@ -108,4 +122,31 @@ considering."
 smaller proposals.
 - Use concrete examples. A code snippet or data flow diagram is worth a \
 paragraph of abstraction.\
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "rfd_skill"
+title = "RFD Relationships"
+content = """\
+- RFDs should be self-contained at the time they were written.
+- If you are writing multiple RFDs at once, the first one must not contain links or details to the \
+next one.
+- Historical RFDs can be updated to reference future RFDs by using a markdown
+note:
+
+```markdown
+> [!TIP]
+> [RFD 037] extends turn-end behavior with configurable per-tool policies (`inquire`, `await`, \
+`abort`).
+```
+
+The best placements for TIPs are:
+- Non-Goals paragraphs that explicitly defer work (look for "future work", "future RFD", \
+"out of scope", "deferred to").
+- Open questions in Risks sections where a later RFD provides the answer.
+- Drawbacks sections where a later RFD mitigates the described cost.
+
+A TIP should name the future RFD by number, briefly state what it adds or extends, and \
+be one to three sentences. Do not add TIPs that merely announce the RFD exists — say what \
+it contributes.
 """

@@ -17,8 +17,8 @@ function loadSummaries() {
 // RFDs use `- **Key**: Value` lines instead of YAML frontmatter, so we
 // need a small custom parser.
 function parseMeta(content, filename) {
-    const num = filename.match(/^(\d+)/)?.[1] ?? '000'
-    const title = content.match(/^# RFD \d+:\s*(.+)/m)?.[1]?.trim() ?? filename
+    const num = filename.match(/^(\d{3}|D\d{2})/)?.[1] ?? '000'
+    const title = content.match(/^# RFD [\dA-Z]+:\s*(.+)/m)?.[1]?.trim() ?? filename
 
     const field = (key) =>
         content.match(new RegExp(`^- \\*\\*${key}\\*\\*:\\s*(.+)`, 'm'))?.[1]?.trim() ?? null
@@ -34,15 +34,35 @@ function parseMeta(content, filename) {
     }
 }
 
+// Scan document content for links to other RFDs.
+// Matches patterns like `NNN-slug.md`, `NNN-slug)`, `./NNN-slug`.
+function parseReferences(content, ownNum) {
+    const refs = new Set()
+    const pattern = /\b(\d{3}|D\d{2})-[a-z0-9-]+(?:\.md)?/g
+    let match
+    while ((match = pattern.exec(content)) !== null) {
+        const num = match[1]
+        if (num !== '000' && num !== ownNum) refs.add(num)
+    }
+    return [...refs].sort()
+}
+
 export default {
     load() {
-        const files = readdirSync(rfdDir)
+        const numbered = readdirSync(rfdDir)
             .filter(f => /^\d{3}-.+\.md$/.test(f) && !f.startsWith('000-'))
             .sort()
 
+        const drafts = readdirSync(rfdDir)
+            .filter(f => /^D\d{2}-.+\.md$/.test(f))
+            .sort()
+
+        const files = [...numbered, ...drafts]
+
         const summaries = loadSummaries()
 
-        const missing = files.filter(f => !summaries[f]?.summary)
+        // Only numbered RFDs require summaries; drafts are excluded.
+        const missing = numbered.filter(f => !summaries[f]?.summary)
         if (missing.length > 0) {
             const nums = missing.map(f => f.match(/^(\d+)/)?.[1]).join(', ')
             throw new Error(
@@ -50,9 +70,24 @@ export default {
             )
         }
 
-        return files.map(f => ({
-            ...parseMeta(readFileSync(resolve(rfdDir, f), 'utf-8'), f),
-            summary: summaries[f].summary,
-        }))
+        // First pass: parse metadata and references.
+        const rfds = files.map(f => {
+            const content = readFileSync(resolve(rfdDir, f), 'utf-8')
+            const meta = parseMeta(content, f)
+            return {
+                ...meta,
+                summary: summaries[f]?.summary ?? null,
+                references: parseReferences(content, meta.num),
+            }
+        })
+
+        // Second pass: compute inverse references ("referenced by").
+        for (const rfd of rfds) {
+            rfd.referencedBy = rfds
+                .filter(other => other.references.includes(rfd.num))
+                .map(other => other.num)
+        }
+
+        return rfds
     },
 }

@@ -1,6 +1,6 @@
 # RFD 001: The JP RFD Process
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
@@ -126,11 +126,23 @@ The author is actively writing the document. It may be incomplete, have open
 questions, or change significantly. Drafts live on a branch and are not yet
 ready for formal review, but early feedback from collaborators is encouraged.
 
+Drafts do not have a permanent number. The file is named `DNN-slug.md` where `D`
+stands for "Draft" and `NN` is a two-digit draft slot (D01–D99). This prevents
+speculative cross-draft dependencies and avoids number gaps from abandoned
+drafts. The permanent number is assigned when the RFD advances to Discussion.
+
 ### Discussion
 
-The RFD is complete enough to review. A pull request is opened to merge the
-document into `main`. Discussion happens on the pull request. The author
-incorporates feedback and iterates on the document.
+The RFD is complete enough to review. When the author runs `just rfd-promote
+D01` (using the draft ID), the tooling:
+
+1. Assigns the next available sequential permanent number.
+2. Renames the file from `D01-slug.md` to `042-slug.md` (for example).
+3. Updates the heading in the file.
+
+A pull request is opened to merge the document into `main`. Discussion happens
+on the pull request. The author incorporates feedback and iterates on the
+document.
 
 There is no fixed timeline for discussion. For most RFDs, a few days should
 suffice. If no one has reviewed your RFD after 48 hours, ask someone directly.
@@ -172,16 +184,40 @@ repository with a brief note explaining why. Common reasons: the problem was
 solved differently, priorities changed, or the approach turned out to be
 infeasible.
 
+An abandoned RFD opens with a standard notice block:
+
+```markdown
+::: danger Abandoned
+<one-line reason>
+
+<what was carried forward and where it lives now, if anything.>
+
+The original text below is preserved for historical context.
+:::
+```
+
+If the RFD was split into other RFDs, name the active successors. If portions
+were superseded by a later RFD, name it. If nothing was carried forward, omit
+the second paragraph.
+
 ## Document Format
 
 ### Filename
 
+Drafts use a `DNN` prefix (`D` for Draft, `NN` a two-digit slot):
+
 ```
-docs/rfd/NNN-short-title.md
+docs/rfd/D01-short-title.md
 ```
 
-- `NNN` is a zero-padded, monotonically increasing serial number (001, 002, ...,
-  010, ..., 100).
+When promoted to Discussion, the tooling assigns a permanent number:
+
+```
+docs/rfd/042-short-title.md
+```
+
+- `DNN` is used for drafts; a zero-padded sequential number (001, 002, ...) is
+  assigned at Discussion.
 - `short-title` is a lowercase, hyphen-separated slug. Keep it short but
   descriptive.
 - Numbers are never reused. If an RFD is abandoned, its number is retired.
@@ -200,13 +236,13 @@ corresponding template:
 |                |                              | choice, a convention, a policy.     |
 | **Guide**      | [`000-guide-template.md`]    | How-tos, reference material, and    |
 |                |                              | contributor-facing documentation.   |
-| **Process**    | [`000-guide-template.md`]    | How the project operates:           |
+| **Process**    | [`000-process-template.md`]  | How the project operates:           |
 |                |                              | workflows, policies, values.        |
 
 All categories share the same numbering scheme, directory, lifecycle, and review
 process. The difference is purpose: a Design has a full design section and
-implementation plan; a Decision has concise context and consequences; a Guide
-or Process document is free-form.
+implementation plan; a Decision has concise context and consequences; a Guide or
+Process document is free-form.
 
 **The templates are starting points, not constraints.** Structure the document
 however it reads best. The only requirement is the metadata header (Status,
@@ -223,13 +259,15 @@ just rfd-draft guide "Attachment Handler Guide" # how-to / reference
 just rfd-draft process "Release Process"        # workflow / policy
 ```
 
-This copies the appropriate template to the next available number (e.g.
-`docs/rfd/021-my-feature-title.md`), fills in the title, author, date, and
-category, and sets the status to **Draft**.
+This copies the appropriate template to `docs/rfd/D01-my-feature-title.md` (or
+the next available draft slot), fills in the title, author, date, and category,
+and sets the status to **Draft**. The draft prefix is replaced with a permanent
+number when the RFD is promoted to Discussion.
 
 [`000-design-template.md`]: 000-design-template.md
 [`000-decision-template.md`]: 000-decision-template.md
 [`000-guide-template.md`]: 000-guide-template.md
+[`000-process-template.md`]: 000-process-template.md
 
 #### Document sections
 
@@ -242,13 +280,27 @@ one-sentence Alternatives section is better than no Alternatives section.
 All categories use the same metadata:
 
 ```markdown
-- **Status**: Accepted | Discussion | Accepted | Implemented | Superseded | Abandoned
+- **Status**: Draft | Discussion | Accepted | Implemented | Superseded | Abandoned
 - **Category**: Design | Decision | Guide | Process
 - **Authors**: Name <email> (or GitHub handle)
 - **Date**: YYYY-MM-DD
+- **Tracking Issue**: #NNN (added automatically at Accepted)
+- **Extends**: RFD NNN (if this RFD builds on another)
+- **Extended by**: RFD NNN (if another RFD builds on this one)
 - **Supersedes**: RFD NNN (if applicable)
 - **Superseded by**: RFD NNN (if applicable)
 ```
+
+The `Tracking Issue` field is added automatically by `just rfd-promote` when
+advancing from Discussion to Accepted. It links to a GitHub issue that tracks
+implementation progress. The issue is created by `jp` using the
+`github_create_issue_rfd_tracking` tool, which reads the RFD and generates a
+task list from the Implementation Plan.
+
+The `Extends` and `Extended by` fields capture directional extension
+relationships between RFDs (see [Tooling](#tooling) for `just rfd-extend`).
+Unlike Supersedes, an extending RFD builds on its predecessor — the original
+remains valid and in effect.
 
 ### Writing Style
 
@@ -270,21 +322,22 @@ All categories use the same metadata:
 1. Create a branch for your work.
 2. Run `just rfd-draft CATEGORY Your Title` to generate the file from the
    appropriate template. Category is one of: `design`, `decision`, `guide`,
-   `process`.
+   `process`. The file is created as `DNN-your-title.md` (e.g.
+   `D01-your-title.md`).
 3. Fill in the sections. Write your proposal.
 4. Push your branch. Iterate until you're ready for feedback.
 
 ### Opening for Discussion
 
-1. Run `just rfd-promote NNN` to advance the status to **Discussion**.
+1. Run `just rfd-promote D01` to advance the status to **Discussion**. This
+   assigns a permanent number and renames the file.
 2. Open a pull request to merge your branch into `main`.
 3. Tag reviewers — people with context on the problem area.
 4. Engage with feedback. Update the document as the discussion evolves.
 
 ### Accepting an RFD
-
-1. When discussion converges, run `just rfd-promote NNN` to advance the
-   status to **Accepted**.
+1. When discussion converges, run `just rfd-promote NNN` to advance the status
+   to **Accepted**.
 2. Merge the pull request.
 3. Create implementation issues or tasks as needed.
 
@@ -293,27 +346,37 @@ All categories use the same metadata:
 - **Minor updates**: Edit the document directly on `main` via a standard pull
   request. No new RFD number needed.
 - **Significant changes**: Write a new RFD that supersedes the original.
-- **Implementation complete**: Run `just rfd-promote NNN` to advance the
-  status to **Implemented**.
-- **Design superseded**: Write a new RFD, then run
-  `just rfd-supersede NNN MMM` to mark the old RFD as superseded and
-  cross-link both documents.
-- **Idea abandoned**: Run `just rfd-abandon NNN "reason"` to mark the
-  RFD as abandoned with an explanation.
+- **Implementation complete**: Run `just rfd-promote NNN` to advance the status
+  to **Implemented**.
+- **Design extended**: When a new RFD builds on this one, run `just rfd-extend
+  NNN MMM` to record the relationship in both documents.
+- **Design superseded**: Write a new RFD, then run `just rfd-supersede NNN MMM`
+  to mark the old RFD as superseded and cross-link both documents.
+- **Idea abandoned**: Run `just rfd-abandon NNN "reason"` to mark the RFD as
+  abandoned with an explanation.
 
 ### Tooling
 
 All RFD commands are in the `rfd` group. Run `just --list --group rfd`
 to see them.
 
-| Command | Description |
-|---|---|
-| `just rfd-draft CATEGORY TITLE` | Create a new RFD from the appropriate template. |
-| `just rfd-promote NNN` | Advance status: Draft → Discussion → Accepted → Implemented. |
-| `just rfd-supersede NNN MMM` | Mark RFD NNN as superseded by RFD MMM, updating both. |
-| `just rfd-abandon NNN REASON` | Mark RFD NNN as abandoned with the given reason. |
-| `just rfd-grep TERM` | Search across all RFD documents using `rg`. |
-| `just rfd-list [CATEGORY]` | List all RFDs, optionally filtered by category. |
+| Command                         | Description                              |
+|---------------------------------|------------------------------------------|
+| `just rfd-draft CATEGORY TITLE` | Create a new draft as `DNN-slug.md`.     |
+| `just rfd-promote NNN`          | Advance status. Draft → Discussion       |
+|                                 | assigns number; Discussion → Accepted    |
+|                                 | creates tracking issue.                  |
+| `just rfd-extend NNN MMM`       | Record that RFD MMM extends RFD NNN,     |
+|                                 | updating both.                           |
+| `just rfd-supersede NNN MMM`    | Mark RFD NNN as superseded by RFD MMM,   |
+|                                 | updating both.                           |
+| `just rfd-abandon NNN REASON`   | Mark RFD NNN as abandoned with the given |
+|                                 | reason.                                  |
+| `just rfd-grep TERM`            | Search across all RFD documents using    |
+|                                 | `rg`.                                    |
+| `just rfd-list [CATEGORY]`      | List all RFDs (including DNN-prefixed    |
+|                                 | drafts), optionally filtered by          |
+|                                 | category.                                |
 
 ## Relationship to Architecture Documents
 
@@ -368,7 +431,8 @@ fundamental approach, write a new RFD.
 
 They stay where they are. The architecture directory describes the system as it
 is. The RFD directory captures proposals and decisions. Both are valuable. See
-[Relationship to Architecture Documents](#relationship-to-architecture-documents).
+[Relationship to Architecture
+Documents](#relationship-to-architecture-documents).
 
 ### Do I need approval to merge an RFD?
 

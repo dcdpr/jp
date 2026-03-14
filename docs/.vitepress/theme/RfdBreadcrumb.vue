@@ -8,11 +8,11 @@ const trail = ref([])
 const STORAGE_KEY = 'rfd-trail'
 
 function rfdNum(path) {
-    return path.match(/\/rfd\/(\d{3})-/)?.[1] ?? null
+    return path.match(/\/rfd\/(\d{3}|D\d{2})-/)?.[1] ?? null
 }
 
 function rfdSlug(path) {
-    return path.match(/\/rfd\/((\d{3})-.+?)(?:\.html)?$/)?.[1] ?? null
+    return path.match(/\/rfd\/((\d{3}|D\d{2})-.+?)(?:\.html)?$/)?.[1] ?? null
 }
 
 function saveTrail() {
@@ -46,7 +46,7 @@ function onNavigate(path) {
     saveTrail()
 }
 
-const visible = computed(() => /^\/rfd\/\d{3}-/.test(route.path))
+const visible = computed(() => /^\/rfd\/(\d{3}|D\d{2})-/.test(route.path))
 
 onMounted(() => {
     loadTrail()
