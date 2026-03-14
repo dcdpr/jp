@@ -1,0 +1,21 @@
+[conversation.tools.rfd_supersede]
+enable = false
+run = "ask"
+source = "local"
+command = "just rfd-supersede {{tool.arguments.nnn}} {{tool.arguments.mmm}}"
+description = "Supersede an RFD with another."
+
+[conversation.tools.rfd_supersede.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.rfd_supersede.parameters.nnn]
+description = "ID of the RFD to supersede."
+required = true
+type = "string"
+
+[conversation.tools.rfd_supersede.parameters.mmm]
+description = "ID of the replacement RFD."
+required = true
+type = "string"

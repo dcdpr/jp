@@ -1,8 +1,68 @@
 :root {
-  --vp-c-brand-1: #646cff;
-  --vp-c-brand-2: #747bff;
+    --vp-c-brand-1: #646cff;
+    --vp-c-brand-2: #747bff;
 }
 
 .heading .text {
-  max-width: 800px !important;
+    max-width: 800px !important;
+}
+
+/* ── RFD status badges ────────────────────────────────────────────── */
+
+.rfd-badge {
+    display: inline-block;
+    padding: 0.1rem 0.55rem;
+    border-radius: 9999px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+.rfd-badge--implemented {
+    background: color-mix(in srgb, #10b981 20%, transparent);
+    color: #059669;
+}
+.rfd-badge--accepted {
+    background: color-mix(in srgb, #3b82f6 20%, transparent);
+    color: #2563eb;
+}
+.rfd-badge--discussion {
+    background: color-mix(in srgb, #a855f7 20%, transparent);
+    color: #7c3aed;
+}
+.rfd-badge--draft {
+    background: color-mix(in srgb, #6b7280 20%, transparent);
+    color: #4b5563;
+}
+.rfd-badge--superseded {
+    background: color-mix(in srgb, #f59e0b 20%, transparent);
+    color: #d97706;
+}
+.rfd-badge--abandoned {
+    background: color-mix(in srgb, #ef4444 20%, transparent);
+    color: #dc2626;
+}
+.dark .rfd-badge--implemented {
+    background: color-mix(in srgb, #10b981 25%, transparent);
+    color: #6ee7b7;
+}
+.dark .rfd-badge--accepted {
+    background: color-mix(in srgb, #3b82f6 25%, transparent);
+    color: #93c5fd;
+}
+.dark .rfd-badge--discussion {
+    background: color-mix(in srgb, #a855f7 25%, transparent);
+    color: #d8b4fe;
+}
+.dark .rfd-badge--draft {
+    background: color-mix(in srgb, #6b7280 25%, transparent);
+    color: #d1d5db;
+}
+.dark .rfd-badge--superseded {
+    background: color-mix(in srgb, #f59e0b 25%, transparent);
+    color: #fcd34d;
+}
+.dark .rfd-badge--abandoned {
+    background: color-mix(in srgb, #ef4444 25%, transparent);
+    color: #fca5a5;
 }

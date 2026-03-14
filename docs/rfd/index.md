@@ -42,7 +42,6 @@ const columns = computed(() => {
     ]
     if (showCategory.value) cols.push({ key: 'category', label: 'Category' })
     cols.push({ key: 'status', label: 'Status' })
-    cols.push({ key: 'date', label: 'Date' })
     return cols
 })
 
@@ -55,16 +54,43 @@ function toggleSort(key) {
     }
 }
 
+// Parse structured filters (e.g. `status:draft`) out of the search string.
+const parsedSearch = computed(() => {
+    const raw = search.value.trim()
+    const statusMatch = raw.match(/\bstatus:(\S+)/i)
+    const statusFilter = statusMatch ? statusMatch[1].toLowerCase() : null
+    const textQuery = raw.replace(/\bstatus:\S+/gi, '').trim().toLowerCase()
+    return { statusFilter, textQuery }
+})
+
+function toggleStatusFilter(status) {
+    const s = status?.toLowerCase()
+    if (!s) return
+    const { statusFilter } = parsedSearch.value
+    if (statusFilter === s) {
+        search.value = search.value.replace(/\bstatus:\S+/gi, '').trim()
+    } else if (/\bstatus:\S+/i.test(search.value)) {
+        search.value = search.value.replace(/\bstatus:\S+/gi, `status:${s}`).trim()
+    } else {
+        search.value = (search.value.trim() + ` status:${s}`).trim()
+    }
+}
+
 const filtered = computed(() => {
     let rows = filter.value === 'all'
         ? [...data]
         : data.filter(r => r.category?.toLowerCase() === filter.value)
 
-    const q = search.value.trim().toLowerCase()
-    if (q) {
+    const { statusFilter, textQuery } = parsedSearch.value
+
+    if (statusFilter) {
+        rows = rows.filter(r => r.status?.toLowerCase() === statusFilter)
+    }
+
+    if (textQuery) {
         rows = rows.filter(r =>
-            [r.title, r.category, r.status, r.date, r.summary]
-                .some(v => v?.toLowerCase().includes(q))
+            [r.title, r.category, r.status, r.summary]
+                .some(v => v?.toLowerCase().includes(textQuery))
         )
     }
 
@@ -89,12 +115,15 @@ const filtered = computed(() => {
             @click="filter = cat"
         >{{ cat }}</button>
     </div>
-    <input
-        v-model="search"
-        class="rfd-search"
-        type="text"
-        placeholder="Filter…"
-    />
+    <div class="rfd-search-wrap">
+        <input
+            v-model="search"
+            class="rfd-search"
+            type="text"
+            placeholder="Filter… e.g. status:draft"
+        />
+        <button v-if="search" class="rfd-search-clear" @click="search = ''" title="Clear">&times;</button>
+    </div>
     <button
         :class="['rfd-toggle', { active: showSummaries }]"
         :title="showSummaries ? 'Hide summaries' : 'Show summaries'"
@@ -108,7 +137,6 @@ const filtered = computed(() => {
     <col>
     <col v-if="showCategory" class="rfd-col-category" style="width: 7rem">
     <col style="width: 8rem">
-    <col class="rfd-col-date" style="width: 8rem">
 </colgroup>
 <thead><tr>
     <th v-for="col in columns" :key="col.key" :class="['rfd-sortable', 'rfd-col-' + col.key]" @click="toggleSort(col.key)">
@@ -123,8 +151,10 @@ const filtered = computed(() => {
         <div v-if="showSummaries && rfd.summary" class="rfd-summary">{{ rfd.summary }}</div>
     </td>
     <td v-if="showCategory" class="rfd-col-category">{{ rfd.category }}</td>
-    <td><span :class="'rfd-badge rfd-badge--' + (rfd.status?.toLowerCase() ?? 'unknown')">{{ rfd.status }}</span></td>
-    <td class="rfd-col-date">{{ rfd.date }}</td>
+    <td><span
+        :class="['rfd-badge', 'rfd-badge--' + (rfd.status?.toLowerCase() ?? 'unknown'), { 'rfd-badge--active': parsedSearch.statusFilter === rfd.status?.toLowerCase() }]"
+        @click="toggleStatusFilter(rfd.status)"
+    >{{ rfd.status }}</span></td>
 </tr>
 </tbody>
 </table>
@@ -143,21 +173,49 @@ const filtered = computed(() => {
     display: flex;
     gap: 0.5rem;
 }
+.rfd-search-wrap {
+    position: relative;
+    width: 14rem;
+}
 .rfd-search {
-    padding: 0.3rem 0.75rem;
+    padding: 0.3rem 1.75rem 0.3rem 0.75rem;
     border: 1px solid var(--vp-c-divider);
     border-radius: 4px;
     background: transparent;
     color: var(--vp-c-text-1);
     font-size: 0.9rem;
     outline: none;
-    width: 14rem;
+    width: 100%;
+    box-sizing: border-box;
 }
 .rfd-search::placeholder {
     color: var(--vp-c-text-3);
 }
 .rfd-search:focus {
     border-color: var(--vp-c-brand-1);
+}
+.rfd-search-clear {
+    position: absolute;
+    right: 0.35rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1.2rem;
+    height: 1.2rem;
+    border-radius: 50%;
+    border: none;
+    background: var(--vp-c-divider);
+    color: var(--vp-c-text-2);
+    cursor: pointer;
+    font-size: 0.85rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+.rfd-search-clear:hover {
+    background: var(--vp-c-text-3);
+    color: var(--vp-c-bg);
 }
 .rfd-filter {
     padding: 0.25rem 0.75rem;
@@ -212,67 +270,17 @@ const filtered = computed(() => {
     line-height: 1.4;
     margin-top: 0.15rem;
 }
-.rfd-badge {
-    display: inline-block;
-    padding: 0.1rem 0.55rem;
-    border-radius: 9999px;
-    font-size: 0.8rem;
-    font-weight: 500;
-    line-height: 1.4;
-    white-space: nowrap;
+.rfd-table .rfd-badge {
+    cursor: pointer;
+    transition: opacity 0.15s, box-shadow 0.15s;
 }
-.rfd-badge--implemented {
-    background: color-mix(in srgb, #10b981 20%, transparent);
-    color: #059669;
+.rfd-table .rfd-badge:hover {
+    opacity: 0.8;
 }
-.rfd-badge--accepted {
-    background: color-mix(in srgb, #3b82f6 20%, transparent);
-    color: #2563eb;
-}
-.rfd-badge--discussion {
-    background: color-mix(in srgb, #a855f7 20%, transparent);
-    color: #7c3aed;
-}
-.rfd-badge--draft {
-    background: color-mix(in srgb, #6b7280 20%, transparent);
-    color: #4b5563;
-}
-.rfd-badge--superseded {
-    background: color-mix(in srgb, #f59e0b 20%, transparent);
-    color: #d97706;
-}
-.rfd-badge--abandoned {
-    background: color-mix(in srgb, #ef4444 20%, transparent);
-    color: #dc2626;
-}
-.dark .rfd-badge--implemented {
-    background: color-mix(in srgb, #10b981 25%, transparent);
-    color: #6ee7b7;
-}
-.dark .rfd-badge--accepted {
-    background: color-mix(in srgb, #3b82f6 25%, transparent);
-    color: #93c5fd;
-}
-.dark .rfd-badge--discussion {
-    background: color-mix(in srgb, #a855f7 25%, transparent);
-    color: #d8b4fe;
-}
-.dark .rfd-badge--draft {
-    background: color-mix(in srgb, #6b7280 25%, transparent);
-    color: #d1d5db;
-}
-.dark .rfd-badge--superseded {
-    background: color-mix(in srgb, #f59e0b 25%, transparent);
-    color: #fcd34d;
-}
-.dark .rfd-badge--abandoned {
-    background: color-mix(in srgb, #ef4444 25%, transparent);
-    color: #fca5a5;
+.rfd-badge--active {
+    box-shadow: 0 0 0 2px var(--vp-c-brand-1);
 }
 @media (max-width: 767px) {
-    .rfd-col-date {
-        display: none;
-    }
     .rfd-table {
         table-layout: auto !important;
     }
@@ -291,10 +299,12 @@ const filtered = computed(() => {
         padding: 0.2rem 0.5rem;
         white-space: nowrap;
     }
-    .rfd-search {
+    .rfd-search-wrap {
         flex: 1;
         min-width: 0;
         width: auto;
+    }
+    .rfd-search {
         font-size: 1rem;
     }
     .rfd-col-category {

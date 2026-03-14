@@ -143,6 +143,10 @@
     "hash": "20ac71e5dcf878a3a8ec468293fee7a1aaa1b797638f7095f43c405e6d0f2cb3",
     "summary": "Composable conversation compaction via mechanical strategies, tool-aware deduplication, LLM summarization, and protocol extensions for declarative compaction hints."
   },
+  "041-rfd-lifecycle-deferred-numbering-tracking-issues-and-extends-metadata.md": {
+    "hash": "43a8a71ef29d809239fe50867b2f40b58695d61e6d583f6d7c2b968cd06c3748",
+    "summary": "Defer RFD numbering to Discussion, auto-create tracking issues, add Extends/Extended by metadata."
+  },
   "042-tool-options.md": {
     "hash": "d5c094882a3f52d471c2a0d156f018ca23bfb5464f47469de8d74954bf824c70",
     "summary": "Introduces per-tool options field for static user-defined configuration passed to tools at runtime."

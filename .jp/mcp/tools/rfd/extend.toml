@@ -1,0 +1,21 @@
+[conversation.tools.rfd_extend]
+enable = false
+run = "ask"
+source = "local"
+command = "just rfd-extend {{tool.arguments.nnn}} {{tool.arguments.mmm}}"
+description = "Record that RFD MMM extends RFD NNN, updating both documents."
+
+[conversation.tools.rfd_extend.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.rfd_extend.parameters.nnn]
+description = "ID of the RFD being extended (the older, established RFD). Must be in Accepted or Implemented status."
+required = true
+type = "string"
+
+[conversation.tools.rfd_extend.parameters.mmm]
+description = "ID of the RFD that extends the other (the newer RFD)."
+required = true
+type = "string"

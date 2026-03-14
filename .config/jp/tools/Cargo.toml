@@ -13,6 +13,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+jp_github = { workspace = true }
 jp_tool = { workspace = true }
 
 base64 = { workspace = true, features = ["std"] }
@@ -28,7 +29,6 @@ grep-regex = { workspace = true }
 grep-searcher = { workspace = true }
 ignore = { workspace = true }
 indoc = { workspace = true }
-jp_github = { workspace = true }
 quick-xml = { workspace = true, features = ["encoding", "serialize"] }
 reqwest = { workspace = true, features = [
     "charset",

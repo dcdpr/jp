@@ -1,0 +1,16 @@
+[conversation.tools.rfd_abandon]
+enable = false
+run = "ask"
+source = "local"
+command = "just rfd-abandon {{tool.arguments.nnn}}"
+description = "Abandon an RFD."
+
+[conversation.tools.rfd_abandon.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.rfd_abandon.parameters.nnn]
+description = "ID of the RFD to abandon."
+required = true
+type = "string"

@@ -5,12 +5,14 @@ use crate::{
 
 mod create_issue_bug;
 mod create_issue_enhancement;
+mod create_issue_rfd_tracking;
 mod issues;
 mod pulls;
 mod repo;
 
 use create_issue_bug::github_create_issue_bug;
 use create_issue_enhancement::github_create_issue_enhancement;
+use create_issue_rfd_tracking::github_create_issue_rfd_tracking;
 use issues::github_issues;
 use pulls::github_pulls;
 use repo::{github_code_search, github_list_files, github_read_file};
@@ -51,6 +53,15 @@ pub async fn run(_: Context, t: Tool) -> ToolResult {
             t.opt("resource_links")?,
             t.opt("labels")?,
             t.opt("assignees")?,
+        )
+        .await
+        .map(Into::into),
+
+        "create_issue_rfd_tracking" => github_create_issue_rfd_tracking(
+            t.req("rfd_number")?,
+            t.req("rfd_title")?,
+            t.req("rfd_slug")?,
+            t.req("tasks")?,
         )
         .await
         .map(Into::into),

@@ -2,6 +2,10 @@
   This template is a starting point, not a constraint. Delete sections that
   don't apply, add sections that do, or restructure entirely. The only
   requirement is the metadata header (Status, Authors, Date).
+
+  Use HTML comments like this one for draft-time notes and review markers.
+  They do not appear in the rendered output and can be removed when the RFD
+  advances to Discussion status.
 -->
 
 # RFD NNN: TITLE
