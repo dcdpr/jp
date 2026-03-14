@@ -882,4 +882,4 @@ fn run_dhat() -> dhat::Profiler {
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]
-mod lib_tests;
+mod tests;
