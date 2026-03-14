@@ -4,6 +4,7 @@
 // semantic edits with (in-memory) staged changes.
 
 use std::{
+    collections::BTreeMap,
     fmt::{self, Write as _},
     fs::{self},
     ops::{Deref, DerefMut},
@@ -22,7 +23,7 @@ use super::utils::is_file_dirty_impl;
 use crate::{
     Context, Error,
     util::{
-        ToolResult, error, fail,
+        OneOrMany, ToolResult, error, fail,
         runner::{DuctProcessRunner, ProcessRunner},
     },
 };
@@ -30,7 +31,8 @@ use crate::{
 pub(crate) async fn fs_modify_file(
     ctx: Context,
     answers: &Map<String, Value>,
-    path: String,
+    options: &Map<String, Value>,
+    path: Option<String>,
     patterns: Vec<Pattern>,
     replace_using_regex: bool,
     replace_all: bool,
@@ -39,7 +41,8 @@ pub(crate) async fn fs_modify_file(
     fs_modify_file_impl(
         &ctx,
         answers,
-        &path,
+        options,
+        path.as_deref(),
         &patterns,
         replace_using_regex,
         replace_all,
@@ -48,10 +51,12 @@ pub(crate) async fn fs_modify_file(
     )
 }
 
+#[expect(clippy::too_many_lines)]
 fn fs_modify_file_impl<R: ProcessRunner>(
     ctx: &Context,
     answers: &Map<String, Value>,
-    path: &str,
+    options: &Map<String, Value>,
+    path: Option<&str>,
     patterns: &[Pattern],
     replace_using_regex: bool,
     replace_all: bool,
@@ -62,7 +67,7 @@ fn fs_modify_file_impl<R: ProcessRunner>(
         return error(msg);
     }
 
-    if let Err(msg) = validate_path(path) {
+    if let Err(msg) = validate_paths(path, patterns) {
         return error(msg);
     }
 
@@ -86,50 +91,71 @@ fn fs_modify_file_impl<R: ProcessRunner>(
         }
     }
 
-    let absolute_path = ctx.root.join(path.trim_start_matches('/'));
+    // Apply patterns, tracking per-file content mutations.
+    // Keys are relative paths; values are (original, current) content.
+    let mut files: BTreeMap<Utf8PathBuf, (String, String)> = BTreeMap::new();
+    let mut outcomes = Vec::with_capacity(patterns.len());
 
-    let mut changes = vec![];
-    let mut last_outcomes: Vec<PatternOutcome> = vec![];
-
-    for entry in glob::glob(absolute_path.as_ref())? {
-        let entry = entry?;
-        let Ok(entry) = Utf8PathBuf::try_from(entry) else {
-            return error("Path is not valid UTF-8.");
+    for pattern in patterns {
+        let targets: Vec<&str> = match &pattern.paths {
+            Some(paths) => paths.iter().map(String::as_str).collect(),
+            None => vec![path.expect("validated above")],
         };
 
-        if !entry.exists() {
-            return error("File does not exist.");
+        let mut applied_any = false;
+
+        for target in &targets {
+            let clean = target.trim_start_matches('/');
+            let relative = Utf8PathBuf::from(clean);
+            let absolute = ctx.root.join(clean);
+
+            // Load file on first access.
+            if !files.contains_key(&relative) {
+                if !absolute.exists() {
+                    return error(format!("File does not exist: {clean}"));
+                }
+                if !absolute.is_file() {
+                    return error(format!("Path is not a regular file: {clean}"));
+                }
+                let Ok(stripped) = absolute.strip_prefix(&ctx.root) else {
+                    return fail("Path is not within workspace root.");
+                };
+                let content = fs::read_to_string(&absolute)?;
+                files.insert(stripped.to_owned(), (content.clone(), content));
+            }
+
+            let (_, current) = files.get_mut(&relative).unwrap();
+            let contents = Content(current.clone());
+            let result = if replace_using_regex {
+                contents.replace_regexp(&pattern.old, &pattern.new, replace_all, case_sensitive)
+            } else {
+                contents.replace_literal(&pattern.old, &pattern.new, replace_all, case_sensitive)
+            };
+
+            if let Ok(after) = result {
+                *current = after;
+                applied_any = true;
+            }
         }
 
-        if !entry.is_file() {
-            return error("Path is not a regular file.");
-        }
-
-        let Ok(path) = entry.strip_prefix(&ctx.root) else {
-            return fail("Path is not within workspace root.");
-        };
-
-        let before = fs::read_to_string(&entry)?;
-        let result = apply_patterns(
-            before.clone(),
-            patterns,
-            replace_using_regex,
-            replace_all,
-            case_sensitive,
-        );
-
-        last_outcomes = result.outcomes;
-
-        if before != result.content {
-            changes.push(Change {
-                path: path.to_owned(),
-                before,
-                after: result.content,
-            });
-        }
+        outcomes.push(if applied_any {
+            PatternOutcome::Applied
+        } else {
+            PatternOutcome::NotFound
+        });
     }
 
-    let report = format_pattern_report(patterns, &last_outcomes);
+    let changes: Vec<Change> = files
+        .into_iter()
+        .filter(|(_, (original, current))| original != current)
+        .map(|(path, (original, current))| Change {
+            path,
+            before: original,
+            after: current,
+        })
+        .collect();
+
+    let report = format_pattern_report(patterns, &outcomes);
 
     if changes.is_empty() {
         if report.is_empty() {
@@ -138,32 +164,34 @@ fn fs_modify_file_impl<R: ProcessRunner>(
         return Ok(report.into());
     }
 
-    if ctx.action.is_run() {
-        // Guard: flag changes that affect a large fraction of the file.
-        if let Some(broad_files) = find_broad_changes(&changes) {
-            let files = broad_files.join(", ");
-            if let Some(result) = guard_broad_replacement(
-                answers,
-                "Replacement rejected: too many lines changed.",
-                format!(
-                    "The replacement modifies more than {BROAD_CHANGE_MAX_PERCENT}% of lines in: \
-                     {files}. This may be unintentional. Continue anyway?",
-                ),
-            ) {
-                return result;
-            }
-        }
-
-        let result = apply_changes(changes, &ctx.root, answers, runner)?;
-        Ok(prepend_report(result, &report))
-    } else {
+    if ctx.action.is_format_arguments() {
         let diff = format_changes(changes);
         if report.is_empty() {
-            Ok(diff.into())
-        } else {
-            Ok(format!("{report}\n\n{diff}").into())
+            return Ok(diff.into());
+        }
+
+        return Ok(format!("{report}\n\n{diff}").into());
+    }
+
+    // Guard: flag changes that affect a large fraction of the file.
+    if let Some(broad_files) = find_broad_changes(&changes) {
+        let files = broad_files.join(", ");
+        if let Some(result) = guard_broad_replacement(
+            answers,
+            "Replacement rejected: too many lines changed.",
+            format!(
+                "The replacement modifies more than {BROAD_CHANGE_MAX_PERCENT}% of lines in: \
+                 {files}. This may be unintentional. Continue anyway?",
+            ),
+        ) {
+            return result;
         }
     }
+
+    let auto_approve = parse_auto_approve_config(options);
+    let result = apply_changes(changes, &ctx.root, answers, &auto_approve, runner)?;
+
+    Ok(append_report(result, &report))
 }
 
 /// A search-and-replace pattern.
@@ -174,6 +202,10 @@ pub(crate) struct Pattern {
 
     /// The replacement string.
     pub new: String,
+
+    /// Optional per-pattern file paths. Overrides the root-level `path`.
+    #[serde(default)]
+    pub paths: Option<OneOrMany<String>>,
 }
 
 /// Result of applying a single pattern.
@@ -184,15 +216,6 @@ enum PatternOutcome {
 
     /// The pattern was not found in the content.
     NotFound,
-}
-
-/// Result of applying all patterns to file content.
-struct ApplyResult {
-    /// The content after all applicable patterns have been applied.
-    content: String,
-
-    /// Per-pattern outcome, in the same order as the input patterns.
-    outcomes: Vec<PatternOutcome>,
 }
 
 /// Validates the patterns for common errors.
@@ -220,61 +243,62 @@ fn validate_patterns(patterns: &[Pattern]) -> Result<(), String> {
     Ok(())
 }
 
-/// Validates a file path for common errors.
-///
-/// Returns an error message if invalid, or `None` if the path is valid.
-fn validate_path(path: &str) -> Result<(), &'static str> {
-    let p = Utf8PathBuf::from(path);
+/// Validates that every pattern has at least one target path, and all paths are
+/// relative.
+fn validate_paths(default_path: Option<&str>, patterns: &[Pattern]) -> Result<(), String> {
+    // Check the default path if provided.
+    if let Some(p) = default_path {
+        validate_single_path(p)?;
+    }
 
-    if p.is_absolute() {
-        return Err("Path must be relative.");
+    // Every pattern must have a target: either from the default or its own paths.
+    if default_path.is_none() {
+        let missing: Vec<_> = patterns
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.paths.is_none())
+            .map(|(i, _)| format!("#{}", i + 1))
+            .collect();
+
+        if !missing.is_empty() {
+            return Err(format!(
+                "Pattern(s) {} have no target files. Provide `path` at the top level or `paths` \
+                 in each pattern.",
+                missing.join(", ")
+            ));
+        }
+    }
+
+    // Validate per-pattern paths.
+    for (i, pattern) in patterns.iter().enumerate() {
+        if let Some(paths) = &pattern.paths {
+            if paths.is_empty() {
+                return Err(format!("Pattern #{} has an empty `paths` array.", i + 1));
+            }
+            for p in paths.iter() {
+                validate_single_path(p)?;
+            }
+        }
     }
 
     Ok(())
 }
 
-/// Applies patterns sequentially to the content.
-///
-/// Each pattern operates on the result of the previous one. If a pattern's
-/// `old` string is not found, it is skipped and marked as `NotFound`.
-fn apply_patterns(
-    content: String,
-    patterns: &[Pattern],
-    replace_using_regex: bool,
-    replace_all: bool,
-    case_sensitive: bool,
-) -> ApplyResult {
-    let mut current = content;
-    let mut outcomes = Vec::with_capacity(patterns.len());
-
-    for pattern in patterns {
-        let contents = Content(current);
-        let result = if replace_using_regex {
-            contents.replace_regexp(&pattern.old, &pattern.new, replace_all, case_sensitive)
-        } else {
-            contents.replace_literal(&pattern.old, &pattern.new, replace_all, case_sensitive)
-        };
-
-        current = if let Ok(after) = result {
-            outcomes.push(PatternOutcome::Applied);
-            after
-        } else {
-            outcomes.push(PatternOutcome::NotFound);
-            contents.0
-        };
+/// Validates a single file path.
+fn validate_single_path(path: &str) -> Result<(), String> {
+    let p = Utf8PathBuf::from(path);
+    if p.is_absolute() {
+        return Err(format!("Path must be relative: {path}"));
     }
 
-    ApplyResult {
-        content: current,
-        outcomes,
-    }
+    Ok(())
 }
 
 /// Formats a report of pattern outcomes.
 ///
-/// Returns empty string when there is a single pattern that succeeded
-/// (backward-compatible). Shows a summary when there are multiple patterns,
-/// and details which patterns were not found.
+/// Returns empty string when there is a single pattern that succeeded. Shows a
+/// summary when there are multiple patterns, and details which patterns were
+/// not found.
 fn format_pattern_report(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> String {
     let total = outcomes.len();
     let applied = outcomes
@@ -312,23 +336,24 @@ fn format_pattern_report(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> S
 fn pattern_preview(s: &str) -> String {
     let first_line = s.lines().next().unwrap_or(s);
     if first_line.chars().count() <= 60 {
-        first_line.to_owned()
-    } else {
-        let truncated: String = first_line.chars().take(57).collect();
-        format!("{truncated}...")
+        return first_line.to_owned();
     }
+
+    let truncated: String = first_line.chars().take(57).collect();
+    format!("{truncated}...")
 }
 
 /// Prepends a report to a successful outcome.
 ///
 /// Non-success outcomes (e.g. `NeedsInput`) are passed through unchanged.
-fn prepend_report(outcome: Outcome, report: &str) -> Outcome {
+fn append_report(outcome: Outcome, report: &str) -> Outcome {
     if report.is_empty() {
         return outcome;
     }
+
     match outcome {
         Outcome::Success { content } => Outcome::Success {
-            content: format!("{report}\n\n{content}"),
+            content: format!("{content}\n\n{report}"),
         },
         other => other,
     }
@@ -340,13 +365,13 @@ fn prepend_report(outcome: Outcome, report: &str) -> Outcome {
 /// which is almost never intended in a search-and-replace context.
 const BLOCKED_REGEX_PATTERNS: &[&str] = &[".*", ".+", "^.*$", "^.+$", r"[\s\S]*", r"[\s\S]+"];
 
-/// Minimum number of lines in the original file before the broad-change
-/// check activates. Small files are not worth flagging.
+/// Minimum number of lines in the original file before the broad-change check
+/// activates. Small files are not worth flagging.
 const BROAD_CHANGE_MIN_LINES: usize = 10;
 
 /// Maximum percentage of changed (deleted) lines to total lines before asking
-/// for confirmation. 50 means more than 50% of the original lines were
-/// removed or replaced.
+/// for confirmation. 50 means more than 50% of the original lines were removed
+/// or replaced.
 const BROAD_CHANGE_MAX_PERCENT: usize = 50;
 
 /// Returns the subset of patterns whose `old` field is a known overly-broad
@@ -359,17 +384,17 @@ fn find_blocked_regex_patterns(patterns: &[Pattern]) -> Option<Vec<&str>> {
         .collect::<Vec<_>>();
 
     if matches.is_empty() {
-        None
-    } else {
-        Some(matches)
+        return None;
     }
+
+    Some(matches)
 }
 
-/// Returns `true` if the change modifies a suspiciously large fraction of
-/// the file.
+/// Returns `true` if the change modifies a suspiciously large fraction of the
+/// file.
 ///
-/// Only activates for files with at least [`BROAD_CHANGE_MIN_LINES`] lines.
-/// The ratio is computed as deleted lines / total original lines.
+/// Only activates for files with at least [`BROAD_CHANGE_MIN_LINES`] lines. The
+/// ratio is computed as deleted lines / total original lines.
 fn is_broad_change(before: &str, after: &str) -> bool {
     let total_lines = before.lines().count();
     if total_lines < BROAD_CHANGE_MIN_LINES {
@@ -408,8 +433,8 @@ fn guard_broad_replacement(
     }
 }
 
-/// Returns the paths of changes that affect a suspiciously large fraction
-/// of the file.
+/// Returns the paths of changes that affect a suspiciously large fraction of
+/// the file.
 fn find_broad_changes(changes: &[Change]) -> Option<Vec<&str>> {
     let matches = changes
         .iter()
@@ -418,10 +443,10 @@ fn find_broad_changes(changes: &[Change]) -> Option<Vec<&str>> {
         .collect::<Vec<_>>();
 
     if matches.is_empty() {
-        None
-    } else {
-        Some(matches)
+        return None;
     }
+
+    Some(matches)
 }
 
 pub struct Change {
@@ -452,8 +477,9 @@ impl Content {
             .or_else(|| self.find_trimmed_substring(pattern))
             .or_else(|| {
                 // Only use fuzzy matching for single-line patterns.
-                // Multi-line fuzzy matching is unreliable because the pattern length
-                // may not match the actual matched text length due to different line wrapping.
+                // Multi-line fuzzy matching is unreliable because the pattern
+                // length may not match the actual matched text length due to
+                // different line wrapping.
                 if pattern.lines().count() <= 1 {
                     self.find_fuzzy_substring(pattern)
                 } else {
@@ -490,6 +516,7 @@ impl Content {
             }
             byte_offset += line.len() + 1; // +1 for newline
         }
+
         None
     }
 
@@ -532,8 +559,8 @@ impl Content {
         }
 
         // Derive the actual matched text (may differ from `find` due to
-        // trimmed/fuzzy matching) so we can find all subsequent
-        // occurrences using exact substring search.
+        // trimmed/fuzzy matching) so we can find all subsequent occurrences
+        // using exact substring search.
         let matched = &self.0[first_start..first_end];
 
         let mut result = String::with_capacity(self.0.len());
@@ -621,10 +648,98 @@ fn format_changes(changes: Vec<Change>) -> String {
     diff
 }
 
+/// Parsed auto-approve configuration from tool options.
+struct AutoApproveConfig {
+    enabled: bool,
+    max_changed_files: usize,
+    max_changed_lines: usize,
+    max_ratio_percent: usize,
+}
+
+impl AutoApproveConfig {
+    const DEFAULT_MAX_CHANGED_FILES: usize = 2;
+    const DEFAULT_MAX_CHANGED_LINES: usize = 10;
+    const DEFAULT_MAX_RATIO_PERCENT: usize = 20;
+}
+
+fn parse_auto_approve_config(options: &Map<String, Value>) -> AutoApproveConfig {
+    let trigger = options
+        .get("apply_changes_trigger")
+        .and_then(Value::as_str)
+        .unwrap_or("always");
+
+    let enabled = trigger == "heuristics";
+
+    let max_changed_files = options
+        .get("auto_approve_max_changed_files")
+        .and_then(Value::as_u64)
+        .map_or(AutoApproveConfig::DEFAULT_MAX_CHANGED_FILES, |v| {
+            usize::try_from(v).unwrap_or(AutoApproveConfig::DEFAULT_MAX_CHANGED_FILES)
+        });
+
+    let max_changed_lines = options
+        .get("auto_approve_max_changed_lines")
+        .and_then(Value::as_u64)
+        .map_or(AutoApproveConfig::DEFAULT_MAX_CHANGED_LINES, |v| {
+            usize::try_from(v).unwrap_or(AutoApproveConfig::DEFAULT_MAX_CHANGED_LINES)
+        });
+
+    let max_ratio_percent = options
+        .get("auto_approve_max_ratio_percent")
+        .and_then(Value::as_u64)
+        .map_or(AutoApproveConfig::DEFAULT_MAX_RATIO_PERCENT, |v| {
+            usize::try_from(v).unwrap_or(AutoApproveConfig::DEFAULT_MAX_RATIO_PERCENT)
+        });
+
+    AutoApproveConfig {
+        enabled,
+        max_changed_files,
+        max_changed_lines,
+        max_ratio_percent,
+    }
+}
+
+/// Returns `true` if the changes are small enough to skip the `apply_changes`
+/// inquiry.
+///
+/// Criteria (all must hold):
+/// - Tlta. changed files <= threshold
+/// - Total changed lines (insertions + deletions) <= threshold
+/// - Deletion ratio per file < threshold percent
+fn should_auto_approve(changes: &[(String, String, String)], config: &AutoApproveConfig) -> bool {
+    if !config.enabled || changes.len() > config.max_changed_files {
+        return false;
+    }
+
+    let mut total_changed = 0;
+    for (_, before, after) in changes {
+        let diff = text_diff(before, after);
+        let (insertions, deletions) =
+            diff.iter_all_changes()
+                .fold((0usize, 0usize), |(ins, del), c| match c.tag() {
+                    ChangeTag::Insert => (ins + 1, del),
+                    ChangeTag::Delete => (ins, del + 1),
+                    ChangeTag::Equal => (ins, del),
+                });
+
+        total_changed += insertions + deletions;
+
+        let total_lines = before.lines().count();
+        if total_lines >= BROAD_CHANGE_MIN_LINES
+            && deletions * 100 > total_lines * config.max_ratio_percent
+        {
+            return false;
+        }
+    }
+
+    total_changed <= config.max_changed_lines
+}
+
 fn apply_changes<R: ProcessRunner>(
     changes: Vec<Change>,
     root: &Utf8Path,
     answers: &Map<String, Value>,
+    auto_approve: &AutoApproveConfig,
     runner: &R,
 ) -> Result<Outcome, Error> {
     let mut queue = vec![];
@@ -669,6 +784,19 @@ fn apply_changes<R: ProcessRunner>(
         })
         .collect::<Vec<_>>()
         .join("\n\n");
+
+    if should_auto_approve(&queue, auto_approve) {
+        for (path, _, after) in &queue {
+            fs::write(root.join(path), after)?;
+        }
+
+        return Ok(format!(
+            "{} modified successfully:\n\n{}",
+            if count == 1 { "File" } else { "Files" },
+            patch
+        )
+        .into());
+    }
 
     match answers.get("apply_changes").and_then(Value::as_bool) {
         Some(true) => {}

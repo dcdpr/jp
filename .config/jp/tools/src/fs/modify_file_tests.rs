@@ -23,6 +23,7 @@ fn pat(old: &str, new: &str) -> Vec<Pattern> {
     vec![Pattern {
         old: old.to_owned(),
         new: new.to_owned(),
+        paths: None,
     }]
 }
 
@@ -76,7 +77,8 @@ fn run_modify_with(
     let result = fs_modify_file_impl(
         &ctx,
         answers,
-        "test.txt",
+        &Map::new(),
+        Some("test.txt"),
         patterns,
         regex,
         true,
@@ -121,20 +123,74 @@ fn test_validate_patterns() {
     }
 }
 
-#[test]
-fn test_validate_path() {
-    let cases = [
-        ("absolute", "/absolute/path", Err("Path must be relative.")),
-        ("relative", "src/main.rs", Ok(())),
-    ];
+mod validate_paths {
+    use super::*;
 
-    for (name, path, expected) in cases {
-        let mut path = path.to_owned();
-        if cfg!(windows) && path.starts_with('/') {
-            path = format!("c:{path}");
-        }
+    #[test]
+    fn test_absolute_default_path() {
+        let result = validate_paths(Some("/absolute"), &pat("a", "b"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("relative"));
+    }
 
-        assert_eq!(validate_path(&path), expected, "test case: {name}");
+    #[test]
+    fn test_relative_default_path() {
+        assert!(validate_paths(Some("src/main.rs"), &pat("a", "b")).is_ok());
+    }
+
+    #[test]
+    fn test_no_default_all_patterns_have_paths() {
+        let patterns = vec![Pattern {
+            old: "a".to_owned(),
+            new: "b".to_owned(),
+            paths: Some(OneOrMany::One("src/lib.rs".to_owned())),
+        }];
+        assert!(validate_paths(None, &patterns).is_ok());
+    }
+
+    #[test]
+    fn test_no_default_some_patterns_missing_paths() {
+        let patterns = vec![
+            Pattern {
+                old: "a".to_owned(),
+                new: "b".to_owned(),
+                paths: Some(OneOrMany::One("src/lib.rs".to_owned())),
+            },
+            Pattern {
+                old: "c".to_owned(),
+                new: "d".to_owned(),
+                paths: None,
+            },
+        ];
+        let result = validate_paths(None, &patterns);
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("#2"), "msg: {msg}");
+        assert!(msg.contains("no target files"), "msg: {msg}");
+    }
+
+    #[test]
+    fn test_absolute_per_pattern_path() {
+        let patterns = vec![Pattern {
+            old: "a".to_owned(),
+            new: "b".to_owned(),
+            paths: Some(OneOrMany::One("/etc/passwd".to_owned())),
+        }];
+        let result = validate_paths(None, &patterns);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("relative"));
+    }
+
+    #[test]
+    fn test_empty_per_pattern_paths() {
+        let patterns = vec![Pattern {
+            old: "a".to_owned(),
+            new: "b".to_owned(),
+            paths: Some(OneOrMany::Many(vec![])),
+        }];
+        let result = validate_paths(None, &patterns);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty"));
     }
 }
 
@@ -230,10 +286,37 @@ fn test_find_broad_changes() {
     assert_eq!(find_broad_changes(&changes), None);
 }
 
-mod apply_patterns {
+mod apply_patterns_content {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    /// Helper to apply patterns to content directly via the Content API.
+    fn apply(content: &str, patterns: &[Pattern], regex: bool) -> (String, Vec<PatternOutcome>) {
+        let mut current = content.to_owned();
+        let mut outcomes = Vec::new();
+
+        for pattern in patterns {
+            let c = Content(current.clone());
+            let result = if regex {
+                c.replace_regexp(&pattern.old, &pattern.new, true, true)
+            } else {
+                c.replace_literal(&pattern.old, &pattern.new, true, true)
+            };
+
+            match result {
+                Ok(after) => {
+                    current = after;
+                    outcomes.push(PatternOutcome::Applied);
+                }
+                Err(_) => {
+                    outcomes.push(PatternOutcome::NotFound);
+                }
+            }
+        }
+
+        (current, outcomes)
+    }
 
     #[test]
     fn test_basic_replacements() {
@@ -298,15 +381,9 @@ mod apply_patterns {
         ];
 
         for (name, tc) in cases {
-            let result = apply_patterns(
-                tc.content.to_owned(),
-                &pat(tc.old, tc.new),
-                false,
-                true,
-                true,
-            );
-            assert_eq!(result.content, tc.expected, "test case: {name}");
-            assert_eq!(result.outcomes, vec![tc.outcome], "test case: {name}");
+            let (result, outcomes) = apply(tc.content, &pat(tc.old, tc.new), false);
+            assert_eq!(result, tc.expected, "test case: {name}");
+            assert_eq!(outcomes, vec![tc.outcome], "test case: {name}");
         }
     }
 
@@ -316,16 +393,18 @@ mod apply_patterns {
             Pattern {
                 old: "bbb".to_owned(),
                 new: "xxx".to_owned(),
+                paths: None,
             },
             Pattern {
                 old: "xxx ccc".to_owned(),
                 new: "yyy".to_owned(),
+                paths: None,
             },
         ];
 
-        let result = apply_patterns("aaa bbb ccc".to_owned(), &patterns, false, true, true);
-        assert_eq!(result.content, "aaa yyy");
-        assert_eq!(result.outcomes, vec![
+        let (result, outcomes) = apply("aaa bbb ccc", &patterns, false);
+        assert_eq!(result, "aaa yyy");
+        assert_eq!(outcomes, vec![
             PatternOutcome::Applied,
             PatternOutcome::Applied,
         ]);
@@ -337,16 +416,18 @@ mod apply_patterns {
             Pattern {
                 old: "missing".to_owned(),
                 new: "x".to_owned(),
+                paths: None,
             },
             Pattern {
                 old: "world".to_owned(),
                 new: "earth".to_owned(),
+                paths: None,
             },
         ];
 
-        let result = apply_patterns("hello world".to_owned(), &patterns, false, true, true);
-        assert_eq!(result.content, "hello earth");
-        assert_eq!(result.outcomes, vec![
+        let (result, outcomes) = apply("hello world", &patterns, false);
+        assert_eq!(result, "hello earth");
+        assert_eq!(outcomes, vec![
             PatternOutcome::NotFound,
             PatternOutcome::Applied,
         ]);
@@ -398,8 +479,8 @@ mod apply_patterns {
             }"
         );
 
-        let result = apply_patterns(source.to_owned(), &pat(old, new), false, true, true);
-        assert_eq!(result.content, expected);
+        let (result, _) = apply(source, &pat(old, new), false);
+        assert_eq!(result, expected);
     }
 
     /// Regression: pattern with trailing newline should match correctly.
@@ -440,8 +521,8 @@ mod apply_patterns {
             pub(crate) struct Rm {
                 /// Conversation IDs to remove."};
 
-        let result = apply_patterns(source.to_owned(), &pat(old, new), false, true, true);
-        assert_eq!(result.content, expected);
+        let (result, _) = apply(source, &pat(old, new), false);
+        assert_eq!(result, expected);
     }
 }
 
@@ -460,10 +541,12 @@ mod format_pattern_report {
             Pattern {
                 old: "a".to_owned(),
                 new: "b".to_owned(),
+                paths: None,
             },
             Pattern {
                 old: "c".to_owned(),
                 new: "d".to_owned(),
+                paths: None,
             },
         ];
         let outcomes = vec![PatternOutcome::Applied, PatternOutcome::Applied];
@@ -479,10 +562,12 @@ mod format_pattern_report {
             Pattern {
                 old: "a".to_owned(),
                 new: "b".to_owned(),
+                paths: None,
             },
             Pattern {
                 old: "missing_pattern".to_owned(),
                 new: "d".to_owned(),
+                paths: None,
             },
         ];
         let outcomes = vec![PatternOutcome::Applied, PatternOutcome::NotFound];
@@ -774,7 +859,8 @@ mod fs_modify_file {
                 action: Action::Run,
             },
             &Map::new(),
-            file,
+            &Map::new(),
+            Some(file),
             &pat("World", "There"),
             true,
             true,
@@ -792,7 +878,8 @@ mod fs_modify_file {
         let result = fs_modify_file_impl(
             &ctx,
             &approved(),
-            file,
+            &Map::new(),
+            Some(file),
             &pat("World", "There"),
             true,
             true,
@@ -843,6 +930,7 @@ mod fs_modify_file {
                 .map(|(old, new)| Pattern {
                     old: old.to_string(),
                     new: new.to_string(),
+                    paths: None,
                 })
                 .collect();
 
@@ -880,7 +968,8 @@ mod fs_modify_file {
                 action: Action::Run,
             },
             &Map::new(),
-            file,
+            &Map::new(),
+            Some(file),
             &pat(".*", "replaced"),
             true,
             true,
@@ -901,7 +990,8 @@ mod fs_modify_file {
                 action: Action::Run,
             },
             &answers("broad_replacement", false),
-            file,
+            &Map::new(),
+            Some(file),
             &pat(".*", "replaced"),
             true,
             true,
@@ -921,7 +1011,8 @@ mod fs_modify_file {
         let result = fs_modify_file_impl(
             &ctx,
             &both,
-            file,
+            &Map::new(),
+            Some(file),
             &pat(".*", "replaced"),
             true,
             true,
@@ -966,7 +1057,8 @@ mod fs_modify_file {
                 action: Action::Run,
             },
             &approved(),
-            file,
+            &Map::new(),
+            Some(file),
             &pat("hello", "goodbye"),
             false,
             true,
@@ -989,7 +1081,8 @@ mod fs_modify_file {
                 action: Action::Run,
             },
             &rejected,
-            file,
+            &Map::new(),
+            Some(file),
             &pat("hello", "goodbye"),
             false,
             true,
@@ -1013,7 +1106,8 @@ mod fs_modify_file {
                 action: Action::Run,
             },
             &accepted,
-            file,
+            &Map::new(),
+            Some(file),
             &pat("hello", "goodbye"),
             false,
             true,
@@ -1037,5 +1131,420 @@ mod fs_modify_file {
 
         let (outcome, _) = run_modify(&content, &pat("content", "stuff"), false);
         assert_matches!(outcome, Outcome::Success { .. });
+    }
+
+    #[test]
+    fn test_no_path_anywhere_is_error() {
+        let (_dir, ctx) = ctx();
+        fs::write(ctx.root.join("test.txt"), "hello").unwrap();
+
+        let result = fs_modify_file_impl(
+            &ctx,
+            &approved(),
+            &Map::new(),
+            None,
+            &pat("hello", "goodbye"),
+            false,
+            true,
+            true,
+            &DirtyRunner(false),
+        )
+        .unwrap();
+
+        assert_matches!(result, Outcome::Error { message, .. } => {
+            assert!(message.contains("no target files"), "message: {message}");
+        });
+    }
+}
+
+mod per_pattern_paths {
+    use super::*;
+
+    #[test]
+    fn test_pattern_with_own_paths() {
+        let (_dir, ctx) = ctx();
+        fs::write(ctx.root.join("a.txt"), "hello world").unwrap();
+        fs::write(ctx.root.join("b.txt"), "hello world").unwrap();
+
+        let patterns = vec![Pattern {
+            old: "hello".to_owned(),
+            new: "goodbye".to_owned(),
+            paths: Some(OneOrMany::Many(vec![
+                "a.txt".to_owned(),
+                "b.txt".to_owned(),
+            ])),
+        }];
+
+        let result = fs_modify_file_impl(
+            &ctx,
+            &approved(),
+            &Map::new(),
+            None,
+            &patterns,
+            false,
+            true,
+            true,
+            &DirtyRunner(false),
+        )
+        .unwrap();
+
+        assert_matches!(result, Outcome::Success { content } => {
+            assert!(content.contains("Files modified successfully:"), "content: {content}");
+        });
+
+        assert_eq!(
+            fs::read_to_string(ctx.root.join("a.txt")).unwrap(),
+            "goodbye world"
+        );
+        assert_eq!(
+            fs::read_to_string(ctx.root.join("b.txt")).unwrap(),
+            "goodbye world"
+        );
+    }
+
+    #[test]
+    fn test_mixed_default_and_per_pattern_paths() {
+        let (_dir, ctx) = ctx();
+        fs::write(ctx.root.join("default.txt"), "aaa bbb").unwrap();
+        fs::write(ctx.root.join("other.txt"), "ccc ddd").unwrap();
+
+        let patterns = vec![
+            // Uses default path
+            Pattern {
+                old: "aaa".to_owned(),
+                new: "xxx".to_owned(),
+                paths: None,
+            },
+            // Uses its own path
+            Pattern {
+                old: "ccc".to_owned(),
+                new: "yyy".to_owned(),
+                paths: Some(OneOrMany::One("other.txt".to_owned())),
+            },
+        ];
+
+        let result = fs_modify_file_impl(
+            &ctx,
+            &approved(),
+            &Map::new(),
+            Some("default.txt"),
+            &patterns,
+            false,
+            true,
+            true,
+            &DirtyRunner(false),
+        )
+        .unwrap();
+
+        assert_matches!(result, Outcome::Success { .. });
+        assert_eq!(
+            fs::read_to_string(ctx.root.join("default.txt")).unwrap(),
+            "xxx bbb"
+        );
+        assert_eq!(
+            fs::read_to_string(ctx.root.join("other.txt")).unwrap(),
+            "yyy ddd"
+        );
+    }
+
+    #[test]
+    fn test_sequential_patterns_same_file_via_paths() {
+        let (_dir, ctx) = ctx();
+        fs::write(ctx.root.join("f.txt"), "aaa bbb ccc").unwrap();
+
+        let patterns = vec![
+            Pattern {
+                old: "bbb".to_owned(),
+                new: "xxx".to_owned(),
+                paths: Some(OneOrMany::One("f.txt".to_owned())),
+            },
+            // This pattern depends on the first one having been applied.
+            Pattern {
+                old: "xxx ccc".to_owned(),
+                new: "yyy".to_owned(),
+                paths: Some(OneOrMany::One("f.txt".to_owned())),
+            },
+        ];
+
+        let result = fs_modify_file_impl(
+            &ctx,
+            &approved(),
+            &Map::new(),
+            None,
+            &patterns,
+            false,
+            true,
+            true,
+            &DirtyRunner(false),
+        )
+        .unwrap();
+
+        assert_matches!(result, Outcome::Success { .. });
+        assert_eq!(
+            fs::read_to_string(ctx.root.join("f.txt")).unwrap(),
+            "aaa yyy"
+        );
+    }
+
+    #[test]
+    fn test_pattern_not_found_in_any_target() {
+        let (_dir, ctx) = ctx();
+        fs::write(ctx.root.join("a.txt"), "hello").unwrap();
+        fs::write(ctx.root.join("b.txt"), "world").unwrap();
+
+        let patterns = vec![
+            Pattern {
+                old: "hello".to_owned(),
+                new: "hi".to_owned(),
+                paths: Some(OneOrMany::One("a.txt".to_owned())),
+            },
+            // "nonexistent" is not in b.txt
+            Pattern {
+                old: "nonexistent".to_owned(),
+                new: "x".to_owned(),
+                paths: Some(OneOrMany::One("b.txt".to_owned())),
+            },
+        ];
+
+        let result = fs_modify_file_impl(
+            &ctx,
+            &approved(),
+            &Map::new(),
+            None,
+            &patterns,
+            false,
+            true,
+            true,
+            &DirtyRunner(false),
+        )
+        .unwrap();
+
+        assert_matches!(result, Outcome::Success { content } => {
+            assert!(content.contains("1/2 patterns applied."), "content: {content}");
+        });
+
+        assert_eq!(fs::read_to_string(ctx.root.join("a.txt")).unwrap(), "hi");
+        // b.txt unchanged
+        assert_eq!(fs::read_to_string(ctx.root.join("b.txt")).unwrap(), "world");
+    }
+
+    #[test]
+    fn test_applied_if_found_in_at_least_one_file() {
+        let (_dir, ctx) = ctx();
+        fs::write(ctx.root.join("a.txt"), "hello").unwrap();
+        fs::write(ctx.root.join("b.txt"), "world").unwrap();
+
+        // "hello" exists in a.txt but not b.txt
+        let patterns = vec![Pattern {
+            old: "hello".to_owned(),
+            new: "hi".to_owned(),
+            paths: Some(OneOrMany::Many(vec![
+                "a.txt".to_owned(),
+                "b.txt".to_owned(),
+            ])),
+        }];
+
+        let result = fs_modify_file_impl(
+            &ctx,
+            &approved(),
+            &Map::new(),
+            None,
+            &patterns,
+            false,
+            true,
+            true,
+            &DirtyRunner(false),
+        )
+        .unwrap();
+
+        // Single pattern succeeded (found in at least one file), so no report.
+        assert_matches!(result, Outcome::Success { .. });
+        assert_eq!(fs::read_to_string(ctx.root.join("a.txt")).unwrap(), "hi");
+        assert_eq!(fs::read_to_string(ctx.root.join("b.txt")).unwrap(), "world");
+    }
+
+    #[test]
+    fn test_nonexistent_file_in_pattern_paths() {
+        let (_dir, ctx) = ctx();
+
+        let patterns = vec![Pattern {
+            old: "hello".to_owned(),
+            new: "goodbye".to_owned(),
+            paths: Some(OneOrMany::One("nonexistent.txt".to_owned())),
+        }];
+
+        let result = fs_modify_file_impl(
+            &ctx,
+            &approved(),
+            &Map::new(),
+            None,
+            &patterns,
+            false,
+            true,
+            true,
+            &DirtyRunner(false),
+        )
+        .unwrap();
+
+        assert_matches!(result, Outcome::Error { message, .. } => {
+            assert!(message.contains("does not exist"), "message: {message}");
+        });
+    }
+}
+
+mod auto_approve {
+    use super::*;
+
+    fn heuristics_options() -> Map<String, Value> {
+        Map::from_iter([(
+            "apply_changes_trigger".to_owned(),
+            Value::String("heuristics".to_owned()),
+        )])
+    }
+
+    /// Small edit with heuristics enabled: auto-approved, no inquiry.
+    #[test]
+    fn test_small_edit_auto_approved() {
+        let (_dir, ctx) = ctx();
+        let file = "test.txt";
+        fs::write(ctx.root.join(file), "hello world\n").unwrap();
+
+        // No answers at all — if the inquiry fired, this would return NeedsInput.
+        let result = fs_modify_file_impl(
+            &ctx,
+            &Map::new(),
+            &heuristics_options(),
+            Some(file),
+            &pat("hello", "goodbye"),
+            false,
+            true,
+            true,
+            &DirtyRunner(false),
+        )
+        .unwrap();
+
+        assert_matches!(result, Outcome::Success { content } => {
+            assert!(content.contains("File modified successfully:"), "content: {content}");
+        });
+
+        let after = fs::read_to_string(ctx.root.join(file)).unwrap();
+        assert_eq!(after, "goodbye world\n");
+    }
+
+    /// Without heuristics (default "always" trigger), the same small edit
+    /// still triggers the inquiry.
+    #[test]
+    fn test_small_edit_without_heuristics_triggers_inquiry() {
+        let (_dir, ctx) = ctx();
+        let file = "test.txt";
+        fs::write(ctx.root.join(file), "hello world\n").unwrap();
+
+        let result = fs_modify_file_impl(
+            &ctx,
+            &Map::new(),
+            &Map::new(),
+            Some(file),
+            &pat("hello", "goodbye"),
+            false,
+            true,
+            true,
+            &DirtyRunner(false),
+        )
+        .unwrap();
+
+        assert_matches!(result, Outcome::NeedsInput { question } => {
+            assert_eq!(question.id, "apply_changes");
+        });
+    }
+
+    /// Large edit exceeding the changed-lines threshold still triggers
+    /// inquiry even with heuristics on.
+    #[test]
+    fn test_large_edit_still_triggers_inquiry() {
+        let (_dir, ctx) = ctx();
+        let file = "test.txt";
+        let content = (0..50)
+            .map(|i| format!("line {i} content"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(ctx.root.join(file), &content).unwrap();
+
+        // Replace every line — way over the 10-line default threshold.
+        let result = fs_modify_file_impl(
+            &ctx,
+            &Map::new(),
+            &heuristics_options(),
+            Some(file),
+            &pat("content", "stuff"),
+            false,
+            true,
+            true,
+            &DirtyRunner(false),
+        );
+
+        // This will hit the broad_replacement guard first (>50% lines changed),
+        // which also returns NeedsInput.
+        assert_matches!(result.unwrap(), Outcome::NeedsInput { .. });
+    }
+
+    /// Custom thresholds via options.
+    #[test]
+    fn test_custom_thresholds() {
+        let (_dir, ctx) = ctx();
+        let file = "test.txt";
+        // 20-line file, change 5 lines (25% ratio, 10 changed lines).
+        let content = (0..20)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(ctx.root.join(file), &content).unwrap();
+
+        // Set max_changed_lines=2 — the 10 changed lines exceed it.
+        let mut opts = heuristics_options();
+        opts.insert(
+            "auto_approve_max_changed_lines".to_owned(),
+            Value::Number(2.into()),
+        );
+
+        let result = fs_modify_file_impl(
+            &ctx,
+            &Map::new(),
+            &opts,
+            Some(file),
+            &pat("line 0", "changed 0"),
+            false,
+            false,
+            true,
+            &DirtyRunner(false),
+        )
+        .unwrap();
+
+        // 2 changed lines (1 deletion + 1 insertion) = exactly at threshold,
+        // so it should be auto-approved (threshold is <=).
+        assert_matches!(result, Outcome::Success { .. });
+
+        // Now set threshold to 1 — 2 changed lines exceed it.
+        let mut opts = heuristics_options();
+        opts.insert(
+            "auto_approve_max_changed_lines".to_owned(),
+            Value::Number(1.into()),
+        );
+
+        let result = fs_modify_file_impl(
+            &ctx,
+            &Map::new(),
+            &opts,
+            Some(file),
+            &pat("changed 0", "line 0"),
+            false,
+            false,
+            true,
+            &DirtyRunner(false),
+        )
+        .unwrap();
+
+        assert_matches!(result, Outcome::NeedsInput { question } => {
+            assert_eq!(question.id, "apply_changes");
+        });
     }
 }
