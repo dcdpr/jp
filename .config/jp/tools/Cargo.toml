@@ -23,7 +23,6 @@ crossbeam-channel = { workspace = true, features = ["std"] }
 crossterm = { workspace = true }
 duct = { workspace = true }
 fancy-regex = { workspace = true, features = ["perf", "std", "unicode"] }
-glob = { workspace = true }
 grep-printer = { workspace = true }
 grep-regex = { workspace = true }
 grep-searcher = { workspace = true }

@@ -4,7 +4,7 @@ source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Modify one or more files in the project's local filesystem."
 description = """
-The files must exist, be a regular file, and have no uncommitted changes.
+The files must exist and be a regular file.
 """
 
 examples = """
@@ -29,10 +29,32 @@ Apply multiple replacements in order:
 }
 ```
 
+Apply the same replacement to multiple files:
+```json
+{
+  "patterns": [
+    {"old": "old_name", "new": "new_name", "paths": ["src/lib.rs", "src/main.rs", \
+"tests/integration.rs"]}
+  ],
+  "replace_using_regex": false
+}
+```
+
+Apply different replacements to different files:
+```json
+{
+  "patterns": [
+    {"old": "foo", "new": "bar", "paths": ["src/a.rs"]},
+    {"old": "baz", "new": "qux", "paths": ["src/b.rs", "src/c.rs"]}
+  ],
+  "replace_using_regex": false
+}
+```
+
 Use regex with capture groups:
 ```json
 {
-  "path": "src/**/*.rs",
+  "path": "src/lib.rs",
   "patterns": [{"old": "fn (\\w+)_old", "new": "fn ${1}_new"}],
   "replace_using_regex": true
 }
@@ -48,11 +70,11 @@ inline_results = "off"
 results_file_link = "off"
 
 [conversation.tools.fs_modify_file.parameters.path]
-required = true
 type = "string"
-summary = "The path to the file to delete. The path must be relative to the project's root."
+summary = "The path to the file to modify. The path must be relative to the project's root."
 description = """
-The path may contain glob patterns, e.g. `src/**/*.rs`.
+Default target file for all patterns. Not required if every pattern specifies \
+its own `paths`.
 """
 
 [conversation.tools.fs_modify_file.parameters.patterns]
@@ -64,6 +86,7 @@ summary = "One or more patterns to replace in the file. The patterns are applied
 type = "object"
 properties.old = { type = "string", description = "The string to replace in the file. The string may span multiple lines.", required = true }
 properties.new = { type = "string", description = "The string to replace the `old` with. The string may span multiple lines. If empty, the `old` will be deleted.", required = true }
+properties.paths = { type = "array", description = "File paths to apply this pattern to. Overrides the root-level `path`. Each path must be relative to the project's root.", required = false, items = { type = "string" } }
 
 [conversation.tools.fs_modify_file.parameters.replace_using_regex]
 required = true
@@ -86,7 +109,7 @@ group name.
 opening parenthesis where `0` is the entire match) or it can be a name (consisting of letters, \
 digits or underscores) corresponding to a named capture group (e.g. `(?<name>exp)`).
 
-If `name` isn’t a valid capture group (whether the name doesn’t exist or isn’t a valid index), \
+If `name` isn't a valid capture group (whether the name doesn't exist or isn't a valid index), \
 then it is replaced with the empty string.
 
 The longest possible name is used. e.g., `$1a` looks up the capture group named `1a` and not the \

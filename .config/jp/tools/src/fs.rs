@@ -16,7 +16,7 @@ use create_file::fs_create_file;
 use delete_file::fs_delete_file;
 use grep_files::fs_grep_files;
 use list_files::fs_list_files;
-use modify_file::{Pattern, fs_modify_file};
+use modify_file::fs_modify_file;
 use move_file::fs_move_file;
 use read_file::fs_read_file;
 
@@ -65,8 +65,9 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             fs_modify_file(
                 ctx,
                 &t.answers,
-                t.req("path")?,
-                t.req::<OneOrMany<Pattern>>("patterns")?.into_vec(),
+                &t.options,
+                t.opt("path")?,
+                t.req::<OneOrMany<_>>("patterns")?.into_vec(),
                 t.opt("replace_using_regex")?.unwrap_or(false),
                 t.opt("replace_all")?.unwrap_or(true),
                 t.opt("case_sensitive")?.unwrap_or(true),

@@ -4116,7 +4116,6 @@ dependencies = [
  "crossterm",
  "duct",
  "fancy-regex 0.17.0",
- "glob",
  "grep-printer",
  "grep-regex",
  "grep-searcher",
