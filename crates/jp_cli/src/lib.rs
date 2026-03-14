@@ -351,10 +351,13 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
             let handle = ctx.handle().clone();
 
             let output = handle.block_on(cmd.run(&mut ctx));
-            if let Err(err) = output.as_ref()
-                && err.disable_persistence
+            if let Err(error) = output.as_ref()
+                && error.disable_persistence
             {
-                tracing::info!("Error running command. Disabling workspace persistence.");
+                tracing::info!(
+                    error = error.to_string(),
+                    "Error running command. Disabling workspace persistence."
+                );
                 ctx.workspace.disable_persistence();
             }
 
