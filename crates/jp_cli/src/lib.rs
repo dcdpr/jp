@@ -24,7 +24,7 @@ use std::{
 use camino::{FromPathBufError, Utf8PathBuf, absolute_utf8};
 use camino_tempfile::NamedUtf8TempFile;
 use clap::{
-    ArgAction, Parser,
+    ArgAction, CommandFactory as _, Parser,
     builder::{BoolValueParser, TypedValueParser as _},
 };
 use cmd::Commands;
@@ -340,6 +340,14 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
             }
         }
         _ => {}
+    }
+
+    if cli.command.is_help_request() {
+        let mut cmd = Cli::command();
+        cmd.find_subcommand_mut(cli.command.name())
+            .expect("subcommand exists")
+            .print_help()?;
+        return Ok(());
     }
 
     // Full pipeline for commands that need workspace + validated config.
