@@ -1,6 +1,7 @@
 use jp_config::PartialAppConfig;
+use jp_printer::Printer;
 
-use crate::{cmd::Output, ctx::Ctx};
+use crate::cmd::Output;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Show {
@@ -14,18 +15,14 @@ pub(crate) struct Show {
 }
 
 impl Show {
-    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
-        if self.defaults {
-            ctx.printer
-                .println(&toml::to_string_pretty(&PartialAppConfig::default())?);
-            return Ok(());
-        }
-
+    pub(crate) fn run_standalone(&self, printer: &Printer) -> Output {
         if self.themes {
-            ctx.printer.println(list_themes());
+            printer.println(list_themes());
             return Ok(());
         }
 
+        // Bare `config show` and `--defaults` both show defaults.
+        printer.println(&toml::to_string_pretty(&PartialAppConfig::default())?);
         Ok(())
     }
 }

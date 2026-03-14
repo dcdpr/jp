@@ -331,55 +331,64 @@ pub fn run() -> ExitCode {
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let printer = Printer::terminal(format);
 
-    match cli.command {
-        Commands::Init(ref args) => args.run(&printer).map_err(Into::into),
-        cmd => {
-            let mut workspace = load_workspace(cli.globals.workspace.as_ref())?;
-            if !cli.globals.persist {
-                workspace.disable_persistence();
+    // Handle commands that don't need the full startup pipeline.
+    match &cli.command {
+        Commands::Init(args) => return args.run(&printer).map_err(Into::into),
+        Commands::Config(config) => {
+            if let Some(result) = config.try_run_standalone(&printer) {
+                return result.map_err(Into::into);
             }
-
-            let runtime = build_runtime(cli.root.threads, "jp-worker")?;
-            if let Err(error) = workspace.load() {
-                tracing::error!(error = ?error, "Failed to load workspace.");
-            }
-
-            let partial = load_partial_config(&cmd, Some(&workspace), &cli.globals.config)?;
-            let config = build(partial)?;
-
-            let mut ctx = Ctx::new(workspace, runtime, cli.globals, config, printer);
-            let handle = ctx.handle().clone();
-
-            let output = handle.block_on(cmd.run(&mut ctx));
-            if let Err(error) = output.as_ref()
-                && error.disable_persistence
-            {
-                tracing::info!(
-                    error = error.to_string(),
-                    "Error running command. Disabling workspace persistence."
-                );
-                ctx.workspace.disable_persistence();
-            }
-
-            // Flush the printer to ensure all queued typewriter output is
-            // fully written before background tasks log any errors.
-            ctx.printer.flush();
-
-            // Wait for background tasks to complete and sync their results to
-            // the workspace.
-            handle
-                .block_on(
-                    ctx.task_handler
-                        .sync(&mut ctx.workspace, Duration::from_secs(10)),
-                )
-                .map_err(Error::Task)?;
-
-            // Remove ephemeral conversations that are no longer needed.
-            ctx.workspace.remove_ephemeral_conversations();
-
-            output.map_err(Into::into)
         }
+        _ => {}
     }
+
+    // Full pipeline for commands that need workspace + validated config.
+    let cmd = cli.command;
+
+    let mut workspace = load_workspace(cli.globals.workspace.as_ref())?;
+    if !cli.globals.persist {
+        workspace.disable_persistence();
+    }
+
+    let runtime = build_runtime(cli.root.threads, "jp-worker")?;
+    if let Err(error) = workspace.load() {
+        tracing::error!(error = ?error, "Failed to load workspace.");
+    }
+
+    let partial = load_partial_config(&cmd, Some(&workspace), &cli.globals.config)?;
+    let config = build(partial)?;
+
+    let mut ctx = Ctx::new(workspace, runtime, cli.globals, config, printer);
+    let handle = ctx.handle().clone();
+
+    let output = handle.block_on(cmd.run(&mut ctx));
+    if let Err(error) = output.as_ref()
+        && error.disable_persistence
+    {
+        tracing::info!(
+            error = error.to_string(),
+            "Error running command. Disabling workspace persistence."
+        );
+        ctx.workspace.disable_persistence();
+    }
+
+    // Flush the printer to ensure all queued typewriter output is
+    // fully written before background tasks log any errors.
+    ctx.printer.flush();
+
+    // Wait for background tasks to complete and sync their results to
+    // the workspace.
+    handle
+        .block_on(
+            ctx.task_handler
+                .sync(&mut ctx.workspace, Duration::from_secs(10)),
+        )
+        .map_err(Error::Task)?;
+
+    // Remove ephemeral conversations that are no longer needed.
+    ctx.workspace.remove_ephemeral_conversations();
+
+    output.map_err(Into::into)
 }
 
 fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
