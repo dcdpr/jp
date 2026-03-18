@@ -5,11 +5,16 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
 
-> **Abandoned.** This RFD has been split into smaller, focused proposals:
+> [!IMPORTANT]
+> This RFD is **Abandoned**.
 >
-> - [RFD 023: Resumable Conversation Turns](023-resumable-conversation-turns.md) — incomplete turn persistence and `--continue`.
-> - [RFD 024: Detached Query Execution](024-detached-query-execution.md) — `--detach`, process registry, `queue` policy.
-> - Live re-attachment to running processes is deferred to a future RFD.
+> Split and reorganised:
+>
+> - [RFD 023: Resumable Conversation Turns][RFD 023] — incomplete turn
+>   persistence and `--continue` — remains active.
+> - The detached execution and live re-attachment portions were superseded by
+>   [RFD 027: Client-Server Query Architecture][RFD 027], which unifies both
+>   under a single client-server model.
 >
 > The original text below is preserved for historical context.
 
@@ -22,16 +27,16 @@ when they hit inquiries, and conversation attachment for monitoring output and
 answering pending prompts.
 
 This RFD depends on [RFD 020] (Parallel Conversations) for per-session
-conversation targeting, conversation locks, and the `--id` flag, and on
-[RFD 021] (Printer Live Redirection) for runtime output redirection during
+conversation targeting, conversation locks, and the `--id` flag, and on [RFD
+021] (Printer Live Redirection) for runtime output redirection during
 detach/attach.
 
 ## Motivation
 
 [RFD 020] introduces parallel conversations: per-session conversation tracking,
 `--id` for explicit targeting, and conversation locks to prevent concurrent
-mutations. With those foundations in place, a user can run multiple conversations
-simultaneously across terminal sessions.
+mutations. With those foundations in place, a user can run multiple
+conversations simultaneously across terminal sessions.
 
 But each conversation still requires a terminal for the duration of the query.
 Long-running queries with tool calls occupy a terminal tab until they complete.
@@ -46,12 +51,12 @@ available. But they don't address a common workflow:
 2. Query hits a tool prompt requiring user judgment.
 3. User wants to come back later and answer the prompt.
 
-Today, the user must keep the terminal open and wait. There is no way to
-detach from a running query and reattach later.
+Today, the user must keep the terminal open and wait. There is no way to detach
+from a running query and reattach later.
 
-Additionally, users have limited visibility into running queries. If a query
-is running in another terminal, there's no way to check its status or interact
-with it from elsewhere.
+Additionally, users have limited visibility into running queries. If a query is
+running in another terminal, there's no way to check its status or interact with
+it from elsewhere.
 
 ## Design
 
@@ -72,13 +77,13 @@ process running the query can be **attached** to a terminal or **detached**
 
 **Renders?** indicates whether the process writes chrome (progress, tool
 headers) to the user's terminal via stderr. **Can prompt?** indicates whether
-the process can ask the user interactive questions via `/dev/tty` (per
-[RFD 019]). Entries marked * depend on `/dev/tty` availability — if the user
-is at a terminal, `/dev/tty` works even when stdin/stdout are piped.
+the process can ask the user interactive questions via `/dev/tty` (per [RFD
+019]). Entries marked * depend on `/dev/tty` availability — if the user is at a
+terminal, `/dev/tty` works even when stdin/stdout are piped.
 
-The process is ephemeral runtime state — PID, socket, streaming state. When
-the query completes or is interrupted, the process exits. The conversation
-state persists in `.jp/conversations/<cid>/` as always.
+The process is ephemeral runtime state — PID, socket, streaming state. When the
+query completes or is interrupted, the process exits. The conversation state
+persists in `.jp/conversations/<cid>/` as always.
 
 ### The `queue` Detached Policy
 
@@ -95,7 +100,7 @@ When `queue` is active and an inquiry arrives without an attached client, the
 conversation pauses. The pending inquiry is written to the process registry. The
 user answers it by attaching:
 
-```bash
+```sh
 $ jp conversation ls
 ID                TITLE            STATUS
 jp-c17528832001   Refactor auth    waiting-for-input (RunTool: fs_modify_file)
@@ -112,9 +117,9 @@ With `queue` available, it becomes the **default detached policy** — replacing
 Users who want automation set `detached = "auto"` in their config.
 
 `--detach` is an explicit opt-in. Piped execution (`echo foo | jp query | cat`)
-is **not** detached — the process runs in the foreground, owned by the script
-or pipeline. `--detach` means "spawn a background process and exit"; the absence
-of a TTY does not imply detachment.
+is **not** detached — the process runs in the foreground, owned by the script or
+pipeline. `--detach` means "spawn a background process and exit"; the absence of
+a TTY does not imply detachment.
 
 ### CLI Interface
 
@@ -123,13 +128,13 @@ of a TTY does not imply detachment.
 Spawns a background process for the conversation, registers it in the process
 registry, and exits immediately. The conversation continues in the background.
 
-```bash
+```sh
 jp query --detach "Refactor the auth module"
 ```
 
 Combines with all conversation targeting flags from [RFD 020]:
 
-```bash
+```sh
 jp query --detach --id=jp-c17528832001 "Continue this in the background"
 jp query --detach --new "Start something new in the background"
 ```
@@ -141,7 +146,7 @@ All conversation targeting and lock errors from [RFD 020] apply.
 Connects to the running process for the specified conversation. The user's
 terminal receives streaming output and can answer pending inquiries.
 
-```bash
+```sh
 jp conversation attach jp-c17528832001
 jp conversation attach jp-c17528832001 --tail=5
 jp conversation attach                          # session's active conversation
@@ -152,20 +157,22 @@ events on disk, then flushes any partial rendering output buffered in memory
 (see [Output on Attach](#output-on-attach)), and finally switches to live
 streaming.
 
-`--tail=N` controls how many persisted events are shown on attach. Only
-content events are counted — structural markers like `TurnStart` and
-`ConfigDelta` are skipped. Without `--tail`, the default is to show all events
-from the current (in-progress) turn, giving the user enough context to
-understand the conversation's current state.
+`--tail=N` controls how many persisted events are shown on attach. Only content
+events are counted — structural markers like `TurnStart` and `ConfigDelta` are
+skipped. Without `--tail`, the default is to show all events from the current
+(in-progress) turn, giving the user enough context to understand the
+conversation's current state.
 
-| Flag | Behavior |
-|------|----------|
-| (no flag) | Show the current in-progress turn. |
-| `--tail=N` | Show the last N content events, plus the current in-progress turn. |
-| `--tail=0` | Show only the pending inquiry prompt. No context. |
+| Flag       | Behavior                                 |
+|------------|------------------------------------------|
+| (no flag)  | Show the current in-progress turn.       |
+| `--tail=N` | Show the last N content events, plus the |
+|            | current in-progress turn.                |
+| `--tail=0` | Show only the pending inquiry prompt. No |
+|            | context.                                 |
 
-Attach is a read-write connection to the running process via the IPC socket.
-It is not a new query — there is no `--attach` flag on `jp query`.
+Attach is a read-write connection to the running process via the IPC socket. It
+is not a new query — there is no `--attach` flag on `jp query`.
 
 #### `jp conversation ls` (extended)
 
@@ -175,14 +182,14 @@ Shows all conversations with their process status:
 - `running (pid NNN)` — process active, no pending inquiry
 - `waiting-for-input (inquiry kind)` — process paused, inquiry pending
 
-The output merges persisted conversation metadata from `.jp/conversations/`
-with ephemeral process state from the process registry.
+The output merges persisted conversation metadata from `.jp/conversations/` with
+ephemeral process state from the process registry.
 
 #### `jp conversation kill <cid>`
 
-Sends a cancellation signal to the running process, cleans up the registry
-entry and socket. The conversation data remains intact — this only terminates
-the process, which releases the conversation lock ([RFD 020]).
+Sends a cancellation signal to the running process, cleans up the registry entry
+and socket. The conversation data remains intact — this only terminates the
+process, which releases the conversation lock ([RFD 020]).
 
 #### `jp conversation show <cid>` (extended)
 
@@ -224,7 +231,7 @@ conversation (enforced by the conversation lock from [RFD 020]).
 `jp conversation ls` checks PID liveness for each entry. If the process is dead,
 the entry and socket are removed. This handles cases where JP crashes without
 cleaning up (SIGKILL, machine reboot, power loss). This uses the same background
-task cleanup approach as RFD 020's lock and session file cleanup.
+task cleanup approach as [RFD 020]'s lock and session file cleanup.
 
 ### Attach Protocol
 
@@ -358,18 +365,18 @@ is ephemeral, machine-local, and user-local. The user data directory
 
 ## Non-Goals
 
-- **Crash resume.** If a detached process dies (crash, SIGKILL, machine
-  reboot), the process registry entry becomes stale and is cleaned up.
-  Automatically spawning a new process that resumes from persisted conversation
-  state is a potential future enhancement but out of scope. Users can start a
-  new query on the conversation manually.
+- **Crash resume.** If a detached process dies (crash, SIGKILL, machine reboot),
+  the process registry entry becomes stale and is cleaned up. Automatically
+  spawning a new process that resumes from persisted conversation state is a
+  potential future enhancement but out of scope. Users can start a new query on
+  the conversation manually.
 
 - **Multi-client attachment.** Only one client can attach to a conversation at a
   time. Concurrent attachment would require coordination (which client receives
   streaming chunks?) and is out of scope.
 
-- **Non-query commands.** Only `jp query` creates running processes.
-  Other subcommands are instant and do not interact with the process registry.
+- **Non-query commands.** Only `jp query` creates running processes. Other
+  subcommands are instant and do not interact with the process registry.
 
 - **Sub-agent support.** The process model is compatible with future sub-agents
   but this RFD does not propose agent infrastructure.
@@ -387,7 +394,7 @@ the new query with a lock contention error. The error message should mention
 `--attach` as an option in addition to the standard suggestions from [RFD 020]
 (fork, new, kill):
 
-```
+```txt
 Error: Conversation jp-c17528832001 is locked by pid 12345 (detached).
 
 Suggestions:
@@ -417,8 +424,8 @@ useful workflow (piped execution hits a prompt, user attaches to answer it).
 
 1. **Double-fork** (classic Unix daemon pattern).
 2. **`nohup` + background** (simpler but less control over signals).
-3. **Re-exec** (`jp query --detach` re-executes itself with an internal flag
-   and exits).
+3. **Re-exec** (`jp query --detach` re-executes itself with an internal flag and
+   exits).
 
 The third option is cleanest. `jp query --detach` spawns a child process that
 outlives the parent, inherits conversation state, and runs independently. The
@@ -433,25 +440,25 @@ understand the current state — especially if the conversation is
 The attach flow has three steps:
 
 1. **Replay from disk.** Read persisted events from the conversation's event
-   stream on disk and render them using the same rendering logic as
-   `jp conversation print`. The number of events shown is controlled by
-   `--tail` (default: current in-progress turn). The conversation stream is
-   persisted after every streaming phase and every tool execution phase, so
-   by the time a conversation is `waiting-for-input`, all events up to and
-   including the pending `InquiryRequest` are on disk.
+   stream on disk and render them using the same rendering logic as `jp
+   conversation print`. The number of events shown is controlled by `--tail`
+   (default: current in-progress turn). The conversation stream is persisted
+   after every streaming phase and every tool execution phase, so by the time a
+   conversation is `waiting-for-input`, all events up to and including the
+   pending `InquiryRequest` are on disk.
 
 2. **Flush the memory buffer.** While detached, the `Printer` writes to an
-   in-memory buffer instead of the terminal (via [RFD 021]'s
-   `swap_writers()`). This buffer captures rendered output from the current
-   streaming cycle — content that has passed through `ChatResponseRenderer`
-   and other renderers but hasn't been persisted as a complete event yet.
-   On attach, this buffer is flushed to the client's terminal. The buffer
-   has a hard-coded 1 MB capacity; if exceeded, a truncation notice is
-   shown and the user can run `jp conversation print` for full history.
+   in-memory buffer instead of the terminal (via [RFD 021]'s `swap_writers()`).
+   This buffer captures rendered output from the current streaming cycle —
+   content that has passed through `ChatResponseRenderer` and other renderers
+   but hasn't been persisted as a complete event yet. On attach, this buffer is
+   flushed to the client's terminal. The buffer has a hard-coded 1 MB capacity;
+   if exceeded, a truncation notice is shown and the user can run `jp
+   conversation print` for full history.
 
-3. **Swap back to terminal.** The `Printer` is swapped from the memory
-   buffer back to the terminal writer. From this point, all renderer output
-   goes directly to the client's terminal via the normal streaming path.
+3. **Swap back to terminal.** The `Printer` is swapped from the memory buffer
+   back to the terminal writer. From this point, all renderer output goes
+   directly to the client's terminal via the normal streaming path.
 
 This design reuses existing infrastructure:
 
@@ -471,8 +478,8 @@ This RFD proposes changing the default detached policy from `deny` ([RFD 019])
 to `queue`. Piped queries that hit prompts will pause and wait instead of
 failing.
 
-This is safer (nothing auto-approves) but changes behavior for users who rely
-on prompts failing fast in non-interactive contexts. Users who want the old
+This is safer (nothing auto-approves) but changes behavior for users who rely on
+prompts failing fast in non-interactive contexts. Users who want the old
 behavior set `detached = "deny"`.
 
 ## Implementation Plan
@@ -521,26 +528,26 @@ Depends on Phase 3. Unix-only initially.
 
 ## References
 
-- [RFD 021: Printer Live Redirection](021-printer-live-redirection.md) —
-  runtime output redirection via `swap_writers()`; used for the detach/attach
-  memory buffer.
-- [RFD 020: Parallel Conversations](020-parallel-conversations.md) —
-  per-session conversation tracking and conversation locks; prerequisite for
-  this RFD.
-- [RFD 019: Non-Interactive Mode](019-non-interactive-mode.md) — defines the
-  `auto`, `defaults`, and `deny` policies; this RFD adds `queue`.
-- [RFD 018: Typed Inquiry System](018-typed-inquiry-system.md) — the `Inquiry`
-  enum used for serializing pending prompts.
-- [RFD 005: First-Class Inquiry Events](005-first-class-inquiry-events.md) —
-  persisting `InquiryRequest`/`InquiryResponse` events.
-- [RFD 009: Stateful Tool Protocol](009-stateful-tool-protocol.md) —
-  long-running tool handles; `AwaitingInput` state supports prompt queuing.
+- [RFD 021: Printer Live Redirection][RFD 021] — runtime output redirection via
+  `swap_writers()`; used for the detach/attach memory buffer.
+- [RFD 020: Parallel Conversations][RFD 020] — per-session conversation tracking
+  and conversation locks; prerequisite for this RFD.
+- [RFD 019: Non-Interactive Mode][RFD 019] — defines the `auto`, `defaults`, and
+  `deny` policies; this RFD adds `queue`.
+- [RFD 018: Typed Inquiry System][RFD 018] — the `Inquiry` enum used for enum
+  used for serializing pending prompts.
+- [RFD 005: First-Class Inquiry Events][RFD 005] — persisting
+  `InquiryRequest`/`InquiryResponse` events.
+- [RFD 009: Stateful Tool Protocol][RFD 009] — long-running tool handles;
+  `AwaitingInput` state supports prompt queuing.
 - tmux session model — precedent for background sessions with attach/detach.
 - `docker attach` — precedent for connecting a terminal to a running container.
 
-[RFD 021]: 021-printer-live-redirection.md
-[RFD 020]: 020-parallel-conversations.md
-[RFD 019]: 019-non-interactive-mode.md
-[RFD 018]: 018-typed-inquiry-system.md
 [RFD 005]: 005-first-class-inquiry-events.md
 [RFD 009]: 009-stateful-tool-protocol.md
+[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 019]: 019-non-interactive-mode.md
+[RFD 020]: 020-parallel-conversations.md
+[RFD 021]: 021-printer-live-redirection.md
+[RFD 023]: 023-resumable-conversation-turns.md
+[RFD 027]: 027-client-server-query-architecture.md

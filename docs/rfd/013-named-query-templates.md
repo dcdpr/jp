@@ -1,6 +1,6 @@
 # RFD 013: Named Query Templates
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-25
@@ -20,8 +20,8 @@ Today, `jp query --template` (`-%`) treats the query string itself as a
 Jinja-style template and resolves variables from `template.values` in the
 config. This works for simple interpolation, but has several limitations:
 
-1. **No reuse.** The template content lives in the query argument or the
-   editor. There is no way to save a template and invoke it by name.
+1. **No reuse.** The template content lives in the query argument or the editor.
+   There is no way to save a template and invoke it by name.
 2. **No interactivity.** All variables must be pre-configured in
    `template.values`. There is no way to prompt the user for missing values at
    runtime.
@@ -46,12 +46,12 @@ workflow into JP, where it can integrate with the config system and the editor.
 # Long form
 jp query --template feature
 
-# Short form (the `%` flag accepts an optional value)
+# Short form
 jp q -% feature
 ```
 
-This loads the template named `feature` from the configuration, prompts the
-user for each question defined in the template, renders the content with the
+This loads the template named `feature` from the configuration, prompts the user
+for each question defined in the template, renders the content with the
 collected answers, and sends the result as the query.
 
 #### Picking a template interactively
@@ -69,14 +69,14 @@ proceeds through the Q&A flow as above.
 After the Q&A, the rendered template is handled according to the template's
 `submit` field:
 
-- `ask` (default): Show the rendered template and prompt with an inline
-  select menu: `[s]end / [e]dit / [c]ancel / ?`.
+- `ask` (default): Show the rendered template and prompt with an inline select
+  menu: `[s]end / [e]dit / [c]ancel / ?`.
 - `unattended`: Send the rendered template as the query immediately.
 - `edit`: Open `$EDITOR` with the rendered template before sending.
 
 The `--edit` (`-e`) and `--no-edit` (`-E`) CLI flags override the template's
-`submit` setting — `--edit` forces `edit` mode, `--no-edit` forces
-`unattended` mode.
+`submit` setting — `--edit` forces `edit` mode, `--no-edit` forces `unattended`
+mode.
 
 ### Configuration Schema
 
@@ -199,12 +199,12 @@ When a named template is loaded:
 1. For each entry in `questions`, in order:
    - If the variable already has a value in `templates.*.values`, skip.
    - If `enum` is set, show a selection prompt (using `inquire::Select`).
-   - Otherwise, show a text prompt with the `question` string. If `default`
-     is set, pre-fill it.
+   - Otherwise, show a text prompt with the `question` string. If `default` is
+     set, pre-fill it.
    - Validate the answer against `type`. On validation failure, re-prompt.
-   - **Esc** skips the current question (leaves it blank, which will produce
-     a template rendering error if the variable is used and minijinja is in
-     strict mode).
+   - **Esc** skips the current question (leaves it blank, which will produce a
+     template rendering error if the variable is used and minijinja is in strict
+     mode).
 2. Render the `content` template with the collected values.
 3. Handle the result according to `submit` mode:
    - `ask`: Show rendered template and prompt `[s]end / [e]dit / [c]ancel`.
@@ -277,9 +277,9 @@ pub enum SubmitMode {
 }
 ```
 
-The top-level config key changes from `template` to `templates`. The
-`AppConfig` field updates accordingly. This is a breaking change to the
-existing `template.values` config path (now `templates.*.values` or just
+The top-level config key changes from `template` to `templates`. The `AppConfig`
+field updates accordingly. This is a breaking change to the existing
+`template.values` config path (now `templates.*.values` or just
 `templates.values`).
 
 #### Query Command Changes (`jp_cli`)
@@ -313,24 +313,24 @@ The Q&A loop and template rendering can be extracted into a function in
   default fields (`values`, `submit`). Template names must not collide with
   these reserved names. The list of reserved names is small and stable, and
   schematic will produce a clear error on collision.
-- **Complexity budget.** The Q&A flow, validation, and submit modes add
-  surface area to the query command, which is already the largest module in
-  the codebase.
+- **Complexity budget.** The Q&A flow, validation, and submit modes add surface
+  area to the query command, which is already the largest module in the
+  codebase.
 - **Minijinja learning curve.** Users need to learn minijinja syntax to write
   templates. This is mitigated by the simple variable interpolation being
   trivial (`{{ var }}`).
-- **Breaking change.** The rename from `template` to `templates` breaks
-  existing `template.values` config paths. Migration is straightforward
-  (rename the key) but must be documented.
+- **Breaking change.** The rename from `template` to `templates` breaks existing
+  `template.values` config paths. Migration is straightforward (rename the key)
+  but must be documented.
 
 ## Alternatives
 
 ### Keep `template` (singular) as the top-level key
 
-Avoids the breaking rename but creates a namespace where `values` coexists
-with named templates in a less principled way. The `templates` rename aligns
-with the pattern established by `conversation.tools` and makes the
-`defaults`/`flatten` split explicit.
+Avoids the breaking rename but creates a namespace where `values` coexists with
+named templates in a less principled way. The `templates` rename aligns with the
+pattern established by `conversation.tools` and makes the `defaults`/`flatten`
+split explicit.
 
 ### Nested namespace: `[templates.definitions.feature]`
 
@@ -342,15 +342,15 @@ reserved-name checking, following the `ToolsConfig` precedent.
 
 Store templates as separate `.md` or `.toml` files in a `templates/` directory.
 More flexible for large templates, but adds file discovery complexity and
-diverges from the config-centric approach. Could be added later as a
-complement (e.g. `content_file = "templates/feature.md"`).
+diverges from the config-centric approach. Could be added later as a complement
+(e.g. `content_file = "templates/feature.md"`).
 
 ### Prompt-driven template creation (no config)
 
 Instead of config-defined templates, let users create templates interactively
-with `jp template create`. More discoverable, but harder to version control
-and share. The config-based approach is preferred because templates are part of
-the project's configuration and travel with the repository.
+with `jp template create`. More discoverable, but harder to version control and
+share. The config-based approach is preferred because templates are part of the
+project's configuration and travel with the repository.
 
 ## Non-Goals
 
@@ -358,27 +358,27 @@ the project's configuration and travel with the repository.
   templates from external sources.
 - **Template versioning.** Templates are config values; they version with the
   config file in Git.
-- **Complex control flow in Q&A.** No conditional questions, branching, or
-  loops in the question sequence. Each question is independent.
+- **Complex control flow in Q&A.** No conditional questions, branching, or loops
+  in the question sequence. Each question is independent.
 - **Custom template functions.** Noted as a future extension point but not
   designed here.
 - **Non-query templates.** This is specifically for `jp query`. Other commands
   may benefit from templates in the future, but that's out of scope.
 - **Template-level config overrides.** A template does not carry its own model,
   tools, or other config settings. Instead, templates can live in separate
-  config files loaded via `jp -c my_template -%tmpl`, which lets the config
-  file set any options alongside the template definition. This uses the
-  existing config layering system rather than adding a template-specific
-  override mechanism.
+  config files loaded via `jp -c my_template -%tmpl`, which lets the config file
+  set any options alongside the template definition. This uses the existing
+  config layering system rather than adding a template-specific override
+  mechanism.
 
 ## Risks and Open Questions
 
 ### Should template names be validated at config load time?
 
-Yes. If a template references variables in `content` that have no
-corresponding question and no value in `templates.*.values`, this should produce a
-warning at config load time (not an error, since a user may rely on
-`templates.*.values` to provide the variable at runtime).
+Yes. If a template references variables in `content` that have no corresponding
+question and no value in `templates.*.values`, this should produce a warning at
+config load time (not an error, since a user may rely on `templates.*.values` to
+provide the variable at runtime).
 
 ### How does `--template` interact with `--schema`?
 
@@ -395,21 +395,20 @@ They conflict. The CLI should enforce this with `conflicts_with`.
 
 ### Phase 1: Config schema and named template loading
 
-Replace `TemplateConfig` with `TemplatesConfig` using the `defaults` +
-flattened `IndexMap` pattern. Add `NamedTemplate`, `TemplateQuestion`,
-`TemplateTarget`, `SubmitMode` types. Add serialization tests. Add config
-validation (reserved name check, variable coverage warning). Update
-`AppConfig` to use the new type. This touches `jp_config` only and can be
-merged independently.
+Replace `TemplateConfig` with `TemplatesConfig` using the `defaults` + flattened
+`IndexMap` pattern. Add `NamedTemplate`, `TemplateQuestion`, `TemplateTarget`,
+`SubmitMode` types. Add serialization tests. Add config validation (reserved
+name check, variable coverage warning). Update `AppConfig` to use the new type.
+This touches `jp_config` only and can be merged independently.
 
 ### Phase 2: CLI flag change and template picker
 
 Change `--template` from `bool` to `Option<Option<String>>`. Implement the
-fuzzy-searchable template picker using `inquire::Select` (showing `title`
-and `description`). Wire up the named template loading path in
-`build_conversation`, including the `-%-` inline mode. At this point,
-selecting a template loads it but does not yet run the Q&A — it renders
-with whatever values are available in `templates.*.values`.
+fuzzy-searchable template picker using `inquire::Select` (showing `title` and
+`description`). Wire up the named template loading path in `build_conversation`,
+including the `-%-` inline mode. At this point, selecting a template loads it
+but does not yet run the Q&A — it renders with whatever values are available in
+`templates.*.values`.
 
 Depends on Phase 1. Can be merged independently.
 
@@ -425,22 +424,27 @@ Depends on Phase 2. Can be merged independently.
 
 ### Phase 4: Submit behavior
 
-Implement the `submit` field: `ask` (inline select menu), `unattended`
-(send immediately), `edit` (open `$EDITOR`). Honor `--edit` / `--no-edit`
-overrides. The `ask` mode reuses the `InlineSelect` component from
-`jp_inquire`. The `edit` mode reuses `edit_message`.
+Implement the `submit` field: `ask` (inline select menu), `unattended` (send
+immediately), `edit` (open `$EDITOR`). Honor `--edit` / `--no-edit` overrides.
+The `ask` mode reuses the `InlineSelect` component from `jp_inquire`. The `edit`
+mode reuses `edit_message`.
 
 Depends on Phase 3. Can be merged independently.
 
 ## Future Work
 
-- **Assistant-populated variables.** A `target` field (`user` | `assistant`)
-  on templates and/or individual questions could allow delegating unanswered
+- **Assistant-populated variables.** A `target` field (`user` | `assistant`) on
+  templates and/or individual questions could allow delegating unanswered
   questions to the assistant via structured output. Unanswered questions would
   be converted to a JSON schema, sent as a structured output request, and the
   response would fill in the remaining template variables. This depends on the
-  structured output infrastructure and needs real use cases to justify the
-  added complexity.
+  structured output infrastructure and needs real use cases to justify the added
+  complexity.
+
+  > [!TIP]
+  > [RFD 029] introduces the structured output infrastructure this feature
+  > depends on. [RFD 030] documents the schema DSL.
+
 - **Custom template functions.** Expose Rust functions in the minijinja
   environment (e.g. `get_config()`, `model_id()`, `git_branch()`, `env()`).
 - **`answer` mode.** A field controlling the Q&A process itself (`ask`,
@@ -449,8 +453,14 @@ Depends on Phase 3. Can be merged independently.
 ## References
 
 - [Issue #178: Add named templates with interactive prompts for `jp query`](https://github.com/dcdpr/jp/issues/178)
-- `jp_config::template` (`crates/jp_config/src/template.rs`) — current template config
-- `jp_config::conversation::tool` (`crates/jp_config/src/conversation/tool.rs`) — `ToolsConfig` pattern (defaults + flatten)
-- `jp_cli::cmd::query` (`crates/jp_cli/src/cmd/query.rs`) — current template rendering (line ~510)
+- `jp_config::template` (`crates/jp_config/src/template.rs`) — current template
+  config
+- `jp_config::conversation::tool` (`crates/jp_config/src/conversation/tool.rs`)
+  — `ToolsConfig` pattern (defaults + flatten)
+- `jp_cli::cmd::query` (`crates/jp_cli/src/cmd/query.rs`) — current template
+  rendering (line ~510)
 - [GitHub issue template syntax](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/syntax-for-githubs-form-schema) — prior art for template question schemas
 - [minijinja documentation](https://docs.rs/minijinja)
+
+[RFD 029]: 029-scriptable-structured-output.md
+[RFD 030]: 030-schema-dsl.md

@@ -1,130 +1,130 @@
 {
   "001-jp-rfd-process.md": {
-    "hash": "79cadf180f30aea894bbb7c546f0226897ed482d053a98b138bf4832acb15d5a",
+    "hash": "f05b3f2d28f3f9d49a957a1c0c26182c8e290e258cc4d0f75b47131044cc65ab",
     "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
   },
   "002-using-llms.md": {
-    "hash": "b159a47b9a1951a03b656b23746aa4055df1540a966ebe068d5fc478f0c05ea9",
+    "hash": "230aab82cbb2fa4fb31b61be370f1701024eeb834dd7a8dd063da37f714f8afa",
     "summary": "LLMs are tools; you own your output and bear responsibility for its quality regardless of how it was produced."
   },
   "004-streaming-md-parser-renderer.md": {
-    "hash": "cae18826a8f0da3c6cf90f9c9c9eb064fb7492f635bb3dd58cbfe2655a96cd74",
-    "summary": "JP streams markdown by segmenting blocks with custom Buffer, then renders them with ANSI-aware terminal renderer."
+    "hash": "fd6cb2fea67ee19335ce3b6eb360cd406a38f91253b3cf90b4657a96b3c832e8",
+    "summary": "Custom Buffer segments streaming markdown blocks; TerminalRenderer applies ANSI-aware formatting for terminal output."
   },
   "005-first-class-inquiry-events.md": {
     "hash": "d139575e477cb1974f8c551f18093c56441f9702f5d3a85f618a0df22018a0bd",
     "summary": "Record inquiry events in conversation stream with centralized filtering to keep them hidden from LLM providers."
   },
   "006-turn-scoped-mutations.md": {
-    "hash": "6b3c3853081d8958fe1ff5dc5f4e03adad706aa05c30ad7f50972fa4f6f6fffd",
+    "hash": "6e1184cbbc99dd16198a148f0dda7ba1ba85ad3810db97d824be0166779fe2f8",
     "summary": "Restrict stream mutations to turn-scoped accessors, preventing invalid event sequences through compile-time guarantees."
   },
   "007-llamacpp-reasoning.md": {
     "hash": "c71cc82a5d9b014228dc0ec328e5d5ab387be6903a3e7bfe067c5c956b89edb3",
     "summary": "Llamacpp provider will drop the openai crate to properly extract reasoning content from all three llama.cpp reasoning formats."
   },
-  "008-knowledge-base.md": {
-    "hash": "d287c2288f41e60bb388a19175e4e1614dc6f0faee680e4ec1d2e54c7778d479",
-    "summary": "Proposes a file-based knowledge base system where assistants retrieve project-specific topics and subjects on-demand via a `learn` tool."
+  "008-ordered-tool-directives.md": {
+    "hash": "e42d1633b20b6f55cded79d628f11b56c3bc1eda48dcc2a71231e716f39e7eaf",
+    "summary": "Make CLI tool flags order-sensitive, processing `--tool` and `--no-tools` left-to-right instead of in fixed order."
   },
   "009-stateful-tool-protocol.md": {
-    "hash": "252efb9eaaa9ce79ad1d598503f668cd7e86dc5ab3e6b2b7cd0dd18d9b9d39c1",
+    "hash": "21afb51a17cddbc1a3899703dcd55b7042dcbc97eef9eee492de223dfbd6c872",
     "summary": "Unifies one-shot and long-running tool execution under a stateful protocol enabling multi-step interactive workflows."
   },
   "010-pty-infrastructure-and-interactive-tool-sdk.md": {
-    "hash": "169f836a0b69b83edb58b79183624448efda52935b13b1f838cd5c05458d580d",
+    "hash": "5bfb42f109b83a52025ff682493b61c9d5fd051b155c2250e90e0303dc8391bf",
     "summary": "Proposes jp_pty crate and interactive SDK for building stateful tools that wrap interactive CLI programs."
   },
-  "011-system-message-queue.md": {
-    "hash": "ec1d22427517338cb857b904792804a09912f29834a5b8874d17eb71dabd6648",
-    "summary": "System message queue delivers asynchronous subsystem notifications to the assistant by embedding them in existing conversation messages."
+  "011-system-notification-queue.md": {
+    "hash": "da578411ec0e96d72433ad5fc5c788eadd91ca3fc080486b8cecf16d248d3fcb",
+    "summary": "System notification queue delivers asynchronous subsystem notifications to the assistant by embedding them in existing conversation messages."
   },
-  "012-incremental-tool-call-argument-streaming.md": {
-    "hash": "00f3175cf2e7b82ebc9628309a6917cdd48f274a30ca3b60eb4baf55b5b6ea88",
-    "summary": "Parse tool call arguments incrementally as JSON streams in, emitting progress events before the full object completes."
+  "012-typed-llm-streaming-events.md": {
+    "hash": "67de200a999ce9c6f4badda33fd5b242c1951858688b48c35d684a53d819b20c",
+    "summary": "Decouple streaming transport from persistence by replacing ConversationEvent in Event::Part with a purpose-built EventPart enum."
   },
   "013-named-query-templates.md": {
-    "hash": "357bbe5a840673fdce2353334a88e1db8f41062d5f579a5849fa79606965709a",
+    "hash": "9c813cc9c8cb1f280dc1c67704c93143aa160511006aa1a615ca43166686ebf1",
     "summary": "Add reusable, config-defined query templates with interactive prompts for collecting variables before rendering."
   },
   "014-attachment-handler-guide.md": {
-    "hash": "669c762ae58adcc0fb9199d45a890d1b88ab399b083d5962ef4b48399134db62",
+    "hash": "217ba96eb8e7e3b778f16d4859448417ad46a91f70b5d69c48b6f7d4a6e62577",
     "summary": "JP attachment handlers fetch context via URL schemes, supporting both opaque and hierarchical formats with add/remove/list/get trait methods."
   },
   "015-simplified-attachment-handler-trait.md": {
-    "hash": "c6e9cb2d3fff037e1cdfac2c855b1a279dbd62b196e17edff756f6356c6c70cb",
+    "hash": "217d2c0573f6b4c404a70d95bfe80b3484240c35d479085e0200033f79e2d8ae",
     "summary": "Simplify attachment handlers from stateful (five methods) to stateless (three methods), moving URL tracking to the host."
   },
   "016-wasm-plugin-architecture.md": {
-    "hash": "5df08f4fa58c9c106e85002e5397fd874a31e62b2ab495b6ad2b999f83867ec4",
-    "summary": "Wasm-based plugin architecture enabling third-party extensibility with sandboxed capabilities through WIT interfaces."
+    "hash": "f55e257b0e01d41a96df18bea936e46e314a7adf64e7e9168f0696fcfa770ca7",
+    "summary": "Sandboxed Wasm plugin system with WIT interfaces, dynamic capability discovery, and per-plugin sandbox configuration for extensibility."
   },
   "017-wasm-attachment-handlers.md": {
-    "hash": "50182f15c19329f873b875ebc1501494dbdd397f390d115cc1ea34bce4d09a4a",
+    "hash": "f1fe44751a06221b46f403ded55774c5ea78f3418bab82c82b0ba60dc9e2c3a3",
     "summary": "Wasm plugins export an attachment interface, wrapped in a native Handler adapter for transparent integration."
   },
-  "018-typed-inquiry-system.md": {
-    "hash": "7a10c16aa8e318a704d76e0d6f141f08f943cabf9e61e35fbf52af1367d46057",
-    "summary": "Codify prompt types as `Inquiry` enum variants for unified routing, config, and extensibility."
+  "018-typed-prompt-routing-enum.md": {
+    "hash": "e8d01fdca5e58abec9ad9f466837ccbf316e00163d87b12f5f6dd191e089a285",
+    "summary": "Codify prompt types as `Prompt` enum variants for unified routing, config, and extensibility."
   },
   "019-non-interactive-mode.md": {
-    "hash": "f8df765c0dea6c488562f5424b66fc0f8fcd4c119adbee2564abd963068028b1",
-    "summary": "Configurable fallback behavior for unattended prompts, with safe defaults and output channel separation."
+    "hash": "0e3ad0cfd595dac01f504e2308c369a308dc77bfed3b9bec89865e912b97482b",
+    "summary": "Abandoned RFD split into RFD 048 and RFD 049; preserved for historical context on non-interactive mode design."
   },
   "020-parallel-conversations.md": {
-    "hash": "33957f2787024160f2dfb5ae033286c2dfbd3c17c88dbbcfe216f2aaeb7f85c5",
+    "hash": "88c88cee70f67c8261e422b07b5b001e9edaca1054ef625faf4798add07e95a4",
     "summary": "Replace global active conversation with per-session tracking and add conversation locks for parallel terminal work."
   },
   "021-printer-live-redirection.md": {
-    "hash": "ba1d703a4cd8e04f13c89b6a5e04eefec834fab6b6a43fd3137234f8274af45f",
+    "hash": "a3ea339c6e2e907ef01e84c44c30f9abe705a6ffd0b5ed9f6f74a887ec3d06a8",
     "summary": "Adds runtime output redirection to Printer via SwapWriters command, enabling mid-stream destination changes without replacing instances."
   },
   "022-detached-conversations.md": {
-    "hash": "32572241f52e016c3cad78a554854a2a8358cd30444ccac583d0845b663d794e",
-    "summary": "Proposes detached query execution, process registry, and conversation attachment—abandoned and split into RFD 023 and 024."
+    "hash": "a6f82ee7a5d9dab13740a189b78d19bd2d243a0e415010c28aaa6728b6eb6ed2",
+    "summary": "Detached conversation execution via background processes and attachment—abandoned, split into RFD 023 and 027."
   },
   "023-resumable-conversation-turns.md": {
-    "hash": "6b1211b1b33edabbc2f707e53ccdd9af6ec92b4720352685af86f23c209ab284",
-    "summary": "Split incomplete turns from stream, persist tool results incrementally, resume with --continue flag."
+    "hash": "4f8ab650970fa0641e9559d14fe407647071b1911c0d1673b31785d96502b3fc",
+    "summary": "Persist tool results incrementally, split incomplete turns from stream, resume with interactive prompt or --continue-turn flag."
   },
   "024-detached-query-execution.md": {
-    "hash": "f6fada08fa801a9a37dd0f39ecc7a3c983a604407cf74fe9291e1a7aab75e3b7",
+    "hash": "5d2bb0b314429c92e3deb631b01b8757aff390e04bcac3d05e488fbb5312f066",
     "summary": "Detached query execution with process registry and queue policy for background conversations; superseded by RFD 027."
   },
   "025-live-re-attachment-to-detached-queries.md": {
-    "hash": "6d9f995427fbb9cbff81f60a0797f51bc0d7c2b02015fa3fdd690a48e9d1c3ff",
+    "hash": "5a06223a182fc2a51195d43ae8fa12b560b1dfbd72581a11001bb500df95f894",
     "summary": "Abandoned design for live re-attachment to detached query processes via Unix domain sockets; superseded by RFD 027."
   },
   "026-agent-loop-extraction.md": {
-    "hash": "a919cf75382c2349f70d708de1c17aa167a440227fb68484a1ae096cfb94fe90",
+    "hash": "a30fee01804bc8a9f65b28a6f441d59598b6b86c06d84b1f3691dd1cc25ccfde",
     "summary": "Extract the agent turn loop from jp_cli into a new jp_agent crate with trait-based I/O hooks."
   },
   "027-client-server-query-architecture.md": {
-    "hash": "3b39f9c40ea451bff0a6a1ffd02ebed2ee50931cc5229c82e5b6bc5a26b22d03",
-    "summary": "Restructure `jp query` as unified client-server architecture for foreground, detached, and reattached queries."
+    "hash": "a803fc44cee2f67e9521e9207a8e894f755edb16653cff510c23b77a416a83bd",
+    "summary": "Client-server architecture unifying foreground, detached, and reattached query execution with IPC-based output streaming and inquiry routing."
   },
   "028-structured-inquiry-system-for-tool-questions.md": {
-    "hash": "ac98a994a98b27ac240a65c7834e82c94a546bb0550e7e13a1c0d1c51a69ef42",
+    "hash": "418442847004b66af43f457451e722d0f8f709058fd63cf955a41b25dd5d8a80",
     "summary": "Replace tool re-invocation with async inquiries to avoid token waste and latency when tools need LLM answers."
   },
   "003-jp-assisted-rfds.md": {
-    "hash": "6cd1f35b175a1fd5205c6bcfa1aa47e2b328aca93d1ef095a4609344f10e5d47",
+    "hash": "8431a623988fef4d02bded031ca62ae86bb986c5cab57df45263ddce052ae4ee",
     "summary": "Propose an `rfd` skill configuration enabling JP to assist RFD writing through research, structure, and collaborative editing—not authorship."
   },
   "029-scriptable-structured-output.md": {
-    "hash": "825a9e3e35c112ee93784cd3f54a8cb50c6c292aa634fe30381c4f5ed852d653",
-    "summary": "Make JP usable in scripts by inferring clean JSON output and adding a concise schema syntax."
+    "hash": "0980a17d326b1d20e7be19c4ddb2a904c3b825ccb6a0ffd50b57f77ac883d323",
+    "summary": "Make JP scriptable with concise schema DSL and inferred clean JSON output when piping or with --schema flag."
   },
   "030-schema-dsl.md": {
     "hash": "6ad7b77699e9b0d29105793b92a958bb40e5c14a54bae41eda7c4eb970ac65ce",
     "summary": "JP's concise DSL syntax for defining JSON Schema objects via command-line flags with types, descriptions, and nested structures."
   },
   "031-durable-conversation-storage-with-workspace-projection.md": {
-    "hash": "0313f86d5cf10756ee8fb7707eeb0ed168dbe6179bcf2e12c2ebe8b4ab3271ae",
+    "hash": "5d8649c8f57cef4d3a1597fd3c13d5522eaec9fe6f14279add39f28fd4f41a52",
     "summary": "Make user-local storage the durable source; workspace copies become optional projections for git visibility."
   },
   "032-grizzly-semantic-search.md": {
-    "hash": "2da284db49973858e10beca9b22deeb752d81ac7a441ed875ad846e54eedaf4a",
+    "hash": "49bff02463e5818c7c6f92c58da24aec380df09b375d2471960f076322974923",
     "summary": "Add FTS5 full-text search, typo tolerance, and local semantic vector search to grizzly's note_search tool."
   },
   "033-cache-preserving-inquiry-via-tool-use.md": {
@@ -132,7 +132,7 @@
     "summary": "Replace structured output with a tool-use-based inquiry system to preserve prompt cache and reduce LLM costs."
   },
   "034-inquiry-specific-assistant-configuration.md": {
-    "hash": "0d03bdb479f48b6df268582df2d1698ad55a0f612bf28a17055297d595287d7b",
+    "hash": "6c7b256b92d2c3138ea3e7904efa8de501b262f8419f12915bec02428dc00c8f",
     "summary": "Route inquiries to cheaper models with stable schemas for 5-25x cost reduction via configurable assistant overrides."
   },
   "035-multi-root-config-load-path-resolution.md": {
@@ -140,15 +140,67 @@
     "summary": "Extend `--cfg` path resolution to search user-global, workspace, and user-workspace config roots, merging matches."
   },
   "036-conversation-compaction.md": {
-    "hash": "20ac71e5dcf878a3a8ec468293fee7a1aaa1b797638f7095f43c405e6d0f2cb3",
+    "hash": "ca322559cb49be451467d95a153304a4df2cfe2639f2b53260c21eea45605ebd",
     "summary": "Composable conversation compaction via mechanical strategies, tool-aware deduplication, LLM summarization, and protocol extensions for declarative compaction hints."
   },
-  "041-rfd-lifecycle-deferred-numbering-tracking-issues-and-extends-metadata.md": {
-    "hash": "43a8a71ef29d809239fe50867b2f40b58695d61e6d583f6d7c2b968cd06c3748",
+  "037-await-tool-for-stateful-handle-synchronization.md": {
+    "hash": "368bd5aca7904f94bc773c832077ba6d4bdccda805c5de24978a40c08c024b43",
+    "summary": "Introduces `await` built-in tool to synchronize on parallel stateful tool handles with `any`/`all` completion modes."
+  },
+  "039-conversation-trees.md": {
+    "hash": "8de78f07ff101fd21abb050ab7ec8ea3c0a89213cbc53dbcc165e960d150c6c5",
+    "summary": "Add parent-child conversation relationships via metadata field, enabling fork lineage and hierarchical organization without nested directories."
+  },
+  "040-hidden-conversations-and-tool-context.md": {
+    "hash": "c645a9f1e651d389ec1b0361a5bf8b32eb92903de0d8d0897646bbbb012cc3c5",
+    "summary": "Add hidden flag on conversations and conversation_id in tool execution context."
+  },
+  "041-rfd-lifecycle-enhancements.md": {
+    "hash": "3f0d35a4fc618daac964dde785f1c339f5279a0b6b5e6b5e73dd2c0158f34c2f",
     "summary": "Defer RFD numbering to Discussion, auto-create tracking issues, add Extends/Extended by metadata."
   },
   "042-tool-options.md": {
-    "hash": "d5c094882a3f52d471c2a0d156f018ca23bfb5464f47469de8d74954bf824c70",
+    "hash": "8e08b5b224523ca18f3896e88a5e4eec6743cdccc9cf0824fe910292ab2f29f1",
     "summary": "Introduces per-tool options field for static user-defined configuration passed to tools at runtime."
+  },
+  "043-incremental-tool-call-argument-streaming.md": {
+    "hash": "493aa699f609bbb5d5f354c5bd7499011a67ecffe383b88c85aee155e0521317",
+    "summary": "Incremental JSON parser emits tool call argument fragments as data streams, enabling real-time UI display."
+  },
+  "044-workspace-initialization.md": {
+    "hash": "e9de34df0adc74bdcf496c0cf13f94989f569dc5a222491501756bf88bfc358c",
+    "summary": "Redesign `jp init` to generate schema-driven config with interactive model/mode selection and curated commented fields."
+  },
+  "045-layered-interrupt-handler-stack.md": {
+    "hash": "2671298042c7266c68cd85f226e5ed57f559d1f330747638ad4d0280856a917c",
+    "summary": "Replace JP's ad-hoc interrupt handling with a layered LIFO handler stack, routing OS signals through scoped notification channels."
+  },
+  "046-nested-workspace-projection.md": {
+    "hash": "031212e05fa48ff25a35abf4ebb73bbcafb842fc9a7441a664289d19f3127902",
+    "summary": "Nested workspace directories project conversation trees visually; user-local storage stays flat for durability."
+  },
+  "047-editor-and-path-access-for-conversations.md": {
+    "hash": "9ba5cc3be2b3ad2fc69ec2463f3a0ef6fa20677caf0b54648de65074d8805431",
+    "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
+  },
+  "038-config-inheritance-for-conversations.md": {
+    "hash": "ab698be5173ba45faac9842437895165061196454b5ee0bb33249b28aa4006c4",
+    "summary": "Extends --cfg with UPPERCASE keywords (NONE, WORKSPACE) and conversation IDs for config inheritance."
+  },
+  "048-four-channel-output-model.md": {
+    "hash": "98b9bc46d694ff76e7d0853f91f1495e26d947564a2d6bdc1fc73485726c4ce5",
+    "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
+  },
+  "049-non-interactive-mode-and-detached-prompt-policy.md": {
+    "hash": "eab29a09c440e3981db69e9feff8973cbc5d62aba039004d90b29d9e5eb4b38b",
+    "summary": "Configurable detached prompt policy controls JP behavior when no interactive client is available; defaults to safe 'deny' mode."
+  },
+  "050-scripting-ergonomics-for-conversation-management.md": {
+    "hash": "d0b49d3629d402d2587784ae0293a9797a99f9d643b45dcb8bb6638499c51deb",
+    "summary": "Adds scripting ergonomics: shared config structs, `conversation new` command, `--no-activate` flag, and `--root-id` ancestry constraint."
+  },
+  "051-sub-agent-workflows.md": {
+    "hash": "1a162b7a00e87551ee7ce35145babf277f86225788cf611d4c616ce394be5dba",
+    "summary": "Guide for building sub-agent workflows using local tools, config overlays, and conversation trees to delegate scoped tasks cheaply."
   }
 }

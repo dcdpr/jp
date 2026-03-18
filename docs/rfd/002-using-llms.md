@@ -1,6 +1,6 @@
 # RFD 002: Using LLMs in the JP Project
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17

@@ -1,6 +1,6 @@
 # RFD 009: Stateful Tool Protocol
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
@@ -9,10 +9,10 @@
 
 This RFD introduces a stateful tool execution protocol that unifies one-shot and
 long-running tools under a single execution model. Every tool call is internally
-modeled as a state machine (`Running → Stopped`), with one-shot tools
-wrapped transparently. Long-running tools expose this lifecycle to the
-assistant, enabling multi-step interactive workflows like `git add --patch` or
-persistent shell sessions.
+modeled as a state machine (`Running → Stopped`), with one-shot tools wrapped
+transparently. Long-running tools expose this lifecycle to the assistant,
+enabling multi-step interactive workflows like `git add --patch` or persistent
+shell sessions.
 
 ## Motivation
 
@@ -45,17 +45,17 @@ We want a model where:
 Consider a `git` tool that supports interactive staging:
 
 ```txt
-assistant: call(git, { action: "spawn", command: "stage", args: ["--patch"] })
-  → { "id": "h_1", "state": "running", "content": "diff --git a/..." }
+assistant: call(git, { action: "spawn", id: "staging", command: "stage", args: ["--patch"] })
+  → { "id": "staging", "state": "running", "content": "diff --git a/..." }
 
-assistant: call(git, { action: "fetch", id: "h_1" })
-  → { "id": "h_1", "state": "running", "content": "Stage this hunk? [y/n/...]" }
+assistant: call(git, { action: "fetch", id: "staging" })
+  → { "id": "staging", "state": "running", "content": "Stage hunk? [y/n/...]" }
 
-assistant: call(git, { action: "apply", id: "h_1", input: "y" })
-  → { "id": "h_1", "state": "running", "content": "Next hunk: ..." }
+assistant: call(git, { action: "apply", id: "staging", input: "y" })
+  → { "id": "staging", "state": "running", "content": "Next hunk: ..." }
 
-assistant: call(git, { action: "fetch", id: "h_1" })
-  → { "id": "h_1", "state": "stopped", "result": "Staged 3 hunks." }
+assistant: call(git, { action: "fetch", id: "staging" })
+  → { "id": "staging", "state": "stopped", "result": "Staged 3 hunks." }
 ```
 
 Today this is impossible. The `git` tool can only run non-interactive commands.
@@ -110,9 +110,9 @@ All states carry an optional `content: String` field. The tool author controls
 what goes in this string — they might format it as plain text, JSON, XML, or
 combine stdout/stderr however they see fit.
 
-`Running` includes content from the first response onward, including any
-initial output from startup (a shell prompt, an editor screen, a welcome
-message). This avoids an extra round-trip to get the initial content.
+`Running` includes content from the first response onward, including any initial
+output from startup (a shell prompt, an editor screen, a welcome message). This
+avoids an extra round-trip to get the initial content.
 
 `Stopped` returns either a successful output as a string, or an error message
 containing an optional trace and a boolean indicating whether the error is
@@ -129,15 +129,15 @@ This means future variants can carry additional typed fields without changing
 `content`'s type. For example, a sub-agent tool that surfaces an inquiry would
 return `Waiting { question, .. }` with the `Question` in the typed field. The
 sub-agent serializes its internal state as JSON over the wire; JP deserializes
-it into the typed `ToolState` variants on the other side — the same pattern
-that local tools already use when they write `Outcome` JSON to stdout.
+it into the typed `ToolState` variants on the other side — the same pattern that
+local tools already use when they write `Outcome` JSON to stdout.
 
-Making `content` into `serde_json::Value` or making `ToolState` generic over
-`T: Serialize` was considered but rejected: `Value` forces every consumer to
-parse, and generics infect every containing type with a type parameter. In
-practice, content is almost always a string. If a richer wire format is needed
-for sub-agents, that can be addressed in the sub-agent RFD by evolving the
-variants, not by changing `content`'s type.
+Making `content` into `serde_json::Value` or making `ToolState` generic over `T:
+Serialize` was considered but rejected: `Value` forces every consumer to parse,
+and generics infect every containing type with a type parameter. In practice,
+content is almost always a string. If a richer wire format is needed for
+sub-agents, that can be addressed in the sub-agent RFD by evolving the variants,
+or by changing `content`'s type.
 
 ### State transitions
 
@@ -150,10 +150,10 @@ Running → Stopped
 ```
 
 `Running` is the initial state for a stateful tool. It means the tool is active
-and may contain output. `Waiting` means the
-tool needs structured input (a `Question`) before it can continue — this maps to
-the existing inquiry system. `Stopped` is terminal — the tool has exited, either
-successfully (`Ok(content)`) or with an error (`Err(...)`).
+and may contain output. `Waiting` means the tool needs structured input (a
+`Question`) before it can continue — this maps to the existing inquiry system.
+`Stopped` is terminal — the tool has exited, either successfully (`Ok(content)`)
+or with an error (`Err(...)`).
 
 ### `ToolCommand` — what JP dispatches internally
 
@@ -162,8 +162,8 @@ When the assistant calls a tool, JP parses the arguments and produces a
 
 ```rust
 pub enum ToolCommand {
-    /// Spawn a new tool process.
-    Spawn { args: Map<String, Value> },
+    /// Spawn a new tool process with an assistant-chosen handle ID.
+    Spawn { id: String, args: Map<String, Value> },
 
     /// Read the current state of a running tool.
     Fetch { id: String },
@@ -200,11 +200,10 @@ The tool handle's internal state determines how `Apply` is routed:
 
 - **`Running` handle**: `input` is written to stdin. No question correlation
   needed.
-- **`Waiting` handle**: JP extracts the `question.id` from the handle's
-  `Waiting { question, .. }` state and maps the answer:
-  `accumulated_answers[question.id] = input`. This is unambiguous because a
-  handle has at most one pending question — a tool can only be in one state
-  at a time.
+- **`Waiting` handle**: JP extracts the `question.id` from the handle's `Waiting
+  { question, .. }` state and maps the answer: `accumulated_answers[question.id]
+  = input`. This is unambiguous because a handle has at most one pending
+  question — a tool can only be in one state at a time.
 
 The caller (assistant or JP's internal one-shot wrapper) does not need to
 include a question ID in the `Apply` command. JP derives it from the handle's
@@ -240,9 +239,9 @@ tool that doesn’t accept input: that case simply cannot arise.
 
 ### How the assistant interacts with stateful tools
 
-A stateful tool exposes `action` and `id` in its JSON schema, alongside its
-own tool-specific parameters. The schema uses `oneOf` so each action variant
-has its own sub-schema. Only the actions the tool supports are included.
+A stateful tool exposes `action` and `id` in its JSON schema, alongside its own
+tool-specific parameters. The schema uses `oneOf` so each action variant has its
+own sub-schema. Only the actions the tool supports are included.
 
 Example schema for `git` (supports `spawn`, `fetch`, `apply`, `abort`):
 
@@ -254,6 +253,10 @@ Example schema for `git` (supports `spawn`, `fetch`, `apply`, `abort`):
       "properties": {
         "action": {
           "const": "spawn"
+        },
+        "id": {
+          "type": "string",
+          "description": "Handle ID for this tool instance. Must be unique across active handles."
         },
         "command": {
           "enum": [
@@ -271,6 +274,7 @@ Example schema for `git` (supports `spawn`, `fetch`, `apply`, `abort`):
       },
       "required": [
         "action",
+        "id",
         "command"
       ]
     },
@@ -334,12 +338,17 @@ Example schema for `cargo_check` (supports `spawn`, `fetch`, `abort` — no
         "action": {
           "const": "spawn"
         },
+        "id": {
+          "type": "string",
+          "description": "Handle ID for this tool instance. Must be unique across active handles."
+        },
         "package": {
           "type": "string"
         }
       },
       "required": [
-        "action"
+        "action",
+        "id"
       ]
     },
     {
@@ -388,7 +397,6 @@ rounds within a turn.
 ```rust
 struct HandleRegistry {
     handles: HashMap<String, ToolHandle>,
-    next_id: u64,
 }
 
 struct ToolHandle {
@@ -401,21 +409,32 @@ struct ToolHandle {
 }
 ```
 
-Handle IDs are JP-generated (`h_1`, `h_2`, ...), monotonically increasing
-within a JP process. The tool itself never generates or sees its own handle
-ID.
+Handle IDs are chosen by the assistant via a required `id` parameter on the
+`spawn` action. The assistant picks descriptive names (`check`, `staging`,
+`build_release`) that appear in the conversation history and should be readable.
+JP validates uniqueness — if the chosen ID collides with an already-active
+handle, the spawn returns an error.
 
-When the assistant calls `tool(action: "fetch", id: "h_1")`, JP looks up
-`h_1` in the registry, calls the tool's fetch handler, and returns the result.
+Model-chosen IDs are preferable to JP-generated sequential IDs (`h_1`, `h_2`)
+because they are meaningful in conversation history and the assistant knows them
+at call time without waiting for JP's response.
+
+When the assistant calls `tool(action: "fetch", id: "staging")`, JP looks up
+`staging` in the registry, calls the tool's fetch handler, and returns the
+result.
 
 ### Handle lifecycle
 
-Handles are created when a tool returns a non-terminal state and destroyed
-when:
+Handles are created when a tool returns a non-terminal state and destroyed when:
 
 - The tool reaches `Stopped` (natural completion)
 - The assistant or user sends `Abort`
 - The conversation turn ends (all remaining handles are aborted)
+
+  > [!TIP]
+  > [RFD 037] extends turn-end behavior with configurable per-tool policies
+  > (`inquire`, `await`, `abort`).
+
 - JP exits (child processes receive SIGTERM, then SIGKILL)
 
 ### One-shot tool wrapping
@@ -444,9 +463,9 @@ function wraps the existing call in this loop. The `NeedsInput` -> re-execute
 pattern maps to: tool returns `Waiting`, JP collects the answer (prompt or
 inquiry), sends `Apply`, tool continues.
 
-For shell-based tools that exit immediately, the internal flow is: spawn
-process → process exits → parse stdout as `Outcome` → convert to
-`ToolState::Stopped` → return. The handle exists for microseconds.
+For shell-based tools that exit immediately, the internal flow is: spawn process
+→ process exits → parse stdout as `Outcome` → convert to `ToolState::Stopped` →
+return. The handle exists for microseconds.
 
 ### Detecting stateful vs. one-shot tools
 
@@ -458,20 +477,20 @@ that is, with an `action` field in its arguments. Detection is based on the
   directly. If the action is `spawn`, JP registers a handle for the tool.
   Subsequent `fetch`/`apply`/`abort` calls reference the handle by ID.
 - **No `action` field** → one-shot. JP wraps the call in the internal
-  spawn/fetch loop. If the tool returns `Waiting` (e.g., `fs_modify_file`
-  asking about a dirty file), JP handles it via the existing inquiry/prompt
-  path and re-executes with accumulated answers. The tool is never registered
-  as stateful.
+  spawn/fetch loop. If the tool returns `Waiting` (e.g., `fs_modify_file` asking
+  about a dirty file), JP handles it via the existing inquiry/prompt path and
+  re-executes with accumulated answers. The tool is never registered as
+  stateful.
 
 This distinction matters because a one-shot shell tool that returns `Waiting`
 has already exited — there is no running process to send `Apply` to. The
 `Waiting` state in the one-shot path means "re-execute with answers" (the
-current `NeedsInput` behavior), while `Waiting` in the stateful path means
-"the process is alive and paused, deliver input via `Apply`."
+current `NeedsInput` behavior), while `Waiting` in the stateful path means "the
+process is alive and paused, deliver input via `Apply`."
 
-Existing tools like `fs_modify_file` require **no changes**. They don't
-declare stateful actions in their schema, so the assistant never sends an
-`action` field, and JP runs them through the one-shot path exactly as today.
+Existing tools like `fs_modify_file` require **no changes**. They don't declare
+stateful actions in their schema, so the assistant never sends an `action`
+field, and JP runs them through the one-shot path exactly as today.
 
 For the JSON schema to include the `action`/`id` fields, the tool's
 configuration or definition must indicate stateful support. This could be:
@@ -495,20 +514,19 @@ The stateful protocol slots into the existing execution flow at the
 
 With the stateful protocol, step 3 changes:
 
-- **One-shot tools**: Same loop, but internally modeled as
-  spawn → fetch → stopped. The `NeedsInput` retry loop maps to the
-  `Waiting` → `Apply` cycle.
+- **One-shot tools**: Same loop, but internally modeled as spawn → fetch →
+  stopped. The `NeedsInput` retry loop maps to the `Waiting` → `Apply` cycle.
 - **Stateful tools**: No loop. JP dispatches the `ToolCommand`, returns the
   `ToolState` to the assistant, and the assistant drives subsequent calls.
 
-The `ToolCallResponse` sent to the assistant for stateful tools includes the handle
-ID and state:
+The `ToolCallResponse` sent to the assistant for stateful tools includes the
+handle ID and state:
 
 ```rust
 ToolCallResponse {
     id: call.id,
     result: Ok(json!({
-        "id": "h_1",
+        "id": "staging",
         "state": "running",
         "content": "Stage this hunk? [y/n/...]"
     }).to_string()),
@@ -521,10 +539,10 @@ perspective.
 
 ### Interaction with the inquiry system
 
-The current inquiry system handles `NeedsInput` with
-`QuestionTarget::Assistant` by making a structured LLM call to get the answer,
-then re-executing the tool. Under the stateful protocol, the inquiry system
-produces the answer the same way, but delivers it via `Apply`:
+The current inquiry system handles `NeedsInput` with `QuestionTarget::Assistant`
+by making a structured LLM call to get the answer, then re-executing the tool.
+Under the stateful protocol, the inquiry system produces the answer the same
+way, but delivers it via `Apply`:
 
 1. Tool returns `Waiting { question, .. }` (with `target: Assistant` in config)
 2. JP's inquiry system makes the structured LLM call, extracts the answer
@@ -536,14 +554,14 @@ produces the answer the same way, but delivers it via `Apply`:
 
 When the assistant drives a stateful tool directly (no inquiry system):
 
-1. Tool returns `Waiting { question, .. }` → JP returns it to the assistant
-   as part of the `ToolCallResponse`
-2. The assistant calls `tool(action: "apply", id: "h_1", input: true)`
+1. Tool returns `Waiting { question, .. }` → JP returns it to the assistant as
+   part of the `ToolCallResponse`
+2. The assistant calls `tool(action: "apply", id: "staging", input: true)`
 3. JP sends `Apply { input: true }` to the handle
 4. The tool answers the question and continues
 
-Both paths use the same `Apply` command. The tool handle routes the input
-based on its internal state (stdin write vs. question answer).
+Both paths use the same `Apply` command. The tool handle routes the input based
+on its internal state (stdin write vs. question answer).
 
 ### `ToolState` in `jp_tool`
 
@@ -578,10 +596,10 @@ impl From<Outcome> for ToolState {
 
 ## Drawbacks
 
-**Complexity.** The unified state machine adds a layer of abstraction over
-what is currently a simple call-and-return model. For the majority of tools
-that are one-shot, this abstraction provides no user-visible benefit — it's
-purely internal.
+**Complexity.** The unified state machine adds a layer of abstraction over what
+is currently a simple call-and-return model. For the majority of tools that are
+one-shot, this abstraction provides no user-visible benefit — it's purely
+internal.
 
 **Handle management.** Long-lived handles introduce state that must be tracked,
 cleaned up on errors, and survived across tool call rounds. This is new
@@ -589,8 +607,8 @@ territory for JP's tool system, which currently has no cross-round state beyond
 `TurnState.pending_tool_call_questions`.
 
 **Schema complexity.** The `oneOf` schema for stateful tools is more complex
-than a flat parameter list. Some assistant providers handle `oneOf` schemas poorly
-or not at all. This may require provider-specific schema transformations.
+than a flat parameter list. Some assistant providers handle `oneOf` schemas
+poorly or not at all. This may require provider-specific schema transformations.
 
 **Two execution paths.** Despite the unified model, one-shot and stateful tools
 still have different code paths (wrap-and-loop vs. direct dispatch). The
@@ -604,8 +622,8 @@ This was the original approach in the first draft of this RFD — expose PTY
 sessions as a set of generic `terminal_*` tools. The assistant would call
 `terminal_start("git add --patch")` to launch any interactive program.
 
-**Rejected because:** It exposes the wrong abstraction. The assistant should call
-domain tools (`git`, `editor`), not generic terminal tools. The stateful
+**Rejected because:** It exposes the wrong abstraction. The assistant should
+call domain tools (`git`, `editor`), not generic terminal tools. The stateful
 protocol lets each tool define its own commands and parameters while reusing
 JP's handle management infrastructure.
 
@@ -623,8 +641,8 @@ runtime dispatch (presence of `action` in arguments).
 
 ### Separate `ToolState` from `Outcome` entirely
 
-Don't provide `From<Outcome> for ToolState`. Make them independent types with
-no conversion path.
+Don't provide `From<Outcome> for ToolState`. Make them independent types with no
+conversion path.
 
 **Rejected because:** It would break every existing tool immediately. The
 conversion preserves backward compatibility — existing tools that output
@@ -636,11 +654,16 @@ conversion preserves backward compatibility — existing tools that output
   management. How a tool actually manages an interactive subprocess (PTY,
   terminal emulator, screen buffer) is covered in a follow-up RFD.
 - **Interactive tool SDK.** A convenience SDK (`jp_tool::interactive`) for
-  building stateful tools in Rust is a follow-up. This RFD defines the
-  protocol that such an SDK would target.
+  building stateful tools in Rust is a follow-up. This RFD defines the protocol
+  that such an SDK would target.
 - **Parallel stateful tools.** Multiple handles can coexist, but this RFD does
-  not address coordinating between them (e.g., piping output from one handle
-  to another).
+  not address coordinating between them (e.g., synchronizing on multiple
+  handles, piping output from one to another).
+
+  > [!TIP]
+  > [RFD 037] introduces an `await` built-in tool for cross-handle
+  > synchronization.
+
 - **Persistent handles across JP invocations.** Handles are scoped to the JP
   process. When JP exits, all handles are destroyed.
 
@@ -689,8 +712,7 @@ its state (e.g., `cargo check` finishes while the assistant is doing other
 work), how does the assistant learn about it?
 
 The current event model requires `ToolCallRequest` → `ToolCallResponse` pairs.
-JP cannot inject a response without a corresponding request. Options
-considered:
+JP cannot inject a response without a corresponding request. Options considered:
 
 - **Require the assistant to poll.** Simple but fragile — the assistant must
   remember to `fetch` every handle it spawned.
@@ -703,23 +725,16 @@ None of these are clean. The recommended approach for this RFD is
 **assistant-driven polling**: the assistant is responsible for checking on its
 handles. JP does not proactively push results.
 
-A better solution may be a general-purpose **system message queue** (explored
-in a separate RFD). The idea: JP maintains a queue of system notifications
-that are delivered to the assistant at the next available communication
-opportunity:
+A better solution may be a general-purpose **system message queue** that
+delivers notifications piggybacked on existing messages. This would allow JP to
+inform the assistant of handle state changes without fabricating events. Such a
+mechanism could also deliver other system events (MCP disconnections, workspace
+changes) and would be configurable per-tool. This is left as a follow-up design.
 
-- In any `ToolCallResponse` about to be sent
-- When the user interrupts the stream and triggers an in-turn `ChatRequest`
-- When the turn ends
-
-At those points, JP checks for queued notifications and prepends them to the
-message. Notifications could include handle state changes, but also other
-system events (MCP server disconnections, workspace changes, etc.).
-
-This mechanism would be configurable per-tool: which notification types a
-tool can emit (`state_stopped`, `state_waiting`), and at which delivery
-points. This keeps the stateful tool protocol simple (poll-based) while
-offering a path to proactive delivery without bending the event model.
+> [!TIP]
+> [RFD 011] introduces the system message queue.
+> [RFD 037] introduces the `await` tool for explicit synchronization and
+> configurable per-tool notifications and turn-end behavior.
 
 ### Backward compatibility of `ToolState` serialization
 
@@ -734,8 +749,8 @@ one of `spawned`, `running`, `waiting`, `stopped`, parse as `ToolState`; if it's
 ### Phase 1: `ToolState` type in `jp_tool`
 
 Add the `ToolState` and `ToolError` types alongside existing `Outcome`. Add
-`From<Outcome> for ToolState`. Add the backward-compatible deserialization
-that accepts both formats. Unit tests for conversion and serialization.
+`From<Outcome> for ToolState`. Add the backward-compatible deserialization that
+accepts both formats. Unit tests for conversion and serialization.
 
 Can be merged independently. No behavioral changes.
 
@@ -751,8 +766,8 @@ aren't used.
 ### Phase 3: One-shot tool wrapping
 
 Refactor `StreamEventHandler.handle_tool_call` to use the stateful protocol
-internally. Replace the `NeedsInput` retry loop with the spawn → fetch →
-apply cycle. The `ToolDefinition::call` function returns `ToolState` instead of
+internally. Replace the `NeedsInput` retry loop with the spawn → fetch → apply
+cycle. The `ToolDefinition::call` function returns `ToolState` instead of
 `ToolCallResponse`. The wrapping loop converts `ToolState::Stopped` to
 `ToolCallResponse`.
 
@@ -763,9 +778,9 @@ Depends on Phase 1 and 2.
 
 ### Phase 4: Stateful tool dispatch
 
-Add the `action` / `id` argument parsing. When a tool call includes `action`,
-JP dispatches the `ToolCommand` to the handle registry instead of wrapping in
-a one-shot loop. Return `ToolState` as the tool call response content.
+Add the `action` / `id` argument parsing. When a tool call includes `action`, JP
+dispatches the `ToolCommand` to the handle registry instead of wrapping in a
+one-shot loop. Return `ToolState` as the tool call response content.
 
 Depends on Phase 3.
 
@@ -779,11 +794,15 @@ Depends on Phase 4. Can be iterated on independently.
 
 ## References
 
-- [RFD 028: Structured Inquiry System](028-structured-inquiry-system-for-tool-questions.md)
-  — the inquiry system that handles `Waiting` with `QuestionTarget::Assistant`.
+- [RFD 028: Structured Inquiry System][RFD 028] — the inquiry system that
+  handles `Waiting` with `QuestionTarget::Assistant`.
 - [Query Stream Pipeline](../architecture/query-stream-pipeline.md) — the turn
   loop and tool execution flow that this RFD modifies.
 - [#392](https://github.com/dcdpr/jp/issues/392) — PTY-based end-to-end CLI
   testing (related infrastructure).
 - [interminai](https://github.com/mstsirkin/interminai) — prior art for
   PTY-based tool interaction, validates the approach.
+
+[RFD 011]: 011-system-notification-queue.md
+[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
+[RFD 037]: 037-await-tool-for-stateful-handle-synchronization.md

@@ -1,6 +1,6 @@
 # RFD 031: Durable Conversation Storage with Workspace Projection
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
@@ -77,6 +77,11 @@ headless server setup, or tests that don't need durability), the dual-write
 logic is skipped and JP falls back to single-write workspace storage — the same
 behavior as today. The `--local` flag and `local` derivation are unavailable
 without user-local storage; all conversations are workspace-only.
+
+> [!TIP]
+> [RFD 039] adds tree-structured parent-child relationships via a `parent_id`
+> field in each conversation's metadata, while retaining the flat directory
+> layout described here.
 
 ### Shared User-Local Storage
 
@@ -410,3 +415,4 @@ Can be merged independently.
   paths.
 
 [RFD 020]: 020-parallel-conversations.md
+[RFD 039]: 039-conversation-trees.md

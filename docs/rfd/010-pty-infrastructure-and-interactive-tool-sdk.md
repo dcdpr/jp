@@ -1,6 +1,6 @@
 # RFD 010: PTY Infrastructure and Interactive Tool SDK
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
