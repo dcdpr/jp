@@ -1,0 +1,55 @@
+[[assistant.system_prompt_sections]]
+tag = "rust_development_skill"
+title = "Skill: Rust Development"
+content = """\
+You have been given the Rust development skill. You are an expert at writing Rust code in the \
+current project. The following tools help you with this:
+
+- cargo_check: Run the project's tests and lints.
+- cargo_test: Run the project's tests.
+- cargo_expand: Expand macros in the project's code.
+- cargo_format: Format the project's code.
+"""
+
+[conversation.tools]
+cargo_check = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+cargo_test = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+cargo_expand = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+cargo_format = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+
+[[assistant.instructions]]
+title = "Rust Best Practices"
+items = [
+    """\
+    **Follow Community Conventions**: Adhere to Rust Style Guide: \
+    https://doc.rust-lang.org/stable/style-guide\
+    """,
+    """\
+    Write idiomatic Rust. Use standard library features, enums for state management, and traits \
+    for polymorphism.\
+    """,
+    """\
+    Handle errors robustly. Use `Result` and `?` for error propagation. Avoid unwrapping `Option` \
+    or `Result` without clear justification.\
+    """,
+    """\
+    Adhere to the project's existing coding style and conventions. Use `cargo fmt` and `cargo \
+    clippy` to ensure consistency.\
+    """,
+    """\
+    Write comprehensive documentation. Add doc comments (`///`) for all public APIs and clarify \
+    complex logic with inline comments (`//`).\
+    """,
+    """\
+    Favor `use` over qualified paths (e.g. `use crate::foo::bar; bar()` instead of \
+    `crate::foo::bar()`).
+    """,
+    """\
+    Unit tests should be isolated into a separate file named with the `_tests` suffix, using the \
+    `path` attribute to specify the file path next to the under-test module.
+    """,
+    """\
+    `use` statements should be grouped together at the top of the file, not scattered throughout \
+    the code.\
+    """,
+]

@@ -33,19 +33,39 @@ struct Output {
 
 pub(crate) fn git_list_patches(
     root: &Utf8Path,
-    files: OneOrMany<String>,
+    files: Option<OneOrMany<String>>,
     options: &Map<String, Value>,
 ) -> ToolResult {
     let env = super::env_from_options(options);
     git_list_patches_impl(root, files, &DuctProcessRunner, &env)
 }
 
+/// Discover all files with unstaged changes via `git diff-files --name-only`.
+fn discover_changed_files<R: ProcessRunner>(
+    root: &Utf8Path,
+    runner: &R,
+    env: &[(&str, &str)],
+) -> Result<Vec<String>, std::io::Error> {
+    let output = runner.run_with_env("git", &["diff-files", "--name-only"], root, env)?;
+    Ok(output
+        .stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 fn git_list_patches_impl<R: ProcessRunner>(
     root: &Utf8Path,
-    files: OneOrMany<String>,
+    files: Option<OneOrMany<String>>,
     runner: &R,
     env: &[(&str, &str)],
 ) -> ToolResult {
+    let files = match files {
+        Some(f) => f.into_vec(),
+        None => discover_changed_files(root, runner, env)?,
+    };
+
     let mut patches = vec![];
     let mut warnings = vec![];
 

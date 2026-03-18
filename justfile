@@ -82,8 +82,9 @@ commit *ARGS: _install-jp
     msg="Give me a commit message"
 
     starts_with() { case $2 in "$1"*) true;; *) false;; esac; }
-    if starts_with "--" "$@"; then
-    elif starts_with "-" "$@"; then
+    contains() { case $2 in *"$1"*) true;; *) false;; esac; }
+    if starts_with "-- " "$@"; then
+    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
         args="$* -- $msg"
     elif [ -z "$args" ]; then
         args="$msg"
@@ -102,8 +103,8 @@ stage *ARGS: _install-jp
 
     starts_with() { case $2 in "$1"*) true;; *) false;; esac; }
     contains() { case $2 in *"$1"*) true;; *) false;; esac; }
-    if starts_with "--" "$@"; then
-    elif starts_with "-" "$@" && ! contains "--" "$@"; then
+    if starts_with "-- " "$@"; then
+    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
         args="$* -- $msg"
     elif [ -n "$args" ]; then
         args="$msg Here is additional context: $args"
@@ -131,15 +132,16 @@ profile-heap *ARGS:
 
 # Ask JP to create a new RFD based on the current conversation context.
 [group('jp')]
-rfd-this:
+[positional-arguments]
+rfd-this *ARGS: _install-jp
     #!/usr/bin/env sh
     args="$@"
     msg="I gave you the RFD skill, use it to codify all that we just discussed and concluded in a feature request RFD"
 
     starts_with() { case $2 in "$1"*) true;; *) false;; esac; }
     contains() { case $2 in *"$1"*) true;; *) false;; esac; }
-    if starts_with "--" "$@"; then
-    elif starts_with "-" "$@" && ! contains "--" "$@"; then
+    if starts_with "-- " "$@"; then
+    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
         args="$* -- $msg"
     elif [ -z "$args" ]; then
         args="$msg"
@@ -244,7 +246,7 @@ rfd-supersede NNN MMM:
     awk -v new="RFD ${new_num}" -v new_file="${new_basename}" '
         /^- \*\*Status\*\*:/ { print "- **Status**: Superseded"; next }
         /^- \*\*Superseded by\*\*:/ { next }
-        /^- \*\*Date\*\*:/ { print; print "- **Superseded by**: [" new "](./" new_file ")"; next }
+        /^- \*\*Date\*\*:/ { print; print "- **Superseded by**: [" new "](" new_file ")"; next }
         { print }
     ' "$old_file" > "${old_file}.tmp"
     mv "${old_file}.tmp" "$old_file"
@@ -252,7 +254,7 @@ rfd-supersede NNN MMM:
     # Update new RFD: add/update "Supersedes" link.
     awk -v old="RFD ${old_num}" -v old_file="${old_basename}" '
         /^- \*\*Supersedes\*\*:/ { next }
-        /^- \*\*Date\*\*:/ { print; print "- **Supersedes**: [" old "](./" old_file ")"; next }
+        /^- \*\*Date\*\*:/ { print; print "- **Supersedes**: [" old "](" old_file ")"; next }
         { print }
     ' "$new_file" > "${new_file}.tmp"
     mv "${new_file}.tmp" "$new_file"
@@ -295,17 +297,23 @@ rfd-extend NNN MMM:
             exit 1 ;;
     esac
 
-    # Add "Extended by: RFD MMM" to the older RFD (NNN).
+    # Resolve basenames for relative markdown links.
+    new_basename=$(basename "$new_file")
+    old_basename=$(basename "$old_file")
+
+    # Add "Extended by: [RFD MMM](...)" to the older RFD (NNN).
     existing_eb=$(sed -n 's/^- \*\*Extended by\*\*: \(.*\)/\1/p' "$old_file" | head -1)
+    new_link="[RFD ${new_num}](${new_basename})"
     if echo "$existing_eb" | grep -q "RFD ${new_num}"; then
         echo "${old_file}: already extended by RFD ${new_num}"
     elif [ -n "$existing_eb" ]; then
-        sed "s/^- \*\*Extended by\*\*: .*/&, RFD ${new_num}/" "$old_file" > "${old_file}.tmp"
+        sed "s/^- \*\*Extended by\*\*: .*/&, ${new_link}/" "$old_file" > "${old_file}.tmp"
         mv "${old_file}.tmp" "$old_file"
         echo "${old_file}: Extended by ${existing_eb}, RFD ${new_num}"
     else
-        last_meta=$(grep -n '^- \*\*' "$old_file" | tail -1 | cut -d: -f1)
-        awk -v ln="$last_meta" -v eb="- **Extended by**: RFD ${new_num}" '
+        first_heading=$(grep -n '^## ' "$old_file" | head -1 | cut -d: -f1)
+        last_meta=$(head -n "${first_heading:-9999}" "$old_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
+        awk -v ln="$last_meta" -v eb="- **Extended by**: ${new_link}" '
             NR == ln { print; print eb; next }
             { print }
         ' "$old_file" > "${old_file}.tmp"
@@ -313,17 +321,19 @@ rfd-extend NNN MMM:
         echo "${old_file}: Extended by RFD ${new_num}"
     fi
 
-    # Add "Extends: RFD NNN" to the newer RFD (MMM).
+    # Add "Extends: [RFD NNN](...)" to the newer RFD (MMM).
     existing_ex=$(sed -n 's/^- \*\*Extends\*\*: \(.*\)/\1/p' "$new_file" | head -1)
+    old_link="[RFD ${old_num}](${old_basename})"
     if echo "$existing_ex" | grep -q "RFD ${old_num}"; then
         echo "${new_file}: already extends RFD ${old_num}"
     elif [ -n "$existing_ex" ]; then
-        sed "s/^- \*\*Extends\*\*: .*/&, RFD ${old_num}/" "$new_file" > "${new_file}.tmp"
+        sed "s/^- \*\*Extends\*\*: .*/&, ${old_link}/" "$new_file" > "${new_file}.tmp"
         mv "${new_file}.tmp" "$new_file"
         echo "${new_file}: Extends ${existing_ex}, RFD ${old_num}"
     else
-        last_meta=$(grep -n '^- \*\*' "$new_file" | tail -1 | cut -d: -f1)
-        awk -v ln="$last_meta" -v ex="- **Extends**: RFD ${old_num}" '
+        first_heading=$(grep -n '^## ' "$new_file" | head -1 | cut -d: -f1)
+        last_meta=$(head -n "${first_heading:-9999}" "$new_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
+        awk -v ln="$last_meta" -v ex="- **Extends**: ${old_link}" '
             NR == ln { print; print ex; next }
             { print }
         ' "$new_file" > "${new_file}.tmp"
@@ -429,7 +439,8 @@ rfd-promote NNN: _install-jp
         issue_url=$(echo "$result" | jq -r '.url // empty' 2>/dev/null || true)
 
         if [ -n "$issue_num" ] && [ -n "$issue_url" ]; then
-            last_meta=$(grep -n '^- \*\*' "$file" | tail -1 | cut -d: -f1)
+            first_heading=$(grep -n '^## ' "$file" | head -1 | cut -d: -f1)
+            last_meta=$(head -n "${first_heading:-9999}" "$file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
             awk -v ln="$last_meta" -v ti="- **Tracking Issue**: [#${issue_num}](${issue_url})" '
                 NR == ln { print; print ti; next }
                 { print }

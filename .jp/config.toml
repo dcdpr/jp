@@ -13,7 +13,6 @@ anthropic.beta_headers = [
     "context-1m-2025-08-07",
     "interleaved-thinking-2025-05-14",
     "context-management-2025-06-27",
-    "structured-outputs-2025-11-13",
 ]
 
 [providers.llm.aliases]
@@ -43,6 +42,9 @@ gemini = "google/gemini-3.1-pro-preview"
 gemini-pro = "google/gemini-3.1-pro-preview"
 gemini-flash = "google/gemini-3-flash-preview"
 gemini-lite = "google/gemini-2.5-flash-lite"
+
+[conversation.inquiry.assistant]
+model.id = "anthropic/claude-haiku-4-5"
 
 [conversation.title.generate.model]
 id = "haiku"

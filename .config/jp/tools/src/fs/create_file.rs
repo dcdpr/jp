@@ -4,6 +4,7 @@ use std::{
     path::PathBuf,
 };
 
+use crossterm::style::Stylize;
 use jp_tool::{AnswerType, Outcome, Question};
 use serde_json::{Map, Value};
 
@@ -29,12 +30,16 @@ pub(crate) async fn fs_create_file(
             "php" => "php",
             "py" => "python",
             "rb" => "ruby",
+            "md" => "markdown",
             lang => lang,
         };
 
-        let mut response = format!("Create file '{path}'");
+        let mut response = format!("Create file '{}'", path.as_str().bold().blue());
         if let Some(content) = content {
-            response.push_str(&format!(" with content:\n\n```{lang}\n{content}\n```"));
+            response.push_str(&format!(
+                " with content:\n\n`````{lang}\n{content}\n`````\n\n"
+            ));
+            response.push_str(&format!("File created at '{}'", path.bold().blue()));
         }
 
         return Ok(response.into());

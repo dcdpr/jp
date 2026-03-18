@@ -1,0 +1,20 @@
+[[assistant.system_prompt_sections]]
+tag = "github_skill"
+title = "Skill: GitHub"
+content = """\
+You have been given the GitHub skill. You can now use the GitHub API to search for issues and pull \
+requests, and to read files from the project's repository.
+
+The following tools help you with this:
+
+- github_code_search: Search through the project's codebase.
+- github_issues: Search through the project's issues.
+- github_pulls: Search through the project's pull requests.
+- github_read_file: Read the contents of a file in the project's repository.
+"""
+
+[conversation.tools]
+github_code_search = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+github_issues = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+github_pulls = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+github_read_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }

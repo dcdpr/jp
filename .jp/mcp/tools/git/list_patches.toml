@@ -5,13 +5,20 @@ style.inline_results = "full"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "List all patches (using --unified=0) for a given file that can be staged with `git_stage_patch`."
+summary = "List all unstaged patches that can be staged with `git_stage_patch`."
 description = """
-The listed patches have a unique identifier, which can be used in \
-`git_stage_patch` to stage the patch in the repository cache.
+Each patch has a unique identifier per file, which can be used in \
+`git_stage_patch` to stage the patch in the repository index. Each diff \
+line is prefixed with `[N]` for use with `git_stage_patch_lines`.
 """
 
 examples = """
+List all unstaged patches across the entire repository:
+```json
+{}
+```
+
+List patches for specific files:
 ```json
 {"files": ["crates/jp_config/src/conversation/tool.rs", "crates/jp_llm/src/builtin.rs"]}
 ```
@@ -19,6 +26,5 @@ examples = """
 
 [conversation.tools.git_list_patches.parameters.files]
 type = "array"
-required = true
 items.type = "string"
-summary = "One or more files to list Git patches for."
+summary = "Optional list of files to list patches for. If omitted, lists patches for all files with unstaged changes."

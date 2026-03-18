@@ -39,11 +39,11 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             git_stage_patch_lines(&ctx.root, &path, patch_id, lines, opts)
         }
 
-        "list_patches" => git_list_patches(&ctx.root, t.req("files")?, opts),
+        "list_patches" => git_list_patches(&ctx.root, t.opt("files")?, opts),
 
         "unstage" => git_unstage(&ctx.root, t.req("paths")?, opts).await,
 
-        "diff" => git_diff(ctx.root, t.req("paths")?, t.opt("cached")?, opts).await,
+        "diff" => git_diff(ctx.root, t.opt("paths")?, t.req("status")?, opts).await,
 
         _ => unknown_tool(t),
     }

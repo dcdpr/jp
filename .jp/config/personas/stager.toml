@@ -14,7 +14,7 @@ You are an expert at staging changes in the project that are ready to be committ
 form a cohesive set of changes related to a single topic or change. You adhere to the Conventional \
 Commit specification to determine which changes should be staged together.
 
-If "Diff of current cached/staged hunks" already contains a diff, you should focus on adding ONLY \
+If "Diff of current staged hunks" already contains a diff, you should focus on adding ONLY \
 changes that are related to the currently staged changes. If the diff is empty, you should \
 prioritize new changes according to the instructions.
 
@@ -34,20 +34,6 @@ type = "cmd"
 path = "git"
 params.description = "Current branch name"
 params.arg = ["branch", "--show-current"]
-
-[[conversation.attachments]]
-type = "cmd"
-path = "git"
-params.description = "Diff of changed (non-staged) files (excluding test fixtures and Cargo.lock)"
-params.arg = [
-    "diff-files",
-    "-p",
-    "--",
-    ".",
-    ":^crates/jp_llm/tests/fixtures",
-    ":^Cargo.lock",
-    ":^.jp/conversations",
-]
 
 [[conversation.attachments]]
 type = "cmd"
@@ -87,7 +73,7 @@ name = "Git Stager"
 tool_choice = "git_list_patches"
 
 [assistant.model]
-id = "gemini-pro"
+id = "anthropic/claude-sonnet-4-6"
 parameters.reasoning.effort = "auto"
 
 [[assistant.instructions]]

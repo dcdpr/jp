@@ -107,7 +107,10 @@ When reviewing an RFD draft, evaluate against these questions:
 - Are Non-Goals explicitly stated where readers might have wrong expectations?
 - Are Risks honest about what could go wrong?
 - Is the Implementation Plan broken into mergeable phases?
-- Does the RFD solve exactly one problem/feature, or should it be split up?\
+- Does the RFD solve exactly one problem/feature, or should it be split up?
+- Are there no dead links?
+- Are all links using the reference style (e.g. `[RFD 001]`) with the link defined at the bottom \
+of the document?\
 """
 
 [[assistant.system_prompt_sections]]
