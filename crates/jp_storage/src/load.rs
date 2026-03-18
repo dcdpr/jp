@@ -32,6 +32,13 @@ impl LoadError {
     pub fn kind(&self) -> &LoadErrorInner {
         &self.error
     }
+
+    /// Returns `true` if the error is caused by corrupt or invalid data
+    /// (as opposed to a system-level I/O failure or missing data).
+    #[must_use]
+    pub fn is_corrupt(&self) -> bool {
+        matches!(self.error, LoadErrorInner::Json(_))
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

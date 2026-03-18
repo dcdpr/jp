@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
-use jp_config::AppConfig;
-use jp_printer::Printer;
+use jp_config::{AppConfig, PartialAppConfig};
+use schematic::PartialConfig as _;
+
+use crate::{Ctx, cmd::Output};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Show {
@@ -15,14 +17,22 @@ pub(crate) struct Show {
 }
 
 impl Show {
-    pub(crate) fn run_standalone(&self, printer: &Printer) {
-        if self.themes {
-            printer.println(list_themes());
-            return;
+    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
+        if self.defaults {
+            ctx.printer
+                .println(toml::to_string_pretty(&PartialAppConfig::default_values(
+                    &(),
+                )?)?);
+            return Ok(());
         }
 
-        // Bare `config show` and `--defaults` both show defaults.
-        printer.println(config_skeleton());
+        if self.themes {
+            ctx.printer.println(list_themes());
+            return Ok(());
+        }
+
+        ctx.printer.println(config_skeleton());
+        Ok(())
     }
 }
 

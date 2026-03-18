@@ -117,20 +117,20 @@ fn test_remove_ephemeral_conversations() {
     let dir1 = convs.join(id1.to_dirname(None));
     fs::create_dir_all(&dir1).unwrap();
     write_json(
-        &dir1.join("metadata.json"),
+        &dir1.join(METADATA_FILE),
         &json!({
             "last_activated_at": Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap(),
             "expires_at": Utc::now() - chrono::Duration::hours(1)
         }),
     )
     .unwrap();
-    write_json(&dir1.join("events.json"), &json!([])).unwrap();
+    write_json(&dir1.join(EVENTS_FILE), &json!([])).unwrap();
 
     let title = "hello world";
     let dir2 = convs.join(id2.to_dirname(Some(title)));
     fs::create_dir_all(&dir2).unwrap();
     write_json(
-        &dir2.join("metadata.json"),
+        &dir2.join(METADATA_FILE),
         &json!({
             "title": title,
             "last_activated_at": Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap(),
@@ -138,12 +138,12 @@ fn test_remove_ephemeral_conversations() {
         }),
     )
     .unwrap();
-    write_json(&dir2.join("events.json"), &json!([])).unwrap();
+    write_json(&dir2.join(EVENTS_FILE), &json!([])).unwrap();
 
     let dir3 = convs.join(id3.to_dirname(Some(title)));
     fs::create_dir_all(&dir3).unwrap();
     write_json(
-        &dir3.join("metadata.json"),
+        &dir3.join(METADATA_FILE),
         &json!({
             "title": title,
             "last_activated_at": Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap(),
@@ -151,7 +151,7 @@ fn test_remove_ephemeral_conversations() {
         }),
     )
     .unwrap();
-    write_json(&dir3.join("events.json"), &json!([])).unwrap();
+    write_json(&dir3.join(EVENTS_FILE), &json!([])).unwrap();
 
     fs::create_dir_all(convs.join(id4.to_dirname(None))).unwrap();
     fs::create_dir_all(convs.join(id5.to_dirname(Some("foo")))).unwrap();

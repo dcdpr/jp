@@ -227,6 +227,12 @@ Cleanup](#stale-file-cleanup)).
 | `jp conversation grep`   | No              | Read-only                      |
 | `jp conversation print`  | No              | Read-only                      |
 
+> [!TIP]
+> [RFD 052] adds workspace sanitization, which moves corrupt conversation
+> directories to `.trash/`. Sanitization should acquire an exclusive lock on
+> each conversation before trashing it, to avoid moving a directory that another
+> session is actively writing to.
+
 #### Lock acquisition behavior
 
 When a lock cannot be acquired immediately, JP blocks and waits for it to be
@@ -639,3 +645,4 @@ cross-platform. The automatic detection layer uses platform-specific APIs behind
 a common interface.
 
 [RFD 039]: 039-conversation-trees.md
+[RFD 052]: 052-workspace-data-store-sanitization.md

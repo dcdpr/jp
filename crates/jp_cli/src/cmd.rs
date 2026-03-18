@@ -13,6 +13,7 @@ use serde_json::Value;
 use crate::{Ctx, ctx::IntoPartialAppConfig};
 
 #[derive(Debug, clap::Subcommand)]
+#[command(disable_help_subcommand = true)]
 #[expect(clippy::large_enum_variant)]
 pub(crate) enum Commands {
     /// Initialize a new workspace.
@@ -48,13 +49,6 @@ impl Commands {
             Commands::AttachmentAdd(args) => args.run(ctx),
             Commands::Conversation(args) => args.run(ctx).await,
             Commands::Init(_) => unreachable!("handled before workspace initialization"),
-        }
-    }
-
-    pub(crate) fn is_help_request(&self) -> bool {
-        match self {
-            Commands::Query(q) => q.is_help_request(),
-            _ => false,
         }
     }
 

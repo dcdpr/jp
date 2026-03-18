@@ -6,6 +6,7 @@
 
 mod error;
 mod id;
+mod sanitize;
 mod state;
 
 use std::{cell::OnceCell, iter, sync::Arc};
@@ -19,6 +20,7 @@ use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::Storage;
 use jp_tombmap::{Mut, TombMap};
+pub use sanitize::{SanitizeReport, TrashedConversation};
 use state::{LocalState, State, UserState};
 use tracing::{debug, info, trace, warn};
 
@@ -155,56 +157,43 @@ impl Workspace {
     /// Load the workspace state from the persisted storage.
     ///
     /// If the workspace is not persisted, this method will return an error.
-    pub fn load(&mut self) -> Result<()> {
+    ///
+    /// Call [`sanitize`](Self::sanitize) before this method to ensure the
+    /// filesystem is in a consistent state.
+    pub fn load_conversations_from_disk(&mut self, config: Arc<AppConfig>) -> Result<()> {
         trace!("Loading state.");
 
         let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
+        let conversation_ids = storage.load_all_conversation_ids();
 
-        // Local state
-        let mut metadata = storage.load_conversations_metadata()?;
+        if conversation_ids.is_empty() {
+            debug!("No conversations found, workspace is fresh.");
+
+            // Ensure the active conversation has an events entry so the
+            // invariant (active_conversation_id → events) always holds.
+            let active_id = self.active_conversation_id();
+            let _err = self
+                .state
+                .local
+                .events
+                .entry(active_id)
+                .or_default()
+                .set(ConversationStream::new(config).with_created_at(active_id.timestamp()));
+
+            return Ok(());
+        }
+
+        let metadata = storage.load_conversations_metadata()?;
         debug!(
             active_conversation_id = %metadata.active_conversation_id,
             "Loaded workspace state metadata."
         );
 
-        let conversation_ids = storage.load_all_conversation_ids();
-
-        let mut all_ids = std::iter::once(metadata.active_conversation_id)
-            .chain(conversation_ids.iter().rev().copied())
-            .peekable();
-        let mut active_conversation = None;
-        while let Some(id) = all_ids.next() {
-            metadata.active_conversation_id = id;
-
-            match storage.load_conversation_metadata(&metadata.active_conversation_id) {
-                Ok(conversation) => {
-                    active_conversation = Some(conversation);
-                    break;
-                }
-
-                // If the active conversation cannot be found on disk, we try to
-                // load the last known conversation on disk, and if that fails,
-                // we return an error.
-                Err(error) if error.kind().is_missing() => {
-                    warn!(
-                        %error,
-                        missing_id = %metadata.active_conversation_id,
-                        new_id = %all_ids.peek().map(ToString::to_string).unwrap_or_default(),
-                        "Failed to load active conversation, trying to fall back to last stored conversation."
-                    );
-                }
-
-                Err(error) => return Err(error.into()),
-            }
-        }
-
-        let Some(active_conversation) = active_conversation else {
-            // Fresh workspace with no conversations yet (e.g. right after
-            // `jp init`). This is a valid state — keep defaults and let the
-            // first `jp q --new` create the initial conversation.
-            debug!("No conversations found, workspace is fresh.");
-            return Ok(());
-        };
+        // After sanitization, the active conversation is guaranteed to be valid
+        // on disk. Any remaining failure here (permission error, race
+        // condition) is an unexpected error that should propagate.
+        let active_conversation =
+            storage.load_conversation_metadata(&metadata.active_conversation_id)?;
 
         let conversations = conversation_ids
             .iter()
@@ -218,17 +207,10 @@ impl Workspace {
             .collect();
 
         // We can `set` without checking if the cell is already initialized, as
-        // we just initialized it above.
+        // we just initialized it above.let _err = events
         let _err = events
             .entry(metadata.active_conversation_id)
             .or_default()
-            // FIXME: This can fail without recourse, if the active conversation
-            // has a corrupt (or missing) events file. The user has to manually
-            // change the `active_conversation_id` in their user local storage
-            // to fix this state.
-            //
-            // Instead, we should perhaps track "bad" conversation IDs and skip
-            // them when retrying loading the workspace state.
             .set(storage.load_conversation_stream(&metadata.active_conversation_id)?);
 
         self.state = State {
