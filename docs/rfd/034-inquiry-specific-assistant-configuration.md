@@ -1,9 +1,11 @@
 # RFD 034: Inquiry-Specific Assistant Configuration
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-07
+- **Supersedes**: [RFD 033](033-cache-preserving-inquiry-via-tool-use.md)
+- **Extends**: [RFD 028](028-structured-inquiry-system-for-tool-questions.md)
 
 ## Summary
 

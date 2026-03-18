@@ -1,4 +1,4 @@
-# RFD 041: RFD Lifecycle: Deferred Numbering, Tracking Issues, and Extends Metadata
+# RFD 041: RFD Lifecycle Enhancements
 
 - **Status**: Implemented
 - **Category**: Process
@@ -124,9 +124,9 @@ extended by multiple successors. Both fields accept comma-separated RFD numbers.
 
 **Distinction from `Supersedes`:** A superseding RFD replaces its predecessor —
 the old design is no longer the current approach. An extending RFD builds on its
-predecessor — the original remains valid and in effect. RFD 034 extends RFD 028
-(adds cheaper model routing); it does not supersede it (the inquiry mechanism is
-still the approach, just improved).
+predecessor — the original remains largely valid and in effect. RFD 034 extends
+RFD 028 (adds cheaper model routing); it does not supersede it (the inquiry
+mechanism is still the approach, just improved).
 
 **Constraint:** These fields reference only RFDs in Accepted status or later.
 The deferred numbering policy makes this natural: a draft has no number, so it

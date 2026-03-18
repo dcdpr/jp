@@ -1,6 +1,6 @@
 # RFD 003: JP-Assisted RFD Writing
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17

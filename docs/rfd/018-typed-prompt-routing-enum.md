@@ -1,13 +1,13 @@
-# RFD 018: Typed Inquiry System
+# RFD 018: Typed Prompt Routing Enum
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-01
 
 ## Summary
 
-This RFD introduces an `Inquiry` enum that codifies all prompt types in JP as
+This RFD introduces a `Prompt` enum that codifies all prompt types in JP as
 typed variants, replacing the current implicit code-path-based distinction
 between permission prompts, result delivery prompts, and tool questions.
 
@@ -35,14 +35,14 @@ difficult to:
 
 ## Design
 
-### The `Inquiry` Enum
+### The `Prompt` Enum
 
-All prompts are modeled as variants of an `Inquiry` enum. JP-level variants
-are fully self-describing (their answer type, exclusivity, and config key are
+All prompts are modeled as variants of a `Prompt` enum. JP-level variants are
+fully self-describing (their answer type, exclusivity, and config key are
 derived from the variant). Tool questions are the open-ended catch-all.
 
 ```rust
-enum Inquiry {
+enum Prompt {
     /// "Should I execute this tool?" — before tool execution.
     /// Constructed by the coordinator. Tools cannot emit this.
     RunTool {
@@ -75,7 +75,7 @@ frontends (terminal, JSON-over-IPC, etc.).
 Methods on the enum derive properties from the variant:
 
 ```rust
-impl Inquiry {
+impl Prompt {
     /// The expected answer type.
     fn answer_type(&self) -> AnswerType {
         match self {
@@ -88,7 +88,7 @@ impl Inquiry {
         }
     }
 
-    /// Whether this inquiry can only be answered by a human.
+    /// Whether this prompt can only be answered by a human.
     ///
     /// RunTool and DeliverToolResult are always exclusive — the LLM
     /// cannot meaningfully answer "should I run the tool you just
@@ -101,7 +101,7 @@ impl Inquiry {
         }
     }
 
-    /// Config key for policy lookup (used by RFD 019).
+    /// Config key for policy lookup (used by RFD 049).
     fn config_key(&self) -> &str {
         match self {
             Self::RunTool { .. } => "run",
@@ -110,7 +110,7 @@ impl Inquiry {
         }
     }
 
-    /// The tool name associated with this inquiry.
+    /// The tool name associated with this prompt.
     fn tool_name(&self) -> &str {
         match self {
             Self::RunTool { tool_name, .. }
@@ -121,32 +121,31 @@ impl Inquiry {
 }
 ```
 
-### Why Each Inquiry Has Its Own Type
+### Why Each Prompt Has Its Own Type
 
-JP-level inquiries (`RunTool`, `DeliverToolResult`) are defined at the type
+JP-level prompts (`RunTool`, `DeliverToolResult`) are defined at the type
 level, not at the call site. This provides:
 
-1. **Discoverability** — one enum, one file. Every inquiry type JP can produce
-   is visible in one place.
+1. **Discoverability** — one enum, one file. Every prompt type JP can produce is
+   visible in one place.
 2. **No duplicates** — today the permission question text is constructed in
-   `build_permission_question`, the result text in
-   `prompt_result_confirmation`, and tool questions come from `Question`. Three
-   patterns for the same concept.
+   `build_permission_question`, the result text in `prompt_result_confirmation`,
+   and tool questions come from `Question`. Three patterns for the same concept.
 3. **Mechanical config mapping** — `config_key()` maps directly to config keys
-   in the detached policy (see [RFD 019]).
+   in the detached policy (see [RFD 049]).
 4. **Type-level exclusivity** — `RunTool` and `DeliverToolResult` are always
    exclusive because the type says so, not because someone remembered to set a
    boolean.
 
-Future JP-level inquiries (e.g., `ConfirmEndConversation`,
+Future JP-level prompts (e.g., `ConfirmEndConversation`,
 `ApproveExpensiveModel`) add a variant with its own `config_key()`,
 `exclusive()`, and `answer_type()`. The routing logic, config cascade, and
 rendering extend mechanically.
 
 ### Tool Boundary
 
-Tools can only produce `Outcome::NeedsInput { question }`. The coordinator
-wraps that into `Inquiry::ToolQuestion { tool_name, question }`. A tool cannot
+Tools can only produce `Outcome::NeedsInput { question }`. The coordinator wraps
+that into `Prompt::ToolQuestion { tool_name, question }`. A tool cannot
 construct `RunTool` or `DeliverToolResult` because those variants require data
 (`ToolSource`) that only the coordinator has, and the tool's output type
 (`Outcome`) does not include them. The type boundary is structural.
@@ -155,53 +154,53 @@ construct `RunTool` or `DeliverToolResult` because those variants require data
 
 The enum does not define question text. Question text today includes ANSI
 escapes (`tool_name.yellow().bold()`), async MCP server resolution, and
-editor-availability-dependent option lists. This is rendering logic that
-belongs in the prompter (CLI layer).
+editor-availability-dependent option lists. This is rendering logic that belongs
+in the prompter (CLI layer).
 
 The prompter pattern-matches on the variant and builds styled text:
 
 ```rust
 // In ToolPrompter — the rendering layer
-fn render_inquiry(&self, inquiry: &Inquiry, mcp_client: &Client) -> String {
-    match inquiry {
-        Inquiry::RunTool { tool_name, tool_source } => {
+fn render_prompt(&self, prompt: &Prompt, mcp_client: &Client) -> String {
+    match prompt {
+        Prompt::RunTool { tool_name, tool_source } => {
             // ANSI formatting, MCP resolution, source label
         }
-        Inquiry::DeliverToolResult { tool_name } => {
+        Prompt::DeliverToolResult { tool_name } => {
             format!("Deliver {} result to assistant?", tool_name.yellow().bold())
         }
-        Inquiry::ToolQuestion { question, .. } => {
+        Prompt::ToolQuestion { question, .. } => {
             question.text.clone()
         }
     }
 }
 ```
 
-Different frontends (terminal, TUI, JSON-over-IPC for `jp tasks attach`)
-render the same `Inquiry` differently without touching the enum.
+Different frontends (terminal, TUI, JSON-over-IPC for `jp tasks attach`) render
+the same `Prompt` differently without touching the enum.
 
 ### Prompt Routing
 
-The coordinator constructs an `Inquiry` and passes it to a central routing
-function. In this RFD, routing preserves existing behavior — TTY detection
-still drives the decision:
+The coordinator constructs a `Prompt` and passes it to a central routing
+function. In this RFD, routing preserves existing behavior — TTY detection still
+drives the decision:
 
 ```rust
-fn route_prompt(inquiry: &Inquiry, has_client: bool) -> PromptAction {
+fn route_prompt(prompt: &Prompt, has_client: bool) -> PromptAction {
     if has_client {
         return PromptAction::PromptClient;
     }
 
     // Current non-TTY behavior, now expressed through the enum.
-    match inquiry {
-        Inquiry::RunTool { .. } => PromptAction::AutoApprove,
-        Inquiry::DeliverToolResult { .. } => PromptAction::AutoDeliver,
-        Inquiry::ToolQuestion { .. } => PromptAction::LlmInquiry,
+    match prompt {
+        Prompt::RunTool { .. } => PromptAction::AutoApprove,
+        Prompt::DeliverToolResult { .. } => PromptAction::AutoDeliver,
+        Prompt::ToolQuestion { .. } => PromptAction::LlmInquiry,
     }
 }
 ```
 
-[RFD 019] extends this function with configurable detached policies.
+[RFD 049] extends this function with configurable detached policies.
 
 ## Drawbacks
 
@@ -211,22 +210,22 @@ payoff is in extensibility and config integration, not in immediate
 simplification.
 
 **Migration surface.** Refactoring three code paths (`prompt_permission`,
-`prompt_result_confirmation`, `prompt_question`) to construct and route
-`Inquiry` variants touches multiple files in the coordinator and prompter.
+`prompt_result_confirmation`, `prompt_question`) to construct and route `Prompt`
+variants touches multiple files in the coordinator and prompter.
 
 ## Alternatives
 
 ### Keep prompt types implicit
 
-Continue with the current approach where prompt type is determined by which
-code path you're in. Rejected because it makes future improvements significantly
+Continue with the current approach where prompt type is determined by which code
+path you're in. Rejected because it makes future improvements significantly
 harder — every new routing policy would need to be implemented in three separate
 places.
 
-### `text()` method on the Inquiry enum
+### `text()` method on the Prompt enum
 
-Have the enum define the question text directly. Rejected because question
-text includes ANSI escapes, async MCP server resolution, and
+Have the enum define the question text directly. Rejected because question text
+includes ANSI escapes, async MCP server resolution, and
 editor-availability-dependent options. This is presentation, not data.
 
 ### `exclusive` as a boolean field instead of a method
@@ -239,26 +238,25 @@ encodes the invariant in the type.
 ## Non-Goals
 
 - **Detached prompt policy.** This RFD introduces the type system; configurable
-  detached policies are proposed in [RFD 019].
+  detached policies are proposed in [RFD 049].
 - **Task model and prompt queuing.** See [RFD 020].
-- **New inquiry variants.** This RFD formalizes the existing three prompt types.
+- **New prompt variants.** This RFD formalizes the existing three prompt types.
   New variants are future work.
 
 ## Implementation Plan
 
-### Phase 1: Add the `Inquiry` enum
+### Phase 1: Add the `Prompt` enum
 
-Define the `Inquiry` enum and its methods. Likely in a new module
-(e.g., `jp_cli::cmd::query::tool::inquiry` or a shared crate if
-needed by config).
+Define the `Prompt` enum and its methods. Likely in a new module (e.g.,
+`jp_cli::cmd::query::tool::prompt` or a shared crate if needed by config).
 
 Can be merged independently. No behavioral changes.
 
 ### Phase 2: Refactor the coordinator
 
 Replace direct `PermissionInfo` / `ResultMode` / `Question` handling in the
-coordinator with `Inquiry` construction and `route_prompt()` calls. The
-prompter receives `Inquiry` variants instead of raw data.
+coordinator with `Prompt` construction and `route_prompt()` calls. The prompter
+receives `Prompt` variants instead of raw data.
 
 Behavior is unchanged — TTY detection still drives routing. The refactor is
 purely structural.
@@ -267,8 +265,19 @@ Depends on Phase 1.
 
 ### Phase 3: Refactor the prompter
 
-Update `ToolPrompter` to accept `Inquiry` variants. Consolidate
-`prompt_permission`, `prompt_result_confirmation`, and `prompt_question` into
-a pattern-match on the enum. The rendering logic stays in the prompter.
+Update `ToolPrompter` to accept `Prompt` variants. Consolidate
+`prompt_permission`, `prompt_result_confirmation`, and `prompt_question` into a
+pattern-match on the enum. The rendering logic stays in the prompter.
 
 Depends on Phase 2.
+
+## References
+
+- [RFD 049: Non-Interactive Mode and Detached Prompt Policy][RFD 049] — extends
+  `route_prompt()` with configurable detached policies.
+- [RFD 028: Structured Inquiry System][RFD 028] — the tool inquiry system (a
+  separate concept from prompt routing; handles `ToolQuestion` prompts routed to
+  the LLM).
+
+[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
+[RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md

@@ -1,9 +1,22 @@
 # RFD 019: Non-Interactive Mode
 
-- **Status**: Draft
+- **Status**: Abandoned
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-01
+
+> [!IMPORTANT]
+> This RFD is **Abandoned**.
+>
+> Split into two focused RFDs:
+>
+> - [RFD 048: Four-Channel Output Model][RFD 048] — stdout/stderr/tty/log
+>   separation and Printer integration.
+> - [RFD 049: Non-Interactive Mode and Detached Prompt
+>   Policy][RFD 049] — `--non-interactive` flag, detached policies, `exclusive`
+>   property, prompt routing.
+>
+> The original text below is preserved for historical context.
 
 ## Summary
 
@@ -27,8 +40,8 @@ This works for simple cases, but users cannot:
 - Explicitly opt into non-interactive mode from a terminal (e.g., scripting).
 - Choose different fallback strategies for different prompt types.
 - Mark certain questions as human-only to prevent LLM auto-answering.
-- Pipe JP's output cleanly (`echo "fix it" | jp query | jq` gets polluted
-  with progress indicators and tool call headers).
+- Pipe JP's output cleanly (`echo "fix it" | jp query | jq` gets polluted with
+  progress indicators and tool call headers).
 
 ## Design
 
@@ -47,10 +60,9 @@ Three policy modes:
 | `defaults` | Use the question's `default` value. Fail if none.        |
 | `deny`     | Fail the tool call with a descriptive error.             |
 
-Default: **`deny`**. Nothing runs unattended unless the user explicitly opts
-in. This is the safe default — a non-interactive run that hits a prompt it
-cannot resolve fails with a clear error message, rather than silently
-auto-approving.
+Default: **`deny`**. Nothing runs unattended unless the user explicitly opts in.
+This is the safe default — a non-interactive run that hits a prompt it cannot
+resolve fails with a clear error message, rather than silently auto-approving.
 
 ### The `exclusive` Property
 
@@ -64,8 +76,8 @@ The `exclusive` property marks a question as human-only. When the detached
 policy is `auto`, exclusive questions fail instead of being routed to the LLM.
 
 At the type level, `RunTool` and `DeliverToolResult` inquiries are inherently
-exclusive — this is encoded in the `Inquiry::exclusive()` method (see
-[RFD 018]). `ToolQuestion` inquiries are non-exclusive by default.
+exclusive — this is encoded in the `Inquiry::exclusive()` method (see [RFD
+018]). `ToolQuestion` inquiries are non-exclusive by default.
 
 Tool authors set the default:
 
@@ -87,13 +99,12 @@ target = "user"
 exclusive = true
 ```
 
-The user has final say — they can set `exclusive = false` even for questions
-the tool author marked as exclusive.
+The user has final say — they can set `exclusive = false` even for questions the
+tool author marked as exclusive.
 
 ### Prompt Routing
 
-The `route_prompt` function from [RFD 018] is extended with the detached
-policy:
+The `route_prompt` function from [RFD 018] is extended with the detached policy:
 
 ```rust
 fn route_prompt(
@@ -122,20 +133,20 @@ fn route_prompt(
 ```
 
 The scattered `is_tty` checks in the coordinator collapse into calls to this
-function. Each call site provides the inquiry and its `exclusive` override
-from config (if any).
+function. Each call site provides the inquiry and its `exclusive` override from
+config (if any).
 
 #### Standard Input
 
-`stdin` is exclusively for query content and context injection (e.g.,
-`cat file.rs | jp query "fix this"`). It is **never** used for answering
-prompts. Prompt input always comes from `/dev/tty` (interactive mode) or the
-detached policy (non-interactive mode).
+`stdin` is exclusively for query content and context injection (e.g., `cat
+file.rs | jp query "fix this"`). It is **never** used for answering prompts.
+Prompt input always comes from `/dev/tty` (interactive mode) or the detached
+policy (non-interactive mode).
 
 This means `echo "y" | jp query "do the thing"` does not answer a tool
 permission prompt with "y." The "y" is treated as query content. If the query
-hits a prompt and `/dev/tty` is available, the user is prompted on the
-terminal. If `/dev/tty` is unavailable, the detached policy applies.
+hits a prompt and `/dev/tty` is available, the user is prompted on the terminal.
+If `/dev/tty` is unavailable, the detached policy applies.
 
 #### Determining `has_client`
 
@@ -148,11 +159,11 @@ determined by:
 3. If `/dev/tty` cannot be opened (no controlling terminal — cron, systemd,
    SSH without `-t`, daemonized processes), `has_client` is `false`.
 
-This is independent of whether stdout is a TTY. A piped command like
-`jp query | less` has stdout connected to a pipe, but `/dev/tty` is still
-available because the user is at a terminal. The user can answer prompts.
-Conversely, `echo foo | jp query` with stdout as a TTY might appear
-interactive, but if `/dev/tty` is unavailable, it is not.
+This is independent of whether stdout is a TTY. A piped command like `jp query |
+less` has stdout connected to a pipe, but `/dev/tty` is still available because
+the user is at a terminal. The user can answer prompts. Conversely, `echo foo |
+jp query` with stdout as a TTY might appear interactive, but if `/dev/tty` is
+unavailable, it is not.
 
 The current implementation uses `stdout.is_terminal()` as the heuristic. This
 RFD replaces it with `/dev/tty` availability, which correctly handles piped
@@ -230,8 +241,8 @@ jp query --non-interactive "Fix the bug"
 `--non-interactive` forces detached prompt routing even when a TTY is present.
 Useful for scripting in a terminal where you don't want prompts to block.
 
-TTY detection remains the default heuristic: when no TTY is detected, JP
-behaves as if `--non-interactive` was passed.
+TTY detection remains the default heuristic: when no TTY is detected, JP behaves
+as if `--non-interactive` was passed.
 
 ### Output Channel Separation
 
@@ -245,30 +256,29 @@ JP uses four output channels, each with a single purpose:
 | **Log file**   | Tracing logs (`-v`)                    |
 
 **stdout** always contains only assistant output. This makes `jp query | jq`,
-`jp query > answer.txt`, and `jp query | less` work without special-casing
-based on whether stdout is a TTY. When `--format json` is used, stdout
-contains the structured JSON response.
+`jp query > answer.txt`, and `jp query | less` work without special-casing based
+on whether stdout is a TTY. When `--format json` is used, stdout contains the
+structured JSON response.
 
 **stderr** always contains chrome: progress indicators, tool call headers,
-status messages. In a normal terminal session, stdout and stderr both display
-on the same screen, so the user sees the same interleaved experience as today.
-The separation only matters when redirecting.
+status messages. In a normal terminal session, stdout and stderr both display on
+the same screen, so the user sees the same interleaved experience as today. The
+separation only matters when redirecting.
 
 **Tracing logs** (`-v` through `-vvvvv`) are written to a log file, not to
 stderr. This prevents tracing output from mixing with chrome when a user
 redirects stderr (e.g., `jp query 2> chrome.log` captures chrome only, not
 tracing data). The log file location is configurable via `--log-file` or
-`JP_LOG_FILE`, defaulting to `~/.local/share/jp/logs/`. The `--log-format`
-flag controls the format of the log file (text or JSON). `--log-file=-`
-writes tracing to stderr, for users who want logs and chrome on the same
-stream.
+`JP_LOG_FILE`, defaulting to `~/.local/share/jp/logs/`. The `--log-format` flag
+controls the format of the log file (text or JSON). `--log-file=-` writes
+tracing to stderr, for users who want logs and chrome on the same stream.
 
 This replaces the current behavior where tracing is written to stderr and all
 other output goes to stdout.
 
-**Output formatting** is controlled by `--format` and applies to both stdout
-and stderr. When `--format json` is set, assistant output on stdout and chrome
-on stderr are both rendered as NDJSON. When `--format auto` resolves to
+**Output formatting** is controlled by `--format` and applies to both stdout and
+stderr. When `--format json` is set, assistant output on stdout and chrome on
+stderr are both rendered as NDJSON. When `--format auto` resolves to
 `text-pretty` (stdout is a terminal), both channels use ANSI-formatted text.
 
 Note that `stdout.is_terminal()` still controls output format resolution
@@ -282,26 +292,25 @@ independent of `/dev/tty` availability, which controls interactivity
 ### Prompt I/O Channel
 
 Inquiry prompts (tool permissions, tool questions, result delivery
-confirmations) use `/dev/tty` for both rendering and input when available.
-This is the fourth output channel, independent of stdout, stderr, and the log
-file.
+confirmations) use `/dev/tty` for both rendering and input when available. This
+is the fourth output channel, independent of stdout, stderr, and the log file.
 
 `/dev/tty` is the controlling terminal device. It bypasses all redirections —
-even `jp query > out.txt 2> err.txt` still renders prompts on the terminal.
-This is the same pattern used by git (password prompts), fzf (interactive UI),
-and sudo (password entry).
+even `jp query > out.txt 2> err.txt` still renders prompts on the terminal. This
+is the same pattern used by git (password prompts), fzf (interactive UI), and
+sudo (password entry).
 
 This means `jp query | less` works correctly: assistant output goes to `less`
 via stdout, chrome goes to stderr, and tool prompts appear on the terminal via
 `/dev/tty`. The channels do not interfere.
 
-When `/dev/tty` is not available, prompts cannot be rendered and `has_client`
-is `false`, so the detached policy applies.
+When `/dev/tty` is not available, prompts cannot be rendered and `has_client` is
+`false`, so the detached policy applies.
 
 ### Integration with `Printer`
 
-All output channels except tracing are managed through the `Printer` type.
-This preserves the single-point-of-output invariant for testing and mocking.
+All output channels except tracing are managed through the `Printer` type. This
+preserves the single-point-of-output invariant for testing and mocking.
 
 `Printer` gains a `Tty` output target alongside the existing `Out` and `Err`:
 
@@ -319,30 +328,28 @@ The `Tty` target:
 - Ignores `--format` (prompts are not data output).
 - Is opened lazily (first call to `tty_writer()`). Most commands never prompt,
   so `/dev/tty` is not opened unless needed.
-- Returns an error if `/dev/tty` is unavailable, which feeds into
-  `has_client = false`.
+- Returns an error if `/dev/tty` is unavailable, which feeds into `has_client =
+  false`.
 
-The `PromptBackend` trait already accepts a `writer` parameter. The change is
-to wire `TerminalPromptBackend` to `printer.tty_writer()` instead of
+The `PromptBackend` trait already accepts a `writer` parameter. The change is to
+wire `TerminalPromptBackend` to `printer.tty_writer()` instead of
 `printer.out_writer()`. Input reading via `inquire` similarly uses `/dev/tty`
 instead of stdin.
 
-In tests, the mock `Printer` provides an in-memory buffer for the `Tty`
-target, allowing prompt rendering to be asserted independently of
-stdout/stderr output.
+In tests, the mock `Printer` provides an in-memory buffer for the `Tty` target,
+allowing prompt rendering to be asserted independently of stdout/stderr output.
 
-Tracing logs are handled separately via the `tracing` subscriber, configured
-to write to the log file. They do not flow through `Printer`.
+Tracing logs are handled separately via the `tracing` subscriber, configured to
+write to the log file. They do not flow through `Printer`.
 
 ### Platform Portability
 
-The `/dev/tty` and `flock` APIs are Unix-specific, but have Windows
-equivalents:
+The `/dev/tty` and `flock` APIs are Unix-specific, but have Windows equivalents:
 
-| Unix             | Windows                | Rust crate                       |
-|------------------|------------------------|----------------------------------|
-| `/dev/tty`       | `CONIN$` / `CONOUT$`   | `crossterm`, `termwiz`           |
-| `ttyname(fd)`    | Console handle detection | `$JP_SESSION` as primary        |
+| Unix          | Windows                  | Rust crate               |
+|---------------|--------------------------|--------------------------|
+| `/dev/tty`    | `CONIN$` / `CONOUT$`     | `crossterm`, `termwiz`   |
+| `ttyname(fd)` | Console handle detection | `$JP_SESSION` as primary |
 
 The `Printer` and `PromptBackend` abstractions hide the platform-specific
 details. The `/dev/tty` path is an implementation detail of `tty_writer()` on
@@ -351,39 +358,38 @@ Unix; on Windows, the same method opens `CONIN$`/`CONOUT$`.
 ## Drawbacks
 
 **Config surface.** The detached policy adds a new config dimension with a
-scalar-or-struct pattern and four-level resolution cascade. This is powerful
-but adds documentation and mental overhead.
+scalar-or-struct pattern and four-level resolution cascade. This is powerful but
+adds documentation and mental overhead.
 
 **Breaking change in non-TTY behavior.** The current implicit behavior
 (auto-approve permissions, reroute questions to LLM) is replaced by `deny` as
-the default. Users who rely on the current piped behavior need to add
-`detached = "auto"` to their config. This is intentional — the current
-behavior is unsafe as a default — but it is a breaking change.
+the default. Users who rely on the current piped behavior need to add `detached
+= "auto"` to their config. This is intentional — the current behavior is unsafe
+as a default — but it is a breaking change.
 
-**Output separation changes rendering.** Chrome (progress, tool headers) goes
-to stderr, assistant output goes to stdout. In a terminal, both streams
-interleave on the same screen. When redirecting, the streams separate. Users
-who redirect stdout to a file only see the assistant's final answer, not the
-interleaved rendering they see in the terminal.
+**Output separation changes rendering.** Chrome (progress, tool headers) goes to
+stderr, assistant output goes to stdout. In a terminal, both streams interleave
+on the same screen. When redirecting, the streams separate. Users who redirect
+stdout to a file only see the assistant's final answer, not the interleaved
+rendering they see in the terminal.
 
 ## Alternatives
 
 ### Single detached policy for all inquiry kinds
 
 A single `detached = "auto"` covering permissions, result delivery, and tool
-questions. Rejected because these are fundamentally different: auto-approving
-a permission prompt (the LLM already decided to call the tool) has different
-risk characteristics than auto-answering a tool question (the LLM might not
-have enough context). Users need independent control.
+questions. Rejected because these are fundamentally different: auto-approving a
+permission prompt (the LLM already decided to call the tool) has different risk
+characteristics than auto-answering a tool question (the LLM might not have
+enough context). Users need independent control.
 
 ### `exclusive` as a third `QuestionTarget` variant
 
 Add `QuestionTarget::UserOnly` instead of a boolean flag. Rejected because
 exclusivity is orthogonal to target — it describes whether the target can be
-overridden when unavailable, not who the target is. At the type level,
-`RunTool` and `DeliverToolResult` are inherently exclusive via the
-`Inquiry::exclusive()` method. A separate `QuestionTarget` variant would not
-express this.
+overridden when unavailable, not who the target is. At the type level, `RunTool`
+and `DeliverToolResult` are inherently exclusive via the `Inquiry::exclusive()`
+method. A separate `QuestionTarget` variant would not express this.
 
 ### `auto` as the default detached policy
 
@@ -393,16 +399,22 @@ current behavior silently auto-approves tool execution without user consent.
 
 ### Environment variable instead of CLI flag
 
-Use `JP_FRONTEND=noninteractive` (like `DEBIAN_FRONTEND`). This could be
-offered as an alias, but a CLI flag is more discoverable and consistent with
-JP's existing flag conventions. Both could coexist.
+Use `JP_FRONTEND=noninteractive` (like `DEBIAN_FRONTEND`). This could be offered
+as an alias, but a CLI flag is more discoverable and consistent with JP's
+existing flag conventions. Both could coexist.
 
 ## Non-Goals
 
-- **Background execution and prompt queuing.** Running conversations as
-  detached background processes, the `queue` detached policy, and attach IPC
-  are future work that builds on the detached policy infrastructure established
-  here.
+- **Background execution and prompt queuing.** Running conversations as detached
+  background processes, the `queue` detached policy, and attach IPC are future
+  work that builds on the detached policy infrastructure established here.
+
+  > [!TIP]
+  > [RFD 027] introduces a client-server query architecture that makes detached
+  > background execution and live re-attachment the default execution model,
+  > building directly on the detached policies defined here. The `queue` policy
+  > is renamed `defer`.
+
 - **New inquiry variants.** This RFD uses the `Inquiry` enum from [RFD 018]
   as-is.
 
@@ -410,23 +422,22 @@ JP's existing flag conventions. Both could coexist.
 
 ### Interaction with the stateful tool protocol
 
-[RFD 009] introduces stateful tools with `spawn`/`fetch`/`apply` actions.
-The per-action permission model (prompt on `spawn`, auto-run `fetch`/`apply`)
-maps to the detached policy, but the details need alignment during
-implementation.
+[RFD 009] introduces stateful tools with `spawn`/`fetch`/`apply` actions. The
+per-action permission model (prompt on `spawn`, auto-run `fetch`/`apply`) maps
+to the detached policy, but the details need alignment during implementation.
 
 ### Config cascade complexity
 
-The four-level resolution is powerful but may be hard to debug. A
-`jp config show --effective <tool>` command that displays the resolved detached
-policy per inquiry kind would help.
+The four-level resolution is powerful but may be hard to debug. A `jp config
+show --effective <tool>` command that displays the resolved detached policy per
+inquiry kind would help.
 
 ### `exclusive` override direction
 
-Users can override `exclusive = true` (set by tool authors) to `false`. This
-is intentional — the user has final say — but could lead to unsafe behavior
-for questions that genuinely require human judgment. Documentation should make
-the implications clear.
+Users can override `exclusive = true` (set by tool authors) to `false`. This is
+intentional — the user has final say — but could lead to unsafe behavior for
+questions that genuinely require human judgment. Documentation should make the
+implications clear.
 
 ### `result` vs `deliver` naming
 
@@ -439,9 +450,9 @@ existing field. To be resolved during implementation.
 
 ### Phase 1: Detached Policy Config
 
-Add the `detached` config field (scalar-or-struct) to `ToolsDefaultsConfig`
-and `ToolConfig`. Implement the `DetachedMode` enum (`auto`, `defaults`,
-`deny`). Implement the config resolution cascade.
+Add the `detached` config field (scalar-or-struct) to `ToolsDefaultsConfig` and
+`ToolConfig`. Implement the `DetachedMode` enum (`auto`, `defaults`, `deny`).
+Implement the config resolution cascade.
 
 Add `exclusive` field to `Question` in `jp_tool` and `QuestionConfig` in
 `jp_config`.
@@ -466,13 +477,16 @@ Independent of Phases 1–2. Can be merged at any point.
 
 ## References
 
-- [RFD 018: Typed Inquiry System](018-typed-inquiry-system.md) — the `Inquiry`
-  enum this RFD's routing logic is built on.
-- [RFD 009: Stateful Tool Protocol](009-stateful-tool-protocol.md) — per-action
-  permission model interacts with detached policy.
+- [RFD 018: Typed Inquiry System][RFD 018] — the `Inquiry` enum this RFD's
+  routing logic is built on.
+- [RFD 009: Stateful Tool Protocol][RFD 009] — per-action permission model
+  interacts with detached policy.
 - `DEBIAN_FRONTEND=noninteractive` — precedent for non-interactive policy.
 - ssh `BatchMode` — precedent for "fail on prompt" policy.
 - `curl` / `git` — precedent for stdout/stderr output separation.
 
-[RFD 018]: 018-typed-inquiry-system.md
 [RFD 009]: 009-stateful-tool-protocol.md
+[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 027]: 027-client-server-query-architecture.md
+[RFD 048]: 048-four-channel-output-model.md
+[RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md

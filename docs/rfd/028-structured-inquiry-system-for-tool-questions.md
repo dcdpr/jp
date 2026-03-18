@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-04
+- **Extended by**: [RFD 034](034-inquiry-specific-assistant-configuration.md)
 
 ## Summary
 
@@ -20,7 +21,7 @@ When a tool returns `NeedsInput` with `QuestionTarget::Assistant`, the system
 needs to get an answer from the LLM without the user's involvement. The original
 approach works like this:
 
-```
+```txt
 1. Assistant: ToolCallRequest(call_123, fs_modify_file, args={path, patterns})
 2. Tool executes → NeedsInput("Create backup files?")
 3. System: ToolCallResponse(call_123, "Tool needs input: ...")
@@ -60,7 +61,7 @@ re-executes the tool with accumulated answers. The turn loop, the terminal, and
 the persisted conversation stream see none of this — the tool simply takes
 longer to complete.
 
-```
+```txt
 1. Assistant: ToolCallRequest(call_123, fs_modify_file, args={path, patterns})
 2. Tool executes → NeedsInput("Create backup files?")
    — Inquiry runs as async task (invisible to turn loop) —
@@ -72,16 +73,23 @@ longer to complete.
 
 ### Design Goals
 
-| Goal | Description |
-|------|-------------|
-| Token efficiency | No re-transmission of tool arguments |
-| Type safety | Structured output schemas guarantee answer types |
-| Full context | LLM sees conversation history when answering |
-| Cache-friendly | Conversation prefix overlaps with main stream |
-| Invisible to turn loop | Inquiry is encapsulated in `ToolCoordinator` |
-| No rendering artifacts | Inquiry runs in a background task, nothing printed |
-| No stream mutation | Real conversation stream untouched during inquiry |
-| Parallel inquiries | Multiple tools can have concurrent inquiries |
+| Goal                   | Description                              |
+|------------------------|------------------------------------------|
+| Token efficiency       | No re-transmission of tool arguments     |
+| Type safety            | Structured output schemas guarantee      |
+|                        | answer types                             |
+| Full context           | LLM sees conversation history when       |
+|                        | answering                                |
+| Cache-friendly         | Conversation prefix overlaps with main   |
+|                        | stream                                   |
+| Invisible to turn loop | Inquiry is encapsulated in               |
+|                        | `ToolCoordinator`                        |
+| No rendering artifacts | Inquiry runs in a background task,       |
+|                        | nothing printed                          |
+| No stream mutation     | Real conversation stream untouched       |
+|                        | during inquiry                           |
+| Parallel inquiries     | Multiple tools can have concurrent       |
+|                        | inquiries                                |
 
 ### InquiryBackend Trait
 
@@ -195,7 +203,7 @@ With the inquiry system in place, the `tool_answers` field is no longer needed:
 
 **Single question:**
 
-```
+```txt
 ToolCoordinator                          Inquiry task (tokio::spawn)
 ─────────────                            ────────────
 Tool executes
@@ -293,11 +301,12 @@ Depends on Phase 4.
 
 ## References
 
-- [RFD 005: First-Class Inquiry Events](005-first-class-inquiry-events.md) —
-  recording `InquiryRequest`/`InquiryResponse` in the persisted stream.
-- [RFD 009: Stateful Tool Protocol](009-stateful-tool-protocol.md) — future
-  protocol for long-running tools (builds on inquiry infrastructure).
-- [RFD 018: Typed Inquiry System](018-typed-inquiry-system.md) — related
-  follow-up work.
+- [RFD 005: First-Class Inquiry Events][RFD 005] — recording
+  `InquiryRequest`/`InquiryResponse` in the persisted stream.
+- [RFD 009: Stateful Tool Protocol][RFD 009] — future protocol for long-running
+  tools (builds on inquiry infrastructure).
+- [RFD 018: Typed Prompt Routing Enum][RFD 018] — related follow-up work.
 
 [RFD 005]: 005-first-class-inquiry-events.md
+[RFD 009]: 009-stateful-tool-protocol.md
+[RFD 018]: 018-typed-prompt-routing-enum.md
