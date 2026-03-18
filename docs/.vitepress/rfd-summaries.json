@@ -72,7 +72,7 @@
     "summary": "Abandoned RFD split into RFD 048 and RFD 049; preserved for historical context on non-interactive mode design."
   },
   "020-parallel-conversations.md": {
-    "hash": "88c88cee70f67c8261e422b07b5b001e9edaca1054ef625faf4798add07e95a4",
+    "hash": "81206c64fcf58682afb91178c17bfc945489ea89ecc380428798a5fa1a197724",
     "summary": "Replace global active conversation with per-session tracking and add conversation locks for parallel terminal work."
   },
   "021-printer-live-redirection.md": {
@@ -80,7 +80,7 @@
     "summary": "Adds runtime output redirection to Printer via SwapWriters command, enabling mid-stream destination changes without replacing instances."
   },
   "022-detached-conversations.md": {
-    "hash": "a6f82ee7a5d9dab13740a189b78d19bd2d243a0e415010c28aaa6728b6eb6ed2",
+    "hash": "f753c89d54740a50ca73feb49545364140c7f9ceae8ec9c7f78473f31c06a614",
     "summary": "Detached conversation execution via background processes and attachment—abandoned, split into RFD 023 and 027."
   },
   "023-resumable-conversation-turns.md": {
@@ -148,12 +148,12 @@
     "summary": "Introduces `await` built-in tool to synchronize on parallel stateful tool handles with `any`/`all` completion modes."
   },
   "039-conversation-trees.md": {
-    "hash": "8de78f07ff101fd21abb050ab7ec8ea3c0a89213cbc53dbcc165e960d150c6c5",
+    "hash": "f8b80e32b3ccc9313dd401e9666cef014b5e7119ab5be48f83638b0767029702",
     "summary": "Add parent-child conversation relationships via metadata field, enabling fork lineage and hierarchical organization without nested directories."
   },
   "040-hidden-conversations-and-tool-context.md": {
-    "hash": "c645a9f1e651d389ec1b0361a5bf8b32eb92903de0d8d0897646bbbb012cc3c5",
-    "summary": "Add hidden flag on conversations and conversation_id in tool execution context."
+    "hash": "de8f8fb170e9f7b9427889d722db97747e4cd89a5ae4e36f039d4c9687c6d030",
+    "summary": "Hide conversations from default listings and expose conversation_id to tools for sub-agent workflows."
   },
   "041-rfd-lifecycle-enhancements.md": {
     "hash": "3f0d35a4fc618daac964dde785f1c339f5279a0b6b5e6b5e73dd2c0158f34c2f",
@@ -164,8 +164,8 @@
     "summary": "Introduces per-tool options field for static user-defined configuration passed to tools at runtime."
   },
   "043-incremental-tool-call-argument-streaming.md": {
-    "hash": "493aa699f609bbb5d5f354c5bd7499011a67ecffe383b88c85aee155e0521317",
-    "summary": "Incremental JSON parser emits tool call argument fragments as data streams, enabling real-time UI display."
+    "hash": "75fbd7234b321610989533fe79518e584d53a99beec353f0bfc0b023aabe59d2",
+    "summary": "Extend EventBuilder to incrementally parse and emit tool call arguments as typed fragments during streaming."
   },
   "044-workspace-initialization.md": {
     "hash": "e9de34df0adc74bdcf496c0cf13f94989f569dc5a222491501756bf88bfc358c",
@@ -176,7 +176,7 @@
     "summary": "Replace JP's ad-hoc interrupt handling with a layered LIFO handler stack, routing OS signals through scoped notification channels."
   },
   "046-nested-workspace-projection.md": {
-    "hash": "031212e05fa48ff25a35abf4ebb73bbcafb842fc9a7441a664289d19f3127902",
+    "hash": "c84c09bcc7c1f3f6870178d928f2a29428200adda99210ab0bfc9494e2fc58af",
     "summary": "Nested workspace directories project conversation trees visually; user-local storage stays flat for durability."
   },
   "047-editor-and-path-access-for-conversations.md": {
@@ -202,5 +202,9 @@
   "051-sub-agent-workflows.md": {
     "hash": "1a162b7a00e87551ee7ce35145babf277f86225788cf611d4c616ce394be5dba",
     "summary": "Guide for building sub-agent workflows using local tools, config overlays, and conversation trees to delegate scoped tasks cheaply."
+  },
+  "052-workspace-data-store-sanitization.md": {
+    "hash": "199bf135a50791b21bf4c5ef6028012334cef5f8be9acb9cea14c54f1f461621",
+    "summary": "Workspace sanitization validates and repairs corrupted conversations, trashing broken data with recovery explanations."
   }
 }
