@@ -34,32 +34,35 @@ impl Conversation {
 #[derive(Debug, clap::Subcommand)]
 enum Commands {
     /// Remove conversations.
-    #[command(name = "rm")]
+    #[command(name = "rm", aliases = ["remove", "rem", "delete", "del"])]
     Remove(rm::Rm),
 
     /// List conversations.
-    #[command(name = "ls")]
+    #[command(name = "ls", alias = "list", visible_alias = "l")]
     List(ls::Ls),
 
     /// Show conversation details.
-    #[command(name = "show")]
+    #[command(name = "show", visible_alias = "s")]
     Show(show::Show),
 
     /// Set the active conversation.
-    #[command(name = "use")]
+    #[command(name = "use", visible_alias = "u")]
     Use(use_::Use),
 
     /// Edit conversation details.
-    #[command(name = "edit")]
+    #[command(name = "edit", visible_alias = "e")]
     Edit(edit::Edit),
 
     /// Fork a conversation.
+    #[command(name = "fork", visible_alias = "f")]
     Fork(fork::Fork),
 
     /// Search through conversation history.
+    #[command(name = "grep", alias = "rg", visible_alias = "g")]
     Grep(grep::Grep),
 
     /// Print conversation history to the terminal.
+    #[command(name = "print", visible_alias = "p")]
     Print(print::Print),
     // /// Merge a conversation.
     // Merge(merge::Merge),

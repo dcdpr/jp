@@ -1021,7 +1021,7 @@ impl ToolCoordinator {
                     "Tool question received, routing to target",
                 );
 
-                if is_tty && target == QuestionTarget::User {
+                if is_tty && target.is_user() {
                     if *prompt_active {
                         pending_prompts.push_back(PendingPrompt::Question { index, question });
                     } else {
