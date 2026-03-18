@@ -1,5 +1,37 @@
 # Configuration
 
+Jean-Pierre's configuration system leans into the "[progressive complexity]":
+
+- **Progressive Fallback**: Systems should be designed to maintain core
+  functionality even as sophisticated technologies or resources become
+  increasingly unavailable. This ensures continued operation, albeit at a
+  reduced capacity, under adverse conditions.
+- **[Progressive Disclosure]**: Systems should reveal their functionality in
+  layers, starting with a minimal set of touchpoints for basic operation and
+  expanding to offer more complex interactions as needed or as the user's
+  proficiency increases.
+- **Progressive Abstraction**: Systems should be built with multiple layers of
+  abstraction, allowing users to interact with them at a level of detail
+  appropriate to their needs and Understanding, while hiding unnecessary
+  complexity but not preventing access to it.
+- **Progressive Enhancement**: Systems should begin with a solid foundation of
+  core functionality that works in even the most basic environments, and then
+  progressively enhance the user experience and add features as more advanced
+  technologies become available.
+- **Progressive Control**: Systems should offer a range of control mechanisms,
+  from simple, direct manipulation to more complex, automated, or AI-driven
+  interactions, allowing users to choose the level of detail that suits their
+  needs and abilities.
+- **Progressive Operation**: Systems should be designed to operate across a
+  spectrum of operational modes, from fully manual to fully autonomous, adapting
+  to different contexts and user preferences.
+- **Progressive Change**: Systems should be designed with feedback loops to
+  evolve and adapt over time, accommodating new technologies, user needs, and
+  environmental changes, without disrupting core functionality.
+
+[progressive complexity]: https://benefuture.miraheze.org/wiki/Progressive_complexity
+[progressive disclosure]: https://en.wikipedia.org/wiki/Progressive_disclosure
+
 ## Loading And Ordering
 
 Configuration options can be set in multiple ways, the order in which they are
