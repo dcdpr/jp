@@ -59,14 +59,19 @@ impl Init {
         let (provider, name) = Self::ask_model(&mut printer.out_writer())?;
 
         // Write workspace config
-        //
-        // NOTE: The `defaults` field in `ToolsConfig` is `#[setting(rename = "*")]`,
-        // so the TOML key must be `'*'`, not `defaults`.
-        let config_content = format!(
-            "[assistant.model.id]\nprovider = \"{provider}\"\nname = \
-             \"{name}\"\n\n[conversation.tools.'*']\nrun = \"{run_mode}\"\n"
-        );
-        fs::write(storage.join("config.toml"), config_content)?;
+        fs::write(
+            storage.join("config.toml"),
+            indoc::formatdoc!(
+                r#"
+                [assistant.model.id]
+                provider = "{provider}"
+                name = "{name}"
+
+                [conversation.tools.'*']
+                run = "{run_mode}"
+            "#
+            ),
+        )?;
 
         let loc = if root == cwd {
             "current directory".to_owned()

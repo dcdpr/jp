@@ -28,6 +28,7 @@ use jp_llm::{
     tool::executor::{Executor, ExecutorResult, MockExecutor, PermissionInfo, TestExecutorSource},
 };
 use jp_printer::{OutputFormat, Printer};
+use jp_storage::Storage;
 use jp_tool::{AnswerType, Question};
 use jp_workspace::Workspace;
 use serde_json::json;
@@ -203,17 +204,10 @@ async fn test_quit_during_streaming_persists_content() {
     drop(output);
 
     // 5. Verify file on disk contains the content
-    let events_file = storage
-        .join("conversations")
-        .join(conv_id.to_dirname(None))
-        .join("events.json");
-
-    assert!(
-        events_file.exists(),
-        "Events file should exist at {events_file}"
-    );
-
-    let content = std::fs::read_to_string(&events_file).expect("should read events file");
+    let reader = Storage::new(&storage).unwrap();
+    let content = reader
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
 
     // The persisted content should contain the user query
     assert!(
@@ -284,12 +278,10 @@ async fn test_normal_completion_persists_content() {
     );
 
     // Verify persistence
-    let events_file = storage
-        .join("conversations")
-        .join(conv_id.to_dirname(None))
-        .join("events.json");
-
-    let content = std::fs::read_to_string(&events_file).expect("should read events file");
+    let reader = Storage::new(&storage).unwrap();
+    let content = reader
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
 
     assert!(
         content.contains("Hello"),
@@ -372,12 +364,10 @@ async fn test_tool_call_cycle_completes_with_followup() {
     );
 
     // Verify persistence
-    let events_file = storage
-        .join("conversations")
-        .join(conv_id.to_dirname(None))
-        .join("events.json");
-
-    let content = std::fs::read_to_string(&events_file).expect("should read events file");
+    let reader = Storage::new(&storage).unwrap();
+    let content = reader
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
 
     // Should contain the user query
     assert!(
@@ -474,17 +464,10 @@ async fn test_quit_during_tool_execution_persists() {
     let _output = out.lock();
 
     // Verify persistence happened
-    let events_file = storage
-        .join("conversations")
-        .join(conv_id.to_dirname(None))
-        .join("events.json");
-
-    assert!(
-        events_file.exists(),
-        "Events file should exist at {events_file}"
-    );
-
-    let content = std::fs::read_to_string(&events_file).expect("should read events file");
+    let reader = Storage::new(&storage).unwrap();
+    let content = reader
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
 
     // Should contain at least the user query
     assert!(
@@ -602,12 +585,10 @@ async fn test_multiple_tool_calls_in_sequence() {
     drop(output);
 
     // Verify persistence
-    let events_file = storage
-        .join("conversations")
-        .join(conv_id.to_dirname(None))
-        .join("events.json");
-
-    let content = std::fs::read_to_string(&events_file).expect("should read events file");
+    let reader = Storage::new(&storage).unwrap();
+    let content = reader
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
 
     // Should contain both tool calls
     assert!(
@@ -695,12 +676,10 @@ async fn test_empty_tool_response_continues_cycle() {
     drop(output);
 
     // The second LLM call should have happened
-    let events_file = storage
-        .join("conversations")
-        .join(conv_id.to_dirname(None))
-        .join("events.json");
-
-    let content = std::fs::read_to_string(&events_file).expect("should read events file");
+    let reader = Storage::new(&storage).unwrap();
+    let content = reader
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
 
     // Should contain the follow-up message from the LLM
     assert!(
@@ -710,7 +689,6 @@ async fn test_empty_tool_response_continues_cycle() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[expect(clippy::too_many_lines)]
 async fn test_tool_restart_on_shutdown_signal() {
     // Tests the restart flow:
     // 1. LLM returns a tool call
@@ -834,12 +812,10 @@ async fn test_tool_restart_on_shutdown_signal() {
         );
 
         // Verify persistence includes the final message
-        let events_file = storage
-            .join("conversations")
-            .join(conv_id.to_dirname(None))
-            .join("events.json");
-
-        let content = std::fs::read_to_string(&events_file).expect("should read events file");
+        let reader = Storage::new(&storage).unwrap();
+        let content = reader
+            .read_test_events_raw(&conv_id)
+            .expect("events should be persisted");
 
         assert!(
             content.contains("Tool completed after restart"),
@@ -952,12 +928,10 @@ async fn test_merged_stream_exits_after_tool_response() {
         drop(output);
 
         // Verify the conversation persisted with the final message
-        let events_file = storage
-            .join("conversations")
-            .join(conv_id.to_dirname(None))
-            .join("events.json");
-
-        let content = std::fs::read_to_string(&events_file).expect("should read events file");
+        let reader = Storage::new(&storage).unwrap();
+        let content = reader
+            .read_test_events_raw(&conv_id)
+            .expect("events should be persisted");
 
         assert!(
             content.contains("Tool executed successfully"),

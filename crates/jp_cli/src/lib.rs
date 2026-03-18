@@ -15,7 +15,7 @@ use std::{
     process::ExitCode,
     str::FromStr,
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -24,7 +24,7 @@ use std::{
 use camino::{FromPathBufError, Utf8PathBuf, absolute_utf8};
 use camino_tempfile::NamedUtf8TempFile;
 use clap::{
-    ArgAction, CommandFactory as _, Parser,
+    ArgAction, Parser,
     builder::{BoolValueParser, TypedValueParser as _},
 };
 use cmd::Commands;
@@ -331,45 +331,45 @@ pub fn run() -> ExitCode {
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let printer = Printer::terminal(format);
 
-    // Handle commands that don't need the full startup pipeline.
-    match &cli.command {
-        Commands::Init(args) => return args.run(&printer).map_err(Into::into),
-        Commands::Config(config) => {
-            if let Some(result) = config.try_run_standalone(&printer) {
-                return result.map_err(Into::into);
-            }
-        }
-        _ => {}
+    // `jp init` is a special case that doesn't need the full startup pipeline.
+    if let Commands::Init(args) = &cli.command {
+        return args.run(&printer).map_err(Into::into);
     }
-
-    if cli.command.is_help_request() {
-        let mut cmd = Cli::command();
-        cmd.find_subcommand_mut(cli.command.name())
-            .expect("subcommand exists")
-            .print_help()?;
-        return Ok(());
-    }
-
-    // Full pipeline for commands that need workspace + validated config.
-    let cmd = cli.command;
 
     let mut workspace = load_workspace(cli.globals.workspace.as_ref())?;
     if !cli.globals.persist {
         workspace.disable_persistence();
     }
 
-    let runtime = build_runtime(cli.root.threads, "jp-worker")?;
-    if let Err(error) = workspace.load() {
+    let report = workspace.sanitize()?;
+    if report.has_repairs() {
+        for trashed in &report.trashed {
+            warn!(
+                dirname = trashed.dirname,
+                error = %trashed.error,
+                "Trashed corrupt conversation"
+            );
+        }
+        if report.active_reassigned {
+            warn!("Active conversation was corrupt or missing, switched to fallback");
+        }
+        if report.default_created {
+            warn!("No valid conversations found, starting with fresh workspace");
+        }
+    }
+
+    let partial = load_partial_config(&cli.command, Some(&workspace), &cli.globals.config)?;
+    let config = Arc::new(build(partial)?);
+
+    if let Err(error) = workspace.load_conversations_from_disk(config.clone()) {
         tracing::error!(error = ?error, "Failed to load workspace.");
     }
 
-    let partial = load_partial_config(&cmd, Some(&workspace), &cli.globals.config)?;
-    let config = build(partial)?;
-
+    let runtime = build_runtime(cli.root.threads, "jp-worker")?;
     let mut ctx = Ctx::new(workspace, runtime, cli.globals, config, printer);
     let handle = ctx.handle().clone();
 
-    let output = handle.block_on(cmd.run(&mut ctx));
+    let output = handle.block_on(cli.command.run(&mut ctx));
     if let Err(error) = output.as_ref()
         && error.disable_persistence
     {

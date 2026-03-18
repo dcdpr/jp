@@ -3,6 +3,8 @@ pub mod value;
 
 pub mod load;
 pub mod persist;
+pub mod trash;
+pub mod validate;
 
 use std::{cell::OnceCell, fs, io::BufReader, iter};
 
@@ -284,15 +286,18 @@ impl Storage {
         Ok(())
     }
 
-    pub fn persist_conversations_metadata(
-        &mut self,
-        metadata: &ConversationsMetadata,
-    ) -> Result<()> {
-        // Only persist metadata if the active conversation exists.
-        if self
-            .load_conversation_stream(&metadata.active_conversation_id)
-            .is_err()
-        {
+    pub fn persist_conversations_metadata(&self, metadata: &ConversationsMetadata) -> Result<()> {
+        // Only persist metadata if the active conversation has a directory on
+        // disk. This prevents writing a metadata file that references a
+        // conversation that was never persisted (e.g., a fresh in-memory
+        // conversation on first run).
+        let id = &metadata.active_conversation_id;
+        let exists = [Some(&self.root), self.user.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|root| find_conversation_dir_path(root, id).is_some());
+
+        if !exists {
             return Ok(());
         }
 
@@ -301,6 +306,23 @@ impl Storage {
         trace!(path = %metadata_path, "Persisting user conversations metadata.");
 
         write_json(&metadata_path, metadata)?;
+
+        Ok(())
+    }
+
+    /// Remove the global conversations metadata file.
+    ///
+    /// After removal, [`load_conversations_metadata`] will return default
+    /// metadata.
+    ///
+    /// [`load_conversations_metadata`]: Self::load_conversations_metadata
+    pub fn remove_conversations_metadata(&self) -> Result<()> {
+        let root = self.user.as_deref().unwrap_or(self.root.as_path());
+        let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
+
+        if metadata_path.is_file() {
+            fs::remove_file(&metadata_path)?;
+        }
 
         Ok(())
     }
@@ -412,31 +434,13 @@ fn build_conversation_dir_prefix(root: &Utf8Path, id: &ConversationId) -> Utf8Pa
     root.join(CONVERSATIONS_DIR).join(id.to_dirname(None))
 }
 
-// fn load_conversation_metadata(entry: &Utf8DirEntry) -> Option<(ConversationId, Conversation)> {
-//     let conversation_id = load_conversation_id_from_entry(entry)?;
-//
-//     let path = entry.path();
-//
-//     let conversation = {
-//         let metadata_path = path.join(METADATA_FILE);
-//         match read_json::<Conversation>(&metadata_path) {
-//             Ok(c) => c,
-//             Err(error) => {
-//                 warn!(
-//                     %error,
-//                     path = %metadata_path,
-//                     "Failed to load conversation metadata. Skipping."
-//                 );
-//                 return None;
-//             }
-//         }
-//     };
-//
-//     Some((conversation_id, conversation))
-// }
-
 fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<ConversationId> {
     if !entry.file_type().ok()?.is_dir() {
+        return None;
+    }
+
+    // Skip dot-prefixed entries (e.g., .trash/).
+    if entry.file_name().starts_with('.') {
         return None;
     }
 
@@ -526,6 +530,83 @@ fn remove_deleted(
     }
 
     Ok(())
+}
+
+// Internal methods for testing.
+#[cfg(debug_assertions)]
+impl Storage {
+    /// Write a minimal valid conversation to the workspace storage root.
+    ///
+    /// Creates a conversation directory with valid `metadata.json` and
+    /// `events.json` files. For test fixture setup only.
+    #[doc(hidden)]
+    pub fn write_test_conversation(&self, id: &ConversationId, conversation: &Conversation) {
+        let dir = self
+            .root
+            .join(CONVERSATIONS_DIR)
+            .join(id.to_dirname(conversation.title.as_deref()));
+        fs::create_dir_all(&dir).unwrap();
+        write_json(&dir.join(METADATA_FILE), conversation).unwrap();
+        write_json(&dir.join(EVENTS_FILE), &ConversationStream::new_test()).unwrap();
+    }
+
+    /// Write the global conversations metadata file.
+    ///
+    /// Writes to user storage if configured, otherwise the workspace root.
+    /// For test fixture setup only.
+    #[doc(hidden)]
+    pub fn write_test_conversations_metadata(&self, active_id: ConversationId) {
+        let root = self.user.as_deref().unwrap_or(self.root.as_path());
+        let path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        write_json(&path, &ConversationsMetadata::new(active_id)).unwrap();
+    }
+
+    /// Read the raw persisted events file content for a conversation.
+    ///
+    /// Searches both workspace and user storage roots. Returns `None` if
+    /// the conversation or its events file doesn't exist.
+    /// For test assertions only.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn read_test_events_raw(&self, id: &ConversationId) -> Option<String> {
+        [Some(&self.root), self.user.as_ref()]
+            .into_iter()
+            .flatten()
+            .find_map(|root| {
+                let dir = find_conversation_dir_path(root, id)?;
+                fs::read_to_string(dir.join(EVENTS_FILE)).ok()
+            })
+    }
+
+    /// Create an empty conversation directory that will fail validation.
+    ///
+    /// The directory contains no files, so it will fail the "missing
+    /// metadata.json" check during validation. For test fixture setup only.
+    #[doc(hidden)]
+    pub fn create_test_conversation_dir(&self, dirname: &str) {
+        let dir = self.root.join(CONVERSATIONS_DIR).join(dirname);
+        fs::create_dir_all(&dir).unwrap();
+    }
+
+    /// Write corrupt (unparseable) data to the global conversations metadata
+    /// file. For test fixture setup only.
+    #[doc(hidden)]
+    pub fn write_test_corrupt_conversations_metadata(&self) {
+        let root = self.user.as_deref().unwrap_or(self.root.as_path());
+        let path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "corrupt").unwrap();
+    }
+
+    /// Returns whether the global conversations metadata file exists on disk.
+    /// For test assertions only.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn conversations_metadata_exists(&self) -> bool {
+        let root = self.user.as_deref().unwrap_or(self.root.as_path());
+        root.join(CONVERSATIONS_DIR).join(METADATA_FILE).is_file()
+    }
 }
 
 #[cfg(test)]

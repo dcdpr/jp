@@ -62,14 +62,15 @@ impl Ctx {
         workspace: Workspace,
         runtime: Runtime,
         args: Globals,
-        config: AppConfig,
+        config: impl Into<Arc<AppConfig>>,
         printer: Printer,
     ) -> Self {
+        let config = config.into();
         let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
         Self {
             workspace,
-            config: Arc::new(config),
+            config,
             term: Term {
                 args,
                 is_tty: io::stdout().is_terminal(),
