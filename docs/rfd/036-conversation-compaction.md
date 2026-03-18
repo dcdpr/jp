@@ -535,5 +535,5 @@ Depends on Phases 1-4.
   Issue #57
 
 [Issue #57]: https://github.com/dcdpr/jp/issues/57
-[RFD 011]: 011-system-message-queue.md
+[RFD 011]: 011-system-notification-queue.md
 [RFD 034]: 034-inquiry-specific-assistant-configuration.md

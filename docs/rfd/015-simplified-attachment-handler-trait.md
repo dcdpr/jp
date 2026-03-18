@@ -1,10 +1,10 @@
 # RFD 015: Simplified Attachment Handler Trait
 
-- **Status**: Accepted
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-27
-- **Supersedes**: [RFD 014](./014-attachment-handler-guide.md)
+- **Supersedes**: [RFD 014](014-attachment-handler-guide.md)
 
 ## Summary
 
@@ -172,9 +172,9 @@ pub fn all_handlers() -> Vec<BuiltinHandler> {
 }
 ```
 
-All built-in handlers are consolidated into `jp_attachment::builtin`.
-Individual handler crates (e.g., `jp_attachment_cmd_output`) are removed.
-Handlers can be enabled or disabled via cargo feature flags:
+All built-in handlers are consolidated into `jp_attachment::builtin`. Individual
+handler crates (e.g., `jp_attachment_cmd_output`) are removed. Handlers can be
+enabled or disabled via cargo feature flags:
 
 ```toml
 [features]
@@ -213,15 +213,14 @@ introduce extensibility for custom attachment types.
 - **The `Attachment` struct.** Handlers still produce `Vec<Attachment>` with
   `source`, `description`, and `content` fields.
 - **Both URL forms.** Handlers receive `Url` values that can be hierarchical
-  (`scheme://host/path?query`) or opaque (`scheme:content`). See [RFD
-  013].
+  (`scheme://host/path?query`) or opaque (`scheme:content`). See [RFD 014].
 - **Config-file attachment syntax.** Both URL strings and the `type`/`path`/
   `params` object form continue to work.
 
 ## Drawbacks
 
-- **Breaking change.** All existing handlers must be rewritten to the new
-  trait. This is acceptable since handlers are currently internal-only.
+- **Breaking change.** All existing handlers must be rewritten to the new trait.
+  This is acceptable since handlers are currently internal-only.
 
 ## Alternatives
 
@@ -235,14 +234,18 @@ handler's state is derivable from its URL list, the complexity is unnecessary.
 ### Use a different state management approach
 
 Instead of moving URL tracking to the host, use a shared state management
-pattern (e.g., a registry that handlers query). This still requires handlers
-to implement state management methods, which adds complexity without clear
-benefit given that all handler state is derivable from the URL list.
+pattern (e.g., a registry that handlers query). This still requires handlers to
+implement state management methods, which adds complexity without clear benefit
+given that all handler state is derivable from the URL list.
 
 ## Non-Goals
 
 - **Third-party extensibility.** This RFD focuses on simplifying the handler
   interface. Plugin support for third-party handlers is future work.
+
+  > [!TIP]
+  > [RFD 016] introduces the plugin system. [RFD 017] defines the Wasm
+  > attachment handler interface as the first capability built on top of it.
 
 ## Risks and Open Questions
 
@@ -283,7 +286,8 @@ benefit given that all handler state is derivable from the URL list.
 
 ## References
 
-- [RFD 014: Attachment Handler Guide](014-attachment-handler-guide.md) — how
-  handlers work today.
+- [RFD 014: Attachment Handler Guide][RFD 014] — how handlers work today.
 
 [RFD 014]: 014-attachment-handler-guide.md
+[RFD 016]: 016-wasm-plugin-architecture.md
+[RFD 017]: 017-wasm-attachment-handlers.md

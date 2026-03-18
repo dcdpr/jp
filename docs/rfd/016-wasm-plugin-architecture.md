@@ -1,41 +1,39 @@
 # RFD 016: Wasm Plugin Architecture
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-28
 
 ## Summary
 
-This RFD defines JP's plugin system. Plugins are Wasm components that extend
-JP with new capabilities — attachment handlers, tools, LLM providers, and
-more. A plugin exports a required `plugin` interface for identification and
-any number of optional capability interfaces. The host discovers capabilities
-at load time using `wasmtime`'s dynamic export inspection. All host
-interaction is mediated through JP-controlled imports (`jp:host`), sandboxed
-per-plugin.
+This RFD defines JP's plugin system. Plugins are Wasm components that extend JP
+with new capabilities — attachment handlers, tools, LLM providers, and more. A
+plugin exports a required `plugin` interface for identification and any number
+of optional capability interfaces. The host discovers capabilities at load time
+using `wasmtime`'s dynamic export inspection. All host interaction is mediated
+through JP-controlled imports (`jp:host`), sandboxed per-plugin.
 
 ## Motivation
 
-JP has several extension points — attachment handlers, tools, LLM providers
-— that are currently hardcoded into the binary. Adding a new attachment type
-or tool means writing a Rust crate, wiring it into the workspace, and
-recompiling. Users only have limited ways to extend JP without forking the
-project.
+JP has several extension points — attachment handlers, tools, LLM providers —
+that are currently hardcoded into the binary. Adding a new attachment type or
+tool means writing a Rust crate, wiring it into the workspace, and recompiling.
+Users only have limited ways to extend JP without forking the project.
 
 We need a plugin system that:
 
 1. Lets third parties extend JP without recompiling.
-2. Runs untrusted code safely — plugins should not have unrestricted access
-   to the host filesystem, network, or environment.
-3. Supports multiple capability types from a single plugin (e.g., a Jira
-   plugin that provides both an attachment handler and a tool).
+2. Runs untrusted code safely — plugins should not have unrestricted access to
+   the host filesystem, network, or environment.
+3. Supports multiple capability types from a single plugin (e.g., a Jira plugin
+   that provides both an attachment handler and a tool).
 4. Scales to many capability types without combinatorial complexity.
 5. Works across platforms and languages.
 
-Wasm with the component model meets all five requirements: sandboxed by
-default, cross-platform, multi-language (via `wit-bindgen`), and the
-component model provides typed interfaces that can be composed freely.
+Wasm with the component model meets all five requirements: sandboxed by default,
+cross-platform, multi-language (via `wit-bindgen`), and the component model
+provides typed interfaces that can be composed freely.
 
 ## Design
 
@@ -43,8 +41,8 @@ component model provides typed interfaces that can be composed freely.
 
 A plugin is a Wasm component that exports one or more interfaces from the
 `jp:plugin` package. The `plugin` interface is required — it identifies the
-plugin. Capability interfaces are optional — the host discovers which ones
-the component exports and registers them accordingly.
+plugin. Capability interfaces are optional — the host discovers which ones the
+component exports and registers them accordingly.
 
 ```wit
 package jp:plugin@0.1.0;
@@ -62,8 +60,8 @@ interface types {
 }
 ```
 
-Capability interfaces are defined in the same package. Each interface
-represents a distinct extension point:
+Capability interfaces are defined in the same package. Each interface represents
+a distinct extension point:
 
 ```wit
 /// Attachment handler capability.
@@ -134,33 +132,33 @@ At load time, the host:
 
 1. Instantiates the component, providing all `jp:host/*` imports via the
    `Linker`.
-2. Calls `instance.get_export_index(None, "jp:plugin/plugin")`. If absent,
-   the component is not a valid plugin — error.
+2. Calls `instance.get_export_index(None, "jp:plugin/plugin")`. If absent, the
+   component is not a valid plugin — error.
 3. Calls `plugin.name()` to identify the plugin.
 4. Probes for each known capability interface:
-   - `instance.get_export_index(None, "jp:plugin/attachment")` — if
-     present, register as an attachment handler.
-   - `instance.get_export_index(None, "jp:plugin/tool")` — if present,
-     register as a tool provider.
+   - `instance.get_export_index(None, "jp:plugin/attachment")` — if present,
+     register as an attachment handler.
+   - `instance.get_export_index(None, "jp:plugin/tool")` — if present, register
+     as a tool provider.
    - (and so on for future capability types)
 
-This approach scales to any number of capability types. Adding a new
-capability means defining a new WIT interface and adding one probe call on
-the host side. Existing plugins are unaffected — they don't export the new
-interface and the host simply skips it.
+This approach scales to any number of capability types. Adding a new capability
+means defining a new WIT interface and adding one probe call on the host side.
+Existing plugins are unaffected — they don't export the new interface and the
+host simply skips it.
 
 The trade-off is that the host uses `wasmtime`'s dynamic API (`get_func`,
 `get_typed_func`) rather than `bindgen!`-generated static bindings. This means
 slightly more boilerplate on the host side and runtime type assertions instead
-of compile-time checks. The cost is paid once in `jp_wasm` and does not
-grow with plugin count or capability count.
+of compile-time checks. The cost is paid once in `jp_wasm` and does not grow
+with plugin count or capability count.
 
 ### Host imports
 
-Plugins do not use WASI capabilities directly. All host interaction goes
-through JP's own imports under the `jp:host` package. This gives the host
-full control: every call is checked against the plugin's sandbox
-configuration before executing.
+Plugins do not use WASI capabilities directly. All host interaction goes through
+JP's own imports under the `jp:host` package. This gives the host full control:
+every call is checked against the plugin's sandbox configuration before
+executing.
 
 ```wit
 package jp:host@0.1.0;
@@ -229,20 +227,19 @@ interface filesystem {
 }
 ```
 
-Guests import only what they need. A plugin that just parses URLs and
-transforms data doesn't import anything. A plugin that runs `git` commands
-imports `jp:host/process`. A plugin that calls an API imports `jp:host/http`.
+Guests import only what they need. A plugin that just parses URLs and transforms
+data doesn't import anything. A plugin that runs `git` commands imports
+`jp:host/process`. A plugin that calls an API imports `jp:host/http`.
 
-The interfaces are intentionally narrow. `process.run` is "run a command in
-a clean environment, get output" — not raw `fork`/`exec`. `http.get` is a
-simple GET with optional headers — not a full HTTP client. The interfaces
-can be extended later (e.g. `http.post`, `process.run_streaming`) as needs
-arise.
+The interfaces are intentionally narrow. `process.run` is "run a command in a
+clean environment, get output" — not raw `fork`/`exec`. `http.get` is a simple
+GET with optional headers — not a full HTTP client. The interfaces can be
+extended later (e.g. `http.post`, `process.run_streaming`) as needs arise.
 
 ### Plugin configuration
 
-Plugins are configured as a top-level `plugins` array. The simplest form
-is a list of Wasm paths:
+Plugins are configured as a top-level `plugins` array. The simplest form is a
+list of Wasm paths:
 
 ```toml
 plugins = ["simple_plugin.wasm", "another_plugin.wasm"]
@@ -262,13 +259,13 @@ envs = ["JIRA_API_TOKEN"]
 wasm = "~/.jp/plugins/notion.wasm"
 ```
 
-The plugin identifies itself via `plugin.name()` — there is no name key in
-the config. The `wasm` key specifies the component path. The plugin format
-is inferred from context (currently always Wasm; other formats may be
-supported in the future).
+The plugin identifies itself via `plugin.name()` — there is no name key in the
+config. The `wasm` key specifies the component path. The plugin format is
+inferred from context (currently always Wasm; other formats may be supported in
+the future).
 
-If two plugins return the same name from `plugin.name()`, the host errors
-at startup with a clear message identifying both.
+If two plugins return the same name from `plugin.name()`, the host errors at
+startup with a clear message identifying both.
 
 Components are compiled on first use and cached for the process lifetime.
 
@@ -297,10 +294,10 @@ runtime changes. Track progress:
 
 ### Crate structure
 
-Plugin configuration types (`SandboxConfig`, `CommandRule`,
-`NetworkSandbox`, `FilesystemSandbox`, plugin entry deserialization) live
-in `jp_config` alongside all other configuration types. This is where
-`[[plugins]]` entries are deserialized.
+Plugin configuration types (`SandboxConfig`, `CommandRule`, `NetworkSandbox`,
+`FilesystemSandbox`, plugin entry deserialization) live in `jp_config` alongside
+all other configuration types. This is where `[[plugins]]` entries are
+deserialized.
 
 The `jp_wasm` crate owns the Wasm runtime and all plugin execution:
 
@@ -312,29 +309,29 @@ The `jp_wasm` crate owns the Wasm runtime and all plugin execution:
 - Inquiry-based permission prompts for unconfigured capabilities
 - Capability-specific adapters (e.g. `WasmHandler` for attachments)
 
-```
+```txt
 jp_cli
-  ├── jp_config            ← SandboxConfig, plugin config types
+  ├── jp_config            <- SandboxConfig, plugin config types
   ├── jp_attachment
   │     └── jp_config
-  └── jp_wasm              ← wasmtime runtime, sandbox enforcement,
+  └── jp_wasm              <- wasmtime runtime, sandbox enforcement,
         ├── jp_config           secret scrubbing, host imports
         └── wasmtime
 ```
 
 Plugin loading is centralized in `jp_wasm`: it reads plugin config from
-`jp_config`, loads all configured plugins, calls `plugin.name()`,
-discovers capabilities, and hands off typed adapters to the relevant
-subsystems (e.g. `WasmHandler` instances to `jp_attachment`). All plugins
-share the same `Engine` instance and component cache.
+`jp_config`, loads all configured plugins, calls `plugin.name()`, discovers
+capabilities, and hands off typed adapters to the relevant subsystems (e.g.
+`WasmHandler` instances to `jp_attachment`). All plugins share the same `Engine`
+instance and component cache.
 
 ## Security
 
 Plugins run in an isolated sandbox. They have no direct access to the host
-filesystem, network, or environment variables. All host interaction goes
-through `jp:host` imports, and every call is checked against the plugin's
-sandbox configuration before executing. Plugins do not use WASI filesystem,
-sockets, or other WASI capabilities.
+filesystem, network, or environment variables. All host interaction goes through
+`jp:host` imports, and every call is checked against the plugin's sandbox
+configuration before executing. Plugins do not use WASI filesystem, sockets, or
+other WASI capabilities.
 
 ### Sandbox configuration
 
@@ -413,11 +410,11 @@ pub struct FilesystemSandbox {
 
 Defaults are deny-all:
 
-| Capability | Default |
-|------------|---------|
-| Commands | Denied |
+| Capability | Default                   |
+|------------|---------------------------|
+| Commands   | Denied                    |
 | Filesystem | Workspace root, read-only |
-| Network | Denied |
+| Network    | Denied                    |
 
 Examples:
 
@@ -458,26 +455,25 @@ filesystem.allow = ["~/Library/Group Containers/9K33E3U3T4.net.shinyfrog.bear"]
 ### Environment variable isolation
 
 Plugins cannot read the host's environment variables. There is no
-`jp:host/environment` import. Env vars flow to subprocesses (via
-`process.run` `envs`) and into HTTP headers (via `${VAR}` substitution)
-without the plugin code ever seeing the resolved values. This keeps secrets
-out of plugin memory.
+`jp:host/environment` import. Env vars flow to subprocesses (via `process.run`
+`envs`) and into HTTP headers (via `${VAR}` substitution) without the plugin
+code ever seeing the resolved values. This keeps secrets out of plugin memory.
 
 ### Secret scrubbing
 
 A plugin that runs a subprocess with forwarded env vars could observe secret
-values in the command output — e.g. `curl -v` prints request headers
-including `Authorization: Bearer <token>`. The same applies to HTTP
-responses if a server echoes back authentication headers.
+values in the command output — e.g. `curl -v` prints request headers including
+`Authorization: Bearer <token>`. The same applies to HTTP responses if a server
+echoes back authentication headers.
 
-The host scrubs all data crossing the boundary from host back to plugin.
-Before returning process output (`stdout`, `stderr`), HTTP response bodies,
-or file contents to the plugin, the host scans for the resolved values of
-all env vars that were forwarded (via `process.run` `envs`) or substituted
-(via `${VAR}` in HTTP headers) and replaces them with `[REDACTED]`.
+The host scrubs all data crossing the boundary from host back to plugin. Before
+returning process output (`stdout`, `stderr`), HTTP response bodies, or file
+contents to the plugin, the host scans for the resolved values of all env vars
+that were forwarded (via `process.run` `envs`) or substituted (via `${VAR}` in
+HTTP headers) and replaces them with `[REDACTED]`.
 
-This follows GitHub Actions' approach to secret masking in workflow logs.
-The same limitations apply:
+This follows GitHub Actions' approach to secret masking in workflow logs. The
+same limitations apply:
 
 - Short or common values (e.g. `true`, `8080`) may cause false positives in
   output.
@@ -485,17 +481,16 @@ The same limitations apply:
 - Partial substring matches may garble unrelated output.
 
 Scrubbing is defense-in-depth, not a guarantee. The primary defense is
-per-command env var scoping — only commands explicitly configured to receive
-a secret have it in their environment. Scrubbing catches accidental leakage
-and naive exfiltration attempts.
+per-command env var scoping — only commands explicitly configured to receive a
+secret have it in their environment. Scrubbing catches accidental leakage and
+naive exfiltration attempts.
 
 ### Inquiry-based permissions
 
-When a plugin requests a capability not covered by the sandbox config, the
-host prompts the user through JP's existing inquiry system rather than
-failing immediately. This applies to all sandbox-governed operations:
-command execution, env var forwarding, network access, and filesystem reads
-outside the workspace.
+When a plugin requests a capability not covered by the sandbox config, the host
+prompts the user through JP's existing inquiry system rather than failing
+immediately. This applies to all sandbox-governed operations: command execution,
+env var forwarding, network access, and filesystem reads outside the workspace.
 
 The prompt follows the same pattern as tool-call permission prompts:
 
@@ -503,63 +498,63 @@ The prompt follows the same pattern as tool-call permission prompts:
 - `Y` — allow this specific request for the remainder of the current turn.
 
 There is no "always allow" option at the prompt. JP never writes to
-user-authored config files. To pre-authorize a capability permanently, the
-user adds the appropriate entry to their sandbox config manually. The
-sandbox config is the persisted form of these permissions — if it covers a
-request, no prompt is shown.
+user-authored config files. To pre-authorize a capability permanently, the user
+adds the appropriate entry to their sandbox config manually. The sandbox config
+is the persisted form of these permissions — if it covers a request, no prompt
+is shown.
 
 This means a plugin can work without any sandbox config at all: the user
-installs the Wasm binary, adds the `wasm` path to their config, and JP
-prompts for each capability as the plugin requests it. The user can then
-optionally add sandbox config entries to suppress future prompts.
+installs the Wasm binary, adds the `wasm` path to their config, and JP prompts
+for each capability as the plugin requests it. The user can then optionally add
+sandbox config entries to suppress future prompts.
 
 ### OS-level subprocess sandboxing (future)
 
-The sandbox config controls which commands a plugin can launch and which
-env vars they receive, but the subprocess itself runs with the user's full
-OS permissions (network access, filesystem access beyond the allowed paths).
+The sandbox config controls which commands a plugin can launch and which env
+vars they receive, but the subprocess itself runs with the user's full OS
+permissions (network access, filesystem access beyond the allowed paths).
 OS-level sandboxing — macOS `sandbox-exec`, Linux seccomp/landlock — could
-restrict what subprocesses can do once launched. This is strictly additive:
-the sandbox config remains the primary control surface, OS-level enforcement
-adds a second layer.
+restrict what subprocesses can do once launched. This is strictly additive: the
+sandbox config remains the primary control surface, OS-level enforcement adds a
+second layer.
 
 ## Drawbacks
 
 - **Binary size.** `wasmtime` adds ~15-20 MB. This is significant for a CLI
-  tool. The cost is shared across all plugin types and is temporary — we
-  will switch to `wasmi` once it gains component model support.
-- **Custom host imports are a maintenance commitment.** The `jp:host`
-  interfaces are JP-specific. We own their evolution and backward
-  compatibility. Each new import is a trust boundary.
-- **Dynamic capability discovery loses compile-time type safety.** The host
-  uses `wasmtime`'s dynamic API to probe exports, trading `bindgen!`
-  compile-time checks for runtime assertions. The cost is boilerplate in
-  `jp_wasm`, not a per-plugin cost.
+  tool. The cost is shared across all plugin types and is temporary — we will
+  switch to `wasmi` once it gains component model support.
+- **Custom host imports are a maintenance commitment.** The `jp:host` interfaces
+  are JP-specific. We own their evolution and backward compatibility. Each new
+  import is a trust boundary.
+- **Dynamic capability discovery loses compile-time type safety.** The host uses
+  `wasmtime`'s dynamic API to probe exports, trading `bindgen!` compile-time
+  checks for runtime assertions. The cost is boilerplate in `jp_wasm`, not a
+  per-plugin cost.
 
 ## Alternatives
 
 ### No plugin system (status quo)
 
-All extensions are Rust crates compiled into the binary. Works for the core
-team but prevents third-party extensibility entirely.
+All extensions are Rust crates compiled into the binary. Works for the core team
+but prevents third-party extensibility entirely.
 
 ### Dynamic libraries (`.so`/`.dylib`)
 
 Native plugins are faster and simpler but lack sandboxing, are
-platform-specific, and have ABI stability concerns. Wasm provides a
-universal target, a standard interface (WIT), and memory safety by default.
+platform-specific, and have ABI stability concerns. Wasm provides a universal
+target, a standard interface (WIT), and memory safety by default.
 
 ### Use wasmi instead of wasmtime
 
-`wasmi` is an interpreter-based Wasm runtime at ~1 MB. It does not support
-the component model, so plugins would use a JSON-over-linear-memory ABI
-instead of WIT. We chose `wasmtime` because WIT provides a substantially
-better author experience: typed contracts, multi-language code generation
-via `wit-bindgen`, and compile-time error detection.
+`wasmi` is an interpreter-based Wasm runtime at ~1 MB. It does not support the
+component model, so plugins would use a JSON-over-linear-memory ABI instead of
+WIT. We chose `wasmtime` because WIT provides a substantially better author
+experience: typed contracts, multi-language code generation via `wit-bindgen`,
+and compile-time error detection.
 
-We will switch to `wasmi` when it gains component model support. The
-migration is transparent to plugin authors — the WIT interfaces stay the
-same, only the host runtime changes. Track progress:
+We will switch to `wasmi` when it gains component model support. The migration
+is transparent to plugin authors — the WIT interfaces stay the same, only the
+host runtime changes. Track progress:
 
 - [wasmi WIT discussion](https://github.com/wasmi-labs/wasmi/discussions/703)
 - [wasmi WIT issue](https://github.com/wasmi-labs/wasmi/issues/657)
@@ -567,10 +562,9 @@ same, only the host runtime changes. Track progress:
 ### Combinatorial worlds for capability discovery
 
 Define one WIT world per combination of capability interfaces
-(`attachment-plugin`, `tool-plugin`, `attachment-and-tool-plugin`, etc.).
-The host tries each at instantiation time. This avoids dynamic probing but
-the number of worlds grows as 2^N for N capability types — untenable past
-3-4 types.
+(`attachment-plugin`, `tool-plugin`, `attachment-and-tool-plugin`, etc.). The
+host tries each at instantiation time. This avoids dynamic probing but the
+number of worlds grows as 2^N for N capability types — untenable past 3-4 types.
 
 ### Stub implementations in a single world
 
@@ -584,47 +578,45 @@ whenever JP adds a new capability type. Bad for ecosystem stability.
   requires restarting `jp`.
 - **Cross-plugin communication.** Plugins cannot call each other.
 - **Direct environment variable access.** Plugins cannot read the host's
-  environment variables. This is a security invariant, not a limitation to
-  be removed later.
-- **WASI capabilities.** Plugins do not use WASI filesystem, sockets, or
-  other capabilities. All host interaction goes through `jp:host` imports.
+  environment variables. This is a security invariant, not a limitation to be
+  removed later.
+- **WASI capabilities.** Plugins do not use WASI filesystem, sockets, or other
+  capabilities. All host interaction goes through `jp:host` imports.
 
 ## Risks and Open Questions
 
 1. **Host import surface area.** The `jp:host` interfaces start minimal. As
-   plugins need more capabilities, the interface grows. Each addition is a
-   new trust boundary. We should version these interfaces and resist adding
+   plugins need more capabilities, the interface grows. Each addition is a new
+   trust boundary. We should version these interfaces and resist adding
    capabilities without clear demand.
 
-2. **Argument prefix matching edge cases.** The sudo-style prefix matching
-   works well for subcommand tools (`git log`, `docker run`) but programs
-   interpret arguments inconsistently: `--flag=value` vs `--flag value`,
-   `-abc` vs `-a -b -c`, `--` as separator. Should the host normalize
-   arguments before matching, or is literal prefix comparison sufficient
-   for a first version?
+2. **Argument prefix matching edge cases.** The sudo-style prefix matching works
+   well for subcommand tools (`git log`, `docker run`) but programs interpret
+   arguments inconsistently: `--flag=value` vs `--flag value`, `-abc` vs `-a -b
+   -c`, `--` as separator. Should the host normalize arguments before matching,
+   or is literal prefix comparison sufficient for a first version?
 
 3. **Plugin config in `jp_config`.** Plugin configuration types live in
    `jp_config` alongside all other config. As the plugin model grows (tool
-   interface, LLM interface), the plugin config module may grow
-   significantly. If it becomes unwieldy, a dedicated crate could be split
-   out, but `jp_config` is the right home for now.
+   interface, LLM interface), the plugin config module may grow significantly.
+   If it becomes unwieldy, a dedicated crate could be split out, but `jp_config`
+   is the right home for now.
 
 4. **Dynamic export naming.** The capability discovery mechanism relies on
-   `wasmtime`'s `get_export_index` returning exports with predictable
-   names (e.g. `jp:plugin/attachment`). The exact export name format for
-   interface exports in the component model needs validation during
-   prototyping.
+   `wasmtime`'s `get_export_index` returning exports with predictable names
+   (e.g. `jp:plugin/attachment`). The exact export name format for interface
+   exports in the component model needs validation during prototyping.
 
 ## Future Work
 
-- **HTTPS-based plugin loading.** Allow `wasm = "https://..."` in config.
-  On first use, JP downloads the binary, prompts the user to accept
-  (showing a hash), and caches it locally.
-- **Plugin discovery/registry.** A curated list or package manager for
-  community plugins.
-- **Migration to wasmi.** When `wasmi` gains component model support,
-  switch runtimes to reduce binary size by ~15 MB. The WIT interfaces stay
-  the same; only the host crate changes.
+- **HTTPS-based plugin loading.** Allow `wasm = "https://..."` in config. On
+  first use, JP downloads the binary, prompts the user to accept (showing a
+  hash), and caches it locally.
+- **Plugin discovery/registry.** A curated list or package manager for community
+  plugins.
+- **Migration to wasmi.** When `wasmi` gains component model support, switch
+  runtimes to reduce binary size by ~15 MB. The WIT interfaces stay the same;
+  only the host crate changes.
 - **OS-level subprocess sandboxing.** macOS `sandbox-exec`, Linux
   seccomp/landlock as an additive enforcement layer. See
   [Security](#os-level-subprocess-sandboxing-future).
@@ -638,14 +630,13 @@ whenever JP adds a new capability type. Bad for ecosystem stability.
 
 ### Phase 1: Plugin config and `jp_wasm` crate
 
-- Add plugin configuration types to `jp_config`: `SandboxConfig`,
-  `CommandRule`, `NetworkSandbox`, `FilesystemSandbox`, `[[plugins]]`
-  entry deserialization.
+- Add plugin configuration types to `jp_config`: `SandboxConfig`, `CommandRule`,
+  `NetworkSandbox`, `FilesystemSandbox`, `[[plugins]]` entry deserialization.
 - Create `crates/jp_wasm/` with `wasmtime` dependency.
 - Define WIT for `jp:host/process`, `jp:host/http`, `jp:host/filesystem`.
 - Implement host-side handlers for each import (delegates to
-  `std::process::Command`, `reqwest`, `std::fs` with sandbox enforcement
-  using config types from `jp_config`).
+  `std::process::Command`, `reqwest`, `std::fs` with sandbox enforcement using
+  config types from `jp_config`).
 - Implement secret scrubbing in `jp_wasm`.
 - Unit tests for sandbox enforcement and secret scrubbing.
 - **Dependency:** None. Can merge independently.
@@ -656,8 +647,8 @@ whenever JP adds a new capability type. Bad for ecosystem stability.
 - Implement plugin loader: read `plugins` config, compile Wasm components,
   instantiate, call `plugin.name()`, probe for capability exports.
 - Implement inquiry-based permission prompts for unconfigured capabilities.
-- Add top-level `plugins` config (array of strings or objects with `wasm`
-  and `sandbox` fields).
+- Add top-level `plugins` config (array of strings or objects with `wasm` and
+  `sandbox` fields).
 - Integration test: load a minimal test plugin, verify name and capability
   discovery.
 - **Dependency:** Phase 1.

@@ -1,16 +1,15 @@
 # RFD 029: Scriptable Structured Output
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
 
 ## Summary
 
-Make JP useful as a scriptable tool for structured LLM output. Today, getting
-clean JSON from JP requires too many flags and produces too much noise. This
-RFD captures the goals, analyzes prior art, and defines an incremental plan
-to make `jp query --schema 'summary' "summarize this" | jq .` work cleanly.
+Make JP useful as a scriptable tool for structured LLM output. This RFD captures
+the goals, analyzes prior art, and defines an incremental plan to make `jp query
+--schema 'summary' "summarize this" | jq .` work cleanly.
 
 ## Motivation
 
@@ -18,17 +17,13 @@ JP is built for interactive pair-programming sessions. When used in scripts or
 pipelines, the experience degrades:
 
 ```sh
-# Current: 8 flags to get structured JSON
-jp -! q --format=json --no-tools --no-stream --new \
-  --schema '{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]}' \
+# Current: still too many flags for clean scripted output
+jp -! query --format=json --no-tools --new --schema 'summary' \
   --no-reasoning --attachment docs/rfd/005.md --model haiku \
   "summarize this document in two sentences"
 ```
 
-This produces three lines of output — the chat request event, the chat response
-event, and the actual structured data — when only the last line is wanted.
-
-Three problems:
+Two problems:
 
 1. **Too much output.** JSON format mode emits all conversation events as
    NDJSON, not just the structured result. The `JsonEmitter` in
@@ -36,12 +31,8 @@ Three problems:
    separately prints the structured data via `print_json`.
 
 2. **Too many flags.** Most flags exist to turn off JP's interactive defaults
-   (streaming chrome, tool calls, reasoning display, conversation persistence).
-   These are the wrong defaults for scripting but the right defaults for
-   interactive use.
-
-3. **No concise schema syntax.** Writing full JSON Schema for a single string
-   field is painful. Other tools solve this with a DSL.
+   (tool calls, reasoning display, conversation persistence). These are the
+   wrong defaults for scripting but the right defaults for interactive use.
 
 ## Prior Art
 
@@ -50,7 +41,7 @@ Three problems:
 The closest precedent. Default behavior is script-friendly — `llm "prompt"`
 emits only the response text to stdout.
 
-- `llm --schema 'name, age int, bio' "invent a dog"` → just the JSON object
+- `llm --schema 'name, age int, bio' "invent a dog"` – just the JSON object
 - Concise schema DSL: `name, age int, bio: a short bio` expands to JSON Schema
 - `--schema-multi` wraps in `{"items": [...]}`  for arrays
 - `--no-log` disables persistence
@@ -97,7 +88,7 @@ script-friendly behavior. The concise schema DSL keeps it short.
 If the user also doesn't want to persist:
 
 ```sh
-jp -! q -s 'summary' "summarize this" -a doc.md -m haiku | jq .
+jp q -! -s 'summary' "summarize this" -a doc.md -m haiku | jq .
 ```
 
 ### Inference from `--schema`
@@ -108,56 +99,68 @@ defaults, not hard overrides — explicit flags always win.
 Precedence: explicit flag > `--schema` inference > config file > hardcoded
 default.
 
-| Inference | Condition | Rationale |
-|-----------|-----------|-----------|
-| Only emit structured JSON to stdout | `--format json` or stdout is not a TTY | NDJSON event stream is noise |
-| Suppress chrome on stdout | stdout is not a TTY | Piped output should be clean |
-| Hide reasoning display | Always (unless `-r` is passed) | Structured output; reasoning display adds nothing |
+| Inference                           | Condition                              | Rationale                              |
+|-------------------------------------|----------------------------------------|----------------------------------------|
+| Only emit structured JSON to stdout | `--format json` or stdout is not a TTY | NDJSON event stream is noise           |
+| Suppress chrome on stderr           | stdout is not a TTY                    | Progress and tool headers are noise in |
+|                                     |                                        | scripted contexts                      |
+| Hide reasoning display              | Always (unless `-r` is passed)         | Structured output; reasoning display   |
+|                                     |                                        | adds nothing                           |
+
+[RFD 019] routes chrome to stderr unconditionally, so stdout is always clean for
+piping. The "suppress chrome on stderr" inference goes further: when the user is
+scripting (stdout is not a TTY), chrome on stderr is also noise — progress
+indicators and tool call headers appearing on the terminal alongside a `$(jp q
+-s ...)` subshell add no value. This inference silences stderr chrome entirely
+in that case.
 
 What `--schema` should NOT imply:
 
-| Flag | Why not infer |
-|------|---------------|
-| `--no-persist` | User might want a record of the extraction |
-| `--new` | Schema queries within an ongoing conversation are valid |
-| `--no-tools` | Tool-assisted extraction is useful |
+| Flag           | Why not infer                            |
+|----------------|------------------------------------------|
+| `--no-persist` | User might want a record of the          |
+|                | extraction                               |
+| `--new`        | Schema queries within an ongoing         |
+|                | conversation are valid                   |
+| `--no-tools`   | Tool-assisted extraction is useful       |
 
 ### Concise Schema DSL
 
-Adopt a syntax inspired by `llm`:
+> [!TIP]
+> **Status: Implemented.**
+>
+> See [RFD 030] for the full syntax reference and `crates/jp_cli/src/schema.rs`
+> for the implementation.
 
+The `--schema` / `-s` flag accepts a concise DSL inspired by `llm`:
+
+```txt
+summary                              -> single required string field
+summary, key_points                  -> two required string fields
+age int, name                        -> integer + string
+summary: brief two-sentence summary  -> description as hint for the model
 ```
-summary                              → single required string field
-summary, key_points                  → two required string fields
-age int, name                        → integer + string
-summary: brief two-sentence summary  → description as hint for the model
-```
 
-Rules:
-
-- Comma-separated fields (or newline-separated)
-- Default type is `string`
-- `int`, `float`, `bool` type suffixes
-- Text after `:` is a description
-- All fields are `required` by default
-
-The DSL produces a `schemars::Schema`. It works alongside full JSON Schema
-input — the `--schema` flag accepts either format.
+The DSL supports flat objects, nested objects, arrays, unions, optional fields,
+and literal values. Full JSON Schema is accepted as a passthrough when the DSL
+is insufficient.
 
 ### Remove Dead Flags
 
-The `--stream` (`-s`) and `--no-stream` (`-S`) flags on `query` are parsed but
-never read (destructured as `_`). Removing them frees `-s` for `--schema`.
+> [!TIP]
+> **Status: Implemented.**
+>
+> The `--stream` / `-s` and `--no-stream` / `-S` flags have been removed. `-s`
+> is now the short form of `--schema`.
 
 ### Future: `--one-shot` / `-1`
 
-If the pattern `jp -! q -n -s 'schema' ...` becomes common enough, a
-`-1` / `--one-shot` flag could preset: `--no-persist`, `--new`, `--no-tools`,
-`--no-reasoning`, `--no-stream`, and `--format json` when `--schema` is
-present. Each can still be overridden.
+If the pattern `jp -! q -n -s 'schema' ...` becomes common enough, a `-1` /
+`--one-shot` flag could preset: `--no-persist`, `--new`, `--no-reasoning`, and
+`--format json` when `--schema` is present. Each can still be overridden.
 
 This is not planned for initial implementation. The inference from `--schema`
-combined with output channel separation (RFD 019) covers the 90% case.
+combined with output channel separation ([RFD 019]) covers the 90% case.
 
 ### Future: Schema in Named Templates
 
@@ -184,9 +187,6 @@ This would be a small addition to the RFD-013 schema (a `schema` field on
   still want verbose output may be surprised. This is the same trade-off `git`,
   `cargo`, and `ls` make.
 
-- **Schema DSL is a new syntax to learn.** Mitigated by its simplicity and by
-  accepting full JSON Schema as a fallback.
-
 ## Alternatives
 
 ### Dedicated `jp gen` subcommand
@@ -209,68 +209,53 @@ behave.
   generation. Multi-turn scripting (continuing conversations in scripts) is
   separate.
 - **Streaming structured output.** Structured responses are inherently
-  non-streamable (the JSON must be complete). The streaming infrastructure
-  still runs, but display is suppressed in script mode.
+  non-streamable (the JSON must be complete). The streaming infrastructure still
+  runs, but display is suppressed in script mode.
 
 ## Risks and Open Questions
 
-### Dependency on RFD 019
+### Dependency on RFD 048
 
-The output inference (suppress chrome when piping) is cleanly solved by
-[RFD 019]'s output channel separation (stdout for data, stderr for chrome).
-Without it, suppressing intermediate output requires threading ad-hoc flags
-through the turn coordinator. The concise schema DSL and dead flag removal
-are independent and can proceed now.
-
-### Schema DSL scope
-
-Starting with flat objects (no nesting, no arrays). A `--schema-multi` flag
-for the `{"items": [...]}` pattern (like `llm`) can be added later. Nesting
-support is deferred until real use cases justify the parser complexity.
+The output inference depends on [RFD 048]'s output channel separation (stdout
+for assistant data, stderr for chrome). Once chrome is on stderr, stdout is
+automatically clean for piping. The remaining inference — suppressing stderr
+chrome in scripted contexts and suppressing NDJSON event noise — builds on that
+foundation.
 
 ## Implementation Plan
 
-### Phase 1: Schema DSL and flag cleanup (independent)
+### Phase 1: Output channel separation (RFD 048)
 
-- Implement the concise schema DSL parser as a pure function in a suitable
-  crate. No side effects, easily testable.
-- Remove dead `--stream` / `-s` and `--no-stream` / `-S` flags from `query`.
-- Reassign `-s` as the short form of `--schema`.
-- Wire the DSL parser into the `--schema` flag's value parser so it accepts
-  both concise syntax and full JSON Schema.
+Implement [RFD 048]'s stdout/stderr split. Once chrome goes to stderr, piped
+structured output is automatically clean on stdout. This is the architectural
+foundation for the schema inference behavior.
 
-No dependency on other RFDs.
+Also adds the `PrintTarget::Tty` variant and `/dev/tty` integration for
+interactive prompts, and moves tracing logs from stderr to a log file.
 
-### Phase 2: Output channel separation (RFD 019)
-
-Implement [RFD 019]'s stdout/stderr split. Once chrome goes to stderr, piped
-structured output is automatically clean. This is the architectural foundation
-for the schema inference behavior.
-
-### Phase 3: Schema output inference
+### Phase 2: Schema output inference
 
 With output channels separated, add the inference logic:
 
-- When `--schema` is present and stdout is not a TTY (or `--format json`):
-  only emit the structured JSON object to stdout.
-- When `--schema` is present: default reasoning display to `Hidden` unless
-  the user explicitly passes `-r` / `--reasoning`.
-- Suppress `JsonEmitter` NDJSON when `--schema` is present in JSON format
-  mode.
+- When `--schema` is present and stdout is not a TTY (or `--format json`): only
+  emit the structured JSON object to stdout. Suppress `JsonEmitter` NDJSON event
+  stream.
+- When `--schema` is present and stdout is not a TTY: suppress chrome on stderr
+  (progress indicators, tool call headers). In scripted contexts these add no
+  value.
+- When `--schema` is present: default reasoning display to `Hidden` unless the
+  user explicitly passes `-r` / `--reasoning`.
 
-Depends on Phase 2.
-
-### Phase 4: Templates with schemas (RFD 013)
-
-Add a `schema` field to named templates. Depends on [RFD 013].
+Depends on Phase 1.
 
 ## References
 
-- [RFD 013: Named Query Templates](013-named-query-templates.md)
-- [RFD 019: Non-Interactive Mode](019-non-interactive-mode.md)
+- [RFD 013: Named Query Templates][RFD 013]
+- [RFD 048: Four-Channel Output Model][RFD 048]
 - [simonw/llm schemas documentation](https://llm.datasette.io/en/stable/schemas.html)
 - [charmbracelet/mods](https://github.com/charmbracelet/mods) (sunset)
 - [sigoden/aichat](https://github.com/sigoden/aichat)
 
 [RFD 013]: 013-named-query-templates.md
-[RFD 019]: 019-non-interactive-mode.md
+[RFD 030]: 030-schema-dsl.md
+[RFD 048]: 048-four-channel-output-model.md

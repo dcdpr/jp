@@ -187,13 +187,14 @@ infeasible.
 An abandoned RFD opens with a standard notice block:
 
 ```markdown
-::: danger Abandoned
-<one-line reason>
-
-<what was carried forward and where it lives now, if anything.>
-
-The original text below is preserved for historical context.
-:::
+> [!IMPORTANT]
+> This RFD is **Abandoned**.
+>
+> {one-line reason}
+>
+> {what was carried forward and where it lives now, if anything.}
+>
+> The original text below is preserved for historical context.
 ```
 
 If the RFD was split into other RFDs, name the active successors. If portions

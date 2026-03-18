@@ -1,6 +1,6 @@
 # RFD 021: Printer Live Redirection
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
@@ -19,7 +19,7 @@ goes. All renderers (`ChatResponseRenderer`, `ToolRenderer`,
 `StructuredRenderer`, `JsonEmitter`) share a single `Arc<Printer>`, so the
 output destination is locked in for the lifetime of the process.
 
-This blocks use cases that need to redirect output at runtime — detaching a
+This blocks use cases that need to redirect output at runtime - detaching a
 conversation from the terminal, redirecting to a file mid-stream, or capturing
 output from a specific phase during testing. Without live redirection, the only
 options are replacing the `Printer` instance (which means either rebuilding all
@@ -28,6 +28,11 @@ path outside the printer (which duplicates rendering logic).
 
 Live redirection is also useful for testing: swap to a memory buffer mid-test to
 capture output from a specific phase without capturing setup noise.
+
+> [!TIP]
+> [RFD 027] uses `Printer::swap_writers()` as a key building block in its
+> client-server output model, redirecting output between the server's in-memory
+> buffer and an attached client's terminal at runtime.
 
 ## Design
 
@@ -92,8 +97,8 @@ impl Printer {
 }
 ```
 
-The method blocks until the worker has performed the swap. After it returns,
-the caller knows the new writers are active.
+The method blocks until the worker has performed the swap. After it returns, the
+caller knows the new writers are active.
 
 ### Worker Type Change
 
@@ -159,8 +164,8 @@ printer.swap_writers(new_out, new_err);
 `flush_instant()` cancels typewriter delays, drains pending commands
 immediately, and blocks until complete. This minimizes the time between the
 caller's intent to swap and the swap taking effect. Any `Print` commands
-enqueued between the two calls race with the worker — in practice this window
-is negligible since both calls happen on the same thread in sequence.
+enqueued between the two calls race with the worker - in practice this window is
+negligible since both calls happen on the same thread in sequence.
 
 ### Existing API Unchanged
 
@@ -252,3 +257,5 @@ Can be merged independently.
   printer implementation.
 - `jp_printer::Printer::memory()` (`crates/jp_printer/src/printer.rs`) —
   existing memory-backed printer pattern using `SharedBuffer`.
+
+[RFD 027]: 027-client-server-query-architecture.md

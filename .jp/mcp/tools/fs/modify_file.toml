@@ -2,10 +2,7 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Modify one or more files in the project's local filesystem."
-description = """
-The files must exist and be a regular file.
-"""
+summary = "Modify multiple files in the project's local filesystem."
 
 examples = """
 Replace a string literal:

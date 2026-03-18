@@ -1,31 +1,31 @@
 {
   "001-jp-rfd-process.md": {
-    "hash": "79cadf180f30aea894bbb7c546f0226897ed482d053a98b138bf4832acb15d5a",
+    "hash": "fccea6c092e57406b5f67d10be2141bba4a5af97c961f468d2415638a6f8bc24",
     "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
   },
   "002-using-llms.md": {
-    "hash": "b159a47b9a1951a03b656b23746aa4055df1540a966ebe068d5fc478f0c05ea9",
+    "hash": "230aab82cbb2fa4fb31b61be370f1701024eeb834dd7a8dd063da37f714f8afa",
     "summary": "LLMs are tools; you own your output and bear responsibility for its quality regardless of how it was produced."
   },
   "004-streaming-md-parser-renderer.md": {
-    "hash": "cae18826a8f0da3c6cf90f9c9c9eb064fb7492f635bb3dd58cbfe2655a96cd74",
-    "summary": "JP streams markdown by segmenting blocks with custom Buffer, then renders them with ANSI-aware terminal renderer."
+    "hash": "fd6cb2fea67ee19335ce3b6eb360cd406a38f91253b3cf90b4657a96b3c832e8",
+    "summary": "JP streams markdown via custom Buffer for block segmentation and TerminalRenderer for ANSI-aware terminal output."
   },
   "005-first-class-inquiry-events.md": {
     "hash": "d139575e477cb1974f8c551f18093c56441f9702f5d3a85f618a0df22018a0bd",
     "summary": "Record inquiry events in conversation stream with centralized filtering to keep them hidden from LLM providers."
   },
   "006-turn-scoped-mutations.md": {
-    "hash": "6b3c3853081d8958fe1ff5dc5f4e03adad706aa05c30ad7f50972fa4f6f6fffd",
+    "hash": "6e1184cbbc99dd16198a148f0dda7ba1ba85ad3810db97d824be0166779fe2f8",
     "summary": "Restrict stream mutations to turn-scoped accessors, preventing invalid event sequences through compile-time guarantees."
   },
   "007-llamacpp-reasoning.md": {
     "hash": "c71cc82a5d9b014228dc0ec328e5d5ab387be6903a3e7bfe067c5c956b89edb3",
     "summary": "Llamacpp provider will drop the openai crate to properly extract reasoning content from all three llama.cpp reasoning formats."
   },
-  "008-knowledge-base.md": {
-    "hash": "d287c2288f41e60bb388a19175e4e1614dc6f0faee680e4ec1d2e54c7778d479",
-    "summary": "Proposes a file-based knowledge base system where assistants retrieve project-specific topics and subjects on-demand via a `learn` tool."
+  "008-ordered-tool-directives.md": {
+    "hash": "e42d1633b20b6f55cded79d628f11b56c3bc1eda48dcc2a71231e716f39e7eaf",
+    "summary": "Make CLI tool flags order-sensitive, processing `--tool` and `--no-tools` left-to-right instead of in fixed order."
   },
   "009-stateful-tool-protocol.md": {
     "hash": "252efb9eaaa9ce79ad1d598503f668cd7e86dc5ab3e6b2b7cd0dd18d9b9d39c1",

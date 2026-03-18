@@ -4,7 +4,7 @@
 - **Category**: Guide
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-27
-- **Superseded by**: [RFD 015](./015-simplified-attachment-handler-trait.md)
+- **Superseded by**: [RFD 015](015-simplified-attachment-handler-trait.md)
 
 ## Summary
 
