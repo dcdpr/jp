@@ -25,7 +25,7 @@ see day-to-day.
 Today, every conversation is visible in `jp conversation ls`. There is no way to
 distinguish a conversation the user created interactively from one that was
 created programmatically by a tool. A user who sets up sub-agent workflows (see
-[RFD D10]) or uses scripts that create temporary conversations quickly ends up
+[RFD 051]) or uses scripts that create temporary conversations quickly ends up
 with a noisy, unmanageable list.
 
 Separately, tools that invoke `jp` recursively (e.g. a `jp_query` tool that
@@ -168,7 +168,7 @@ conversation's position in the tree.
 
 - **Sub-agent workflow design.** How to configure tools that create
   sub-conversations, what configurations to use, and how to structure
-  research-plan-implement workflows are covered in [RFD D10].
+  research-plan-implement workflows are covered in [RFD 051].
 
 - **General-purpose tagging.** A tag system for arbitrary conversation
   classification may be valuable, but this RFD addresses only the binary
@@ -217,8 +217,8 @@ No dependency on other RFDs. Can be merged independently.
 
 - [RFD 039: Conversation Trees][RFD 039] — tree-structured conversation
   hierarchy; hidden conversations often appear as children in the tree.
-- [RFD D10: Sub-Agent Workflows][RFD D10] — guide describing how to use these
+- [RFD 051: Sub-Agent Workflows][RFD 051] — guide describing how to use these
   features to build sub-agent workflows with local tools.
 
 [RFD 039]: 039-conversation-trees.md
-[RFD D10]: D10-sub-agent-workflows.md
+[RFD 051]: 051-sub-agent-workflows.md

@@ -517,4 +517,4 @@ separate PR or RFD.
 - `crates/jp_cli/src/cmd/query/turn/coordinator.rs` — `TurnCoordinator`
 - `crates/jp_cli/src/cmd/query/tool/renderer.rs` — `ToolRenderer`
 
-[RFD 012]: 012-incremental-tool-call-argument-streaming.md
+[RFD 012]: 012-typed-llm-streaming-events.md

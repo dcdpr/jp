@@ -373,6 +373,6 @@ Depends on Phase A. Can be merged alongside Phase B.
 
 [RFD 020]: 020-parallel-conversations.md
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
-[RFD 038]: 038-config-inheritance-for-new-conversations.md
+[RFD 038]: 038-config-inheritance-for-conversations.md
 [RFD 039]: 039-conversation-trees.md
 [RFD 040]: 040-hidden-conversations-and-tool-context.md

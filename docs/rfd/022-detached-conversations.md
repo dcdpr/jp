@@ -394,7 +394,7 @@ the new query with a lock contention error. The error message should mention
 `--attach` as an option in addition to the standard suggestions from [RFD 020]
 (fork, new, kill):
 
-```Atxt
+```txt
 Error: Conversation jp-c17528832001 is locked by pid 12345 (detached).
 
 Suggestions:
