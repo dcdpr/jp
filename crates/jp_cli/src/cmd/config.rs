@@ -1,5 +1,6 @@
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
 use jp_config::fs::{ConfigFile, ConfigLoader, ConfigLoaderError, user_global_config_path};
+use jp_printer::Printer;
 
 use super::Output;
 use crate::ctx::Ctx;
@@ -15,9 +16,23 @@ pub(crate) struct Config {
 }
 
 impl Config {
+    /// Try to run the command without requiring a full context.
+    ///
+    /// Returns `Some` for subcommands that don't need workspace or validated
+    /// config (e.g. `show`), `None` for those that do.
+    pub(crate) fn try_run_standalone(&self, printer: &Printer) -> Option<Output> {
+        match &self.command {
+            Commands::Show(args) => {
+                args.run_standalone(printer);
+                Some(Ok(()))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         match self.command {
-            Commands::Show(args) => args.run(ctx),
+            Commands::Show(_) => unreachable!("handled in standalone dispatch"),
             Commands::Set(args) => args.run(ctx),
             Commands::Fmt(args) => args.run(ctx),
         }

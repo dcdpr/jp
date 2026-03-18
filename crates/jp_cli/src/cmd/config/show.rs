@@ -1,6 +1,7 @@
-use jp_config::PartialAppConfig;
+use std::collections::BTreeMap;
 
-use crate::{cmd::Output, ctx::Ctx};
+use jp_config::AppConfig;
+use jp_printer::Printer;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Show {
@@ -14,20 +15,49 @@ pub(crate) struct Show {
 }
 
 impl Show {
-    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
-        if self.defaults {
-            ctx.printer
-                .println(&toml::to_string_pretty(&PartialAppConfig::default())?);
-            return Ok(());
-        }
-
+    pub(crate) fn run_standalone(&self, printer: &Printer) {
         if self.themes {
-            ctx.printer.println(list_themes());
-            return Ok(());
+            printer.println(list_themes());
+            return;
         }
 
-        Ok(())
+        // Bare `config show` and `--defaults` both show defaults.
+        printer.println(config_skeleton());
     }
+}
+
+/// Build a commented TOML skeleton showing all available config keys.
+fn config_skeleton() -> String {
+    let fields = AppConfig::fields();
+
+    // Group fields by their TOML section path (everything before the last
+    // dot-separated component). Top-level fields have an empty section key.
+    let mut sections: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for field in &fields {
+        let (section, key) = match field.rsplit_once('.') {
+            Some((s, k)) => (s.to_owned(), k.to_owned()),
+            None => (String::new(), field.clone()),
+        };
+        sections.entry(section).or_default().push(key);
+    }
+
+    let mut out = String::new();
+
+    for (section, keys) in &sections {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+
+        if !section.is_empty() {
+            out.push_str(&format!("[{section}]\n"));
+        }
+
+        for key in keys {
+            out.push_str(&format!("# {key} =\n"));
+        }
+    }
+
+    out
 }
 
 /// Build a human-readable list of available syntax highlighting themes.
