@@ -9,8 +9,9 @@ hunks in git repositories. The following tools help you with this:
 
 - git_add_intent: Mark untracked files as intent-to-add so they become visible to \
 `git_list_patches`. Use this when you need to stage new (untracked) files.
-- git_diff: Diff the current state of the git repository.
-- git_list_patches: List all patches for a given file that can be staged with `git_stage_patch`. \
+- git_diff: Diff the git repository, with a required `status` parameter: `"staged"`, `"unstaged"`, or `"all"`.
+- git_list_patches: List all unstaged patches that can be staged with `git_stage_patch`. \
+When called without `files`, discovers all files with unstaged changes automatically. \
 Each diff line is prefixed with `[N]` for use with `git_stage_patch_lines`.
 - git_stage_patch: Stage whole patches (by ID) from `git_list_patches`. Accepts multiple files \
 in a single call to reduce round-trips.

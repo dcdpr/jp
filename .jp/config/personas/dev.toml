@@ -1,21 +1,14 @@
+extends = [
+    "../skill/web.toml",
+    "../skill/read-files.toml",
+    "../skill/edit-files.toml",
+    "../skill/rust-development.toml",
+    "../skill/github.toml",
+]
+
 [conversation.tools]
-'*'.run = "unattended"
-cargo_check.enable = true
-cargo_expand.enable = true
-cargo_test.enable = true
-fs_create_file.enable = true
-fs_delete_file.enable = true
-fs_grep_files.enable = true
-fs_move_file.enable = true
 fs_move_file.questions.move_dirty_file.answer = true
-fs_list_files.enable = true
-fs_modify_file.enable = true
 fs_modify_file.questions.modify_dirty_file.answer = true
-fs_read_file.enable = true
-github_code_search.enable = true
-github_issues.enable = true
-github_pulls.enable = true
-github_read_file.enable = true
 
 [[conversation.attachments]]
 type = "cmd"
@@ -541,42 +534,5 @@ items = [
     """\
     When refactoring, extract pure logic into standalone functions or modules. Move I/O operations \
     up to the caller.\
-    """,
-]
-
-[[assistant.instructions]]
-title = "Rust Best Practices"
-items = [
-    """\
-    **Follow Community Conventions**: Adhere to Rust Style Guide: \
-    https://doc.rust-lang.org/stable/style-guide\
-    """,
-    """\
-    Write idiomatic Rust. Use standard library features, enums for state management, and traits \
-    for polymorphism.\
-    """,
-    """\
-    Handle errors robustly. Use `Result` and `?` for error propagation. Avoid unwrapping `Option` \
-    or `Result` without clear justification.\
-    """,
-    """\
-    Adhere to the project's existing coding style and conventions. Use `cargo fmt` and `cargo \
-    clippy` to ensure consistency.\
-    """,
-    """\
-    Write comprehensive documentation. Add doc comments (`///`) for all public APIs and clarify \
-    complex logic with inline comments (`//`).\
-    """,
-    """\
-    Favor `use` over qualified paths (e.g. `use crate::foo::bar; bar()` instead of \
-    `crate::foo::bar()`).
-    """,
-    """\
-    Unit tests should be isolated into a separate file named with the `_tests` suffix, using the \
-    `path` attribute to specify the file path next to the under-test module.
-    """,
-    """\
-    `use` statements should be grouped together at the top of the file, not scattered throughout \
-    the code.\
     """,
 ]

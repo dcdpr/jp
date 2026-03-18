@@ -5,31 +5,44 @@ style.inline_results = "full"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "List the differences between the current state of the git repository and the last committed state."
+summary = "Show the diff of changes in the git repository, filtered by staging status."
 
 examples = """
+Diff all unstaged changes:
+```json
+{"status": "unstaged"}
+```
+
 Diff unstaged changes in specific files:
 ```json
-{"paths": ["crates/jp_config/src/conversation/tool.rs"]}
+{"status": "unstaged", "paths": ["crates/jp_config/src/conversation/tool.rs"]}
 ```
 
 Diff staged changes:
 ```json
-{"paths": ["src/"], "cached": true}
+{"status": "staged", "paths": ["src/"]}
+```
+
+Diff all changes (staged + unstaged combined):
+```json
+{"status": "all"}
 ```
 """
 
 [conversation.tools.git_diff.parameters.paths]
 type = "array"
 items.type = "string"
-required = true
-summary = "The paths to diff. Can be a single path or a list of paths."
+summary = "Optional list of paths to restrict the diff to. If omitted, diffs the entire repository."
 
-[conversation.tools.git_diff.parameters.cached]
-type = "boolean"
-summary = "If true, diff staged changes instead of unstaged."
+[conversation.tools.git_diff.parameters.status]
+type = "string"
+enum = ["all", "staged", "unstaged"]
+required = true
+summary = "Which changes to include in the diff."
 description = """
-If `true`, the diff will be computed against the cached (staged) state of the
-git repository. If `false` or unspecified, the diff will be computed against
-the last committed state.
+- `"staged"`: changes in the index that differ from HEAD (HEAD vs index).
+- `"unstaged"`: changes in the working tree that differ from the index (index vs working tree).
+- `"all"`: all changes from HEAD, regardless of staging (HEAD vs working tree).
+
+A staged change will NOT appear in the `"unstaged"` diff and vice versa.
 """

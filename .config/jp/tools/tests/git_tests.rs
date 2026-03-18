@@ -172,6 +172,27 @@ async fn add_intent_multiple_files() {
 // --- git_list_patches ---
 
 #[tokio::test]
+async fn list_patches_without_files_discovers_all_changes() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "a.rs", "old_a\n", "new_a\n");
+    commit_then_modify(&root, "b.rs", "old_b\n", "new_b\n");
+
+    // No `files` argument — should discover both changed files.
+    let content = run_ok(ctx(&root), tool("git_list_patches", &json!({}))).await;
+
+    assert!(content.contains("<path>a.rs</path>"));
+    assert!(content.contains("<path>b.rs</path>"));
+    assert!(content.contains("-old_a"));
+    assert!(content.contains("+new_a"));
+    assert!(content.contains("-old_b"));
+    assert!(content.contains("+new_b"));
+}
+
+#[tokio::test]
 async fn list_patches_shows_hunks_with_line_indices() {
     if !has_git() {
         return;
@@ -636,10 +657,35 @@ async fn diff_shows_unstaged_changes() {
     let (_dir, root) = init_repo();
     commit_then_modify(&root, "d.rs", "before\n", "after\n");
 
-    let content = run_ok(ctx(&root), tool("git_diff", &json!({"paths": ["d.rs"]}))).await;
+    let content = run_ok(
+        ctx(&root),
+        tool(
+            "git_diff",
+            &json!({"paths": ["d.rs"], "status": "unstaged"}),
+        ),
+    )
+    .await;
 
     assert!(content.contains("-before"));
     assert!(content.contains("+after"));
+}
+
+#[tokio::test]
+async fn diff_without_paths_diffs_entire_repo() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "x.rs", "old_x\n", "new_x\n");
+    commit_then_modify(&root, "y.rs", "old_y\n", "new_y\n");
+
+    let content = run_ok(ctx(&root), tool("git_diff", &json!({"status": "unstaged"}))).await;
+
+    assert!(content.contains("-old_x"));
+    assert!(content.contains("+new_x"));
+    assert!(content.contains("-old_y"));
+    assert!(content.contains("+new_y"));
 }
 
 #[tokio::test]
@@ -664,12 +710,47 @@ async fn diff_cached_shows_staged_changes() {
 
     let content = run_ok(
         ctx(&root),
-        tool("git_diff", &json!({"paths": ["dc.rs"], "cached": true})),
+        tool("git_diff", &json!({"paths": ["dc.rs"], "status": "staged"})),
     )
     .await;
 
     assert!(content.contains("-before"));
     assert!(content.contains("+after"));
+}
+
+#[tokio::test]
+async fn diff_unstaged_excludes_staged_changes() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "sep.rs", "before\n", "after\n");
+
+    // Stage the change.
+    run_ok(
+        ctx(&root),
+        tool_with_answers(
+            "git_stage_patch",
+            &json!({"patches": [{"path": "sep.rs", "ids": [0]}]}),
+            &json!({"stage_changes": true}),
+        ),
+    )
+    .await;
+
+    // Unstaged diff must be empty — the change is fully staged.
+    let unstaged = run_ok(
+        ctx(&root),
+        tool(
+            "git_diff",
+            &json!({"paths": ["sep.rs"], "status": "unstaged"}),
+        ),
+    )
+    .await;
+    assert!(
+        !unstaged.contains("-before") && !unstaged.contains("+after"),
+        "unstaged diff should not contain staged changes, got: {unstaged}"
+    );
 }
 
 // --- git_unstage ---

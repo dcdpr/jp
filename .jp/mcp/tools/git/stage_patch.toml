@@ -23,7 +23,8 @@ Stage patches across multiple files:
 ```
 """
 
-questions.stage_changes.target = "assistant"
+# questions.stage_changes.target = "assistant"
+questions.stage_changes.answer = true
 
 [conversation.tools.git_stage_patch.parameters.patches]
 type = "array"

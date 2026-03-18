@@ -1,6 +1,0 @@
-{
-  "transport": {
-    "type": "Stdio",
-    "command": "bookworm"
-  }
-}

@@ -9,18 +9,42 @@ use crate::{
     },
 };
 
+/// Which changes to include in the diff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiffStatus {
+    /// All changes from HEAD (staged + unstaged combined).
+    All,
+    /// Staged changes only (HEAD vs index).
+    Staged,
+    /// Unstaged changes only (index vs working tree).
+    Unstaged,
+}
+
+impl DiffStatus {
+    fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "all" => Ok(Self::All),
+            "staged" => Ok(Self::Staged),
+            "unstaged" => Ok(Self::Unstaged),
+            other => Err(format!(
+                "Invalid diff status '{other}', expected 'all', 'staged', or 'unstaged'"
+            )),
+        }
+    }
+}
+
 fn git_diff_impl<R: ProcessRunner>(
     root: &Utf8Path,
     paths: &[String],
-    cached: bool,
+    status: DiffStatus,
     runner: &R,
     env: &[(&str, &str)],
 ) -> ToolResult {
-    let mut args = vec!["diff-index"];
-    if cached {
-        args.push("--cached");
-    }
-    args.extend_from_slice(&["-p", "HEAD"]);
+    let mut args = match status {
+        DiffStatus::All => vec!["diff-index", "-p", "HEAD"],
+        DiffStatus::Staged => vec!["diff-index", "--cached", "-p", "HEAD"],
+        DiffStatus::Unstaged => vec!["diff-files", "-p"],
+    };
 
     let path_refs: Vec<&str> = paths.iter().map(String::as_str).collect();
     args.extend(path_refs);
@@ -32,13 +56,14 @@ fn git_diff_impl<R: ProcessRunner>(
 
 pub(crate) async fn git_diff(
     root: Utf8PathBuf,
-    paths: OneOrMany<String>,
-    cached: Option<bool>,
+    paths: Option<OneOrMany<String>>,
+    status: String,
     options: &Map<String, Value>,
 ) -> ToolResult {
-    let cached = cached.unwrap_or(false);
+    let status = DiffStatus::parse(&status)?;
+    let paths = paths.unwrap_or_default();
     let env = super::env_from_options(options);
-    git_diff_impl(&root, &paths, cached, &DuctProcessRunner, &env)
+    git_diff_impl(&root, &paths, status, &DuctProcessRunner, &env)
 }
 
 #[cfg(test)]

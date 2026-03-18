@@ -77,7 +77,7 @@ its own `paths`.
 [conversation.tools.fs_modify_file.parameters.patterns]
 required = true
 type = "array"
-summary = "One or more patterns to replace in the file. The patterns are applied in order."
+summary = "One or more patterns to replace in the given files. The patterns are applied in order."
 
 [conversation.tools.fs_modify_file.parameters.patterns.items]
 type = "object"

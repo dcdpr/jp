@@ -28,10 +28,11 @@ fn multiple_hunks() {
     "#};
 
     let runner = MockProcessRunner::success(mock_diff);
-    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner, &[])
-        .unwrap()
-        .into_content()
-        .unwrap();
+    let content =
+        git_list_patches_impl(root, Some(vec![filename.to_string()].into()), &runner, &[])
+            .unwrap()
+            .into_content()
+            .unwrap();
 
     assert_eq!(content, indoc::indoc! {r#"
         <patches>
@@ -80,10 +81,15 @@ fn single_hunk() {
     "};
 
     let runner = MockProcessRunner::success(mock_diff);
-    let content = git_list_patches_impl(root, vec!["simple.rs".to_string()].into(), &runner, &[])
-        .unwrap()
-        .into_content()
-        .unwrap();
+    let content = git_list_patches_impl(
+        root,
+        Some(vec!["simple.rs".to_string()].into()),
+        &runner,
+        &[],
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
 
     assert_eq!(content, indoc::indoc! {"
         <patches>
@@ -109,10 +115,11 @@ fn no_changes() {
     fs::write(root.join(filename), "fn main() {}\n").unwrap();
 
     let runner = MockProcessRunner::success("");
-    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner, &[])
-        .unwrap()
-        .into_content()
-        .unwrap();
+    let content =
+        git_list_patches_impl(root, Some(vec![filename.to_string()].into()), &runner, &[])
+            .unwrap()
+            .into_content()
+            .unwrap();
 
     assert_eq!(content, "<patches>\n</patches>");
 }
@@ -127,10 +134,11 @@ fn git_command_fails_produces_warning() {
 
     let runner = MockProcessRunner::error("fatal: not a git repository");
 
-    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner, &[])
-        .unwrap()
-        .into_content()
-        .unwrap();
+    let content =
+        git_list_patches_impl(root, Some(vec![filename.to_string()].into()), &runner, &[])
+            .unwrap()
+            .into_content()
+            .unwrap();
 
     assert!(content.contains("Failed to list patches"));
     assert!(content.contains("fatal: not a git repository"));
@@ -156,10 +164,11 @@ fn context_lines_aligned_with_diff_lines() {
     "};
 
     let runner = MockProcessRunner::success(mock_diff);
-    let content = git_list_patches_impl(root, vec![filename.to_string()].into(), &runner, &[])
-        .unwrap()
-        .into_content()
-        .unwrap();
+    let content =
+        git_list_patches_impl(root, Some(vec![filename.to_string()].into()), &runner, &[])
+            .unwrap()
+            .into_content()
+            .unwrap();
 
     // Context lines get `[N] ` (4 chars) + ` ` = 5 spaces of padding,
     // aligning the content with what follows `-`/`+` on diff lines.
@@ -225,7 +234,7 @@ fn missing_file_produces_warning_not_error() {
 
     let content = git_list_patches_impl(
         root,
-        vec!["missing.rs".to_string(), "exists.rs".to_string()].into(),
+        Some(vec!["missing.rs".to_string(), "exists.rs".to_string()].into()),
         &runner,
         &[],
     )

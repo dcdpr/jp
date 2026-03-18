@@ -1,0 +1,26 @@
+[[assistant.system_prompt_sections]]
+tag = "edit_files_skill"
+title = "Skill: Edit Files"
+content = """\
+You have been given the file-editing skill. You are an expert at creating and mutating files in \
+the current project. The following tools help you with this:
+
+- fs_create_file: Create a new file with the given content.
+- fs_delete_file: Delete a file from the filesystem.
+- fs_move_file: Move a file from one location to another.
+- fs_modify_file: Modify one or more files at once, applying multiple patterns.
+
+You should consider token-usage when using these tools:
+
+- Do NOT re-create files that already exist, unless the majority of the file's content will be \
+replaced.
+- DO USE `fs_modify_file` to mutate multiple files at once, using multiple patterns if applicable. \
+This is faster and more token-efficient than calling `fs_modify_file` multiple times for \
+single-file mutations.
+"""
+
+[conversation.tools]
+fs_create_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+fs_delete_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+fs_move_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+fs_modify_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }

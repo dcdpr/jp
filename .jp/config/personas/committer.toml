@@ -21,27 +21,9 @@ follows the rules as described in your system prompt.
 [conversation]
 title.generate.auto = false
 tools.'*' = { enable = false, run = "unattended" }
-
-[[conversation.attachments]]
-type = "cmd"
-path = "git"
-params.description = "Current branch name"
-params.arg = ["branch", "--show-current"]
-
-[[conversation.attachments]]
-type = "cmd"
-path = "git"
-params.description = "Diff of cached/changed hunks (excluding test fixtures and Cargo.lock)"
-params.arg = [
-    "diff-index",
-    "--cached",
-    "-p",
-    "HEAD",
-    "--",
-    ".",
-    ":^crates/jp_llm/tests/fixtures",
-    ":^Cargo.lock",
-    ":^.jp/conversations",
+attachments = [
+    "cmd:git branch --show-current?description=Current branch name",
+    "cmd:git diff-index --cached -p HEAD -- . :^crates/jp_llm/tests/fixtures :^Cargo.lock :^.jp/conversations?description=Diff of current cached/changed hunks (excluding test fixtures and Cargo.lock)",
 ]
 
 [style]
@@ -53,8 +35,8 @@ name = "Commit Writer"
 tool_choice = "git_commit"
 
 [assistant.model]
-id = "gemini-flash"
-parameters.reasoning.effort = "high"
+id = "sonnet"
+parameters.reasoning.effort = "auto"
 
 [[assistant.instructions]]
 title = "How to format your response"

@@ -5,7 +5,7 @@
 
 use std::{
     collections::BTreeMap,
-    fmt::{self, Write as _},
+    fmt::Write as _,
     fs::{self},
     ops::{Deref, DerefMut},
     time::Duration,
@@ -829,14 +829,12 @@ fn apply_changes<R: ProcessRunner>(
     .into())
 }
 
-struct Line(Option<usize>);
-
-impl fmt::Display for Line {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            None => write!(f, "    "),
-            Some(idx) => write!(f, "{:<4}", idx + 1),
-        }
+/// Formats a line number as a right-aligned string of the given width,
+/// or blank spaces if the index is `None`.
+fn fmt_line_num(index: Option<usize>, width: usize) -> String {
+    match index {
+        Some(idx) => format!("{:>width$}", idx + 1),
+        None => " ".repeat(width),
     }
 }
 
@@ -877,30 +875,48 @@ fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
                 (add, del)
             });
 
-    // -10,+5
-    let stats_len = additions.to_string().len() + deletions.to_string().len() + 3;
+    // Dynamic number column width based on the largest line number.
+    let max_line = diff.old_slices().len().max(diff.new_slices().len()).max(1);
+    let nw = max_line.to_string().len();
 
-    let mut stats = String::new();
-    if additions > 0 {
-        stats.push_str(&format!("+{additions}").green().to_string());
-    }
+    // Build stats: deletions first (left column = red), additions second (right = green).
+    let mut stats_plain = String::new();
+    let mut stats_colored = String::new();
     if deletions > 0 {
-        if !stats.is_empty() {
-            stats.push(',');
-        }
-        stats.push_str(&format!("-{deletions}").red().to_string());
+        stats_plain.push_str(&format!("-{deletions}"));
+        stats_colored.push_str(format!("-{deletions}").red().to_string().as_str());
     }
+    if additions > 0 {
+        if !stats_plain.is_empty() {
+            stats_plain.push(',');
+            stats_colored.push(',');
+        }
+        stats_plain.push_str(&format!("+{additions}"));
+        stats_colored.push_str(format!("+{additions}").green().to_string().as_str());
+    }
+    let stats_width = stats_plain.len();
 
-    // header
-    buf.push_str(&format!("{:>stats_len$} │ {}\n", stats, path.bold(),));
-    buf.push_str(&format!(
-        "{}─┼─{}\n",
-        "─".repeat(stats_len),
-        "─".repeat(path.len())
-    ));
+    // Unified column where │ sits. Enough room for two right-aligned number
+    // columns plus a separator space, or the stats text plus a leading space.
+    let line_nums_width = 2 * nw + 1;
+    let pipe_col = (line_nums_width + 1).max(stats_width + 1);
 
-    // hunks
+    // Header: stats line + separator.
+    let stats_pad = " ".repeat(pipe_col - stats_width - 1);
+    let header_line = format!("{stats_pad}{stats_colored} │ {}\n", path.bold());
+    let separator = format!("{}┼{}\n", "─".repeat(pipe_col), "─".repeat(path.len() + 2),);
+    buf.push_str(&header_line);
+    buf.push_str(&separator);
+
+    // Hunks, with an ellipsis separator between non-contiguous regions.
+    let num_pad = " ".repeat(pipe_col - line_nums_width);
+    let mut first_hunk = true;
     for hunk in unified.iter_hunks() {
+        if !first_hunk {
+            let _ = writeln!(&mut buf, "{}│ …", " ".repeat(pipe_col));
+        }
+        first_hunk = false;
+
         for op in hunk.ops() {
             for change in diff.iter_inline_changes(op) {
                 let (sign, s) = match change.tag() {
@@ -909,17 +925,15 @@ fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
                     ChangeTag::Equal => (" ", ContentStyle::new().dim()),
                 };
 
-                let old = Line(change.old_index());
-                let new = Line(change.new_index());
-
-                let left_len = old.to_string().len() + new.to_string().len() + 1;
-                let left = format!("{}{} ", s.apply(old), s.apply(new),);
+                let old = fmt_line_num(change.old_index(), nw);
+                let new = fmt_line_num(change.new_index(), nw);
 
                 let _ = write!(
                     &mut buf,
-                    "{}{}│{}",
-                    left,
-                    " ".repeat(stats_len.saturating_sub(left_len)),
+                    "{} {}{}│{}",
+                    s.apply(old),
+                    s.apply(new),
+                    num_pad,
                     s.apply(sign).bold(),
                 );
                 for (emphasized, value) in change.iter_strings_lossy() {
@@ -935,6 +949,10 @@ fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
             }
         }
     }
+
+    // Footer: separator + stats (mirrored header for long diffs).
+    buf.push_str(&separator);
+    buf.push_str(&header_line);
 
     buf
 }

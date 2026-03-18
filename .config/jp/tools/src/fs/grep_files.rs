@@ -24,7 +24,7 @@ pub(crate) async fn fs_grep_files(
     // Guard against a common mistake LLMs seem to make when using this tool.
     // Often the pattern ends with an escaped double quote, which will cause the
     // pattern to not match anything.
-    if let Some(pat) = pattern.strip_suffix(r#"\""#) {
+    if let Some(pat) = pattern.strip_suffix('"') {
         pattern = format!("{pattern}|{pat}");
     }
 

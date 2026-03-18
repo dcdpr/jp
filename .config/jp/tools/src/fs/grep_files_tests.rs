@@ -83,7 +83,7 @@ async fn test_grep_files() {
             expected: vec!["test/subdir/c.txt:1:foo\n"],
         }),
         ("escape-double-quote", TestCase {
-            pattern: r#"hi\""#,
+            pattern: "hi\"",
             paths: vec!["test/a.txt"],
             given: vec![("test/a.txt", "hello\nhi\ngoodbye")],
             expected: vec![
