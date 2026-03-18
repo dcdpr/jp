@@ -6,6 +6,18 @@ import abnfGrammar from './grammars/abnf.tmLanguage.json'
 export default defineConfig({
     markdown: {
         languages: [abnfGrammar],
+        config(md) {
+            // Escape {{ }} inside inline code spans so Vue's template compiler
+            // doesn't try to evaluate them. Fenced code blocks are already
+            // safe (VitePress adds v-pre to <pre> tags), but inline code
+            // (backticks) is not.
+            md.renderer.rules.code_inline = (tokens, idx) => {
+                const escaped = md.utils.escapeHtml(tokens[idx].content)
+                    .replace(/\{\{/g, '&#123;&#123;')
+                    .replace(/\}\}/g, '&#125;&#125;')
+                return `<code>${escaped}</code>`
+            }
+        },
     },
     lang: 'en-US',
     base: '/', // https://jp.computer
