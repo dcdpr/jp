@@ -72,7 +72,7 @@
     "summary": "Abandoned RFD split into RFD 048 and RFD 049; preserved for historical context on non-interactive mode design."
   },
   "020-parallel-conversations.md": {
-    "hash": "81206c64fcf58682afb91178c17bfc945489ea89ecc380428798a5fa1a197724",
+    "hash": "75ceb2a99600c700dc1fd304961cc5fdd5cdbe3391017b515a1496bab49caf9e",
     "summary": "Replace global active conversation with per-session tracking and add conversation locks for parallel terminal work."
   },
   "021-printer-live-redirection.md": {
@@ -206,5 +206,9 @@
   "052-workspace-data-store-sanitization.md": {
     "hash": "199bf135a50791b21bf4c5ef6028012334cef5f8be9acb9cea14c54f1f461621",
     "summary": "Workspace sanitization validates and repairs corrupted conversations, trashing broken data with recovery explanations."
+  },
+  "053-auto-refresh-conversation-titles.md": {
+    "hash": "42b4f764ddcb1a2f2177a2b9d61d56177b723ce40bba39038a0a19370f6c0dfd",
+    "summary": "Auto-refresh stale conversation titles periodically by re-running LLM generation when accumulated turns exceed a configured threshold."
   }
 }
