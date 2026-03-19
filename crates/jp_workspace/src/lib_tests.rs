@@ -2,6 +2,12 @@ use std::{collections::HashMap, fs, time::Duration};
 
 use camino_tempfile::tempdir;
 use datetime_literal::datetime;
+use jp_config::{
+    PartialConfig as _,
+    fs::load_partial,
+    model::id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig, ProviderId},
+    util::build,
+};
 use jp_conversation::ConversationsMetadata;
 use jp_storage::{
     CONVERSATIONS_DIR, METADATA_FILE,
@@ -234,7 +240,7 @@ fn test_workspace_cannot_remove_active_conversation() {
 }
 
 #[test]
-fn test_load_succeeds_when_no_conversations_exist() {
+fn test_load_index_fresh_workspace_then_ensure_stream() {
     let tmp = tempdir().unwrap();
     let root = tmp.path().join("root");
     let storage = root.join("storage");
@@ -247,14 +253,135 @@ fn test_load_succeeds_when_no_conversations_exist() {
     let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
     workspace.disable_persistence();
 
-    // A fresh workspace with no conversations on disk is valid — load
-    // should succeed with default state.
-    let config = Arc::new(AppConfig::new_test());
-    workspace.load_conversations_from_disk(config).unwrap();
-
-    // The active conversation must have an events entry.
+    // Phase 1: load index — no conversations on disk, so the active
+    // conversation entry is registered but has no stream yet.
+    workspace.load_conversation_index().unwrap();
     let active_id = workspace.active_conversation_id();
+    assert!(
+        workspace.get_events(&active_id).is_none(),
+        "fresh workspace should have no stream before ensure_active_conversation_stream"
+    );
+
+    // Phase 2: create the default stream with the final config.
+    let config = Arc::new(AppConfig::new_test());
+    workspace.ensure_active_conversation_stream(config).unwrap();
     assert!(workspace.get_events(&active_id).is_some());
+}
+
+#[test]
+fn test_load_index_existing_workspace_events_accessible() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage_path = root.join("storage");
+
+    let config = Arc::new(AppConfig::new_test());
+    let id = ConversationId::try_from(datetime!(2024-03-15 12:00:00 Z)).unwrap();
+
+    // Write a conversation to disk.
+    {
+        let mut ws = Workspace::new(&root).persisted_at(&storage_path).unwrap();
+        ws.create_conversation_with_id(id, Conversation::default(), config.clone());
+        ws.set_active_conversation_id(id, DateTime::<Utc>::UNIX_EPOCH)
+            .unwrap();
+        ws.persist().unwrap();
+    }
+
+    // Reload from scratch — only load_conversation_index, no config needed.
+    let mut ws = Workspace::new(&root).persisted_at(&storage_path).unwrap();
+    ws.disable_persistence();
+    ws.load_conversation_index().unwrap();
+
+    // Events should be accessible via lazy loading.
+    assert_eq!(ws.active_conversation_id(), id);
+    let events = ws.get_events(&id);
+    assert!(
+        events.is_some(),
+        "events must be lazily loadable after load_conversation_index"
+    );
+
+    // The stream's config should be retrievable (this is what
+    // apply_conversation_config relies on).
+    let stream_config = events.unwrap().config();
+    assert!(stream_config.is_ok());
+
+    // ensure_active_conversation_stream should be a no-op.
+    ws.ensure_active_conversation_stream(config).unwrap();
+    assert!(ws.get_events(&id).is_some());
+}
+
+/// Regression test for the bug where continuing a conversation without the
+/// original config passed in via `--cfg` caused a spurious `ConfigDelta` that
+/// reset the model and disabled all tools.
+///
+/// The root cause was that `load_partial_config` ran before conversation events
+/// were loaded from disk, so `apply_conversation_config` couldn't read the
+/// stream config and fell back to an empty partial.
+///
+/// This test exercises the full round-trip:
+/// 1. Create a conversation with a custom model name, persist to disk.
+/// 2. Reload with `load_conversation_index` only (no config needed).
+/// 3. Simulate `apply_conversation_config`: merge stream config into a bare
+///    partial (as if no custom config was passed).
+/// 4. Build the final config and assert the custom model name survived.
+/// 5. Assert that `get_config_delta_from_cli` would produce no delta.
+#[test]
+fn test_conversation_config_preserved_across_reload() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage_path = root.join("storage");
+
+    // Build a config with a distinctive model name.
+    let mut custom_config = AppConfig::new_test();
+    custom_config.assistant.model.id =
+        ModelIdOrAliasConfig::Id((ProviderId::Anthropic, "custom-model").try_into().unwrap());
+    let id = ConversationId::try_from(datetime!(2024-05-20 10:00:00 Z)).unwrap();
+
+    // Persist a conversation that was created with the custom config.
+    {
+        let mut ws = Workspace::new(&root).persisted_at(&storage_path).unwrap();
+        ws.create_conversation_with_id(id, Conversation::default(), Arc::new(custom_config));
+        ws.set_active_conversation_id(id, DateTime::<Utc>::UNIX_EPOCH)
+            .unwrap();
+        ws.persist().unwrap();
+    }
+
+    // Simulate a second invocation WITHOUT the custom config.
+    let mut ws = Workspace::new(&root).persisted_at(&storage_path).unwrap();
+    ws.disable_persistence();
+    ws.load_conversation_index().unwrap();
+
+    // Simulate `apply_conversation_config`: merge the stream's config into a
+    // bare (default) partial, exactly as the CLI does when no `--cfg` flag is
+    // provided. We use new_test().to_partial() to represent the default config
+    // (file-based + env, but no custom config overlay).
+    let bare_partial = AppConfig::new_test().to_partial();
+    let stream_config = ws
+        .get_events(&id)
+        .expect("events must be accessible")
+        .config()
+        .expect("valid config")
+        .to_partial();
+    let merged = load_partial(bare_partial, stream_config).expect("merge ok");
+    let final_config = build(merged).expect("valid config");
+
+    // The custom config's model name must survive the round-trip.
+    let resolved = final_config.assistant.model.id.resolved();
+    assert_eq!(
+        resolved.name.as_ref(),
+        "custom-model",
+        "conversation config must be preserved when continuing without --cfg flag"
+    );
+
+    // The delta must NOT contain a model change — this was the core symptom of
+    // the bug, where the model reverted to the default.
+    let stream_partial = ws.get_events(&id).unwrap().config().unwrap().to_partial();
+    let delta = stream_partial.delta(final_config.to_partial());
+    assert_eq!(
+        delta.assistant.model.id,
+        PartialModelIdOrAliasConfig::empty(),
+        "config delta must not contain a model change when continuing a conversation without \
+         overrides"
+    );
 }
 
 #[test]

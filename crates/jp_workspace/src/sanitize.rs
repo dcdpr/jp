@@ -50,10 +50,10 @@ impl Workspace {
     /// those that fail validation, and ensures the active conversation ID
     /// resolves to a valid conversation. Returns a report of what was repaired.
     ///
-    /// This should be called before [`load_conversations_from_disk`] to
+    /// This should be called before [`load_conversation_index`] to
     /// guarantee the filesystem is in a consistent state.
     ///
-    /// [`load_conversations_from_disk`]: Self::load_conversations_from_disk
+    /// [`load_conversation_index`]: Self::load_conversation_index
     pub fn sanitize(&mut self) -> Result<SanitizeReport> {
         let storage = self.storage.as_ref().ok_or(Error::MissingStorage)?;
 

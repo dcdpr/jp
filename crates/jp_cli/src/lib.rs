@@ -358,11 +358,20 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         }
     }
 
+    // Load conversation IDs and metadata from disk so that
+    // `apply_conversation_config` (called inside `load_partial_config`) can
+    // access conversation events via lazy loading.
+    if let Err(error) = workspace.load_conversation_index() {
+        tracing::error!(error = ?error, "Failed to load conversation index.");
+    }
+
     let partial = load_partial_config(&cli.command, Some(&workspace), &cli.globals.config)?;
     let config = Arc::new(build(partial)?);
 
-    if let Err(error) = workspace.load_conversations_from_disk(config.clone()) {
-        tracing::error!(error = ?error, "Failed to load workspace.");
+    // For fresh workspaces, create a default stream now that we have the
+    // final config.
+    if let Err(error) = workspace.ensure_active_conversation_stream(config.clone()) {
+        tracing::error!(error = ?error, "Failed to ensure active conversation stream.");
     }
 
     let runtime = build_runtime(cli.root.threads, "jp-worker")?;
