@@ -154,31 +154,36 @@ impl Workspace {
         self.storage.as_ref().and_then(Storage::user_storage_path)
     }
 
-    /// Load the workspace state from the persisted storage.
+    /// Load conversation IDs, metadata, and `TombMap` entries from disk.
     ///
-    /// If the workspace is not persisted, this method will return an error.
+    /// This populates the workspace state so that conversation events can be
+    /// accessed via [`get_events`](Self::get_events) (which triggers lazy
+    /// loading from storage). For the active conversation, the stream is
+    /// eagerly loaded for performance.
+    ///
+    /// For fresh workspaces (no conversations on disk), this registers the
+    /// active conversation ID in the events `TombMap` but does **not** create a
+    /// default stream — call [`ensure_active_conversation_stream`] after
+    /// the final [`AppConfig`] is available for that.
     ///
     /// Call [`sanitize`](Self::sanitize) before this method to ensure the
     /// filesystem is in a consistent state.
-    pub fn load_conversations_from_disk(&mut self, config: Arc<AppConfig>) -> Result<()> {
-        trace!("Loading state.");
+    ///
+    /// [`ensure_active_conversation_stream`]: Self::ensure_active_conversation_stream
+    pub fn load_conversation_index(&mut self) -> Result<()> {
+        trace!("Loading conversation index.");
 
-        let storage = self.storage.as_mut().ok_or(Error::MissingStorage)?;
+        let storage = self.storage.as_ref().ok_or(Error::MissingStorage)?;
         let conversation_ids = storage.load_all_conversation_ids();
 
         if conversation_ids.is_empty() {
             debug!("No conversations found, workspace is fresh.");
 
-            // Ensure the active conversation has an events entry so the
-            // invariant (active_conversation_id → events) always holds.
+            // Register the active conversation ID so that `get_events` can
+            // find the entry (lazy loading will return `None` since there is
+            // no file on disk, which is expected for fresh workspaces).
             let active_id = self.active_conversation_id();
-            let _err = self
-                .state
-                .local
-                .events
-                .entry(active_id)
-                .or_default()
-                .set(ConversationStream::new(config).with_created_at(active_id.timestamp()));
+            self.state.local.events.entry(active_id).or_default();
 
             return Ok(());
         }
@@ -206,8 +211,7 @@ impl Workspace {
             .map(|id| (id, OnceCell::new()))
             .collect();
 
-        // We can `set` without checking if the cell is already initialized, as
-        // we just initialized it above.let _err = events
+        // Eagerly load the active conversation stream for performance.
         let _err = events
             .entry(metadata.active_conversation_id)
             .or_default()
@@ -223,6 +227,35 @@ impl Workspace {
                 conversations_metadata: metadata,
             },
         };
+
+        Ok(())
+    }
+
+    /// Ensure the active conversation has an event stream.
+    ///
+    /// For fresh workspaces where no stream exists on disk, this creates a
+    /// default [`ConversationStream`] with the given config as its base.
+    ///
+    /// For existing workspaces where the stream was already loaded (eagerly
+    /// by [`load_conversation_index`] or lazily via [`get_events`]), this is
+    /// a no-op.
+    ///
+    /// [`load_conversation_index`]: Self::load_conversation_index
+    /// [`get_events`]: Self::get_events
+    pub fn ensure_active_conversation_stream(&mut self, config: Arc<AppConfig>) -> Result<()> {
+        let active_id = self.active_conversation_id();
+
+        if self.get_events(&active_id).is_some() {
+            return Ok(());
+        }
+
+        let _err = self
+            .state
+            .local
+            .events
+            .entry(active_id)
+            .or_default()
+            .set(ConversationStream::new(config).with_created_at(active_id.timestamp()));
 
         Ok(())
     }

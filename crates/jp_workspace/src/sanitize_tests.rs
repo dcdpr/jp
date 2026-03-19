@@ -79,7 +79,7 @@ fn test_reassigns_active_when_trashed() {
     assert!(report.active_reassigned);
     assert!(!report.default_created);
 
-    ws.load_conversations_from_disk(test_config()).unwrap();
+    ws.load_conversation_index().unwrap();
     assert_eq!(ws.active_conversation_id(), id2);
 }
 
@@ -100,7 +100,7 @@ fn test_reassigns_to_most_recent_valid() {
     let report = ws.sanitize().unwrap();
 
     assert!(report.active_reassigned);
-    ws.load_conversations_from_disk(test_config()).unwrap();
+    ws.load_conversation_index().unwrap();
     assert_eq!(ws.active_conversation_id(), id2);
 }
 
@@ -123,7 +123,7 @@ fn test_reassigns_when_active_has_no_directory() {
     assert!(report.active_reassigned);
     assert!(!report.default_created);
 
-    ws.load_conversations_from_disk(test_config()).unwrap();
+    ws.load_conversation_index().unwrap();
     assert_eq!(ws.active_conversation_id(), id2);
 }
 
@@ -143,7 +143,8 @@ fn test_default_created_when_all_trashed() {
     assert!(report.default_created);
     assert_eq!(report.trashed.len(), 1);
 
-    ws.load_conversations_from_disk(test_config()).unwrap();
+    ws.load_conversation_index().unwrap();
+    ws.ensure_active_conversation_stream(test_config()).unwrap();
 }
 
 #[test]
@@ -162,7 +163,7 @@ fn test_corrupt_global_metadata_reassigns_to_valid() {
     assert!(report.active_reassigned);
     assert!(!report.default_created);
 
-    ws.load_conversations_from_disk(test_config()).unwrap();
+    ws.load_conversation_index().unwrap();
     assert_eq!(ws.active_conversation_id(), id2);
 }
 
@@ -178,7 +179,8 @@ fn test_corrupt_global_metadata_with_no_conversations() {
     assert!(!report.has_repairs());
     assert!(!storage.conversations_metadata_exists());
 
-    ws.load_conversations_from_disk(test_config()).unwrap();
+    ws.load_conversation_index().unwrap();
+    ws.ensure_active_conversation_stream(test_config()).unwrap();
 }
 
 #[test]
@@ -235,7 +237,7 @@ fn test_sanitize_then_load_with_mixed_valid_and_invalid() {
     assert!(report.active_reassigned);
     assert!(!report.default_created);
 
-    ws.load_conversations_from_disk(test_config()).unwrap();
+    ws.load_conversation_index().unwrap();
     assert_eq!(ws.active_conversation_id(), id3);
     assert!(ws.get_conversation(&id1).is_some());
 }
