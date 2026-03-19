@@ -32,7 +32,7 @@ and well-tested code that aligns with the project's standards and goals.
 """
 
 [assistant.model]
-id = "anthropic/claude-opus-4-6"
+id = "opus"
 parameters.reasoning.effort = "auto"
 
 [[assistant.system_prompt_sections]]

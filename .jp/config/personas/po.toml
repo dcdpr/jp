@@ -11,8 +11,8 @@ actionable. Follow the tool call descriptions and parameter requirements precise
 """
 
 [assistant.model]
-id = "anthropic/claude-sonnet-4-5"
-parameters.reasoning.effort = "high"
+id = "sonnet"
+parameters.reasoning.effort = "auto"
 
 [[assistant.instructions]]
 title = "Research First"

@@ -33,7 +33,7 @@ principles, not implementation details.
 """
 
 [assistant.model]
-id = "anthropic/claude-opus-4-6"
+id = "opus"
 parameters.reasoning.effort = "auto"
 
 [[assistant.system_prompt_sections]]
