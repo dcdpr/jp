@@ -291,13 +291,13 @@ rfd-extend NNN MMM:
         echo "No RFD found with number ${new_num}." >&2; exit 1
     fi
 
-    # Validate that the extended RFD is in Accepted or later status.
+    # Validate that the extended RFD is in Discussion or later status.
     old_status=$(sed -n 's/^- \*\*Status\*\*: \(.*\)/\1/p' "$old_file" | head -1)
     case "$old_status" in
-        Accepted|Implemented) ;;
+        Discussion|Accepted|Implemented) ;;
         *)
             echo "Cannot extend RFD ${old_num} (status: '${old_status}')." >&2
-            echo "Only Accepted or Implemented RFDs can be extended." >&2
+            echo "Only Discussion, Accepted or Implemented RFDs can be extended." >&2
             exit 1 ;;
     esac
 
