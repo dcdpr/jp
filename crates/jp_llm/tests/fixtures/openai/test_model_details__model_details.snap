@@ -32,6 +32,8 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
 ]

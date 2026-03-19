@@ -415,6 +415,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                none: false,
                 xlow: true,
                 low: true,
                 medium: true,
@@ -487,6 +488,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                none: false,
                 xlow: false,
                 low: true,
                 medium: true,
@@ -619,6 +621,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                none: false,
                 xlow: false,
                 low: true,
                 medium: false,
@@ -653,6 +656,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                none: false,
                 xlow: true,
                 low: true,
                 medium: true,
@@ -687,6 +691,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                none: false,
                 xlow: false,
                 low: true,
                 medium: true,
@@ -721,6 +726,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                none: false,
                 xlow: false,
                 low: true,
                 medium: true,

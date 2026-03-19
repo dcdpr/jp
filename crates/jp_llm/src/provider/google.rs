@@ -203,6 +203,7 @@ fn create_request(
                 },
                 thinking_level: match details {
                     ReasoningDetails::Leveled {
+                        none: _,
                         xlow,
                         low,
                         medium,
@@ -370,7 +371,9 @@ fn map_model(model: types::Model) -> ModelDetails {
                 display_name,
                 context_window,
                 max_output_tokens,
-                reasoning: Some(ReasoningDetails::leveled(false, true, true, true, false)),
+                reasoning: Some(ReasoningDetails::leveled(
+                    false, false, true, true, true, false,
+                )),
                 knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
                 deprecated: Some(ModelDeprecation::Active),
                 structured_output: None,
@@ -382,7 +385,9 @@ fn map_model(model: types::Model) -> ModelDetails {
             display_name,
             context_window,
             max_output_tokens,
-            reasoning: Some(ReasoningDetails::leveled(false, true, false, true, false)),
+            reasoning: Some(ReasoningDetails::leveled(
+                false, false, true, false, true, false,
+            )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
@@ -393,7 +398,9 @@ fn map_model(model: types::Model) -> ModelDetails {
             display_name,
             context_window,
             max_output_tokens,
-            reasoning: Some(ReasoningDetails::leveled(true, true, true, true, false)),
+            reasoning: Some(ReasoningDetails::leveled(
+                false, true, true, true, true, false,
+            )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,

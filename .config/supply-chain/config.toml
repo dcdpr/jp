@@ -445,16 +445,8 @@ criteria = "safe-to-deploy"
 version = "1.1.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.openai_responses]]
-version = "0.1.6@git:87a31cd3ebac62f83efef2586c34a50141d33ffe"
-criteria = "safe-to-deploy"
-
 [[exemptions.os_pipe]]
 version = "1.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.parking]]
-version = "2.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.path-tree]]
