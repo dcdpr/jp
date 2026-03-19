@@ -28,8 +28,8 @@ technically accurate while remaining approachable. You follow Hemingway's writin
 """
 
 [assistant.model]
-id = { provider = "anthropic", name = "claude-sonnet-4-5" }
-parameters.reasoning.effort = "high"
+id = "sonnet"
+parameters.reasoning.effort = "auto"
 
 [[assistant.instructions]]
 title = "Writing Style"

@@ -43,12 +43,13 @@ gemini-pro = "google/gemini-3.1-pro-preview"
 gemini-flash = "google/gemini-3-flash-preview"
 gemini-lite = "google/gemini-2.5-flash-lite"
 
-[conversation.inquiry.assistant]
-model.id = "anthropic/claude-haiku-4-5"
+[conversation.inquiry.assistant.model]
+id = "haiku"
+parameters.reasoning.effort = "auto"
 
 [conversation.title.generate.model]
 id = "haiku"
-reasoning = "low"
+parameters.reasoning.effort = "low"
 
 [style.code]
 copy_link = "osc8"

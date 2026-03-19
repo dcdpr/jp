@@ -73,7 +73,7 @@ name = "Git Stager"
 tool_choice = "git_list_patches"
 
 [assistant.model]
-id = "anthropic/claude-sonnet-4-6"
+id = "sonnet"
 parameters.reasoning.effort = "auto"
 
 [[assistant.instructions]]
