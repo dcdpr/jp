@@ -302,8 +302,8 @@ pub struct ConversationLock {
 obtain a `ConversationLock` is through this method. The lock is acquired once at
 the start of `jp query` and lives in a long-lived scope (e.g., `Ctx`).
 
-Mutable access to a conversation's event stream requires a reference to the
-lock:
+Mutable access to a conversation's event stream or metadata requires a reference
+to the lock:
 
 ```rust
 impl Workspace {
@@ -312,26 +312,35 @@ impl Workspace {
         id: &ConversationId,
         _lock: &ConversationLock,
     ) -> Option<&mut ConversationStream> { /* ... */ }
+
+    pub fn get_conversation_mut(
+        &mut self,
+        id: &ConversationId,
+        _lock: &ConversationLock,
+    ) -> Option<Mut<'_, ConversationId, Conversation>> { /* ... */ }
 }
 ```
 
-All existing mutation methods stay on `ConversationStream`. The only change is
-that `get_events_mut` (and `try_get_events_mut`) take a `&ConversationLock`
-parameter. Call sites add one argument:
+All existing mutation methods stay on `ConversationStream` and `Conversation`.
+The change is that `get_events_mut`, `try_get_events_mut`,
+`get_conversation_mut`, and `try_get_conversation_mut` take a
+`&ConversationLock` parameter. Call sites add one argument:
 
 ```rust
 // before
 workspace.try_get_events_mut(&cid)?.add_config_delta(delta);
+workspace.try_get_conversation_mut(&cid)?.title = Some(title);
 
 // after
 workspace.try_get_events_mut(&cid, &lock)?.add_config_delta(delta);
+workspace.try_get_conversation_mut(&cid, &lock)?.title = Some(title);
 ```
 
 This enforces the lock-before-mutate invariant at the API boundary. You cannot
-call `get_events_mut` without proof that the process holds the lock.
-`ConversationLock` is held for the entire `jp query` run, so any `&mut
-ConversationStream` obtained through it is guaranteed to be protected by the
-lock for its entire lifetime.
+call `get_events_mut` or `get_conversation_mut` without proof that the process
+holds the lock. `ConversationLock` is held for the entire `jp query` run, so any
+mutable reference obtained through it is guaranteed to be protected by the lock
+for its entire lifetime.
 
 The lock file is deleted in the `Drop` implementation of `ConversationLock`.
 
