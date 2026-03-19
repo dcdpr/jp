@@ -210,5 +210,9 @@
   "053-auto-refresh-conversation-titles.md": {
     "hash": "42b4f764ddcb1a2f2177a2b9d61d56177b723ce40bba39038a0a19370f6c0dfd",
     "summary": "Auto-refresh stale conversation titles periodically by re-running LLM generation when accumulated turns exceed a configured threshold."
+  },
+  "054-split-conversation-config-and-events.md": {
+    "hash": "716d382ca9c81c76a5b3760f6727ba3ac44bdc049d4eb366d29366f83e1f535a",
+    "summary": "Split conversation events.json into separate base_config.json and events.json files for better readability and clarity."
   }
 }
