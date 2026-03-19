@@ -214,5 +214,17 @@
   "054-split-conversation-config-and-events.md": {
     "hash": "716d382ca9c81c76a5b3760f6727ba3ac44bdc049d4eb366d29366f83e1f535a",
     "summary": "Split conversation events.json into separate base_config.json and events.json files for better readability and clarity."
+  },
+  "055-tool-groups.md": {
+    "hash": "015a91d70cdf68a5c8b13756c237bd435d9e8d0b6bc5fb9d1e9b9ebf2e3d2a9d",
+    "summary": "Named tool groups enable CLI shortcuts and exhaustive validation ensuring every tool is classified relative to a group."
+  },
+  "056-group-configuration-defaults.md": {
+    "hash": "79a4a58c5b89474ac1267d4e156e48a01282d7ed7400a5ad857ef88af587cfad",
+    "summary": "Groups can declare default tool configuration, allowing tool inheritance without per-tool repetition."
+  },
+  "057-group-configuration-overrides.md": {
+    "hash": "002459492c526bf9cf295b94aecb3bfb79d544d15aaea44dfc7c5c8f4a5e8eb6",
+    "summary": "Adds group `overrides` section to enforce tool configuration that outlasts tool-level settings but yields to CLI flags."
   }
 }
