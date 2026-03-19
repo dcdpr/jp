@@ -1624,7 +1624,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -1655,7 +1657,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -1686,7 +1690,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -1717,7 +1723,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -1748,7 +1756,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -1905,7 +1915,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -1946,14 +1958,35 @@ expression: v
                 "gpt-5-pro",
             ),
         },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
+        display_name: Some(
+            "GPT-5 pro",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Leveled {
+                none: false,
+                xlow: false,
+                low: false,
+                medium: false,
+                high: true,
+                xhigh: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-08-30,
+        ),
+        deprecated: Some(
+            Active,
+        ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -2128,7 +2161,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -2159,7 +2194,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -2190,7 +2227,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -2221,7 +2260,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -2252,7 +2293,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -2299,7 +2342,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -2330,7 +2375,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -2350,6 +2397,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                none: false,
                 xlow: false,
                 low: false,
                 medium: true,
@@ -2364,7 +2412,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -2384,6 +2434,7 @@ expression: v
         ),
         reasoning: Some(
             Leveled {
+                none: false,
                 xlow: false,
                 low: false,
                 medium: true,
@@ -2398,7 +2449,9 @@ expression: v
             Active,
         ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {

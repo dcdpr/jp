@@ -123,6 +123,7 @@ impl ModelDetails {
 
             // Leveled
             Some(ReasoningDetails::Leveled {
+                none: _,
                 xlow: _,
                 low,
                 medium,
@@ -225,6 +226,9 @@ pub enum ReasoningDetails {
     /// reasoning configuration, but instead offer specific "efforts" of
     /// reasoning, such as low/medium/high effort.
     Leveled {
+        /// Whether the model supports completely disabling reasoning.
+        none: bool,
+
         /// Whether the model supports extremely low effort reasoning.
         xlow: bool,
 
@@ -265,8 +269,16 @@ impl ReasoningDetails {
 
     #[must_use]
     #[expect(clippy::fn_params_excessive_bools)]
-    pub fn leveled(xlow: bool, low: bool, medium: bool, high: bool, xhigh: bool) -> Self {
+    pub fn leveled(
+        none: bool,
+        xlow: bool,
+        low: bool,
+        medium: bool,
+        high: bool,
+        xhigh: bool,
+    ) -> Self {
         Self::Leveled {
+            none,
             xlow,
             low,
             medium,
@@ -312,13 +324,16 @@ impl ReasoningDetails {
     pub fn lowest_effort(&self) -> Option<ReasoningEffort> {
         match self {
             Self::Leveled {
+                none,
                 xlow,
                 low,
                 medium,
                 high,
                 xhigh,
             } => {
-                if *xlow {
+                if *none {
+                    Some(ReasoningEffort::None)
+                } else if *xlow {
                     Some(ReasoningEffort::Xlow)
                 } else if *low {
                     Some(ReasoningEffort::Low)
