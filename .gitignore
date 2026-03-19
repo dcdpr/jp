@@ -1,7 +1,7 @@
 /.jp/**/QUERY_MESSAGE.md
+/.jp/conversations/.trash
 # Conversations, until encrypted.
 # /.jp/conversations/*
-!/.jp/conversations/17462040864/
 
 # Rust specific
 **/target

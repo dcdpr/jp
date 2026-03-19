@@ -1294,7 +1294,6 @@
       },
       "style": {
         "code": {
-          "theme": "base16-mocha.dark",
           "color": true,
           "line_numbers": false,
           "file_link": "osc8",

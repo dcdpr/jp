@@ -86,6 +86,8 @@ commit *ARGS: _install-jp
     if starts_with "-- " "$@"; then
     elif starts_with "-" "$@" && ! contains "-- " "$@"; then
         args="$* -- $msg"
+    elif [ -n "$args" ]; then
+        args="$msg\n\n Here is additional context: $args"
     elif [ -z "$args" ]; then
         args="$msg"
     fi
@@ -107,7 +109,7 @@ stage *ARGS: _install-jp
     elif starts_with "-" "$@" && ! contains "-- " "$@"; then
         args="$* -- $msg"
     elif [ -n "$args" ]; then
-        args="$msg Here is additional context: $args"
+        args="$msg\n\n Here is additional context: $args"
     elif [ -z "$args" ]; then
         args="$msg"
     fi
@@ -136,13 +138,15 @@ profile-heap *ARGS:
 rfd-this *ARGS: _install-jp
     #!/usr/bin/env sh
     args="$@"
-    msg="I gave you the RFD skill, use it to codify all that we just discussed and concluded in a feature request RFD"
+    msg="I gave you the RFD skill, use it to codify all that we just discussed and concluded in a feature request RFD."
 
     starts_with() { case $2 in "$1"*) true;; *) false;; esac; }
     contains() { case $2 in *"$1"*) true;; *) false;; esac; }
     if starts_with "-- " "$@"; then
     elif starts_with "-" "$@" && ! contains "-- " "$@"; then
         args="$* -- $msg"
+    elif [ -n "$args" ]; then
+        args="$msg\n\n Here is additional context: $args"
     elif [ -z "$args" ]; then
         args="$msg"
     fi
