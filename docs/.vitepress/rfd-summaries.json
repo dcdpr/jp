@@ -234,5 +234,9 @@
   "059-shell-completions-and-man-pages.md": {
     "hash": "791b583757910d0f1687a180f4ec49fd2d7876ffd695ceffc546bcf4ae5b9c7c",
     "summary": "Add `jp completions` and `jp manpage` subcommands using clap_complete and clap_mangen for shell integration."
+  },
+  "060-config-explain.md": {
+    "hash": "cfa8458677aef01bb18793dab19605f67968b23ad00905a9d02dbd1bc7647bc0",
+    "summary": "Global `--explain` flag traces config resolution through 9 layers, showing where each field value originates."
   }
 }

@@ -106,9 +106,9 @@ for your shell:
 
 `clap_complete` v4.4+ provides `CompleteEnv`, a dynamic completion system where
 the shell calls back into the binary itself when the user presses Tab. Instead
-of generating a large static script with all options baked in, `jp completions
-<shell>` generates a small shell script that registers `jp` as its own
-completer.
+of generating a large static script with all options baked in, the command `jp
+completions <shell>` generates a small shell script that registers `jp` as its
+own completer.
 
 When the shell requests completions, it invokes `jp` with special environment
 variables. JP inspects the partial command line and returns candidates. This
@@ -348,8 +348,3 @@ changing the shell integration mechanism.
   `--cfg` completions
 - `SchemaType::Enum` in `schematic` — enum variant extraction for value
   completions
-- [RFD D11]: Config explain — provenance infrastructure
-- [RFD D12]: Interactive config — `--cfg` browser
-
-[RFD D11]: D11-config-explain.md
-[RFD D12]: D12-interactive-config.md
