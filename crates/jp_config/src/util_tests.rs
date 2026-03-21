@@ -96,6 +96,22 @@ fn test_load_envs() {
 }
 
 #[test]
+#[serial(env_vars)]
+fn test_load_envs_overrides_file_config() {
+    let _env = EnvVarGuard::set("JP_CFG_PROVIDERS_LLM_OPENROUTER_API_KEY_ENV", "FROM_ENV");
+
+    let mut file_config = PartialAppConfig::empty();
+    file_config.providers.llm.openrouter.api_key_env = Some("FROM_FILE".to_owned());
+
+    let merged = load_envs(file_config).unwrap();
+    assert_eq!(
+        merged.providers.llm.openrouter.api_key_env,
+        Some("FROM_ENV".to_owned()),
+        "environment variables should override file config"
+    );
+}
+
+#[test]
 fn test_build() {
     let error = build(PartialAppConfig::default_values(&()).unwrap().unwrap()).unwrap_err();
     assert_matches!(

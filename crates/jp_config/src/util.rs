@@ -53,12 +53,12 @@ pub fn load_partials_with_inheritance(
 ///
 /// Returns an error if merging the partials fails, which returns a
 /// [`schematic::MergeError`].
-pub fn load_envs(base: PartialAppConfig) -> Result<PartialAppConfig, BoxedError> {
+pub fn load_envs(mut base: PartialAppConfig) -> Result<PartialAppConfig, BoxedError> {
     trace!("Loading environment variable configuration.");
-    let mut partial = PartialAppConfig::from_envs()?;
-    partial.merge(&(), base)?;
+    let envs = PartialAppConfig::from_envs()?;
+    base.merge(&(), envs)?;
 
-    Ok(partial)
+    Ok(base)
 }
 
 /// Tries to find a configuration file in a load path.
