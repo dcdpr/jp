@@ -348,8 +348,3 @@ changing the shell integration mechanism.
   `--cfg` completions
 - `SchemaType::Enum` in `schematic` — enum variant extraction for value
   completions
-- [RFD D11]: Config explain — provenance infrastructure
-- [RFD D12]: Interactive config — `--cfg` browser
-
-[RFD D11]: D11-config-explain.md
-[RFD D12]: D12-interactive-config.md
