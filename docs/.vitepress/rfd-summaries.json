@@ -230,5 +230,9 @@
   "058-typed-content-blocks-for-tool-responses.md": {
     "hash": "2ae2a1d79c333f1ed44be5ad6e139e935f2b2f3bd22b1f2c3ad3cb419e6a70da",
     "summary": "Replace opaque tool output strings with typed content blocks (text, resource, question) mirroring MCP's CallToolResult model."
+  },
+  "059-shell-completions-and-man-pages.md": {
+    "hash": "791b583757910d0f1687a180f4ec49fd2d7876ffd695ceffc546bcf4ae5b9c7c",
+    "summary": "Add `jp completions` and `jp manpage` subcommands using clap_complete and clap_mangen for shell integration."
   }
 }
