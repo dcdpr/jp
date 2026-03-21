@@ -106,9 +106,9 @@ for your shell:
 
 `clap_complete` v4.4+ provides `CompleteEnv`, a dynamic completion system where
 the shell calls back into the binary itself when the user presses Tab. Instead
-of generating a large static script with all options baked in, `jp completions
-<shell>` generates a small shell script that registers `jp` as its own
-completer.
+of generating a large static script with all options baked in, the command `jp
+completions <shell>` generates a small shell script that registers `jp` as its
+own completer.
 
 When the shell requests completions, it invokes `jp` with special environment
 variables. JP inspects the partial command line and returns candidates. This
