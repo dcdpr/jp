@@ -232,11 +232,15 @@
     "summary": "Replace opaque tool output strings with typed content blocks (text, resource, question) mirroring MCP's CallToolResult model."
   },
   "059-shell-completions-and-man-pages.md": {
-    "hash": "791b583757910d0f1687a180f4ec49fd2d7876ffd695ceffc546bcf4ae5b9c7c",
+    "hash": "87620f0427690fa91fb954cf7cb95dd62392937a6410414f19a3a9fc0d07aca2",
     "summary": "Add `jp completions` and `jp manpage` subcommands using clap_complete and clap_mangen for shell integration."
   },
   "060-config-explain.md": {
     "hash": "cfa8458677aef01bb18793dab19605f67968b23ad00905a9d02dbd1bc7647bc0",
     "summary": "Global `--explain` flag traces config resolution through 9 layers, showing where each field value originates."
+  },
+  "061-interactive-config.md": {
+    "hash": "0b3bcc7ed9bbafde9e3599e05238320856c4e5711af34cc35dbade7d4d0ecbc8",
+    "summary": "Bare `--cfg` flag triggers interactive configuration browser for searching, inspecting, and editing config fields with type-appropriate prompts."
   }
 }
