@@ -576,12 +576,12 @@ depends on Phase 2 and is a single PR touching only `run_inner()`.
 
 ## References
 
-- [RFD D12]: Interactive config (first consumer of usage data)
+- [RFD 061]: Interactive config (first consumer of usage data)
 - `Ctx` in `jp_cli/src/ctx.rs` — the CLI context struct
 - `Workspace::user_storage_path()` — per-user, per-workspace storage
 - `user_data_dir()` in `jp_workspace` — global user data directory
 - `write_json` in `jp_storage/src/value.rs` — current (non-atomic) JSON writer
 - `tempfile::NamedTempFile::persist` — atomic rename on POSIX/Windows
 
-[RFD D12]: D12-interactive-config.md
 [RFD 060]: 060-config-explain.md
+[RFD 061]: 061-interactive-config.md
