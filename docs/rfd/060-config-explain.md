@@ -322,16 +322,27 @@ trait IntoPartialAppConfig {
 struct CliRecord {
     /// The config field path. Compile-time constant.
     field: &'static str,
-    /// The CLI flag that set it. Compile-time constant.
-    flag: &'static str,
-    /// The raw value as provided by the user.
-    raw_value: String,
+    /// The clap argument ID that set it (e.g. `model`, `no_reasoning`).
+    /// Compile-time constant.
+    arg_id: &'static str,
     /// Optional note (e.g., "resolved via alias").
     note: Option<String>,
 }
 
 struct CliRecorder(Vec<CliRecord>);
 ```
+
+`CliRecord` stores only the config field path, the clap argument ID, and an
+optional transformation note. It does **not** store the raw value or the display
+flag name (`--model`, `-m`). Both can be looked up at render time:
+
+- **Raw value**: from `ArgMatches::get_raw(arg_id)`, which is available in
+  `run_inner()` via Clap's `Cli::command().get_matches()`.
+- **Display flag name**: from the `Command` definition via
+  `Command::find_subcommand()` and `Arg::get_long()` / `Arg::get_short()`.
+
+This avoids cloning raw values in every `apply_*` helper and keeps the recorder
+lightweight — just two `&'static str` pointers and an occasional note.
 
 The helper functions that bridge CLI flags to config fields record their
 assignments:
@@ -346,12 +357,12 @@ fn apply_model(
     partial.assistant.model.id = id.into();
 
     if let Some(rec) = recorder {
-        rec.record("assistant.model.id", "--model", id, None);
+        rec.record("assistant.model.id", "model", None);
     }
 }
 ```
 
-The `&'static str` for `field` and `flag` means these are compile-time
+The `&'static str` for `field` and `arg_id` means these are compile-time
 constants, not runtime strings constructed elsewhere. The mapping lives next to
 the code that performs the mapping — the only place that can keep it accurate.
 
@@ -473,9 +484,9 @@ Did you mean one of:
 - **CLI recorder is opt-in per call site**: Each `apply_*` helper that bridges a
   CLI flag to a config field needs a `recorder.record(...)` call. Forgetting to
   add one when a new flag is introduced means the diff still shows the field
-  changed, but without the flag annotation. A test validates that recorded field
-  paths are valid, but cannot detect missing recordings — that requires code
-  review discipline.
+  changed, but without the flag annotation. A test validates that recorded
+  `arg_id` values match real clap argument IDs and that field paths are valid,
+  but cannot detect missing recordings — that requires code review discipline.
 
 - **Inheritable config complexity**: When `inherit = false` is set, the explain
   output needs to show which layers were skipped and why. This adds conditional

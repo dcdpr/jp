@@ -236,11 +236,15 @@
     "summary": "Add `jp completions` and `jp manpage` subcommands using clap_complete and clap_mangen for shell integration."
   },
   "060-config-explain.md": {
-    "hash": "cfa8458677aef01bb18793dab19605f67968b23ad00905a9d02dbd1bc7647bc0",
+    "hash": "9aab2d559dfa612cc7580293424e57a9cd7b0887b1b7766ac5e8dd2a39b123d3",
     "summary": "Global `--explain` flag traces config resolution through 9 layers, showing where each field value originates."
   },
   "061-interactive-config.md": {
     "hash": "0b3bcc7ed9bbafde9e3599e05238320856c4e5711af34cc35dbade7d4d0ecbc8",
     "summary": "Bare `--cfg` flag triggers interactive configuration browser for searching, inspecting, and editing config fields with type-appropriate prompts."
+  },
+  "062-cli-usage-tracking.md": {
+    "hash": "2a7d38872df128034bd34fa8df7030af0d7f0e97a06cf5d9d522631818805e04",
+    "summary": "Adds local-only CLI usage tracking to record command invocations and argument patterns per workspace for adaptive features."
   }
 }
