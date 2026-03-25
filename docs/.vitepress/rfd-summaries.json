@@ -228,7 +228,7 @@
     "summary": "Adds group `overrides` section to enforce tool configuration that outlasts tool-level settings but yields to CLI flags."
   },
   "058-typed-content-blocks-for-tool-responses.md": {
-    "hash": "2ae2a1d79c333f1ed44be5ad6e139e935f2b2f3bd22b1f2c3ad3cb419e6a70da",
+    "hash": "4ebf6d7d7a11edf16967497bc335f35c4880c1423458749265f8b79a75a566a8",
     "summary": "Replace opaque tool output strings with typed content blocks (text, resource, question) mirroring MCP's CallToolResult model."
   },
   "059-shell-completions-and-man-pages.md": {
@@ -250,5 +250,17 @@
   "063-usage-based-wizard-field-ordering.md": {
     "hash": "0ad593a54402a40cd633d40994157ad8b4958de5dd6d7246b0c6924138fa54b2",
     "summary": "Extend config wizard with frecency-based field ordering using CLI usage tracking data."
+  },
+  "065-typed-resource-model-for-attachments.md": {
+    "hash": "7240c6c6cbb722da0e2c39d8cae4b05f6aed7e4035c3cc4f25d7eb332cd38d71",
+    "summary": "Replace opaque attachments with typed resources carrying canonical URIs, MIME types, and metadata aligned with MCP."
+  },
+  "066-content-addressable-blob-store.md": {
+    "hash": "a048ebb16802936e30d5433279c8adc812e7ea47036e87e3c213c5809d873ccb",
+    "summary": "Content-addressable blob store externalizes resource payloads from events.json, enabling deduplication and faster parsing."
+  },
+  "067-resource-deduplication-for-token-efficiency.md": {
+    "hash": "bbb66ea4cf5da6e74c917cfe71c2241797da2ee16d3f5eb799a2b7a563227b71",
+    "summary": "Detects redundant resource deliveries to LLM via URI and checksum matching, replacing duplicates with brief references."
   }
 }
