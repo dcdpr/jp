@@ -1,9 +1,10 @@
 # RFD 036: Conversation Compaction
 
-- **Status**: Discussion
+- **Status**: Superseded
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
+- **Superseded by**: [RFD 064](064-non-destructive-conversation-compaction.md)
 
 ## Summary
 
