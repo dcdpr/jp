@@ -9,9 +9,9 @@
 
 This RFD replaces the workspace-wide "active conversation" with per-session
 conversation tracking, adds conversation locks to prevent concurrent mutations,
-and introduces `--id`, `--last`, and `--fork` flags on `jp query` for explicit
-conversation targeting. Together, these changes allow users to run multiple
-conversations in parallel across terminal sessions.
+and introduces `--id` and `--fork` flags on `jp query` for explicit conversation
+targeting. Together, these changes allow users to run multiple conversations in
+parallel across terminal sessions.
 
 ## Motivation
 
@@ -61,10 +61,11 @@ environment. JP identifies sessions using three layers, checked in order:
    per-tab or per-pane env vars set by popular terminal emulators and
    multiplexers.
 
-If none of these produce a session identity, JP operates without a session.
-Commands that need a conversation fall back to implicit `--last` behavior (see
-[`jp query` (no flags)](#jp-query-no-flags)) but cannot persist a session
-mapping. Each invocation re-resolves the conversation independently.
+If none of these produce a session identity, JP operates without a session. In
+interactive terminals, commands that need a conversation show an interactive
+picker (see [`jp query` (no flags)](#jp-query-no-flags)). In non-interactive
+environments, they fail with an error directing the user to `--id`, `--new`, or
+`$JP_SESSION`. Session mappings cannot be persisted without a session identity.
 
 #### `$JP_SESSION`
 
@@ -148,14 +149,34 @@ The mapping file contains:
 
 ```json
 {
-  "conversation_id": "jp-c17528832001",
-  "updated_at": "2025-07-19T14:30:00.000Z",
+  "history": [
+    {
+      "id": "jp-c17528832001",
+      "activated_at": "2025-07-19T14:30:00Z"
+    },
+    {
+      "id": "jp-c17528832002",
+      "activated_at": "2025-07-19T14:00:00Z"
+    },
+    {
+      "id": "jp-c17528832003",
+      "activated_at": "2025-07-19T13:00:00Z"
+    }
+  ],
   "source": {
     "type": "env",
     "key": "JP_SESSION"
   }
 }
 ```
+
+The `history` array tracks conversations activated in this session, ordered most
+recent first. Each entry records the conversation ID and activation timestamp.
+The list is deduplicated — reactivating a conversation moves it to the front
+rather than creating a duplicate entry. The active conversation is always
+`history[0]`. This history enables `--id=previous` (the session's previously
+active conversation) and improves the interactive picker by showing
+session-relevant conversations first.
 
 The `source` field records how the session identity was produced. This
 determines whether and how stale detection can be performed:
@@ -172,12 +193,13 @@ determines whether and how stale detection can be performed:
 When a stale mapping is detected (e.g., session leader process is no longer
 alive), the mapping file is deleted immediately. Mappings sourced from
 environment variables are opaque strings with no way to verify liveness, so
-they are only removed by the [Stale File Cleanup](#stale-file-cleanup) task
-when the conversation they point to no longer exists.
+they are only removed by the [Stale File Cleanup](#stale-file-cleanup) task when
+the conversation they point to no longer exists.
 
-When `jp query` successfully operates on a conversation, the mapping is updated.
-When `jp query --new` creates a new conversation, the mapping is set to the new
-conversation. The mapping is the session's "default conversation."
+When `jp query` successfully operates on a conversation, that conversation is
+pushed to the front of the session's history. When `jp query --new` creates a
+new conversation, it becomes `history[0]`. The session's active conversation is
+always `history[0]`.
 
 ### Conversation Locks
 
@@ -267,9 +289,11 @@ Error: Timed out waiting for lock on conversation jp-c17528832001
        (held by pid 12345, session 12057).
 
 Suggestions:
-    --id    target a specific conversation.
-    --new   start a new conversation.
-    --fork  branch from this one.
+    --id        open conversation picker.
+    --id=<id>   target a specific conversation.
+    --id=last   continue the most recently active conversation.
+    --new       start a new conversation.
+    --fork      branch from this one.
 ```
 
 Ctrl+C during the wait cancels immediately.
@@ -358,33 +382,51 @@ which is useful for running a non-persistent query without waiting for the lock.
 
 ### CLI Changes
 
-#### `jp query --id=<id>`
+#### `jp query --id[=<target>]`
 
-Operate on a specific conversation by ID. Waits if the conversation is locked
-(see [Lock acquisition behavior](#lock-acquisition-behavior)).
+The `--id` flag accepts a conversation ID, a reserved keyword, or no value:
+
+| Form                       | Behavior                                           |
+|----------------------------|----------------------------------------------------|
+| `--id=<conversation-id>`   | Operate on a specific conversation by ID           |
+| `--id=last-activated`      | Most recently activated conversation (any session) |
+| `--id=last-created`        | Most recently created conversation                 |
+| `--id=previous`            | Session's previously active conversation           |
+| `--id` (no value)          | Show an interactive conversation picker            |
+
+`last` is shorthand for `last-activated`. `previous` can be shortened to `prev`.
+
+All forms wait if the target conversation is locked (see [Lock acquisition
+behavior](#lock-acquisition-behavior)) and set the resolved conversation as the
+session's default.
 
 ```sh
-jp query --id=jp-c17528832001 "Follow-up question"
+jp query --id=jp-c17528832001 "Follow-up question"  # explicit ID
+jp query --id=last "Continue where I left off"       # most recent
+jp query --id=previous "Back to the other thing"     # session's previous
+jp query --id "Which conversation?"                  # interactive picker
 ```
 
-This is the explicit targeting mechanism. It does not depend on session identity
-and works in all environments.
+`last` uses the `last_activated_at` timestamp across all conversations.
+`last-created` uses the conversation's creation timestamp — useful when you ran
+`--new` in another tab and want to pick it up here. `previous` reads the
+session's activation history to find the conversation that was active before the
+current one, similar to `cd -` in a shell. Fails if the session has no previous
+conversation.
 
-#### `jp query --last`
+The keyword list is extensible — new keywords can be added without structural
+changes, since conversation IDs use the `jp-c<timestamp>` format which cannot
+collide with short alphabetic keywords.
 
-Operate on the most recently modified conversation in the workspace. Waits if
-the conversation is locked (see [Lock acquisition
-behavior](#lock-acquisition-behavior)). Sets the conversation as the session's
-default.
+The interactive picker (`--id` with no value) displays recent conversations with
+their title, last message preview, and timestamp. Conversations previously
+activated in the current session appear first, followed by remaining
+conversations sorted by last activation time. This follows the same pattern as
+the bare `--cfg` interactive browser described in [RFD 061].
 
-```sh
-jp query --last "Continue where I left off"
-```
-
-This uses the `last_activated_at` timestamp on conversations to find the most
-recent one. It is useful for explicitly switching the session to whatever
-conversation was most recently active, even if the session already has a mapping
-to a different conversation.
+In clap, `--id` uses `num_args = 0..=1` with `default_missing_value = "". The
+empty string triggers the interactive picker; recognized keywords trigger their
+respective resolution; any other value is treated as a conversation ID.
 
 #### `jp query --fork[=N]`
 
@@ -402,15 +444,16 @@ conversation. If omitted, the fork keeps the entire history.
 This is shorthand for `jp conversation fork --activate` followed by `jp query`.
 The fork reads the source conversation (no lock needed) and creates a new one.
 
-`--fork` can combine with `--last` or `--id` to fork a specific conversation:
+`--fork` can combine with `--id` to fork a specific conversation:
 
 ```sh
-jp query --fork --last "Branch from the most recent conversation"
+jp query --fork --id=last "Branch from the most recent conversation"
 jp query --fork --id=jp-c17528832001 "Branch from this one"
+jp query --fork --id -- "Pick a conversation to fork"
 ```
 
-Without `--last` or `--id`, `--fork` operates on the session's active
-conversation. Fails if the session has no active conversation.
+Without `--id`, `--fork` operates on the session's active conversation. Fails if
+the session has no active conversation.
 
 > [!TIP]
 > [RFD 039] introduces conversation trees, where `--fork=0` becomes the standard
@@ -428,28 +471,23 @@ jp query "Next question"
 Resolution order:
 
 1. **Session mapping exists**: Use the session's default conversation.
-2. **No session mapping**: Fall back to the most recently modified conversation
-   in the workspace (implicit `--last` behavior). The resolved conversation
+2. **No session mapping + interactive terminal**: Show the interactive
+   conversation picker (same as `--id` with no value). The selected conversation
    becomes the session's default.
-3. **No session identity**: Same as (2), but the mapping is not persisted. Each
-   invocation re-resolves via `--last`.
+3. **No session mapping + non-interactive**: Fail with an error directing the
+   user to `--id=<id>`, `--id=last`, `--new`, or `$JP_SESSION`.
 4. **No conversations exist**: Fail with guidance to use `--new`.
 
-The implicit `--last` fallback means opening a new terminal tab and running `jp
-query` continues the conversation you were most recently working on. Once the
-session has a mapping, subsequent `jp query` calls use that mapping regardless
-of activity in other sessions.
-
-Without a session identity (e.g., a CI pipeline without `$JP_SESSION`), step (3)
-preserves the current "just works" behavior: `jp query` operates on the most
-recently used conversation. The only downside is that every invocation
-re-resolves, so there is no sticky session.
+In the common single-session workflow, step 1 applies after the first query.
+Step 2 only triggers when a session has never operated on a conversation — for
+example, opening a new terminal tab or a split pane. The picker lets the user
+explicitly choose which conversation to continue, avoiding silent misrouting
+when multiple conversations are active.
 
 Fails if:
 - No conversations exist in the workspace
 - Conversation is locked by another session and the lock wait times out
-
-The error message directs the user to `--new`, `--last`, `--id`, or `--fork`.
+- Non-interactive and no session mapping exists
 
 #### `jp query --new`
 
@@ -480,13 +518,35 @@ The field is removed from the `ConversationsMetadata` struct. Serde ignores
 unknown fields during deserialization, so old workspace files that contain the
 field will continue to load. JP simply stops reading or writing it.
 
+### Terminal Title Updates
+
+When `jp query` finishes a turn, JP writes the conversation's ID + title (or ID
+if untitled) to the terminal title via the OSC 2 escape sequence:
+
+```
+\x1b]2;jp-c1234: Refactoring the config layer\x07
+```
+
+This makes the active conversation visible in the terminal's tab or title bar,
+which helps users identify which conversation is running in which terminal
+session. In split-pane workflows, the title is visible in each pane's header (in
+tmux) or the tab bar (in terminals that update per-pane).
+
+The title is updated at the end of each assistant turn, not continuously during
+streaming. If the conversation has no title yet (e.g., the first turn before
+title generation runs), JP uses a truncated form of the conversation ID.
+
+This is a progressive enhancement — terminals that don't support OSC 2 ignore
+the sequence. The `jp_term::osc` module already provides escape sequence
+utilities.
+
 ## Drawbacks
 
 **No sticky session without session identity.** Users without a controlling
-terminal and without `$JP_SESSION` get implicit `--last` behavior on every
-invocation. This works, but the session is not sticky — if another session
-modifies a different conversation between invocations, the next bare `jp query`
-may resolve to a different conversation than the previous one.
+terminal and without `$JP_SESSION` cannot persist a session mapping. In
+interactive terminals, they see the conversation picker on every bare `jp query`
+invocation. In non-interactive environments, they get an error and must use
+`--id=<id>`, `--id=last`, or `--new` explicitly.
 
 **Lock contention UX.** When a conversation is locked, JP waits up to 30 seconds
 for the lock to be released (with an interactive prompt in terminals). For brief
@@ -499,13 +559,11 @@ alternative. This is friction that didn't exist before.
 the existing local conversation storage. This is another place where state lives
 that users need to be aware of for debugging.
 
-**Implicit `--last` in fresh sessions.** When a session has no mapping, `jp
-query` implicitly resolves to the most recently modified conversation. This is
-convenient for the common single-tab workflow, but it means two fresh sessions
-opened simultaneously will target the same conversation. The lock wait behavior
-prevents data corruption in this case, but the user experience (second session
-waits, then times out) may be confusing. Once either session gets a mapping,
-isolation is established.
+**Interactive picker adds a step for fresh sessions.** Users who open a new
+terminal and run bare `jp query` see a conversation picker instead of
+automatically continuing their last conversation. This is one extra interaction
+compared to an implicit fallback, but it prevents silent misrouting when
+multiple conversations are active across sessions.
 
 ## Alternatives
 
@@ -547,6 +605,29 @@ Rejected because it defeats the purpose of parallel conversations. Users want
 independent queries running simultaneously on different conversations. Per-
 conversation locks allow this.
 
+### Implicit `--last` fallback for fresh sessions
+
+When no session mapping exists, silently resolve to the most recently modified
+conversation. This avoids the picker step and preserves "just works" behavior
+for users who only ever use one terminal.
+
+Rejected because it silently picks the wrong conversation when multiple sessions
+are active. For example: a user working in a split pane sees conversation A on
+the left, but an agentic session in another tab recently touched conversation B.
+The right pane's bare `jp query` silently continues conversation B. The user
+doesn't notice until the response is wrong. The interactive picker makes this
+choice explicit at the cost of one additional interaction.
+
+### Separate `--last` flag
+
+Add a dedicated `--last` flag instead of overloading `--id=last`.
+
+Rejected in favor of consolidating conversation targeting into a single `--id`
+flag with three modes (explicit ID, `last` keyword, interactive picker). This
+reduces the flag surface area and follows the same pattern as `--cfg` in [RFD
+061], where a bare flag triggers interactive mode and a valued flag provides
+explicit input.
+
 ## Non-Goals
 
 - **Background execution.** Running conversations as detached background
@@ -569,15 +650,14 @@ conversation locks allow this.
 
 ## Risks and Open Questions
 
-### Conversation discovery for `--last`
+### Conversation discovery for `--id=last`
 
-`--last` (and the implicit `--last` fallback for fresh sessions) finds the most
-recently modified conversation. Today, conversations are sorted by
-`last_activated_at`. With per-session tracking, this timestamp is updated
-whenever a session operates on a conversation. This means `--last` returns the
-conversation most recently used by *any* session, not the most recently
-*created* conversation. This seems correct — "last" means "last worked on" — but
-should be documented.
+`--id=last` finds the most recently modified conversation. Today, conversations
+are sorted by `last_activated_at`. With per-session tracking, this timestamp is
+updated whenever a session operates on a conversation. This means `--id=last`
+returns the conversation most recently used by *any* session, not the most
+recently *created* conversation. This seems correct — "last" means "last worked
+on" — but should be documented.
 
 ## Implementation Plan
 
@@ -600,29 +680,31 @@ on a conversation, write the mapping. When `jp query --new` creates a
 conversation, write the mapping.
 
 `jp query` without `--new` reads the mapping to find the session's default
-conversation. If no mapping exists, fall back to the most recently modified
-conversation (implicit `--last`) and write the mapping.
+conversation. If no mapping exists, the behavior depends on the CLI flags and
+interactivity (see [CLI Changes](#cli-changes)).
 
 Remove `active_conversation_id` from `ConversationsMetadata`.
 
 Add `flock`-based locking via `ConversationLock`. Introduce the type-level
 enforcement for conversation mutations.
 
-### Phase 3: CLI Flags
+### Phase 3: CLI Flags and Interactive Picker
 
-Add `--id`, `--last`, and `--fork` to `jp query`. Implement the resolution
-order:
+Add `--id` and `--fork` to `jp query`. The `--id` flag supports three modes:
 
 1. `--id=<id>` — explicit conversation
-2. `--last` — most recently modified conversation
-3. `--fork[=N]` — fork source conversation, operate on fork
-4. (none) — session's default conversation, falling back to most recently
-   modified if no mapping exists
+2. `--id=last` — most recently modified conversation
+3. `--id` (no value) — interactive conversation picker
+
+Bare `jp query` with no session mapping shows the interactive picker in
+interactive terminals, or fails with an error in non-interactive environments.
+
+`--fork[=N]` composes with `--id` for forking specific conversations.
 
 Update `jp conversation use` to write the session mapping instead of the
 workspace-wide field.
 
-### Phase 4: Stale File Cleanup
+### Phase 4: Stale File Cleanup {#stale-file-cleanup}
 
 Add a background task (using the existing `TaskHandler` system) that runs on
 every `jp` invocation and removes orphaned files:
@@ -631,6 +713,13 @@ every `jp` invocation and removes orphaned files:
   `flock`; if it succeeds, the file is orphaned).
 - **Session mappings**: Orphaned if they point to a conversation that no longer
   exists.
+
+### Phase 5: Terminal Title Updates
+
+After each assistant turn completes, write the conversation title (or short ID)
+to the terminal title via OSC 2. This is a progressive enhancement with no
+behavioral dependency on earlier phases, but it improves discoverability of
+conversation identity across terminal sessions.
 
 ## References
 
@@ -655,3 +744,4 @@ a common interface.
 
 [RFD 039]: 039-conversation-trees.md
 [RFD 052]: 052-workspace-data-store-sanitization.md
+[RFD 061]: 061-interactive-config.md
