@@ -140,7 +140,7 @@
     "summary": "Extend `--cfg` path resolution to search user-global, workspace, and user-workspace config roots, merging matches."
   },
   "036-conversation-compaction.md": {
-    "hash": "ca322559cb49be451467d95a153304a4df2cfe2639f2b53260c21eea45605ebd",
+    "hash": "1de7bd00b7b84104b8d2aa278bf11bdab94380a86ddbb7bf801821c59a028c48",
     "summary": "Composable conversation compaction via mechanical strategies, tool-aware deduplication, LLM summarization, and protocol extensions for declarative compaction hints."
   },
   "037-await-tool-for-stateful-handle-synchronization.md": {
@@ -250,6 +250,10 @@
   "063-usage-based-wizard-field-ordering.md": {
     "hash": "0ad593a54402a40cd633d40994157ad8b4958de5dd6d7246b0c6924138fa54b2",
     "summary": "Extend config wizard with frecency-based field ordering using CLI usage tracking data."
+  },
+  "064-non-destructive-conversation-compaction.md": {
+    "hash": "b6cecaddc01242c39a8fc87d5ba44a7bfd631476965af3f7060ad8d06aaa6a16",
+    "summary": "Non-destructive conversation compaction through overlay events that project reduced views without mutating stored data."
   },
   "065-typed-resource-model-for-attachments.md": {
     "hash": "7240c6c6cbb722da0e2c39d8cae4b05f6aed7e4035c3cc4f25d7eb332cd38d71",
