@@ -152,6 +152,7 @@ fn test_buffer_setext_header() {
 }
 
 #[test]
+#[expect(clippy::too_many_lines)]
 fn test_buffer_fenced_code_streaming() {
     let cases = vec![
         ("line by line", TestCase {
