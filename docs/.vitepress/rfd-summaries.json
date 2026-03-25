@@ -72,7 +72,7 @@
     "summary": "Abandoned RFD split into RFD 048 and RFD 049; preserved for historical context on non-interactive mode design."
   },
   "020-parallel-conversations.md": {
-    "hash": "75ceb2a99600c700dc1fd304961cc5fdd5cdbe3391017b515a1496bab49caf9e",
+    "hash": "79e362fcae7f551183cea775b9f24eef1bd343479852f298ff9ca1e4ba382dd5",
     "summary": "Replace global active conversation with per-session tracking and add conversation locks for parallel terminal work."
   },
   "021-printer-live-redirection.md": {
@@ -236,7 +236,7 @@
     "summary": "Add `jp completions` and `jp manpage` subcommands using clap_complete and clap_mangen for shell integration."
   },
   "060-config-explain.md": {
-    "hash": "d4f0dcbb9e0c7a0ab02adfd67cd5bf3676c4065e03967ce9bc47740a3a4be9ca",
+    "hash": "9aab2d559dfa612cc7580293424e57a9cd7b0887b1b7766ac5e8dd2a39b123d3",
     "summary": "Global `--explain` flag traces config resolution through 9 layers, showing where each field value originates."
   },
   "061-interactive-config.md": {
