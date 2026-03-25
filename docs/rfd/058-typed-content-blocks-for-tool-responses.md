@@ -88,6 +88,11 @@ metadata to work with.
 
 ## Design
 
+> [!TIP]
+> The `Resource` type and the MCP-compatible superset design principle that
+> governs its shape are defined in [RFD 065]. The `ContentBlock::Resource`
+> variant wraps that type directly.
+
 ### Response format
 
 A tool's stdout is a JSON object with a `content` array of typed content blocks:
@@ -172,6 +177,12 @@ a `resource` block.
 Resource blocks support MCP's standard annotations (`audience`, `priority`,
 `lastModified`). These are optional. JP defines the annotation types for
 type-level compatibility with MCP but does not act on them initially.
+
+Local tools may also provide optional JP extension fields (`name`, `title`,
+`description`) for richer display metadata. These fields are `Option<T>` on
+the internal `Resource` type and default to `None` when absent from the JSON
+output (e.g., from MCP tools). See [RFD 065] for the full type definition and
+the MCP-compatible superset principle.
 
 ##### Tool-provided formatting
 
@@ -457,21 +468,10 @@ pub enum ContentBlock {
     Text {
         text: String,
     },
-    Resource {
-        uri: String,
-        mime_type: Option<String>,
-        content: ResourceContent,
-        formatted: Option<String>,
-        annotations: Option<Annotations>,
-    },
+    Resource(Resource),
     Question {
         question: InputRequest,
     },
-}
-
-pub enum ResourceContent {
-    Text(String),
-    Blob(Vec<u8>),
 }
 
 /// A request for input from the user or assistant.
@@ -489,8 +489,13 @@ pub struct InputRequest {
 }
 ```
 
-`ContentBlock` lives in `jp_tool` because it is the contract type shared between
-tool authors and JP.
+`ContentBlock` lives in `jp_tool` because it is the contract type shared
+between tool authors and JP. The `Resource` type (defined in [RFD 065]) carries
+both MCP-standard fields (`uri`, `content`, `mime_type`, `annotations`) and
+optional JP extensions (`name`, `title`, `description`, `formatted`). MCP tool
+responses populate only the MCP fields; local tools may populate the extensions.
+`ResourceContent` is defined alongside `Resource` — see [RFD 065] for the
+full type definition.
 
 All three execution paths (`execute_local`, `execute_mcp`, `execute_builtin`)
 produce `Vec<ContentBlock>`. The formatting step that converts content blocks
@@ -759,6 +764,10 @@ Depends on Phase 5.
   responses.
 - [RFD 036: Conversation Compaction][RFD 036] — relevant for how resource
   metadata interacts with compacted conversations.
+- [RFD 065: Typed Resource Model for Attachments][RFD 065] — defines the
+  `Resource` type that `ContentBlock::Resource` wraps, and the MCP-compatible
+  superset design principle governing resource type shapes.
 
 [RFD 009]: 009-stateful-tool-protocol.md
 [RFD 036]: 036-conversation-compaction.md
+[RFD 065]: 065-typed-resource-model-for-attachments.md
