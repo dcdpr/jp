@@ -19,7 +19,7 @@ pub async fn run(ctx: Context, t: Tool) -> util::ToolResult {
         s if s.starts_with("cargo_") => cargo::run(ctx, t).await,
         s if s.starts_with("github_") => github::run(ctx, t).await,
         s if s.starts_with("fs_") => fs::run(ctx, t).await,
-        s if s.starts_with("web_") => web::run(ctx, t).await.map(Into::into),
+        s if s.starts_with("web_") => web::run(ctx, t).await,
         s if s.starts_with("git_") => git::run(ctx, t).await,
         _ => util::unknown_tool(t),
     }
