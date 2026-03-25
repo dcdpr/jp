@@ -5,6 +5,7 @@ use std::{
 };
 
 use crossterm::style::Stylize;
+use jp_md::format::Formatter;
 use jp_tool::{AnswerType, Outcome, Question};
 use serde_json::{Map, Value};
 
@@ -36,10 +37,11 @@ pub(crate) async fn fs_create_file(
 
         let mut response = format!("Create file '{}'", path.as_str().bold().blue());
         if let Some(content) = content {
-            response.push_str(&format!(
-                " with content:\n\n`````{lang}\n{content}\n`````\n\n"
-            ));
-            response.push_str(&format!("File created at '{}'", path.bold().blue()));
+            let code_block = format!("`````{lang}\n{content}\n`````");
+            let highlighted = Formatter::new()
+                .format_terminal(&code_block)
+                .unwrap_or(code_block);
+            response.push_str(&format!(" with content:\n\n{highlighted}\n"));
         }
 
         return Ok(response.into());
@@ -105,3 +107,7 @@ pub(crate) async fn fs_create_file(
     )
     .into())
 }
+
+#[cfg(test)]
+#[path = "create_file_tests.rs"]
+mod tests;

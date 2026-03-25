@@ -225,6 +225,38 @@ fn test_buffer_fenced_code_streaming() {
             ])],
             flushed: None,
         }),
+        ("five consecutive blank lines preserved", TestCase {
+            in_out: vec![("```\n\n\n\n\n\n```\n", vec![
+                Event::FencedCodeStart {
+                    language: String::new(),
+                    fence_type: FenceType::Backtick,
+                    fence_length: 3,
+                },
+                Event::FencedCodeLine("\n".into()),
+                Event::FencedCodeLine("\n".into()),
+                Event::FencedCodeLine("\n".into()),
+                Event::FencedCodeLine("\n".into()),
+                Event::FencedCodeLine("\n".into()),
+                Event::FencedCodeEnd("```".into()),
+            ])],
+            flushed: None,
+        }),
+        ("blank lines between code lines preserved", TestCase {
+            in_out: vec![("```\nfoo\n\n\n\nbar\n```\n", vec![
+                Event::FencedCodeStart {
+                    language: String::new(),
+                    fence_type: FenceType::Backtick,
+                    fence_length: 3,
+                },
+                Event::FencedCodeLine("foo\n".into()),
+                Event::FencedCodeLine("\n".into()),
+                Event::FencedCodeLine("\n".into()),
+                Event::FencedCodeLine("\n".into()),
+                Event::FencedCodeLine("bar\n".into()),
+                Event::FencedCodeEnd("```".into()),
+            ])],
+            flushed: None,
+        }),
     ];
 
     for (name, case) in cases {
