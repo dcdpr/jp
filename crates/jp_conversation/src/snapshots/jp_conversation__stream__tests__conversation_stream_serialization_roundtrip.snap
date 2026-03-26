@@ -50,7 +50,8 @@ expression: "&stream"
               "parameters": "json"
             }
           }
-        }
+        },
+        "start_local": false
       },
       "style": {
         "code": {

@@ -1,5 +1,5 @@
 ---
-source: crates/jp_config/src/lib.rs
+source: crates/jp_config/src/lib_tests.rs
 expression: "AppConfig::fields()"
 ---
 [
@@ -53,6 +53,7 @@ expression: "AppConfig::fields()"
     "editor.cmd",
     "editor.envs",
     "conversation.attachments",
+    "conversation.start_local",
     "conversation.tools.tools",
     "conversation.tools.*.enable",
     "conversation.tools.*.result",

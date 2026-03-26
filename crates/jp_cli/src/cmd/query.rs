@@ -69,7 +69,7 @@ use jp_config::{
     AppConfig, PartialAppConfig, PartialConfig as _,
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::{AssistantConfig, instructions::InstructionsConfig, tool_choice::ToolChoice},
-    conversation::tool::Enable,
+    conversation::{ConversationConfig, tool::Enable},
     fs::{expand_tilde, load_partial},
     model::parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig},
     style::reasoning::ReasoningDisplayConfig,
@@ -146,33 +146,26 @@ pub(crate) struct Query {
     replay: bool,
 
     /// Start a new conversation without any message history.
-    #[arg(
-        short = 'n',
-        long = "new",
-        group = "new",
-        conflicts_with = "new_local_conversation"
-    )]
+    #[arg(short = 'n', long = "new", group = "new")]
     new_conversation: bool,
-
-    /// Start a new local conversation without any message history.
-    ///
-    /// This is the same as `--new --local`.
-    #[arg(
-        short = 'N',
-        long = "new-local",
-        group = "new",
-        conflicts_with_all = ["new_conversation", "local"]
-    )]
-    new_local_conversation: bool,
 
     /// Store the conversation locally, outside of the workspace.
     #[arg(
         short = 'l',
         long = "local",
         requires = "new_conversation",
-        conflicts_with = "new_local_conversation"
+        conflicts_with = "no_local"
     )]
     local: bool,
+
+    /// Store the conversation in the current workspace.
+    #[arg(
+        short = 'L',
+        long = "no-local",
+        requires = "new_conversation",
+        conflicts_with = "local"
+    )]
+    no_local: bool,
 
     /// Add attachment to the configuration.
     #[arg(short = 'a', long = "attachment", alias = "attach")]
@@ -302,7 +295,7 @@ impl Query {
         let now = ctx.now();
         let cfg = ctx.config();
 
-        let previous_id = self.update_active_conversation(&mut ctx.workspace, cfg.clone(), now)?;
+        let previous_id = self.update_active_conversation(&mut ctx.workspace, &cfg, now)?;
         let cid = ctx.workspace.active_conversation_id();
         if let Some(delta) = get_config_delta_from_cli(&cfg, &ctx.workspace, &cid)? {
             ctx.workspace
@@ -545,7 +538,7 @@ impl Query {
     fn update_active_conversation(
         &self,
         ws: &mut Workspace,
-        cfg: Arc<AppConfig>,
+        cfg: &Arc<AppConfig>,
         now: DateTime<Utc>,
     ) -> Result<ConversationId> {
         // Store the (old) active conversation ID, so that we can restore to it,
@@ -555,9 +548,9 @@ impl Query {
 
         // Set new active conversation if requested.
         if self.is_new() {
-            let conversation = Conversation::default().with_local(self.is_local());
+            let conversation = Conversation::default().with_local(self.is_local(&cfg.conversation));
 
-            let id = ws.create_conversation(conversation, cfg);
+            let id = ws.create_conversation(conversation, cfg.clone());
             if let Some(duration) = self.expires_in_duration()
                 && let Some(mut conversation) = ws.get_conversation_mut(&id)
             {
@@ -568,7 +561,7 @@ impl Query {
 
             debug!(
                 id = id.to_string(),
-                local = self.is_local(),
+                local = self.is_local(&cfg.conversation),
                 expires_in = self.expires_in_duration().map_or_else(
                     || "when inactive".to_owned(),
                     |v| humantime::format_duration(v).to_string()
@@ -718,13 +711,13 @@ impl Query {
     }
 
     #[must_use]
-    fn is_local(&self) -> bool {
-        self.local || self.new_local_conversation
+    fn is_local(&self, cfg: &ConversationConfig) -> bool {
+        (self.local || cfg.start_local) && !self.no_local
     }
 
     #[must_use]
     fn is_new(&self) -> bool {
-        self.new_conversation || self.new_local_conversation
+        self.new_conversation
     }
 
     #[must_use]
@@ -769,8 +762,8 @@ impl IntoPartialAppConfig for Query {
             schema: _,
             replay: _,
             new_conversation: _,
-            new_local_conversation: _,
             local: _,
+            no_local: _,
             attachments,
             edit,
             no_edit,
