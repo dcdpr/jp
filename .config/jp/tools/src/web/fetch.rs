@@ -91,7 +91,7 @@ fn is_binary(content_type: &str) -> bool {
     ct.starts_with("image/")
         || ct.starts_with("audio/")
         || ct.starts_with("video/")
-        || ct.starts_with("application/")
+        || ct.starts_with("application/octet-stream")
         || ct.starts_with("application/pdf")
         || ct.starts_with("application/zip")
 }
