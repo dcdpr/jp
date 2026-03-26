@@ -124,7 +124,7 @@ impl Printer {
     /// Returns `true` if pretty printing is enabled (ANSI colors,
     /// unicode decorations, syntax highlighting).
     #[must_use]
-    pub const fn pretty_printing(&self) -> bool {
+    pub const fn pretty_printing_enabled(&self) -> bool {
         self.format.is_pretty()
     }
     /// Print content.

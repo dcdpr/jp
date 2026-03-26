@@ -72,7 +72,7 @@ fn remove(ctx: &mut Ctx, id: ConversationId, force: bool) -> Output {
         .with_last_activated_at(conversation.map(|v| v.last_activated_at))
         .with_local_flag(conversation.is_some_and(|v| v.user))
         .with_active_conversation(active_id)
-        .with_pretty_printing(ctx.printer.pretty_printing());
+        .with_pretty_printing(ctx.printer.pretty_printing_enabled());
 
     if !force {
         details.title = Some(format!(

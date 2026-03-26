@@ -18,12 +18,12 @@ pub(crate) struct Print {
 }
 
 impl Print {
-    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
         let id = self.id.unwrap_or(active_id);
         let events = ctx.workspace.try_get_events(&id)?.clone();
         let cfg = ctx.config();
-        let pretty = ctx.printer.pretty_printing();
+        let pretty = ctx.printer.pretty_printing_enabled();
 
         let printer = ctx.printer.clone();
         let root = ctx
@@ -65,14 +65,7 @@ impl Print {
                             .as_ref()
                             .map(|c| c.style().parameters.clone())
                             .unwrap_or_default();
-                        tool_renderer.render_call_header(&req.name);
-                        if let Err(e) = tool_renderer
-                            .render_arguments(&req.name, &req.arguments, &params_style)
-                            .await
-                        {
-                            tracing::warn!(error = %e, tool = %req.name, "Failed to format tool arguments");
-                            printer.println("");
-                        }
+                        tool_renderer.render_tool_call(&req.name, &req.arguments, &params_style);
                     }
                 }
 

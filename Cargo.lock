@@ -1941,6 +1941,7 @@ dependencies = [
  "indexmap",
  "indoc",
  "inquire",
+ "insta",
  "jp_attachment",
  "jp_attachment_bear_note",
  "jp_attachment_cmd_output",

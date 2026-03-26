@@ -108,6 +108,14 @@ pub enum InlineResults {
     Truncate(TruncateLines),
 }
 
+impl InlineResults {
+    /// Returns [`true`] if the results should be truncated.
+    #[must_use]
+    pub const fn is_truncated(&self) -> bool {
+        matches!(self, Self::Truncate(_))
+    }
+}
+
 impl Default for InlineResults {
     fn default() -> Self {
         Self::Truncate(TruncateLines::default())
@@ -322,6 +330,17 @@ pub enum ParametersStyle {
     /// and is expected to return a string that is shown verbatim in the
     /// terminal.
     Custom(CommandConfigOrString),
+}
+
+impl ParametersStyle {
+    /// Return the custom command if this is a custom style.
+    #[must_use]
+    pub fn into_custom(self) -> Option<CommandConfigOrString> {
+        match self {
+            Self::Custom(c) => Some(c),
+            _ => None,
+        }
+    }
 }
 
 impl FromStr for ParametersStyle {

@@ -70,13 +70,13 @@ fn setup_ctx(events: Vec<ConversationEvent>) -> (Ctx, ConversationId, SharedBuff
 
 #[test]
 fn prints_user_message() {
-    let (mut ctx, id, out, rt) = setup_ctx(vec![ConversationEvent::new(
+    let (mut ctx, id, out, _rt) = setup_ctx(vec![ConversationEvent::new(
         ChatRequest::from("Hello world"),
         ts(0, 0, 0),
     )]);
 
     let print = Print { id: Some(id) };
-    let result = rt.block_on(print.run(&mut ctx));
+    let result = print.run(&mut ctx);
     ctx.printer.flush();
 
     result.unwrap();
@@ -86,13 +86,13 @@ fn prints_user_message() {
 
 #[test]
 fn prints_assistant_message() {
-    let (mut ctx, id, out, rt) = setup_ctx(vec![ConversationEvent::new(
+    let (mut ctx, id, out, _rt) = setup_ctx(vec![ConversationEvent::new(
         ChatResponse::message("The answer is 42.\n\n"),
         ts(0, 0, 1),
     )]);
 
     let print = Print { id: Some(id) };
-    let result = rt.block_on(print.run(&mut ctx));
+    let result = print.run(&mut ctx);
     ctx.printer.flush();
 
     result.unwrap();
@@ -105,7 +105,7 @@ fn prints_reasoning_full() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
 
-    let (mut ctx, id, out, rt) = setup_ctx_with_config(config, vec![
+    let (mut ctx, id, out, _rt) = setup_ctx_with_config(config, vec![
         ConversationEvent::new(
             ChatResponse::reasoning("Let me think about this...\n\n"),
             ts(0, 0, 0),
@@ -114,7 +114,7 @@ fn prints_reasoning_full() {
     ]);
 
     let print = Print { id: Some(id) };
-    let result = rt.block_on(print.run(&mut ctx));
+    let result = print.run(&mut ctx);
     ctx.printer.flush();
 
     result.unwrap();
@@ -131,13 +131,13 @@ fn hides_reasoning_when_hidden() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Hidden;
 
-    let (mut ctx, id, out, rt) = setup_ctx_with_config(config, vec![
+    let (mut ctx, id, out, _rt) = setup_ctx_with_config(config, vec![
         ConversationEvent::new(ChatResponse::reasoning("Secret thoughts\n\n"), ts(0, 0, 0)),
         ConversationEvent::new(ChatResponse::message("Visible answer.\n\n"), ts(0, 0, 1)),
     ]);
 
     let print = Print { id: Some(id) };
-    let result = rt.block_on(print.run(&mut ctx));
+    let result = print.run(&mut ctx);
     ctx.printer.flush();
 
     result.unwrap();
@@ -155,13 +155,13 @@ fn truncates_reasoning() {
     config.style.reasoning.display =
         ReasoningDisplayConfig::Truncate(TruncateChars { characters: 10 });
 
-    let (mut ctx, id, out, rt) = setup_ctx_with_config(config, vec![ConversationEvent::new(
+    let (mut ctx, id, out, _rt) = setup_ctx_with_config(config, vec![ConversationEvent::new(
         ChatResponse::reasoning("This is a very long reasoning chain that goes on and on"),
         ts(0, 0, 0),
     )]);
 
     let print = Print { id: Some(id) };
-    let result = rt.block_on(print.run(&mut ctx));
+    let result = print.run(&mut ctx);
     ctx.printer.flush();
 
     result.unwrap();
@@ -176,7 +176,7 @@ fn truncates_reasoning() {
 
 #[test]
 fn prints_tool_call_and_result() {
-    let (mut ctx, id, out, rt) = setup_ctx(vec![
+    let (mut ctx, id, out, _rt) = setup_ctx(vec![
         ConversationEvent::new(
             ToolCallRequest {
                 id: "tc1".into(),
@@ -195,7 +195,7 @@ fn prints_tool_call_and_result() {
     ]);
 
     let print = Print { id: Some(id) };
-    let result = rt.block_on(print.run(&mut ctx));
+    let result = print.run(&mut ctx);
     ctx.printer.flush();
 
     result.unwrap();
@@ -210,13 +210,13 @@ fn prints_tool_call_and_result() {
 #[test]
 fn prints_structured_data() {
     let data = json!({"name": "Alice", "age": 30});
-    let (mut ctx, id, out, rt) = setup_ctx(vec![ConversationEvent::new(
+    let (mut ctx, id, out, _rt) = setup_ctx(vec![ConversationEvent::new(
         ChatResponse::structured(data.clone()),
         ts(0, 0, 0),
     )]);
 
     let print = Print { id: Some(id) };
-    let result = rt.block_on(print.run(&mut ctx));
+    let result = print.run(&mut ctx);
     ctx.printer.flush();
 
     result.unwrap();
@@ -227,7 +227,7 @@ fn prints_structured_data() {
 
 #[test]
 fn turn_separators_between_turns() {
-    let (mut ctx, id, out, rt) = setup_ctx(vec![
+    let (mut ctx, id, out, _rt) = setup_ctx(vec![
         ConversationEvent::new(TurnStart, ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("First question"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("First answer.\n\n"), ts(0, 0, 2)),
@@ -237,7 +237,7 @@ fn turn_separators_between_turns() {
     ]);
 
     let print = Print { id: Some(id) };
-    let result = rt.block_on(print.run(&mut ctx));
+    let result = print.run(&mut ctx);
     ctx.printer.flush();
 
     result.unwrap();
@@ -248,13 +248,13 @@ fn turn_separators_between_turns() {
 
 #[test]
 fn defaults_to_active_conversation() {
-    let (mut ctx, _id, out, rt) = setup_ctx(vec![ConversationEvent::new(
+    let (mut ctx, _id, out, _rt) = setup_ctx(vec![ConversationEvent::new(
         ChatRequest::from("active conversation content"),
         ts(0, 0, 0),
     )]);
 
     let print = Print { id: None };
-    let result = rt.block_on(print.run(&mut ctx));
+    let result = print.run(&mut ctx);
     ctx.printer.flush();
 
     result.unwrap();
@@ -267,10 +267,10 @@ fn defaults_to_active_conversation() {
 
 #[test]
 fn empty_conversation_produces_no_content() {
-    let (mut ctx, id, out, rt) = setup_ctx(vec![]);
+    let (mut ctx, id, out, _rt) = setup_ctx(vec![]);
 
     let print = Print { id: Some(id) };
-    let result = rt.block_on(print.run(&mut ctx));
+    let result = print.run(&mut ctx);
     ctx.printer.flush();
 
     result.unwrap();
@@ -284,7 +284,7 @@ fn empty_conversation_produces_no_content() {
 
 #[test]
 fn full_conversation_round_trip() {
-    let (mut ctx, id, out, rt) = setup_ctx(vec![
+    let (mut ctx, id, out, _rt) = setup_ctx(vec![
         ConversationEvent::new(TurnStart, ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("What is Rust?"), ts(0, 0, 1)),
         ConversationEvent::new(
@@ -315,7 +315,7 @@ fn full_conversation_round_trip() {
     ]);
 
     let print = Print { id: Some(id) };
-    let result = rt.block_on(print.run(&mut ctx));
+    let result = print.run(&mut ctx);
     ctx.printer.flush();
 
     result.unwrap();

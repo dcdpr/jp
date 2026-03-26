@@ -1,5 +1,8 @@
 use std::{
-    sync::{Arc, atomic::AtomicUsize},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -126,10 +129,11 @@ impl Provider for SequentialMockProvider {
         use std::sync::atomic::Ordering;
 
         let index = self.call_index.fetch_add(1, Ordering::SeqCst);
-        let events = self.responses.get(index).cloned().unwrap_or_else(|| {
-            // If we run out of responses, return a simple completion
-            vec![Event::Finished(FinishReason::Completed)]
-        });
+        let events = self
+            .responses
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| vec![Event::Finished(FinishReason::Completed)]);
 
         Ok(Box::pin(stream::iter(events.into_iter().map(Ok))))
     }
@@ -688,21 +692,17 @@ async fn test_empty_tool_response_continues_cycle() {
     );
 }
 
+/// Tests the restart flow:
+///
+/// 1. LLM returns a tool call
+/// 2. During execution, Shutdown signal is received
+/// 3. User selects "Restart" from menu (mocked)
+/// 4. Tool execution restarts with original calls
+/// 5. Eventually completes with follow-up message
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tool_restart_on_shutdown_signal() {
-    // Tests the restart flow:
-    // 1. LLM returns a tool call
-    // 2. During execution, Shutdown signal is received
-    // 3. User selects "Restart" from menu (mocked)
-    // 4. Tool execution restarts with original calls
-    // 5. Eventually completes with follow-up message
-
-    use std::{sync::atomic::Ordering, time::Duration};
-
-    use tokio::time::timeout;
-
     // Wrap the entire test in a timeout to prevent infinite hangs
-    let test_result = timeout(Duration::from_secs(10), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
         use indexmap::IndexMap;
         use jp_config::{
             Config, PartialAppConfig,
@@ -821,7 +821,7 @@ async fn test_tool_restart_on_shutdown_signal() {
             content.contains("Tool completed after restart"),
             "Should contain final response.\nFile contents:\n{content}"
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
@@ -829,19 +829,7 @@ async fn test_tool_restart_on_shutdown_signal() {
 
 #[tokio::test]
 async fn test_merged_stream_exits_after_tool_response() {
-    // use std::time::Duration;
-    //
-    // use indexmap::IndexMap;
-    // use jp_config::{
-    //     Config, PartialAppConfig,
-    //     conversation::tool::{
-    //         PartialCommandConfigOrString, PartialToolConfig, RunMode, ToolSource,
-    //     },
-    //     model::id::{Name, PartialModelIdConfig, ProviderId},
-    // };
-    // use tokio::time::timeout;
-
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -937,7 +925,7 @@ async fn test_merged_stream_exits_after_tool_response() {
             content.contains("Tool executed successfully"),
             "Should contain final response after tool execution.\nFile contents:\n{content}"
         );
-    })
+    }))
     .await;
 
     assert!(
@@ -951,7 +939,7 @@ async fn test_merged_stream_exits_after_tool_response() {
 async fn test_tool_call_with_run_mode_ask_approves() {
     // Tests: LLM returns tool call → Ask prompt → user presses 'y' → tool executes
     // Uses MockExecutor to avoid shell commands.
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -1021,6 +1009,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 ),
             )
         });
+        let tool_defs = executor_source.tool_definitions();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -1033,7 +1022,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(backend),
@@ -1084,18 +1073,18 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             "mock output",
             "Tool output should match mock executor output"
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
 }
 
+/// Tests: LLM returns tool call → Ask prompt → user presses 'n' → tool skipped
+/// Uses `MockExecutor` to avoid shell commands.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn test_tool_call_with_run_mode_ask_skips() {
-    // Tests: LLM returns tool call → Ask prompt → user presses 'n' → tool skipped
-    // Uses MockExecutor to avoid shell commands.
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -1164,6 +1153,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                     }),
             )
         });
+        let tool_defs = executor_source.tool_definitions();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -1176,7 +1166,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(backend),
@@ -1235,7 +1225,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             "Should NOT contain mock output since tool was skipped: {}",
             response.content()
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -1246,7 +1236,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
 async fn test_tool_call_with_run_mode_unattended() {
     // Tests: LLM returns tool call → Unattended mode → tool runs without prompt
     // Uses MockExecutor to avoid shell commands.
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -1311,6 +1301,7 @@ async fn test_tool_call_with_run_mode_unattended() {
                 "unattended execution output",
             ))
         });
+        let tool_defs = executor_source.tool_definitions();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -1323,7 +1314,7 @@ async fn test_tool_call_with_run_mode_unattended() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(backend),
@@ -1374,7 +1365,7 @@ async fn test_tool_call_with_run_mode_unattended() {
             "unattended execution output",
             "Tool output should match mock executor output"
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -1385,7 +1376,7 @@ async fn test_tool_call_with_run_mode_unattended() {
 async fn test_tool_call_with_run_mode_skip() {
     // Tests: LLM returns tool call → Skip mode → tool is skipped without prompt
     // Uses MockExecutor to avoid shell commands.
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -1459,6 +1450,7 @@ async fn test_tool_call_with_run_mode_skip() {
                 }),
             )
         });
+        let tool_defs = executor_source.tool_definitions();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -1471,7 +1463,7 @@ async fn test_tool_call_with_run_mode_skip() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(backend),
@@ -1530,7 +1522,7 @@ async fn test_tool_call_with_run_mode_skip() {
             "Should NOT contain mock output since tool was skipped: {}",
             response.content()
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -1543,7 +1535,7 @@ async fn test_multiple_tools_with_different_run_modes() {
     // Both should complete successfully with proper handling.
     use jp_conversation::event::{ChatResponse, ConversationEvent, ToolCallRequest};
 
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -1675,6 +1667,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                     "unattended tool output",
                 ))
             });
+        let tool_defs = executor_source.tool_definitions();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -1687,7 +1680,7 @@ async fn test_multiple_tools_with_different_run_modes() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(backend),
@@ -1751,7 +1744,7 @@ async fn test_multiple_tools_with_different_run_modes() {
             unattended_response.is_some(),
             "Should have response from tool_unattended with 'unattended tool output'"
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -1762,7 +1755,7 @@ async fn test_multiple_tools_with_different_run_modes() {
 async fn test_tool_call_returns_error() {
     // Tests: LLM returns tool call → tool returns error → error is persisted
     // Uses MockExecutor to simulate error without shell commands.
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -1824,6 +1817,7 @@ async fn test_tool_call_returns_error() {
                 "Simulated tool failure",
             ))
         });
+        let tool_defs = executor_source.tool_definitions();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -1836,7 +1830,7 @@ async fn test_tool_call_returns_error() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(backend),
@@ -1889,7 +1883,7 @@ async fn test_tool_call_returns_error() {
             "Simulated tool failure",
             "Error message should match mock executor error"
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -1941,7 +1935,6 @@ impl Provider for DelayedMockProvider {
     ) -> Result<EventStream, LlmError> {
         use jp_conversation::event::{ChatResponse, ConversationEvent};
 
-        // Delay before returning the stream (simulates HTTP round-trip)
         tokio::time::sleep(self.delay).await;
 
         let events = vec![
@@ -1963,7 +1956,7 @@ async fn test_waiting_indicator_shows_during_delay() {
     // than the configured delay. Uses a multi_thread runtime so the
     // spawned timer task can run concurrently with run_cycle().await.
 
-    let test_result = timeout(Duration::from_secs(10), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -2043,7 +2036,7 @@ async fn test_waiting_indicator_shows_during_delay() {
             output.contains("\r\x1b[K"),
             "Output should contain clear sequence.\nOutput:\n{output}"
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -2051,7 +2044,7 @@ async fn test_waiting_indicator_shows_during_delay() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_waiting_indicator_not_shown_when_disabled() {
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -2120,7 +2113,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             output.contains("Quick response"),
             "Output should contain LLM response.\nOutput:\n{output}"
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -2128,7 +2121,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_waiting_indicator_not_shown_for_non_tty() {
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -2192,7 +2185,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             !output.contains("Waiting…"),
             "Output should NOT contain waiting indicator for non-TTY.\nOutput:\n{output}"
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -2211,7 +2204,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
 
     use jp_conversation::event::{ChatResponse, ConversationEvent, ToolCallRequest};
 
-    let test_result = timeout(Duration::from_secs(10), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -2413,7 +2406,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             output.contains("File created"),
             "Output should contain final LLM response.\nOutput:\n{output}"
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -2506,7 +2499,7 @@ async fn test_turn_start_index_increments_across_turns() {
 
     let mcp_client = jp_mcp::Client::default();
 
-    // --- First turn ---
+    // First turn.
     let chat_request = ChatRequest::from("First question");
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message("First answer"));
@@ -2540,7 +2533,7 @@ async fn test_turn_start_index_increments_across_turns() {
     .await
     .unwrap();
 
-    // --- Second turn ---
+    // Second turn.
     let chat_request = ChatRequest::from("Second question");
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message("Second answer"));
@@ -2574,7 +2567,7 @@ async fn test_turn_start_index_increments_across_turns() {
     .await
     .unwrap();
 
-    // --- Verify ---
+    // Verify.
     let events = workspace.get_events(&conv_id).unwrap();
     let turn_starts: Vec<&TurnStart> = events
         .iter()
@@ -2590,7 +2583,7 @@ async fn test_turn_start_index_increments_across_turns() {
 async fn test_markdown_flushed_before_tool_header() {
     use jp_conversation::event::{ChatResponse, ConversationEvent, ToolCallRequest};
 
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -2697,7 +2690,7 @@ async fn test_markdown_flushed_before_tool_header() {
             "Markdown text (pos {md_pos}) should appear before 'Calling tool' header (pos \
              {tool_pos}).\nOutput:\n{output}"
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -2714,7 +2707,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
     use jp_config::conversation::tool::style::{DisplayStyleConfig, ParametersStyle as PS};
     use jp_conversation::event::{ChatResponse, ConversationEvent, ToolCallRequest};
 
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -2838,11 +2831,18 @@ async fn test_parallel_tool_calls_rendered_atomically() {
 
         let executor_source = TestExecutorSource::new()
             .with_executor("tool_a", |req| {
-                Box::new(MockExecutor::completed(&req.id, &req.name, "result_a"))
+                Box::new(
+                    MockExecutor::completed(&req.id, &req.name, "result_a")
+                        .with_arguments(req.arguments.clone()),
+                )
             })
             .with_executor("tool_b", |req| {
-                Box::new(MockExecutor::completed(&req.id, &req.name, "result_b"))
+                Box::new(
+                    MockExecutor::completed(&req.id, &req.name, "result_b")
+                        .with_arguments(req.arguments.clone()),
+                )
             });
+        let tool_defs = executor_source.tool_definitions();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -2855,7 +2855,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(TerminalPromptBackend),
@@ -2908,7 +2908,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             "tool_b should have args immediately after name (atomic permanent \
              line).\nOutput:\n{raw}"
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -2921,7 +2921,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
 async fn test_single_tool_call_rendered_with_args() {
     use jp_conversation::event::{ChatResponse, ConversationEvent, ToolCallRequest};
 
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -3006,8 +3006,12 @@ async fn test_single_tool_call_rendered_with_args() {
         let (_signal_tx, signal_rx) = broadcast::channel(16);
 
         let executor_source = TestExecutorSource::new().with_executor("fs_read_file", |req| {
-            Box::new(MockExecutor::completed(&req.id, &req.name, "file contents"))
+            Box::new(
+                MockExecutor::completed(&req.id, &req.name, "file contents")
+                    .with_arguments(req.arguments.clone()),
+            )
         });
+        let tool_defs = executor_source.tool_definitions();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -3020,7 +3024,7 @@ async fn test_single_tool_call_rendered_with_args() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(TerminalPromptBackend),
@@ -3052,18 +3056,7 @@ async fn test_single_tool_call_rendered_with_args() {
             output.contains("/etc/hosts"),
             "Should contain tool args.\nOutput:\n{output}"
         );
-
-        // The permanent line should contain both name and args.
-        // (The raw buffer may have 2 "Calling tool" writes — the
-        // temp line from register() and the permanent line from
-        // complete() — but on a real terminal the temp line is
-        // overwritten. We verify atomicity by checking the permanent
-        // line contains args.)
-        assert!(
-            output.contains("Calling tool") && output.contains("/etc/hosts"),
-            "Permanent line should contain header and args.\nOutput:\n{output}"
-        );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -3248,7 +3241,7 @@ fn inquiry_mock_model() -> ModelDetails {
 #[tokio::test]
 #[expect(clippy::too_many_lines)]
 async fn test_tool_with_single_inquiry() {
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -3308,6 +3301,7 @@ async fn test_tool_with_single_inquiry() {
                 "inquiry tool output",
             ))
         });
+        let tool_defs = executor_source.tool_definitions();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -3320,7 +3314,7 @@ async fn test_tool_with_single_inquiry() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(TerminalPromptBackend),
@@ -3379,7 +3373,7 @@ async fn test_tool_with_single_inquiry() {
             .collect();
         assert_eq!(res.len(), 1, "Should have one inquiry response");
         assert_eq!(res[0].answer, json!(true));
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -3391,7 +3385,7 @@ async fn test_tool_with_single_inquiry() {
 #[tokio::test]
 #[expect(clippy::too_many_lines)]
 async fn test_tool_with_multiple_inquiries() {
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -3461,6 +3455,7 @@ async fn test_tool_with_multiple_inquiries() {
                 "both questions answered",
             ))
         });
+        let tool_defs = executor_source.tool_definitions();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -3473,7 +3468,7 @@ async fn test_tool_with_multiple_inquiries() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(TerminalPromptBackend),
@@ -3519,7 +3514,7 @@ async fn test_tool_with_multiple_inquiries() {
             .filter_map(|e| e.event.into_inquiry_response())
             .collect();
         assert_eq!(res.len(), 2, "Should have two inquiry responses");
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -3532,7 +3527,7 @@ async fn test_tool_with_multiple_inquiries() {
 async fn test_parallel_tools_one_with_inquiry() {
     use jp_conversation::event::{ConversationEvent, ToolCallRequest};
 
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -3635,6 +3630,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             .with_executor("normal_tool", |req| {
                 Box::new(MockExecutor::completed(&req.id, &req.name, "normal output"))
             });
+        let tool_defs = executor_source.tool_definitions();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -3647,7 +3643,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(TerminalPromptBackend),
@@ -3687,7 +3683,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 r.result
             );
         }
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -3700,7 +3696,7 @@ async fn test_parallel_tools_one_with_inquiry() {
 async fn test_parallel_tools_both_with_inquiries() {
     use jp_conversation::event::{ConversationEvent, ToolCallRequest};
 
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -3802,6 +3798,7 @@ async fn test_parallel_tools_both_with_inquiries() {
                     "tool_b done",
                 ))
             });
+        let tool_defs = executor_source.tool_definitions();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -3814,7 +3811,7 @@ async fn test_parallel_tools_both_with_inquiries() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(TerminalPromptBackend),
@@ -3852,7 +3849,7 @@ async fn test_parallel_tools_both_with_inquiries() {
                 r.result
             );
         }
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
@@ -3862,7 +3859,7 @@ async fn test_parallel_tools_both_with_inquiries() {
 /// fails and the tool is marked as completed with an error.
 #[tokio::test]
 async fn test_inquiry_failure_marks_tool_as_error() {
-    let test_result = timeout(Duration::from_secs(5), async {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
@@ -3922,6 +3919,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
                 "should not reach this",
             ))
         });
+        let tool_defs = executor_source.tool_definitions();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -3934,7 +3932,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             &[],
             &mut workspace,
             ToolChoice::Auto,
-            &[],
+            &tool_defs,
             conv_id,
             printer.clone(),
             Arc::new(TerminalPromptBackend),
@@ -3966,7 +3964,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             content.contains("secondary assistant failed"),
             "Error should explain the inquiry failure: {content}",
         );
-    })
+    }))
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");

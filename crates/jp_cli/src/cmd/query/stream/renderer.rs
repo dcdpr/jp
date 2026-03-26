@@ -47,6 +47,7 @@ use jp_printer::{PrintableExt as _, Printer};
 enum ContentKind {
     Reasoning,
     Message,
+    ToolCall,
 }
 
 /// Renders `ChatResponse` events to the terminal.
@@ -66,7 +67,7 @@ pub struct ChatResponseRenderer {
 
 impl ChatResponseRenderer {
     pub fn new(printer: Arc<Printer>, config: StyleConfig) -> Self {
-        let pretty = printer.pretty_printing();
+        let pretty = printer.pretty_printing_enabled();
         let formatter = formatter_from_config(&config, pretty);
         Self {
             buffer: Buffer::new(),
@@ -96,9 +97,15 @@ impl ChatResponseRenderer {
     /// block boundary — which may not arrive until much later (or never,
     /// if a tool call follows).
     fn flush_on_transition(&mut self, next: ContentKind) {
-        if self.last_content_kind.is_some_and(|prev| prev != next) {
+        if let Some(prev) = self.last_content_kind
+            && prev != next
+        {
             self.flush();
+            if prev == ContentKind::ToolCall {
+                self.printer.println("");
+            }
         }
+
         self.last_content_kind = Some(next);
     }
 
@@ -290,14 +297,9 @@ impl ChatResponseRenderer {
         }
     }
 
-    /// Clear the content-kind transition state.
-    ///
-    /// Call this after flushing when a tool call arrives during streaming.
-    /// The tool call output provides its own visual break, so any pending
-    /// reasoning→message transition should not fire if the LLM later
-    /// sends message content in the same streaming cycle.
-    pub fn reset_content_kind(&mut self) {
-        self.last_content_kind = None;
+    /// Transition renderer state to tool call mode.
+    pub fn transition_to_tool_call(&mut self) {
+        self.last_content_kind = Some(ContentKind::ToolCall);
     }
 
     /// Reset the renderer state, discarding any buffered content.
@@ -308,7 +310,7 @@ impl ChatResponseRenderer {
     /// so it's safe to discard.
     pub fn reset(&mut self) {
         self.buffer = Buffer::new();
-        let pretty = self.printer.pretty_printing();
+        let pretty = self.printer.pretty_printing_enabled();
         self.formatter = formatter_from_config(&self.config, pretty);
         self.last_content_kind = None;
         self.reasoning_chars_count = 0;

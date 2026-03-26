@@ -3,13 +3,18 @@ use std::{collections::HashSet, env, fmt::Write as _, fs, sync::Arc, time, time:
 use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::Stylize as _;
 use jp_config::{
-    conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
+    conversation::tool::{
+        ToolCommandConfig,
+        style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
+    },
     style::StyleConfig,
 };
 use jp_conversation::event::ToolCallResponse;
+use jp_llm::{CommandResult, run_tool_command};
+use jp_md::format::Formatter;
 use jp_printer::Printer;
 use jp_term::osc::hyperlink;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tokio::{
     sync::mpsc::Sender,
     time::{Instant, MissedTickBehavior},
@@ -116,16 +121,6 @@ pub fn spawn_line_timer(
 
     Some((token, handle))
 }
-/// Result of formatting a tool call's arguments.
-#[derive(Debug)]
-pub struct FormatResult {
-    /// Tool call ID.
-    pub id: String,
-    /// Tool name.
-    pub name: String,
-    /// Formatted arguments string (to append after header), or error.
-    pub formatted: Result<String, String>,
-}
 
 /// A tool in the pending list.
 struct PendingTool {
@@ -141,27 +136,42 @@ struct PendingTool {
 /// The renderer owns the full tool display lifecycle:
 ///
 /// 1. **Streaming phase** — a rewritable "temp line" shows tool names while
-///    arguments are streamed. Methods: [`register`](Self::register),
-///    [`complete`](Self::complete), [`tick`](Self::tick).
+///    arguments are streamed. Once arguments are complete, a permanent line is
+///    printed via [`complete`]. Methods: [`register`], [`complete`], [`tick`].
 ///
-/// 2. **Execution phase** — permanent headers, progress, and results.
-///    Methods: [`render_call_header`](Self::render_call_header),
-///    [`render_arguments`](Self::render_arguments),
-///    [`render_progress`](Self::render_progress),
-///    [`render_result`](Self::render_result).
+/// 2. **Permission/execution phase** — arguments (if not already rendered),
+///    Custom formatter output, progress, and results. Methods:
+///    [`render_tool_call`], [`render_custom_arguments`], [`render_progress`],
+///    [`render_result`].
+///
+/// [`complete`]: Self::complete
+/// [`register`]: Self::register
+/// [`tick`]: Self::tick
+/// [`render_tool_call`]: Self::render_tool_call
+/// [`render_custom_arguments`]: Self::render_custom_arguments
+/// [`render_progress`]: Self::render_progress
+/// [`render_result`]: Self::render_result
 pub struct ToolRenderer {
     printer: Arc<Printer>,
     config: StyleConfig,
     root: Utf8PathBuf,
 
+    /// Markdown formatter used for syntax highlighting code blocks in tool
+    /// results.
+    formatter: Formatter,
+
     /// Tools not yet permanently displayed, in registration order.
     pending: Vec<PendingTool>,
-    /// Tool IDs whose header+args have been permanently printed.
+
+    /// Tool IDs whose permanent line has been printed during streaming.
     rendered: HashSet<String>,
+
     /// Whether a temp line is currently on screen.
     line_active: bool,
+
     /// Whether we're running in a TTY (controls timer spawning).
     is_tty: bool,
+
     /// Cancellation token for the tick timer task.
     timer_token: Option<CancellationToken>,
 }
@@ -173,10 +183,17 @@ impl ToolRenderer {
         root: Utf8PathBuf,
         is_tty: bool,
     ) -> Self {
+        let formatter = Formatter::new().theme(if printer.pretty_printing_enabled() {
+            config.markdown.theme.as_deref()
+        } else {
+            None
+        });
+
         Self {
             printer,
             config,
             root,
+            formatter,
             pending: Vec::new(),
             rendered: HashSet::new(),
             line_active: false,
@@ -185,40 +202,57 @@ impl ToolRenderer {
         }
     }
 
-    /// Renders just the "Calling tool X" header (without arguments or
-    /// newline).
+    /// Renders header + arguments for a tool call.
     ///
-    /// Used during the streaming phase when the tool name is known but
-    /// arguments are still being received. The line is left open so the
-    /// preparing timer can append "(receiving arguments… Ns)" on the same
-    /// line, and `render_arguments` can later replace it with the full
-    /// styled arguments.
-    pub fn render_call_header(&self, name: &str) {
-        let styled_name = name.yellow().bold();
-        let _ = write!(self.printer.out_writer(), "\nCalling tool {styled_name}");
-    }
-
-    /// Renders the formatted arguments after the "Calling tool X" header.
-    ///
-    /// The header is always printed by [`render_call_header`] first (either
-    /// during the streaming phase for multi-part tool calls, or right before
-    /// this method for single-part tool calls). This method appends the
-    /// styled arguments and a trailing newline.
-    ///
-    /// Returns `Err` if a `Custom` style command fails; the caller should
-    /// use the error to short-circuit tool execution.
-    ///
-    /// [`render_call_header`]: Self::render_call_header
-    pub async fn render_arguments(
+    /// For `Custom` style, arguments are deferred to after approval via
+    /// [`Self::render_custom_arguments`] - only the header is printed here.
+    pub fn render_tool_call(
         &self,
         name: &str,
-        arguments: &serde_json::Map<String, Value>,
+        arguments: &Map<String, Value>,
         style: &ParametersStyle,
-    ) -> Result<(), String> {
-        let args = format_args(name, arguments, style, &self.root).await?;
-        let _ = writeln!(self.printer.out_writer(), "{args}");
+    ) {
+        let styled_name = name.yellow().bold();
+        let args = format_args(arguments, style);
 
-        Ok(())
+        let _ = writeln!(
+            self.printer.out_writer(),
+            "Calling tool {styled_name}{args}"
+        );
+    }
+
+    /// Renders custom formatter output after permission approval.
+    ///
+    /// Runs the custom command and prints its content. Only meaningful for
+    /// [`ParametersStyle::Custom`]; no-ops for other styles.
+    ///
+    /// If the custom command fails, falls back to JSON formatting so the user
+    /// always sees the arguments.
+    pub async fn render_custom_arguments(
+        &self,
+        name: &str,
+        arguments: &Map<String, Value>,
+        cmd: ToolCommandConfig,
+    ) {
+        match format_args_custom(name, arguments, cmd, &self.root).await {
+            Ok(content) if !content.is_empty() => {
+                let _ = writeln!(self.printer.out_writer(), "\n{content}");
+                if !content.ends_with("\n\n") {
+                    let _ = writeln!(self.printer.out_writer());
+                }
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let filtered = filter_display_args(arguments);
+                if filtered.is_empty() {
+                    return;
+                }
+
+                warn!(%error, tool = %name, "Custom formatter failed, falling back to JSON");
+                let json = format_args_json(filtered);
+                let _ = writeln!(self.printer.out_writer(), "{json}\n");
+            }
+        }
     }
 
     /// Renders elapsed time for a long-running tool.
@@ -291,12 +325,9 @@ impl ToolRenderer {
         // Remove code fence markers for processing
         if ext.is_some() && !lines.is_empty() {
             lines.remove(0);
-        }
-        if lines.last().is_some_and(|v| v.trim() == "```") {
-            lines.pop();
+            lines.pop_if(|v| v.trim() == "```");
         }
 
-        // Auto-detect language from content if not already set
         if ext.is_none() {
             let trimmed = content.trim();
             if trimmed.starts_with('<') && quick_xml::de::from_str::<Value>(trimmed).is_ok() {
@@ -320,7 +351,7 @@ impl ToolRenderer {
         };
 
         let path = env::temp_dir().join(&file_name);
-        drop(fs::write(&path, &inner_content));
+        let _err = fs::write(&path, &inner_content);
 
         // Determine max lines based on config
         let total_lines = inner_content.lines().count();
@@ -331,40 +362,36 @@ impl ToolRenderer {
         };
 
         // Render intro header
-        if !matches!(inline_results, InlineResults::Off) {
-            let mut intro = "\nTool call result".to_owned();
-            if let InlineResults::Truncate(TruncateLines { lines }) = inline_results
-                && *lines < total_lines
-            {
-                intro.push_str(&format!(" _(truncated to {lines} lines)_"));
-            }
-            intro.push_str(":\n");
-            let _ = write!(self.printer.out_writer(), "{intro}");
-        }
-
-        // Render content with code fence if we have a language
         if !matches!(inline_results, InlineResults::Off) && max_lines > 0 {
+            let lang = ext.as_ref().filter(|e| !e.is_empty());
+            let mut highlighter = lang.and_then(|lang| self.formatter.new_code_highlighter(lang));
             let mut output = "\n".to_owned();
 
-            if let Some(e) = ext.as_ref()
-                && !e.is_empty()
-            {
+            if let Some(lang) = ext.as_ref() {
                 output.push_str("```");
-                output.push_str(e);
+                output.push_str(lang);
                 output.push('\n');
             }
 
             for line in inner_content.lines().take(max_lines) {
-                output.push_str(line);
+                match highlighter.as_mut().and_then(|hl| hl.highlight(line).ok()) {
+                    Some(highlighted) => output.push_str(&highlighted),
+                    None => output.push_str(line),
+                }
+
                 output.push('\n');
             }
 
-            if ext.as_ref().is_some_and(|e| !e.is_empty()) {
+            if ext.is_some() {
                 output.push_str("```");
             }
 
             if !output.ends_with('\n') {
                 output.push('\n');
+            }
+
+            if inline_results.is_truncated() && max_lines < total_lines {
+                output.push_str(&format!(" _(truncated to {max_lines} lines)_"));
             }
 
             let _ = write!(self.printer.out_writer(), "{output}");
@@ -393,12 +420,16 @@ impl ToolRenderer {
         }
     }
 
+    /// Returns `true` if the tool has been permanently rendered during the
+    /// streaming phase via [`complete`](Self::complete).
+    pub fn is_rendered(&self, id: &str) -> bool {
+        self.rendered.contains(id)
+    }
+
     /// Registers a new tool call (name known, arguments pending).
     ///
-    /// Adds the tool to the rewritable temp line. Starts the tick timer
-    /// on the first registration.
-    ///
-    /// Hidden tools are immediately marked as rendered without any output.
+    /// Adds the tool to the rewritable temp line. Starts the tick timer on the
+    /// first registration.
     pub fn register(&mut self, id: &str, name: &str, tick_tx: &Sender<Duration>) {
         if self.pending.iter().any(|t| t.id == id) {
             return;
@@ -412,7 +443,6 @@ impl ToolRenderer {
         if self.line_active {
             self.rewrite_temp_line();
         } else {
-            let _ = writeln!(self.printer.out_writer());
             self.write_temp_line();
             self.line_active = true;
         }
@@ -420,46 +450,34 @@ impl ToolRenderer {
         self.ensure_timer(tick_tx);
     }
 
-    /// Handles successful formatting. Prints a permanent line and removes
-    /// the tool from the temp line.
+    /// Completes a tool call and removes it from the temp line.
     ///
-    /// Hidden tools are silently marked as rendered without output.
-    pub fn complete(&mut self, id: &str, name: &str, formatted_args: &str) {
+    /// When `render` is true, prints a permanent "Calling tool ..." line.
+    /// When `render` is false, silently removes the tool from the pending
+    /// display without printing anything.
+    pub fn complete(
+        &mut self,
+        id: &str,
+        name: &str,
+        arguments: &Map<String, Value>,
+        style: &ParametersStyle,
+        render: bool,
+    ) {
         self.pending.retain(|t| t.id != id);
 
         if self.line_active {
             let _ = write!(self.printer.out_writer(), "\r\x1b[K");
         }
 
-        let styled_name = name.yellow().bold();
-        let _ = writeln!(
-            self.printer.out_writer(),
-            "Calling tool {styled_name}{formatted_args}",
-        );
-
-        self.rendered.insert(id.to_owned());
+        if render {
+            self.render_tool_call(name, arguments, style);
+            self.rendered.insert(id.to_owned());
+        }
 
         if self.pending.is_empty() {
             self.line_active = false;
         } else {
             self.write_temp_line();
-        }
-    }
-
-    /// Removes a tool from pending without printing a permanent line.
-    ///
-    /// Used when formatting fails — the tool will be rendered in the
-    /// execution phase as a fallback.
-    pub fn remove_pending(&mut self, id: &str) {
-        self.pending.retain(|t| t.id != id);
-
-        if self.pending.is_empty() {
-            if self.line_active {
-                let _ = write!(self.printer.out_writer(), "\r\x1b[K");
-                self.line_active = false;
-            }
-        } else if self.line_active {
-            self.rewrite_temp_line();
         }
     }
 
@@ -477,11 +495,6 @@ impl ToolRenderer {
             self.printer.out_writer(),
             "\r\x1b[K{content} (receiving arguments… {secs:.1}s)",
         );
-    }
-
-    /// Returns `true` if the tool has been permanently rendered.
-    pub fn is_rendered(&self, id: &str) -> bool {
-        self.rendered.contains(id)
     }
 
     /// Returns `true` if there are tools waiting for arguments.
@@ -503,8 +516,8 @@ impl ToolRenderer {
 
     /// Clears the temp line and all pending state. Stops the timer.
     ///
-    /// The `rendered` set is preserved — it's needed by the execution
-    /// phase to skip already-displayed tools.
+    /// The `rendered` set is preserved — it's needed by the permission phase to
+    /// skip already-displayed tools.
     pub fn cancel_all(&mut self) {
         self.stop_timer();
 
@@ -518,10 +531,9 @@ impl ToolRenderer {
 
     /// Resets all state for a new streaming cycle.
     pub fn reset(&mut self) {
-        self.stop_timer();
-        self.pending.clear();
-        self.rendered.clear();
         self.line_active = false;
+        self.cancel_all();
+        self.rendered.clear();
     }
 
     fn temp_line_content(&self) -> String {
@@ -573,37 +585,25 @@ impl ToolRenderer {
 
 /// Formats tool call arguments for display based on the configured style.
 ///
-/// This is a free function (not a method) so it can be called from
-/// `spawn_blocking` without cloning the entire `ToolRenderer`.
-///
 /// Arguments with empty values (`{}`, `[]`, `null`) are stripped before
 /// formatting.
 ///
-/// - `Off` → `""`
+/// - `Off` / `Custom` → `""` (Custom content is rendered separately)
 /// - `Json` → JSON block with arguments
 /// - `FunctionCall` → `(key=value, ...)`
-/// - `Custom(cmd)` → runs the command with tool context, uses stdout verbatim.
-///   Returns `Err` if the command fails.
-pub(crate) async fn format_args(
-    tool_name: &str,
-    arguments: &serde_json::Map<String, Value>,
-    style: &ParametersStyle,
-    root: &Utf8Path,
-) -> Result<String, String> {
+fn format_args(arguments: &Map<String, Value>, style: &ParametersStyle) -> String {
     let filtered = filter_display_args(arguments);
 
     if filtered.is_empty() {
-        return Ok(String::new());
+        return String::new();
     }
 
     match style {
-        ParametersStyle::Off => Ok(String::new()),
+        // Off and Custom produce no inline output.
+        // Custom content is rendered separately via render_custom_arguments.
+        ParametersStyle::Off | ParametersStyle::Custom(_) => String::new(),
 
-        ParametersStyle::Json => Ok(format_args_json(&filtered)),
-
-        ParametersStyle::Custom(cmd_config) => {
-            format_args_custom(tool_name, &filtered, cmd_config, root).await
-        }
+        ParametersStyle::Json => format_args_json(filtered),
 
         ParametersStyle::FunctionCall => {
             let mut buf = String::new();
@@ -616,15 +616,13 @@ pub(crate) async fn format_args(
                 buf.push_str(&format!("{dim_key}: {value}"));
             }
             buf.push(')');
-            Ok(buf)
+            buf
         }
     }
 }
 
 /// Filters out visually empty arguments before display.
-fn filter_display_args(
-    arguments: &serde_json::Map<String, Value>,
-) -> serde_json::Map<String, Value> {
+fn filter_display_args(arguments: &Map<String, Value>) -> Map<String, Value> {
     arguments
         .iter()
         .filter(|(_, value)| !is_display_empty(value))
@@ -641,26 +639,19 @@ fn is_display_empty(value: &Value) -> bool {
     }
 }
 
-fn format_args_json(arguments: &serde_json::Map<String, Value>) -> String {
-    let args = serde_json::to_string_pretty(arguments)
-        .unwrap_or_else(|_| format!("{:#}", Value::Object(arguments.clone())));
-    format!(" with arguments:\n\n```json\n{args}\n```")
+/// Render a JSON representation of the arguments.
+fn format_args_json(arguments: Map<String, Value>) -> String {
+    let pretty = format!("{:#}", Value::Object(arguments));
+    format!(" with arguments:\n\n```json\n{pretty}\n```")
 }
 
+/// Runs a custom arguments formatter command and returns the content.
 async fn format_args_custom(
     tool_name: &str,
-    arguments: &serde_json::Map<String, Value>,
-    cmd_config: &jp_config::conversation::tool::CommandConfigOrString,
+    arguments: &Map<String, Value>,
+    cmd: ToolCommandConfig,
     root: &Utf8Path,
 ) -> Result<String, String> {
-    use jp_llm::{CommandResult, run_tool_command};
-    use tokio_util::sync::CancellationToken;
-
-    if arguments.is_empty() {
-        return Ok(String::new());
-    }
-
-    let cmd = cmd_config.clone().command();
     let ctx = serde_json::json!({
         "tool": {
             "name": tool_name,
@@ -684,14 +675,7 @@ async fn format_args_custom(
         })?;
 
     match result {
-        CommandResult::Success(content) => {
-            let content = content.trim();
-            if content.is_empty() {
-                Ok(String::new())
-            } else {
-                Ok(format!(":\n\n{content}"))
-            }
-        }
+        CommandResult::Success(content) => Ok(content.trim().to_owned()),
         CommandResult::TransientError { message, trace } => {
             let detail = CommandResult::format_error(&message, &trace);
             warn!(
@@ -722,14 +706,7 @@ async fn format_args_custom(
             stdout,
             success: true,
             ..
-        } => {
-            let content = stdout.trim();
-            if content.is_empty() {
-                Ok(String::new())
-            } else {
-                Ok(format!(":\n\n{content}"))
-            }
-        }
+        } => Ok(stdout.trim().to_owned()),
         CommandResult::RawOutput { stderr, .. } => {
             warn!(
                 command = %cmd,

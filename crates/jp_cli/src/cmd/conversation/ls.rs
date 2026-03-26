@@ -149,11 +149,11 @@ impl Ls {
             id.to_string()
         };
 
-        if ctx.printer.pretty_printing() {
+        if ctx.printer.pretty_printing_enabled() {
             id_fmt = hyperlink(format!("jp://show-metadata/{id}"), id_fmt);
         }
 
-        let messages_fmt = if ctx.printer.pretty_printing() {
+        let messages_fmt = if ctx.printer.pretty_printing_enabled() {
             hyperlink(format!("jp://show-events/{id}"), messages.to_string())
         } else {
             messages.to_string()

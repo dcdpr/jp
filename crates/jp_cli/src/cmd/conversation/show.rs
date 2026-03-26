@@ -26,7 +26,7 @@ impl Show {
             .with_local_flag(user)
             .with_active_conversation(active_id)
             .with_expires_at(conversation.and_then(|v| v.expires_at))
-            .with_pretty_printing(ctx.printer.pretty_printing());
+            .with_pretty_printing(ctx.printer.pretty_printing_enabled());
 
         print_details(&ctx.printer, details.title.as_deref(), details.rows());
         Ok(())
