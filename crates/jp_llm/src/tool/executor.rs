@@ -10,6 +10,8 @@ use jp_tool::Question;
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
+use super::ToolDefinition;
+
 /// Trait for tool execution, enabling mock implementations for testing.
 ///
 /// This trait abstracts the execution of a single tool call, allowing the
@@ -292,10 +294,10 @@ impl TestExecutorSource {
     /// Useful for passing to `run_turn_loop` so the availability check
     /// accepts the tools this source can handle.
     #[must_use]
-    pub fn tool_definitions(&self) -> Vec<super::ToolDefinition> {
+    pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
         self.factories
             .keys()
-            .map(|name| super::ToolDefinition {
+            .map(|name| ToolDefinition {
                 name: name.clone(),
                 docs: super::ToolDocs::default(),
                 parameters: indexmap::IndexMap::new(),

@@ -391,6 +391,8 @@ impl ToolCoordinator {
     /// Renders a tool call header + safe arguments (everything except
     /// Custom formatter output). For Custom styles, only the header is
     /// printed — call [`render_custom_args`] separately to run the command.
+    ///
+    /// [`render_custom_args`]: Self::render_custom_args
     fn render_tool(
         &self,
         tool_name: &str,
