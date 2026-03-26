@@ -24,8 +24,8 @@ use crate::{cmd::Output, ctx::Ctx};
 #[group(required = true, id = "edit")]
 #[command(arg_required_else_help = true)]
 pub(crate) struct Edit {
-    /// Conversation ID to edit. Defaults to active conversation.
-    id: Option<ConversationId>,
+    /// Conversation IDs to edit. Defaults to active conversation.
+    id: Vec<ConversationId>,
 
     /// Toggle the conversation between user and workspace-scoped.
     ///
@@ -54,38 +54,43 @@ pub(crate) struct Edit {
 }
 
 impl Edit {
-    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) async fn run(mut self, ctx: &mut Ctx) -> Output {
         let active_id = ctx.workspace.active_conversation_id();
-        let id = self.id.unwrap_or(active_id);
-
-        if let Some(user) = self.local {
-            let mut conversation = ctx.workspace.try_get_conversation_mut(&id)?;
-            conversation.user = user.unwrap_or(!conversation.user);
+        if self.id.is_empty() {
+            self.id.push(active_id);
         }
 
-        if let Some(title) = self.title {
-            let events = ctx.workspace.try_get_events(&id)?.clone();
-            let title = match title {
-                Some(title) => title,
-                None => {
-                    generate_titles(&ctx.config(), ctx.printer.out_writer(), events, vec![]).await?
-                }
-            };
+        for id in self.id {
+            if let Some(user) = self.local {
+                let mut conversation = ctx.workspace.try_get_conversation_mut(&id)?;
+                conversation.user = user.unwrap_or(!conversation.user);
+            }
 
-            ctx.workspace.try_get_conversation_mut(&id)?.title = Some(title);
-        } else if self.no_title {
-            ctx.workspace.try_get_conversation_mut(&id)?.title = None;
+            if let Some(ref title) = self.title {
+                let events = ctx.workspace.try_get_events(&id)?.clone();
+                let title = match title {
+                    Some(title) => title.clone(),
+                    None => {
+                        generate_titles(&ctx.config(), ctx.printer.out_writer(), events, vec![])
+                            .await?
+                    }
+                };
+
+                ctx.workspace.try_get_conversation_mut(&id)?.title = Some(title);
+            } else if self.no_title {
+                ctx.workspace.try_get_conversation_mut(&id)?.title = None;
+            }
+
+            if let Some(ephemeral) = self.expires_at {
+                let mut conversation = ctx.workspace.try_get_conversation_mut(&id)?;
+                let duration = ephemeral.map_or(Duration::ZERO, Into::into);
+                conversation.expires_at = Some(Utc::now() + duration);
+            } else if self.no_expires_at {
+                ctx.workspace.try_get_conversation_mut(&id)?.expires_at = None;
+            }
         }
 
-        if let Some(ephemeral) = self.expires_at {
-            let mut conversation = ctx.workspace.try_get_conversation_mut(&id)?;
-            let duration = ephemeral.map_or(Duration::ZERO, Into::into);
-            conversation.expires_at = Some(Utc::now() + duration);
-        } else if self.no_expires_at {
-            ctx.workspace.try_get_conversation_mut(&id)?.expires_at = None;
-        }
-
-        ctx.printer.println("Conversation updated.");
+        ctx.printer.println("Conversation(s) updated.");
         Ok(())
     }
 }
