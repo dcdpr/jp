@@ -419,6 +419,74 @@ fn test_workspace_persist_active_conversation() {
     assert!(!id2_metadata_file.is_file());
 }
 
+/// Regression test: files placed in a local conversation's user-storage
+/// directory must survive `persist_active_conversation`.
+///
+/// Before the fix, the editor created `QUERY_MESSAGE.md` inside the
+/// workspace-side `.jp/conversations/{id}/` directory, even for local
+/// conversations. `persist_active_conversation` then deleted that
+/// workspace-side directory (because the conversation lives in user
+/// storage), destroying the query file and causing an IO error.
+///
+/// The fix ensures local conversations use the user-storage path for
+/// the editor file. This test verifies that a file placed in the
+/// correct (user-storage) conversation directory is not deleted by
+/// `persist_active_conversation`.
+#[test]
+fn test_persist_active_conversation_preserves_files_in_user_storage() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage_path = root.join("storage");
+    let user_root = tmp.path().join("user");
+
+    let config = Arc::new(AppConfig::new_test());
+    let id = ConversationId::try_from(datetime!(2024-07-01 00:00:00 Z)).unwrap();
+
+    let mut workspace = Workspace::new(&root)
+        .persisted_at(&storage_path)
+        .unwrap()
+        .with_local_storage_at(&user_root, "test-ws", "abc")
+        .unwrap();
+
+    // Create a local conversation and make it active.
+    let conversation = Conversation::default().with_local(true);
+    workspace.create_conversation_with_id(id, conversation, config);
+    workspace
+        .set_active_conversation_id(id, DateTime::<Utc>::UNIX_EPOCH)
+        .unwrap();
+
+    // Simulate what the editor does: place a file inside the conversation's
+    // directory. For local conversations, this should be in user storage.
+    let user_storage = workspace.user_storage_path().unwrap();
+    let conv_dir = user_storage
+        .join(CONVERSATIONS_DIR)
+        .join(id.to_dirname(None));
+    fs::create_dir_all(&conv_dir).unwrap();
+    let query_file = conv_dir.join("QUERY_MESSAGE.md");
+    fs::write(&query_file, "test query content").unwrap();
+    assert!(query_file.is_file());
+
+    // This is the operation that previously deleted the workspace-side
+    // directory. With the file in user storage, it should be preserved.
+    workspace.persist_active_conversation().unwrap();
+
+    assert!(
+        query_file.is_file(),
+        "query file in user-storage conversation directory must survive \
+         persist_active_conversation"
+    );
+
+    // The workspace-side conversations directory should NOT have a
+    // directory for this conversation (it's local-only).
+    let workspace_conv_dir = storage_path
+        .join(CONVERSATIONS_DIR)
+        .join(id.to_dirname(None));
+    assert!(
+        !workspace_conv_dir.exists(),
+        "local conversation should not create a workspace-side directory"
+    );
+}
+
 /// Write a `conversations/metadata.json` pointing to the given active ID.
 fn write_conversations_metadata_to_disk(storage: &Utf8Path, active_id: &ConversationId) {
     let meta_path = storage.join(CONVERSATIONS_DIR).join(METADATA_FILE);
