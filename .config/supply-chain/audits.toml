@@ -21,6 +21,21 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.16.2 -> 0.17.0"
 
+[[audits.futf]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.1.5"
+
+[[audits.htmd]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.5.3"
+
+[[audits.html5ever]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.36.1"
+
 [[audits.infer]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -30,6 +45,21 @@ version = "0.19.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.35.0 -> 0.36.0"
+
+[[audits.mac]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.1.1"
+
+[[audits.markup5ever]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.36.1"
+
+[[audits.markup5ever_rcdom]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.36.0+unofficial"
 
 [[audits.nix]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -127,10 +157,25 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.5.2"
 
+[[audits.string_cache]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.9.0"
+
+[[audits.string_cache_codegen]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.6.1"
+
 [[audits.syntect]]
 who = "rgrant <rgrant@contract.design>"
 criteria = "safe-to-deploy"
 delta = "5.2.0 -> 5.3.0"
+
+[[audits.tendril]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.4.3"
 
 [[audits.time-core]]
 who = "rgrant <rgrant@contract.design>"
@@ -161,6 +206,16 @@ version = "0.1.4"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "1.22.0"
+
+[[audits.web_atoms]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.2.3"
+
+[[audits.xml5ever]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.36.1"
 
 [[trusted.aho-corasick]]
 criteria = "safe-to-deploy"
@@ -486,6 +541,12 @@ user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-09-09"
 end = "2027-02-13"
 
+[[trusted.new_debug_unreachable]]
+criteria = "safe-to-deploy"
+user-id = 2017 # Matt Brubeck (mbrubeck)
+start = "2019-02-26"
+end = "2027-03-26"
+
 [[trusted.num]]
 criteria = "safe-to-deploy"
 user-id = 539 # Josh Stone (cuviper)
@@ -557,6 +618,12 @@ criteria = "safe-to-deploy"
 user-id = 51017 # Yuki Okushi (JohnTitor)
 start = "2021-06-17"
 end = "2027-02-20"
+
+[[trusted.phf_macros]]
+criteria = "safe-to-deploy"
+user-id = 51017 # Yuki Okushi (JohnTitor)
+start = "2021-06-17"
+end = "2027-03-26"
 
 [[trusted.phf_shared]]
 criteria = "safe-to-deploy"
