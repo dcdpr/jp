@@ -9,7 +9,10 @@ mod add_intent;
 mod apply;
 mod commit;
 mod diff;
+mod diff_commit;
 mod list_patches;
+mod log;
+mod show;
 mod stage_patch;
 mod stage_patch_lines;
 mod unstage;
@@ -17,7 +20,10 @@ mod unstage;
 use add_intent::git_add_intent;
 use commit::git_commit;
 use diff::git_diff;
+use diff_commit::git_diff_commit;
 use list_patches::git_list_patches;
+use log::git_log;
+use show::git_show;
 use stage_patch::git_stage_patch;
 use stage_patch_lines::git_stage_patch_lines;
 use unstage::git_unstage;
@@ -44,6 +50,32 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         "unstage" => git_unstage(&ctx.root, t.req("paths")?, opts).await,
 
         "diff" => git_diff(ctx.root, t.opt("paths")?, t.req("status")?, opts).await,
+
+        "log" => {
+            git_log(
+                ctx.root,
+                t.opt("query")?,
+                t.opt("paths")?,
+                t.opt("count")?,
+                t.opt("since")?,
+                opts,
+            )
+            .await
+        }
+
+        "show" => git_show(ctx.root, t.req("revision")?, opts).await,
+
+        "diff_commit" => {
+            git_diff_commit(
+                ctx.root,
+                t.req("revision")?,
+                t.req("paths")?,
+                t.opt("pattern")?,
+                t.opt("context")?,
+                opts,
+            )
+            .await
+        }
 
         _ => unknown_tool(t),
     }

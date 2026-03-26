@@ -125,8 +125,6 @@ fn commit_then_modify(root: &Utf8Path, path: &str, original: &str, modified: &st
     fs::write(root.join(path), modified).unwrap();
 }
 
-// --- git_add_intent ---
-
 #[tokio::test]
 async fn add_intent_marks_untracked_file() {
     if !has_git() {
@@ -168,8 +166,6 @@ async fn add_intent_multiple_files() {
 
     assert!(content.contains("2 files"));
 }
-
-// --- git_list_patches ---
 
 #[tokio::test]
 async fn list_patches_without_files_discovers_all_changes() {
@@ -457,8 +453,6 @@ async fn stage_patch_declined() {
     assert_eq!(staged_content(&root, "no.rs"), "old\n");
 }
 
-// --- git_stage_patch_lines ---
-
 #[tokio::test]
 async fn stage_patch_lines_partial_hunk() {
     if !has_git() {
@@ -646,8 +640,6 @@ async fn stage_patch_lines_empty_lines_error() {
     assert!(result.is_err(), "Expected error for empty lines");
 }
 
-// --- git_diff ---
-
 #[tokio::test]
 async fn diff_shows_unstaged_changes() {
     if !has_git() {
@@ -753,8 +745,6 @@ async fn diff_unstaged_excludes_staged_changes() {
     );
 }
 
-// --- git_unstage ---
-
 #[tokio::test]
 async fn unstage_reverts_staged_changes() {
     if !has_git() {
@@ -781,8 +771,6 @@ async fn unstage_reverts_staged_changes() {
     assert_eq!(content, "Changes unstaged.");
     assert_eq!(staged_content(&root, "u.rs"), "old\n");
 }
-
-// --- git_commit ---
 
 #[tokio::test]
 async fn commit_staged_changes() {
@@ -815,8 +803,6 @@ async fn commit_staged_changes() {
     let diff = git(&root, &["diff", "--cached", "--name-only"]);
     assert!(diff.trim().is_empty());
 }
-
-// --- end-to-end workflows ---
 
 #[tokio::test]
 async fn full_workflow_add_intent_list_stage_lines_commit() {
@@ -916,6 +902,271 @@ async fn stage_unstage_restage_roundtrip() {
     .await;
 
     assert_eq!(staged_content(&root, "rt.rs"), "v2\n");
+}
+
+#[tokio::test]
+async fn log_lists_recent_commits() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "a.rs", "v1\n", "v2\n");
+    git(&root, &["add", "a.rs"]);
+    git(&root, &["commit", "-m", "update a.rs"]);
+
+    let content = run_ok(ctx(&root), tool("git_log", &json!({}))).await;
+
+    assert!(content.contains("update a.rs"));
+    assert!(content.contains("init"));
+    assert!(content.contains("short_hash: "));
+}
+
+#[tokio::test]
+async fn log_filters_by_query() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "b.rs", "v1\n", "v2\n");
+    git(&root, &["add", "b.rs"]);
+    git(&root, &["commit", "-m", "feat: add widget"]);
+
+    commit_then_modify(&root, "c.rs", "v1\n", "v2\n");
+    git(&root, &["add", "c.rs"]);
+    git(&root, &["commit", "-m", "fix: correct typo"]);
+
+    let content = run_ok(ctx(&root), tool("git_log", &json!({"query": "widget"}))).await;
+
+    assert!(content.contains("widget"));
+    assert!(!content.contains("typo"));
+}
+
+#[tokio::test]
+async fn log_filters_by_path() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "x.rs", "v1\n", "v2\n");
+    git(&root, &["add", "x.rs"]);
+    git(&root, &["commit", "-m", "change x"]);
+
+    commit_then_modify(&root, "y.rs", "v1\n", "v2\n");
+    git(&root, &["add", "y.rs"]);
+    git(&root, &["commit", "-m", "change y"]);
+
+    let content = run_ok(ctx(&root), tool("git_log", &json!({"paths": ["x.rs"]}))).await;
+
+    assert!(content.contains("change x"));
+    assert!(!content.contains("change y"));
+}
+
+#[tokio::test]
+async fn log_respects_count() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    for i in 0..5 {
+        let path = format!("{i}.rs");
+        fs::write(root.join(&path), format!("v{i}\n")).unwrap();
+        git(&root, &["add", &path]);
+        git(&root, &["commit", "-m", &format!("commit {i}")]);
+    }
+
+    let content = run_ok(ctx(&root), tool("git_log", &json!({"count": 2}))).await;
+
+    // Should have exactly 2 log entries.
+    assert!(content.contains("commit 4"));
+    assert!(content.contains("commit 3"));
+    assert!(!content.contains("commit 2"));
+}
+
+#[tokio::test]
+async fn log_empty_result() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+
+    let content = run_ok(
+        ctx(&root),
+        tool("git_log", &json!({"query": "nonexistent_query_string_xyz"})),
+    )
+    .await;
+
+    assert!(content.contains("No commits found"));
+}
+
+#[tokio::test]
+async fn show_displays_commit_details() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "s.rs", "old\n", "new\n");
+    git(&root, &["add", "s.rs"]);
+    git(&root, &[
+        "commit",
+        "-m",
+        "feat: update s.rs\n\nDetailed description.",
+    ]);
+
+    // Get the latest commit hash.
+    let hash = git(&root, &["rev-parse", "--short", "HEAD"])
+        .trim()
+        .to_string();
+
+    let content = run_ok(ctx(&root), tool("git_show", &json!({"revision": "HEAD"}))).await;
+
+    assert!(content.contains(&hash));
+    assert!(content.contains("feat: update s.rs"));
+    assert!(content.contains("Detailed description."));
+    assert!(content.contains("    - s.rs ("));
+    assert!(content.contains("  <files>"));
+}
+
+#[tokio::test]
+async fn show_bad_revision_errors() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+
+    let outcome = run_outcome(
+        ctx(&root),
+        tool("git_show", &json!({"revision": "nonexistent_ref_xyz"})),
+    )
+    .await;
+
+    assert!(
+        matches!(outcome, Outcome::Error { .. }),
+        "Expected error for bad revision, got {outcome:?}"
+    );
+}
+
+#[tokio::test]
+async fn diff_commit_shows_file_diff() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "d.rs", "old\n", "new\n");
+    git(&root, &["add", "d.rs"]);
+    git(&root, &["commit", "-m", "change d"]);
+
+    let content = run_ok(
+        ctx(&root),
+        tool(
+            "git_diff_commit",
+            &json!({"revision": "HEAD", "paths": ["d.rs"]}),
+        ),
+    )
+    .await;
+
+    assert!(content.contains("-old"));
+    assert!(content.contains("+new"));
+}
+
+#[tokio::test]
+async fn diff_commit_excludes_unrequested_files() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    fs::write(root.join("a.rs"), "a_old\n").unwrap();
+    fs::write(root.join("b.rs"), "b_old\n").unwrap();
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-m", "add both"]);
+
+    fs::write(root.join("a.rs"), "a_new\n").unwrap();
+    fs::write(root.join("b.rs"), "b_new\n").unwrap();
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-m", "change both"]);
+
+    // Only request diff for a.rs.
+    let content = run_ok(
+        ctx(&root),
+        tool(
+            "git_diff_commit",
+            &json!({"revision": "HEAD", "paths": ["a.rs"]}),
+        ),
+    )
+    .await;
+
+    assert!(content.contains("a_new") || content.contains("a_old"));
+    assert!(!content.contains("b_new") && !content.contains("b_old"));
+}
+
+#[tokio::test]
+async fn diff_commit_with_pattern() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    // Create a file with enough content to have interesting grep results.
+    let original = (0..20)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let modified = original
+        .replace("line 5", "CHANGED_5")
+        .replace("line 15", "CHANGED_15");
+
+    fs::write(root.join("g.rs"), &original).unwrap();
+    git(&root, &["add", "g.rs"]);
+    git(&root, &["commit", "-m", "add g.rs"]);
+
+    fs::write(root.join("g.rs"), &modified).unwrap();
+    git(&root, &["add", "g.rs"]);
+    git(&root, &["commit", "-m", "modify g.rs"]);
+
+    let content = run_ok(
+        ctx(&root),
+        tool(
+            "git_diff_commit",
+            &json!({"revision": "HEAD", "paths": ["g.rs"], "pattern": "CHANGED_5", "context": 1}),
+        ),
+    )
+    .await;
+
+    assert!(content.contains("CHANGED_5"));
+    // With context=1, CHANGED_15 should not appear (they're far apart).
+    assert!(!content.contains("CHANGED_15"));
+}
+
+#[tokio::test]
+async fn diff_commit_no_match_for_path() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "exists.rs", "old\n", "new\n");
+    git(&root, &["add", "exists.rs"]);
+    git(&root, &["commit", "-m", "change"]);
+
+    let content = run_ok(
+        ctx(&root),
+        tool(
+            "git_diff_commit",
+            &json!({"revision": "HEAD", "paths": ["nonexistent.rs"]}),
+        ),
+    )
+    .await;
+
+    assert!(content.contains("No diff found"));
 }
 
 #[tokio::test]

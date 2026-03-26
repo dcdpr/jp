@@ -1,0 +1,57 @@
+[conversation.tools.git_diff_commit]
+enable = "explicit"
+run = "unattended"
+style.inline_results = "full"
+style.parameters = "function_call"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Show the actual diff for specific files in a commit."
+description = """
+Returns the diff content for the given files in a commit. The `paths` \
+parameter is required to prevent accidentally dumping massive diffs.
+
+If the diff exceeds 500 lines, it is truncated with a message suggesting \
+the use of the `pattern` parameter.
+
+When `pattern` is provided, the tool greps within the diff output and \
+returns only matching lines with surrounding context, similar to \
+`fs_grep_files`. This is useful for large diffs where you only care \
+about specific changes.
+"""
+
+examples = """
+Show the diff for a file in a commit:
+```json
+{"revision": "abc1234", "paths": ["crates/jp_llm/src/stream.rs"]}
+```
+
+Show the diff for multiple files:
+```json
+{"revision": "HEAD~1", "paths": ["src/main.rs", "src/lib.rs"]}
+```
+
+Search within a diff:
+```json
+{"revision": "abc1234", "paths": ["crates/jp_config/src/lib.rs"], "pattern": "fn parse", "context": 5}
+```
+"""
+
+[conversation.tools.git_diff_commit.parameters.revision]
+type = "string"
+required = true
+summary = "The commit hash or any git revision specifier."
+
+[conversation.tools.git_diff_commit.parameters.paths]
+type = "array"
+items.type = "string"
+required = true
+summary = "Files to show the diff for. Required to prevent accidental full-commit diff dumps."
+
+[conversation.tools.git_diff_commit.parameters.pattern]
+type = "string"
+summary = "Regex pattern to search within the diff output. When set, only matching lines with context are returned instead of the full diff."
+
+[conversation.tools.git_diff_commit.parameters.context]
+type = "integer"
+summary = "Number of context lines around pattern matches. Defaults to 3 when `pattern` is set. Ignored without `pattern`."
