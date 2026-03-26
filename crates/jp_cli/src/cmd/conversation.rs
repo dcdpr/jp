@@ -26,7 +26,7 @@ impl Conversation {
             Commands::Edit(args) => args.run(ctx).await,
             Commands::Fork(args) => args.run(ctx),
             Commands::Grep(args) => args.run(ctx),
-            Commands::Print(args) => args.run(ctx).await,
+            Commands::Print(args) => args.run(ctx),
         }
     }
 }
