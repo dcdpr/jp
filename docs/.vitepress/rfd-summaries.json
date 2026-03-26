@@ -266,5 +266,9 @@
   "067-resource-deduplication-for-token-efficiency.md": {
     "hash": "bbb66ea4cf5da6e74c917cfe71c2241797da2ee16d3f5eb799a2b7a563227b71",
     "summary": "Detects redundant resource deliveries to LLM via URI and checksum matching, replacing duplicates with brief references."
+  },
+  "068-forced-tool-retry-without-reasoning.md": {
+    "hash": "50af2695b685dac01d6d7a16ad815f14a5c3958936a47289859ea02599ec57e2",
+    "summary": "Automatically retry forced tool calls with reasoning disabled if the model ignores soft-force directives."
   }
 }
