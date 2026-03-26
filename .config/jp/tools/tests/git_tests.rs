@@ -1185,11 +1185,7 @@ async fn staged_diff_excludes_intent_to_add_files() {
     fs::write(root.join("ita.rs"), "intent to add content\n").unwrap();
     git(&root, &["add", "--intent-to-add", "ita.rs"]);
 
-    let content = run_ok(
-        ctx(&root),
-        tool("git_diff", &json!({"status": "staged"})),
-    )
-    .await;
+    let content = run_ok(ctx(&root), tool("git_diff", &json!({"status": "staged"}))).await;
 
     // The real staged change must be present.
     assert!(
@@ -1203,7 +1199,6 @@ async fn staged_diff_excludes_intent_to_add_files() {
         "staged diff must not contain intent-to-add file, got: {content}"
     );
 }
-
 
 #[tokio::test]
 async fn sequential_staging_across_tools() {
