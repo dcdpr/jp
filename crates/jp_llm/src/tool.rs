@@ -986,13 +986,13 @@ async fn resolve_mcp_tool(
 
     let user_overrides = config.parameters();
 
-    // -- Merge tool-level description --
+    // Merge tool-level description.
     let merged_description = merge_description(
         config.description().map(str::to_owned),
         mcp_tool.description.as_deref(),
     );
 
-    // -- Build parameters from MCP schema + user overrides --
+    // Build parameters from MCP schema + user overrides.
     let schema = mcp_tool.input_schema.as_ref().clone();
     let required_properties: Vec<&str> = schema
         .get("required")
@@ -1116,7 +1116,7 @@ async fn resolve_mcp_tool(
         });
     }
 
-    // -- Build docs with auto-split heuristic --
+    // Build docs with auto-split heuristic.
     let has_user_summary = config.summary().is_some();
 
     let (summary, description) = if has_user_summary {

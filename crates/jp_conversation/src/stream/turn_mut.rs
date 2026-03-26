@@ -110,8 +110,6 @@ impl<'a> TurnMut<'a> {
         self
     }
 
-    // -- Borrowed chainable methods (borrow self, return &mut Self) --
-
     /// Buffer a [`ChatRequest`] event.
     pub fn with_chat_request(&mut self, request: impl Into<ChatRequest>) -> &mut Self {
         self.events.push(ConversationEvent::now(request.into()));

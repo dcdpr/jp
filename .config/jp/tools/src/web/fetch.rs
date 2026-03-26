@@ -129,8 +129,6 @@ fn truncate(content: &str, max: usize) -> String {
     )
 }
 
-// -- Haiku summarization --
-
 async fn try_summarize(url: &Url, content: &str) -> Option<String> {
     let api_key = std::env::var("ANTHROPIC_API_KEY").ok()?;
     if api_key.is_empty() {

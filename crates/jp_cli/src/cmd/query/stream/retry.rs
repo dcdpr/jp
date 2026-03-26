@@ -145,7 +145,7 @@ pub async fn handle_stream_error(
     let kind = error.kind.as_str();
 
     warn!(attempt, max, kind, "{error}");
-    printer.println(format!("⚠ {kind}, retrying ({attempt}/{max})…",));
+    printer.println(format!("⚠ {kind}, retrying ({attempt}/{max})…"));
 
     // 5. Backoff.
     let delay = retry_state.backoff_duration(&error);

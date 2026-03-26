@@ -93,8 +93,6 @@ fn resolve_partial_direct_id_missing_name() {
     assert!(partial.resolve(&aliases).is_err());
 }
 
-// -- ModelIdOrAliasConfig::resolved tests --
-
 #[test]
 fn resolved_returns_id() {
     let config = ModelIdOrAliasConfig::Id(ModelIdConfig {
@@ -147,8 +145,6 @@ fn resolve_in_place_error_on_unknown_alias() {
     let mut config = ModelIdOrAliasConfig::Alias("nonexistent".into());
     assert!(config.resolve_in_place(&aliases).is_err());
 }
-
-// -- PartialModelIdOrAliasConfig::resolve_in_place tests --
 
 #[test]
 fn partial_resolve_in_place_converts_alias() {

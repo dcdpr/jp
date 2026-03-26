@@ -226,6 +226,20 @@ fn test_buffer_fenced_code_streaming() {
             ])],
             flushed: None,
         }),
+        ("multiple consecutive blank lines preserved", TestCase {
+            in_out: vec![("```\n\n\n\n```\n", vec![
+                Event::FencedCodeStart {
+                    language: String::new(),
+                    fence_type: FenceType::Backtick,
+                    fence_length: 3,
+                },
+                Event::FencedCodeLine("\n".into()),
+                Event::FencedCodeLine("\n".into()),
+                Event::FencedCodeLine("\n".into()),
+                Event::FencedCodeEnd("```".into()),
+            ])],
+            flushed: None,
+        }),
         ("five consecutive blank lines preserved", TestCase {
             in_out: vec![("```\n\n\n\n\n\n```\n", vec![
                 Event::FencedCodeStart {

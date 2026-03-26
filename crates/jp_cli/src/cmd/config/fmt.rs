@@ -98,10 +98,10 @@ impl Fmt {
                 .into());
             }
 
-            Ok(format!("Checked configuration file: {}", config.path,))
+            Ok(format!("Checked configuration file: {}", config.path))
         } else if curr != config.content {
             fs::write(&config.path, config.content)?;
-            Ok(format!("Formatted configuration file: {}", config.path,))
+            Ok(format!("Formatted configuration file: {}", config.path))
         } else {
             Ok(format!(
                 "Skipped formatted configuration file: {}",
