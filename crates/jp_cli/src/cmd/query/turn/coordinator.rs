@@ -156,7 +156,7 @@ impl TurnCoordinator {
                     // Flush any buffered markdown so it appears before the
                     // tool-call output rather than being delayed until after.
                     self.chat_renderer.flush();
-                    self.chat_renderer.reset_content_kind();
+                    self.chat_renderer.transition_to_tool_call();
                 }
 
                 match &event.kind {
@@ -272,11 +272,10 @@ impl TurnCoordinator {
         self.chat_renderer.flush();
     }
 
-    /// Clear the chat renderer's content-kind transition state.
-    ///
-    /// Delegates to [`ChatResponseRenderer::reset_content_kind`].
-    pub fn reset_content_kind(&mut self) {
-        self.chat_renderer.reset_content_kind();
+    /// Mark that tool calls are about to be rendered, so the next
+    /// content chunk gets a blank line separator.
+    pub fn transition_to_tool_call(&mut self) {
+        self.chat_renderer.transition_to_tool_call();
     }
 
     /// Force transition to Complete phase.

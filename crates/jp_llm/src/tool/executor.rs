@@ -3,14 +3,12 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use camino::Utf8Path;
 use indexmap::IndexMap;
-use jp_config::conversation::tool::{RunMode, ToolSource, ToolsConfig};
+use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_mcp::Client;
 use jp_tool::Question;
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
-
-use crate::ToolError;
 
 /// Trait for tool execution, enabling mock implementations for testing.
 ///
@@ -80,25 +78,16 @@ pub trait Executor: Send + Sync {
 ///
 /// This trait enables dependency injection of executor creation, allowing tests
 /// to use mock executors without executing real shell commands.
-#[async_trait]
 pub trait ExecutorSource: Send + Sync {
     /// Creates an executor for the given tool call request.
     ///
-    /// # Arguments
-    ///
-    /// * `request` - The tool call request from the LLM
-    /// * `tools_config` - Configuration for all tools
-    /// * `mcp_client` - MCP client for remote tool execution
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the tool is not found or cannot be initialized.
-    async fn create(
+    /// Returns `None` if the tool cannot be resolved (e.g. missing
+    /// from the definitions).
+    fn create(
         &self,
         request: ToolCallRequest,
-        tools_config: &ToolsConfig,
-        mcp_client: &Client,
-    ) -> Result<Box<dyn Executor>, ToolError>;
+        config: ToolConfigWithDefaults,
+    ) -> Option<Box<dyn Executor>>;
 }
 
 /// Result of a tool execution attempt.
@@ -297,6 +286,22 @@ impl TestExecutorSource {
             .insert(tool_name.to_string(), Box::new(factory));
         self
     }
+
+    /// Returns stub [`ToolDefinition`]s for all registered tool names.
+    ///
+    /// Useful for passing to `run_turn_loop` so the availability check
+    /// accepts the tools this source can handle.
+    #[must_use]
+    pub fn tool_definitions(&self) -> Vec<super::ToolDefinition> {
+        self.factories
+            .keys()
+            .map(|name| super::ToolDefinition {
+                name: name.clone(),
+                docs: super::ToolDocs::default(),
+                parameters: indexmap::IndexMap::new(),
+            })
+            .collect()
+    }
 }
 
 impl Default for TestExecutorSource {
@@ -305,21 +310,14 @@ impl Default for TestExecutorSource {
     }
 }
 
-#[async_trait]
 impl ExecutorSource for TestExecutorSource {
-    async fn create(
+    fn create(
         &self,
         request: ToolCallRequest,
-        _tools_config: &ToolsConfig,
-        _mcp_client: &Client,
-    ) -> Result<Box<dyn Executor>, ToolError> {
-        if let Some(factory) = self.factories.get(&request.name) {
-            Ok(factory(request))
-        } else {
-            Err(ToolError::NotFound {
-                name: request.name.clone(),
-            })
-        }
+        _config: ToolConfigWithDefaults,
+    ) -> Option<Box<dyn Executor>> {
+        let factory = self.factories.get(&request.name)?;
+        Some(factory(request))
     }
 }
 

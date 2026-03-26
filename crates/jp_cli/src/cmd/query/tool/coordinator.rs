@@ -79,7 +79,9 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use indexmap::IndexMap;
-use jp_config::conversation::tool::{QuestionTarget, ResultMode, RunMode, ToolsConfig};
+use jp_config::conversation::tool::{
+    CommandConfigOrString, QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
+};
 use jp_conversation::{
     ConversationStream,
     event::{
@@ -88,10 +90,7 @@ use jp_conversation::{
     },
 };
 use jp_inquire::prompt::PromptBackend;
-use jp_llm::{
-    ToolError,
-    tool::executor::{Executor, ExecutorResult, ExecutorSource},
-};
+use jp_llm::tool::executor::{Executor, ExecutorResult, ExecutorSource, PermissionInfo};
 use jp_mcp::Client;
 use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
@@ -174,6 +173,19 @@ enum PendingPrompt {
     },
 }
 
+/// Result of [`ToolCoordinator::decide_permission`] for a single tool.
+pub enum PermissionDecision {
+    /// Tool can run immediately (unattended, persisted approval, non-TTY).
+    Approved(Box<dyn Executor>),
+    /// Tool should not run (persisted skip).
+    Skipped(ToolCallResponse),
+    /// Requires an interactive user prompt before deciding.
+    NeedsPrompt {
+        executor: Box<dyn Executor>,
+        info: PermissionInfo,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolCallState {
     ReceivingArguments { name: String },
@@ -248,21 +260,14 @@ impl ToolCoordinator {
         self.tool_states.clear();
     }
 
-    pub fn parameter_style(
-        &self,
-        tool_name: &str,
-    ) -> jp_config::conversation::tool::style::ParametersStyle {
+    pub fn parameter_style(&self, tool_name: &str) -> ParametersStyle {
         self.tools_config
             .get(tool_name)
             .map(|c| c.style().parameters.clone())
             .unwrap_or_default()
     }
 
-    pub fn question_target(
-        &self,
-        tool_name: &str,
-        question_id: &str,
-    ) -> Option<jp_config::conversation::tool::QuestionTarget> {
+    pub fn question_target(&self, tool_name: &str, question_id: &str) -> Option<QuestionTarget> {
         self.tools_config
             .get(tool_name)
             .and_then(|config| config.question_target(question_id).cloned())
@@ -303,6 +308,12 @@ impl ToolCoordinator {
         self.static_answers_for_tool(tool_name)
     }
 
+    pub fn is_hidden(&self, tool_name: &str) -> bool {
+        self.tools_config
+            .get(tool_name)
+            .is_some_and(|cfg| cfg.style().hidden)
+    }
+
     pub fn result_mode(&self, tool_name: &str) -> ResultMode {
         self.tools_config
             .get(tool_name)
@@ -315,33 +326,254 @@ impl ToolCoordinator {
         self.cancellation_token.cancel();
     }
 
-    pub async fn prepare(
-        &mut self,
-        requests: Vec<ToolCallRequest>,
-        mcp_client: &Client,
-    ) -> Result<(), ToolError> {
+    /// Resets internal state for a new execution cycle.
+    ///
+    /// Call this when the streaming phase has already prepared executors
+    /// and decided permissions, so the executing phase starts with a
+    /// fresh cancellation token.
+    pub fn reset_for_execution(&mut self) {
+        self.cancellation_token = CancellationToken::new();
+    }
+
+    /// Prepares executors for the given tool call requests.
+    ///
+    /// Tools that cannot be resolved (e.g. missing from config or
+    /// definitions) are returned as pre-built error responses rather
+    /// than failing the entire batch.
+    pub fn prepare(&mut self, requests: Vec<ToolCallRequest>) -> Vec<(usize, ToolCallResponse)> {
         self.executors.clear();
         self.clear_tool_states();
         self.cancellation_token = CancellationToken::new();
 
+        let mut unavailable = Vec::new();
         for (index, request) in requests.into_iter().enumerate() {
-            self.tool_states
-                .insert(request.id.clone(), ToolCallState::Queued);
-            let executor = self
-                .executor_source
-                .create(request, &self.tools_config, mcp_client)
-                .await?;
-            self.executors.push((index, executor));
+            match self.prepare_one(request) {
+                Ok(executor) => self.executors.push((index, executor)),
+                Err(response) => unavailable.push((index, response)),
+            }
         }
-        Ok(())
+
+        unavailable
     }
 
+    /// Prepares a single executor for a tool call request.
+    ///
+    /// Returns the executor on success, or an error response if the tool
+    /// cannot be resolved (e.g. missing from config or definitions).
+    pub fn prepare_one(
+        &mut self,
+        request: ToolCallRequest,
+    ) -> Result<Box<dyn Executor>, ToolCallResponse> {
+        self.tool_states
+            .insert(request.id.clone(), ToolCallState::Queued);
+
+        if let Some(executor) = self
+            .tools_config
+            .get(&request.name)
+            .and_then(|config| self.executor_source.create(request.clone(), config))
+        {
+            return Ok(executor);
+        }
+
+        warn!(tool = %request.name, "Tool not available, returning error to LLM");
+        self.set_tool_state(&request.id, ToolCallState::Completed);
+        Err(ToolCallResponse {
+            id: request.id,
+            result: Err(format!(
+                "Tool '{}' is not available. It may have been available earlier in this \
+                 conversation but is no longer enabled. Do not retry this tool until it it is \
+                 available again in the list of enabled tools.",
+                request.name,
+            )),
+        })
+    }
+
+    /// Renders a tool call header + safe arguments (everything except
+    /// Custom formatter output). For Custom styles, only the header is
+    /// printed — call [`render_custom_args`] separately to run the command.
+    fn render_tool(
+        &self,
+        tool_name: &str,
+        arguments: &serde_json::Map<String, Value>,
+        tool_renderer: &ToolRenderer,
+    ) {
+        let is_hidden = self
+            .tools_config
+            .get(tool_name)
+            .is_some_and(|cfg| cfg.style().hidden);
+
+        if is_hidden {
+            return;
+        }
+
+        let style = self.parameter_style(tool_name);
+        tool_renderer.render_tool_call(tool_name, arguments, &style);
+    }
+
+    /// Renders custom formatter output for a tool, if applicable.
+    /// No-ops for non-Custom styles and hidden tools.
+    pub(crate) async fn render_custom_args(
+        &self,
+        tool_name: &str,
+        arguments: &serde_json::Map<String, Value>,
+        tool_renderer: &ToolRenderer,
+    ) {
+        let is_hidden = self
+            .tools_config
+            .get(tool_name)
+            .is_some_and(|cfg| cfg.style().hidden);
+
+        if is_hidden {
+            return;
+        }
+
+        let Some(cmd) = self
+            .parameter_style(tool_name)
+            .into_custom()
+            .map(CommandConfigOrString::command)
+        else {
+            return;
+        };
+
+        tool_renderer
+            .render_custom_arguments(tool_name, arguments, cmd)
+            .await;
+    }
+
+    /// Determines permission for a single tool without blocking on user input.
+    ///
+    /// Returns one of:
+    /// - `Approved` — tool can run immediately (unattended, persisted "y",
+    ///   non-interactive)
+    /// - `Skipped` — tool should not run (persisted "n")
+    /// - `NeedsPrompt` — requires an interactive user prompt
+    pub fn decide_permission(
+        &mut self,
+        executor: Box<dyn Executor>,
+        is_tty: bool,
+        turn_state: &TurnState,
+        tool_renderer: &ToolRenderer,
+    ) -> PermissionDecision {
+        let Some(info) = executor.permission_info() else {
+            // Unattended tool — render if not already shown during
+            // streaming and approve.
+            let id = executor.tool_id();
+            let name = executor.tool_name();
+            let args = executor.arguments();
+            if !tool_renderer.is_rendered(id) {
+                self.render_tool(name, args, tool_renderer);
+            }
+            return PermissionDecision::Approved(executor);
+        };
+
+        if !is_tty && matches!(info.run_mode, RunMode::Ask | RunMode::Edit) {
+            if !tool_renderer.is_rendered(&info.tool_id) {
+                let args_map = info.arguments.as_object().cloned().unwrap_or_default();
+                self.render_tool(&info.tool_name, &args_map, tool_renderer);
+            }
+            self.set_tool_state(&info.tool_id, ToolCallState::Running);
+            return PermissionDecision::Approved(executor);
+        }
+
+        // Check for a persisted permission decision from earlier in this turn.
+        let permission_id = permission_inquiry_id(&info.tool_name);
+        let persisted = turn_state
+            .persisted_inquiry_responses
+            .get(&permission_id)
+            .and_then(|r| r.answer.as_str())
+            .map(str::to_owned);
+
+        if let Some(ref decision) = persisted {
+            match decision.as_str() {
+                "y" | "Y" => {
+                    if !tool_renderer.is_rendered(&info.tool_id) {
+                        let args_map = info.arguments.as_object().cloned().unwrap_or_default();
+                        self.render_tool(&info.tool_name, &args_map, tool_renderer);
+                    }
+                    self.set_tool_state(&info.tool_id, ToolCallState::Running);
+                    return PermissionDecision::Approved(executor);
+                }
+                "n" | "N" => {
+                    self.set_tool_state(&info.tool_id, ToolCallState::Completed);
+                    return PermissionDecision::Skipped(ToolCallResponse {
+                        id: info.tool_id.clone(),
+                        result: Ok("Tool skipped by user (remembered).".to_string()),
+                    });
+                }
+                _ => {} // Unknown value, fall through to prompt
+            }
+        }
+
+        // Needs interactive prompt.
+        if !tool_renderer.is_rendered(&info.tool_id) {
+            let args_map = info.arguments.as_object().cloned().unwrap_or_default();
+            self.render_tool(&info.tool_name, &args_map, tool_renderer);
+        }
+
+        PermissionDecision::NeedsPrompt { executor, info }
+    }
+
+    /// Applies the result of an interactive permission prompt.
+    ///
+    /// Call this after the user answers a prompt for a tool returned as
+    /// [`PermissionDecision::NeedsPrompt`].
+    pub fn apply_permission_result(
+        &mut self,
+        result: Result<PermissionResult, crate::error::Error>,
+        info: &PermissionInfo,
+        turn_state: &mut TurnState,
+        mut executor: Box<dyn Executor>,
+    ) -> Result<Box<dyn Executor>, ToolCallResponse> {
+        let permission_id = permission_inquiry_id(&info.tool_name);
+
+        match result {
+            Ok(PermissionResult::Run { arguments, persist }) => {
+                if persist {
+                    turn_state.persisted_inquiry_responses.insert(
+                        permission_id.clone(),
+                        InquiryResponse::select(permission_id, "y"),
+                    );
+                }
+                executor.set_arguments(arguments);
+                self.set_tool_state(&info.tool_id, ToolCallState::Running);
+                Ok(executor)
+            }
+            Ok(PermissionResult::Skip { reason, persist }) => {
+                if persist {
+                    turn_state.persisted_inquiry_responses.insert(
+                        permission_id.clone(),
+                        InquiryResponse::select(permission_id, "n"),
+                    );
+                }
+                self.set_tool_state(&info.tool_id, ToolCallState::Completed);
+                let msg = if let Some(r) = reason {
+                    format!("Tool skipped by user: {r}")
+                } else {
+                    "Tool skipped by user.".to_string()
+                };
+                Err(ToolCallResponse {
+                    id: info.tool_id.clone(),
+                    result: Ok(msg),
+                })
+            }
+            Err(e) => {
+                self.set_tool_state(&info.tool_id, ToolCallState::Completed);
+                Err(ToolCallResponse {
+                    id: info.tool_id.clone(),
+                    result: Err(format!("Permission prompt failed: {e}")),
+                })
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
     pub async fn run_permission_phase(
         &mut self,
         prompter: &ToolPrompter,
         mcp_client: &Client,
         is_tty: bool,
         turn_state: &mut TurnState,
+        tool_renderer: &ToolRenderer,
     ) -> (
         Vec<(usize, Box<dyn Executor>)>,
         Vec<(usize, ToolCallResponse)>,
@@ -350,84 +582,33 @@ impl ToolCoordinator {
         let mut skipped_responses = Vec::new();
 
         for (index, executor) in std::mem::take(&mut self.executors) {
-            let Some(info) = executor.permission_info() else {
-                approved_executors.push((index, executor));
-                continue;
-            };
+            let decision = self.decide_permission(executor, is_tty, turn_state, tool_renderer);
 
-            if !is_tty && matches!(info.run_mode, RunMode::Ask | RunMode::Edit) {
-                self.set_tool_state(&info.tool_id, ToolCallState::Running);
-                approved_executors.push((index, executor));
-                continue;
-            }
-
-            // Check for a persisted permission decision from earlier in this turn.
-            let permission_id = permission_inquiry_id(&info.tool_name);
-            let persisted = turn_state
-                .persisted_inquiry_responses
-                .get(&permission_id)
-                .and_then(|r| r.answer.as_str())
-                .map(str::to_owned);
-
-            if let Some(ref decision) = persisted {
-                match decision.as_str() {
-                    "y" | "Y" => {
-                        self.set_tool_state(&info.tool_id, ToolCallState::Running);
-                        approved_executors.push((index, executor));
-                        continue;
-                    }
-                    "n" | "N" => {
-                        self.set_tool_state(&info.tool_id, ToolCallState::Completed);
-                        skipped_responses.push((index, ToolCallResponse {
-                            id: info.tool_id.clone(),
-                            result: Ok("Tool skipped by user (remembered).".to_string()),
-                        }));
-                        continue;
-                    }
-                    _ => {} // Unknown value, fall through to prompt
-                }
-            }
-
-            self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
-            let result = prompter.prompt_permission(&info, mcp_client).await;
-
-            match result {
-                Ok(PermissionResult::Run { arguments, persist }) => {
-                    if persist {
-                        turn_state.persisted_inquiry_responses.insert(
-                            permission_id.clone(),
-                            InquiryResponse::select(permission_id, "y"),
-                        );
-                    }
-                    let mut executor = executor;
-                    executor.set_arguments(arguments);
-                    self.set_tool_state(&info.tool_id, ToolCallState::Running);
+            match decision {
+                PermissionDecision::Approved(executor) => {
+                    let name = executor.tool_name().to_owned();
+                    let args = executor.arguments().clone();
+                    self.render_custom_args(&name, &args, tool_renderer).await;
                     approved_executors.push((index, executor));
                 }
-                Ok(PermissionResult::Skip { reason, persist }) => {
-                    if persist {
-                        turn_state.persisted_inquiry_responses.insert(
-                            permission_id.clone(),
-                            InquiryResponse::select(permission_id, "n"),
-                        );
-                    }
-                    self.set_tool_state(&info.tool_id, ToolCallState::Completed);
-                    let msg = if let Some(r) = reason {
-                        format!("Tool skipped by user: {r}")
-                    } else {
-                        "Tool skipped by user.".to_string()
-                    };
-                    skipped_responses.push((index, ToolCallResponse {
-                        id: info.tool_id.clone(),
-                        result: Ok(msg),
-                    }));
+                PermissionDecision::Skipped(response) => {
+                    skipped_responses.push((index, response));
                 }
-                Err(e) => {
-                    self.set_tool_state(&info.tool_id, ToolCallState::Completed);
-                    skipped_responses.push((index, ToolCallResponse {
-                        id: info.tool_id.clone(),
-                        result: Err(format!("Permission prompt failed: {e}")),
-                    }));
+                PermissionDecision::NeedsPrompt { executor, info } => {
+                    self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
+                    let result = prompter.prompt_permission(&info, mcp_client).await;
+
+                    match self.apply_permission_result(result, &info, turn_state, executor) {
+                        Ok(executor) => {
+                            let args = executor.arguments().clone();
+                            self.render_custom_args(&info.tool_name, &args, tool_renderer)
+                                .await;
+                            approved_executors.push((index, executor));
+                        }
+                        Err(response) => {
+                            skipped_responses.push((index, response));
+                        }
+                    }
                 }
             }
         }
@@ -471,33 +652,9 @@ impl ToolCoordinator {
         for (index, executor) in executors {
             let tool_id = executor.tool_id().to_string();
             let tool_name = executor.tool_name().to_string();
-            let arguments = executor.arguments().clone();
-
             let accumulated_answers = self.static_answers_for_all_questions(&tool_name);
 
             let executor: Arc<dyn Executor> = Arc::from(executor);
-
-            let is_hidden = self
-                .tools_config
-                .get(&tool_name)
-                .is_some_and(|cfg| cfg.style().hidden);
-
-            if !tool_renderer.is_rendered(&tool_id) && !is_hidden {
-                tool_renderer.render_call_header(&tool_name);
-
-                let style = self.parameter_style(&tool_name);
-                if let Err(error) = tool_renderer
-                    .render_arguments(&tool_name, &arguments, &style)
-                    .await
-                {
-                    self.set_tool_state(&tool_id, ToolCallState::Completed);
-                    results[index] = Some(ToolCallResponse {
-                        id: tool_id,
-                        result: Err(error),
-                    });
-                    continue;
-                }
-            }
 
             executing_tools.insert(index, ExecutingTool {
                 executor: Arc::clone(&executor),

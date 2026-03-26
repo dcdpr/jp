@@ -11,34 +11,42 @@ use std::{
 };
 
 use camino::Utf8Path;
-use futures::{Stream, StreamExt as _, stream::SelectAll};
+use futures::{Stream, StreamExt as _, future, stream::SelectAll};
+use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::{
-    AppConfig, assistant::tool_choice::ToolChoice, conversation::tool::style::ParametersStyle,
-    style::streaming::StreamingConfig,
+    AppConfig, PartialConfig, assistant::tool_choice::ToolChoice,
+    conversation::tool::QuestionTarget, model::id::ProviderId, style::streaming::StreamingConfig,
 };
 use jp_conversation::{
     ConversationId,
-    event::{ChatRequest, ToolCallRequest},
+    event::{ChatRequest, ToolCallRequest, ToolCallResponse},
 };
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
-    Provider, error::StreamError, event::Event, model::ModelDetails, query::ChatQuery,
-    tool::ToolDefinition,
+    Provider,
+    error::StreamError,
+    event::Event,
+    model::ModelDetails,
+    provider::get_provider,
+    query::ChatQuery,
+    tool::{ToolDefinition, executor::Executor},
 };
 use jp_printer::Printer;
 use jp_workspace::Workspace;
+use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream, errors::BroadcastStreamRecvError};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use super::{
     build_sections, build_thread,
     interrupt::{LoopAction, handle_llm_event, handle_streaming_signal},
     stream::{StreamRetryState, handle_stream_error},
     tool::{
-        FormatResult, ToolCallState, ToolCoordinator, ToolPrompter, ToolRenderer,
+        PermissionDecision, ToolCallState, ToolCoordinator, ToolPrompter, ToolRenderer,
         inquiry::{InquiryBackend, InquiryConfig, LlmInquiryBackend},
+        spawn_line_timer,
     },
     turn::{Action, TurnCoordinator, TurnPhase, TurnState},
 };
@@ -56,8 +64,6 @@ enum StreamingLoopEvent {
     /// A tick from the preparing indicator timer, carrying the elapsed
     /// time since the timer started.
     PreparingTick(Duration),
-    /// Async argument formatting completed (Custom style).
-    FormatComplete(FormatResult),
 }
 
 /// Wrapper enum that unifies heterogeneous stream sources for
@@ -66,19 +72,17 @@ enum StreamingLoopEvent {
 /// Each variant holds a different concrete stream type, but they all
 /// yield [`StreamingLoopEvent`]. This avoids boxing while allowing
 /// `select_all` to poll them as a single merged stream.
-enum StreamSource<S, L, T, F> {
+enum StreamSource<S, L, T> {
     Signal(S),
     Llm(L),
     Tick(T),
-    Format(F),
 }
 
-impl<S, L, T, F> Stream for StreamSource<S, L, T, F>
+impl<S, L, T> Stream for StreamSource<S, L, T>
 where
     S: Stream<Item = StreamingLoopEvent> + Unpin,
     L: Stream<Item = StreamingLoopEvent> + Unpin,
     T: Stream<Item = StreamingLoopEvent> + Unpin,
-    F: Stream<Item = StreamingLoopEvent> + Unpin,
 {
     type Item = StreamingLoopEvent;
 
@@ -87,7 +91,6 @@ where
             Self::Signal(s) => Pin::new(s).poll_next(cx),
             Self::Llm(s) => Pin::new(s).poll_next(cx),
             Self::Tick(s) => Pin::new(s).poll_next(cx),
-            Self::Format(s) => Pin::new(s).poll_next(cx),
         }
     }
 }
@@ -99,12 +102,12 @@ fn spawn_waiting_indicator(
     printer: Arc<Printer>,
     config: &StreamingConfig,
     is_tty: bool,
-) -> Option<(CancellationToken, tokio::task::JoinHandle<()>)> {
+) -> Option<(CancellationToken, JoinHandle<()>)> {
     if !is_tty {
         return None;
     }
 
-    super::tool::spawn_line_timer(
+    spawn_line_timer(
         printer,
         config.progress.show,
         Duration::from_secs(u64::from(config.progress.delay_secs)),
@@ -163,79 +166,36 @@ pub(super) async fn run_turn_loop(
         is_tty,
     );
 
-    let sections = build_sections(&cfg.assistant, !tools.is_empty());
-    let inquiry_backend: Arc<dyn InquiryBackend> = {
-        let inquiry_override = &cfg.conversation.inquiry.assistant;
-
-        // Use the inquiry system prompt if configured, otherwise fall back to
-        // the parent assistant's system prompt.
-        let default_system_prompt = inquiry_override
-            .system_prompt
-            .clone()
-            .or_else(|| cfg.assistant.system_prompt.clone().map(String::from));
-
-        // Track providers we've already constructed to avoid duplicates.
-        let mut providers: indexmap::IndexMap<jp_config::model::id::ProviderId, Arc<dyn Provider>> =
-            indexmap::IndexMap::new();
-
-        // Build the default InquiryConfig from the global inquiry override
-        // merged with the parent assistant config.
-        let default_config = if let Some(inquiry_model_cfg) = inquiry_override.model.as_ref() {
-            let inquiry_model_id = inquiry_model_cfg.id.resolved();
-            let inquiry_provider: Arc<dyn Provider> = Arc::from(jp_llm::provider::get_provider(
-                inquiry_model_id.provider,
-                &cfg.providers.llm,
-            )?);
-            let inquiry_model = inquiry_provider
-                .model_details(&inquiry_model_id.name)
-                .await?;
-
-            if inquiry_model.structured_output == Some(false) {
-                warn!(
-                    model = %inquiry_model_id,
-                    "Inquiry model does not support structured output. \
-                     Inquiry responses may be unreliable.",
-                );
-            }
-
-            info!(
-                model = inquiry_model.name(),
-                "Using dedicated model for inquiries.",
-            );
-
-            providers.insert(inquiry_model_id.provider, Arc::clone(&inquiry_provider));
-
-            InquiryConfig {
-                provider: inquiry_provider,
-                model: inquiry_model,
-                system_prompt: default_system_prompt,
-                sections: sections.clone(),
-            }
-        } else {
-            providers.insert(model.id.provider, Arc::clone(&provider));
-
-            InquiryConfig {
-                provider: Arc::clone(&provider),
-                model: model.clone(),
-                system_prompt: default_system_prompt,
-                sections: sections.clone(),
-            }
-        };
-
-        let overrides = build_inquiry_overrides(cfg, &default_config, &mut providers).await?;
-
-        Arc::new(LlmInquiryBackend::new(
-            default_config,
-            overrides,
-            attachments.to_vec(),
-            tools.to_vec(),
-        ))
-    };
+    let inquiry_backend: Arc<dyn InquiryBackend> = build_inquiry_backend(
+        cfg,
+        tools.to_vec(),
+        model.clone(),
+        provider.clone(),
+        attachments.to_vec(),
+    )
+    .await?;
 
     info!(model = model.name(), "Starting conversation turn.");
 
     // Track any tool call that needs to be restarted before the turn ends.
     let mut pending_restart_calls: Option<Vec<ToolCallRequest>> = None;
+
+    // Permission results collected during the streaming phase,
+    // consumed by the executing phase: (approved, skipped, unavailable).
+    #[allow(clippy::type_complexity)]
+    let mut streaming_perm_results: Option<(
+        Vec<(usize, Box<dyn Executor>)>,
+        Vec<(usize, ToolCallResponse)>,
+        Vec<(usize, ToolCallResponse)>,
+    )> = None;
+
+    // Prompter shared between streaming (permission prompts) and
+    // executing (tool question prompts) phases.
+    let prompter = Arc::new(ToolPrompter::with_prompt_backend(
+        printer.clone(),
+        cfg.editor.path(),
+        prompt_backend.clone(),
+    ));
 
     loop {
         match turn_coordinator.current_phase() {
@@ -285,7 +245,7 @@ pub(super) async fn run_turn_loop(
                 // Build the three event sources for the streaming loop.
                 let sig_stream = StreamSource::Signal(
                     BroadcastStream::new(signals.resubscribe()).filter_map(|result| {
-                        futures::future::ready(match result {
+                        future::ready(match result {
                             Ok(signal) => Some(StreamingLoopEvent::Signal(signal)),
                             Err(BroadcastStreamRecvError::Lagged(n)) => {
                                 warn!("Missed {n} signals due to receiver lag");
@@ -299,12 +259,9 @@ pub(super) async fn run_turn_loop(
                     provider
                         .chat_completion_stream(model, query)
                         .await
-                        .map_err(|e| {
-                            // Convert to cli Error for the ? below.
-                            map_llm_error(e, vec![])
-                        })?
+                        .map_err(|e| map_llm_error(e, vec![]))?
                         .fuse()
-                        .map(|e| StreamingLoopEvent::Llm(Box::new(e))),
+                        .map(|result| StreamingLoopEvent::Llm(Box::new(result))),
                 );
                 turn_state.request_count += 1;
 
@@ -312,21 +269,21 @@ pub(super) async fn run_turn_loop(
                 tool_renderer.reset();
 
                 // Channel for preparing ticks. The sender is passed to
-                // PreparingDisplay which spawns a timer task. The receiver
-                // is merged into the event loop via SelectAll.
-                let (tick_tx, tick_rx) = tokio::sync::mpsc::channel::<Duration>(1);
+                // PreparingDisplay which spawns a timer task. The receiver is
+                // merged into the event loop via SelectAll.
+                let (tick_tx, tick_rx) = mpsc::channel::<Duration>(1);
                 let tick_stream = StreamSource::Tick(
                     ReceiverStream::new(tick_rx).map(StreamingLoopEvent::PreparingTick),
                 );
 
-                // Channel for async argument formatting results (Custom style).
-                let (format_tx, format_rx) = tokio::sync::mpsc::channel::<FormatResult>(16);
-                let format_stream = StreamSource::Format(
-                    ReceiverStream::new(format_rx).map(StreamingLoopEvent::FormatComplete),
-                );
+                // Permission results collected during the streaming phase.
+                let mut perm_approved = vec![];
+                let mut perm_skipped = vec![];
+                let mut perm_unavailable = vec![];
+                let mut perm_tool_index: usize = 0;
 
                 let mut streams: SelectAll<_> =
-                    SelectAll::from_iter([sig_stream, llm_stream, tick_stream, format_stream]);
+                    SelectAll::from_iter([sig_stream, llm_stream, tick_stream]);
 
                 let conversation_stream = workspace
                     .get_events_mut(&conversation_id)
@@ -334,8 +291,8 @@ pub(super) async fn run_turn_loop(
 
                 while let Some(event) = streams.next().await {
                     // Cancel and await the waiting indicator on the first
-                    // event, ensuring its cleanup (line clear) completes
-                    // before we render any content.
+                    // event, ensuring its cleanup (line clear) completes before
+                    // we render any content.
                     if let Some(handle) = waiting_handle.take() {
                         if let Some(token) = &waiting_token {
                             token.cancel();
@@ -392,14 +349,14 @@ pub(super) async fn run_turn_loop(
                                 }
                             };
 
-                            // Register preparing tool calls. Flush the
-                            // markdown buffer first so buffered text appears
-                            // before the "Calling tool" line (fixes Issue 1).
+                            // Register preparing tool calls. Flush the markdown
+                            // buffer first so buffered text appears before the
+                            // "Calling tool" line (fixes Issue 1).
                             if let Event::Part { ref event, .. } = event
                                 && let Some(req) = event.as_tool_call_request()
                             {
                                 turn_coordinator.flush_renderer();
-                                turn_coordinator.reset_content_kind();
+                                turn_coordinator.transition_to_tool_call();
 
                                 tool_renderer.register(&req.id, &req.name, &tick_tx);
                                 tool_coordinator.set_tool_state(
@@ -423,55 +380,98 @@ pub(super) async fn run_turn_loop(
                                 LoopAction::Return(()) => return Ok(()),
                             }
 
-                            // On Flush of a tool call: format arguments and
-                            // print the permanent line (or spawn async for
-                            // Custom style).
+                            // On Flush of a tool call: print a permanent
+                            // "Calling tool X(args)" line, prepare the
+                            // executor, and decide permission immediately. For
+                            // Custom style, format_args returns empty so only
+                            // the header is printed; the custom command runs
+                            // later after approval.
                             if is_flush
-                                && let Some(last) = conversation_stream.last()
-                                && let Some(req) = last.as_tool_call_request()
+                                && let Some(req) = conversation_stream
+                                    .last()
+                                    .as_ref()
+                                    .and_then(|e| e.as_tool_call_request())
                             {
                                 tool_coordinator.set_tool_state(&req.id, ToolCallState::Queued);
 
                                 let style = tool_coordinator.parameter_style(&req.name);
-                                if matches!(style, ParametersStyle::Custom(_)) {
-                                    // Spawn async formatting for Custom style.
-                                    let format_root = root.to_path_buf();
-                                    let id = req.id.clone();
-                                    let name = req.name.clone();
-                                    let args = req.arguments.clone();
-                                    let tx = format_tx.clone();
-                                    tokio::spawn(async move {
-                                        let formatted = super::tool::renderer::format_args(
-                                            &name,
-                                            &args,
-                                            &style,
-                                            &format_root,
-                                        )
-                                        .await;
-                                        drop(
-                                            tx.send(FormatResult {
-                                                id,
-                                                name,
-                                                formatted,
-                                            })
-                                            .await,
+                                let hidden = tool_coordinator.is_hidden(&req.name);
+                                tool_renderer.complete(
+                                    &req.id,
+                                    &req.name,
+                                    &req.arguments,
+                                    &style,
+                                    !hidden,
+                                );
+
+                                // Prepare executor and decide permission.
+                                let idx = perm_tool_index;
+                                perm_tool_index += 1;
+
+                                match tool_coordinator.prepare_one(req.clone()) {
+                                    Ok(executor) => {
+                                        let decision = tool_coordinator.decide_permission(
+                                            executor,
+                                            is_tty,
+                                            &turn_state,
+                                            &tool_renderer,
                                         );
-                                    });
-                                } else {
-                                    // Non-Custom styles are pure formatting (no I/O).
-                                    let formatted = super::tool::renderer::format_args(
-                                        &req.name,
-                                        &req.arguments,
-                                        &style,
-                                        root,
-                                    )
-                                    .await;
-                                    match formatted {
-                                        Ok(args) => {
-                                            tool_renderer.complete(&req.id, &req.name, &args);
+                                        match decision {
+                                            PermissionDecision::Approved(exec) => {
+                                                let name = exec.tool_name().to_owned();
+                                                let args = exec.arguments().clone();
+                                                tool_coordinator
+                                                    .render_custom_args(
+                                                        &name,
+                                                        &args,
+                                                        &tool_renderer,
+                                                    )
+                                                    .await;
+                                                perm_approved.push((idx, exec));
+                                            }
+                                            PermissionDecision::Skipped(resp) => {
+                                                perm_skipped.push((idx, resp));
+                                            }
+                                            PermissionDecision::NeedsPrompt {
+                                                executor: exec,
+                                                info,
+                                            } => {
+                                                tool_coordinator.set_tool_state(
+                                                    &info.tool_id,
+                                                    ToolCallState::AwaitingPermission,
+                                                );
+                                                // Await the prompt inline. This pauses
+                                                // the event loop — LLM events buffer in
+                                                // the channel and are processed after
+                                                // the user answers.
+                                                let result = prompter
+                                                    .prompt_permission(&info, mcp_client)
+                                                    .await;
+                                                match tool_coordinator.apply_permission_result(
+                                                    result,
+                                                    &info,
+                                                    &mut turn_state,
+                                                    exec,
+                                                ) {
+                                                    Ok(exec) => {
+                                                        let args = exec.arguments().clone();
+                                                        tool_coordinator
+                                                            .render_custom_args(
+                                                                &info.tool_name,
+                                                                &args,
+                                                                &tool_renderer,
+                                                            )
+                                                            .await;
+                                                        perm_approved.push((idx, exec));
+                                                    }
+                                                    Err(resp) => {
+                                                        perm_skipped.push((idx, resp));
+                                                    }
+                                                }
+                                            }
                                         }
-                                        Err(_) => tool_renderer.remove_pending(&req.id),
                                     }
+                                    Err(resp) => perm_unavailable.push((idx, resp)),
                                 }
                             }
 
@@ -484,70 +484,115 @@ pub(super) async fn run_turn_loop(
                         StreamingLoopEvent::PreparingTick(elapsed) => {
                             tool_renderer.tick(elapsed);
                         }
-
-                        StreamingLoopEvent::FormatComplete(result) => match result.formatted {
-                            Ok(formatted) => {
-                                tool_renderer.complete(&result.id, &result.name, &formatted);
-                            }
-                            Err(_) => {
-                                tool_renderer.remove_pending(&result.id);
-                            }
-                        },
                     }
                 }
 
                 // Clean up any preparing state on early loop exit.
                 tool_renderer.cancel_all();
 
+                // Stash streaming-phase permission results for the
+                // executing phase to consume.
+                streaming_perm_results = Some((perm_approved, perm_skipped, perm_unavailable));
+
                 workspace.persist_active_conversation()?;
             }
 
             TurnPhase::Executing => {
-                // Use restart calls if available, otherwise take from
-                // coordinator. These are mutually exclusive:
-                //
-                // - Restart: we stayed in Executing, so coordinator has no new
-                //   calls.
-                // - Normal: pending_restart_calls is None, take from
-                //   coordinator.
-                let calls = pending_restart_calls
-                    .take()
-                    .unwrap_or_else(|| turn_coordinator.take_pending_tool_calls());
+                // If restarting, use the batch path (re-prepare + full
+                // permission phase). Otherwise consume the results
+                // collected during the streaming phase.
+                if let Some(restart_calls) = pending_restart_calls.take() {
+                    if restart_calls.is_empty() {
+                        break;
+                    }
 
-                if calls.is_empty() {
+                    let original_calls = restart_calls.clone();
+                    let unavailable_responses = tool_coordinator.prepare(restart_calls);
+                    let restart_prompter = ToolPrompter::with_prompt_backend(
+                        printer.clone(),
+                        cfg.editor.path(),
+                        prompt_backend.clone(),
+                    );
+                    let (executors, skipped_responses) = tool_coordinator
+                        .run_permission_phase(
+                            &restart_prompter,
+                            mcp_client,
+                            is_tty,
+                            &mut turn_state,
+                            &tool_renderer,
+                        )
+                        .await;
+
+                    let inquiry_events = workspace
+                        .get_events_mut(&conversation_id)
+                        .expect("conversation must exist");
+
+                    let execution_result = tool_coordinator
+                        .execute_with_prompting(
+                            executors,
+                            restart_prompter.into(),
+                            signals.resubscribe(),
+                            &mut turn_coordinator,
+                            &mut turn_state,
+                            &printer,
+                            prompt_backend.as_ref(),
+                            Arc::clone(&inquiry_backend),
+                            inquiry_events,
+                            mcp_client,
+                            root,
+                            &tool_renderer,
+                            is_tty,
+                        )
+                        .await;
+
+                    if execution_result.restart_requested {
+                        pending_restart_calls = Some(original_calls);
+                        continue;
+                    }
+
+                    let mut indexed_responses: Vec<(usize, _)> =
+                        execution_result.responses.into_iter().enumerate().collect();
+                    indexed_responses.extend(skipped_responses);
+                    indexed_responses.extend(unavailable_responses);
+                    indexed_responses.sort_by_key(|(index, _)| *index);
+                    let responses: Vec<_> = indexed_responses.into_iter().map(|(_, r)| r).collect();
+
+                    let ws_stream = workspace
+                        .get_events_mut(&conversation_id)
+                        .expect("conversation must exist");
+
+                    if let Action::SendFollowUp =
+                        turn_coordinator.handle_tool_responses(ws_stream, responses)
+                    {
+                        tool_choice = ToolChoice::Auto;
+                    }
+
+                    workspace.persist_active_conversation()?;
+                    continue;
+                }
+
+                // Normal path: consume results collected during streaming.
+                let (approved, skipped, unavailable) =
+                    streaming_perm_results.take().unwrap_or_default();
+
+                // Save original calls for potential restart.
+                let original_calls = turn_coordinator.take_pending_tool_calls();
+
+                if approved.is_empty() && skipped.is_empty() && unavailable.is_empty() {
                     break;
                 }
 
-                // Store tool calls for potential restart
-                let original_calls = calls.clone();
+                // Reset coordinator state for the execution phase.
+                tool_coordinator.reset_for_execution();
 
-                if let Err(error) = tool_coordinator.prepare(calls, mcp_client).await {
-                    error!(error = error.to_string(), "Failed to prepare tools");
-                }
-
-                // Note: cancellation_token is handled internally by execute_with_prompting
-
-                // Run permission phase - prompts user for each tool that needs it.
-                // This sets tool states to AwaitingPermission during prompts.
-                // Use the injected prompt backend for testability.
-                let prompter = ToolPrompter::with_prompt_backend(
-                    printer.clone(),
-                    cfg.editor.path(),
-                    prompt_backend.clone(),
-                );
-                let (executors, skipped_responses) = tool_coordinator
-                    .run_permission_phase(&prompter, mcp_client, is_tty, &mut turn_state)
-                    .await;
-
-                // Execute approved tools with streaming results and prompting
                 let inquiry_events = workspace
                     .get_events_mut(&conversation_id)
                     .expect("conversation must exist");
 
                 let execution_result = tool_coordinator
                     .execute_with_prompting(
-                        executors,
-                        prompter.into(),
+                        approved,
+                        Arc::clone(&prompter),
                         signals.resubscribe(),
                         &mut turn_coordinator,
                         &mut turn_state,
@@ -562,18 +607,15 @@ pub(super) async fn run_turn_loop(
                     )
                     .await;
 
-                // If restart was requested, re-execute with the original calls
-                // instead of adding the cancelled responses to the conversation
                 if execution_result.restart_requested {
                     pending_restart_calls = Some(original_calls);
                     continue;
                 }
 
-                // Combine execution responses with skipped responses and sort
-                // by original index to maintain request order
                 let mut indexed_responses: Vec<(usize, _)> =
                     execution_result.responses.into_iter().enumerate().collect();
-                indexed_responses.extend(skipped_responses);
+                indexed_responses.extend(skipped);
+                indexed_responses.extend(unavailable);
                 indexed_responses.sort_by_key(|(index, _)| *index);
                 let responses: Vec<_> = indexed_responses.into_iter().map(|(_, r)| r).collect();
 
@@ -595,29 +637,99 @@ pub(super) async fn run_turn_loop(
     Ok(())
 }
 
+async fn build_inquiry_backend(
+    cfg: &AppConfig,
+    tools: Vec<ToolDefinition>,
+    model: ModelDetails,
+    provider: Arc<dyn Provider>,
+    attachments: Vec<Attachment>,
+) -> Result<Arc<LlmInquiryBackend>, Error> {
+    let sections = build_sections(&cfg.assistant, !tools.is_empty());
+    let inquiry_override = &cfg.conversation.inquiry.assistant;
+
+    // Use the inquiry system prompt if configured, otherwise fall back to the
+    // parent assistant's system prompt.
+    let default_system_prompt = inquiry_override
+        .system_prompt
+        .clone()
+        .or_else(|| cfg.assistant.system_prompt.clone().map(String::from));
+
+    // Track providers we've already constructed to avoid duplicates.
+    let mut providers: IndexMap<ProviderId, Arc<dyn Provider>> = IndexMap::new();
+
+    // Build the default InquiryConfig from the global inquiry override
+    // merged with the parent assistant config.
+    let default_config = if let Some(inquiry_model_cfg) = inquiry_override.model.as_ref() {
+        let inquiry_model_id = inquiry_model_cfg.id.resolved();
+        let inquiry_provider: Arc<dyn Provider> =
+            Arc::from(get_provider(inquiry_model_id.provider, &cfg.providers.llm)?);
+        let inquiry_model = inquiry_provider
+            .model_details(&inquiry_model_id.name)
+            .await?;
+
+        if inquiry_model.structured_output == Some(false) {
+            warn!(
+                model = inquiry_model_id.to_string(),
+                "Inquiry model does not support structured output. Inquiry responses may be \
+                 unreliable.",
+            );
+        }
+
+        info!(
+            model = inquiry_model.name(),
+            "Using dedicated model for inquiries."
+        );
+
+        providers.insert(inquiry_model_id.provider, Arc::clone(&inquiry_provider));
+
+        InquiryConfig {
+            provider: inquiry_provider,
+            model: inquiry_model,
+            system_prompt: default_system_prompt,
+            sections: sections.clone(),
+        }
+    } else {
+        providers.insert(model.id.provider, Arc::clone(&provider));
+
+        InquiryConfig {
+            provider: Arc::clone(&provider),
+            model: model.clone(),
+            system_prompt: default_system_prompt,
+            sections: sections.clone(),
+        }
+    };
+
+    let overrides = build_inquiry_overrides(cfg, &default_config, &mut providers).await?;
+
+    Ok(Arc::new(LlmInquiryBackend::new(
+        default_config,
+        overrides,
+        attachments,
+        tools,
+    )))
+}
+
 /// Walk active tool configs to build per-question [`InquiryConfig`] overrides
 /// from `QuestionTarget::Assistant(config)` entries that have non-empty config.
 async fn build_inquiry_overrides(
     cfg: &AppConfig,
     default_config: &InquiryConfig,
-    providers: &mut indexmap::IndexMap<jp_config::model::id::ProviderId, Arc<dyn Provider>>,
-) -> Result<indexmap::IndexMap<(String, String), InquiryConfig>, Error> {
-    let mut overrides = indexmap::IndexMap::new();
+    providers: &mut IndexMap<ProviderId, Arc<dyn Provider>>,
+) -> Result<IndexMap<(String, String), InquiryConfig>, Error> {
+    let mut overrides = IndexMap::new();
 
     for (tool_name, tool_cfg) in cfg.conversation.tools.iter() {
         for (question_id, question_cfg) in tool_cfg.questions() {
-            let jp_config::conversation::tool::QuestionTarget::Assistant(ref per_q) =
-                question_cfg.target
-            else {
+            let QuestionTarget::Assistant(ref per_q) = question_cfg.target else {
                 continue;
             };
-            if jp_config::PartialConfig::is_empty(per_q.as_ref()) {
+            if PartialConfig::is_empty(per_q.as_ref()) {
                 continue;
             }
 
             // Resolve per-question model (if overridden), falling back to
             // the default inquiry config's model.
-            let has_model_override = !jp_config::PartialConfig::is_empty(&per_q.model.id);
+            let has_model_override = !PartialConfig::is_empty(&per_q.model.id);
             let (inq_provider, inq_model) = if has_model_override {
                 let model_id = per_q
                     .model
@@ -628,10 +740,8 @@ async fn build_inquiry_overrides(
                 let prov = if let Some(p) = providers.get(&model_id.provider) {
                     Arc::clone(p)
                 } else {
-                    let p: Arc<dyn Provider> = Arc::from(jp_llm::provider::get_provider(
-                        model_id.provider,
-                        &cfg.providers.llm,
-                    )?);
+                    let p: Arc<dyn Provider> =
+                        Arc::from(get_provider(model_id.provider, &cfg.providers.llm)?);
                     providers.insert(model_id.provider, Arc::clone(&p));
                     p
                 };

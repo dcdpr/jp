@@ -330,7 +330,7 @@ impl Query {
         // If we have a query, and it was built from the editor, we print it
         // to the terminal for convenience, formatted as markdown.
         if query_file.is_some() {
-            let pretty = ctx.printer.pretty_printing();
+            let pretty = ctx.printer.pretty_printing_enabled();
             let formatter = Formatter::with_width(cfg.style.markdown.wrap_width)
                 .table_max_column_width(cfg.style.markdown.table_max_column_width)
                 .theme(if pretty {

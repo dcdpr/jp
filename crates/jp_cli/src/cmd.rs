@@ -43,7 +43,7 @@ pub(crate) enum Commands {
 impl Commands {
     pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         match self {
-            Commands::Query(args) => args.run(ctx).await,
+            Commands::Query(args) => Box::pin(args.run(ctx)).await,
             Commands::Config(args) => args.run(ctx),
             Commands::Attachment(args) => args.run(ctx),
             Commands::AttachmentAdd(args) => args.run(ctx),

@@ -384,8 +384,6 @@ async fn llm_backend_uses_per_question_override() {
     assert_eq!(result.unwrap(), json!(true));
 }
 
-// -- second_last_visible_event_index tests --
-
 #[test]
 fn visible_index_empty_stream() {
     let events = ConversationStream::new_test();
@@ -451,8 +449,6 @@ fn visible_index_skips_inquiry_request() {
         EventKind::ToolCallRequest(_)
     ));
 }
-
-// -- estimate_fixed_overhead_chars tests --
 
 #[test]
 fn overhead_empty_inputs() {
@@ -534,8 +530,6 @@ fn overhead_combines_all_sources() {
     assert_eq!(combined, sum);
 }
 
-// -- token_budget / token_target with overhead --
-
 #[test]
 fn budget_subtracts_overhead() {
     let no_overhead = token_budget(1000, 0);
@@ -555,8 +549,6 @@ fn target_subtracts_overhead() {
     let with_overhead = token_target(1000, 500);
     assert_eq!(no_overhead - 500, with_overhead);
 }
-
-// -- truncate_to_fit with overhead --
 
 #[test]
 fn truncate_no_op_when_within_budget() {

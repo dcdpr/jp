@@ -206,6 +206,7 @@ impl ToolPrompter {
             SelectOption::new("Y", "Run tool, remember for this turn"),
             SelectOption::new("n", "Skip running tool"),
             SelectOption::new("N", "Skip running tool, remember for this turn"),
+            SelectOption::new("p", "Print arguments as JSON"),
         ];
 
         if self.editor.is_some() {
@@ -270,6 +271,13 @@ impl ToolPrompter {
                         reason,
                         persist: false,
                     });
+                }
+                Ok('p') => {
+                    // Print raw JSON arguments
+                    let json = serde_json::to_string_pretty(&current_args)
+                        .unwrap_or_else(|_| format!("{current_args}"));
+                    drop(writeln!(writer, "\n```json\n{json}\n```"));
+                    // Loop back to prompt
                 }
                 Ok('e') => {
                     match self.try_edit_arguments(&current_args)? {
@@ -488,7 +496,7 @@ impl ToolPrompter {
             ToolSource::Mcp { .. } => "mcp",
         };
 
-        let mut question = format!("Run {} {} tool", source_type, tool_name.yellow().bold(),);
+        let mut question = format!("Run {} {} tool", source_type, tool_name.yellow().bold());
 
         if let ToolSource::Mcp { server, tool } = tool_source {
             let tool_id = McpToolId::new(tool.as_ref().unwrap_or(&tool_name.to_string()));

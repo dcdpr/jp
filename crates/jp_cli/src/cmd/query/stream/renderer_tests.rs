@@ -411,3 +411,43 @@ fn test_no_separator_for_consecutive_messages() {
     printer.flush();
     assert_eq!(*out.lock(), "First  Second\n\n");
 }
+
+#[test]
+fn test_blank_line_after_tool_calls_before_message() {
+    let (mut renderer, out, printer) = create_renderer();
+
+    renderer.render(&ChatResponse::Message {
+        message: "Before tools\n\n".into(),
+    });
+    printer.flush();
+
+    // Simulate tool calls being rendered between message chunks.
+    // The turn loop calls set_tool_call_kind() when tool calls arrive.
+    renderer.transition_to_tool_call();
+
+    // Next message content should be separated by a blank line.
+    renderer.render(&ChatResponse::Message {
+        message: "After tools\n\n".into(),
+    });
+    printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(output, "Before tools\n\n\nAfter tools\n\n");
+}
+
+#[test]
+fn test_no_blank_line_for_consecutive_messages_without_tool_calls() {
+    let (mut renderer, out, printer) = create_renderer();
+
+    renderer.render(&ChatResponse::Message {
+        message: "First paragraph\n\n".into(),
+    });
+    renderer.render(&ChatResponse::Message {
+        message: "Second paragraph\n\n".into(),
+    });
+    printer.flush();
+
+    let output = out.lock().clone();
+    // No extra blank line between consecutive messages.
+    assert_eq!(output, "First paragraph\n\nSecond paragraph\n\n");
+}

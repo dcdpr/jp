@@ -46,10 +46,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use camino::Utf8Path;
 use indexmap::IndexMap;
-use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolsConfig};
+use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults};
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_llm::{
-    ExecutionOutcome, ToolError,
+    ExecutionOutcome,
     tool::{
         ToolDefinition,
         builtin::BuiltinExecutors,
@@ -83,20 +83,20 @@ impl TerminalExecutorSource {
     }
 }
 
-#[async_trait]
 impl ExecutorSource for TerminalExecutorSource {
-    async fn create(
+    fn create(
         &self,
         request: ToolCallRequest,
-        tools_config: &ToolsConfig,
-        _mcp_client: &Client,
-    ) -> Result<Box<dyn Executor>, ToolError> {
-        Ok(Box::new(ToolExecutor::new(
+        config: ToolConfigWithDefaults,
+    ) -> Option<Box<dyn Executor>> {
+        let definition = self.definitions.get(&request.name)?.clone();
+
+        Some(Box::new(ToolExecutor::new(
             request,
-            tools_config,
-            &self.definitions,
+            config,
+            definition,
             Arc::new(self.builtin_executors.clone()),
-        )?))
+        )))
     }
 }
 
@@ -118,35 +118,18 @@ pub struct ToolExecutor {
 }
 
 impl ToolExecutor {
-    /// Creates a new executor for the given tool call request.
-    ///
-    /// Uses a pre-resolved definition from the `definitions` map instead of
-    /// re-resolving from config + MCP.
-    pub fn new(
+    fn new(
         request: ToolCallRequest,
-        tools_config: &ToolsConfig,
-        definitions: &IndexMap<String, ToolDefinition>,
+        config: ToolConfigWithDefaults,
+        definition: ToolDefinition,
         builtin_executors: Arc<BuiltinExecutors>,
-    ) -> Result<Self, ToolError> {
-        let tool_config = tools_config
-            .get(&request.name)
-            .ok_or_else(|| ToolError::NotFound {
-                name: request.name.clone(),
-            })?;
-
-        let definition = definitions
-            .get(&request.name)
-            .ok_or_else(|| ToolError::NotFound {
-                name: request.name.clone(),
-            })?
-            .clone();
-
-        Ok(Self {
+    ) -> Self {
+        Self {
             request,
-            config: tool_config.clone(),
+            config,
             definition,
             builtin_executors,
-        })
+        }
     }
 }
 

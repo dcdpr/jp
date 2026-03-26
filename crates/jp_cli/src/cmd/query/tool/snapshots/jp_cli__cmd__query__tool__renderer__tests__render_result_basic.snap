@@ -1,0 +1,5 @@
+---
+source: crates/jp_cli/src/cmd/query/tool/renderer_tests.rs
+expression: output
+---
+Hello, world!

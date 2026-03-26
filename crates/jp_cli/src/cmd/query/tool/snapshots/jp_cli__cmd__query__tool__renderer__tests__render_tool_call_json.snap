@@ -1,0 +1,11 @@
+---
+source: crates/jp_cli/src/cmd/query/tool/renderer_tests.rs
+expression: output
+---
+Calling tool fs_read_file with arguments:
+
+```json
+{
+  "path": "/tmp/test.txt"
+}
+```
