@@ -1,5 +1,5 @@
 ---
-source: crates/jp_config/src/lib.rs
+source: crates/jp_config/src/lib_tests.rs
 expression: "PartialAppConfig::empty()"
 ---
 PartialAppConfig {
@@ -71,6 +71,7 @@ PartialAppConfig {
                 request: None,
             },
         },
+        start_local: None,
     },
     style: PartialStyleConfig {
         code: PartialCodeConfig {

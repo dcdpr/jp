@@ -20,7 +20,7 @@ use crate::{
     },
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_vec},
     model::{ModelConfig, PartialModelConfig},
-    partial::{ToPartial, partial_opts},
+    partial::{ToPartial, partial_opt, partial_opts},
 };
 
 /// Conversation-specific configuration.
@@ -52,6 +52,10 @@ pub struct ConversationConfig {
     /// assistant a question (via `QuestionTarget::Assistant`).
     #[setting(nested)]
     pub inquiry: InquiryConfig,
+
+    /// Whether to store new conversations in the user-local workspace storage.
+    #[setting(default)]
+    pub start_local: bool,
 }
 
 impl AssignKeyValue for PartialConversationConfig {
@@ -62,6 +66,7 @@ impl AssignKeyValue for PartialConversationConfig {
             _ if kv.p("tools") => self.tools.assign(kv)?,
             _ if kv.p("attachments") => kv.try_vec_of_nested(&mut self.attachments)?,
             _ if kv.p("inquiry") => self.inquiry.assign(kv)?,
+            _ if kv.p("start_local") => self.start_local = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -81,17 +86,21 @@ impl PartialConfigDelta for PartialConversationConfig {
                     .collect()
             },
             inquiry: self.inquiry.delta(next.inquiry),
+            start_local: delta_opt(self.start_local.as_ref(), next.start_local),
         }
     }
 }
 
 impl ToPartial for ConversationConfig {
     fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
         Self::Partial {
             title: self.title.to_partial(),
             tools: self.tools.to_partial(),
             attachments: self.attachments.iter().map(ToPartial::to_partial).collect(),
             inquiry: self.inquiry.to_partial(),
+            start_local: partial_opt(&self.start_local, defaults.start_local),
         }
     }
 }
