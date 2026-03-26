@@ -134,12 +134,7 @@ impl Workspace {
 
     /// Enable local storage at an explicit path, for testing.
     #[cfg(test)]
-    pub fn with_local_storage_at(
-        mut self,
-        root: &Utf8Path,
-        name: &str,
-        id: &str,
-    ) -> Result<Self> {
+    pub fn with_local_storage_at(mut self, root: &Utf8Path, name: &str, id: &str) -> Result<Self> {
         self.storage = self
             .storage
             .take()

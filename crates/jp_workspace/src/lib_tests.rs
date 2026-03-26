@@ -472,7 +472,8 @@ fn test_persist_active_conversation_preserves_files_in_user_storage() {
 
     assert!(
         query_file.is_file(),
-        "query file in user-storage conversation directory must survive persist_active_conversation"
+        "query file in user-storage conversation directory must survive \
+         persist_active_conversation"
     );
 
     // The workspace-side conversations directory should NOT have a
