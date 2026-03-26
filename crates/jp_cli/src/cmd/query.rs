@@ -305,13 +305,16 @@ impl Query {
 
         let mut mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
 
-        let root = ctx
-            .workspace
-            .storage_path()
-            .unwrap_or(ctx.workspace.root())
-            .to_path_buf();
-
         let conversation = ctx.workspace.get_conversation(&cid);
+        let is_local = conversation.is_some_and(|c| c.user);
+        let root = if is_local {
+            ctx.workspace.user_storage_path()
+        } else {
+            ctx.workspace.storage_path()
+        }
+        .unwrap_or(ctx.workspace.root())
+        .to_path_buf();
+
         let conversation_path = root
             .join(CONVERSATIONS_DIR)
             .join(cid.to_dirname(conversation.as_ref().and_then(|v| v.title.as_deref())));

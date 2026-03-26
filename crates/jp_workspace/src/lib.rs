@@ -132,6 +132,22 @@ impl Workspace {
         Ok(self)
     }
 
+    /// Enable local storage at an explicit path, for testing.
+    #[cfg(test)]
+    pub fn with_local_storage_at(
+        mut self,
+        root: &Utf8Path,
+        name: &str,
+        id: &str,
+    ) -> Result<Self> {
+        self.storage = self
+            .storage
+            .take()
+            .map(|storage| storage.with_user_storage(root, name, id))
+            .transpose()?;
+        Ok(self)
+    }
+
     /// Disable persistence for the workspace.
     ///
     /// If this is called, then [`Self::persist`] becomes a no-op.
