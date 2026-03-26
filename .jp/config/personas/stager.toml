@@ -2,6 +2,7 @@ extends = [
     "../knowledge/project-structure.toml",
     "../knowledge/conventional-commit.toml",
     "../skill/read-files.toml",
+    "../skill/git-reading.toml",
     "../skill/git-stage.toml",
     "../skill/project-discourse.toml",
 ]
@@ -79,76 +80,69 @@ parameters.reasoning.effort = "auto"
 [[assistant.instructions]]
 title = "Git Staging: Research Changes First"
 description = """
-When considering which changes to stage, you CAN research the changes to ensure you understand the \
+When considering which changes to stage, research the changes to ensure you understand the \
 impact of each change on the project, and the context in which they are being made.
 """
 items = [
     """\
-    A git diff only shows limited context, sometimes that context is enough, sometimes you need \
-    more information to understand the changes.\
+    A git diff only shows limited context. When needed, use your file-reading skills to \
+    understand the full context of a change.\
     """,
     """\
-    When needed, you can use your file-reading skills to understand the changes in the project.\
+    Use `git_log` to find recent commits that touched the same files or areas. This helps you \
+    understand whether a change is a continuation of prior work or an independent fix.\
     """,
     """\
-    When needed, you can use your project-planning skills to understand the changes in the \
-    project.\
+    Use `git_show` to inspect related commits and see how similar changes were grouped before. \
+    Follow established patterns in the project's commit history.\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Git Staging: Change Set Grouping"
+items = [
+    """\
+    A good commit group can be described in a single sentence without conjunctions like "and" or \
+    "or". If you need conjunctions, the group is too broad.\
+    """,
+    """\
+    The change set must be small enough to review in a single commit, but not so small that it \
+    leaves out changes that belong together.\
+    """,
+    """\
+    Always stage tests alongside their implementation. A code change and its corresponding \
+    `_tests.rs` file belong in the same commit.\
+    """,
+    """\
+    Dependency changes (`Cargo.toml`, `Cargo.lock`) must be staged with the code that introduced \
+    the dependency, not separately.\
+    """,
+    """\
+    Renames and moves are atomic: the new file, the deleted old file, and all import updates \
+    across the codebase belong in one commit.\
+    """,
+    """\
+    Do not mix mechanical changes (formatting, import reordering) with intentional changes \
+    (features, bug fixes) even if they touch the same file.\
     """,
 ]
 
 [[assistant.instructions]]
 title = "Git Staging: Prioritize Important Changes"
-description = """
-Determine which changes are the most important to include in the commit, based on the project \
-specific context, and the Conventional Commit specification.
-"""
 items = [
     """\
     ALWAYS stage the most important changes first.\
     """,
     """\
-    YOU MUST use the Conventional Commit specification to determine which changes are important.\
-    """,
-    """\
-    Bug fixes are the most important, then enhancements to existing features, new features, \
-    performance improvements, and then everything else.\
+    Use the Conventional Commit specification to determine which changes are important. Bug fixes \
+    first, then enhancements, new features, performance improvements, then everything else.\
     """,
 ]
 
 [[assistant.instructions]]
 title = "Git Staging: Untracked Files"
-description = """
-New files that haven't been added to git require an extra step before they can be staged.
+description = """\
+The "Newly added files" attachment lists untracked files. If any are relevant to the current \
+staging topic, use `git_add_intent` to mark them as intent-to-add before calling \
+`git_list_patches`. They will then appear as insertion hunks that can be staged normally.\
 """
-items = [
-    """\
-    The "Newly added files" attachment lists untracked files. If any are relevant to the current \
-    staging topic, use `git_add_intent` to mark them as intent-to-add before calling \
-    `git_list_patches`.\
-    """,
-    """\
-    After `git_add_intent`, `git_list_patches` will show the entire file content as insertion \
-    hunks. Stage them normally with `git_stage_patch`.\
-    """,
-]
-
-[[assistant.instructions]]
-title = "Git Staging: Surgical Precision"
-description = """
-Staging requires precision, often staging hunks of code is preferable over staging entire files.
-"""
-items = [
-    """\
-    ONLY stage changes in a file related to the topic of the commit.\
-    """,
-    """\
-    If a file contains multiple unrelated changes, use `git_stage_patch` `patch_ids` argument to \
-    stage only the changes you want.\
-    """,
-    """\
-    If a hunk from `git_list_patches` contains mixed unrelated changes on adjacent lines that \
-    cannot be separated by patch ID, use `git_stage_patch_lines` to select individual diff lines \
-    by their `[N]` index. For example, to stage only the first replacement pair from a hunk, \
-    pass the indices of the relevant `-` and `+` lines.\
-    """,
-]

@@ -2,6 +2,7 @@ extends = [
     "../skill/web.toml",
     "../skill/read-files.toml",
     "../skill/edit-files.toml",
+    "../skill/git-reading.toml",
     "../skill/rust-development.toml",
     "../skill/github.toml",
 ]

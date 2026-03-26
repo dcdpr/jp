@@ -4,41 +4,46 @@ separator = "paragraph"
 value = """
 # Skill: Git Staging
 
-You have been given the git-staging skill. You are an expert at diffing and staging files and \
-hunks in git repositories. The following tools help you with this:
+You have been given the git-staging skill. You are an expert at staging files and hunks in git \
+repositories. The following tools help you with this:
 
 - git_add_intent: Mark untracked files as intent-to-add so they become visible to \
 `git_list_patches`. Use this when you need to stage new (untracked) files.
-- git_diff: Diff the git repository, with a required `status` parameter: `"staged"`, `"unstaged"`, or `"all"`.
-- git_list_patches: List all unstaged patches that can be staged with `git_stage_patch`. \
-When called without `files`, discovers all files with unstaged changes automatically. \
-Each diff line is prefixed with `[N]` for use with `git_stage_patch_lines`.
-- git_stage_patch: Stage whole patches (by ID) from `git_list_patches`. Accepts multiple files \
-in a single call to reduce round-trips.
+- git_list_patches: List all unstaged patches that can be staged with `git_stage_patch`. When \
+called without `files`, discovers all files with unstaged changes automatically. Each diff line is \
+prefixed with `[N]` for use with `git_stage_patch_lines`.
+- git_stage_patch: Stage whole patches (by ID) from `git_list_patches`. Accepts multiple files in \
+a single call to reduce round-trips.
 - git_stage_patch_lines: Stage individual diff lines from a patch. Use this when a hunk from \
 `git_list_patches` contains mixed changes on adjacent lines that need to be staged partially.
 - git_unstage: Unstage (restore/reset) one or more staged files, undoing the effects of \
 `git_stage_patch`.
+
+Use these tools in a typical workflow: `git_add_intent` for new files, then `git_list_patches` \
+to see available hunks, `git_stage_patch` or `git_stage_patch_lines` to stage them selectively, \
+and `git_unstage` to undo if needed.
 """
 
 [conversation.tools]
 git_add_intent = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-git_diff = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
 git_list_patches = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "full" }
 git_stage_patch = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 git_stage_patch_lines = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 git_unstage = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 
 [[assistant.instructions]]
-title = "Git Staging: How To Determine Change Set Grouping"
+title = "Git Staging: Surgical Precision"
 items = [
     """\
-    When considering explaining the staged changes as a group, you MUST be able to describe them \
-    in a single sentence, without using "or", "and", or other conjunctions, indicating that the \
-    changes are related to a single topic.\
+    ONLY stage changes related to the topic of the commit. If a file contains multiple unrelated \
+    changes, use `git_stage_patch` with specific `patch_ids` to stage only the relevant hunks.\
     """,
     """\
-    The change set must be small enough to be reviewed in a single commit, but not too small to \
-    leave out any changes that should be part of the same change set\
+    If a hunk contains mixed unrelated changes on adjacent lines that cannot be separated by \
+    patch ID, use `git_stage_patch_lines` to select individual diff lines by their `[N]` index.\
+    """,
+    """\
+    If you staged something that doesn't belong, use `git_unstage` to undo it and re-stage \
+    correctly. Don't leave a bad stage in place hoping the next commit will fix it.\
     """,
 ]

@@ -1,0 +1,31 @@
+[conversation.tools.git_show]
+enable = "explicit"
+run = "unattended"
+style.inline_results = "full"
+style.parameters = "function_call"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Show commit details: message and changed file stats (no diff content)."
+description = """
+Shows the full commit message and a list of changed files with their \
+insertion/deletion counts. Does NOT include the actual diff. Use \
+`git_diff_commit` to view the diff for specific files.
+"""
+
+examples = """
+Show a commit by hash:
+```json
+{"revision": "abc1234"}
+```
+
+Show the previous commit:
+```json
+{"revision": "HEAD~1"}
+```
+"""
+
+[conversation.tools.git_show.parameters.revision]
+type = "string"
+required = true
+summary = "The commit hash or any git revision specifier (e.g. `HEAD~1`, a tag name, a branch name)."

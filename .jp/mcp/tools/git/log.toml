@@ -1,0 +1,57 @@
+[conversation.tools.git_log]
+enable = "explicit"
+run = "unattended"
+style.inline_results = "full"
+style.parameters = "function_call"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Search the git commit history."
+description = """
+Returns a list of commits matching the given filters. Each entry includes the short hash, author, \
+date, and subject line. Use `git_show` to inspect a specific commit in detail.
+"""
+
+examples = """
+List recent commits:
+```json
+{}
+```
+
+Search for commits mentioning a topic:
+```json
+{"query": "streaming", "count": 10}
+```
+
+Commits touching a specific file:
+```json
+{"paths": ["crates/jp_llm/src/stream.rs"]}
+```
+
+Commits from the last week:
+```json
+{"since": "1 week ago"}
+```
+
+Combine filters:
+```json
+{"query": "refactor", "paths": ["crates/jp_config/"], "count": 5}
+```
+"""
+
+[conversation.tools.git_log.parameters.query]
+type = "string"
+summary = "Search string matched against commit messages (substring match)."
+
+[conversation.tools.git_log.parameters.paths]
+type = "array"
+items.type = "string"
+summary = "Restrict to commits touching these file paths."
+
+[conversation.tools.git_log.parameters.count]
+type = "integer"
+summary = "Maximum number of commits to return. Defaults to 20, capped at 50."
+
+[conversation.tools.git_log.parameters.since]
+type = "string"
+summary = "Only return commits after this date. Accepts relative dates like `\"2 weeks ago\"` or absolute dates like `\"2024-01-01\"`."
