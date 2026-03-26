@@ -31,7 +31,7 @@ pub(crate) struct Rm {
     until: Option<ConversationId>,
 
     /// Do not prompt for confirmation.
-    #[arg(long)]
+    #[arg(long, short = 'y')]
     yes: bool,
 }
 
