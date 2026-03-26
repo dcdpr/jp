@@ -760,7 +760,7 @@ fn apply_changes<R: ProcessRunner>(
                     return Ok(Outcome::NeedsInput {
                         question: Question {
                             id: "modify_dirty_file".to_string(),
-                            text: format!("File '{path}' has uncommitted changes. Modify anyway?",),
+                            text: format!("File '{path}' has uncommitted changes. Modify anyway?"),
                             answer_type: AnswerType::Boolean,
                             default: None,
                         },
@@ -904,7 +904,7 @@ fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
     // Header: stats line + separator.
     let stats_pad = " ".repeat(pipe_col - stats_width - 1);
     let header_line = format!("{stats_pad}{stats_colored} │ {}\n", path.bold());
-    let separator = format!("{}┼{}\n", "─".repeat(pipe_col), "─".repeat(path.len() + 2),);
+    let separator = format!("{}┼{}\n", "─".repeat(pipe_col), "─".repeat(path.len() + 2));
     buf.push_str(&header_line);
     buf.push_str(&separator);
 

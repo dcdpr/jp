@@ -102,13 +102,13 @@ fn git_log_impl<R: ProcessRunner>(
 fn format_log_entries(entries: &[LogEntry]) -> Result<String> {
     let mut out = String::from("<git_log>\n");
     for entry in entries {
-        writeln!(out, "  <commit>\n")?;
+        writeln!(out, "  <commit>")?;
         writeln!(out, "    hash: {}", entry.hash)?;
         writeln!(out, "    short_hash: {}", entry.short_hash)?;
         writeln!(out, "    author: {}", entry.author)?;
         writeln!(out, "    date: {}", entry.date)?;
         writeln!(out, "    subject: {}", entry.subject)?;
-        writeln!(out, "  </commit>\n")?;
+        writeln!(out, "  </commit>")?;
     }
     out.push_str("</git_log>");
 

@@ -121,8 +121,6 @@ fn empty_build_is_noop() {
     assert_eq!(stream.len(), len_before);
 }
 
-// -- Validation tests --
-
 #[test]
 fn tool_call_response_requires_matching_request() {
     let mut stream = ConversationStream::new_test();

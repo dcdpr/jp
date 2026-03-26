@@ -45,7 +45,7 @@ pub trait Id: fmt::Display {
     /// jp-pdefault
     /// ```
     fn format_id(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}-{}{}", ID_PREFIX, Self::variant(), self.target_id(),)
+        write!(f, "{}-{}{}", ID_PREFIX, Self::variant(), self.target_id())
     }
 
     /// Format the ID with a global ID suffix:

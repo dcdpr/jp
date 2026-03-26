@@ -223,10 +223,10 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             NodeValue::Code(ref code) => self.format_code(&code.literal, entering)?,
             NodeValue::HtmlInline(ref literal) => self.format_html_inline(literal, entering)?,
             NodeValue::Raw(ref literal) => self.format_raw(literal, entering)?,
-            NodeValue::Strong => {
-                if parent_node.is_none_or(|p| !matches!(p.data().value, NodeValue::Strong)) {
-                    self.format_strong(entering)?;
-                }
+            NodeValue::Strong
+                if parent_node.is_none_or(|p| !matches!(p.data().value, NodeValue::Strong)) =>
+            {
+                self.format_strong(entering)?;
             }
             NodeValue::Emph => self.format_emph(node, entering)?,
             NodeValue::TaskItem(ref nti) => self.format_task_item(nti, node, entering)?,
@@ -235,33 +235,25 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             NodeValue::Link(ref nl) => return self.format_link(node, nl, entering),
             NodeValue::Image(ref nl) => self.format_image(nl, entering)?,
             NodeValue::Table(..) => return self.format_table_aligned(node, entering),
-            NodeValue::FrontMatter(ref literal) => {
-                if entering {
-                    self.writer.output(literal, false)?;
-                }
+            NodeValue::FrontMatter(ref literal) if entering => {
+                self.writer.output(literal, false)?;
             }
-            NodeValue::Math(ref math) => {
-                if entering {
-                    let delim = if math.dollar_math {
-                        if math.display_math { "$$" } else { "$" }
-                    } else {
-                        "$`"
-                    };
-                    let end_delim = if delim == "$`" { "`$" } else { delim };
-                    self.writer.output(delim, false)?;
-                    self.writer.output(&math.literal, false)?;
-                    self.writer.output(end_delim, false)?;
-                }
+            NodeValue::Math(ref math) if entering => {
+                let delim = if math.dollar_math {
+                    if math.display_math { "$$" } else { "$" }
+                } else {
+                    "$`"
+                };
+                let end_delim = if delim == "$`" { "`$" } else { delim };
+                self.writer.output(delim, false)?;
+                self.writer.output(&math.literal, false)?;
+                self.writer.output(end_delim, false)?;
             }
-            NodeValue::FootnoteDefinition(ref nfd) => {
-                if entering {
-                    self.writer.output(&format!("[^{}]: ", nfd.name), false)?;
-                }
+            NodeValue::FootnoteDefinition(ref nfd) if entering => {
+                self.writer.output(&format!("[^{}]: ", nfd.name), false)?;
             }
-            NodeValue::FootnoteReference(ref nfr) => {
-                if entering {
-                    self.writer.output(&format!("[^{}]", nfr.name), false)?;
-                }
+            NodeValue::FootnoteReference(ref nfr) if entering => {
+                self.writer.output(&format!("[^{}]", nfr.name), false)?;
             }
             NodeValue::WikiLink(ref nl) => {
                 if entering {
@@ -272,10 +264,8 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
                     self.writer.output("]]", false)?;
                 }
             }
-            NodeValue::EscapedTag(tag) => {
-                if entering {
-                    self.writer.output(tag, false)?;
-                }
+            NodeValue::EscapedTag(tag) if entering => {
+                self.writer.output(tag, false)?;
             }
             _ => {}
         }

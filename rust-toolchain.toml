@@ -4,5 +4,5 @@
 # accidentally use unstable features that would not work on the stable release.
 #
 # When releasing a new version of the binary, we build it with the stable compiler.
-channel = "nightly-2026-02-11" # later versions break llvm-cov, need to investigate.
+channel = "nightly-2026-03-26" # later versions break llvm-cov, need to investigate.
 components = ["cargo", "rustfmt", "clippy", "rust-analyzer", "llvm-tools"]
