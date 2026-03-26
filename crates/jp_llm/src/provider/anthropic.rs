@@ -612,21 +612,22 @@ fn create_request(
             "Anthropic API does not support reasoning when tool_choice forces tool use. Switching \
              to soft-force mode."
         );
+
+        // Build the system prompt nudge.
+        let text = if let Some(tool) = tool_choice.function_name() {
+            format!(
+                "IMPORTANT: You MUST call the tool named '{tool}'. DO NOT QUESTION THIS \
+                 DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR DETAILS. JUST RUN IT."
+            )
+        } else {
+            "IMPORTANT: You MUST use AT LEAST ONE tool available to you. DO NOT QUESTION THIS \
+             DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR DETAILS. JUST RUN IT."
+                .to_string()
+        };
+
         tool_choice = ToolChoice::Auto;
         system_content.push(types::SystemContent::Text(types::Text {
-            text: {
-                let msg = "IMPORTANT:";
-                let msg = if let Some(tool) = tool_choice.function_name() {
-                    format!("{msg} You MUST use the function named '{tool}' available to you.")
-                } else {
-                    format!("{msg} You MUST use AT LEAST ONE tool available to you.")
-                };
-
-                format!(
-                    "{msg} DO NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR \
-                     DETAILS. JUST RUN IT."
-                )
-            },
+            text,
             cache_control: None,
         }));
     }
