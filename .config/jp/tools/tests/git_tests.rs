@@ -1170,6 +1170,42 @@ async fn diff_commit_no_match_for_path() {
 }
 
 #[tokio::test]
+async fn staged_diff_excludes_intent_to_add_files() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+
+    // Also stage a real change so we can verify the diff isn't just empty.
+    commit_then_modify(&root, "tracked.rs", "old\n", "new\n");
+    git(&root, &["add", "tracked.rs"]);
+
+    // Create an untracked file and mark it intent-to-add.
+    fs::write(root.join("ita.rs"), "intent to add content\n").unwrap();
+    git(&root, &["add", "--intent-to-add", "ita.rs"]);
+
+    let content = run_ok(
+        ctx(&root),
+        tool("git_diff", &json!({"status": "staged"})),
+    )
+    .await;
+
+    // The real staged change must be present.
+    assert!(
+        content.contains("tracked.rs"),
+        "staged diff should contain the genuinely staged file"
+    );
+
+    // The intent-to-add file must NOT appear in staged output.
+    assert!(
+        !content.contains("ita.rs"),
+        "staged diff must not contain intent-to-add file, got: {content}"
+    );
+}
+
+
+#[tokio::test]
 async fn sequential_staging_across_tools() {
     if !has_git() {
         return;

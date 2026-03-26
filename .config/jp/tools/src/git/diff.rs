@@ -41,8 +41,8 @@ fn git_diff_impl<R: ProcessRunner>(
     env: &[(&str, &str)],
 ) -> ToolResult {
     let mut args = match status {
-        DiffStatus::All => vec!["diff-index", "-p", "HEAD"],
-        DiffStatus::Staged => vec!["diff-index", "--cached", "-p", "HEAD"],
+        DiffStatus::All => vec!["diff-index", "--ita-invisible-in-index", "-p", "HEAD"],
+        DiffStatus::Staged => vec!["diff-index", "--cached", "--ita-invisible-in-index", "-p", "HEAD"],
         DiffStatus::Unstaged => vec!["diff-files", "-p"],
     };
 

@@ -23,7 +23,7 @@ title.generate.auto = false
 tools.'*' = { enable = false, run = "unattended" }
 attachments = [
     "cmd:git branch --show-current?description=Current branch name",
-    "cmd:git diff-index --cached -p HEAD -- . :^crates/jp_llm/tests/fixtures :^Cargo.lock :^.jp/conversations?description=Diff of current cached/changed hunks (excluding test fixtures and Cargo.lock)",
+    "cmd:git diff-index --cached --ita-invisible-in-index -p HEAD -- . :^crates/jp_llm/tests/fixtures :^Cargo.lock :^.jp/conversations?description=Diff of current cached/changed hunks (excluding test fixtures and Cargo.lock)",
 ]
 
 [style]
