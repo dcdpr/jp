@@ -1,12 +1,11 @@
 bacon_version        := "3.22.0"
-binstall_version     := "1.17.7"
+binstall_version     := "1.17.8"
 deny_version         := "0.19.0"
 expand_version       := "1.0.120"
 insta_version        := "1.46.3"
 jilu_version         := "0.13.2"
 llvm_cov_version     := "0.8.4"
 nextest_version      := "0.9.126"
-quickinstall_version := "0.3.49"
 shear_version        := "1.9.1"
 vet_version          := "0.10.2"
 
@@ -764,8 +763,9 @@ vet-ci: (_install "cargo-vet@" + vet_version)
     cargo install {{quiet_flag}} --locked --path crates/jp_cli {{args}}
 
 @_install-binstall:
-    cargo install {{quiet_flag}} --locked --version {{quickinstall_version}} cargo-quickinstall
-    cargo quickinstall cargo-binstall > /dev/null
+    command -v cargo-binstall >/dev/null 2>&1 || { \
+        curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | BINSTALL_VERSION={{binstall_version}} sh; \
+    }
 
 [working-directory: 'docs']
 @_docs-install:
