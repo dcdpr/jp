@@ -24,7 +24,7 @@
 //!
 //! [`StreamError::is_retryable`]: jp_llm::StreamError::is_retryable
 
-use std::sync::Arc;
+use std::{fmt::Write as _, sync::Arc};
 
 use jp_config::assistant::request::RequestConfig;
 use jp_conversation::{ConversationStream, event::ChatResponse};
@@ -40,31 +40,59 @@ use crate::{
 /// Tracks retry state for stream errors within a single turn.
 ///
 /// Counts consecutive stream failures and enforces retry limits from
-/// [`RequestConfig`]. The counter resets when a streaming cycle completes
-/// successfully (i.e., `Event::Finished` is received).
+/// [`RequestConfig`]. The counter resets when a new streaming cycle produces
+/// its first successful event.
 pub struct StreamRetryState {
     /// Retry configuration (max retries, backoff parameters).
     config: RequestConfig,
 
     /// Number of consecutive stream failures without a successful cycle.
     consecutive_failures: u32,
+
+    /// Whether a temporary retry notification line is currently displayed.
+    ///
+    /// When `true`, the next retry or successful event should overwrite the
+    /// line using `\r\x1b[K` rather than printing a new one.
+    line_active: bool,
+
+    /// Whether output is a TTY (enables temp-line rewriting).
+    is_tty: bool,
 }
 
 impl StreamRetryState {
     /// Create a new retry state from the given configuration.
-    pub fn new(config: RequestConfig) -> Self {
+    pub fn new(config: RequestConfig, is_tty: bool) -> Self {
         Self {
             config,
             consecutive_failures: 0,
+            line_active: false,
+            is_tty,
         }
     }
 
-    /// Reset the failure counter after a successful streaming cycle.
+    /// Reset the failure counter.
     ///
-    /// Call this when `Event::Finished` is received, indicating the stream
-    /// completed without error.
+    /// Call this when the first successful LLM event arrives in a new streaming
+    /// cycle. This ensures that partially successful streams (e.g. rate-limited
+    /// mid-response) don't permanently consume the retry budget.
     pub fn reset(&mut self) {
         self.consecutive_failures = 0;
+    }
+
+    /// Clear the retry notification line if one is currently displayed.
+    ///
+    /// Call this when the first successful event arrives, before rendering any
+    /// LLM content.
+    pub fn clear_line(&mut self, printer: &Printer) {
+        if !self.line_active {
+            return;
+        }
+
+        if self.is_tty {
+            let _ = write!(printer.out_writer(), "\r\x1b[K");
+        }
+
+        self.line_active = false;
     }
 
     /// Check whether we should retry the given error.
@@ -93,6 +121,22 @@ impl StreamRetryState {
             ),
         }
     }
+
+    /// Write the retry notification, overwriting any previous retry line on TTY
+    /// or printing a new permanent line otherwise.
+    fn notify(&mut self, kind: &str, printer: &Printer) {
+        let attempt = self.consecutive_failures;
+        let max = self.config.max_retries;
+        let msg = format!("⚠ {kind}, retrying ({attempt}/{max})…");
+
+        if self.is_tty {
+            // Overwrite any previous retry line in-place.
+            let _ = write!(printer.out_writer(), "\r\x1b[K{msg}");
+            self.line_active = true;
+        } else {
+            printer.println(msg);
+        }
+    }
 }
 
 /// Single source of truth for handling stream errors during LLM streaming.
@@ -116,6 +160,10 @@ pub async fn handle_stream_error(
     printer: &Arc<Printer>,
 ) -> LoopAction<Result<(), Error>> {
     if !retry_state.can_retry(&error) {
+        // Clear the temp line before printing the final error so it doesn't
+        // linger on screen.
+        retry_state.clear_line(printer);
+
         error!("Stream error (not retryable or max retries exceeded): {error}");
         return LoopAction::Return(Err(jp_llm::Error::Stream(error).into()));
     }
@@ -145,7 +193,7 @@ pub async fn handle_stream_error(
     let kind = error.kind.as_str();
 
     warn!(attempt, max, kind, "{error}");
-    printer.println(format!("⚠ {kind}, retrying ({attempt}/{max})…"));
+    retry_state.notify(kind, printer);
 
     // 5. Backoff.
     let delay = retry_state.backoff_duration(&error);

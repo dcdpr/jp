@@ -21,7 +21,7 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
         max_backoff_secs: 1,
         cache: CachePolicy::default(),
     };
-    StreamRetryState::new(config)
+    StreamRetryState::new(config, false)
 }
 
 fn make_turn_coordinator() -> TurnCoordinator {
@@ -68,7 +68,7 @@ fn backoff_uses_retry_after_when_present() {
         max_backoff_secs: 120,
         cache: CachePolicy::default(),
     };
-    let state = StreamRetryState::new(config);
+    let state = StreamRetryState::new(config, false);
     let err = StreamError::rate_limit(Some(Duration::from_secs(42)));
     assert_eq!(state.backoff_duration(&err), Duration::from_secs(42));
 }

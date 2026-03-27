@@ -26,7 +26,7 @@ use crate::{
 };
 
 #[async_trait]
-pub trait Provider: std::fmt::Debug + Send + Sync {
+pub trait Provider: Send + Sync {
     /// Get details of a model.
     async fn model_details(&self, name: &Name) -> Result<ModelDetails>;
 
