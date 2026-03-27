@@ -9,6 +9,9 @@
 !.jp/**
 !.config/
 !.config/**
+!.github/
+!.github/**
+!justfile
 
 # Then the exclusions (applied within the un-ignored trees)
 .jp/conversations/
