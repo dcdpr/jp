@@ -153,7 +153,7 @@ pub(super) async fn run_turn_loop(
     chat_request: ChatRequest,
 ) -> Result<(), Error> {
     let mut turn_state = TurnState::default();
-    let mut stream_retry = StreamRetryState::new(cfg.assistant.request);
+    let mut stream_retry = StreamRetryState::new(cfg.assistant.request, is_tty);
     let mut turn_coordinator = TurnCoordinator::new(printer.clone(), cfg.style.clone());
     let mut tool_renderer = ToolRenderer::new(
         if cfg.style.tool_call.show && !printer.format().is_json() {
@@ -281,6 +281,7 @@ pub(super) async fn run_turn_loop(
                 let mut perm_skipped = vec![];
                 let mut perm_unavailable = vec![];
                 let mut perm_tool_index: usize = 0;
+                let mut received_provider_event = false;
 
                 let mut streams: SelectAll<_> =
                     SelectAll::from_iter([sig_stream, llm_stream, tick_stream]);
@@ -348,6 +349,16 @@ pub(super) async fn run_turn_loop(
                                     }
                                 }
                             };
+
+                            // Reset the retry counter on the first successful
+                            // event in this cycle. This ensures that partially
+                            // successful streams (rate-limited mid-response)
+                            // don't permanently consume the retry budget.
+                            if !received_provider_event {
+                                received_provider_event = true;
+                                stream_retry.clear_line(&printer);
+                                stream_retry.reset();
+                            }
 
                             // Register preparing tool calls. Flush the markdown
                             // buffer first so buffered text appears before the
@@ -476,7 +487,6 @@ pub(super) async fn run_turn_loop(
                             }
 
                             if is_finished {
-                                stream_retry.reset();
                                 tool_renderer.cancel_all();
                             }
                         }
