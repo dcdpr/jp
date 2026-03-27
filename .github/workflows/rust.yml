@@ -34,7 +34,6 @@ jobs:
         with:
           path: |
             ~/.rustup
-            ~/.cargo/bin/
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
           key: toolchain-${{ matrix.task }}${{ matrix.cache_suffix }}
@@ -56,7 +55,6 @@ jobs:
         with:
           path: |
             ~/.rustup
-            ~/.cargo/bin/
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
           key: ${{ steps.restore-cache.outputs.cache-primary-key }}
