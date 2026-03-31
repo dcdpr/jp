@@ -25,8 +25,9 @@ impl Print {
         ConversationLoadRequest::explicit_or_session(&self.target.ids)
     }
 
-    pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
-        for handle in &handles {
+    #[expect(clippy::unused_self)]
+    pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
+        for handle in handles {
             Self::print_conversation(ctx, handle)?;
         }
         ctx.printer.println("");

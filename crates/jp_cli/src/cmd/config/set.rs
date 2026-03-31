@@ -9,25 +9,6 @@ use crate::{
     ctx::Ctx,
 };
 
-/// File target for `config set`. Mutually exclusive with `--id` (conversation
-/// targeting). When none of these flags are set and no `--id` is given, the
-/// workspace config file is used as the default.
-#[derive(Debug, Clone, Copy, Default, PartialEq, clap::Args)]
-#[group(required = false, multiple = false)]
-struct FileTarget {
-    /// Write to the workspace's user-specific configuration file.
-    #[arg(long, conflicts_with = "id")]
-    user_workspace: bool,
-
-    /// Write to the global user-specific configuration file.
-    #[arg(long, conflicts_with = "id")]
-    user_global: bool,
-
-    /// Write to the current-working-directory configuration file.
-    #[arg(long, conflicts_with = "id")]
-    cwd: bool,
-}
-
 #[derive(Debug, clap::Args)]
 pub(crate) struct Set {
     #[command(flatten)]
@@ -38,10 +19,6 @@ pub(crate) struct Set {
 }
 
 impl Set {
-    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        ConversationLoadRequest::explicit_or_none(&self.conversation.ids)
-    }
-
     pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         let base = ctx.config().to_partial();
         let config_delta = config_pipeline::build_partial_from_cfg_args(
@@ -106,6 +83,31 @@ impl Set {
             .println(format!("Set configuration in {}", config.path));
         Ok(())
     }
+
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        ConversationLoadRequest::explicit_or_none(&self.conversation.ids)
+    }
+}
+
+/// File target for `config set`.
+///
+/// Mutually exclusive with `--id` (conversation targeting). When none of these
+/// flags are set and no `--id` is given, the workspace config file is used as
+/// the default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, clap::Args)]
+#[group(required = false, multiple = false)]
+struct FileTarget {
+    /// Write to the workspace's user-specific configuration file.
+    #[arg(long, conflicts_with = "id")]
+    user_workspace: bool,
+
+    /// Write to the global user-specific configuration file.
+    #[arg(long, conflicts_with = "id")]
+    user_global: bool,
+
+    /// Write to the current-working-directory configuration file.
+    #[arg(long, conflicts_with = "id")]
+    cwd: bool,
 }
 
 #[cfg(test)]

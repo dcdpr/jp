@@ -85,7 +85,7 @@ fn prints_user_message() {
         },
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
-    let result = print.run(&mut ctx, vec![h]);
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -106,7 +106,7 @@ fn prints_assistant_message() {
         },
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
-    let result = print.run(&mut ctx, vec![h]);
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -133,7 +133,7 @@ fn prints_reasoning_full() {
         },
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
-    let result = print.run(&mut ctx, vec![h]);
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -161,7 +161,7 @@ fn hides_reasoning_when_hidden() {
         },
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
-    let result = print.run(&mut ctx, vec![h]);
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -190,7 +190,7 @@ fn truncates_reasoning() {
         },
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
-    let result = print.run(&mut ctx, vec![h]);
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -229,7 +229,7 @@ fn prints_tool_call_and_result() {
         },
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
-    let result = print.run(&mut ctx, vec![h]);
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -255,7 +255,7 @@ fn prints_structured_data() {
         },
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
-    let result = print.run(&mut ctx, vec![h]);
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -281,7 +281,7 @@ fn turn_separators_between_turns() {
         },
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
-    let result = print.run(&mut ctx, vec![h]);
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -303,7 +303,7 @@ fn prints_conversation_by_id() {
         },
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
-    let result = print.run(&mut ctx, vec![h]);
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -324,7 +324,7 @@ fn empty_conversation_produces_no_content() {
         },
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
-    let result = print.run(&mut ctx, vec![h]);
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -374,7 +374,7 @@ fn full_conversation_round_trip() {
         },
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
-    let result = print.run(&mut ctx, vec![h]);
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();

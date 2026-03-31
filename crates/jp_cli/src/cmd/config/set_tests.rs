@@ -58,10 +58,6 @@ fn setup(
     (ctx, tmp)
 }
 
-// ---------------------------------------------------------------------------
-// build_partial_from_cfg_args
-// ---------------------------------------------------------------------------
-
 #[test]
 fn build_partial_errors_when_no_args() {
     let base = PartialAppConfig::default();
@@ -131,10 +127,6 @@ fn build_partial_errors_on_missing_file() {
     assert!(result.is_err());
 }
 
-// ---------------------------------------------------------------------------
-// config set: conversation targeting
-// ---------------------------------------------------------------------------
-
 #[test]
 fn set_in_conversation_applies_config_delta() {
     let id = make_id(1000);
@@ -150,7 +142,7 @@ fn set_in_conversation_applies_config_delta() {
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let events = ctx.workspace.events(&handle).unwrap();
     let config = events.config().unwrap();
-    assert_eq!(config.conversation.start_local, true);
+    assert!(config.conversation.start_local);
 }
 
 #[test]
@@ -171,13 +163,9 @@ fn set_in_multiple_conversations() {
         let handle = ctx.workspace.acquire_conversation(&id).unwrap();
         let events = ctx.workspace.events(&handle).unwrap();
         let config = events.config().unwrap();
-        assert_eq!(config.conversation.start_local, true);
+        assert!(config.conversation.start_local);
     }
 }
-
-// ---------------------------------------------------------------------------
-// config set: file targeting
-// ---------------------------------------------------------------------------
 
 #[test]
 fn set_in_workspace_file() {
@@ -246,12 +234,8 @@ fn set_from_toml_file_into_conversation() {
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let events = ctx.workspace.events(&handle).unwrap();
     let config = events.config().unwrap();
-    assert_eq!(config.conversation.start_local, true);
+    assert!(config.conversation.start_local);
 }
-
-// ---------------------------------------------------------------------------
-// config set: error cases
-// ---------------------------------------------------------------------------
 
 #[test]
 fn set_errors_without_cfg_args() {
@@ -264,10 +248,6 @@ fn set_errors_without_cfg_args() {
     let result = set.run(&mut ctx, vec![]);
     assert!(result.is_err());
 }
-
-// ---------------------------------------------------------------------------
-// config set: conversation_load_request
-// ---------------------------------------------------------------------------
 
 #[test]
 fn load_request_none_when_no_ids() {

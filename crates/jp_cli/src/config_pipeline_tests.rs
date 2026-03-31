@@ -39,7 +39,7 @@ fn with_conversation_preserves_cfg_over_conversation() {
     conv.conversation.start_local = Some(false);
 
     let partial = pipeline.partial_with_conversation(conv).unwrap();
-    // --cfg should win over conversation layer
+    // `--cfg` should win over conversation layer
     assert_eq!(partial.conversation.start_local, Some(true));
 }
 

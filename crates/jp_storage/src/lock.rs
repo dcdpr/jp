@@ -178,8 +178,6 @@ pub(crate) fn is_orphaned_lock(path: &camino::Utf8Path) -> bool {
     }
 }
 
-// --- Platform-specific flock ---
-
 #[cfg(unix)]
 fn try_exclusive_lock(file: &File) -> bool {
     use std::os::unix::io::AsRawFd;

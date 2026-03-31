@@ -52,8 +52,8 @@ impl Fork {
         ConversationLoadRequest::explicit_or_session(&self.target.ids)
     }
 
-    pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
-        for source in &handles {
+    pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
+        for source in handles {
             self.fork_one(ctx, source)?;
         }
         ctx.printer.println("Conversation forked.");

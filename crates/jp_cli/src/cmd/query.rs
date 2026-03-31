@@ -365,7 +365,7 @@ impl Query {
                     }
                 }
             } else {
-                // --no-persist still acquires a lock for API consistency.
+                // `--no-persist` still acquires a lock for API consistency.
                 let h = ctx
                     .workspace
                     .acquire_conversation(&conv_id)

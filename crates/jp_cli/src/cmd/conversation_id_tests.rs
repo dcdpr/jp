@@ -33,8 +33,6 @@ struct TestFlagSingle {
     target: FlagIds<false, false>,
 }
 
-// -- PositionalIds<true, true> (session + multi) --
-
 #[test]
 fn positional_multi_no_args() {
     let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi"]).unwrap();
@@ -73,8 +71,6 @@ fn positional_multi_rejects_keyword_in_multi() {
     assert!(err.is_err());
 }
 
-// -- PositionalIds<false, false> (no session, single) --
-
 #[test]
 fn positional_single_no_args() {
     let cmd = TestPositionalSingle::try_parse_from(["test-positional-single"]).unwrap();
@@ -102,8 +98,6 @@ fn positional_single_rejects_two_values() {
     ]);
     assert!(err.is_err());
 }
-
-// -- FlagIds<true, true> (session + multi) --
 
 #[test]
 fn flag_multi_no_flag() {
@@ -165,8 +159,6 @@ fn flag_multi_rejects_keyword_in_multi() {
     assert!(err.is_err());
 }
 
-// -- FlagIds<false, false> (no session, single) --
-
 #[test]
 fn flag_single_no_flag() {
     let cmd = TestFlagSingle::try_parse_from(["test-flag-single"]).unwrap();
@@ -191,8 +183,6 @@ fn flag_single_rejects_session() {
     assert!(err.is_err());
 }
 
-// -- Short aliases --
-
 #[test]
 fn keyword_aliases() {
     for (input, expected) in [
@@ -212,8 +202,6 @@ fn keyword_aliases() {
         assert_eq!(cmd.target.ids, vec![expected], "failed for input: {input}");
     }
 }
-
-// -- Help text includes/excludes session --
 
 #[test]
 fn help_text_with_session_mentions_session() {

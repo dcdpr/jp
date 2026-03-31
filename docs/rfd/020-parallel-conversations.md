@@ -987,17 +987,17 @@ impl Workspace {
         config: Arc<AppConfig>,
     ) -> ConversationHandle;
 
-    // --- Read access (handle required, infallible) ---
+    // Read access (handle required, infallible)
 
     fn events(&self, h: &ConversationHandle) -> &ConversationStream;
     fn metadata(&self, h: &ConversationHandle) -> &Conversation;
 
-    // --- Write access (guard required, infallible) ---
+    // Write access (guard required, infallible)
 
     fn events_mut(&mut self, g: &ConversationGuard) -> &mut ConversationStream;
     fn metadata_mut(&mut self, g: &ConversationGuard) -> &mut Conversation;
 
-    // --- Lifecycle operations ---
+    // Lifecycle operations
 
     /// Remove a conversation. Consumes the guard, releasing the handle
     /// and lock. The borrow checker prevents use-after-remove.

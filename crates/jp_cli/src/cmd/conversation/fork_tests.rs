@@ -603,7 +603,7 @@ fn test_conversation_fork() {
         ctx.set_now(DateTime::<Utc>::UNIX_EPOCH + Duration::from_secs(1));
 
         let source_handle = ctx.workspace.acquire_conversation(&source_id).unwrap();
-        case.args.run(&mut ctx, vec![source_handle]).unwrap();
+        case.args.run(&mut ctx, &[source_handle]).unwrap();
         ctx.printer.flush();
         assert_eq!(*out.lock(), "Conversation forked.\n");
 

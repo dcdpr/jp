@@ -178,8 +178,6 @@ impl Storage {
             .unwrap_or_else(|| self.root_with_path(path))
     }
 
-    // --- Single-conversation persistence ---
-
     /// Persist a single conversation's metadata and events to disk.
     ///
     /// Handles directory naming, stale directory cleanup (when a conversation
@@ -237,8 +235,6 @@ impl Storage {
 
         Ok(())
     }
-
-    // --- Session mapping I/O ---
 
     const SESSIONS_DIR: &'static str = "sessions";
 

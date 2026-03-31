@@ -24,9 +24,9 @@ impl Conversation {
             Commands::Show(args) => args.run(ctx, handles),
             Commands::Remove(args) => args.run(ctx, handles),
             Commands::Edit(args) => args.run(ctx, handles).await,
-            Commands::Fork(args) => args.run(ctx, handles),
+            Commands::Fork(args) => args.run(ctx, &handles),
             Commands::Grep(args) => args.run(ctx, handles),
-            Commands::Print(args) => args.run(ctx, handles),
+            Commands::Print(args) => args.run(ctx, &handles),
             Commands::List(args) => args.run(ctx, handles),
             Commands::Use(args) => args.run(
                 ctx,

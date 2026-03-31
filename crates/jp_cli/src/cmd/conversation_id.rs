@@ -11,9 +11,9 @@
 //! - `MULTI`: whether multiple IDs are accepted
 //!
 //! Because clap's derive macro doesn't evaluate const generics in `#[arg]`
-//! attributes, both types implement [`clap::Args`] and
-//! [`clap::FromArgMatches`] manually. The const generics control parser
-//! selection, help text, and validation.
+//! attributes, both types implement [`clap::Args`] and [`clap::FromArgMatches`]
+//! manually. The const generics control parser selection, help text, and
+//! validation.
 
 use std::ffi::OsStr;
 
@@ -35,8 +35,8 @@ pub(crate) struct PositionalIds<const SESSION: bool, const MULTI: bool> {
 
 /// Flag-based conversation ID arguments: `-i/--id/--ids`
 ///
-/// Always supports bare `--id` (no value) for the interactive picker.
-/// When `MULTI` is true, supports comma-separated values and repeated flags.
+/// Always supports bare `--id` (no value) for the interactive picker. When
+/// `MULTI` is true, supports comma-separated values and repeated flags.
 ///
 /// # Type parameters
 ///
@@ -46,10 +46,6 @@ pub(crate) struct PositionalIds<const SESSION: bool, const MULTI: bool> {
 pub(crate) struct FlagIds<const SESSION: bool, const MULTI: bool> {
     pub ids: Vec<ConversationTarget>,
 }
-
-// ---------------------------------------------------------------------------
-// Clap integration: PositionalIds
-// ---------------------------------------------------------------------------
 
 impl<const SESSION: bool, const MULTI: bool> clap::Args for PositionalIds<SESSION, MULTI> {
     fn augment_args(cmd: Command) -> Command {
@@ -85,10 +81,6 @@ impl<const SESSION: bool, const MULTI: bool> FromArgMatches for PositionalIds<SE
         Ok(())
     }
 }
-
-// ---------------------------------------------------------------------------
-// Clap integration: FlagIds
-// ---------------------------------------------------------------------------
 
 impl<const SESSION: bool, const MULTI: bool> clap::Args for FlagIds<SESSION, MULTI> {
     fn augment_args(cmd: Command) -> Command {
@@ -128,10 +120,6 @@ impl<const SESSION: bool, const MULTI: bool> FromArgMatches for FlagIds<SESSION,
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
 /// Read parsed [`ConversationTarget`] values from the arg matches.
 fn read_ids(matches: &ArgMatches) -> Vec<ConversationTarget> {
     matches
@@ -163,10 +151,6 @@ fn validate_multi<const MULTI: bool>(ids: &[ConversationTarget]) -> Result<(), c
 
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Value parser
-// ---------------------------------------------------------------------------
 
 /// A clap [`TypedValueParser`] for [`ConversationTarget`].
 ///
@@ -201,10 +185,6 @@ impl<const SESSION: bool> TypedValueParser for TargetParser<SESSION> {
         Ok(target)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Help text
-// ---------------------------------------------------------------------------
 
 fn short_help(session: bool) -> &'static str {
     if session {

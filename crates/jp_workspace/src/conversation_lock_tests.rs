@@ -33,8 +33,6 @@ fn test_lock_no_writer() -> ConversationLock {
     )
 }
 
-// --- ConversationLock ---
-
 #[test]
 fn lock_id_matches() {
     let lock = test_lock_no_writer();
@@ -68,8 +66,6 @@ fn into_mut_consumes_lock() {
     // lock is consumed, conv owns the flock
     assert_eq!(conv.id(), test_id());
 }
-
-// --- ConversationMut: dirty flag ---
 
 #[test]
 fn fresh_conv_is_not_dirty() {
@@ -112,8 +108,6 @@ fn clear_dirty_resets_flag() {
     assert!(!conv.is_dirty());
 }
 
-// --- ConversationMut: callback return values ---
-
 #[test]
 fn update_metadata_forwards_return_value() {
     let lock = test_lock_no_writer();
@@ -132,8 +126,6 @@ fn update_events_forwards_result() {
     let result: Result<(), &str> = conv.update_events(|_| Err("fail"));
     assert!(result.is_err());
 }
-
-// --- ConversationMut: flush ---
 
 #[test]
 fn flush_skips_when_not_dirty() {
@@ -172,8 +164,6 @@ fn double_flush_writes_once() {
     conv.flush().unwrap(); // not dirty anymore
     assert_eq!(mock.writes().len(), 1);
 }
-
-// --- ConversationMut: Drop persistence ---
 
 #[test]
 fn drop_persists_dirty_conv() {
@@ -222,8 +212,6 @@ fn drop_skips_without_writer() {
     drop(conv); // no writer, should not panic
 }
 
-// --- ConversationMut: read access ---
-
 #[test]
 fn metadata_read_reflects_mutations() {
     let lock = test_lock_no_writer();
@@ -241,8 +229,6 @@ fn events_read_reflects_mutations() {
     let _events = conv.events();
 }
 
-// --- ConversationMut: shared state with ConversationLock ---
-
 #[test]
 fn as_mut_mutations_visible_through_lock() {
     let lock = test_lock_no_writer();
@@ -252,8 +238,6 @@ fn as_mut_mutations_visible_through_lock() {
     }
     assert_eq!(lock.metadata().title.as_deref(), Some("visible"));
 }
-
-// --- ConversationMut: multiple as_mut scopes ---
 
 #[test]
 fn multiple_as_mut_each_persist_independently() {

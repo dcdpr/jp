@@ -11,7 +11,7 @@
 //! resolution logic (checking environment variables, calling platform APIs)
 //! lives in `jp_cli::session`. The session-to-conversation mapping — which
 //! conversation is active in which session — is in the sibling
-//! [`session_mapping`] module.
+//! `session_mapping` module.
 //!
 //! # Why Sessions Matter
 //!
@@ -72,7 +72,7 @@
 //! ```
 //!
 //! The `<session-key>` is the [`SessionId`] value (PID string, HWND string,
-//! or `$JP_SESSION` value). The file contains a [`SessionMapping`] with the
+//! or `$JP_SESSION` value). The file contains a `SessionMapping` with the
 //! session's conversation history.
 //!
 //! # Module Boundaries
@@ -81,7 +81,7 @@
 //! |-----------------------|-----------------------------------------|
 //! | This module           | Domain types (`SessionId`,              |
 //! |                       | `SessionSource`, `Session`)             |
-//! | [`session_mapping`]   | Session-to-conversation mapping         |
+//! | `session_mapping`     | Session-to-conversation mapping         |
 //! |                       | (`SessionMapping`, `Workspace` methods) |
 //! | `jp_cli::session`     | Resolution logic (`resolve()`, platform |
 //! |                       | APIs, env var checks)                   |
@@ -90,8 +90,6 @@
 //!
 //! See: `docs/rfd/020-parallel-conversations.md`
 //!
-//! [`session_mapping`]: super::session_mapping
-//! [`SessionMapping`]: super::session_mapping::SessionMapping
 //! [`Workspace::cleanup_stale_files`]: super::Workspace::cleanup_stale_files
 
 use std::fmt;
