@@ -5,7 +5,7 @@ use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _, model::id::PartialModelIdOrAliasConfig,
 };
 use jp_conversation::{
-    ConversationEvent, ConversationId, ConversationStream,
+    ConversationEvent, ConversationStream,
     event::{ChatRequest, ChatResponse},
     event_builder::EventBuilder,
     thread::ThreadBuilder,
@@ -17,15 +17,19 @@ use jp_llm::{
     title,
 };
 use jp_printer::PrinterWriter;
+use jp_workspace::ConversationHandle;
 
-use crate::{cmd::Output, ctx::Ctx};
+use crate::{
+    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    ctx::Ctx,
+};
 
 #[derive(Debug, clap::Args)]
 #[group(required = true, id = "edit")]
 #[command(arg_required_else_help = true)]
 pub(crate) struct Edit {
-    /// Conversation IDs to edit. Defaults to active conversation.
-    id: Vec<ConversationId>,
+    #[command(flatten)]
+    target: PositionalIds<true, true>,
 
     /// Toggle the conversation between user and workspace-scoped.
     ///
@@ -54,20 +58,27 @@ pub(crate) struct Edit {
 }
 
 impl Edit {
-    pub(crate) async fn run(mut self, ctx: &mut Ctx) -> Output {
-        let active_id = ctx.workspace.active_conversation_id();
-        if self.id.is_empty() {
-            self.id.push(active_id);
-        }
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        ConversationLoadRequest::explicit_or_session(&self.target.ids)
+    }
 
-        for id in self.id {
+    pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+        let session = ctx.session.as_ref().map(|s| s.id.as_str().to_owned());
+
+        for handle in handles {
+            let id = handle.id();
+            let conv = ctx
+                .workspace
+                .lock_conversation(handle, session.as_deref())?
+                .ok_or(crate::error::Error::LockTimeout(id))?
+                .into_mut();
+
             if let Some(user) = self.local {
-                let mut conversation = ctx.workspace.try_get_conversation_mut(&id)?;
-                conversation.user = user.unwrap_or(!conversation.user);
+                conv.update_metadata(|m| m.user = user.unwrap_or(!m.user));
             }
 
             if let Some(ref title) = self.title {
-                let events = ctx.workspace.try_get_events(&id)?.clone();
+                let events = conv.events().clone();
                 let title = match title {
                     Some(title) => title.clone(),
                     None => {
@@ -76,17 +87,18 @@ impl Edit {
                     }
                 };
 
-                ctx.workspace.try_get_conversation_mut(&id)?.title = Some(title);
+                conv.update_metadata(|m| m.title = Some(title));
             } else if self.no_title {
-                ctx.workspace.try_get_conversation_mut(&id)?.title = None;
+                conv.update_metadata(|m| m.title = None);
             }
 
             if let Some(ephemeral) = self.expires_at {
-                let mut conversation = ctx.workspace.try_get_conversation_mut(&id)?;
-                let duration = ephemeral.map_or(Duration::ZERO, Into::into);
-                conversation.expires_at = Some(Utc::now() + duration);
+                conv.update_metadata(|m| {
+                    let duration = ephemeral.map_or(Duration::ZERO, Into::into);
+                    m.expires_at = Some(Utc::now() + duration);
+                });
             } else if self.no_expires_at {
-                ctx.workspace.try_get_conversation_mut(&id)?.expires_at = None;
+                conv.update_metadata(|m| m.expires_at = None);
             }
         }
 

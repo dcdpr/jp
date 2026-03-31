@@ -9,7 +9,6 @@ use std::{
 
 use async_trait::async_trait;
 use camino_tempfile::tempdir;
-use chrono::Utc;
 use futures::stream;
 use indexmap::IndexMap;
 use jp_config::{
@@ -154,9 +153,9 @@ async fn test_quit_during_streaming_persists_content() {
 
     // Create a conversation with an initial user query
     let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-    workspace
-        .set_active_conversation_id(conv_id, Utc::now())
-        .unwrap();
+
+    let handle = workspace.acquire_conversation(&conv_id).unwrap();
+    let lock = workspace.test_lock(handle);
 
     let chat_request = ChatRequest::from("What is 2+2?");
 
@@ -188,10 +187,9 @@ async fn test_quit_during_streaming_persists_content() {
         root,
         false, // is_tty
         &[],   // attachments
-        &mut workspace,
+        &lock,
         ToolChoice::Auto,
         &[], // tools
-        conv_id,
         printer.clone(),
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -234,9 +232,9 @@ async fn test_normal_completion_persists_content() {
         .expect("failed to enable persistence");
 
     let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-    workspace
-        .set_active_conversation_id(conv_id, Utc::now())
-        .unwrap();
+
+    let handle = workspace.acquire_conversation(&conv_id).unwrap();
+    let lock = workspace.test_lock(handle);
 
     let chat_request = ChatRequest::from("Hello");
 
@@ -261,10 +259,9 @@ async fn test_normal_completion_persists_content() {
         root,
         false,
         &[],
-        &mut workspace,
+        &lock,
         ToolChoice::Auto,
         &[],
-        conv_id,
         printer.clone(),
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -316,9 +313,9 @@ async fn test_tool_call_cycle_completes_with_followup() {
         .expect("failed to enable persistence");
 
     let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-    workspace
-        .set_active_conversation_id(conv_id, Utc::now())
-        .unwrap();
+
+    let handle = workspace.acquire_conversation(&conv_id).unwrap();
+    let lock = workspace.test_lock(handle);
 
     let chat_request = ChatRequest::from("List files in current directory");
 
@@ -347,10 +344,9 @@ async fn test_tool_call_cycle_completes_with_followup() {
         root,
         false,
         &[],
-        &mut workspace,
+        &lock,
         ToolChoice::Auto,
         &[], // No tool definitions - tests the "tool not found" path
-        conv_id,
         printer.clone(),
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -408,9 +404,9 @@ async fn test_quit_during_tool_execution_persists() {
         .expect("failed to enable persistence");
 
     let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-    workspace
-        .set_active_conversation_id(conv_id, Utc::now())
-        .unwrap();
+
+    let handle = workspace.acquire_conversation(&conv_id).unwrap();
+    let lock = workspace.test_lock(handle);
 
     let chat_request = ChatRequest::from("Run a tool");
 
@@ -448,10 +444,9 @@ async fn test_quit_during_tool_execution_persists() {
         root,
         false,
         &[],
-        &mut workspace,
+        &lock,
         ToolChoice::Auto,
         &[],
-        conv_id,
         printer.clone(),
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -497,9 +492,9 @@ async fn test_multiple_tool_calls_in_sequence() {
         .expect("failed to enable persistence");
 
     let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-    workspace
-        .set_active_conversation_id(conv_id, Utc::now())
-        .unwrap();
+
+    let handle = workspace.acquire_conversation(&conv_id).unwrap();
+    let lock = workspace.test_lock(handle);
 
     let chat_request = ChatRequest::from("Do multiple things");
 
@@ -565,10 +560,9 @@ async fn test_multiple_tool_calls_in_sequence() {
         root,
         false,
         &[],
-        &mut workspace,
+        &lock,
         ToolChoice::Auto,
         &[],
-        conv_id,
         printer.clone(),
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -625,9 +619,9 @@ async fn test_empty_tool_response_continues_cycle() {
         .expect("failed to enable persistence");
 
     let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-    workspace
-        .set_active_conversation_id(conv_id, Utc::now())
-        .unwrap();
+
+    let handle = workspace.acquire_conversation(&conv_id).unwrap();
+    let lock = workspace.test_lock(handle);
 
     let chat_request = ChatRequest::from("Use unknown tool");
 
@@ -656,10 +650,9 @@ async fn test_empty_tool_response_continues_cycle() {
         root,
         false,
         &[],
-        &mut workspace,
+        &lock,
         ToolChoice::Auto,
         &[], // No tools configured - tool_coordinator.prepare will fail
-        conv_id,
         printer.clone(),
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -729,9 +722,9 @@ async fn test_tool_restart_on_shutdown_signal() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Please use a tool");
 
@@ -770,10 +763,9 @@ async fn test_tool_restart_on_shutdown_signal() {
             root,
             false,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &[],
-            conv_id,
             printer.clone(),
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -850,9 +842,9 @@ async fn test_merged_stream_exits_after_tool_response() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Please use echo_tool");
 
@@ -883,10 +875,9 @@ async fn test_merged_stream_exits_after_tool_response() {
             root,
             false,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &[], // Tool definitions come from config, not this param
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -961,9 +952,9 @@ async fn test_tool_call_with_run_mode_ask_approves() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
@@ -1010,10 +1001,9 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             root,
             true, // is_tty = true to enable prompts
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -1033,10 +1023,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
         drop(output);
 
         // Verify the tool was executed using typed API
-        let events = workspace
-            .get_events(&conv_id)
-            .expect("conversation must exist")
-            .clone();
+        let events = lock.events().clone();
 
         // Find tool call responses
         let tool_responses: Vec<_> = events
@@ -1106,9 +1093,9 @@ async fn test_tool_call_with_run_mode_ask_skips() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
@@ -1154,10 +1141,9 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             root,
             true,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -1177,10 +1163,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
         drop(output);
 
         // Verify the tool was skipped using typed API
-        let events = workspace
-            .get_events(&conv_id)
-            .expect("conversation must exist")
-            .clone();
+        let events = lock.events().clone();
 
         // Find tool call responses
         let tool_responses: Vec<_> = events
@@ -1258,9 +1241,9 @@ async fn test_tool_call_with_run_mode_unattended() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
@@ -1302,10 +1285,9 @@ async fn test_tool_call_with_run_mode_unattended() {
             root,
             true, // is_tty doesn't matter for Unattended
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -1325,10 +1307,7 @@ async fn test_tool_call_with_run_mode_unattended() {
         drop(output);
 
         // Verify the tool was executed using typed API (not raw JSON)
-        let events = workspace
-            .get_events(&conv_id)
-            .expect("conversation must exist")
-            .clone();
+        let events = lock.events().clone();
 
         // Find tool call responses
         let tool_responses: Vec<_> = events
@@ -1398,9 +1377,9 @@ async fn test_tool_call_with_run_mode_skip() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
@@ -1451,10 +1430,9 @@ async fn test_tool_call_with_run_mode_skip() {
             root,
             true,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -1474,10 +1452,7 @@ async fn test_tool_call_with_run_mode_skip() {
         drop(output);
 
         // Verify the tool was skipped using typed API
-        let events = workspace
-            .get_events(&conv_id)
-            .expect("conversation must exist")
-            .clone();
+        let events = lock.events().clone();
 
         // Find tool call responses
         let tool_responses: Vec<_> = events
@@ -1572,9 +1547,9 @@ async fn test_multiple_tools_with_different_run_modes() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Use both tools");
 
@@ -1666,10 +1641,9 @@ async fn test_multiple_tools_with_different_run_modes() {
             root,
             true,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -1689,10 +1663,7 @@ async fn test_multiple_tools_with_different_run_modes() {
         drop(output);
 
         // Verify both tools were executed using typed API
-        let events = workspace
-            .get_events(&conv_id)
-            .expect("conversation must exist")
-            .clone();
+        let events = lock.events().clone();
 
         // Find tool call responses
         let tool_responses: Vec<_> = events
@@ -1774,9 +1745,9 @@ async fn test_tool_call_returns_error() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Use failing_tool");
 
@@ -1816,10 +1787,9 @@ async fn test_tool_call_returns_error() {
             root,
             true,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -1839,10 +1809,7 @@ async fn test_tool_call_returns_error() {
         drop(output);
 
         // Verify the tool error using typed API
-        let events = workspace
-            .get_events(&conv_id)
-            .expect("conversation must exist")
-            .clone();
+        let events = lock.events().clone();
 
         // Find tool call responses
         let tool_responses: Vec<_> = events
@@ -1956,9 +1923,9 @@ async fn test_waiting_indicator_shows_during_delay() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Hello");
 
@@ -1986,10 +1953,9 @@ async fn test_waiting_indicator_shows_during_delay() {
             root,
             true, // is_tty = true to enable the indicator
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &[],
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -2041,9 +2007,9 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Hello");
 
@@ -2070,10 +2036,9 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             root,
             true, // is_tty
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &[],
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -2119,9 +2084,9 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Hello");
 
@@ -2148,10 +2113,9 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             root,
             false, // is_tty = false
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &[],
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -2203,9 +2167,9 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Create a file");
 
@@ -2339,10 +2303,9 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             root,
             true, // is_tty = true to enable the indicator
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &[],
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -2402,9 +2365,9 @@ async fn test_turn_start_event_is_emitted() {
         .expect("failed to enable persistence");
 
     let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-    workspace
-        .set_active_conversation_id(conv_id, Utc::now())
-        .unwrap();
+
+    let handle = workspace.acquire_conversation(&conv_id).unwrap();
+    let lock = workspace.test_lock(handle);
 
     let chat_request = ChatRequest::from("Hello");
 
@@ -2428,10 +2391,9 @@ async fn test_turn_start_event_is_emitted() {
         root,
         false,
         &[],
-        &mut workspace,
+        &lock,
         ToolChoice::Auto,
         &[],
-        conv_id,
         printer,
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -2440,7 +2402,7 @@ async fn test_turn_start_event_is_emitted() {
     .await
     .unwrap();
 
-    let events = workspace.get_events(&conv_id).unwrap();
+    let events = lock.events();
     let turn_starts: Vec<&TurnStart> = events
         .iter()
         .filter_map(|e| e.event.as_turn_start())
@@ -2464,9 +2426,9 @@ async fn test_turn_start_index_increments_across_turns() {
         .expect("failed to enable persistence");
 
     let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-    workspace
-        .set_active_conversation_id(conv_id, Utc::now())
-        .unwrap();
+
+    let handle = workspace.acquire_conversation(&conv_id).unwrap();
+    let lock = workspace.test_lock(handle);
 
     let mcp_client = jp_mcp::Client::default();
 
@@ -2492,10 +2454,9 @@ async fn test_turn_start_index_increments_across_turns() {
         root,
         false,
         &[],
-        &mut workspace,
+        &lock,
         ToolChoice::Auto,
         &[],
-        conv_id,
         printer,
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -2526,10 +2487,9 @@ async fn test_turn_start_index_increments_across_turns() {
         root,
         false,
         &[],
-        &mut workspace,
+        &lock,
         ToolChoice::Auto,
         &[],
-        conv_id,
         printer,
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -2539,7 +2499,7 @@ async fn test_turn_start_index_increments_across_turns() {
     .unwrap();
 
     // Verify.
-    let events = workspace.get_events(&conv_id).unwrap();
+    let events = lock.events();
     let turn_starts: Vec<&TurnStart> = events
         .iter()
         .filter_map(|e| e.event.as_turn_start())
@@ -2566,9 +2526,9 @@ async fn test_markdown_flushed_before_tool_header() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Do something");
 
@@ -2631,10 +2591,9 @@ async fn test_markdown_flushed_before_tool_header() {
             root,
             false,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &[],
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -2731,9 +2690,9 @@ async fn test_parallel_tool_calls_rendered_atomically() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Use both tools");
 
@@ -2819,10 +2778,9 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             root,
             false, // is_tty = false (no timer, keeps output deterministic)
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -2917,9 +2875,9 @@ async fn test_single_tool_call_rendered_with_args() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Read a file");
 
@@ -2986,10 +2944,9 @@ async fn test_single_tool_call_rendered_with_args() {
             root,
             false,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -3209,9 +3166,9 @@ async fn test_tool_with_single_inquiry() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Use the tool");
 
@@ -3262,10 +3219,9 @@ async fn test_tool_with_single_inquiry() {
             root,
             false,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -3284,10 +3240,7 @@ async fn test_tool_with_single_inquiry() {
         drop(output);
 
         // Verify the tool response was persisted as successful.
-        let events = workspace
-            .get_events(&conv_id)
-            .expect("conversation must exist")
-            .clone();
+        let events = lock.events().clone();
 
         let tool_responses: Vec<_> = events
             .clone()
@@ -3353,9 +3306,9 @@ async fn test_tool_with_multiple_inquiries() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Multi-question tool");
 
@@ -3416,10 +3369,9 @@ async fn test_tool_with_multiple_inquiries() {
             root,
             false,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -3437,10 +3389,7 @@ async fn test_tool_with_multiple_inquiries() {
         );
         drop(output);
 
-        let events = workspace
-            .get_events(&conv_id)
-            .expect("conversation must exist")
-            .clone();
+        let events = lock.events().clone();
 
         let tool_responses: Vec<_> = events
             .clone()
@@ -3510,9 +3459,9 @@ async fn test_parallel_tools_one_with_inquiry() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Use both tools");
 
@@ -3589,10 +3538,9 @@ async fn test_parallel_tools_one_with_inquiry() {
             root,
             false,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -3610,10 +3558,7 @@ async fn test_parallel_tools_one_with_inquiry() {
         );
         drop(output);
 
-        let events = workspace
-            .get_events(&conv_id)
-            .expect("conversation must exist")
-            .clone();
+        let events = lock.events().clone();
 
         let tool_responses: Vec<_> = events
             .into_iter()
@@ -3664,9 +3609,9 @@ async fn test_parallel_tools_both_with_inquiries() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Both need inquiries");
 
@@ -3755,10 +3700,9 @@ async fn test_parallel_tools_both_with_inquiries() {
             root,
             false,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -3776,10 +3720,7 @@ async fn test_parallel_tools_both_with_inquiries() {
         );
         drop(output);
 
-        let events = workspace
-            .get_events(&conv_id)
-            .expect("conversation must exist")
-            .clone();
+        let events = lock.events().clone();
 
         let tool_responses: Vec<_> = events
             .into_iter()
@@ -3880,9 +3821,9 @@ async fn test_retry_counter_resets_on_successful_event() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Hello");
         let call_index = Arc::new(AtomicUsize::new(0));
@@ -3916,10 +3857,9 @@ async fn test_retry_counter_resets_on_successful_event() {
             root,
             false,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &[],
-            conv_id,
             printer,
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
@@ -3969,9 +3909,9 @@ async fn test_inquiry_failure_marks_tool_as_error() {
 
         let conv_id =
             workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-        workspace
-            .set_active_conversation_id(conv_id, Utc::now())
-            .unwrap();
+
+        let handle = workspace.acquire_conversation(&conv_id).unwrap();
+        let lock = workspace.test_lock(handle);
 
         let chat_request = ChatRequest::from("Use the tool");
 
@@ -4022,10 +3962,9 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             root,
             false,
             &[],
-            &mut workspace,
+            &lock,
             ToolChoice::Auto,
             &tool_defs,
-            conv_id,
             printer.clone(),
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
@@ -4035,10 +3974,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
 
         assert!(result.is_ok(), "Turn loop should complete: {result:?}");
 
-        let events = workspace
-            .get_events(&conv_id)
-            .expect("conversation must exist")
-            .clone();
+        let events = lock.events().clone();
 
         let tool_responses: Vec<_> = events
             .into_iter()

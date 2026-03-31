@@ -1,7 +1,8 @@
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
 use jp_config::fs::{ConfigFile, ConfigLoader, ConfigLoaderError, user_global_config_path};
+use jp_workspace::ConversationHandle;
 
-use super::Output;
+use super::{ConversationLoadRequest, Output};
 use crate::ctx::Ctx;
 
 mod fmt;
@@ -15,11 +16,24 @@ pub(crate) struct Config {
 }
 
 impl Config {
-    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         match self.command {
-            Commands::Show(args) => args.run(ctx),
-            Commands::Set(args) => args.run(ctx),
-            Commands::Fmt(args) => args.run(ctx),
+            Commands::Show(args) => {
+                debug_assert!(handles.is_empty());
+                args.run(ctx)
+            }
+            Commands::Set(args) => args.run(ctx, handles),
+            Commands::Fmt(args) => {
+                debug_assert!(handles.is_empty());
+                args.run(ctx)
+            }
+        }
+    }
+
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        match &self.command {
+            Commands::Set(args) => args.conversation_load_request(),
+            Commands::Show(_) | Commands::Fmt(_) => ConversationLoadRequest::none(),
         }
     }
 }
@@ -102,15 +116,4 @@ impl Target {
                 .transpose()
         }
     }
-}
-
-#[derive(Debug, Default, clap::Args)]
-#[group(required = false, multiple = false)]
-struct TargetWithConversation {
-    #[command(flatten)]
-    target: Target,
-
-    /// Appply the configuration to the active or specified conversation.
-    #[arg(long, value_name = "CONVERSATION_ID")]
-    conversation: Option<Option<String>>,
 }

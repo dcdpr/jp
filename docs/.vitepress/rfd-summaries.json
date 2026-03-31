@@ -72,7 +72,7 @@
     "summary": "Abandoned RFD split into RFD 048 and RFD 049; preserved for historical context on non-interactive mode design."
   },
   "020-parallel-conversations.md": {
-    "hash": "79e362fcae7f551183cea775b9f24eef1bd343479852f298ff9ca1e4ba382dd5",
+    "hash": "f9689ba2c4e1caff792de738a074411eaad44985171edb93012b7e92fef4480e",
     "summary": "Replace global active conversation with per-session tracking and add conversation locks for parallel terminal work."
   },
   "021-printer-live-redirection.md": {
@@ -270,5 +270,9 @@
   "068-forced-tool-retry-without-reasoning.md": {
     "hash": "50af2695b685dac01d6d7a16ad815f14a5c3958936a47289859ea02599ec57e2",
     "summary": "Automatically retry forced tool calls with reasoning disabled if the model ignores soft-force directives."
+  },
+  "069-guard-scoped-persistence-for-conversations.md": {
+    "hash": "e1d6df1cea707200a0d30db63401279639e8e8b064c5a70b216372ce644b8bd3",
+    "summary": "Conversation data auto-persists when ConversationMut drops via Arc<RwLock>, ensuring atomicity with file locks."
   }
 }

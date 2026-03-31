@@ -1,4 +1,5 @@
 mod cmd;
+mod config_pipeline;
 mod ctx;
 mod editor;
 mod error;
@@ -6,18 +7,20 @@ mod format;
 mod output;
 mod parser;
 mod schema;
+mod session;
 mod signals;
 
 use std::{
-    fmt,
-    io::{IsTerminal as _, stderr, stdout},
-    num::NonZeroUsize,
+    env, fmt,
+    io::{self, IsTerminal as _, stderr, stdout},
+    num::{self, NonZeroUsize},
     process::ExitCode,
     str::FromStr,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
+    thread,
     time::Duration,
 };
 
@@ -34,11 +37,11 @@ use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
 use jp_config::{
     PartialAppConfig,
-    assignment::{AssignKeyValue as _, KvAssignment},
-    fs::{load_partial, user_global_config_path},
+    assignment::KvAssignment,
+    fs::user_global_config_path,
     util::{
-        build, find_file_in_load_path, load_envs, load_partial_at_path,
-        load_partial_at_path_recursive, load_partials_with_inheritance,
+        build, load_envs, load_partial_at_path, load_partial_at_path_recursive,
+        load_partials_with_inheritance,
     },
 };
 use jp_printer::{OutputFormat, Printer};
@@ -47,6 +50,8 @@ use jp_workspace::{Workspace, user_data_dir};
 use serde_json::Value;
 use tokio::runtime::{self, Runtime};
 use tracing::{debug, info, trace, warn};
+
+use crate::{cmd::target::resolve_request, config_pipeline::ConfigPipeline};
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
 
@@ -271,6 +276,7 @@ impl fmt::Display for Cli {
     }
 }
 
+#[expect(clippy::print_stdout, clippy::print_stderr)]
 pub fn run() -> ExitCode {
     #[cfg(feature = "dhat")]
     let _profiler = run_dhat();
@@ -286,6 +292,7 @@ pub fn run() -> ExitCode {
         cli.globals.log_format,
         format,
     );
+
     trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
     let (code, output) = match run_inner(cli, format) {
         Ok(()) => (0, None),
@@ -295,7 +302,6 @@ pub fn run() -> ExitCode {
         }
     };
 
-    #[expect(clippy::print_stdout, clippy::print_stderr)]
     if let Some(output) = output {
         if code == 0 {
             println!("{output}");
@@ -304,9 +310,8 @@ pub fn run() -> ExitCode {
         }
     }
 
-    #[expect(clippy::print_stderr)]
     if (code != 0
-        || std::env::var("JP_DEBUG")
+        || env::var("JP_DEBUG")
             .as_deref()
             .is_ok_and(|v| v == "1" || v == "true"))
         && let Some(path) = guard.and_then(TracingGuard::persist)
@@ -320,10 +325,7 @@ pub fn run() -> ExitCode {
     }
 
     #[cfg(feature = "dhat")]
-    #[expect(clippy::print_stderr)]
-    {
-        eprintln!("You can view the heap profile at https://profiler.firefox.com");
-    }
+    eprintln!("You can view the heap profile at https://profiler.firefox.com");
 
     ExitCode::from(code)
 }
@@ -341,6 +343,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         workspace.disable_persistence();
     }
 
+    trace!("Sanitizing workspace.");
     let report = workspace.sanitize()?;
     if report.has_repairs() {
         for trashed in &report.trashed {
@@ -350,35 +353,68 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
                 "Trashed corrupt conversation"
             );
         }
-        if report.active_reassigned {
-            warn!("Active conversation was corrupt or missing, switched to fallback");
-        }
-        if report.default_created {
-            warn!("No valid conversations found, starting with fresh workspace");
-        }
     }
 
-    // Load conversation IDs and metadata from disk so that
-    // `apply_conversation_config` (called inside `load_partial_config`) can
-    // access conversation events via lazy loading.
-    if let Err(error) = workspace.load_conversation_index() {
-        tracing::error!(error = ?error, "Failed to load conversation index.");
+    trace!("Resolving session identity.");
+    let session = session::resolve();
+
+    // Populate the conversation index. This does NOT load the contents of
+    // individual conversations, this is done lazily as needed.
+    workspace.load_conversation_index();
+
+    // Config Loading Phase 1: Load static sources (files + env + --cfg) once.
+    let base = load_base_partial(&workspace)?;
+    let pipeline = ConfigPipeline::new(base, &cli.globals.config, Some(&workspace))?;
+
+    // Extract default_id for conversation resolution. This builds a temporary
+    // partial (base + --cfg + command-CLI) without the per-conversation layer.
+    let default_id = {
+        let mut cfg = pipeline.partial_without_conversation()?;
+        cfg = cli
+            .command
+            .apply_cli_config(Some(&workspace), cfg, None)
+            .map_err(|error| Error::CliConfig(error.to_string()))?;
+
+        cfg.conversation.default_id.take().unwrap_or_default()
+    };
+
+    let request = cli.command.conversation_load_request();
+    let handles = resolve_request(&request, &workspace, session.as_ref(), default_id)?;
+
+    // Config Loading Phase 2: Build final config with per-conversation layer.
+    let config_handle = request.config_conversation.and_then(|idx| handles.get(idx));
+    if let Some(handle) = config_handle
+        && let Err(error) = workspace.eager_load_conversation(handle)
+    {
+        tracing::warn!(error = ?error, "Failed to eager-load conversation.");
     }
 
-    let partial = load_partial_config(&cli.command, Some(&workspace), &cli.globals.config)?;
+    let conversation_partial = config_handle
+        .map(|handle| {
+            cli.command
+                .apply_conversation_config(&workspace, PartialAppConfig::default(), None, handle)
+                .map_err(|error| Error::CliConfig(error.to_string()))
+        })
+        .transpose()?;
+
+    let mut partial = match conversation_partial {
+        Some(conversation_config) => pipeline.partial_with_conversation(conversation_config)?,
+        None => pipeline.partial_without_conversation()?,
+    };
+
+    partial = cli
+        .command
+        .apply_cli_config(Some(&workspace), partial, None)
+        .map_err(|error| Error::CliConfig(error.to_string()))?;
+
     let config = Arc::new(build(partial)?);
-
-    // For fresh workspaces, create a default stream now that we have the
-    // final config.
-    if let Err(error) = workspace.ensure_active_conversation_stream(config.clone()) {
-        tracing::error!(error = ?error, "Failed to ensure active conversation stream.");
-    }
-
     let runtime = build_runtime(cli.root.threads, "jp-worker")?;
-    let mut ctx = Ctx::new(workspace, runtime, cli.globals, config, printer);
-    let handle = ctx.handle().clone();
+    let mut ctx = Ctx::new(workspace, runtime, cli.globals, config, session, printer);
+    let rt = ctx.handle().clone();
 
-    let output = handle.block_on(cli.command.run(&mut ctx));
+    // Run the requested command.
+    let output = rt.block_on(cli.command.run(&mut ctx, handles));
+
     if let Err(error) = output.as_ref()
         && error.disable_persistence
     {
@@ -389,21 +425,23 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         ctx.workspace.disable_persistence();
     }
 
-    // Flush the printer to ensure all queued typewriter output is
-    // fully written before background tasks log any errors.
+    // Flush the printer to ensure all queued typewriter output is fully written
+    // before background tasks log any errors.
     ctx.printer.flush();
 
-    // Wait for background tasks to complete and sync their results to
-    // the workspace.
-    handle
-        .block_on(
-            ctx.task_handler
-                .sync(&mut ctx.workspace, Duration::from_secs(10)),
-        )
-        .map_err(Error::Task)?;
+    // Wait for background tasks to complete and sync their results to the
+    // workspace.
+    rt.block_on(
+        ctx.task_handler
+            .sync(&mut ctx.workspace, Duration::from_secs(10)),
+    )
+    .map_err(Error::Task)?;
 
     // Remove ephemeral conversations that are no longer needed.
-    ctx.workspace.remove_ephemeral_conversations();
+    ctx.workspace.remove_ephemeral_conversations(&[]);
+
+    // Remove orphaned lock files and stale session mappings.
+    ctx.workspace.cleanup_stale_files();
 
     output.map_err(Into::into)
 }
@@ -468,141 +506,17 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
     (code.into(), error)
 }
 
-/// Load the static partial workspace configuration.
+/// Load the base partial config from files and environment variables.
 ///
-/// This uses all configuration sources known at the start of the CLI run.
+/// This produces the `files + inheritance + env` layer that serves as input to
+/// [`ConfigPipeline`]. No `--cfg` args or per-conversation config.
 ///
 /// See: <https://jp.computer/configuration>
-fn load_partial_config(
-    cmd: &Commands,
-    workspace: Option<&Workspace>,
-    overrides: &[KeyValueOrPath],
-) -> Result<PartialAppConfig> {
-    // Load all partials in different file locations, the first loaded file
-    // having the lowest precedence.
-    let partials = load_partial_configs_from_files(workspace, absolute_utf8(".").ok())?;
+fn load_base_partial(workspace: &Workspace) -> Result<PartialAppConfig> {
+    let partials = load_partial_configs_from_files(Some(workspace), absolute_utf8(".").ok())?;
+    let partial = load_partials_with_inheritance(partials)?;
 
-    // Load all partials, merging later partials over earlier ones, unless one
-    // of the partials set `inherit = false`, then later partials are ignored.
-    let mut partial = load_partials_with_inheritance(partials)?;
-
-    // Load environment variables.
-    partial = load_envs(partial).map_err(|e| Error::CliConfig(e.to_string()))?;
-
-    // Apply conversation-specific config, if needed.
-    if let Some(workspace) = workspace {
-        partial = cmd
-            .apply_conversation_config(Some(workspace), partial, None)
-            .map_err(|e| Error::CliConfig(e.to_string()))?;
-    }
-
-    // Load CLI-provided `--cfg` arguments. These are different from
-    // command-specific CLI arguments, in that they are global, and allow you to
-    // change any field in the [`Config`] struct.
-    partial = load_cli_cfg_args(partial, overrides, workspace)?;
-
-    // Load command-specific CLI arguments last (e.g. `jp query --model`).
-    partial = cmd
-        .apply_cli_config(workspace, partial, None)
-        .map_err(|e| Error::CliConfig(e.to_string()))?;
-
-    Ok(partial)
-}
-
-fn load_cli_cfg_args(
-    mut partial: PartialAppConfig,
-    overrides: &[KeyValueOrPath],
-    workspace: Option<&Workspace>,
-) -> Result<PartialAppConfig> {
-    let home = std::env::home_dir().and_then(|p| Utf8PathBuf::from_path_buf(p).ok());
-
-    for field in overrides {
-        match field {
-            KeyValueOrPath::Path(path) if path.exists() => {
-                if let Some(p) = load_partial_at_path(path)? {
-                    partial = load_partial(partial, p)?;
-                }
-            }
-            KeyValueOrPath::Path(path) => {
-                // Build search roots in precedence order (lowest first).
-                //
-                // 1. User-global:    $XDG_CONFIG_HOME/jp/config/
-                // 2. Workspace:      <workspace_root>/
-                // 3. User-workspace: $XDG_DATA_HOME/jp/workspace/<id>/config/
-                let mut roots: Vec<Utf8PathBuf> = Vec::new();
-
-                if let Some(global_dir) = user_global_config_path(home.as_deref()) {
-                    roots.push(global_dir.join("config"));
-                }
-                if let Some(w) = workspace {
-                    roots.push(w.root().to_owned());
-                }
-                if let Some(user_ws_dir) = workspace.and_then(Workspace::user_storage_path) {
-                    roots.push(user_ws_dir.join("config"));
-                }
-
-                let mut matches: Vec<PartialAppConfig> = Vec::new();
-                let mut searched: Vec<Utf8PathBuf> = Vec::new();
-
-                // Search each root independently. Within a single root, the
-                // first `config_load_paths` entry that produces a match wins.
-                // Across roots, all matches are collected for merging.
-                for root in &roots {
-                    let load_paths: Vec<Utf8PathBuf> = partial
-                        .config_load_paths
-                        .iter()
-                        .flatten()
-                        .filter_map(|p| {
-                            Utf8PathBuf::try_from(p.to_path(root))
-                                .inspect_err(|e| {
-                                    tracing::error!(
-                                        path = p.to_string(),
-                                        error = e.to_string(),
-                                        "Not a valid UTF-8 path"
-                                    );
-                                })
-                                .ok()
-                        })
-                        .collect();
-
-                    for load_path in &load_paths {
-                        searched.push(load_path.clone());
-
-                        debug!(
-                            path = path.as_str(),
-                            load_path = load_path.as_str(),
-                            root = root.as_str(),
-                            "Trying to load partial from config load path"
-                        );
-
-                        if let Some(file) = find_file_in_load_path(path, load_path) {
-                            if let Some(p) = load_partial_at_path(file)? {
-                                matches.push(p);
-                            }
-
-                            break; // first match within this root
-                        }
-                    }
-                }
-
-                if matches.is_empty() {
-                    return Err(Error::MissingConfigFile {
-                        path: path.clone(),
-                        searched,
-                    });
-                }
-
-                for p in matches {
-                    partial = load_partial(partial, p)?;
-                }
-            }
-            KeyValueOrPath::KeyValue(kv) => partial
-                .assign(kv.clone())
-                .map_err(|e| Error::CliConfig(e.to_string()))?,
-        }
-    }
-
-    Ok(partial)
+    load_envs(partial).map_err(|error| Error::CliConfig(error.to_string()))
 }
 
 fn load_partial_configs_from_files(
@@ -612,7 +526,7 @@ fn load_partial_configs_from_files(
     let mut partials = vec![];
 
     // Load `$XDG_CONFIG_HOME/jp/config.{toml,json,yaml}`.
-    let home = std::env::home_dir().and_then(|p| Utf8PathBuf::from_path_buf(p).ok());
+    let home = env::home_dir().and_then(|p| Utf8PathBuf::from_path_buf(p).ok());
     if let Some(user_global_config) = user_global_config_path(home.as_deref())
         .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
         .transpose()?
@@ -822,10 +736,7 @@ fn configure_logging(
     };
 
     if use_json {
-        let layer = fmt::layer()
-            .json()
-            .with_ansi(false)
-            .with_writer(std::io::stderr);
+        let layer = fmt::layer().json().with_ansi(false).with_writer(io::stderr);
 
         let layer = if level < LevelFilter::DEBUG {
             layer.without_time().boxed()
@@ -839,7 +750,7 @@ fn configure_logging(
         let layer = fmt::layer()
             .event_format(format)
             .with_ansi(true)
-            .with_writer(std::io::stderr);
+            .with_writer(io::stderr);
 
         if level < LevelFilter::DEBUG {
             registry
@@ -881,11 +792,11 @@ pub(crate) fn build_runtime(threads: Option<NonZeroUsize>, thread_name: &str) ->
 /// Returns an estimate of the number of recommended threads that JP should
 /// spawn.
 pub fn num_threads() -> NonZeroUsize {
-    match std::thread::available_parallelism() {
+    match thread::available_parallelism() {
         Ok(count) => count,
         Err(error) => {
             warn!(%error, "Failed to determine available parallelism for thread count, defaulting to 1.");
-            std::num::NonZeroUsize::MIN
+            num::NonZeroUsize::MIN
         }
     }
 }

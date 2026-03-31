@@ -1,34 +1,46 @@
-use jp_conversation::{ConversationId, ConversationStream};
+use jp_workspace::ConversationHandle;
 
-use crate::{cmd::Output, ctx::Ctx, format::conversation::DetailsFmt, output::print_details};
+use crate::{
+    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    ctx::Ctx,
+    format::conversation::DetailsFmt,
+    output::print_details,
+};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Show {
-    /// Conversation ID to show.
-    ///
-    /// Defaults to the active conversation if not specified.
-    id: Option<ConversationId>,
+    #[command(flatten)]
+    target: PositionalIds<true, true>,
 }
 
 impl Show {
-    #[expect(clippy::unnecessary_wraps)]
-    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
-        let active_id = ctx.workspace.active_conversation_id();
-        let id = self.id.unwrap_or(active_id);
-        let conversation = ctx.workspace.get_conversation(&id);
-        let events = ctx.workspace.get_events(&id);
-        let user = conversation.is_some_and(|v| v.user);
-        let details = DetailsFmt::new(id)
-            .with_last_message_at(events.and_then(|v| v.last().map(|v| v.event.timestamp)))
-            .with_event_count(events.map(ConversationStream::len).unwrap_or_default())
-            .with_title(conversation.and_then(|v| v.title.as_ref()))
-            .with_last_activated_at(conversation.map(|v| v.last_activated_at))
-            .with_local_flag(user)
-            .with_active_conversation(active_id)
-            .with_expires_at(conversation.and_then(|v| v.expires_at))
-            .with_pretty_printing(ctx.printer.pretty_printing_enabled());
+    #[expect(clippy::unused_self)]
+    pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+        let active_id = ctx
+            .session
+            .as_ref()
+            .and_then(|s| ctx.workspace.session_active_conversation(s));
 
-        print_details(&ctx.printer, details.title.as_deref(), details.rows());
+        for handle in handles {
+            let id = handle.id();
+            let conversation = ctx.workspace.metadata(&handle)?;
+            let events = ctx.workspace.events(&handle)?;
+            let details = DetailsFmt::new(id)
+                .with_last_message_at(events.last().map(|v| v.event.timestamp))
+                .with_event_count(events.len())
+                .with_title(conversation.title.as_ref())
+                .with_last_activated_at(Some(conversation.last_activated_at))
+                .with_local_flag(conversation.user)
+                .with_active_conversation(active_id.unwrap_or(id))
+                .with_expires_at(conversation.expires_at)
+                .with_pretty_printing(ctx.printer.pretty_printing_enabled());
+
+            print_details(&ctx.printer, details.title.as_deref(), details.rows());
+        }
         Ok(())
+    }
+
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        ConversationLoadRequest::explicit_or_session(&self.target.ids)
     }
 }

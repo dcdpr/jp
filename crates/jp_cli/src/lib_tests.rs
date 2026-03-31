@@ -24,6 +24,17 @@ fn partial_with_load_paths(paths: &[&str]) -> PartialAppConfig {
     partial
 }
 
+/// Helper: build a pipeline from a base partial + overrides, then return the
+/// built partial (without conversation layer).
+fn build_cfg(
+    base: PartialAppConfig,
+    overrides: &[KeyValueOrPath],
+    workspace: Option<&Workspace>,
+) -> Result<PartialAppConfig> {
+    let pipeline = config_pipeline::ConfigPipeline::new(base, overrides, workspace)?;
+    pipeline.partial_without_conversation()
+}
+
 #[test]
 fn test_cli() {
     Cli::command().debug_assert();
@@ -43,7 +54,7 @@ fn test_load_cli_cfg_args_workspace_root() {
     let partial = partial_with_load_paths(&[".jp/config"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("skill/web"))];
 
-    let result = load_cli_cfg_args(partial, &overrides, Some(&workspace)).unwrap();
+    let result = build_cfg(partial, &overrides, Some(&workspace)).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("from-workspace"));
 }
 
@@ -63,7 +74,7 @@ fn test_load_cli_cfg_args_user_global_root() {
     let partial = partial_with_load_paths(&[".jp/config"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("skill/web"))];
 
-    let result = load_cli_cfg_args(partial, &overrides, None).unwrap();
+    let result = build_cfg(partial, &overrides, None).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("from-global"));
 
     unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_FILE") };
@@ -80,7 +91,6 @@ fn test_load_cli_cfg_args_merges_global_and_workspace() {
 
     let workspace = Workspace::new(&ws_root);
 
-    // Global sets name, workspace sets system_prompt (different fields)
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
         "assistant.name = 'from-global'",
@@ -93,9 +103,8 @@ fn test_load_cli_cfg_args_merges_global_and_workspace() {
     let partial = partial_with_load_paths(&[".jp/config"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("skill/web"))];
 
-    let result = load_cli_cfg_args(partial, &overrides, Some(&workspace)).unwrap();
+    let result = build_cfg(partial, &overrides, Some(&workspace)).unwrap();
 
-    // Both fields should be present: global loaded first, workspace merged on top
     assert_eq!(result.assistant.name.as_deref(), Some("from-global"));
     assert_eq!(
         result.providers.llm.openrouter.api_key_env.as_deref(),
@@ -116,7 +125,6 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
 
     let workspace = Workspace::new(&ws_root);
 
-    // Both set the same field; workspace (higher precedence) should win
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
         "assistant.name = 'from-global'",
@@ -129,7 +137,7 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
     let partial = partial_with_load_paths(&[".jp/config"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("skill/web"))];
 
-    let result = load_cli_cfg_args(partial, &overrides, Some(&workspace)).unwrap();
+    let result = build_cfg(partial, &overrides, Some(&workspace)).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("from-workspace"));
 
     unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_FILE") };
@@ -144,7 +152,7 @@ fn test_load_cli_cfg_args_missing_file_reports_searched_paths() {
     let partial = partial_with_load_paths(&[".jp/config"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("skill/missing"))];
 
-    let err = load_cli_cfg_args(partial, &overrides, Some(&workspace)).unwrap_err();
+    let err = build_cfg(partial, &overrides, Some(&workspace)).unwrap_err();
     match err {
         Error::MissingConfigFile { path, searched } => {
             assert_eq!(path.as_str(), "skill/missing");
@@ -177,7 +185,7 @@ fn test_load_cli_cfg_args_first_load_path_wins_within_root() {
     let partial = partial_with_load_paths(&["first", "second"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("skill/web"))];
 
-    let result = load_cli_cfg_args(partial, &overrides, Some(&workspace)).unwrap();
+    let result = build_cfg(partial, &overrides, Some(&workspace)).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("from-first"));
 }
 
@@ -192,7 +200,7 @@ fn test_load_cli_cfg_args_absolute_path_still_works() {
     let partial = PartialAppConfig::empty();
     let overrides = vec![KeyValueOrPath::Path(file)];
 
-    let result = load_cli_cfg_args(partial, &overrides, None).unwrap();
+    let result = build_cfg(partial, &overrides, None).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("direct"));
 }
 
@@ -202,7 +210,7 @@ fn test_load_cli_cfg_args_no_roots_errors() {
     let partial = partial_with_load_paths(&[".jp/config"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("foobar/baz"))];
 
-    let err = load_cli_cfg_args(partial, &overrides, None).unwrap_err();
+    let err = build_cfg(partial, &overrides, None).unwrap_err();
     match err {
         Error::MissingConfigFile { path, .. } => {
             assert_eq!(path.as_str(), "foobar/baz");
@@ -216,7 +224,7 @@ fn test_load_cli_cfg_args_key_value_still_works() {
     let partial = PartialAppConfig::empty();
     let overrides = vec![KeyValueOrPath::from_str("assistant.name=test").unwrap()];
 
-    let result = load_cli_cfg_args(partial, &overrides, None).unwrap();
+    let result = build_cfg(partial, &overrides, None).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("test"));
 }
 
@@ -231,7 +239,6 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
 
     let workspace = Workspace::new(&ws_root);
 
-    // Only global has the file, workspace does not
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
         "assistant.name = 'from-global'",
@@ -240,7 +247,7 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
     let partial = partial_with_load_paths(&[".jp/config"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("skill/web"))];
 
-    let result = load_cli_cfg_args(partial, &overrides, Some(&workspace)).unwrap();
+    let result = build_cfg(partial, &overrides, Some(&workspace)).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("from-global"));
 
     unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_FILE") };

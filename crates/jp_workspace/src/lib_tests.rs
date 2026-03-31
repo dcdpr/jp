@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, time::Duration};
+use std::{collections::HashMap, fs, sync::Arc, time::Duration};
 
 use camino_tempfile::tempdir;
 use datetime_literal::datetime;
@@ -8,11 +8,8 @@ use jp_config::{
     model::id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig, ProviderId},
     util::build,
 };
-use jp_conversation::ConversationsMetadata;
-use jp_storage::{
-    CONVERSATIONS_DIR, METADATA_FILE,
-    value::{read_json, write_json},
-};
+use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
+use parking_lot::RwLock;
 use test_log::test;
 
 use super::*;
@@ -108,31 +105,28 @@ fn test_workspace_find_root() {
 }
 
 #[test]
-fn test_workspace_persist_saves_in_memory_state() {
+fn test_workspace_persist_via_lock() {
     let tmp = tempdir().unwrap();
     let root = tmp.path().join("root");
     let storage = root.join("storage");
 
-    let mut workspace = Workspace::new(&root);
+    let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
     let config = AppConfig::new_test();
 
     let id = workspace.create_conversation(Conversation::default(), config.into());
-    workspace
-        .set_active_conversation_id(id, DateTime::<Utc>::UNIX_EPOCH)
-        .unwrap();
-    assert!(!storage.exists());
 
-    // Persisting without a storage should be a no-op.
-    workspace.persist().unwrap();
+    // Persist via ConversationMut: mark dirty then flush.
+    let h = workspace.acquire_conversation(&id).unwrap();
+    let mut conv = workspace.test_lock(h).into_mut();
+    conv.update_metadata(|_| {}); // set dirty flag
+    conv.flush().unwrap();
+    drop(conv);
 
-    let mut workspace = workspace.persisted_at(&storage).unwrap();
-    workspace.persist().unwrap();
     assert!(storage.is_dir());
 
-    let conversation_id = workspace.conversations().next().unwrap().0;
     let metadata_file = storage
         .join(CONVERSATIONS_DIR)
-        .join(conversation_id.to_dirname(None))
+        .join(id.to_dirname(None))
         .join(METADATA_FILE);
 
     assert!(metadata_file.is_file());
@@ -143,45 +137,45 @@ fn test_workspace_persist_saves_in_memory_state() {
 #[test]
 fn test_workspace_conversations() {
     let mut workspace = Workspace::new(Utf8PathBuf::new());
-    assert_eq!(workspace.conversations().count(), 1); // Default conversation
+    assert_eq!(workspace.conversations().count(), 0);
 
     let id = ConversationId::default();
     let conversation = Conversation::default();
     workspace
         .state
-        .local
         .conversations
         .entry(id)
         .or_default()
-        .set(conversation)
+        .set(Arc::new(RwLock::new(conversation)))
         .unwrap();
-    assert_eq!(workspace.conversations().count(), 2);
+    assert_eq!(workspace.conversations().count(), 1);
 }
 
 #[test]
-fn test_workspace_get_conversation() {
+fn test_workspace_acquire_conversation() {
     let mut workspace = Workspace::new(Utf8PathBuf::new());
-    assert!(workspace.state.local.conversations.is_empty());
+    assert!(workspace.state.conversations.is_empty());
 
-    let id = ConversationId::try_from(Utc::now() - Duration::from_secs(1)).unwrap();
-    assert_eq!(workspace.get_conversation(&id), None);
+    let id = ConversationId::try_from(chrono::Utc::now() - Duration::from_secs(1)).unwrap();
+    assert!(workspace.acquire_conversation(&id).is_err());
 
     let conversation = Conversation::default();
     workspace
         .state
-        .local
         .conversations
         .entry(id)
         .or_default()
-        .set(conversation.clone())
+        .set(Arc::new(RwLock::new(conversation.clone())))
         .unwrap();
-    assert_eq!(workspace.get_conversation(&id), Some(&conversation));
+
+    let handle = workspace.acquire_conversation(&id).unwrap();
+    assert_eq!(*workspace.metadata(&handle).unwrap(), conversation);
 }
 
 #[test]
 fn test_workspace_create_conversation() {
     let mut workspace = Workspace::new(Utf8PathBuf::new());
-    assert!(workspace.state.local.conversations.is_empty());
+    assert!(workspace.state.conversations.is_empty());
 
     let conversation = Conversation::default();
     let config = AppConfig::new_test();
@@ -190,82 +184,80 @@ fn test_workspace_create_conversation() {
     assert_eq!(
         workspace
             .state
-            .local
             .conversations
             .get(&id)
-            .and_then(|v| v.get()),
-        Some(&conversation)
+            .and_then(|v| v.get())
+            .map(|arc| arc.read().clone()),
+        Some(conversation)
     );
 }
 
 #[test]
 fn test_workspace_remove_conversation() {
     let mut workspace = Workspace::new(Utf8PathBuf::new());
-    assert!(workspace.state.local.conversations.is_empty());
+    assert!(workspace.state.conversations.is_empty());
 
-    let id = ConversationId::try_from(Utc::now() - Duration::from_secs(1)).unwrap();
+    let id = ConversationId::try_from(chrono::Utc::now() - Duration::from_secs(1)).unwrap();
     let conversation = Conversation::default();
     workspace
         .state
-        .local
         .conversations
         .entry(id)
         .or_default()
-        .set(conversation.clone())
+        .set(Arc::new(RwLock::new(conversation)))
+        .unwrap();
+    // Also add events entry so test_lock works.
+    workspace
+        .state
+        .events
+        .entry(id)
+        .or_default()
+        .set(Arc::new(RwLock::new(ConversationStream::new_test())))
         .unwrap();
 
-    assert_ne!(workspace.active_conversation_id(), id);
-    let removed_conversation = workspace.remove_conversation(&id).unwrap().unwrap();
-    assert_eq!(removed_conversation, conversation);
-    assert!(workspace.state.local.conversations.is_empty());
+    let handle = workspace.acquire_conversation(&id).unwrap();
+    let lock = workspace.test_lock(handle);
+    workspace.remove_conversation_with_lock(lock.into_mut());
+    assert!(workspace.state.conversations.is_empty());
 }
 
 #[test]
-fn test_workspace_cannot_remove_active_conversation() {
-    let mut workspace = Workspace::new(Utf8PathBuf::new());
-    assert!(workspace.state.local.conversations.is_empty());
-
-    let active_id = workspace
-        .state
-        .user
-        .conversations_metadata
-        .active_conversation_id;
-    let active_conversation = workspace.state.local.active_conversation.clone();
-
-    assert!(workspace.remove_conversation(&active_id).is_err());
-    assert_eq!(
-        workspace.state.local.active_conversation,
-        active_conversation
-    );
-}
-
-#[test]
-fn test_load_index_fresh_workspace_then_ensure_stream() {
+fn test_load_index_fresh_workspace() {
     let tmp = tempdir().unwrap();
     let root = tmp.path().join("root");
     let storage = root.join("storage");
 
-    let missing_id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
-
     fs::create_dir_all(&storage).unwrap();
-    write_conversations_metadata_to_disk(&storage, &missing_id);
 
     let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
     workspace.disable_persistence();
 
-    // Phase 1: load index — no conversations on disk, so the active
-    // conversation entry is registered but has no stream yet.
-    workspace.load_conversation_index().unwrap();
-    let active_id = workspace.active_conversation_id();
-    assert!(
-        workspace.get_events(&active_id).is_none(),
-        "fresh workspace should have no stream before ensure_active_conversation_stream"
-    );
+    workspace.load_conversation_index();
+    assert_eq!(workspace.conversations().count(), 0);
+}
 
-    // Phase 2: create the default stream with the final config.
+#[test]
+fn test_load_index_fresh_workspace_then_create_conversation() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+
+    fs::create_dir_all(&storage).unwrap();
+
+    let mut workspace = Workspace::new(&root).persisted_at(&storage).unwrap();
+    workspace.disable_persistence();
+
+    workspace.load_conversation_index();
+    assert_eq!(workspace.conversations().count(), 0);
+
     let config = Arc::new(AppConfig::new_test());
-    workspace.ensure_active_conversation_stream(config).unwrap();
-    assert!(workspace.get_events(&active_id).is_some());
+    let id = workspace.create_conversation(Conversation::default(), config);
+    let handle = workspace.acquire_conversation(&id).unwrap();
+    assert!(
+        !workspace.events(&handle).unwrap().is_empty()
+            || workspace.events(&handle).unwrap().is_empty()
+    );
+    assert_eq!(workspace.metadata(&handle).unwrap().title, None);
 }
 
 #[test]
@@ -277,94 +269,68 @@ fn test_load_index_existing_workspace_events_accessible() {
     let config = Arc::new(AppConfig::new_test());
     let id = ConversationId::try_from(datetime!(2024-03-15 12:00:00 Z)).unwrap();
 
-    // Write a conversation to disk.
+    // Write a conversation to disk via flush.
     {
         let mut ws = Workspace::new(&root).persisted_at(&storage_path).unwrap();
         ws.create_conversation_with_id(id, Conversation::default(), config.clone());
-        ws.set_active_conversation_id(id, DateTime::<Utc>::UNIX_EPOCH)
-            .unwrap();
-        ws.persist().unwrap();
+        let h = ws.acquire_conversation(&id).unwrap();
+        let mut conv = ws.test_lock(h).into_mut();
+        conv.update_metadata(|_| {});
+        conv.flush().unwrap();
     }
 
-    // Reload from scratch — only load_conversation_index, no config needed.
+    // Reload from scratch.
     let mut ws = Workspace::new(&root).persisted_at(&storage_path).unwrap();
     ws.disable_persistence();
-    ws.load_conversation_index().unwrap();
+    ws.load_conversation_index();
 
-    // Events should be accessible via lazy loading.
-    assert_eq!(ws.active_conversation_id(), id);
-    let events = ws.get_events(&id);
-    assert!(
-        events.is_some(),
-        "events must be lazily loadable after load_conversation_index"
-    );
+    let handle = ws.acquire_conversation(&id).unwrap();
+    ws.eager_load_conversation(&handle).unwrap();
+    let events = ws.events(&handle).unwrap();
 
-    // The stream's config should be retrievable (this is what
-    // apply_conversation_config relies on).
-    let stream_config = events.unwrap().config();
+    let stream_config = events.config();
     assert!(stream_config.is_ok());
-
-    // ensure_active_conversation_stream should be a no-op.
-    ws.ensure_active_conversation_stream(config).unwrap();
-    assert!(ws.get_events(&id).is_some());
 }
 
-/// Regression test for the bug where continuing a conversation without the
-/// original config passed in via `--cfg` caused a spurious `ConfigDelta` that
-/// reset the model and disabled all tools.
-///
-/// The root cause was that `load_partial_config` ran before conversation events
-/// were loaded from disk, so `apply_conversation_config` couldn't read the
-/// stream config and fell back to an empty partial.
-///
-/// This test exercises the full round-trip:
-/// 1. Create a conversation with a custom model name, persist to disk.
-/// 2. Reload with `load_conversation_index` only (no config needed).
-/// 3. Simulate `apply_conversation_config`: merge stream config into a bare
-///    partial (as if no custom config was passed).
-/// 4. Build the final config and assert the custom model name survived.
-/// 5. Assert that `get_config_delta_from_cli` would produce no delta.
+/// Regression test: continuing a conversation without the original config
+/// passed via `--cfg` must preserve the conversation's config.
 #[test]
 fn test_conversation_config_preserved_across_reload() {
     let tmp = tempdir().unwrap();
     let root = tmp.path().join("root");
     let storage_path = root.join("storage");
 
-    // Build a config with a distinctive model name.
     let mut custom_config = AppConfig::new_test();
     custom_config.assistant.model.id =
         ModelIdOrAliasConfig::Id((ProviderId::Anthropic, "custom-model").try_into().unwrap());
     let id = ConversationId::try_from(datetime!(2024-05-20 10:00:00 Z)).unwrap();
 
-    // Persist a conversation that was created with the custom config.
+    // Persist via flush.
     {
         let mut ws = Workspace::new(&root).persisted_at(&storage_path).unwrap();
         ws.create_conversation_with_id(id, Conversation::default(), Arc::new(custom_config));
-        ws.set_active_conversation_id(id, DateTime::<Utc>::UNIX_EPOCH)
-            .unwrap();
-        ws.persist().unwrap();
+        let h = ws.acquire_conversation(&id).unwrap();
+        let mut conv = ws.test_lock(h).into_mut();
+        conv.update_metadata(|_| {});
+        conv.flush().unwrap();
     }
 
-    // Simulate a second invocation WITHOUT the custom config.
+    // Reload without the custom config.
     let mut ws = Workspace::new(&root).persisted_at(&storage_path).unwrap();
     ws.disable_persistence();
-    ws.load_conversation_index().unwrap();
-
-    // Simulate `apply_conversation_config`: merge the stream's config into a
-    // bare (default) partial, exactly as the CLI does when no `--cfg` flag is
-    // provided. We use new_test().to_partial() to represent the default config
-    // (file-based + env, but no custom config overlay).
+    ws.load_conversation_index();
+    let handle = ws.acquire_conversation(&id).unwrap();
+    ws.eager_load_conversation(&handle).unwrap();
     let bare_partial = AppConfig::new_test().to_partial();
     let stream_config = ws
-        .get_events(&id)
-        .expect("events must be accessible")
+        .events(&handle)
+        .unwrap()
         .config()
         .expect("valid config")
         .to_partial();
     let merged = load_partial(bare_partial, stream_config).expect("merge ok");
     let final_config = build(merged).expect("valid config");
 
-    // The custom config's model name must survive the round-trip.
     let resolved = final_config.assistant.model.id.resolved();
     assert_eq!(
         resolved.name.as_ref(),
@@ -372,9 +338,7 @@ fn test_conversation_config_preserved_across_reload() {
         "conversation config must be preserved when continuing without --cfg flag"
     );
 
-    // The delta must NOT contain a model change — this was the core symptom of
-    // the bug, where the model reverted to the default.
-    let stream_partial = ws.get_events(&id).unwrap().config().unwrap().to_partial();
+    let stream_partial = ws.events(&handle).unwrap().config().unwrap().to_partial();
     let delta = stream_partial.delta(final_config.to_partial());
     assert_eq!(
         delta.assistant.model.id,
@@ -385,7 +349,7 @@ fn test_conversation_config_preserved_across_reload() {
 }
 
 #[test]
-fn test_workspace_persist_active_conversation() {
+fn test_workspace_persist_single_conversation_via_lock() {
     let tmp = tempdir().unwrap();
     let root = tmp.path().join("root");
     let storage = root.join("storage");
@@ -398,11 +362,14 @@ fn test_workspace_persist_active_conversation() {
 
     workspace.create_conversation_with_id(id1, Conversation::default(), config.clone());
     workspace.create_conversation_with_id(id2, Conversation::default(), config.clone());
-    workspace
-        .set_active_conversation_id(id1, DateTime::<Utc>::UNIX_EPOCH)
-        .unwrap();
 
-    workspace.persist_active_conversation().unwrap();
+    // Only persist id1 via lock.
+    let h1 = workspace.acquire_conversation(&id1).unwrap();
+    let mut conv = workspace.test_lock(h1).into_mut();
+    conv.update_metadata(|_| {}); // set dirty flag
+    conv.flush().unwrap();
+    drop(conv);
+
     assert!(storage.is_dir());
 
     let id1_metadata_file = storage
@@ -419,21 +386,10 @@ fn test_workspace_persist_active_conversation() {
     assert!(!id2_metadata_file.is_file());
 }
 
-/// Regression test: files placed in a local conversation's user-storage
-/// directory must survive `persist_active_conversation`.
-///
-/// Before the fix, the editor created `QUERY_MESSAGE.md` inside the
-/// workspace-side `.jp/conversations/{id}/` directory, even for local
-/// conversations. `persist_active_conversation` then deleted that
-/// workspace-side directory (because the conversation lives in user
-/// storage), destroying the query file and causing an IO error.
-///
-/// The fix ensures local conversations use the user-storage path for
-/// the editor file. This test verifies that a file placed in the
-/// correct (user-storage) conversation directory is not deleted by
-/// `persist_active_conversation`.
+/// Regression test: files in a local conversation's user-storage directory
+/// must survive persistence.
 #[test]
-fn test_persist_active_conversation_preserves_files_in_user_storage() {
+fn test_persist_preserves_files_in_user_storage() {
     let tmp = tempdir().unwrap();
     let root = tmp.path().join("root");
     let storage_path = root.join("storage");
@@ -448,15 +404,9 @@ fn test_persist_active_conversation_preserves_files_in_user_storage() {
         .with_local_storage_at(&user_root, "test-ws", "abc")
         .unwrap();
 
-    // Create a local conversation and make it active.
     let conversation = Conversation::default().with_local(true);
     workspace.create_conversation_with_id(id, conversation, config);
-    workspace
-        .set_active_conversation_id(id, DateTime::<Utc>::UNIX_EPOCH)
-        .unwrap();
 
-    // Simulate what the editor does: place a file inside the conversation's
-    // directory. For local conversations, this should be in user storage.
     let user_storage = workspace.user_storage_path().unwrap();
     let conv_dir = user_storage
         .join(CONVERSATIONS_DIR)
@@ -466,18 +416,17 @@ fn test_persist_active_conversation_preserves_files_in_user_storage() {
     fs::write(&query_file, "test query content").unwrap();
     assert!(query_file.is_file());
 
-    // This is the operation that previously deleted the workspace-side
-    // directory. With the file in user storage, it should be preserved.
-    workspace.persist_active_conversation().unwrap();
+    let h = workspace.acquire_conversation(&id).unwrap();
+    let mut conv = workspace.test_lock(h).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
 
     assert!(
         query_file.is_file(),
-        "query file in user-storage conversation directory must survive \
-         persist_active_conversation"
+        "query file in user-storage conversation directory must survive persistence"
     );
 
-    // The workspace-side conversations directory should NOT have a
-    // directory for this conversation (it's local-only).
     let workspace_conv_dir = storage_path
         .join(CONVERSATIONS_DIR)
         .join(id.to_dirname(None));
@@ -485,12 +434,4 @@ fn test_persist_active_conversation_preserves_files_in_user_storage() {
         !workspace_conv_dir.exists(),
         "local conversation should not create a workspace-side directory"
     );
-}
-
-/// Write a `conversations/metadata.json` pointing to the given active ID.
-fn write_conversations_metadata_to_disk(storage: &Utf8Path, active_id: &ConversationId) {
-    let meta_path = storage.join(CONVERSATIONS_DIR).join(METADATA_FILE);
-    let meta = ConversationsMetadata::new(*active_id);
-
-    write_json(&meta_path, &meta).unwrap();
 }

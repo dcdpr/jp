@@ -1,7 +1,9 @@
-use std::{fmt, fs, io::BufReader};
+use std::fmt;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use jp_conversation::{Conversation, ConversationId};
+use jp_conversation::ConversationId;
+use rayon::prelude::*;
+use tracing::{debug, trace};
 
 use crate::{CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage, dir_entries};
 
@@ -50,22 +52,24 @@ pub enum ValidationError {
     #[error("missing {METADATA_FILE}")]
     MissingMetadata,
 
-    /// The per-conversation metadata file exists but contains invalid data.
-    #[error("{METADATA_FILE}: {}", source.to_string())]
+    /// The per-conversation metadata file exists but is not valid JSON or
+    /// is not a JSON object.
+    #[error("{METADATA_FILE}: {source}")]
     CorruptMetadata {
         /// The underlying parse error.
-        source: Box<dyn std::error::Error>,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 
     /// The per-conversation events file is missing.
     #[error("missing {EVENTS_FILE}")]
     MissingEvents,
 
-    /// The per-conversation events file exists but contains invalid data.
-    #[error("{EVENTS_FILE}: {}", source.to_string())]
+    /// The per-conversation events file exists but is not a valid JSON array
+    /// or its elements are missing required structural fields.
+    #[error("{EVENTS_FILE}: {source}")]
     CorruptEvents {
         /// The underlying parse error.
-        source: Box<dyn std::error::Error>,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 }
 
@@ -76,20 +80,30 @@ impl fmt::Display for InvalidConversation {
 }
 
 impl Storage {
-    /// Scan all conversation directories and validate each one.
+    /// Scan all conversation directories and check structural integrity.
     ///
-    /// Checks every entry in the `conversations/` directory under both storage
-    /// roots (workspace and user). For each directory entry:
+    /// This is a lightweight check that runs on every startup. For each
+    /// directory entry it verifies:
     ///
-    /// 1. The directory name must parse as a [`ConversationId`].
-    /// 2. A `metadata.json` file must exist and deserialize as [`Conversation`].
-    /// 3. An `events.json` file must be structurally valid JSON (array of
-    ///    objects with `timestamp` fields).
+    /// 1. The directory name parses as a [`ConversationId`].
+    /// 2. A `metadata.json` file exists and is a valid JSON object.
+    /// 3. An `events.json` file exists and is a JSON array where each
+    ///    element contains `timestamp` and `kind` fields.
+    ///
+    /// No field values are materialized — the check uses [`IgnoredAny`] to
+    /// skip values without allocating. Content-level issues (bad field
+    /// values, missing optional fields, schema mismatches) are handled at
+    /// load time by [`ConversationStream::sanitize`].
     ///
     /// Files and dot-prefixed directories (e.g., `.trash/`) are silently
     /// skipped.
+    ///
+    /// [`IgnoredAny`]: serde::de::IgnoredAny
+    /// [`ConversationStream::sanitize`]: jp_conversation::ConversationStream::sanitize
     #[must_use]
     pub fn validate_conversations(&self) -> ValidationResult {
+        trace!("Validating conversations.");
+
         let mut result = ValidationResult::default();
 
         for root in [Some(&self.root), self.user.as_ref()] {
@@ -104,6 +118,12 @@ impl Storage {
 
             validate_root(&conversations_dir, &mut result);
         }
+
+        debug!(
+            valid = result.valid.len(),
+            invalid = result.invalid.len(),
+            "Validated conversations.",
+        );
 
         result
     }
@@ -120,103 +140,117 @@ impl Storage {
 }
 
 fn validate_root(conversations_dir: &Utf8Path, result: &mut ValidationResult) {
-    for entry in dir_entries(conversations_dir) {
-        let dirname = entry.file_name().to_owned();
+    trace!(root = %conversations_dir, "Validating conversation root.");
 
-        if !entry.file_type().ok().is_some_and(|ft| ft.is_dir()) {
-            continue;
+    let entries: Vec<_> = dir_entries(conversations_dir)
+        .filter(|entry| {
+            entry.file_type().ok().is_some_and(|ft| ft.is_dir())
+                && !entry.file_name().starts_with('.')
+        })
+        .collect();
+
+    let outcomes: Vec<_> = entries
+        .par_iter()
+        .map(|entry| validate_entry(conversations_dir, entry.file_name(), entry.path()))
+        .collect();
+
+    for outcome in outcomes {
+        match outcome {
+            Ok(v) => result.valid.push(v),
+            Err(e) => result.invalid.push(e),
         }
-
-        if dirname.starts_with('.') {
-            continue;
-        }
-
-        let Ok(id) = ConversationId::try_from_dirname(&dirname) else {
-            result.invalid.push(InvalidConversation {
-                conversations_dir: conversations_dir.to_path_buf(),
-                error: ValidationError::InvalidDirname,
-                dirname,
-            });
-
-            continue;
-        };
-
-        let entry_path = entry.into_path();
-
-        // Validate metadata.json.
-        let metadata_path = entry_path.join(METADATA_FILE);
-        if !metadata_path.is_file() {
-            result.invalid.push(InvalidConversation {
-                conversations_dir: conversations_dir.to_path_buf(),
-                error: ValidationError::MissingMetadata,
-                dirname,
-            });
-
-            continue;
-        }
-        if let Err(source) = validate_metadata(&metadata_path) {
-            result.invalid.push(InvalidConversation {
-                conversations_dir: conversations_dir.to_path_buf(),
-                error: ValidationError::CorruptMetadata { source },
-                dirname,
-            });
-
-            continue;
-        }
-
-        // Validate events.json (lightweight structural check).
-        let events_path = entry_path.join(EVENTS_FILE);
-        if !events_path.is_file() {
-            result.invalid.push(InvalidConversation {
-                conversations_dir: conversations_dir.to_path_buf(),
-                error: ValidationError::MissingEvents,
-                dirname,
-            });
-
-            continue;
-        }
-        if let Err(source) = validate_events(&events_path) {
-            result.invalid.push(InvalidConversation {
-                conversations_dir: conversations_dir.to_path_buf(),
-                error: ValidationError::CorruptEvents { source },
-                dirname,
-            });
-
-            continue;
-        }
-
-        result.valid.push(ValidConversation { id, dirname });
     }
 }
 
-/// Validate that a metadata.json file deserializes as a [`Conversation`].
-fn validate_metadata(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error>> {
-    let file = fs::File::open(path)?;
-    let reader = BufReader::new(file);
+/// Validate a single conversation directory entry.
+fn validate_entry(
+    conversations_dir: &Utf8Path,
+    dirname: &str,
+    entry_path: &Utf8Path,
+) -> Result<ValidConversation, InvalidConversation> {
+    let id = ConversationId::try_from_dirname(dirname).map_err(|_| InvalidConversation {
+        conversations_dir: conversations_dir.to_path_buf(),
+        error: ValidationError::InvalidDirname,
+        dirname: dirname.to_owned(),
+    })?;
 
-    serde_json::from_reader(reader)
-        .map(|_: Conversation| ())
-        .map_err(Into::into)
+    let metadata_path = entry_path.join(METADATA_FILE);
+    if !metadata_path.is_file() {
+        return Err(InvalidConversation {
+            conversations_dir: conversations_dir.to_path_buf(),
+            error: ValidationError::MissingMetadata,
+            dirname: dirname.to_owned(),
+        });
+    }
+    validate_metadata(&metadata_path).map_err(|source| InvalidConversation {
+        conversations_dir: conversations_dir.to_path_buf(),
+        error: ValidationError::CorruptMetadata { source },
+        dirname: dirname.to_owned(),
+    })?;
+
+    let events_path = entry_path.join(EVENTS_FILE);
+    if !events_path.is_file() {
+        return Err(InvalidConversation {
+            conversations_dir: conversations_dir.to_path_buf(),
+            error: ValidationError::MissingEvents,
+            dirname: dirname.to_owned(),
+        });
+    }
+    validate_events(&events_path).map_err(|source| InvalidConversation {
+        conversations_dir: conversations_dir.to_path_buf(),
+        error: ValidationError::CorruptEvents { source },
+        dirname: dirname.to_owned(),
+    })?;
+
+    Ok(ValidConversation {
+        id,
+        dirname: dirname.to_owned(),
+    })
 }
 
-/// Lightweight structural validation for events.json.
+/// Confirm `metadata.json` is a valid JSON object.
 ///
-/// Confirms the file is valid JSON, the top-level structure is an array, and
-/// each element has a `timestamp` field. Does NOT fully deserialize event
-/// variants — that's deferred to lazy loading.
-fn validate_events(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error>> {
+/// Uses [`IgnoredAny`] to skip all field values — no allocations, no
+/// schema checks. Content validation happens at load time.
+///
+/// [`IgnoredAny`]: serde::de::IgnoredAny
+fn validate_metadata(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use serde::de::IgnoredAny;
+
+    // Confirm the file is valid JSON. IgnoredAny accepts any valid JSON
+    // value (object, array, string, etc.) without allocating.
+    let buf = std::fs::read(path)?;
+    serde_json::from_slice::<IgnoredAny>(&buf)?;
+    Ok(())
+}
+
+/// Confirm `events.json` is a JSON array of objects with `timestamp` and
+/// `type` fields.
+///
+/// All elements in the array — both `ConfigDelta` and `ConversationEvent` —
+/// serialize with `timestamp` and `type` as top-level fields. `type` is the
+/// tag for the flattened `EventKind` enum on events, and an explicit
+/// `"config_delta"` tag on config deltas.
+///
+/// Uses [`IgnoredAny`] for field values — the parser skips over them without
+/// allocating. This confirms the structural shape without materializing any
+/// event data.
+///
+/// [`IgnoredAny`]: serde::de::IgnoredAny
+fn validate_events(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use serde::de::IgnoredAny;
+
     #[derive(serde::Deserialize)]
-    struct RawEvent {
+    struct EventProbe {
         #[expect(dead_code)]
-        timestamp: Box<serde_json::value::RawValue>,
+        timestamp: IgnoredAny,
+        #[expect(dead_code)]
+        r#type: IgnoredAny,
     }
 
-    let file = fs::File::open(path)?;
-    let reader = BufReader::new(file);
-
-    serde_json::from_reader(reader)
-        .map(|_: Vec<RawEvent>| ())
-        .map_err(Into::into)
+    let buf = std::fs::read(path)?;
+    serde_json::from_slice::<Vec<EventProbe>>(&buf)?;
+    Ok(())
 }
 
 #[cfg(test)]

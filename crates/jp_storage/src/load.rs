@@ -2,11 +2,10 @@ use std::{fs, io::BufReader};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
-use jp_conversation::{Conversation, ConversationId, ConversationStream, ConversationsMetadata};
+use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
-use relative_path::RelativePath;
 use serde::de::DeserializeOwned;
-use tracing::{trace, warn};
+use tracing::warn;
 
 use crate::{
     CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage, build_conversation_dir_prefix,
@@ -80,28 +79,6 @@ impl PartialEq for LoadErrorInner {
 }
 
 impl Storage {
-    /// Loads the conversations metadata from storage.
-    ///
-    /// This loads the file from user storage if configured, otherwise the
-    /// workspace storage is used.
-    ///
-    /// If the file does not exist, return default conversations metadata.
-    pub fn load_conversations_metadata(&self) -> Result<ConversationsMetadata> {
-        let metadata_path = RelativePath::new(CONVERSATIONS_DIR)
-            .to_owned()
-            .join(METADATA_FILE);
-
-        trace!(path = %metadata_path, "Loading user conversations metadata.");
-
-        let path = self.user_or_root_with_path(&metadata_path);
-
-        if !path.exists() {
-            return Ok(ConversationsMetadata::default());
-        }
-
-        self.read_json(&path)
-    }
-
     pub fn load_all_conversation_ids(&self) -> Vec<ConversationId> {
         let mut conversations = vec![];
         for root in [Some(&self.root), self.user.as_ref()] {

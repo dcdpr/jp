@@ -4,9 +4,13 @@ pub mod attachment;
 pub mod title;
 pub mod tool;
 
-use schematic::Config;
+use std::{fmt, str::FromStr};
+
+use schematic::{Config, Schematic};
+use serde::{Deserialize, Serialize};
 
 use crate::{
+    BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     assistant::{
         request::{PartialRequestConfig, RequestConfig},
@@ -56,6 +60,16 @@ pub struct ConversationConfig {
     /// Whether to store new conversations in the user-local workspace storage.
     #[setting(default)]
     pub start_local: bool,
+
+    /// Default conversation to target when no session mapping exists and no
+    /// `--id` flag is provided.
+    ///
+    /// - `ask`: show an interactive picker or error in non-interactive mode
+    /// - `last-activated` / `last`: most recently activated conversation
+    /// - `last-created`: most recently created conversation
+    /// - `previous` / `prev`: session's previously active conversation
+    /// - `jp-c...`: a specific conversation ID
+    pub default_id: Option<DefaultConversationId>,
 }
 
 impl AssignKeyValue for PartialConversationConfig {
@@ -67,6 +81,7 @@ impl AssignKeyValue for PartialConversationConfig {
             _ if kv.p("attachments") => kv.try_vec_of_nested(&mut self.attachments)?,
             _ if kv.p("inquiry") => self.inquiry.assign(kv)?,
             _ if kv.p("start_local") => self.start_local = kv.try_some_bool()?,
+            "default_id" => self.default_id = kv.try_some_from_str()?,
             _ => return missing_key(&kv),
         }
 
@@ -87,6 +102,7 @@ impl PartialConfigDelta for PartialConversationConfig {
             },
             inquiry: self.inquiry.delta(next.inquiry),
             start_local: delta_opt(self.start_local.as_ref(), next.start_local),
+            default_id: delta_opt(self.default_id.as_ref(), next.default_id),
         }
     }
 }
@@ -101,6 +117,7 @@ impl ToPartial for ConversationConfig {
             attachments: self.attachments.iter().map(ToPartial::to_partial).collect(),
             inquiry: self.inquiry.to_partial(),
             start_local: partial_opt(&self.start_local, defaults.start_local),
+            default_id: self.default_id.clone(),
         }
     }
 }
@@ -222,3 +239,76 @@ impl ToPartial for AssistantOverrideConfig {
         }
     }
 }
+
+/// Which conversation to default to when no session mapping exists.
+///
+/// This is read during conversation resolution, before the full config is
+/// built. It cannot be set per-conversation (circular dependency).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Schematic)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultConversationId {
+    /// Show an interactive picker (TTY) or error (non-interactive).
+    #[default]
+    Ask,
+
+    /// Most recently activated conversation (any session).
+    LastActivated,
+
+    /// Most recently created conversation.
+    LastCreated,
+
+    /// Session's previously active conversation.
+    Previous,
+
+    /// A specific conversation ID.
+    #[serde(skip)]
+    Id(String),
+}
+
+impl<'de> Deserialize<'de> for DefaultConversationId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl DefaultConversationId {
+    /// Returns `true` if this is the default `Ask` variant.
+    #[must_use]
+    pub const fn is_ask(&self) -> bool {
+        matches!(self, Self::Ask)
+    }
+}
+
+impl FromStr for DefaultConversationId {
+    type Err = BoxedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ask" => Ok(Self::Ask),
+            "last" | "last-activated" | "last_activated" => Ok(Self::LastActivated),
+            "last-created" | "last_created" => Ok(Self::LastCreated),
+            "previous" | "prev" => Ok(Self::Previous),
+            _ => Ok(Self::Id(s.to_owned())),
+        }
+    }
+}
+
+impl fmt::Display for DefaultConversationId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ask => write!(f, "ask"),
+            Self::LastActivated => write!(f, "last-activated"),
+            Self::LastCreated => write!(f, "last-created"),
+            Self::Previous => write!(f, "previous"),
+            Self::Id(id) => write!(f, "{id}"),
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "conversation_tests.rs"]
+mod tests;

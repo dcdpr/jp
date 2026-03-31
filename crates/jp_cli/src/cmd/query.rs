@@ -57,18 +57,20 @@ use std::{
     env, fs,
     io::{self, BufRead as _, IsTerminal},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use chrono::{DateTime, Utc};
 use clap::{ArgAction, builder::TypedValueParser as _};
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::{
     AppConfig, PartialAppConfig, PartialConfig as _,
     assignment::{AssignKeyValue as _, KvAssignment},
-    assistant::{AssistantConfig, instructions::InstructionsConfig, tool_choice::ToolChoice},
+    assistant::{
+        AssistantConfig, instructions::InstructionsConfig, sections::SectionConfig,
+        tool_choice::ToolChoice,
+    },
     conversation::{ConversationConfig, tool::Enable},
     fs::{expand_tilde, load_partial},
     model::parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig},
@@ -92,13 +94,15 @@ use jp_md::format::Formatter;
 use jp_printer::Printer;
 use jp_storage::CONVERSATIONS_DIR;
 use jp_task::task::TitleGeneratorTask;
-use jp_workspace::Workspace;
+use jp_workspace::{ConversationHandle, ConversationLock, Workspace};
 use minijinja::{Environment, UndefinedBehavior};
 use tool::{TerminalExecutorSource, ToolCoordinator};
-use tracing::{debug, info, trace};
+use tracing::{debug, trace, warn};
 use turn_loop::run_turn_loop;
 
-use super::{Output, attachment::register_attachment};
+use super::{
+    ConversationLoadRequest, Output, attachment::register_attachment, conversation_id::FlagIds,
+};
 use crate::{
     Ctx, PATH_STRING_PREFIX, cmd,
     ctx::IntoPartialAppConfig,
@@ -145,8 +149,24 @@ pub(crate) struct Query {
     #[arg(long = "replay", conflicts_with = "new")]
     replay: bool,
 
+    #[command(flatten)]
+    target: FlagIds<false, false>,
+
+    /// Fork the session's active conversation (or the one specified by --id)
+    /// and start a new turn on the fork.
+    ///
+    /// If N is given, the fork keeps only the last N turns.
+    #[arg(
+        long = "fork",
+        num_args = 0..=1,
+        default_missing_value = "",
+        value_parser = parse_fork_turns,
+        conflicts_with = "new",
+    )]
+    fork: Option<Option<usize>>,
+
     /// Start a new conversation without any message history.
-    #[arg(short = 'n', long = "new", group = "new")]
+    #[arg(short = 'n', long = "new", group = "new", conflicts_with = "id")]
     new_conversation: bool,
 
     /// Store the conversation locally, outside of the workspace.
@@ -289,24 +309,99 @@ pub(crate) struct Query {
 
 impl Query {
     #[expect(clippy::too_many_lines)]
-    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx, handle: Option<ConversationHandle>) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
         let now = ctx.now();
         let cfg = ctx.config();
 
-        let previous_id = self.update_active_conversation(&mut ctx.workspace, &cfg, now)?;
-        let cid = ctx.workspace.active_conversation_id();
-        if let Some(delta) = get_config_delta_from_cli(&cfg, &ctx.workspace, &cid)? {
-            ctx.workspace
-                .try_get_events_mut(&cid)?
-                .add_config_delta(delta);
+        let session_str = ctx.session.as_ref().map(|s| s.id.as_str().to_owned());
+
+        // Resolve the target conversation and acquire an exclusive lock.
+        //
+        // Three paths:
+        // 1. --new: create a fresh conversation (already locked).
+        // 2. --fork/--id/session: resolve an existing conversation, lock it.
+        // 3. Lock contention: user picks "new" or "fork" from the prompt.
+        let lock = if self.is_new() {
+            self.create_new_conversation(ctx, session_str.as_deref())?
+        } else {
+            // Handle --fork: fork the conversation before locking.
+            let mut target_id = handle.as_ref().map(ConversationHandle::id);
+            if let Some(fork_turns) = &self.fork {
+                let source_id = target_id.ok_or(Error::NoConversationTarget)?;
+                target_id = Some(self.fork_conversation(ctx, source_id, *fork_turns)?);
+            }
+
+            let conv_id = target_id
+                .or_else(|| handle.as_ref().map(ConversationHandle::id))
+                .ok_or(Error::NoConversationTarget)?;
+
+            if ctx.term.args.persist {
+                match acquire_conversation_lock(
+                    &ctx.workspace,
+                    conv_id,
+                    ctx.term.is_tty,
+                    session_str.as_deref(),
+                    &ctx.printer,
+                )? {
+                    LockOutcome::Acquired(l) => l,
+                    LockOutcome::NewConversation => {
+                        self.create_new_conversation(ctx, session_str.as_deref())?
+                    }
+                    LockOutcome::ForkConversation => {
+                        let new_id = self.fork_conversation(ctx, conv_id, None)?;
+                        let LockOutcome::Acquired(l) = acquire_conversation_lock(
+                            &ctx.workspace,
+                            new_id,
+                            ctx.term.is_tty,
+                            session_str.as_deref(),
+                            &ctx.printer,
+                        )?
+                        else {
+                            return Err(Error::LockTimeout(new_id).into());
+                        };
+                        l
+                    }
+                }
+            } else {
+                // --no-persist still acquires a lock for API consistency.
+                let h = ctx
+                    .workspace
+                    .acquire_conversation(&conv_id)
+                    .expect("target conversation must exist");
+                ctx.workspace
+                    .lock_conversation(h, session_str.as_deref())?
+                    .ok_or(Error::LockTimeout(conv_id))?
+            }
+        };
+
+        // Record this conversation as the session's active conversation.
+        if let Some(session) = &ctx.session
+            && let Err(error) = ctx
+                .workspace
+                .activate_session_conversation(session, lock.id(), now)
+        {
+            warn!(%error, "Failed to write session mapping.");
+        }
+
+        if let Some(delta) = get_config_delta_from_cli(&cfg, &lock)? {
+            lock.as_mut()
+                .update_events(|events| events.add_config_delta(delta));
         }
 
         let mut mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
 
-        let conversation = ctx.workspace.get_conversation(&cid);
-        let is_local = conversation.is_some_and(|c| c.user);
+        let (conv_title, is_local) = {
+            let m = lock.metadata();
+            (m.title.clone(), m.user)
+        };
+
+        // Show conversation identity in the terminal title.
+        if ctx.term.is_tty {
+            set_terminal_title(lock.id(), conv_title.as_deref());
+        }
+
         let root = if is_local {
             ctx.workspace.user_storage_path()
         } else {
@@ -315,19 +410,22 @@ impl Query {
         .unwrap_or(ctx.workspace.root())
         .to_path_buf();
 
+        let cid = lock.id();
         let conversation_path = root
             .join(CONVERSATIONS_DIR)
-            .join(cid.to_dirname(conversation.as_ref().and_then(|v| v.title.as_deref())));
+            .join(cid.to_dirname(conv_title.as_deref()));
 
-        let (query_file, mut editor_provided_config, chat_request) = self.build_conversation(
-            ctx.workspace.try_get_events_mut(&cid)?,
-            &cfg,
-            &conversation_path,
-        )?;
+        let (query_file, mut editor_provided_config, chat_request) = lock
+            .as_mut()
+            .update_events(|stream| self.build_conversation(stream, &cfg, &conversation_path))?;
 
         let Some(chat_request) = chat_request else {
-            // Empty query, early exit.
-            return cleanup(ctx, previous_id, query_file.as_deref()).map_err(Into::into);
+            // Empty query, early exit. Auto-persist happens on lock drop.
+            if let Some(path) = query_file.as_deref() {
+                fs::remove_file(path)?;
+            }
+            ctx.printer.println("Query is empty, ignoring.");
+            return Ok(());
         };
 
         // If we have a query, and it was built from the editor, we print it
@@ -358,19 +456,14 @@ impl Query {
             // Resolve any model aliases before storing in the stream so
             // that per-event configs always contain concrete model IDs.
             editor_provided_config.resolve_model_aliases(&cfg.providers.llm.aliases);
-            ctx.workspace
-                .try_get_events_mut(&cid)?
-                .add_config_delta(editor_provided_config);
+            lock.as_mut()
+                .update_events(|events| events.add_config_delta(editor_provided_config));
         }
 
-        let stream = ctx
-            .workspace
-            .get_events(&cid)
-            .cloned()
-            .unwrap_or_else(|| ConversationStream::new(cfg.clone()));
+        let stream = lock.events().clone();
 
-        // Generate title for new or empty conversations.
-        if (self.is_new() || stream.is_empty())
+        // Generate title for new or empty conversations (including forks).
+        if (self.is_new() || self.fork.is_some() || stream.is_empty())
             && ctx.term.args.persist
             && cfg.conversation.title.generate.auto
         {
@@ -390,18 +483,29 @@ impl Query {
         let tools =
             tool_definitions(cfg.conversation.tools.iter(), &ctx.mcp_client, forced_tool).await?;
 
-        let mut attachments = vec![];
-        for attachment in &cfg.conversation.attachments {
-            register_attachment(ctx, &attachment.to_url()?, &mut attachments).await?;
-        }
+        let attachment_futs: Vec<_> = cfg
+            .conversation
+            .attachments
+            .iter()
+            .map(jp_config::conversation::attachment::AttachmentConfig::to_url)
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|url| register_attachment(ctx, url))
+            .collect();
+        let attachments: Vec<_> = futures::future::try_join_all(attachment_futs)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect();
+
+        debug!(count = attachments.len(), "Attachments loaded.");
 
         let thread = build_thread(stream, attachments, &cfg.assistant, !tools.is_empty())?;
         let root = ctx.workspace.root().to_path_buf();
-        let workspace = &mut ctx.workspace;
 
         // Sanitize any structural issues (orphaned tool calls, missing
         // user messages, etc.) before sending the stream to the provider.
-        workspace.try_get_events_mut(&cid)?.sanitize();
+        lock.as_mut().update_events(ConversationStream::sanitize);
 
         // If a schema is provided, set it on the ChatRequest so the
         // provider uses its native structured output API.
@@ -418,10 +522,9 @@ impl Query {
                 root,
                 ctx.term.is_tty,
                 &thread.attachments,
-                workspace,
+                &lock,
                 cfg.assistant.tool_choice.clone(),
                 &tools,
-                cid,
                 ctx.printer.clone(),
                 chat_request,
             )
@@ -430,12 +533,10 @@ impl Query {
 
         // Extract structured data from the conversation after the turn.
         if self.schema.is_some() && turn_result.is_ok() {
-            let data = workspace.get_events(&cid).and_then(|events| {
-                events.iter().rev().find_map(|e| {
-                    e.as_chat_response()
-                        .and_then(ChatResponse::as_structured_data)
-                        .cloned()
-                })
+            let data = lock.events().iter().rev().find_map(|e| {
+                e.as_chat_response()
+                    .and_then(ChatResponse::as_structured_data)
+                    .cloned()
             });
 
             match data {
@@ -452,6 +553,15 @@ impl Query {
         }
 
         turn_result
+    }
+
+    /// Declare what conversations this command needs.
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        if self.is_new() {
+            return ConversationLoadRequest::none();
+        }
+
+        ConversationLoadRequest::explicit_or_session_with_config(&self.target.ids)
     }
 
     /// Build the chat request for this query.
@@ -538,44 +648,109 @@ impl Query {
         ))
     }
 
-    fn update_active_conversation(
+    /// Create a new conversation and return an exclusive lock.
+    fn create_new_conversation(
         &self,
-        ws: &mut Workspace,
-        cfg: &Arc<AppConfig>,
-        now: DateTime<Utc>,
-    ) -> Result<ConversationId> {
-        // Store the (old) active conversation ID, so that we can restore to it,
-        // if the current conversation is aborted early (e.g. because of an
-        // empty query or any other error).
-        let last_active_conversation_id = ws.active_conversation_id();
+        ctx: &mut Ctx,
+        session: Option<&str>,
+    ) -> Result<ConversationLock> {
+        let cfg = ctx.config();
+        let ws = &mut ctx.workspace;
 
-        // Set new active conversation if requested.
-        if self.is_new() {
-            let conversation = Conversation::default().with_local(self.is_local(&cfg.conversation));
+        let conversation = Conversation::default().with_local(self.is_local(&cfg.conversation));
+        let id = ws.create_conversation(conversation, cfg.clone());
 
-            let id = ws.create_conversation(conversation, cfg.clone());
-            if let Some(duration) = self.expires_in_duration()
-                && let Some(mut conversation) = ws.get_conversation_mut(&id)
-            {
-                conversation.expires_at = chrono::Duration::from_std(duration)
+        let h = ws.acquire_conversation(&id).expect("just created");
+        let lock = ws
+            .lock_conversation(h, session)?
+            .expect("just created conversation should not be locked");
+
+        if let Some(duration) = self.expires_in_duration() {
+            let mut conv = lock.as_mut();
+            conv.update_metadata(|m| {
+                m.expires_at = chrono::Duration::from_std(duration)
                     .ok()
                     .and_then(|v| id.timestamp().checked_add_signed(v));
-            }
-
-            debug!(
-                id = id.to_string(),
-                local = self.is_local(&cfg.conversation),
-                expires_in = self.expires_in_duration().map_or_else(
-                    || "when inactive".to_owned(),
-                    |v| humantime::format_duration(v).to_string()
-                ),
-                "Creating new active conversation due to --new flag."
-            );
-
-            ws.set_active_conversation_id(id, now)?;
+            });
+            conv.flush()?;
         }
 
-        Ok(last_active_conversation_id)
+        debug!(
+            id = id.to_string(),
+            local = self.is_local(&cfg.conversation),
+            expires_in = self.expires_in_duration().map_or_else(
+                || "when inactive".to_owned(),
+                |v| humantime::format_duration(v).to_string()
+            ),
+            "Creating new conversation."
+        );
+
+        Ok(lock)
+    }
+
+    /// Fork a conversation and return the new conversation's ID.
+    #[expect(clippy::unused_self)]
+    fn fork_conversation(
+        &self,
+        ctx: &mut Ctx,
+        source_id: ConversationId,
+        keep_turns: Option<usize>,
+    ) -> Result<ConversationId> {
+        let now = ctx.now();
+        let cfg = ctx.config();
+
+        let source = ctx.workspace.acquire_conversation(&source_id)?;
+        let mut new_conversation = ctx.workspace.metadata(&source)?.clone();
+        new_conversation.last_activated_at = now;
+        new_conversation.expires_at = None;
+
+        let mut new_events = ctx.workspace.events(&source)?.clone().with_created_at(now);
+
+        if let Some(n) = keep_turns {
+            let turn_count = new_events
+                .iter()
+                .filter(|e| e.event.is_turn_start())
+                .count();
+
+            if turn_count > n {
+                let skip = turn_count - n;
+                let mut turns_seen = 0;
+                let mut keeping = false;
+
+                new_events.retain(|event| {
+                    if event.is_turn_start() {
+                        turns_seen += 1;
+                        if turns_seen > skip {
+                            keeping = true;
+                        }
+                    }
+                    keeping
+                });
+            }
+        }
+
+        new_events.sanitize();
+
+        let new_id = ConversationId::try_from(now)?;
+        ctx.workspace
+            .create_conversation_with_id(new_id, new_conversation, cfg.clone());
+
+        let new_handle = ctx.workspace.acquire_conversation(&new_id)?;
+        let conv = ctx
+            .workspace
+            .lock_conversation(new_handle, None)?
+            .expect("newly created conversation should not be locked")
+            .into_mut();
+        conv.update_events(|events| events.extend(new_events));
+
+        debug!(
+            source = source_id.to_string(),
+            fork = new_id.to_string(),
+            keep_turns = ?keep_turns,
+            "Forked conversation."
+        );
+
+        Ok(new_id)
     }
 
     // Open the editor for the query, if requested.
@@ -646,10 +821,9 @@ impl Query {
         root: Utf8PathBuf,
         is_tty: bool,
         attachments: &[Attachment],
-        workspace: &mut Workspace,
+        lock: &ConversationLock,
         tool_choice: ToolChoice,
         tools: &[ToolDefinition],
-        conversation_id: ConversationId,
         printer: Arc<Printer>,
         chat_request: ChatRequest,
     ) -> Result<()> {
@@ -658,7 +832,9 @@ impl Query {
             model_id.provider,
             &cfg.providers.llm,
         )?);
+        debug!(model = %model_id, "Fetching model details.");
         let model = provider.model_details(&model_id.name).await?;
+        debug!(model = model.name(), "Model details resolved.");
 
         // Build docs map from the resolved definitions for describe_tools.
         let docs_map: IndexMap<String, ToolDocs> = tools
@@ -681,10 +857,9 @@ impl Query {
             &root,
             is_tty,
             attachments,
-            workspace,
+            lock,
             tool_choice,
             tools,
-            conversation_id,
             printer,
             prompt_backend,
             tool_coordinator,
@@ -733,15 +908,12 @@ impl Query {
 
 fn get_config_delta_from_cli(
     cfg: &AppConfig,
-    ws: &Workspace,
-    conversation_id: &ConversationId,
+    lock: &ConversationLock,
 ) -> Result<Option<PartialAppConfig>> {
-    let partial = ws
-        .get_events(conversation_id)
-        .map_or_else(
-            || Ok(PartialAppConfig::empty()),
-            |stream| stream.config().map(|c| c.to_partial()),
-        )
+    let partial = lock
+        .events()
+        .config()
+        .map(|c| c.to_partial())
         .map_err(jp_conversation::Error::from)?;
 
     let partial = partial.delta(cfg.to_partial());
@@ -781,6 +953,8 @@ impl IntoPartialAppConfig for Query {
             reasoning,
             no_reasoning,
             expires_in: _,
+            target: _,
+            fork: _,
         } = &self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);
@@ -822,28 +996,12 @@ impl IntoPartialAppConfig for Query {
 
     fn apply_conversation_config(
         &self,
-        workspace: Option<&Workspace>,
+        workspace: &Workspace,
         partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,
+        handle: &ConversationHandle,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
-        // New conversations do not apply any existing conversation
-        // configurations. This is handled by the other configuration layers
-        // (files, environment variables, CLI arguments).
-        if self.is_new() {
-            return Ok(partial);
-        }
-
-        // If we're not inside a workspace, there is no active conversation to
-        // fetch the configuration from.
-        let Some(workspace) = workspace else {
-            return Ok(partial);
-        };
-
-        let id = workspace.active_conversation_id();
-        let config = workspace.get_events(&id).map_or_else(
-            || Ok(PartialAppConfig::empty()),
-            |stream| stream.config().map(|c| c.to_partial()),
-        )?;
+        let config = workspace.events(handle)?.config().map(|c| c.to_partial())?;
 
         load_partial(partial, config).map_err(Into::into)
     }
@@ -855,16 +1013,13 @@ impl IntoPartialAppConfig for Query {
 /// to ensure the inquiry backend sees the same sections as the main thread.
 ///
 /// [`LlmInquiryBackend`]: crate::cmd::query::tool::inquiry::LlmInquiryBackend
-pub(super) fn build_sections(
-    assistant: &AssistantConfig,
-    has_tools: bool,
-) -> Vec<jp_config::assistant::sections::SectionConfig> {
+pub(super) fn build_sections(assistant: &AssistantConfig, has_tools: bool) -> Vec<SectionConfig> {
     let mut sections: Vec<_> = assistant.system_prompt_sections.to_vec();
     sections.extend(
         assistant
             .instructions
             .iter()
-            .map(jp_config::assistant::instructions::InstructionsConfig::to_section),
+            .map(InstructionsConfig::to_section),
     );
 
     if has_tools {
@@ -1118,27 +1273,13 @@ fn apply_reasoning(
     });
 }
 
-/// Clean up empty queries.
-fn cleanup(
-    ctx: &mut Ctx,
-    last_active_conversation_id: ConversationId,
-    query_file_path: Option<&Utf8Path>,
-) -> Result<()> {
-    let conversation_id = ctx.workspace.active_conversation_id();
-
-    info!("Query is empty, exiting.");
-    if last_active_conversation_id != conversation_id {
-        ctx.workspace
-            .set_active_conversation_id(last_active_conversation_id, ctx.now())?;
-        ctx.workspace.remove_conversation(&conversation_id)?;
-    }
-
-    if let Some(path) = query_file_path {
-        fs::remove_file(path)?;
-    }
-
-    ctx.printer.println("Query is empty, ignoring.");
-    Ok(())
+/// Set the terminal title to show the active conversation.
+fn set_terminal_title(id: ConversationId, title: Option<&str>) {
+    let display = match title {
+        Some(t) => format!("{id}: {t}"),
+        None => id.to_string(),
+    };
+    jp_term::osc::set_title(display);
 }
 
 /// Parse a schema string as either a concise DSL or raw JSON Schema.
@@ -1150,6 +1291,17 @@ fn parse_schema(s: String) -> Result<schemars::Schema> {
         .map_err(Into::into)
 }
 
+/// Parse the `--fork` value. Empty string means "all turns", a number means
+/// "keep last N turns".
+fn parse_fork_turns(s: &str) -> std::result::Result<Option<usize>, String> {
+    if s.is_empty() {
+        return Ok(None);
+    }
+    s.parse::<usize>()
+        .map(Some)
+        .map_err(|_| format!("expected a positive integer, got '{s}'"))
+}
+
 fn string_or_path(s: &str) -> Result<String> {
     if let Some(s) = s
         .strip_prefix(PATH_STRING_PREFIX)
@@ -1159,6 +1311,109 @@ fn string_or_path(s: &str) -> Result<String> {
     }
 
     Ok(s.to_owned())
+}
+
+/// Result of attempting to acquire a conversation lock.
+enum LockOutcome {
+    /// Lock acquired successfully.
+    Acquired(ConversationLock),
+    /// User chose to start a new conversation instead.
+    NewConversation,
+    /// User chose to fork the locked conversation.
+    ForkConversation,
+}
+
+/// Acquire an exclusive conversation lock with polling and timeout.
+///
+/// Polls `lock_conversation` at 500ms intervals. The default timeout is
+/// 30 seconds, overridable via `$JP_LOCK_DURATION` (humantime format, e.g.
+/// `10s`, `2m`). Setting `$JP_LOCK_DURATION=0s` disables waiting entirely.
+///
+/// In interactive terminals, shows a selection prompt on timeout instead of
+/// failing immediately.
+fn acquire_conversation_lock(
+    workspace: &Workspace,
+    id: ConversationId,
+    is_tty: bool,
+    session: Option<&str>,
+    printer: &Printer,
+) -> Result<LockOutcome> {
+    let timeout = lock_timeout();
+    let start = Instant::now();
+
+    loop {
+        let handle = workspace.acquire_conversation(&id)?;
+        if let Some(lock) = workspace.lock_conversation(handle, session)? {
+            return Ok(LockOutcome::Acquired(lock));
+        }
+
+        if start.elapsed() >= timeout {
+            if !is_tty {
+                return Err(Error::LockTimeout(id));
+            }
+
+            return prompt_lock_contention(workspace, id, session, printer);
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// Show an interactive prompt when a conversation lock times out.
+fn prompt_lock_contention(
+    workspace: &Workspace,
+    id: ConversationId,
+    session: Option<&str>,
+    printer: &Printer,
+) -> Result<LockOutcome> {
+    let options = vec![
+        "Continue waiting",
+        "Start a new conversation",
+        "Fork this conversation",
+        "Cancel",
+    ];
+
+    let holder = workspace.read_lock_info(&id);
+    let msg = match &holder {
+        Some(info) => {
+            let who = match &info.session {
+                Some(s) => format!("pid {}, session {s}", info.pid),
+                None => format!("pid {}", info.pid),
+            };
+            format!("Conversation {id} is locked ({who}).")
+        }
+        None => format!("Conversation {id} is locked by another session."),
+    };
+
+    let selected =
+        inquire::Select::new(&msg, options).prompt_with_writer(&mut printer.err_writer())?;
+
+    match selected {
+        "Continue waiting" => {
+            // Re-enter the polling loop with a fresh timeout.
+            let timeout = lock_timeout();
+            let start = Instant::now();
+            loop {
+                let handle = workspace.acquire_conversation(&id)?;
+                if let Some(lock) = workspace.lock_conversation(handle, session)? {
+                    return Ok(LockOutcome::Acquired(lock));
+                }
+                if start.elapsed() >= timeout {
+                    return prompt_lock_contention(workspace, id, session, printer);
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }
+        "Start a new conversation" => Ok(LockOutcome::NewConversation),
+        "Fork this conversation" => Ok(LockOutcome::ForkConversation),
+        _ => Err(Error::LockTimeout(id)),
+    }
+}
+
+fn lock_timeout() -> Duration {
+    env::var("JP_LOCK_DURATION")
+        .ok()
+        .and_then(|val| val.parse::<humantime::Duration>().ok())
+        .map_or(Duration::from_secs(30), Duration::from)
 }
 
 #[cfg(test)]

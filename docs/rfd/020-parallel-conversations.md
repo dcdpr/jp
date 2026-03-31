@@ -1,9 +1,10 @@
 # RFD 020: Parallel Conversations
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
+- **Extended by**: [RFD 069](069-guard-scoped-persistence-for-conversations.md)
 
 ## Summary
 
@@ -668,79 +669,400 @@ platform-specific detection (`getsid` on Unix, `GetConsoleWindow` on Windows),
 then terminal env vars (`$TMUX_PANE`, `$WEZTERM_PANE`, `$TERM_SESSION_ID`,
 `$ITERM_SESSION_ID`). Store the result in `Ctx` for use by commands.
 
-No behavioral changes yet. The session identity is computed but not used.
+### Phase 2: Handle-Based Workspace API
 
-Can be merged independently.
+`ConversationHandle` and `ConversationGuard` types provide proof of conversation
+existence at the type level. `acquire_conversation`, `events`/`metadata`/
+`events_mut`/`metadata_mut` form the handle-based API. All production code
+migrated. Old `get_events`/`get_conversation` methods remain for internal use.
 
-### Phase 2: Session-to-Conversation Mapping and Lock Infrastructure
+### Phase 3a: Remove Global Active Conversation
 
-Add the session mapping storage in
-`~/.local/share/jp/workspace/<workspace-id>/sessions/`. When `jp query` operates
-on a conversation, write the mapping. When `jp query --new` creates a
-conversation, write the mapping.
+`ConversationsMetadata` and `conversations/metadata.json` removed. The
+workspace-wide singleton is replaced by per-session mappings (Phase 3b).
 
-`jp query` without `--new` reads the mapping to find the session's default
-conversation. If no mapping exists, the behavior depends on the CLI flags and
-interactivity (see [CLI Changes](#cli-changes)).
+### Phase 3b: Session-to-Conversation Mapping and `ConversationNeed`
 
-Remove `active_conversation_id` from `ConversationsMetadata`.
+Session mapping storage in `~/.local/share/jp/workspace/<id>/sessions/`. `jp
+query` and `jp conversation use` write the mapping. The startup pipeline reads
+it to resolve the session's target conversation.
 
-Add `flock`-based locking via `ConversationLock`. Introduce the type-level
-enforcement for conversation mutations.
+`ConversationNeed` enum (`None` / `Session`) and startup dispatch implemented.
+Commands declare their need; `None`-need commands skip conversation loading
+entirely.
 
-### Phase 3: CLI Flags and Interactive Picker
+### Phase 3c: Conversation Locks
+
+`ConversationFileLock` in `jp_storage::lock` wraps OS-level advisory locks
+(`flock` on Unix, `LockFileEx` on Windows) via `libc`/`windows-sys` directly
+(not `fd-lock`, to avoid the `RwLockWriteGuard` lifetime issue and a
+`windows-sys` version conflict).
+
+`ConversationGuard` is a real struct: `ConversationHandle` + `Option<
+ConversationFileLock>`. The lock is `Option` to support `guard_conversation`
+(unlocked, for `--no-persist` and commands not yet migrated). `jp query`
+acquires the lock with polling/timeout (`acquire_conversation_lock` in
+`query.rs`). `$JP_LOCK_DURATION` overrides the default 30s timeout.
+
+### Phase 4a: CLI Flags
 
 Add `--id` and `--fork` to `jp query`. The `--id` flag supports three modes:
 
 1. `--id=<id>` — explicit conversation
 2. `--id=last` — most recently modified conversation
-3. `--id` (no value) — interactive conversation picker
-
-Bare `jp query` with no session mapping shows the interactive picker in
-interactive terminals, or fails with an error in non-interactive environments.
+3. `--id` (no value) — triggers interactive picker
 
 `--fork[=N]` composes with `--id` for forking specific conversations.
 
-Update `jp conversation use` to write the session mapping instead of the
-workspace-wide field.
+This phase also adds `ConversationNeed::New` and
+`ConversationNeed::Explicit(id)` variants and the corresponding startup dispatch
+paths.
 
-### Phase 4: Stale File Cleanup {#stale-file-cleanup}
+### Phase 4b: Interactive Pickers
 
-Add a background task (using the existing `TaskHandler` system) that runs on
-every `jp` invocation and removes orphaned files:
+All interactive selection prompts that require design and UX work:
 
-- **Lock files**: Orphaned if no `flock` is held on them (attempt a non-blocking
-  `flock`; if it succeeds, the file is orphaned).
-- **Session mappings**: Orphaned if they point to a conversation that no longer
-  exists.
+- **Conversation picker** (`--id` with no value, or bare `jp query` with no
+  session mapping in an interactive terminal). Shows recent conversations with
+  title, last message preview, timestamp. Session-relevant conversations first.
+- **Lock contention prompt** (conversation locked by another session). Options:
+  continue waiting, start new conversation, fork, cancel.
+
+#### Non-interactive fallback
+
+Implemented as part of Phase 4b. In non-interactive environments (stdin is not a
+TTY):
+
+- Bare `--id` (picker mode) fails with `NoConversationTarget` error and guidance
+  directing to `--id=<id>`, `--id=last`, `--new`, or `$JP_SESSION`.
+- `Session` path with no session mapping fails with the same error.
+
+In interactive terminals, both cases currently fall through to `Session` (which
+picks the most recent conversation). The interactive picker will replace this
+fallback.
+
+#### Conversation picker
+
+MVP using `inquire::Select`. Two call sites:
+
+1. **`conversation_need()` Picker path** (`--id` with no value in interactive
+   terminal): `pick_conversation()` in `query.rs` shows the picker and
+   returns `Explicit(id)`. Conversations sorted by `last_activated_at`
+   (most recent first), session's active conversation pinned to top.
+2. **`run_inner` Session path** (no session mapping in interactive terminal):
+   `pick_session_conversation()` in `lib.rs` shows the same picker. Returns
+   `Option<ConversationId>` — `None` on cancel falls through to the
+   most-recent-conversation default. Only shown when >1 conversation exists.
+
+Both pickers display `{id}  {title}` per line (or just `{id}` if untitled).
+
+#### Lock contention prompt
+
+When `acquire_conversation_lock` times out in an interactive terminal, it
+shows an `inquire::Select` prompt with four options:
+
+- **Continue waiting** — re-enters the polling loop with a fresh timeout.
+  Recurses back to the prompt if the second timeout also expires.
+- **Start a new conversation** — returns `LockOutcome::NewConversation`;
+  `Query::run` creates a new conversation and acquires the lock on it.
+- **Fork this conversation** — returns `LockOutcome::ForkConversation`;
+  `Query::run` forks the locked conversation (read-only, no lock needed)
+  and acquires the lock on the fork.
+- **Cancel** — returns `Error::LockTimeout`, terminating the command.
+
+In non-interactive environments (no TTY), `acquire_conversation_lock` still
+fails with `Error::LockTimeout` immediately on timeout.
 
 ### Phase 5: Terminal Title Updates
 
-After each assistant turn completes, write the conversation title (or short ID)
-to the terminal title via OSC 2. This is a progressive enhancement with no
-behavioral dependency on earlier phases, but it improves discoverability of
-conversation identity across terminal sessions.
+Write the conversation title to the terminal title via OSC 2 at two points:
+
+1. **At startup** when the target conversation is resolved — the user
+   immediately sees which conversation they're in.
+2. **Inside the title generation task** when a title is first generated — the
+   update appears as soon as the title is ready, not at the end of the turn.
+
+This is a progressive enhancement — terminals that don't support OSC 2 ignore
+the sequence.
+
+#### Implementation notes
+
+- `jp_term::osc::set_title()` writes the OSC 2 sequence to stderr.
+- `Query::run()` calls `set_terminal_title(id, title)` after acquiring the
+  conversation metadata, gated on `ctx.term.is_tty`.
+- `TitleGeneratorTask::sync()` calls `jp_term::osc::set_title()` after writing
+  the title to the workspace.
+- `jp_term` added as a dependency of `jp_task`.
+
+### Phase 6: Stale File Cleanup {#stale-file-cleanup}
+
+Runs synchronously at the end of every `jp` invocation (alongside ephemeral
+conversation cleanup) via `Workspace::cleanup_stale_files()`:
+
+- **Lock files**: `Storage::list_orphaned_lock_files()` attempts a non-blocking
+  `flock` on each `.lock` file; if it succeeds, the file is orphaned and
+  deleted. Uses `lock::is_orphaned_lock()` internally.
+- **Session mappings**: `Storage::list_session_files()` lists all session
+  mapping files. For each, the history is checked against the set of existing
+  conversation IDs. Mappings where no conversation in the history still exists
+  are deleted.
+
+## Implementation Details
+
+### Conversation Targeting {#conversation-targeting}
+
+#### Problem
+
+The current startup pipeline assumes every command operates on a conversation:
+
+```txt
+sanitize → load_conversation_index → load_config (incl. conversation config) → command.run()
+```
+
+`load_conversation_index` both scans conversation IDs and sets the active
+conversation. `load_partial_config` reads the active conversation's events to
+merge per-conversation config overrides. This coupling creates problems:
+
+- **Commands that don't need conversations** (e.g., `jp config show`) are forced
+  through conversation resolution anyway.
+- **Conversation resolution requires user interaction** (picker) in some cases,
+  but the startup pipeline runs before any command logic.
+- **Config loading depends on knowing the active conversation**, but resolving
+  the active conversation may need config (e.g., picker backend).
+
+#### Resolution
+
+Each command declares its conversation targeting needs via a trait method. The
+startup pipeline uses this declaration to determine whether and how to load a
+conversation before config is built.
+
+```rust
+/// Declared by each command to indicate its conversation needs.
+enum ConversationNeed {
+    /// Command does not operate on a conversation.
+    /// Config is built without the conversation config layer.
+    None,
+
+    /// Command creates a new conversation.
+    /// Config is built without the conversation config layer (new
+    /// conversations have no stored config).
+    New,
+
+    /// Command targets a specific conversation by ID.
+    /// The conversation is loaded and its config is included.
+    Explicit(ConversationId),
+
+    /// Command continues the session's active conversation.
+    /// Resolved via session mapping, falling back to an interactive
+    /// picker if no mapping exists or error for non-interactive sessions.
+    Session,
+}
+```
+
+The `IntoPartialAppConfig` trait (or a new companion trait) gains a method:
+
+```rust
+fn conversation_need(
+    &self,
+    conversation_ids: &[ConversationId],
+    session: &Option<Session>,
+) -> Result<ConversationNeed>;
+```
+
+This is called early in the startup pipeline, after filesystem scanning but
+before config loading.
+
+#### Startup Flow
+
+The startup pipeline becomes:
+
+```txt
+sanitize()
+ids = workspace.conversation_ids()              // scan only
+need = command.conversation_need(ids, session)
+
+match need:
+  None →
+    config = build(layers 1 + 2 + 4 + 5)        // no conversation layer
+  New →
+    config = build(layers 1 + 2 + 4 + 5)        // no conversation layer
+    create new conversation
+  Explicit(id) →
+    workspace.load_conversation(id)             // eager load target
+    config = build(layers 1 + 2 + 3 + 4 + 5)    // full config
+  Session →
+    target = read_session_mapping()             // file read
+    if target exists and valid:
+      workspace.load_conversation(target)
+      config = build(layers 1 + 2 + 3 + 4 + 5)
+    else if interactive:
+      pre_config = build(layers 1 + 2 + 4 + 5)  // for picker UI
+      target = show_picker(ids, pre_config)
+      workspace.load_conversation(target)
+      config = build(layers 1 + 2 + 3 + 4 + 5)  // rebuild with conversation
+    else:
+      error with guidance
+
+Ctx::new(workspace, config, ...)
+command.run(ctx)
+```
+
+The `AppConfig` in `Ctx` is always complete and read-only. The double-build only
+occurs in the `Session` path with a picker fallback — a
+first-invocation-per-terminal event that also requires `/dev/tty`.
+
+#### Workspace API and Conversation Handles
+
+`Workspace` becomes a pure storage manager with no opinion on which conversation
+is "active." Conversation targeting is expressed through handle types that
+provide proof of existence and access rights.
+
+##### Type Hierarchy
+
+```txt
+ConversationGuard (owns both, for write commands like `jp query`)
+├── ConversationHandle (proof of existence, for read access)
+└── ConversationLock (proof of exclusive file lock, Phase 3c)
+```
+
+##### `ConversationHandle`
+
+A move-only (non-`Copy`, non-`Clone`) type that proves a conversation exists in
+the workspace index. Obtained exclusively through `Workspace` methods. Only one
+handle should exist per conversation ID at a time — acquiring a second handle to
+the same ID is a logic error (debug-asserted).
+
+```rust
+/// Proof that a conversation exists and is loaded.
+///
+/// Move-only: consuming this handle (e.g., via `remove_conversation`)
+/// invalidates all access. The borrow checker prevents use-after-move.
+struct ConversationHandle {
+    id: ConversationId,
+    // Private constructor — only obtainable through Workspace methods.
+}
+```
+
+##### `ConversationGuard`
+
+Combines a `ConversationHandle` with a `ConversationLock` (Phase 3c). Required
+for mutable access to conversation state. Derefs to `ConversationHandle` so read
+methods work transparently.
+
+```rust
+/// Proof of existence AND exclusive write access.
+struct ConversationGuard {
+    handle: ConversationHandle,
+    lock: ConversationLock, // holds the flock; added in Phase 3c
+}
+
+impl Deref for ConversationGuard {
+    type Target = ConversationHandle;
+    fn deref(&self) -> &ConversationHandle { &self.handle }
+}
+```
+
+##### Workspace API
+
+```rust
+impl Workspace {
+    /// Scan conversation IDs from disk. No loading.
+    fn conversation_ids(&self) -> Vec<ConversationId>;
+
+    /// Acquire a handle to a conversation, proving it exists in the index.
+    ///
+    /// Does not load metadata or events from disk — those are loaded
+    /// lazily when accessed via `events()`, `metadata()`, etc.
+    /// Returns an error if the ID doesn't exist. Only one handle should
+    /// exist per ID at a time (debug-asserted).
+    fn acquire_conversation(
+        &self,
+        id: &ConversationId,
+    ) -> Result<ConversationHandle>;
+
+    /// Create a new conversation and return a handle to it.
+    fn create_conversation(
+        &mut self,
+        conversation: Conversation,
+        config: Arc<AppConfig>,
+    ) -> ConversationHandle;
+
+    // --- Read access (handle required, infallible) ---
+
+    fn events(&self, h: &ConversationHandle) -> &ConversationStream;
+    fn metadata(&self, h: &ConversationHandle) -> &Conversation;
+
+    // --- Write access (guard required, infallible) ---
+
+    fn events_mut(&mut self, g: &ConversationGuard) -> &mut ConversationStream;
+    fn metadata_mut(&mut self, g: &ConversationGuard) -> &mut Conversation;
+
+    // --- Lifecycle operations ---
+
+    /// Remove a conversation. Consumes the guard, releasing the handle
+    /// and lock. The borrow checker prevents use-after-remove.
+    fn remove_conversation(&mut self, g: ConversationGuard) -> Conversation;
+
+    /// Persist a specific conversation to disk.
+    fn persist_conversation(&mut self, h: &ConversationHandle) -> Result<()>;
+
+    /// Persist all modified conversations.
+    fn persist(&mut self) -> Result<()>;
+}
+```
+
+Methods that take `&ConversationHandle` are infallible — the handle is proof the
+conversation exists. The implementation uses an internal `expect` that can only
+fire if the workspace implementation has a bug (the handle invariant is
+violated).
+
+`events_mut` and `metadata_mut` require `&ConversationGuard` (which derefs to
+`&ConversationHandle`), enforcing that write access requires both existence
+proof and the file lock. Read-only methods accept `&ConversationHandle`
+directly, so they work with either a bare handle or a guard.
+
+`remove_conversation` consumes the `ConversationGuard` by value. After the call,
+the handle is moved and the borrow checker prevents any further use. This
+provides compile-time protection against use-after-remove.
+
+> [!NOTE]
+> Before Phase 3c adds `ConversationLock`, `ConversationGuard` can be a type
+> alias for `ConversationHandle`, or the guard can hold a placeholder lock
+> field. This allows the API shape to stabilize before locking is implemented.
+
+#### Command Implementations
+
+| Command                    | `conversation_need`     | Notes                                  |
+|----------------------------|-------------------------|----------------------------------------|
+| `jp query` (no flags)      | `Session`               | Reads session mapping, picker fallback |
+| `jp query --new`           | `New`                   | Always creates fresh                   |
+| `jp query --id=<id>`       | `Explicit(id)`          | Direct targeting                       |
+| `jp config show`           | `None`                  | No conversation needed                 |
+| `jp conversation rm <id>`  | `Explicit(id)`          | Targets specific conversation          |
+| `jp conversation ls`       | `None`                  | Lists all, no active needed            |
+| `jp conversation use <id>` | `None`                  | Writes session mapping only            |
+| `jp conversation fork`     | `Session` or `Explicit` | Reads source conversation              |
+| `jp attachment ls`         | `None`                  | No conversation needed                 |
 
 ## References
 
 - `flock(2)` — POSIX advisory file locking used for conversation locks.
-- `fd-lock` — Cross-platform advisory file locks (uses `LockFileEx` on Windows).
+- `LockFileEx` — Windows equivalent, used via `windows-sys`.
 - `getsid(2)` — POSIX function for obtaining the session leader PID.
-- `nix::unistd::getsid` — Rust binding via the `nix` crate.
 
 ### Platform Portability
 
-| Concern          | Unix                | Windows                    | Rust crate    |
-|------------------|---------------------|----------------------------|---------------|
-| File locking     | `flock`             | `LockFileEx`               | `fd-lock`     |
-| Session identity | `getsid(0)`         | `GetConsoleWindow()` HWND  | `nix`         |
-| Session env vars | `$TMUX_PANE`, etc.  | `$WEZTERM_PANE`, etc.      | `std::env`    |
+| Concern          | Unix               | Windows                   | Rust crate             |
+|------------------|--------------------|---------------------------|------------------------|
+| File locking     | `flock`            | `LockFileEx`              | `libc` / `windows-sys` |
+| Session identity | `getsid(0)`        | `GetConsoleWindow()` HWND | `libc` / `windows-sys` |
+| Session env vars | `$TMUX_PANE`, etc. | `$WEZTERM_PANE`, etc.     | `std::env`             |
 
-The `ConversationLock` abstraction hides the platform-specific locking
-mechanism. Session identity uses the three-layer resolution described above,
-which works on both platforms. The terminal env var layer is fully
-cross-platform. The automatic detection layer uses platform-specific APIs behind
-a common interface.
+The `ConversationFileLock` abstraction in `jp_storage::lock` hides the
+platform-specific locking mechanism. We use `libc` and `windows-sys` directly
+rather than `fd-lock` to avoid `RwLockWriteGuard` lifetime issues and a
+`windows-sys` version conflict. Session identity uses the three-layer resolution
+described above, which works on both platforms.
 
 [RFD 039]: 039-conversation-trees.md
 [RFD 052]: 052-workspace-data-store-sanitization.md

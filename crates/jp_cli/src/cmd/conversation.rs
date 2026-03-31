@@ -1,4 +1,6 @@
-use super::Output;
+use jp_workspace::ConversationHandle;
+
+use super::{ConversationLoadRequest, Output};
 use crate::ctx::Ctx;
 
 mod edit;
@@ -17,16 +19,32 @@ pub(crate) struct Conversation {
 }
 
 impl Conversation {
-    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         match self.command {
-            Commands::Show(args) => args.run(ctx),
-            Commands::Remove(args) => args.run(ctx),
-            Commands::List(args) => args.run(ctx),
-            Commands::Use(args) => args.run(ctx),
-            Commands::Edit(args) => args.run(ctx).await,
-            Commands::Fork(args) => args.run(ctx),
-            Commands::Grep(args) => args.run(ctx),
-            Commands::Print(args) => args.run(ctx),
+            Commands::Show(args) => args.run(ctx, handles),
+            Commands::Remove(args) => args.run(ctx, handles),
+            Commands::Edit(args) => args.run(ctx, handles).await,
+            Commands::Fork(args) => args.run(ctx, handles),
+            Commands::Grep(args) => args.run(ctx, handles),
+            Commands::Print(args) => args.run(ctx, handles),
+            Commands::List(args) => args.run(ctx, handles),
+            Commands::Use(args) => args.run(
+                ctx,
+                handles.into_iter().next().expect("Use requires a handle"),
+            ),
+        }
+    }
+
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        match &self.command {
+            Commands::Show(args) => args.conversation_load_request(),
+            Commands::Remove(args) => args.conversation_load_request(),
+            Commands::Edit(args) => args.conversation_load_request(),
+            Commands::Fork(args) => args.conversation_load_request(),
+            Commands::Grep(args) => args.conversation_load_request(),
+            Commands::Print(args) => args.conversation_load_request(),
+            Commands::List(args) => args.conversation_load_request(),
+            Commands::Use(args) => args.conversation_load_request(),
         }
     }
 }

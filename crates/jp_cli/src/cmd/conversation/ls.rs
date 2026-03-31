@@ -1,13 +1,21 @@
 use chrono::{DateTime, FixedOffset, Local, Utc};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
-use jp_conversation::{Conversation, ConversationId};
+use jp_conversation::ConversationId;
 use jp_term::osc::hyperlink;
+use jp_workspace::ConversationHandle;
 
-use crate::{cmd::Output, ctx::Ctx, output::print_table};
+use crate::{
+    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    ctx::Ctx,
+    output::print_table,
+};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Ls {
+    #[command(flatten)]
+    target: PositionalIds<true, true>,
+
     /// Sort conversations by a specific field.
     #[arg(long)]
     sort: Option<Sort>,
@@ -42,6 +50,7 @@ enum Sort {
 
 struct Details {
     id: ConversationId,
+    active: bool,
     title: Option<String>,
     messages: usize,
     last_event_at: Option<DateTime<Utc>>,
@@ -50,32 +59,38 @@ struct Details {
 }
 
 impl Ls {
-    #[expect(clippy::unnecessary_wraps)]
-    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
-        let active_conversation_id = ctx.workspace.active_conversation_id();
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        ConversationLoadRequest::explicit_or_none(&self.target.ids)
+    }
+
+    #[expect(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
+    pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+        let active_conversation_id = ctx
+            .session
+            .as_ref()
+            .and_then(|s| ctx.workspace.session_active_conversation(s));
         let limit = self.limit.unwrap_or(usize::MAX);
+
+        // If specific handles were given, filter to those IDs.
+        let filter_ids: Option<Vec<_>> = if handles.is_empty() {
+            None
+        } else {
+            Some(handles.iter().map(ConversationHandle::id).collect())
+        };
 
         let mut conversations = ctx
             .workspace
             .conversations()
+            .filter(|(id, _)| filter_ids.as_ref().is_none_or(|f| f.contains(id)))
             .filter(|(_, c)| !self.local || c.user)
-            .map(|(id, conversation)| {
-                let Conversation {
-                    title,
-                    user,
-                    last_event_at,
-                    expires_at,
-                    events_count,
-                    ..
-                } = conversation;
-                Details {
-                    id: *id,
-                    title: title.clone(),
-                    messages: *events_count,
-                    last_event_at: *last_event_at,
-                    expires_at: *expires_at,
-                    local: *user,
-                }
+            .map(|(id, conversation)| Details {
+                id: *id,
+                active: active_conversation_id == Some(*id),
+                title: conversation.title.clone(),
+                messages: conversation.events_count,
+                last_event_at: conversation.last_event_at,
+                expires_at: conversation.expires_at,
+                local: conversation.user,
             })
             .collect::<Vec<_>>();
 
@@ -113,7 +128,6 @@ impl Ls {
         for details in conversations {
             rows.push(self.build_conversation_row(
                 ctx,
-                active_conversation_id,
                 local_column,
                 title_column,
                 expires_at_column,
@@ -128,7 +142,6 @@ impl Ls {
     fn build_conversation_row(
         &self,
         ctx: &Ctx,
-        active_conversation_id: ConversationId,
         local_column: bool,
         title_column: bool,
         expires_at_column: bool,
@@ -136,6 +149,7 @@ impl Ls {
     ) -> Row {
         let Details {
             id,
+            active,
             title,
             messages,
             last_event_at: last_message_at,
@@ -143,7 +157,7 @@ impl Ls {
             local,
         } = details;
 
-        let mut id_fmt = if id == active_conversation_id {
+        let mut id_fmt = if active {
             id.to_string().bold().yellow().to_string()
         } else {
             id.to_string()
