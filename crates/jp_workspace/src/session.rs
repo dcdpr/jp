@@ -166,6 +166,16 @@ impl SessionSource {
     }
 }
 
+impl fmt::Display for SessionSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Getsid => write!(f, "getsid"),
+            Self::Hwnd => write!(f, "hwnd"),
+            Self::Env { key } => write!(f, "env:{key}"),
+        }
+    }
+}
+
 /// A resolved session identity, combining the ID with its provenance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {

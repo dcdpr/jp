@@ -84,8 +84,8 @@ impl Workspace {
 
     /// Get the previous conversation ID for the given session.
     ///
-    /// This is the conversation that was active before the current one,
-    /// similar to `cd -` in a shell.
+    /// This is the conversation that was active before the current one, similar
+    /// to `cd -` in a shell.
     #[must_use]
     pub fn session_previous_conversation(&self, session: &Session) -> Option<ConversationId> {
         self.load_session_mapping(session)
@@ -163,7 +163,12 @@ impl Workspace {
 
             // Check process liveness for sources that support it.
             if is_session_process_dead(&mapping.source, session_key) {
-                debug!(path = %path, source = ?mapping.source, "Removing stale session mapping (process dead).");
+                debug!(
+                    path = path.to_string(),
+                    source = mapping.source.to_string(),
+                    "Removing stale session mapping (process dead)."
+                );
+
                 drop(fs::remove_file(&path));
                 continue;
             }
@@ -175,7 +180,11 @@ impl Workspace {
                 .any(|entry| conversation_ids.contains(&entry.id));
 
             if !has_live {
-                debug!(path = %path, "Removing stale session mapping (no live conversations).");
+                debug!(
+                    path = path.to_string(),
+                    "Removing stale session mapping (no live conversations)."
+                );
+
                 drop(fs::remove_file(&path));
             }
         }
@@ -208,9 +217,9 @@ impl Workspace {
 
 /// Check whether the process that created a session mapping is dead.
 ///
-/// Returns `true` if the source supports liveness checking and the process
-/// is no longer alive. Returns `false` if liveness cannot be determined
-/// (Env sources, parse failures, unsupported platforms).
+/// Returns `true` if the source supports liveness checking and the process is
+/// no longer alive. Returns `false` if liveness cannot be determined (Env
+/// sources, parse failures, unsupported platforms).
 fn is_session_process_dead(source: &SessionSource, session_key: &str) -> bool {
     match source {
         SessionSource::Getsid => is_pid_dead(session_key),
@@ -258,6 +267,8 @@ fn is_pid_dead(_session_key: &str) -> bool {
 /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-iswindow>
 #[cfg(windows)]
 fn is_hwnd_dead(session_key: &str) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+
     let Ok(hwnd) = session_key.parse::<isize>() else {
         return false;
     };
@@ -266,7 +277,7 @@ fn is_hwnd_dead(session_key: &str) -> bool {
     //
     // SAFETY: IsWindow is safe to call with any handle value — it just checks
     // validity.
-    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(hwnd) == 0 }
+    unsafe { IsWindow(hwnd as *mut core::ffi::c_void) == 0 }
 }
 
 #[cfg(not(windows))]

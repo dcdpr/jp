@@ -18,17 +18,20 @@ jp_conversation = { workspace = true }
 jp_storage = { workspace = true }
 
 camino = { workspace = true }
-parking_lot = { workspace = true }
-rayon = { workspace = true }
 camino-tempfile = { workspace = true }
 chrono = { workspace = true }
 directories = { workspace = true }
+parking_lot = { workspace = true }
+rayon = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 datetime_literal = { workspace = true }
