@@ -12,7 +12,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::{Error, error::Result};
 
 pub(crate) const LOCKS_DIR: &str = "locks";
 
