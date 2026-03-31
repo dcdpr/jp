@@ -195,6 +195,7 @@ fn hwnd_with_unparseable_key_is_not_dead() {
     assert!(!is_hwnd_dead("not-a-handle"));
 }
 
+#[cfg(unix)]
 #[test]
 fn cleanup_removes_stale_getsid_session() {
     let (_tmp, mut ws) = setup();
@@ -220,6 +221,32 @@ fn cleanup_removes_stale_getsid_session() {
     assert!(
         ws.session_active_conversation(&session).is_none(),
         "Stale getsid session should be cleaned up when process is dead"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn cleanup_removes_stale_hwnd_session() {
+    let (_tmp, mut ws) = setup();
+    let session = Session {
+        id: SessionId::new("57005").unwrap(), // 0xDEAD — unlikely to be a valid HWND
+        source: SessionSource::Hwnd,
+    };
+    let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+    ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
+
+    ws.activate_session_conversation(&session, id, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    assert!(ws.session_active_conversation(&session).is_some());
+
+    // Cleanup should remove it because HWND 0xDEAD is not a valid window.
+    ws.cleanup_stale_files();
+
+    assert!(
+        ws.session_active_conversation(&session).is_none(),
+        "Stale hwnd session should be cleaned up when window handle is dead"
     );
 }
 
