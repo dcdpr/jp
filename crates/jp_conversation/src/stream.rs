@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 use tracing::error;
 
+pub mod turn_iter;
 pub mod turn_mut;
+pub use turn_iter::{IterTurns, Turn};
 pub use turn_mut::TurnMut;
 
 use crate::{
@@ -763,6 +765,55 @@ impl ConversationStream {
             )));
             self.events.insert(pos + 1, response);
         }
+    }
+
+    /// Returns a turn-level iterator over the stream.
+    ///
+    /// Each [`Turn`] groups the events between consecutive [`TurnStart`]
+    /// markers. Events before the first `TurnStart` (if any) form an implicit
+    /// leading turn.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    #[must_use]
+    pub fn iter_turns(&self) -> IterTurns<'_> {
+        IterTurns::new(self.iter())
+    }
+
+    /// Retain only the last `n` turns, dropping earlier ones.
+    ///
+    /// A turn is delimited by a [`TurnStart`] event. If there are `n` or
+    /// fewer turns, the stream is left unchanged.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    pub fn retain_last_turns(&mut self, n: usize) {
+        if n == 0 {
+            self.retain(|_| false);
+            return;
+        }
+
+        let turn_count = self
+            .events
+            .iter()
+            .filter(|e| matches!(e, InternalEvent::Event(ev) if ev.is_turn_start()))
+            .count();
+
+        if turn_count <= n {
+            return;
+        }
+
+        let skip = turn_count - n;
+        let mut turns_seen = 0;
+        let mut keeping = false;
+
+        self.retain(|event| {
+            if event.is_turn_start() {
+                turns_seen += 1;
+                if turns_seen > skip {
+                    keeping = true;
+                }
+            }
+            keeping
+        });
     }
 
     /// Removes a trailing [`TurnStart`] event if it is the last conversation

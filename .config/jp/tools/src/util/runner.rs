@@ -80,6 +80,23 @@ impl ProcessOutput {
     }
 }
 
+/// Options for running a process.
+#[derive(Debug, Default)]
+pub struct RunnerOpts<'a> {
+    pub env: &'a [(&'a str, &'a str)],
+    pub stdin: Option<&'a str>,
+
+    /// macOS Seatbelt profile string for `sandbox-exec -p`.
+    /// If set, the command is wrapped in `sandbox-exec`.
+    /// Errors if `sandbox-exec` is not available.
+    pub macos_sandbox_profile: Option<&'a str>,
+
+    /// If `true`, the process inherits NO environment variables from the
+    /// parent. Only the variables in `env` are set. Use this for sandboxed
+    /// processes to prevent leaking secrets via env vars.
+    pub clean_env: bool,
+}
+
 /// Trait for running external processes, allowing for dependency injection in
 /// tests.
 pub trait ProcessRunner {
@@ -89,7 +106,7 @@ pub trait ProcessRunner {
         args: &[&str],
         working_dir: &Utf8Path,
     ) -> Result<ProcessOutput, std::io::Error> {
-        self.run_with_env(program, args, working_dir, &[])
+        self.run_with_opts(program, args, working_dir, &RunnerOpts::default())
     }
 
     fn run_with_env(
@@ -99,7 +116,10 @@ pub trait ProcessRunner {
         working_dir: &Utf8Path,
         env: &[(&str, &str)],
     ) -> Result<ProcessOutput, std::io::Error> {
-        self.run_with_env_and_stdin(program, args, working_dir, env, None)
+        self.run_with_opts(program, args, working_dir, &RunnerOpts {
+            env,
+            ..Default::default()
+        })
     }
 
     fn run_with_env_and_stdin(
@@ -109,32 +129,86 @@ pub trait ProcessRunner {
         working_dir: &Utf8Path,
         env: &[(&str, &str)],
         stdin: Option<&str>,
+    ) -> Result<ProcessOutput, std::io::Error> {
+        self.run_with_opts(program, args, working_dir, &RunnerOpts {
+            env,
+            stdin,
+            ..Default::default()
+        })
+    }
+
+    fn run_with_opts(
+        &self,
+        program: &str,
+        args: &[&str],
+        working_dir: &Utf8Path,
+        opts: &RunnerOpts<'_>,
     ) -> Result<ProcessOutput, std::io::Error>;
 }
 
 /// Production implementation that uses duct to run actual external processes.
 pub struct DuctProcessRunner;
 
+impl DuctProcessRunner {
+    /// Build the actual program and args, wrapping in a sandbox if requested.
+    fn resolve_command<'a>(
+        program: &'a str,
+        args: &'a [&'a str],
+        opts: &'a RunnerOpts<'_>,
+    ) -> Result<(String, Vec<String>), std::io::Error> {
+        // macOS sandbox
+        if let Some(profile) = opts.macos_sandbox_profile {
+            if cfg!(target_os = "macos") {
+                let mut sandbox_args = vec![
+                    "-p".to_owned(),
+                    profile.to_owned(),
+                    "--".to_owned(),
+                    program.to_owned(),
+                ];
+                sandbox_args.extend(args.iter().map(|s| (*s).to_owned()));
+                return Ok(("sandbox-exec".to_owned(), sandbox_args));
+            }
+
+            return Err(std::io::Error::other(
+                "macOS sandbox profile requested but not running on macOS",
+            ));
+        }
+
+        Ok((
+            program.to_owned(),
+            args.iter().map(|s| (*s).to_owned()).collect(),
+        ))
+    }
+}
+
 impl ProcessRunner for DuctProcessRunner {
-    fn run_with_env_and_stdin(
+    fn run_with_opts(
         &self,
         program: &str,
         args: &[&str],
         working_dir: &Utf8Path,
-        env: &[(&str, &str)],
-        stdin: Option<&str>,
+        opts: &RunnerOpts<'_>,
     ) -> Result<ProcessOutput, std::io::Error> {
-        let mut command = cmd(program, args)
+        let (program, args) = Self::resolve_command(program, args, opts)?;
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+
+        let mut command = cmd(&program, &arg_refs)
             .dir(working_dir)
             .unchecked()
             .stdout_capture()
             .stderr_capture();
 
-        for (key, value) in env {
-            command = command.env(key, value);
+        if opts.clean_env {
+            // Replace the entire environment — only `opts.env` entries are set.
+            let env_map: std::collections::HashMap<_, _> = opts.env.iter().copied().collect();
+            command = command.full_env(env_map);
+        } else {
+            for (key, value) in opts.env {
+                command = command.env(key, value);
+            }
         }
 
-        if let Some(input) = stdin {
+        if let Some(input) = opts.stdin {
             command = command.stdin_bytes(input.as_bytes());
         }
 
@@ -302,13 +376,12 @@ impl ExpectationBuilder {
 
 #[cfg(test)]
 impl ProcessRunner for MockProcessRunner {
-    fn run_with_env_and_stdin(
+    fn run_with_opts(
         &self,
         program: &str,
         args: &[&str],
         _working_dir: &Utf8Path,
-        _env: &[(&str, &str)],
-        _stdin: Option<&str>,
+        _opts: &RunnerOpts<'_>,
     ) -> Result<ProcessOutput, std::io::Error> {
         let mut expectations = self.expectations.lock().unwrap();
 
@@ -343,14 +416,13 @@ impl ProcessRunner for MockProcessRunner {
 
 #[cfg(test)]
 impl ProcessRunner for &MockProcessRunner {
-    fn run_with_env_and_stdin(
+    fn run_with_opts(
         &self,
         program: &str,
         args: &[&str],
         working_dir: &Utf8Path,
-        env: &[(&str, &str)],
-        stdin: Option<&str>,
+        opts: &RunnerOpts<'_>,
     ) -> Result<ProcessOutput, std::io::Error> {
-        (*self).run_with_env_and_stdin(program, args, working_dir, env, stdin)
+        (*self).run_with_opts(program, args, working_dir, opts)
     }
 }

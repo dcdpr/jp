@@ -8,7 +8,7 @@ use jp_tool::Action;
 use serde_json::{Map, Value};
 
 use super::*;
-use crate::util::runner::{ExitCode, ProcessOutput};
+use crate::util::runner::{ExitCode, ProcessOutput, RunnerOpts};
 
 fn ctx() -> (Utf8TempDir, Context) {
     let dir = tempdir().unwrap();
@@ -41,13 +41,12 @@ fn approved() -> Map<String, Value> {
 struct DirtyRunner(bool);
 
 impl ProcessRunner for DirtyRunner {
-    fn run_with_env_and_stdin(
+    fn run_with_opts(
         &self,
         _program: &str,
         _args: &[&str],
         _working_dir: &Utf8Path,
-        _env: &[(&str, &str)],
-        _stdin: Option<&str>,
+        _opts: &RunnerOpts<'_>,
     ) -> Result<ProcessOutput, std::io::Error> {
         let stdout = if self.0 { " M file\n" } else { "" };
         Ok(ProcessOutput {
