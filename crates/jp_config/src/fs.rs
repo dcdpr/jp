@@ -6,6 +6,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clean_path::clean;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
+use toml_edit::DocumentMut;
 use tracing::debug;
 
 use crate::{Error, PartialAppConfig};
@@ -138,6 +139,33 @@ impl ConfigFile {
         Ok(())
     }
 
+    /// Merge a serializable delta into the config file, preserving formatting.
+    ///
+    /// Only the keys present in the serialized `delta` are touched; all other
+    /// content (comments, whitespace, key order) is preserved.
+    ///
+    /// Currently only supports TOML files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file is not TOML, or if parsing/serialization
+    /// fails.
+    pub fn merge_delta<T: Serialize>(
+        &mut self,
+        delta: &T,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if self.format != Format::Toml {
+            return Err("format-preserving merge is only supported for TOML files".into());
+        }
+
+        let mut doc: DocumentMut = self.content.parse()?;
+        let delta_toml = toml::to_string_pretty(delta)?;
+        let delta_doc: DocumentMut = delta_toml.parse()?;
+        deep_merge_toml(doc.as_table_mut(), delta_doc.as_table());
+        self.content = doc.to_string();
+        Ok(())
+    }
+
     /// Format the content of the configuration file, using the provided type.
     ///
     /// # Errors
@@ -156,6 +184,23 @@ impl ConfigFile {
         };
 
         Ok(())
+    }
+}
+
+/// Recursively merge `source` table entries into `target`.
+///
+/// Only keys present in `source` are touched. When both sides have a
+/// sub-table for the same key the merge recurses; otherwise the source
+/// value overwrites the target.
+fn deep_merge_toml(target: &mut toml_edit::Table, source: &toml_edit::Table) {
+    for (key, source_item) in source {
+        if let Some(target_table) = target.get_mut(key).and_then(|t| t.as_table_mut())
+            && let Some(source_table) = source_item.as_table()
+        {
+            deep_merge_toml(target_table, source_table);
+        } else {
+            target.insert(key, source_item.clone());
+        }
     }
 }
 
