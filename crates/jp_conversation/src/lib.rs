@@ -23,6 +23,7 @@
     unused_doc_comments
 )]
 
+mod compat;
 pub mod conversation;
 pub mod error;
 pub mod event;
