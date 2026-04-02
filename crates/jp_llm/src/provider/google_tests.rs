@@ -29,6 +29,134 @@ async fn test_gemini_3_reasoning() -> std::result::Result<(), Box<dyn std::error
     run_test(PROVIDER, function_name!(), Some(request)).await
 }
 
+mod thought_signature_recovery {
+    use gemini_client_rs::types;
+
+    use crate::{
+        error::StreamError,
+        event::{EventMatcher, PatchAction},
+        provider::google::{
+            THOUGHT_SIGNATURE_DUMMY_VALUE, THOUGHT_SIGNATURE_KEY,
+            build_thought_signature_patch, is_corrupted_thought_signature,
+        },
+    };
+
+    fn text_part(text: &str) -> types::ContentPart {
+        types::ContentPart {
+            data: types::ContentData::Text(text.to_owned()),
+            thought: false,
+            thought_signature: None,
+            metadata: None,
+        }
+    }
+
+    fn thought_part(text: &str, sig: &str) -> types::ContentPart {
+        types::ContentPart {
+            data: types::ContentData::Text(text.to_owned()),
+            thought: true,
+            thought_signature: Some(sig.to_owned()),
+            metadata: None,
+        }
+    }
+
+    fn content(role: types::Role, parts: Vec<types::ContentPart>) -> types::Content {
+        types::Content {
+            role: Some(role),
+            parts,
+        }
+    }
+
+    fn request(contents: Vec<types::Content>) -> types::GenerateContentRequest {
+        types::GenerateContentRequest {
+            system_instruction: None,
+            contents,
+            tools: vec![],
+            tool_config: None,
+            generation_config: None,
+        }
+    }
+
+    #[test]
+    fn detects_corrupted_signature_error() {
+        let err = StreamError::other(
+            "API Error: {\"status\":400,\"message\":{\"error\":{\"code\":400,\
+             \"message\":\"Corrupted thought signature.\",\"status\":\
+             \"INVALID_ARGUMENT\"}},\"context\":{\"cause\":\"Invalid status code\"}}",
+        );
+        assert!(is_corrupted_thought_signature(&err));
+    }
+
+    #[test]
+    fn ignores_unrelated_errors() {
+        let err = StreamError::other("API Error: rate limit exceeded");
+        assert!(!is_corrupted_thought_signature(&err));
+    }
+
+    #[test]
+    fn ignores_retryable_errors() {
+        let err = StreamError::transient("Corrupted thought signature.");
+        assert!(!is_corrupted_thought_signature(&err));
+    }
+
+    #[test]
+    fn builds_patch_for_oldest_signature() {
+        let req = request(vec![
+            content(types::Role::User, vec![text_part("hello")]),
+            content(types::Role::Model, vec![
+                thought_part("thinking 1", "sig_old"),
+                text_part("response 1"),
+            ]),
+            content(types::Role::User, vec![text_part("follow up")]),
+            content(types::Role::Model, vec![
+                thought_part("thinking 2", "sig_new"),
+                text_part("response 2"),
+            ]),
+        ]);
+
+        let patches = build_thought_signature_patch(&req).unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(
+            patches[0].matcher,
+            EventMatcher::MetadataValue {
+                key: THOUGHT_SIGNATURE_KEY.to_owned(),
+                value: "sig_old".to_owned(),
+            }
+        );
+        assert_eq!(
+            patches[0].action,
+            PatchAction::RemoveMetadata(THOUGHT_SIGNATURE_KEY.to_owned())
+        );
+    }
+
+    #[test]
+    fn skips_dummy_signatures() {
+        let req = request(vec![content(types::Role::Model, vec![types::ContentPart {
+            data: types::ContentData::Text("text".to_owned()),
+            thought: false,
+            thought_signature: Some(THOUGHT_SIGNATURE_DUMMY_VALUE.to_owned()),
+            metadata: None,
+        }])]);
+
+        assert!(build_thought_signature_patch(&req).is_none());
+    }
+
+    #[test]
+    fn returns_none_without_signatures() {
+        let req = request(vec![
+            content(types::Role::User, vec![text_part("hello")]),
+            content(types::Role::Model, vec![text_part("world")]),
+        ]);
+
+        assert!(build_thought_signature_patch(&req).is_none());
+    }
+
+    #[test]
+    fn returns_none_for_empty_request() {
+        let req = request(vec![]);
+        assert!(build_thought_signature_patch(&req).is_none());
+    }
+}
+
 mod transform_schema {
     use serde_json::{Map, Value, json};
 

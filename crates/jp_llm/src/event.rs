@@ -44,8 +44,46 @@ pub enum Event {
         metadata: IndexMap<String, Value>,
     },
 
+    /// Instruct the caller to patch the conversation stream based on the
+    /// patching rules.
+    ///
+    /// This allows providers LLM providers to inform the caller about an
+    /// invalid event stream that the provider can fix, but which should ideally
+    /// also be applied to the conversation stream itself so that the error
+    /// doesn't show up again in the future.
+    Patch(Vec<EventPatch>),
+
     /// The response was finished.
     Finished(FinishReason),
+}
+
+/// A patch to apply to historical conversation events.
+///
+/// Providers yield these (via [`Event::Patch`]) when they discover that
+/// previously-persisted events need updating.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventPatch {
+    /// Which events to target.
+    pub matcher: EventMatcher,
+
+    /// What to do with matching events.
+    pub action: PatchAction,
+}
+
+/// Identifies which historical events a patch applies to.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum EventMatcher {
+    /// Match events where `metadata[key]` equals `value` (string comparison).
+    MetadataValue { key: String, value: String },
+}
+
+/// The mutation to apply to matched events.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum PatchAction {
+    /// Remove a metadata key from the event.
+    RemoveMetadata(String),
 }
 
 impl Event {
@@ -109,6 +147,11 @@ pub enum FinishReason {
     /// The maximum number of tokens was reached before the assistant could
     /// complete the turn.
     MaxTokens,
+
+    /// The provider requests that the caller rebuild the request from the
+    /// current conversation state and retry. The stream is finished and no
+    /// further events will be produced.
+    Retry,
 
     /// The assistant has stopped generating tokens for some reason.
     Other(Value),

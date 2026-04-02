@@ -117,6 +117,9 @@ impl EventChain {
                 self.buffer.push_back(event);
                 self.trim_buffer()
             }
+
+            // Pass through immediately — not part of the content stream.
+            Event::Patch(_) => vec![event],
         }
     }
 
@@ -161,6 +164,9 @@ impl EventChain {
                 self.pending.push_back(event);
                 self.attempt_merge(self.min_overlap)
             }
+
+            // Pass through immediately — not part of the content stream.
+            Event::Patch(_) => vec![event],
         }
     }
 

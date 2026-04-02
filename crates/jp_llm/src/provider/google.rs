@@ -28,7 +28,7 @@ use super::{EventStream, Provider};
 use crate::{
     StreamErrorKind,
     error::{Error, Result, StreamError, looks_like_quota_error},
-    event::{Event, FinishReason},
+    event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
     model::{ModelDeprecation, ModelDetails, ReasoningDetails},
     query::ChatQuery,
     tool::ToolDefinition,
@@ -103,6 +103,20 @@ fn call(
 
         tokio::pin!(stream);
         while let Some(event) = stream.next().await {
+            // Google rejects requests with stale thought signatures as a
+            // 400 "Corrupted thought signature." Emit a patch to strip the
+            // oldest one and ask the caller to retry.
+            if let Err(ref err) = event
+                && is_corrupted_thought_signature(err)
+            {
+                tracing::warn!("Corrupted thought signature, requesting retry.");
+                if let Some(patches) = build_thought_signature_patch(&request) {
+                    yield Ok(Event::Patch(patches));
+                    yield Ok(Event::Finished(FinishReason::Retry));
+                    return;
+                }
+            }
+
             for event in map_response(event?, &mut state, is_structured).map_err(|e| StreamError::other(e.to_string()))? {
                 // Sometimes the API returns an "unexpected tool call" error, if
                 // a previous turn had tools available but those were made
@@ -1019,6 +1033,34 @@ impl From<GeminiError> for Error {
             _ => Self::Gemini(error),
         }
     }
+}
+
+/// Returns `true` if the error is a Google API 400 "Corrupted thought
+/// signature." rejection.
+fn is_corrupted_thought_signature(err: &StreamError) -> bool {
+    err.kind == StreamErrorKind::Other && err.message().contains("Corrupted thought signature")
+}
+
+/// Build a patch to remove the oldest `google_thought_signature` from the
+/// conversation. Google's error doesn't identify which block is bad, so we
+/// degrade one at a time starting from the oldest.
+fn build_thought_signature_patch(
+    request: &types::GenerateContentRequest,
+) -> Option<Vec<EventPatch>> {
+    let sig = request
+        .contents
+        .iter()
+        .flat_map(|content| &content.parts)
+        .filter_map(|part| part.thought_signature.as_ref())
+        .find(|sig| sig.as_str() != THOUGHT_SIGNATURE_DUMMY_VALUE)?;
+
+    Some(vec![EventPatch {
+        matcher: EventMatcher::MetadataValue {
+            key: THOUGHT_SIGNATURE_KEY.to_owned(),
+            value: sig.clone(),
+        },
+        action: PatchAction::RemoveMetadata(THOUGHT_SIGNATURE_KEY.to_owned()),
+    }])
 }
 
 #[cfg(test)]

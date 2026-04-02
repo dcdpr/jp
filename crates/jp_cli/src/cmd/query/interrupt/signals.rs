@@ -8,7 +8,7 @@
 
 use jp_conversation::ConversationStream;
 use jp_inquire::prompt::PromptBackend;
-use jp_llm::event::Event;
+use jp_llm::event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction};
 use jp_printer::Printer;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, trace};
@@ -93,10 +93,59 @@ pub fn handle_llm_event(
     turn_coordinator: &mut TurnCoordinator,
     conversation_stream: &mut ConversationStream,
 ) -> LoopAction<()> {
+    // `Patch` is a side-channel instruction from the provider to fix bad events
+    // in the conversation stream. This can be handled directly instead of
+    // passing through the turn coordinator.
+    if let Event::Patch(patches) = event {
+        apply_history_patches(conversation_stream, &patches);
+        return LoopAction::Continue;
+    }
+
+    // `Retry` means the provider wants us to rebuild the request and try again.
+    // Break the inner streaming loop while keeping the phase as `Streaming` so
+    // the outer turn loop re-enters with a fresh request.
+    if matches!(event, Event::Finished(FinishReason::Retry)) {
+        return LoopAction::Break;
+    }
+
     let action = turn_coordinator.handle_event(conversation_stream, event);
     match action {
         Action::Done | Action::ExecuteTools(_) => LoopAction::Break,
         _ => LoopAction::Continue,
+    }
+}
+
+/// Apply provider-issued metadata patches to historical conversation events.
+fn apply_history_patches(stream: &mut ConversationStream, patches: &[EventPatch]) {
+    let mut count = 0;
+
+    for event in stream.iter_mut() {
+        for patch in patches {
+            let matched = match &patch.matcher {
+                EventMatcher::MetadataValue { key, value } => event
+                    .event
+                    .metadata
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|v| v == value),
+                _ => false,
+            };
+
+            if !matched {
+                continue;
+            }
+
+            match &patch.action {
+                PatchAction::RemoveMetadata(key) => event.event.metadata.remove(key),
+                _ => continue,
+            };
+
+            count += 1;
+        }
+    }
+
+    if count > 0 {
+        tracing::debug!(count, "Applied history patches to conversation stream.");
     }
 }
 

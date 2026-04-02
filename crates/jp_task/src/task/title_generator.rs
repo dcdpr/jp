@@ -120,6 +120,7 @@ impl TitleGeneratorTask {
                     flushed.extend(builder.handle_flush(index, metadata));
                 }
                 Event::Finished(_) => flushed.extend(builder.drain()),
+                Event::Patch(_) => {}
             }
         }
 
