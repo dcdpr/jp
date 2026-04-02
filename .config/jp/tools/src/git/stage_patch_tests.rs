@@ -61,24 +61,15 @@ fn stage_non_last_hunk_of_multi_hunk_diff() {
     // Two hunks: hunk 0 changes line 1, hunk 1 changes line 5.
     // Selecting only hunk 0 (non-last) previously produced a patch without
     // a trailing newline, causing `git apply` to reject it as corrupt.
-    let diff = "diff --git a/f.rs b/f.rs\nindex abc..def 100644\n\
-        --- a/f.rs\n+++ b/f.rs\n\
-        @@ -1 +1 @@\n-aaa\n+AAA\n\
-        @@ -5 +5 @@\n-eee\n+EEE\n";
+    let diff = "diff --git a/f.rs b/f.rs\nindex abc..def 100644\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1 \
+                @@\n-aaa\n+AAA\n@@ -5 +5 @@\n-eee\n+EEE\n";
 
     let runner = MockProcessRunner::builder()
         .expect("git")
         .args(&["ls-files", "f.rs"])
         .returns_success("f.rs\n")
         .expect("git")
-        .args(&[
-            "diff-files",
-            "-p",
-            "--minimal",
-            "--unified=0",
-            "--",
-            "f.rs",
-        ])
+        .args(&["diff-files", "-p", "--minimal", "--unified=0", "--", "f.rs"])
         .returns_success(diff)
         .expect("git")
         .args(&["apply", "--cached", "--unidiff-zero", "-"])
