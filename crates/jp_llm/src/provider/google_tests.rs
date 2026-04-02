@@ -36,8 +36,8 @@ mod thought_signature_recovery {
         error::StreamError,
         event::{EventMatcher, PatchAction},
         provider::google::{
-            THOUGHT_SIGNATURE_DUMMY_VALUE, THOUGHT_SIGNATURE_KEY,
-            build_thought_signature_patch, is_corrupted_thought_signature,
+            THOUGHT_SIGNATURE_DUMMY_VALUE, THOUGHT_SIGNATURE_KEY, build_thought_signature_patch,
+            is_corrupted_thought_signature,
         },
     };
 
@@ -79,9 +79,10 @@ mod thought_signature_recovery {
     #[test]
     fn detects_corrupted_signature_error() {
         let err = StreamError::other(
-            "API Error: {\"status\":400,\"message\":{\"error\":{\"code\":400,\
-             \"message\":\"Corrupted thought signature.\",\"status\":\
-             \"INVALID_ARGUMENT\"}},\"context\":{\"cause\":\"Invalid status code\"}}",
+            "API Error: \
+             {\"status\":400,\"message\":{\"error\":{\"code\":400,\"message\":\"Corrupted thought \
+             signature.\",\"status\":\"INVALID_ARGUMENT\"}},\"context\":{\"cause\":\"Invalid \
+             status code\"}}",
         );
         assert!(is_corrupted_thought_signature(&err));
     }
@@ -115,13 +116,10 @@ mod thought_signature_recovery {
 
         let patches = build_thought_signature_patch(&req).unwrap();
         assert_eq!(patches.len(), 1);
-        assert_eq!(
-            patches[0].matcher,
-            EventMatcher::MetadataValue {
-                key: THOUGHT_SIGNATURE_KEY.to_owned(),
-                value: "sig_old".to_owned(),
-            }
-        );
+        assert_eq!(patches[0].matcher, EventMatcher::MetadataValue {
+            key: THOUGHT_SIGNATURE_KEY.to_owned(),
+            value: "sig_old".to_owned(),
+        });
         assert_eq!(
             patches[0].action,
             PatchAction::RemoveMetadata(THOUGHT_SIGNATURE_KEY.to_owned())
@@ -130,12 +128,14 @@ mod thought_signature_recovery {
 
     #[test]
     fn skips_dummy_signatures() {
-        let req = request(vec![content(types::Role::Model, vec![types::ContentPart {
-            data: types::ContentData::Text("text".to_owned()),
-            thought: false,
-            thought_signature: Some(THOUGHT_SIGNATURE_DUMMY_VALUE.to_owned()),
-            metadata: None,
-        }])]);
+        let req = request(vec![content(types::Role::Model, vec![
+            types::ContentPart {
+                data: types::ContentData::Text("text".to_owned()),
+                thought: false,
+                thought_signature: Some(THOUGHT_SIGNATURE_DUMMY_VALUE.to_owned()),
+                metadata: None,
+            },
+        ])]);
 
         assert!(build_thought_signature_patch(&req).is_none());
     }
