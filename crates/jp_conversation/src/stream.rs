@@ -14,6 +14,7 @@ pub use turn_iter::{IterTurns, Turn};
 pub use turn_mut::TurnMut;
 
 use crate::{
+    compat::deserialize_config_delta,
     event::{ChatRequest, ConversationEvent, EventKind, InquiryId, ToolCallResponse, TurnStart},
     storage::{decode_event_value, encode_event},
 };
@@ -1317,9 +1318,7 @@ impl<'de> Deserialize<'de> for InternalEvent {
             .unwrap_or_default();
 
         if tag == "config_delta" {
-            return serde_json::from_value(value)
-                .map(Self::ConfigDelta)
-                .map_err(serde::de::Error::custom);
+            return Ok(Self::ConfigDelta(deserialize_config_delta(value)));
         }
 
         // Decode base64-encoded storage fields before deserializing.

@@ -54,7 +54,9 @@ pub use error::Error;
 use indexmap::IndexMap;
 pub use partial::ToPartial;
 use relative_path::RelativePathBuf;
-pub use schematic::{Config, ConfigError, PartialConfig};
+pub use schematic::{
+    Config, ConfigError, PartialConfig, Schema, SchemaBuilder, SchemaType, Schematic, schema,
+};
 use serde_json::Value;
 
 use crate::{
@@ -254,6 +256,16 @@ impl AppConfig {
         Self::from_partial(partial, vec![]).expect("valid config")
     }
 
+    /// Build the schema for the configuration.
+    ///
+    /// Returns a [`Schema`] tree describing the structure of `AppConfig`, with
+    /// [`SchemaType::Struct`] at each nested level containing a `fields` map of
+    /// valid field names.
+    #[must_use]
+    pub fn schema() -> Schema {
+        Self::build_schema(SchemaBuilder::default())
+    }
+
     /// Return a list of all fields in the configuration.
     ///
     /// The fields are returned in alphabetical order, with nested fields
@@ -272,11 +284,8 @@ impl AppConfig {
     /// ```
     #[must_use]
     pub fn fields() -> Vec<String> {
-        use schematic::{SchemaBuilder, SchemaType, Schematic as _};
-
-        let builder = SchemaBuilder::default();
         let mut output = Vec::new();
-        let mut stack = vec![(Self::build_schema(builder), String::new())];
+        let mut stack = vec![(Self::schema(), String::new())];
 
         while let Some((schema, prefix)) = stack.pop() {
             let fields = match schema.ty {
