@@ -37,7 +37,7 @@ use crate::{
         Error, Result, StreamError, StreamErrorKind, extract_retry_from_text,
         looks_like_quota_error,
     },
-    event::{Event, FinishReason},
+    event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
     model::{ModelDeprecation, ModelDetails, ReasoningDetails},
     query::ChatQuery,
     stream::{
@@ -168,13 +168,16 @@ impl Provider for Anthropic {
     }
 }
 
-/// Create a request to the assistant to generate a response, and return a
-/// stream of [`Event`]s.
+/// Create a streaming request and return a stream of [`Event`]s.
 ///
 /// If `chain_on_max_tokens` is `true`, a new request is created when the last
 /// one ends with a [`FinishReason::MaxTokens`] event, allowing the assistant to
 /// continue from where it left off and the caller to receive the full response
 /// as a single stream of events.
+///
+/// If the API rejects the request due to an invalid thinking-block signature,
+/// emits [`Event::Patch`] instructions to fix the conversation stream and
+/// finishes with [`FinishReason::Retry`] so the caller can rebuild and retry.
 fn call(
     client: Client,
     request: types::CreateMessagesRequest,
@@ -201,8 +204,21 @@ fn call(
             .peekable();
 
         pin_mut!(stream);
-        while let Some(event) = stream.next().await.transpose()? {
-            match event {
+        while let Some(result) = stream.next().await {
+            // Anthropic rejects requests with stale thinking signatures as a
+            // 400 `invalid_request_error`. Emit a patch to strip the offending
+            // metadata and ask the caller to retry.
+            if let Err(ref err) = result
+                && is_invalid_thinking_signature(err)
+                && let Some(patches) = build_thinking_patches(&request, err)
+            {
+                warn!("Invalid thinking signature, requesting retry.");
+                yield Event::Patch(patches);
+                yield Event::Finished(FinishReason::Retry);
+                return;
+            }
+
+            match result? {
                 // If the assistant has reached the maximum number of
                 // tokens, and we are in a state in which we can request
                 // more tokens, we do so by sending a new request and
@@ -246,6 +262,7 @@ fn call(
 
                     yield flush;
                 }
+                patch @ Event::Patch(_) => yield patch,
             }
         }
 
@@ -384,6 +401,172 @@ fn find_merge_point(left: &str, right: &str, max_search: usize) -> usize {
 
     // No overlap found (or overlap was below minimum threshold)
     0
+}
+
+/// Returns `true` if the error is an Anthropic `invalid_request_error`
+/// complaining about an invalid `signature` in a `thinking` block.
+fn is_invalid_thinking_signature(error: &StreamError) -> bool {
+    error.kind == StreamErrorKind::Other
+        && error.message().contains("invalid_request_error")
+        && error.message().contains("signature")
+        && error.message().contains("thinking")
+}
+
+/// Extract the `(turn_index, flat_content_index)` from an Anthropic error
+/// message like `"messages.1.content.0: Invalid 'signature' …"`.
+///
+/// These are **logical turn** indices — not our `request.messages[]` array
+/// positions. Use [`resolve_turn_position`] to map them to actual message and
+/// content-block indices in the request.
+fn parse_signature_error_position(msg: &str) -> Option<(usize, usize)> {
+    let rest = msg.split("messages.").nth(1)?;
+    let dot = rest.find('.')?;
+
+    let turn_idx = rest[..dot].parse().ok()?;
+    let rest = rest.get(dot + 1..)?.strip_prefix("content.")?;
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    let flat_content_idx = rest[..end].parse().ok()?;
+
+    Some((turn_idx, flat_content_idx))
+}
+
+/// Map an Anthropic logical-turn position to a `(msg_idx, content_idx)` pair in
+/// our `request.messages[]` array.
+///
+/// The Anthropic API groups messages into logical turns: a user turn is a
+/// single non-tool-result user message, and an assistant turn spans from the
+/// first assistant message through all subsequent tool-result / assistant pairs
+/// until the next real user message. Content blocks are flat-indexed across all
+/// messages within a turn.
+fn resolve_turn_position(
+    messages: &[types::Message],
+    turn_idx: usize,
+    flat_content_idx: usize,
+) -> Option<(usize, usize)> {
+    let mut current_turn = 0;
+    let mut i = 0;
+
+    while i < messages.len() {
+        let turn_start = i;
+
+        // Advance past all messages belonging to this turn.
+        i += 1;
+        if messages[turn_start].role == types::MessageRole::Assistant {
+            // Assistant turns include subsequent tool-result user messages and
+            // assistant continuations until a non-tool-result user message
+            // appears.
+            while i < messages.len() {
+                if messages[i].role == types::MessageRole::User
+                    && !is_tool_result_message(&messages[i])
+                {
+                    break;
+                }
+                i += 1;
+            }
+        }
+
+        if current_turn == turn_idx {
+            let mut flat = 0;
+            for (mi, msg) in messages.iter().enumerate().take(i).skip(turn_start) {
+                for (ci, _) in msg.content.0.iter().enumerate() {
+                    if flat == flat_content_idx {
+                        return Some((mi, ci));
+                    }
+                    flat += 1;
+                }
+            }
+            return None;
+        }
+
+        current_turn += 1;
+    }
+
+    None
+}
+
+/// Returns `true` if every content block in the message is a `ToolResult`.
+fn is_tool_result_message(msg: &types::Message) -> bool {
+    !msg.content.0.is_empty()
+        && msg
+            .content
+            .0
+            .iter()
+            .all(|c| matches!(c, types::MessageContent::ToolResult(_)))
+}
+
+/// Build [`EventPatch`] instructions for the thinking block identified by the
+/// API error. The caller yields these as [`Event::Patch`] so the CLI can remove
+/// the stale signature metadata from the persisted conversation stream. On the
+/// next request rebuild, [`convert_event`] will fall through to the `<think>`
+/// tag path for events that no longer carry a signature.
+///
+/// Returns `None` if the offending block cannot be located.
+fn build_thinking_patches(
+    request: &types::CreateMessagesRequest,
+    error: &StreamError,
+) -> Option<Vec<EventPatch>> {
+    let api_position = parse_signature_error_position(error.message());
+    let (msg_idx, content_idx) = api_position
+        .and_then(|(turn, flat)| resolve_turn_position(&request.messages, turn, flat))
+        .or_else(|| find_oldest_thinking_block(request))?;
+
+    let (key, value) = identify_thinking_block(request, msg_idx, content_idx).or_else(|| {
+        // Resolved position wasn't a thinking block. Fall back to oldest.
+        let (msg, idx) = find_oldest_thinking_block(request)?;
+        identify_thinking_block(request, msg, idx)
+    })?;
+
+    Some(vec![EventPatch {
+        matcher: EventMatcher::MetadataValue {
+            key: key.to_owned(),
+            value,
+        },
+        action: PatchAction::RemoveMetadata(key.to_owned()),
+    }])
+}
+
+/// Find the first (oldest) `Thinking` or `RedactedThinking` content block in
+/// the request. Used as a fallback when [`parse_signature_error_position`]
+/// cannot parse the API error.
+fn find_oldest_thinking_block(request: &types::CreateMessagesRequest) -> Option<(usize, usize)> {
+    for (i, msg) in request.messages.iter().enumerate() {
+        for (j, content) in msg.content.0.iter().enumerate() {
+            if matches!(
+                content,
+                types::MessageContent::Thinking(_) | types::MessageContent::RedactedThinking { .. }
+            ) {
+                return Some((i, j));
+            }
+        }
+    }
+
+    None
+}
+
+/// Identify a thinking block at the given position and return its metadata key
+/// and value, without mutating the request.
+///
+/// Returns `(metadata_key, metadata_value)` for the block, or `None` if the
+/// target isn't a thinking block.
+fn identify_thinking_block(
+    request: &types::CreateMessagesRequest,
+    msg_idx: usize,
+    content_idx: usize,
+) -> Option<(&'static str, String)> {
+    let content = request.messages.get(msg_idx)?.content.0.get(content_idx)?;
+
+    match content {
+        types::MessageContent::Thinking(thinking) => Some((
+            THINKING_SIGNATURE_KEY,
+            thinking.signature.clone().unwrap_or_default(),
+        )),
+        types::MessageContent::RedactedThinking { data } => {
+            Some((REDACTED_THINKING_KEY, data.clone()))
+        }
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Default)]

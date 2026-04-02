@@ -74,6 +74,12 @@ impl StreamError {
         Self::new(StreamErrorKind::Transient, message)
     }
 
+    /// Returns the human-readable error message (without the source chain).
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     /// Create an error from another error type.
     #[must_use]
     pub fn other(message: impl Into<String>) -> Self {

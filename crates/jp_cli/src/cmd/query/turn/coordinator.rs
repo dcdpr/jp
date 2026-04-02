@@ -192,6 +192,9 @@ impl TurnCoordinator {
                 self.structured_renderer.flush();
                 self.transition_from_streaming(reason)
             }
+
+            // Patch is handled by the caller before reaching here.
+            Event::Patch(_) => Action::Continue,
         }
     }
 

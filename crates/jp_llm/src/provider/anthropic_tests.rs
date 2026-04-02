@@ -737,3 +737,375 @@ mod transform_schema {
         );
     }
 }
+
+mod thinking_signature_recovery {
+    use async_anthropic::types::{self, MessageRole};
+
+    use crate::{
+        error::StreamError,
+        event::{EventMatcher, PatchAction},
+        provider::anthropic::{
+            build_thinking_patches, find_oldest_thinking_block, identify_thinking_block,
+            is_invalid_thinking_signature, parse_signature_error_position, resolve_turn_position,
+        },
+    };
+
+    fn make_thinking(text: &str, sig: &str) -> types::MessageContent {
+        types::MessageContent::Thinking(types::Thinking {
+            thinking: text.to_owned(),
+            signature: Some(sig.to_owned()),
+        })
+    }
+
+    fn make_redacted(data: &str) -> types::MessageContent {
+        types::MessageContent::RedactedThinking {
+            data: data.to_owned(),
+        }
+    }
+
+    fn make_text(text: &str) -> types::MessageContent {
+        types::MessageContent::Text(text.into())
+    }
+
+    fn msg(role: MessageRole, content: Vec<types::MessageContent>) -> types::Message {
+        types::Message {
+            role,
+            content: types::MessageContentList(content),
+        }
+    }
+
+    fn request(messages: Vec<types::Message>) -> types::CreateMessagesRequest {
+        types::CreateMessagesRequestBuilder::default()
+            .model("claude-test")
+            .messages(messages)
+            .build()
+            .unwrap()
+    }
+
+    fn make_tool_use(id: &str) -> types::MessageContent {
+        types::MessageContent::ToolUse(types::ToolUse {
+            id: id.to_owned(),
+            name: "tool".to_owned(),
+            input: serde_json::Value::Null,
+            cache_control: None,
+        })
+    }
+
+    fn make_tool_result(id: &str) -> types::MessageContent {
+        types::MessageContent::ToolResult(types::ToolResult {
+            tool_use_id: id.to_owned(),
+            content: Some("ok".to_owned()),
+            is_error: false,
+            cache_control: None,
+        })
+    }
+
+    #[test]
+    fn parse_exact_position() {
+        let msg = "api error: invalid_request_error: messages.1.content.0: Invalid `signature` in \
+                   `thinking` block";
+        assert_eq!(parse_signature_error_position(msg), Some((1, 0)));
+    }
+
+    #[test]
+    fn parse_larger_indices() {
+        let msg = "api error: invalid_request_error: messages.12.content.3: Invalid `signature` \
+                   in `thinking` block";
+        assert_eq!(parse_signature_error_position(msg), Some((12, 3)));
+    }
+
+    #[test]
+    fn parse_returns_none_for_unrelated_error() {
+        assert_eq!(
+            parse_signature_error_position("api error: rate_limit_error: too many requests"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_returns_none_for_missing_content() {
+        assert_eq!(
+            parse_signature_error_position("messages.1: something else"),
+            None
+        );
+    }
+
+    #[test]
+    fn detects_signature_error() {
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.1.content.0: Invalid `signature` in \
+             `thinking` block",
+        );
+        assert!(is_invalid_thinking_signature(&error));
+    }
+
+    #[test]
+    fn ignores_unrelated_errors() {
+        let error = StreamError::other("api error: rate_limit_error: too many requests");
+        assert!(!is_invalid_thinking_signature(&error));
+    }
+
+    #[test]
+    fn ignores_retryable_errors() {
+        let error = StreamError::transient("server error with signature and thinking");
+        assert!(!is_invalid_thinking_signature(&error));
+    }
+
+    #[test]
+    fn finds_first_thinking_block() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("hello")]),
+            msg(MessageRole::Assistant, vec![
+                make_text("preamble"),
+                make_thinking("deep thought", "sig_1"),
+            ]),
+            msg(MessageRole::Assistant, vec![make_thinking(
+                "later thought",
+                "sig_2",
+            )]),
+        ]);
+
+        assert_eq!(find_oldest_thinking_block(&request), Some((1, 1)));
+    }
+
+    #[test]
+    fn finds_redacted_before_thinking_if_older() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("hello")]),
+            msg(MessageRole::Assistant, vec![
+                make_redacted("secret"),
+                make_thinking("visible", "sig"),
+            ]),
+        ]);
+
+        // RedactedThinking at (1, 0) comes before Thinking at (1, 1)
+        assert_eq!(find_oldest_thinking_block(&request), Some((1, 0)));
+    }
+
+    #[test]
+    fn returns_none_without_thinking() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("hello")]),
+            msg(MessageRole::Assistant, vec![make_text("world")]),
+        ]);
+
+        assert_eq!(find_oldest_thinking_block(&request), None);
+    }
+
+    #[test]
+    fn identifies_thinking_block() {
+        let request = request(vec![msg(MessageRole::Assistant, vec![
+            make_thinking("my reasoning", "sig_old"),
+            make_text("my answer"),
+        ])]);
+
+        let result = identify_thinking_block(&request, 0, 0);
+        assert_eq!(
+            result.as_ref().map(|(k, v)| (*k, v.as_str())),
+            Some(("anthropic_thinking_signature", "sig_old"))
+        );
+    }
+
+    #[test]
+    fn identifies_redacted_block() {
+        let request = request(vec![msg(MessageRole::Assistant, vec![
+            make_redacted("encrypted"),
+            make_text("visible"),
+        ])]);
+
+        let result = identify_thinking_block(&request, 0, 0);
+        assert_eq!(
+            result.as_ref().map(|(k, v)| (*k, v.as_str())),
+            Some(("anthropic_redacted_thinking", "encrypted"))
+        );
+    }
+
+    #[test]
+    fn identify_out_of_bounds_is_none() {
+        let request = request(vec![msg(MessageRole::Assistant, vec![make_thinking(
+            "thought", "sig",
+        )])]);
+
+        assert!(identify_thinking_block(&request, 99, 0).is_none());
+        assert!(identify_thinking_block(&request, 0, 99).is_none());
+    }
+
+    #[test]
+    fn identify_non_thinking_is_none() {
+        let request = request(vec![msg(MessageRole::Assistant, vec![make_text(
+            "just text",
+        )])]);
+
+        assert!(identify_thinking_block(&request, 0, 0).is_none());
+    }
+
+    #[test]
+    fn build_patches_from_position_in_error() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("hello")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("thought", "sig_bad"),
+                make_text("response"),
+            ]),
+        ]);
+
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.1.content.0: Invalid `signature` in \
+             `thinking` block",
+        );
+
+        let patches = build_thinking_patches(&request, &error).unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].matcher, EventMatcher::MetadataValue {
+            key: "anthropic_thinking_signature".to_owned(),
+            value: "sig_bad".to_owned(),
+        });
+        assert_eq!(
+            patches[0].action,
+            PatchAction::RemoveMetadata("anthropic_thinking_signature".to_owned())
+        );
+    }
+
+    #[test]
+    fn build_patches_falls_back_to_oldest() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("hello")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("thought", "sig_oldest"),
+                make_text("response"),
+            ]),
+        ]);
+
+        // Unparseable position in error, falls back to oldest thinking block.
+        let error = StreamError::other(
+            "api error: invalid_request_error: Invalid `signature` in `thinking` block",
+        );
+
+        let patches = build_thinking_patches(&request, &error).unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].matcher, EventMatcher::MetadataValue {
+            key: "anthropic_thinking_signature".to_owned(),
+            value: "sig_oldest".to_owned(),
+        });
+    }
+
+    #[test]
+    fn build_patches_none_without_thinking() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("hello")]),
+            msg(MessageRole::Assistant, vec![make_text("world")]),
+        ]);
+
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.1.content.0: Invalid `signature` in \
+             `thinking` block",
+        );
+
+        assert!(build_thinking_patches(&request, &error).is_none());
+    }
+
+    /// Reproduce the exact message structure from the user's failing request:
+    /// two assistant turns with tool-use loops, separated by a user message.
+    fn tool_use_conversation() -> Vec<types::Message> {
+        vec![
+            // Turn 0: user
+            msg(MessageRole::User, vec![make_text("hello")]),
+            // Turn 1: assistant (tool-use loop spanning messages 1-7)
+            msg(MessageRole::Assistant, vec![
+                make_thinking("t1", "s1"),
+                make_text("resp1"),
+                make_tool_use("tu1"),
+            ]),
+            msg(MessageRole::User, vec![make_tool_result("tu1")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("t2", "s2"),
+                make_tool_use("tu2"),
+            ]),
+            msg(MessageRole::User, vec![make_tool_result("tu2")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("t3", "s3"),
+                make_tool_use("tu3"),
+            ]),
+            msg(MessageRole::User, vec![make_tool_result("tu3")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("t4", "s4"),
+                make_text("final1"),
+            ]),
+            // Turn 2: user
+            msg(MessageRole::User, vec![make_text("follow up")]),
+            // Turn 3: assistant (tool-use loop spanning messages 9-13)
+            msg(MessageRole::Assistant, vec![
+                make_thinking("t5", "s5"),
+                make_text("resp2"),
+                make_tool_use("tu4"),
+            ]),
+            msg(MessageRole::User, vec![make_tool_result("tu4")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("t6", "s6"),
+                make_text("resp3"),
+                make_tool_use("tu5"),
+            ]),
+            msg(MessageRole::User, vec![make_tool_result("tu5")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("t7", "s7"),
+                make_text("final2"),
+            ]),
+            // Turn 4: user
+            msg(MessageRole::User, vec![make_text("last question")]),
+        ]
+    }
+
+    #[test]
+    fn resolve_turn1_thinking_blocks() {
+        let msgs = tool_use_conversation();
+
+        // Turn 1 flattened: [Thinking(0), Text(1), ToolUse(2), ToolResult(3),
+        //   Thinking(4), ToolUse(5), ToolResult(6), Thinking(7), ToolUse(8),
+        //   ToolResult(9), Thinking(10), Text(11)]
+        assert_eq!(resolve_turn_position(&msgs, 1, 0), Some((1, 0))); // t1
+        assert_eq!(resolve_turn_position(&msgs, 1, 4), Some((3, 0))); // t2
+        assert_eq!(resolve_turn_position(&msgs, 1, 7), Some((5, 0))); // t3
+        assert_eq!(resolve_turn_position(&msgs, 1, 10), Some((7, 0))); // t4
+    }
+
+    #[test]
+    fn resolve_turn3_thinking_blocks() {
+        let msgs = tool_use_conversation();
+
+        // Turn 3 flattened: [Thinking(0), Text(1), ToolUse(2), ToolResult(3),
+        //   Thinking(4), Text(5), ToolUse(6), ToolResult(7), Thinking(8),
+        //   Text(9)]
+        assert_eq!(resolve_turn_position(&msgs, 3, 0), Some((9, 0))); // t5
+        assert_eq!(resolve_turn_position(&msgs, 3, 4), Some((11, 0))); // t6
+        assert_eq!(resolve_turn_position(&msgs, 3, 8), Some((13, 0))); // t7
+    }
+
+    #[test]
+    fn resolve_user_turn() {
+        let msgs = tool_use_conversation();
+
+        // Turn 0 is a single user message.
+        assert_eq!(resolve_turn_position(&msgs, 0, 0), Some((0, 0)));
+        assert_eq!(resolve_turn_position(&msgs, 0, 1), None);
+    }
+
+    #[test]
+    fn resolve_out_of_bounds() {
+        let msgs = tool_use_conversation();
+
+        assert_eq!(resolve_turn_position(&msgs, 99, 0), None);
+        assert_eq!(resolve_turn_position(&msgs, 1, 999), None);
+    }
+
+    #[test]
+    fn resolve_non_thinking_blocks() {
+        let msgs = tool_use_conversation();
+
+        // Turn 1, flat index 1 = Text block in messages[1]
+        assert_eq!(resolve_turn_position(&msgs, 1, 1), Some((1, 1)));
+        // Turn 1, flat index 2 = ToolUse in messages[1]
+        assert_eq!(resolve_turn_position(&msgs, 1, 2), Some((1, 2)));
+        // Turn 1, flat index 3 = ToolResult in messages[2]
+        assert_eq!(resolve_turn_position(&msgs, 1, 3), Some((2, 0)));
+    }
+}
