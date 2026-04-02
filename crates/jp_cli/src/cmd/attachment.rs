@@ -82,9 +82,8 @@ pub(crate) fn validate_attachment(uri: &Url) -> Result<()> {
 
 pub(crate) async fn register_attachment(
     ctx: &Ctx,
-    uri: &Url,
-    attachments: &mut Vec<jp_attachment::Attachment>,
-) -> Result<()> {
+    uri: Url,
+) -> Result<Vec<jp_attachment::Attachment>> {
     trace!(uri = uri.as_str(), "Registering attachment.");
 
     let scheme = uri
@@ -97,16 +96,12 @@ pub(crate) async fn register_attachment(
     };
 
     handler
-        .add(uri, ctx.workspace.root())
+        .add(&uri, ctx.workspace.root())
         .await
         .map_err(|e| Error::Attachment(e.to_string()))?;
 
-    attachments.extend(
-        handler
-            .get(ctx.workspace.root(), ctx.mcp_client.clone())
-            .await
-            .map_err(|e| Error::Attachment(e.to_string()))?,
-    );
-
-    Ok(())
+    handler
+        .get(ctx.workspace.root(), ctx.mcp_client.clone())
+        .await
+        .map_err(|e| Error::Attachment(e.to_string()))
 }

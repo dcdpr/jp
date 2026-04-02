@@ -260,32 +260,6 @@ impl Default for ConversationId {
     }
 }
 
-/// Holds metadata about all conversations, like the current active
-/// conversation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ConversationsMetadata {
-    /// The ID of the currently active conversation.
-    ///
-    /// If no active conversation exists, one is created.
-    pub active_conversation_id: ConversationId,
-}
-
-impl ConversationsMetadata {
-    /// Creates a new conversations metadata.
-    #[must_use]
-    pub const fn new(active_conversation_id: ConversationId) -> Self {
-        Self {
-            active_conversation_id,
-        }
-    }
-}
-
-impl Default for ConversationsMetadata {
-    fn default() -> Self {
-        Self::new(ConversationId::default())
-    }
-}
-
 #[cfg(test)]
 #[path = "conversation_tests.rs"]
 mod tests;

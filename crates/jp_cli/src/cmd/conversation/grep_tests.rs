@@ -12,7 +12,10 @@ use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
 use super::*;
-use crate::Globals;
+use crate::{
+    Globals,
+    cmd::{conversation_id::FlagIds, target::ConversationTarget},
+};
 
 fn setup_ctx_with_events(
     events: Vec<(ConversationId, Vec<ConversationEvent>)>,
@@ -26,6 +29,7 @@ fn setup_ctx_with_events(
         Runtime::new().unwrap(),
         Globals::default(),
         config,
+        None,
         printer,
     );
 
@@ -33,14 +37,10 @@ fn setup_ctx_with_events(
     for (id, evts) in events {
         ctx.workspace
             .create_conversation_with_id(id, Conversation::default(), ctx.config());
-        ctx.workspace.get_events_mut(&id).unwrap().extend(evts);
+        let h = ctx.workspace.acquire_conversation(&id).unwrap();
+        let lock = ctx.workspace.test_lock(h);
+        lock.as_mut().update_events(|e| e.extend(evts));
         ids.push(id);
-    }
-
-    if let Some(&first) = ids.first() {
-        ctx.workspace
-            .set_active_conversation_id(first, chrono::DateTime::<Utc>::UNIX_EPOCH)
-            .unwrap();
     }
 
     (ctx, ids, out)
@@ -61,11 +61,11 @@ fn test_grep_finds_chat_request() {
 
     let grep = Grep {
         pattern: "generics".into(),
-        id: None,
+        target: FlagIds::default(),
         ignore_case: false,
     };
 
-    grep.run(&mut ctx).unwrap();
+    grep.run(&mut ctx, vec![]).unwrap();
     ctx.printer.flush();
     let output = out.lock().clone();
     assert!(
@@ -85,11 +85,11 @@ fn test_grep_finds_chat_response() {
 
     let grep = Grep {
         pattern: "type system".into(),
-        id: None,
+        target: FlagIds::default(),
         ignore_case: false,
     };
 
-    grep.run(&mut ctx).unwrap();
+    grep.run(&mut ctx, vec![]).unwrap();
     ctx.printer.flush();
     let output = out.lock().clone();
     assert!(output.contains("type system"));
@@ -106,18 +106,18 @@ fn test_grep_case_insensitive() {
     // Case-sensitive: no match
     let grep = Grep {
         pattern: "wasm".into(),
-        id: None,
+        target: FlagIds::default(),
         ignore_case: false,
     };
-    assert!(grep.run(&mut ctx).is_err());
+    assert!(grep.run(&mut ctx, vec![]).is_err());
 
     // Case-insensitive: match
     let grep = Grep {
         pattern: "wasm".into(),
-        id: None,
+        target: FlagIds::default(),
         ignore_case: true,
     };
-    grep.run(&mut ctx).unwrap();
+    grep.run(&mut ctx, vec![]).unwrap();
     ctx.printer.flush();
     let output = out.lock().clone();
     assert!(output.contains("WASM"));
@@ -133,10 +133,10 @@ fn test_grep_no_matches() {
 
     let grep = Grep {
         pattern: "nonexistent".into(),
-        id: None,
+        target: FlagIds::default(),
         ignore_case: false,
     };
-    assert!(grep.run(&mut ctx).is_err());
+    assert!(grep.run(&mut ctx, vec![]).is_err());
 }
 
 #[test]
@@ -157,10 +157,13 @@ fn test_grep_with_specific_id() {
     // Search only in id1
     let grep = Grep {
         pattern: "unique-marker".into(),
-        id: Some(id1),
+        target: FlagIds {
+            ids: vec![ConversationTarget::Id(id1)],
+        },
         ignore_case: false,
     };
-    grep.run(&mut ctx).unwrap();
+    let h = ctx.workspace.acquire_conversation(&id1).unwrap();
+    grep.run(&mut ctx, vec![h]).unwrap();
     ctx.printer.flush();
     let output = out.lock().clone();
     assert!(output.contains("alpha"));
@@ -180,10 +183,10 @@ fn test_grep_searches_tool_call_response() {
 
     let grep = Grep {
         pattern: "secret-keyword".into(),
-        id: None,
+        target: FlagIds::default(),
         ignore_case: false,
     };
-    grep.run(&mut ctx).unwrap();
+    grep.run(&mut ctx, vec![]).unwrap();
     ctx.printer.flush();
     let output = out.lock().clone();
     assert!(output.contains("secret-keyword"));
@@ -205,10 +208,10 @@ fn test_grep_multiple_matches_per_conversation() {
 
     let grep = Grep {
         pattern: "tokio".into(),
-        id: None,
+        target: FlagIds::default(),
         ignore_case: false,
     };
-    grep.run(&mut ctx).unwrap();
+    grep.run(&mut ctx, vec![]).unwrap();
     ctx.printer.flush();
     let output = out.lock().clone();
     let lines: Vec<&str> = output.trim().lines().collect();

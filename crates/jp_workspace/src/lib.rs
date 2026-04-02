@@ -4,56 +4,61 @@
 //! a CLI tool for managing LLM-assisted code conversations with fine-grained
 //! control over context and behavior.
 
+mod conversation_lock;
 mod error;
+mod handle;
 mod id;
+pub mod persist;
 mod sanitize;
+pub mod session;
+mod session_mapping;
 mod state;
 
-use std::{cell::OnceCell, iter, sync::Arc};
+use std::sync::{Arc, OnceLock};
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
-use chrono::{DateTime, Utc};
+pub use conversation_lock::{ConversationLock, ConversationMut};
 pub use error::Error;
 use error::Result;
+pub use handle::ConversationHandle;
 pub use id::Id;
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
-use jp_storage::Storage;
-use jp_tombmap::{Mut, TombMap};
+use jp_storage::{Storage, lock::LockInfo};
+use parking_lot::{ArcRwLockReadGuard, RawRwLock, RwLock, RwLockReadGuard};
+use persist::FsPersistBackend;
+use rayon::prelude::*;
 pub use sanitize::{SanitizeReport, TrashedConversation};
-use state::{LocalState, State, UserState};
-use tracing::{debug, info, trace, warn};
+use state::State;
+use tracing::{debug, trace, warn};
+
+use crate::persist::PersistBackend;
 
 const APPLICATION: &str = "jp";
 
 #[derive(Debug)]
 pub struct Workspace {
     /// The root directory of the workspace.
-    ///
-    /// This differs from the storage's root directory.
     root: Utf8PathBuf,
 
     /// The globally unique ID of the workspace.
     id: id::Id,
 
     /// The (optional) storage for the workspace.
-    ///
-    /// If this is `None`, the workspace is in-memory only.
     storage: Option<Storage>,
 
     /// The in-memory state of the workspace.
-    ///
-    /// If `storage` is `Some`, this is a copy of the persisted state. Any
-    /// changes made during the lifetime of the workspace will be persisted
-    /// atomically when `persist` is called.
     state: State,
 
-    /// Disable persistence for the workspace, even if the workspace has a
-    /// storage attached.
-    ///
-    /// This is useful when you want to force persistence to be disabled at
-    /// runtime, for example when an unexpected situation occurs.
+    /// Disable persistence for the workspace.
     disable_persistence: bool,
+
+    /// The persist backend for writing conversations to disk.
+    ///
+    /// Built lazily from `Storage` when `load_conversation_index` is called,
+    /// or when `persisted_at` configures storage. Shared with
+    /// `ConversationLock` / `ConversationMut` instances.
+    persist_backend: Option<Arc<dyn PersistBackend>>,
 }
 
 impl Workspace {
@@ -92,6 +97,7 @@ impl Workspace {
             storage: None,
             state: State::default(),
             disable_persistence: false,
+            persist_backend: None,
         }
     }
 
@@ -107,11 +113,14 @@ impl Workspace {
 
         self.disable_persistence = false;
         self.storage = Some(Storage::new(path)?);
+        self.rebuild_persist_backend();
         Ok(self)
     }
 
     /// Enable local storage for the workspace.
     pub fn with_local_storage(mut self) -> Result<Self> {
+        trace!("Enabling local storage.");
+
         if self.storage.is_none() {
             return Err(Error::MissingStorage);
         }
@@ -129,25 +138,27 @@ impl Workspace {
             .map(|storage| storage.with_user_storage(&root, name, id))
             .transpose()?;
 
+        self.rebuild_persist_backend();
+        trace!("Local storage enabled.");
+
         Ok(self)
     }
 
     /// Enable local storage at an explicit path, for testing.
-    #[cfg(test)]
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
     pub fn with_local_storage_at(mut self, root: &Utf8Path, name: &str, id: &str) -> Result<Self> {
         self.storage = self
             .storage
             .take()
             .map(|storage| storage.with_user_storage(root, name, id))
             .transpose()?;
+
+        self.rebuild_persist_backend();
         Ok(self)
     }
 
     /// Disable persistence for the workspace.
-    ///
-    /// If this is called, then [`Self::persist`] becomes a no-op.
-    ///
-    /// Persistence can be re-enabled by calling [`Self::persisted_at`].
     pub fn disable_persistence(&mut self) {
         self.disable_persistence = true;
     }
@@ -165,338 +176,96 @@ impl Workspace {
         self.storage.as_ref().and_then(Storage::user_storage_path)
     }
 
-    /// Load conversation IDs, metadata, and `TombMap` entries from disk.
+    /// Scan conversation IDs from disk and populate the workspace index.
     ///
-    /// This populates the workspace state so that conversation events can be
-    /// accessed via [`get_events`](Self::get_events) (which triggers lazy
-    /// loading from storage). For the active conversation, the stream is
-    /// eagerly loaded for performance.
-    ///
-    /// For fresh workspaces (no conversations on disk), this registers the
-    /// active conversation ID in the events `TombMap` but does **not** create a
-    /// default stream — call [`ensure_active_conversation_stream`] after
-    /// the final [`AppConfig`] is available for that.
+    /// All entries are lazily initialized — metadata and events are loaded from
+    /// disk on first access via [`metadata`], [`events`], etc.
     ///
     /// Call [`sanitize`](Self::sanitize) before this method to ensure the
     /// filesystem is in a consistent state.
     ///
-    /// [`ensure_active_conversation_stream`]: Self::ensure_active_conversation_stream
-    pub fn load_conversation_index(&mut self) -> Result<()> {
-        trace!("Loading conversation index.");
+    /// This call is a no-op if the workspace has no backing storage.
+    ///
+    /// [`metadata`]: Self::metadata
+    /// [`events`]: Self::events
+    pub fn load_conversation_index(&mut self) {
+        let Some(storage) = self.storage.as_ref() else {
+            return;
+        };
 
-        let storage = self.storage.as_ref().ok_or(Error::MissingStorage)?;
+        trace!("Loading conversation index.");
         let conversation_ids = storage.load_all_conversation_ids();
 
-        if conversation_ids.is_empty() {
-            debug!("No conversations found, workspace is fresh.");
-
-            // Register the active conversation ID so that `get_events` can
-            // find the entry (lazy loading will return `None` since there is
-            // no file on disk, which is expected for fresh workspaces).
-            let active_id = self.active_conversation_id();
-            self.state.local.events.entry(active_id).or_default();
-
-            return Ok(());
-        }
-
-        let metadata = storage.load_conversations_metadata()?;
-        debug!(
-            active_conversation_id = %metadata.active_conversation_id,
-            "Loaded workspace state metadata."
-        );
-
-        // After sanitization, the active conversation is guaranteed to be valid
-        // on disk. Any remaining failure here (permission error, race
-        // condition) is an unexpected error that should propagate.
-        let active_conversation =
-            storage.load_conversation_metadata(&metadata.active_conversation_id)?;
+        debug!(count = conversation_ids.len(), "Loaded conversation index.");
 
         let conversations = conversation_ids
             .iter()
-            .filter(|id| id != &&metadata.active_conversation_id)
-            .map(|id| (*id, OnceCell::new()))
+            .map(|id| (*id, OnceLock::new()))
             .collect();
 
-        let mut events: TombMap<_, _> = conversation_ids
+        let events = conversation_ids
             .into_iter()
-            .map(|id| (id, OnceCell::new()))
+            .map(|id| (id, OnceLock::new()))
             .collect();
-
-        // Eagerly load the active conversation stream for performance.
-        let _err = events
-            .entry(metadata.active_conversation_id)
-            .or_default()
-            .set(storage.load_conversation_stream(&metadata.active_conversation_id)?);
 
         self.state = State {
-            local: LocalState {
-                active_conversation,
-                conversations,
-                events,
-            },
-            user: UserState {
-                conversations_metadata: metadata,
-            },
+            conversations,
+            events,
         };
 
-        Ok(())
+        self.rebuild_persist_backend();
     }
 
-    /// Ensure the active conversation has an event stream.
-    ///
-    /// For fresh workspaces where no stream exists on disk, this creates a
-    /// default [`ConversationStream`] with the given config as its base.
-    ///
-    /// For existing workspaces where the stream was already loaded (eagerly
-    /// by [`load_conversation_index`] or lazily via [`get_events`]), this is
-    /// a no-op.
-    ///
-    /// [`load_conversation_index`]: Self::load_conversation_index
-    /// [`get_events`]: Self::get_events
-    pub fn ensure_active_conversation_stream(&mut self, config: Arc<AppConfig>) -> Result<()> {
-        let active_id = self.active_conversation_id();
+    /// Eagerly load a single conversation's metadata and events from disk.
+    pub fn eager_load_conversation(&mut self, h: &ConversationHandle) -> Result<()> {
+        let storage = self.storage.as_ref().ok_or(Error::MissingStorage)?;
+        let id = &h.id();
 
-        if self.get_events(&active_id).is_some() {
-            return Ok(());
-        }
-
-        let _err = self
-            .state
-            .local
-            .events
-            .entry(active_id)
-            .or_default()
-            .set(ConversationStream::new(config).with_created_at(active_id.timestamp()));
-
-        Ok(())
-    }
-
-    /// Persists the current in-memory workspace state back to disk atomically.
-    ///
-    /// This is a no-op if persistence is disabled.
-    pub fn persist(&mut self) -> Result<()> {
-        if self.disable_persistence {
-            trace!("Persistence disabled, skipping.");
-            return Ok(());
-        }
-
-        trace!("Persisting state.");
-
-        let Some(storage) = self.storage.as_mut() else {
-            return Ok(());
-        };
-
-        storage.persist_conversations_and_events(
-            &self.state.local.conversations,
-            &self.state.local.events,
-            &self
-                .state
-                .user
-                .conversations_metadata
-                .active_conversation_id,
-            &self.state.local.active_conversation,
-        )?;
-        storage.persist_conversations_metadata(&self.state.user.conversations_metadata)?;
-
-        info!(path = %self.root, "Persisted state.");
-        Ok(())
-    }
-
-    /// Persists the active conversation to disk.
-    ///
-    /// This can be used continuously while the CLI is running, to persist the
-    /// active conversation to disk without having to wait for the CLI to exit.
-    /// This guards against a long-running LLM conversation not being persisted
-    /// to disk at the end, if the CLI is terminated early.
-    pub fn persist_active_conversation(&mut self) -> Result<()> {
-        if self.disable_persistence {
-            return Ok(());
-        }
-
-        let active_id = self.active_conversation_id();
-        let Some(storage) = self.storage.as_mut() else {
-            return Ok(());
-        };
-
-        storage.persist_conversations_and_events(
-            &TombMap::new(),
-            &self.state.local.events,
-            &active_id,
-            &self.state.local.active_conversation,
-        )?;
-
-        info!(path = %self.root, "Persisted active conversation.");
-        Ok(())
-    }
-
-    pub fn remove_ephemeral_conversations(&mut self) {
-        if self.disable_persistence {
-            return;
-        }
-
-        let active_id = self.active_conversation_id();
-        let Some(storage) = self.storage.as_mut() else {
-            return;
-        };
-
-        storage.remove_ephemeral_conversations(&[active_id]);
-    }
-
-    /// Gets the ID of the active conversation.
-    #[must_use]
-    pub fn active_conversation_id(&self) -> ConversationId {
-        self.state
-            .user
-            .conversations_metadata
-            .active_conversation_id
-    }
-
-    /// Sets the active conversation ID (in memory).
-    ///
-    /// The old active conversation is either moved to the end of the list of
-    /// non-active conversations, or removed entirely, if it has no events.
-    pub fn set_active_conversation_id(
-        &mut self,
-        id: ConversationId,
-        activation_timestamp: DateTime<Utc>,
-    ) -> Result<()> {
-        // Remove the new active conversation from the list of conversations,
-        // returning an error if it doesn't exist.
-        let new_active_conversation = self
-            .state
-            .local
-            .conversations
-            .remove(&id)
-            .inspect(|v| maybe_init_conversation(self.storage.as_ref(), (&id, v)))
-            .and_then(|mut v| v.take())
-            .ok_or(Error::not_found("Conversation", &id))?
-            .with_last_activated_at(activation_timestamp);
-
-        // Replace the current active conversation with the new one.
-        let old_active_conversation = std::mem::replace(
-            &mut self.state.local.active_conversation,
-            new_active_conversation,
-        );
-
-        // Replace the active conversation ID with the new one.
-        let old_active_conversation_id = std::mem::replace(
-            &mut self
-                .state
-                .user
-                .conversations_metadata
-                .active_conversation_id,
-            id,
-        );
-
-        // Insert the old active conversation back into the list of
-        // conversations, but only if it has any events attached.
-        if self
-            .state
-            .local
-            .events
-            .get(&old_active_conversation_id)
-            .inspect(|v| maybe_init_events(self.storage.as_ref(), (&old_active_conversation_id, v)))
-            .and_then(|v| v.get())
-            .is_some_and(|v| !v.is_empty())
+        if let Some(cell) = self.state.conversations.get(id)
+            && cell.get().is_none()
         {
-            // Guaranteed to not be initialized, because this conversation ID
-            // was previously stored in the `active_conversation_id` field, not
-            // in the `conversations` map.
-            let _err = self
-                .state
-                .local
-                .conversations
-                .entry(old_active_conversation_id)
-                .or_default()
-                .set(old_active_conversation);
+            let metadata = storage.load_conversation_metadata(id)?;
+            let _err = cell.set(Arc::new(RwLock::new(metadata)));
+        }
+
+        if let Some(cell) = self.state.events.get(id)
+            && cell.get().is_none()
+        {
+            let stream = storage.load_conversation_stream(id)?;
+            let _err = cell.set(Arc::new(RwLock::new(stream)));
         }
 
         Ok(())
     }
 
-    /// Returns an iterator over all conversations, including the active
-    /// conversation.
-    pub fn conversations(&self) -> impl Iterator<Item = (&ConversationId, &Conversation)> {
-        iter::once((
-            &self
-                .state
-                .user
-                .conversations_metadata
-                .active_conversation_id,
-            &self.state.local.active_conversation,
-        ))
-        .chain(
-            self.state
-                .local
-                .conversations
-                .iter()
-                .filter_map(|v| get_or_init_conversation(self.storage.as_ref(), v)),
-        )
+    pub fn remove_ephemeral_conversations(&mut self, skip: &[ConversationId]) {
+        if self.disable_persistence {
+            return;
+        }
+
+        let Some(storage) = self.storage.as_mut() else {
+            return;
+        };
+
+        storage.remove_ephemeral_conversations(skip);
     }
 
-    /// Returns an iterator over all mutable conversations, including the active
-    /// conversation.
+    /// Returns an iterator over all conversations.
     ///
-    /// This returns a [`jp_tombmap::Mut`] instead of a reference to the
-    /// conversation, to allow for change tracking.
-    pub fn conversations_mut(
-        &mut self,
-    ) -> impl Iterator<Item = (&ConversationId, Mut<'_, ConversationId, Conversation>)> {
-        iter::once((
-            &self
-                .state
-                .user
-                .conversations_metadata
-                .active_conversation_id,
-            Mut::new_untracked(
-                &self
-                    .state
-                    .user
-                    .conversations_metadata
-                    .active_conversation_id,
-                &mut self.state.local.active_conversation,
-            ),
-        ))
-        .chain(self.state.local.conversations.iter_mut().filter_map(
-            |(id, conversation)| {
-                maybe_init_conversation(self.storage.as_ref(), (id, &conversation));
-                conversation.and_then(OnceCell::get_mut).map(|v| (id, v))
-            },
-        ))
-    }
+    /// Uninitialized metadata is loaded from disk in parallel (via rayon)
+    /// on first access. Already-loaded conversations are returned as-is.
+    ///
+    /// Each item yields a read guard that auto-derefs to `&Conversation`.
+    /// Do **not** hold these guards across `.await` points.
+    pub fn conversations(
+        &self,
+    ) -> impl Iterator<Item = (&ConversationId, ArcRwLockReadGuard<RawRwLock, Conversation>)> {
+        self.ensure_all_metadata_loaded();
 
-    /// Gets a reference to a conversation by its ID.
-    #[must_use]
-    pub fn get_conversation(&self, id: &ConversationId) -> Option<&Conversation> {
-        self.conversations()
-            .find_map(|(i, v)| (i == id).then_some(v))
-    }
-
-    /// Similar to [`Self::get_conversation`], but returns an error if the
-    /// conversation does not exist.
-    pub fn try_get_conversation(&self, id: &ConversationId) -> Result<&Conversation> {
-        self.get_conversation(id)
-            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
-    }
-
-    /// Gets a mutable reference to a conversation by its ID.
-    #[must_use]
-    pub fn get_conversation_mut(
-        &mut self,
-        id: &ConversationId,
-    ) -> Option<Mut<'_, ConversationId, Conversation>> {
-        self.conversations_mut()
-            .find_map(|(i, v)| (i == id).then_some(v))
-    }
-
-    /// Similar to [`Self::get_conversation_mut`], but returns an error if the
-    /// conversation does not exist.
-    pub fn try_get_conversation_mut(
-        &mut self,
-        id: &ConversationId,
-    ) -> Result<Mut<'_, ConversationId, Conversation>> {
-        self.get_conversation_mut(id)
-            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
+        self.state
+            .conversations
+            .iter()
+            .filter_map(|(id, cell)| cell.get().map(|arc| (id, arc.read_arc())))
     }
 
     /// Creates a new conversation.
@@ -515,109 +284,25 @@ impl Workspace {
         conversation: Conversation,
         config: Arc<AppConfig>,
     ) -> ConversationId {
-        // This can only fail if `ConversationId::default()` is called multiple
-        // times within the same nanosecond, which is highly unlikely, and not
-        // an issue if it does happen.
         let _err = self
             .state
-            .local
             .conversations
             .entry(id)
-            .insert_entry(OnceCell::new())
+            .insert_entry(OnceLock::new())
             .get_mut()
-            .set(conversation);
+            .set(Arc::new(RwLock::new(conversation)));
 
-        // See above.
         let _err = self
             .state
-            .local
             .events
             .entry(id)
-            .insert_entry(OnceCell::new())
+            .insert_entry(OnceLock::new())
             .get_mut()
-            .set(ConversationStream::new(config).with_created_at(id.timestamp()));
+            .set(Arc::new(RwLock::new(
+                ConversationStream::new(config).with_created_at(id.timestamp()),
+            )));
+
         id
-    }
-
-    /// Remove a conversation by its ID.
-    ///
-    /// This cannot remove the active conversation. If the active conversation
-    /// needs to be removed, mark another conversation as active first.
-    pub fn remove_conversation(&mut self, id: &ConversationId) -> Result<Option<Conversation>> {
-        let active_id = self.active_conversation_id();
-        if id == &active_id {
-            return Err(Error::CannotRemoveActiveConversation(active_id));
-        }
-
-        // Make sure to load the conversation from disk first, so that our
-        // `TombMap` can record the removal (allowing our persistence logic to
-        // trigger a file deletion).
-        if self.get_conversation(id).is_none() {
-            return Ok(None);
-        }
-
-        Ok(self
-            .state
-            .local
-            .conversations
-            .remove(id)
-            .and_then(|mut v| v.take()))
-    }
-
-    /// Gets a reference to the currently active conversation.
-    ///
-    /// Creates a new conversation if none exists.
-    #[must_use]
-    pub fn get_active_conversation(&self) -> &Conversation {
-        &self.state.local.active_conversation
-    }
-
-    /// Gets a mutable reference to the currently active conversation.
-    #[must_use]
-    pub fn get_active_conversation_mut(&mut self) -> &mut Conversation {
-        &mut self.state.local.active_conversation
-    }
-
-    /// Gets the event stream for a specific conversation.
-    #[must_use]
-    pub fn get_events(&self, id: &ConversationId) -> Option<&ConversationStream> {
-        self.state
-            .local
-            .events
-            .get_key_value(id)
-            .and_then(|v| get_or_init_events(self.storage.as_ref(), v))
-            .map(|v| v.1)
-    }
-
-    /// Similar to [`Self::get_events`], but returns an error if the
-    /// conversation does not exist.
-    pub fn try_get_events(&self, id: &ConversationId) -> Result<&ConversationStream> {
-        self.get_events(id)
-            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
-    }
-
-    /// Gets a mutable reference to the event stream for a specific conversation.
-    #[must_use]
-    pub fn get_events_mut<'a>(
-        &'a mut self,
-        id: &'a ConversationId,
-    ) -> Option<&'a mut ConversationStream> {
-        self.state
-            .local
-            .events
-            .get_mut(id)
-            .and_then(|v| get_or_init_events_mut(self.storage.as_ref(), (id, v)))
-            .map(|v| v.1)
-    }
-
-    /// Similar to [`Self::get_events_mut`], but returns an error if the
-    /// conversation does not exist.
-    pub fn try_get_events_mut<'a>(
-        &'a mut self,
-        id: &'a ConversationId,
-    ) -> Result<&'a mut ConversationStream> {
-        self.get_events_mut(id)
-            .ok_or_else(|| Error::NotFound("Conversation", id.to_string()))
     }
 
     /// Returns the globally unique ID of the workspace.
@@ -625,76 +310,247 @@ impl Workspace {
     pub fn id(&self) -> &Id {
         &self.id
     }
-}
 
-impl Drop for Workspace {
-    fn drop(&mut self) {
-        #[expect(clippy::print_stderr)]
-        if let Err(err) = self.persist() {
-            eprintln!("Failed to persist workspace: {err}");
+    /// Acquire a handle to a conversation, proving it exists in the index.
+    pub fn acquire_conversation(&self, id: &ConversationId) -> Result<ConversationHandle> {
+        if !self.state.conversations.contains_key(id) {
+            return Err(Error::not_found("Conversation", id));
+        }
+
+        Ok(ConversationHandle::new(*id))
+    }
+
+    /// Get conversation metadata via a handle.
+    ///
+    /// Returns an error if the conversation data cannot be loaded from disk
+    /// (e.g. the file was deleted or is corrupt).
+    pub fn metadata(&self, h: &ConversationHandle) -> Result<RwLockReadGuard<'_, Conversation>> {
+        let id = &h.id();
+        let arc = self
+            .state
+            .conversations
+            .get(id)
+            .and_then(|cell| {
+                maybe_init_conversation(self.storage.as_ref(), (id, cell));
+                cell.get()
+            })
+            .ok_or_else(|| Error::not_found("Conversation metadata", id))?;
+        Ok(arc.read())
+    }
+
+    /// Get the event stream via a handle.
+    ///
+    /// Returns an error if the conversation data cannot be loaded from disk
+    /// (e.g. the file was deleted or is corrupt).
+    pub fn events(
+        &self,
+        h: &ConversationHandle,
+    ) -> Result<RwLockReadGuard<'_, ConversationStream>> {
+        let id = &h.id();
+        let arc = self
+            .state
+            .events
+            .get(id)
+            .and_then(|cell| {
+                maybe_init_events(self.storage.as_ref(), (id, cell));
+                cell.get()
+            })
+            .ok_or_else(|| Error::not_found("Conversation events", id))?;
+        Ok(arc.read())
+    }
+
+    /// Acquire an exclusive cross-process lock on a conversation.
+    ///
+    /// Returns `Ok(Some(lock))` if the lock was acquired, `Ok(None)` if another
+    /// process holds it. The caller is responsible for retry/timeout.
+    ///
+    /// Returns an error if conversation data cannot be loaded from disk (e.g.
+    /// the user deleted a required file).
+    pub fn lock_conversation(
+        &self,
+        handle: ConversationHandle,
+        session: Option<&str>,
+    ) -> Result<Option<ConversationLock>> {
+        let storage = self.storage.as_ref().ok_or(Error::MissingStorage)?;
+        let id = handle.id();
+
+        let Some(file_lock) = storage.try_lock_conversation(&id.to_string(), session)? else {
+            return Ok(None);
+        };
+
+        if let Some(cell) = self.state.conversations.get(&id) {
+            maybe_init_conversation(self.storage.as_ref(), (&id, cell));
+        }
+        if let Some(cell) = self.state.events.get(&id) {
+            maybe_init_events(self.storage.as_ref(), (&id, cell));
+        }
+
+        let metadata = self
+            .state
+            .conversations
+            .get(&id)
+            .and_then(|cell| cell.get())
+            .ok_or_else(|| Error::not_found("Conversation metadata", &id))?
+            .clone();
+
+        let events = self
+            .state
+            .events
+            .get(&id)
+            .and_then(|cell| cell.get())
+            .ok_or_else(|| Error::not_found("Conversation events", &id))?
+            .clone();
+
+        let writer = if self.disable_persistence {
+            None
+        } else {
+            self.persist_backend.clone()
+        };
+
+        Ok(Some(ConversationLock::new(
+            handle, metadata, events, writer, file_lock,
+        )))
+    }
+
+    /// Remove a conversation, consuming its lock.
+    pub fn remove_conversation_with_lock(&mut self, conv: ConversationMut) {
+        let id = conv.id();
+        conv.clear_dirty();
+
+        if let Some(backend) = &self.persist_backend
+            && let Err(e) = backend.remove(&id)
+        {
+            warn!(%id, %e, "Failed to remove conversation from disk.");
+        }
+
+        drop(conv);
+
+        self.state.conversations.remove(&id);
+        self.state.events.remove(&id);
+    }
+
+    /// Read the lock holder info for a conversation.
+    #[must_use]
+    pub fn read_lock_info(&self, id: &ConversationId) -> Option<LockInfo> {
+        let storage = self.storage.as_ref()?;
+        storage.read_conversation_lock_info(&id.to_string())
+    }
+
+    /// Create a [`ConversationLock`] backed by a no-op flock for tests.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn test_lock(&self, handle: ConversationHandle) -> ConversationLock {
+        let id = handle.id();
+
+        if let Some(cell) = self.state.conversations.get(&id) {
+            maybe_init_conversation(self.storage.as_ref(), (&id, cell));
+        }
+        if let Some(cell) = self.state.events.get(&id) {
+            maybe_init_events(self.storage.as_ref(), (&id, cell));
+        }
+
+        let metadata = self
+            .state
+            .conversations
+            .get(&id)
+            .and_then(|cell| cell.get())
+            .expect("test_lock: metadata not found")
+            .clone();
+
+        let events = self
+            .state
+            .events
+            .get(&id)
+            .and_then(|cell| cell.get())
+            .expect("test_lock: events not found")
+            .clone();
+
+        if let Some(writer) = &self.persist_backend {
+            ConversationLock::test_lock_with_writer(handle, metadata, events, Arc::clone(writer))
+        } else {
+            ConversationLock::test_lock(handle, metadata, events)
+        }
+    }
+
+    fn rebuild_persist_backend(&mut self) {
+        self.persist_backend = self
+            .storage
+            .as_ref()
+            .map(|s| Arc::new(FsPersistBackend::from_storage(s)) as Arc<_>);
+    }
+
+    fn ensure_all_metadata_loaded(&self) {
+        let Some(storage) = self.storage.as_ref() else {
+            return;
+        };
+
+        let uninitialized: Vec<_> = self
+            .state
+            .conversations
+            .iter()
+            .filter(|(_, cell)| cell.get().is_none())
+            .map(|(id, _)| *id)
+            .collect();
+
+        if uninitialized.is_empty() {
+            return;
+        }
+
+        let loaded: Vec<_> = uninitialized
+            .par_iter()
+            .filter_map(|id| match storage.load_conversation_metadata(id) {
+                Ok(meta) => Some((*id, meta)),
+                Err(error) => {
+                    warn!(%id, %error, "Failed to load conversation metadata.");
+                    None
+                }
+            })
+            .collect();
+
+        for (id, meta) in loaded {
+            if let Some(cell) = self.state.conversations.get(&id) {
+                let _err = cell.set(Arc::new(RwLock::new(meta)));
+            }
         }
     }
 }
 
-fn get_or_init_events<'a>(
+fn maybe_init_conversation(
     storage: Option<&Storage>,
-    (id, conversation): (&'a ConversationId, &'a OnceCell<ConversationStream>),
-) -> Option<(&'a ConversationId, &'a ConversationStream)> {
-    maybe_init_events(storage, (id, conversation));
-    conversation.get().map(|v| (id, v))
-}
-
-fn get_or_init_events_mut<'a>(
-    storage: Option<&Storage>,
-    (id, conversation): (&'a ConversationId, &'a mut OnceCell<ConversationStream>),
-) -> Option<(&'a ConversationId, &'a mut ConversationStream)> {
-    maybe_init_events(storage, (id, conversation));
-    conversation.get_mut().map(|v| (id, v))
-}
-
-fn get_or_init_conversation<'a>(
-    storage: Option<&Storage>,
-    (id, conversation): (&'a ConversationId, &'a OnceCell<Conversation>),
-) -> Option<(&'a ConversationId, &'a Conversation)> {
-    maybe_init_conversation(storage, (id, conversation));
-    conversation.get().map(|v| (id, v))
-}
-
-fn maybe_init_conversation<'a>(
-    storage: Option<&Storage>,
-    (id, conversation): (&'a ConversationId, &'a OnceCell<Conversation>),
+    (id, cell): (&ConversationId, &OnceLock<Arc<RwLock<Conversation>>>),
 ) {
     let Some(storage) = storage else {
         return;
     };
 
-    if conversation.get().is_none() {
-        let Ok(stream) = storage.load_conversation_metadata(id) else {
+    if cell.get().is_none() {
+        let Ok(meta) = storage.load_conversation_metadata(id) else {
             warn!(%id, "Failed to load conversation metadata. Skipping.");
             return;
         };
 
-        if let Err(error) = conversation.set(stream) {
+        if let Err(error) = cell.set(Arc::new(RwLock::new(meta))) {
             warn!(%id, ?error, "Failed to initialize conversation metadata. Skipping.");
         }
     }
 }
 
-fn maybe_init_events<'a>(
+fn maybe_init_events(
     storage: Option<&Storage>,
-    (id, conversation): (&'a ConversationId, &'a OnceCell<ConversationStream>),
+    (id, cell): (&ConversationId, &OnceLock<Arc<RwLock<ConversationStream>>>),
 ) {
     let Some(storage) = storage else {
         return;
     };
 
-    if conversation.get().is_none() {
+    if cell.get().is_none() {
         let Ok(stream) = storage.load_conversation_stream(id) else {
             warn!(%id, "Failed to load conversation events. Skipping.");
             return;
         };
 
-        if let Err(error) = conversation.set(stream) {
+        if let Err(error) = cell.set(Arc::new(RwLock::new(stream))) {
             warn!(%id, ?error, "Failed to initialize conversation events. Skipping.");
         }
     }

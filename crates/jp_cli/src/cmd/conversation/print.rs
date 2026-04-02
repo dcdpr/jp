@@ -1,27 +1,42 @@
 use jp_config::AppConfig;
 use jp_conversation::{
-    ConversationId, ConversationStream, EventKind,
+    ConversationStream, EventKind,
     event::{ChatResponse, ToolCallResponse},
 };
 use jp_md::format::Formatter;
 use jp_printer::Printer;
+use jp_workspace::ConversationHandle;
 
 use crate::{
-    cmd::{Output, query::tool::ToolRenderer},
+    cmd::{
+        ConversationLoadRequest, Output, conversation_id::PositionalIds, query::tool::ToolRenderer,
+    },
     ctx::Ctx,
 };
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Print {
-    /// Conversation ID to print. Defaults to active conversation.
-    id: Option<ConversationId>,
+    #[command(flatten)]
+    target: PositionalIds<true, true>,
 }
 
 impl Print {
-    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
-        let active_id = ctx.workspace.active_conversation_id();
-        let id = self.id.unwrap_or(active_id);
-        let events = ctx.workspace.try_get_events(&id)?.clone();
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        ConversationLoadRequest::explicit_or_session(&self.target.ids)
+    }
+
+    #[expect(clippy::unused_self)]
+    pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
+        for handle in handles {
+            Self::print_conversation(ctx, handle)?;
+        }
+        ctx.printer.println("");
+        ctx.printer.flush();
+        Ok(())
+    }
+
+    fn print_conversation(ctx: &mut Ctx, handle: &ConversationHandle) -> Output {
+        let events = ctx.workspace.events(handle)?.clone();
         let cfg = ctx.config();
         let pretty = ctx.printer.pretty_printing_enabled();
 
@@ -88,9 +103,6 @@ impl Print {
                 EventKind::InquiryRequest(_) | EventKind::InquiryResponse(_) => {}
             }
         }
-
-        printer.println("");
-        printer.flush();
 
         Ok(())
     }

@@ -5,11 +5,12 @@ use jp_config::{
     assistant::request::{CachePolicy, RequestConfig},
 };
 use jp_conversation::{
-    ConversationStream,
+    Conversation,
     event::{ChatRequest, ChatResponse, ConversationEvent},
 };
 use jp_llm::{StreamError, event::Event};
 use jp_printer::{OutputFormat, Printer};
+use jp_workspace::{ConversationLock, Workspace};
 
 use super::*;
 use crate::cmd::query::interrupt::LoopAction;
@@ -27,6 +28,16 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
 fn make_turn_coordinator() -> TurnCoordinator {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style)
+}
+
+/// Create a workspace with a single conversation and return a test lock.
+fn make_test_lock() -> (Workspace, ConversationLock) {
+    let config = Arc::new(AppConfig::new_test());
+    let mut workspace = Workspace::new(camino::Utf8PathBuf::new());
+    let id = workspace.create_conversation(Conversation::default(), config);
+    let handle = workspace.acquire_conversation(&id).unwrap();
+    let lock = workspace.test_lock(handle);
+    (workspace, lock)
 }
 
 #[test]
@@ -96,15 +107,18 @@ async fn retryable_error_breaks_for_retry() {
     let printer = Arc::new(printer);
     let mut retry_state = make_retry_state(3);
     let mut turn_coordinator = make_turn_coordinator();
-    let mut stream = ConversationStream::new_test();
-    turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
+    conv.update_events(|stream| {
+        turn_coordinator.start_turn(stream, ChatRequest::from("test"));
+    });
 
     let error = StreamError::transient("server overloaded");
     let result = handle_stream_error(
         error,
         &mut retry_state,
         &mut turn_coordinator,
-        &mut stream,
+        &conv,
         &printer,
     )
     .await;
@@ -127,14 +141,15 @@ async fn non_retryable_error_returns_error() {
     let printer = Arc::new(printer);
     let mut retry_state = make_retry_state(3);
     let mut turn_coordinator = make_turn_coordinator();
-    let mut stream = ConversationStream::new_test();
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
 
     let error = StreamError::other("auth failure");
     let result = handle_stream_error(
         error,
         &mut retry_state,
         &mut turn_coordinator,
-        &mut stream,
+        &conv,
         &printer,
     )
     .await;
@@ -149,7 +164,8 @@ async fn budget_exhausted_returns_error() {
     let printer = Arc::new(printer);
     let mut retry_state = make_retry_state(1);
     let mut turn_coordinator = make_turn_coordinator();
-    let mut stream = ConversationStream::new_test();
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
 
     // First attempt exhausts budget
     retry_state.record_attempt();
@@ -159,7 +175,7 @@ async fn budget_exhausted_returns_error() {
         error,
         &mut retry_state,
         &mut turn_coordinator,
-        &mut stream,
+        &conv,
         &printer,
     )
     .await;
@@ -173,17 +189,22 @@ async fn partial_content_flushed_on_retry() {
     let printer = Arc::new(printer);
     let mut retry_state = make_retry_state(3);
     let mut turn_coordinator = make_turn_coordinator();
-    let mut stream = ConversationStream::new_test();
-    turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
+    conv.update_events(|stream| {
+        turn_coordinator.start_turn(stream, ChatRequest::from("test"));
+    });
 
     // Simulate partial content accumulated in the event builder
-    turn_coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ChatResponse::message("Hello ")),
-    });
-    turn_coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ChatResponse::message("world")),
+    conv.update_events(|stream| {
+        turn_coordinator.handle_event(stream, Event::Part {
+            index: 0,
+            event: ConversationEvent::now(ChatResponse::message("Hello ")),
+        });
+        turn_coordinator.handle_event(stream, Event::Part {
+            index: 0,
+            event: ConversationEvent::now(ChatResponse::message("world")),
+        });
     });
 
     // Verify partial content exists before the error
@@ -197,7 +218,7 @@ async fn partial_content_flushed_on_retry() {
         error,
         &mut retry_state,
         &mut turn_coordinator,
-        &mut stream,
+        &conv,
         &printer,
     )
     .await;
@@ -205,7 +226,7 @@ async fn partial_content_flushed_on_retry() {
     assert!(matches!(result, LoopAction::Break));
 
     // Partial content should have been flushed to the conversation stream
-    let has_response = stream.iter().any(|e| {
+    let has_response = conv.events().iter().any(|e| {
         e.event.as_chat_response().is_some_and(
             |r| matches!(r, ChatResponse::Message { message } if message == "Hello world"),
         )
@@ -225,8 +246,11 @@ async fn retry_without_partial_content_still_works() {
     let printer = Arc::new(printer);
     let mut retry_state = make_retry_state(3);
     let mut turn_coordinator = make_turn_coordinator();
-    let mut stream = ConversationStream::new_test();
-    turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
+    conv.update_events(|stream| {
+        turn_coordinator.start_turn(stream, ChatRequest::from("test"));
+    });
 
     // No partial content — error happens before any events
     assert_eq!(turn_coordinator.peek_partial_content(), None);
@@ -236,7 +260,7 @@ async fn retry_without_partial_content_still_works() {
         error,
         &mut retry_state,
         &mut turn_coordinator,
-        &mut stream,
+        &conv,
         &printer,
     )
     .await;

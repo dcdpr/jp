@@ -2,8 +2,12 @@ use std::{borrow::Cow, fmt::Write as _};
 
 use crossterm::style::Stylize as _;
 use jp_conversation::{ConversationId, EventKind, event::ChatResponse};
+use jp_workspace::ConversationHandle;
 
-use crate::{cmd::Output, ctx::Ctx};
+use crate::{
+    cmd::{ConversationLoadRequest, Output, conversation_id::FlagIds},
+    ctx::Ctx,
+};
 
 /// Maximum number of characters to show from a matching line.
 const TRUNCATE_AT: usize = 60;
@@ -13,35 +17,39 @@ pub(crate) struct Grep {
     /// The search pattern.
     pattern: String,
 
-    /// Search only in the specified conversation.
-    #[arg(long)]
-    id: Option<ConversationId>,
+    #[command(flatten)]
+    target: FlagIds<true, true>,
 
     /// Case-insensitive matching.
-    #[arg(short = 'i', long)]
+    #[arg(long)]
     ignore_case: bool,
 }
 
 impl Grep {
-    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
-        let Self {
-            mut pattern,
-            id,
-            ignore_case,
-        } = self;
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        ConversationLoadRequest::explicit_or_none(&self.target.ids)
+    }
 
-        if ignore_case {
+    #[expect(clippy::needless_pass_by_value)]
+    pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+        let mut pattern = self.pattern;
+        if self.ignore_case {
             pattern = pattern.to_lowercase();
         }
 
-        let ids = id.map_or_else(
-            || ctx.workspace.conversations().map(|(id, _)| *id).collect(),
-            |id| vec![id],
-        );
+        // If handles were provided, search only those. Otherwise search all.
+        let ids: Vec<ConversationId> = if handles.is_empty() {
+            ctx.workspace.conversations().map(|(id, _)| *id).collect()
+        } else {
+            handles.iter().map(ConversationHandle::id).collect()
+        };
 
         let mut output = String::new();
         for id in ids {
-            let Some(events) = ctx.workspace.get_events(&id) else {
+            let Ok(handle) = ctx.workspace.acquire_conversation(&id) else {
+                continue;
+            };
+            let Ok(events) = ctx.workspace.events(&handle) else {
                 continue;
             };
 

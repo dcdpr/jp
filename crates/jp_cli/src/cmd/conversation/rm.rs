@@ -2,17 +2,19 @@ use std::fmt::Write as _;
 
 use crossterm::style::Stylize as _;
 use inquire::Confirm;
-use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_conversation::ConversationId;
+use jp_workspace::ConversationHandle;
 
-use crate::{cmd::Output, ctx::Ctx, format::conversation::DetailsFmt};
+use crate::{
+    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    ctx::Ctx,
+    format::conversation::DetailsFmt,
+};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Rm {
-    /// Conversation IDs to remove.
-    ///
-    /// Defaults to the active conversation if not specified.
-    #[arg(conflicts_with = "from")]
-    id: Vec<ConversationId>,
+    #[command(flatten)]
+    target: PositionalIds<true, true>,
 
     /// Remove all conversations *starting from* the specified conversation,
     /// based on creation date.
@@ -36,42 +38,77 @@ pub(crate) struct Rm {
 }
 
 impl Rm {
-    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
-        let active_id = ctx.workspace.active_conversation_id();
-        let ids = if !self.id.is_empty() {
-            self.id
-        } else if self.from.is_none() && self.until.is_none() {
-            vec![active_id]
-        } else {
-            ctx.workspace
-                .conversations()
-                .map(|(id, _)| *id)
-                .filter(|id| self.from.is_none_or(|from| *id >= from))
-                .filter(|id| self.until.is_none_or(|until| *id < until))
-                .collect::<Vec<_>>()
-        };
+    pub(crate) fn run(self, ctx: &mut Ctx, mut handles: Vec<ConversationHandle>) -> Output {
+        let active_id = ctx
+            .session
+            .as_ref()
+            .and_then(|s| ctx.workspace.session_active_conversation(s));
 
-        for id in ids {
-            remove(ctx, id, self.yes)?;
+        // Range mode: resolve IDs from --from/--until.
+        if handles.is_empty() {
+            handles = ctx
+                .workspace
+                .conversations()
+                .map(|(id, _)| id)
+                .map(|id| ctx.workspace.acquire_conversation(id))
+                .collect::<Result<Vec<_>, _>>()?;
+        }
+
+        for handle in handles {
+            remove(ctx, handle, active_id, self.yes)?;
         }
 
         ctx.printer.println("Conversation(s) removed.");
         Ok(())
     }
+
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        if self.from.is_some() || self.until.is_some() {
+            ConversationLoadRequest::none()
+        } else {
+            ConversationLoadRequest::explicit_or_session(&self.target.ids)
+        }
+    }
 }
 
-fn remove(ctx: &mut Ctx, id: ConversationId, force: bool) -> Output {
-    let active_id = ctx.workspace.active_conversation_id();
+fn remove(
+    ctx: &mut Ctx,
+    handle: ConversationHandle,
+    active_id: Option<ConversationId>,
+    force: bool,
+) -> Output {
+    let id = handle.id();
+    let lock = ctx
+        .workspace
+        .lock_conversation(handle, None)?
+        .ok_or_else(|| {
+            crate::cmd::Error::from(format!(
+                "Conversation {} is locked by another session.",
+                id.to_string().bold().yellow()
+            ))
+        })?;
 
-    let conversation = ctx.workspace.get_conversation(&id);
-    let events = ctx.workspace.get_events(&id);
+    confirm_and_remove(ctx, id, &lock, active_id, force)?;
+    ctx.workspace.remove_conversation_with_lock(lock.into_mut());
+    Ok(())
+}
+
+fn confirm_and_remove(
+    ctx: &mut Ctx,
+    id: ConversationId,
+    lock: &jp_workspace::ConversationLock,
+    active_id: Option<ConversationId>,
+    force: bool,
+) -> Output {
+    let conversation = lock.metadata();
+    let events = lock.events();
     let mut details = DetailsFmt::new(id)
-        .with_last_message_at(events.and_then(|v| v.last().map(|v| v.event.timestamp)))
-        .with_event_count(events.map(ConversationStream::len).unwrap_or_default())
-        .with_title(conversation.and_then(|v| v.title.as_ref()))
-        .with_last_activated_at(conversation.map(|v| v.last_activated_at))
-        .with_local_flag(conversation.is_some_and(|v| v.user))
-        .with_active_conversation(active_id)
+        .with_last_message_at(events.last().map(|v| v.event.timestamp))
+        .with_event_count(events.len())
+        .with_title(conversation.title.as_ref())
+        .with_last_activated_at(Some(conversation.last_activated_at))
+        .with_local_flag(conversation.user)
+        .with_active_conversation(active_id.unwrap_or(id))
         .with_pretty_printing(ctx.printer.pretty_printing_enabled());
 
     if !force {
@@ -91,35 +128,6 @@ fn remove(ctx: &mut Ctx, id: ConversationId, force: bool) -> Output {
             Ok(true) => {}
             Ok(false) | Err(_) => return Err(1.into()),
         }
-    }
-
-    // We can't remove the active conversation, so we need to first switch
-    // the active conversation to another one, or create a new one if
-    // needed.
-    if id == active_id {
-        #[expect(clippy::map_unwrap_or, reason = "`map_or_else` fails borrow check")]
-        let new_active_id = ctx
-            .workspace
-            .conversations()
-            .filter(|(id, _)| *id != &active_id)
-            .max_by_key(|(_, conversation)| conversation.last_activated_at)
-            .map(|(id, _)| *id)
-            .unwrap_or_else(|| {
-                ctx.workspace
-                    .create_conversation(Conversation::default(), ctx.config())
-            });
-
-        ctx.workspace
-            .set_active_conversation_id(new_active_id, ctx.now())?;
-    }
-
-    if let Err(err) = ctx.workspace.remove_conversation(&id) {
-        return Err(format!(
-            "Failed to remove conversation {}: {}",
-            id.to_string().bold().yellow(),
-            err.to_string().red()
-        )
-        .into());
     }
 
     Ok(())

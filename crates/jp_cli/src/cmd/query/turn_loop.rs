@@ -18,10 +18,7 @@ use jp_config::{
     AppConfig, PartialConfig, assistant::tool_choice::ToolChoice,
     conversation::tool::QuestionTarget, model::id::ProviderId, style::streaming::StreamingConfig,
 };
-use jp_conversation::{
-    ConversationId,
-    event::{ChatRequest, ToolCallRequest, ToolCallResponse},
-};
+use jp_conversation::event::{ChatRequest, ToolCallRequest, ToolCallResponse};
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
     Provider,
@@ -33,11 +30,11 @@ use jp_llm::{
     tool::{ToolDefinition, executor::Executor},
 };
 use jp_printer::Printer;
-use jp_workspace::Workspace;
+use jp_workspace::ConversationLock;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream, errors::BroadcastStreamRecvError};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::{
     build_sections, build_thread,
@@ -143,10 +140,9 @@ pub(super) async fn run_turn_loop(
     root: &Utf8Path,
     is_tty: bool,
     attachments: &[Attachment],
-    workspace: &mut Workspace,
+    lock: &ConversationLock,
     mut tool_choice: ToolChoice,
     tools: &[ToolDefinition],
-    conversation_id: ConversationId,
     printer: Arc<Printer>,
     prompt_backend: Arc<dyn PromptBackend>,
     mut tool_coordinator: ToolCoordinator,
@@ -200,21 +196,16 @@ pub(super) async fn run_turn_loop(
     loop {
         match turn_coordinator.current_phase() {
             TurnPhase::Idle => {
-                let conversation_stream = workspace
-                    .get_events_mut(&conversation_id)
-                    .expect("conversation must exist");
-
-                turn_coordinator.start_turn(conversation_stream, chat_request.clone());
+                lock.as_mut().update_events(|stream| {
+                    turn_coordinator.start_turn(stream, chat_request.clone());
+                });
             }
 
             TurnPhase::Complete | TurnPhase::Aborted => return Ok(()),
 
             TurnPhase::Streaming => {
                 // Rebuild thread from workspace events to ensure latest context.
-                let events_stream = workspace
-                    .get_events(&conversation_id)
-                    .expect("conversation must exist")
-                    .clone();
+                let events_stream = lock.events().clone();
 
                 let thread = build_thread(
                     events_stream,
@@ -286,9 +277,7 @@ pub(super) async fn run_turn_loop(
                 let mut streams: SelectAll<_> =
                     SelectAll::from_iter([sig_stream, llm_stream, tick_stream]);
 
-                let conversation_stream = workspace
-                    .get_events_mut(&conversation_id)
-                    .expect("conversation must exist");
+                let mut conv = lock.as_mut();
 
                 while let Some(event) = streams.next().await {
                     // Cancel and await the waiting indicator on the first
@@ -310,14 +299,17 @@ pub(super) async fn run_turn_loop(
                             let llm_alive =
                                 streams.iter().any(|s| matches!(s, StreamSource::Llm(_)));
 
-                            match handle_streaming_signal(
-                                signal,
-                                &mut turn_coordinator,
-                                conversation_stream,
-                                &printer,
-                                prompt_backend.as_ref(),
-                                !llm_alive,
-                            ) {
+                            let action = conv.update_events(|stream| {
+                                handle_streaming_signal(
+                                    signal,
+                                    &mut turn_coordinator,
+                                    stream,
+                                    &printer,
+                                    prompt_backend.as_ref(),
+                                    !llm_alive,
+                                )
+                            });
+                            match action {
                                 LoopAction::Continue => {}
                                 LoopAction::Break => break,
                                 LoopAction::Return(()) => return Ok(()),
@@ -338,7 +330,7 @@ pub(super) async fn run_turn_loop(
                                         e,
                                         &mut stream_retry,
                                         &mut turn_coordinator,
-                                        conversation_stream,
+                                        &conv,
                                         &printer,
                                     )
                                     .await
@@ -381,11 +373,10 @@ pub(super) async fn run_turn_loop(
                             let is_flush = matches!(event, Event::Flush { .. });
                             let is_finished = matches!(event, Event::Finished(_));
 
-                            match handle_llm_event(
-                                event,
-                                &mut turn_coordinator,
-                                conversation_stream,
-                            ) {
+                            let action = conv.update_events(|stream| {
+                                handle_llm_event(event, &mut turn_coordinator, stream)
+                            });
+                            match action {
                                 LoopAction::Continue => {}
                                 LoopAction::Break => break,
                                 LoopAction::Return(()) => return Ok(()),
@@ -397,12 +388,16 @@ pub(super) async fn run_turn_loop(
                             // Custom style, format_args returns empty so only
                             // the header is printed; the custom command runs
                             // later after approval.
-                            if is_flush
-                                && let Some(req) = conversation_stream
-                                    .last()
-                                    .as_ref()
-                                    .and_then(|e| e.as_tool_call_request())
-                            {
+                            let flushed_req = is_flush
+                                .then(|| {
+                                    conv.events()
+                                        .last()
+                                        .as_ref()
+                                        .and_then(|e| e.as_tool_call_request())
+                                        .cloned()
+                                })
+                                .flatten();
+                            if let Some(req) = flushed_req {
                                 tool_coordinator.set_tool_state(&req.id, ToolCallState::Queued);
 
                                 let style = tool_coordinator.parameter_style(&req.name);
@@ -504,7 +499,7 @@ pub(super) async fn run_turn_loop(
                 // executing phase to consume.
                 streaming_perm_results = Some((perm_approved, perm_skipped, perm_unavailable));
 
-                workspace.persist_active_conversation()?;
+                conv.flush()?;
             }
 
             TurnPhase::Executing => {
@@ -533,10 +528,7 @@ pub(super) async fn run_turn_loop(
                         )
                         .await;
 
-                    let inquiry_events = workspace
-                        .get_events_mut(&conversation_id)
-                        .expect("conversation must exist");
-
+                    let mut conv = lock.as_mut();
                     let execution_result = tool_coordinator
                         .execute_with_prompting(
                             executors,
@@ -547,7 +539,7 @@ pub(super) async fn run_turn_loop(
                             &printer,
                             prompt_backend.as_ref(),
                             Arc::clone(&inquiry_backend),
-                            inquiry_events,
+                            &conv,
                             mcp_client,
                             root,
                             &tool_renderer,
@@ -567,17 +559,14 @@ pub(super) async fn run_turn_loop(
                     indexed_responses.sort_by_key(|(index, _)| *index);
                     let responses: Vec<_> = indexed_responses.into_iter().map(|(_, r)| r).collect();
 
-                    let ws_stream = workspace
-                        .get_events_mut(&conversation_id)
-                        .expect("conversation must exist");
-
-                    if let Action::SendFollowUp =
-                        turn_coordinator.handle_tool_responses(ws_stream, responses)
-                    {
+                    let follow_up = conv.update_events(|stream| {
+                        turn_coordinator.handle_tool_responses(stream, responses)
+                    });
+                    if let Action::SendFollowUp = follow_up {
                         tool_choice = ToolChoice::Auto;
                     }
 
-                    workspace.persist_active_conversation()?;
+                    conv.flush()?;
                     continue;
                 }
 
@@ -595,10 +584,7 @@ pub(super) async fn run_turn_loop(
                 // Reset coordinator state for the execution phase.
                 tool_coordinator.reset_for_execution();
 
-                let inquiry_events = workspace
-                    .get_events_mut(&conversation_id)
-                    .expect("conversation must exist");
-
+                let mut conv = lock.as_mut();
                 let execution_result = tool_coordinator
                     .execute_with_prompting(
                         approved,
@@ -609,7 +595,7 @@ pub(super) async fn run_turn_loop(
                         &printer,
                         prompt_backend.as_ref(),
                         Arc::clone(&inquiry_backend),
-                        inquiry_events,
+                        &conv,
                         mcp_client,
                         root,
                         &tool_renderer,
@@ -629,17 +615,14 @@ pub(super) async fn run_turn_loop(
                 indexed_responses.sort_by_key(|(index, _)| *index);
                 let responses: Vec<_> = indexed_responses.into_iter().map(|(_, r)| r).collect();
 
-                let ws_stream = workspace
-                    .get_events_mut(&conversation_id)
-                    .expect("conversation must exist");
-
-                if let Action::SendFollowUp =
-                    turn_coordinator.handle_tool_responses(ws_stream, responses)
-                {
+                let follow_up = conv.update_events(|stream| {
+                    turn_coordinator.handle_tool_responses(stream, responses)
+                });
+                if let Action::SendFollowUp = follow_up {
                     tool_choice = ToolChoice::Auto;
                 }
 
-                workspace.persist_active_conversation()?;
+                conv.flush()?;
             }
         }
     }
@@ -673,6 +656,7 @@ async fn build_inquiry_backend(
         let inquiry_model_id = inquiry_model_cfg.id.resolved();
         let inquiry_provider: Arc<dyn Provider> =
             Arc::from(get_provider(inquiry_model_id.provider, &cfg.providers.llm)?);
+        debug!(model = %inquiry_model_id, "Fetching inquiry model details.");
         let inquiry_model = inquiry_provider
             .model_details(&inquiry_model_id.name)
             .await?;

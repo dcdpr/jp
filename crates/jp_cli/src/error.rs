@@ -1,6 +1,7 @@
 use std::io;
 
 use camino::Utf8PathBuf;
+use jp_conversation::ConversationId;
 
 use crate::cmd;
 
@@ -106,4 +107,10 @@ pub(crate) enum Error {
 
     #[error("No structured data in the assistant's response")]
     MissingStructuredData,
+
+    #[error("Timed out waiting for lock on conversation {0}")]
+    LockTimeout(ConversationId),
+
+    #[error("No conversation targeted")]
+    NoConversationTarget,
 }

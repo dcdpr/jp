@@ -17,6 +17,7 @@ jp_config = { workspace = true }
 jp_conversation = { workspace = true }
 jp_llm = { workspace = true }
 jp_macro = { workspace = true }
+jp_term = { workspace = true }
 jp_workspace = { workspace = true }
 
 async-trait = { workspace = true }

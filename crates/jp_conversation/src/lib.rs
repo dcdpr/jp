@@ -31,7 +31,7 @@ pub(crate) mod storage;
 pub mod stream;
 pub mod thread;
 
-pub use conversation::{Conversation, ConversationId, ConversationsMetadata};
+pub use conversation::{Conversation, ConversationId};
 pub use error::Error;
 pub use event::{ConversationEvent, EventKind};
 pub use stream::{ConversationStream, StreamError, TurnMut};

@@ -27,9 +27,10 @@
 use std::{fmt::Write as _, sync::Arc};
 
 use jp_config::assistant::request::RequestConfig;
-use jp_conversation::{ConversationStream, event::ChatResponse};
+use jp_conversation::event::ChatResponse;
 use jp_llm::{StreamError, exponential_backoff};
 use jp_printer::Printer;
+use jp_workspace::ConversationMut;
 use tracing::{error, warn};
 
 use crate::{
@@ -156,7 +157,7 @@ pub async fn handle_stream_error(
     error: StreamError,
     retry_state: &mut StreamRetryState,
     turn_coordinator: &mut TurnCoordinator,
-    conversation_stream: &mut ConversationStream,
+    conv: &ConversationMut,
     printer: &Arc<Printer>,
 ) -> LoopAction<Result<(), Error>> {
     if !retry_state.can_retry(&error) {
@@ -179,11 +180,13 @@ pub async fn handle_stream_error(
     // 3. Flush any unflushed partial content to the ConversationStream so
     //    it will be included when the thread is rebuilt for the retry.
     if let Some(content) = turn_coordinator.peek_partial_content() {
-        conversation_stream
-            .current_turn_mut()
-            .add_chat_response(ChatResponse::message(&content))
-            .build()
-            .expect("Invalid ConversationStream state");
+        conv.update_events(|stream| {
+            stream
+                .current_turn_mut()
+                .add_chat_response(ChatResponse::message(&content))
+                .build()
+                .expect("Invalid ConversationStream state");
+        });
     }
     turn_coordinator.prepare_continuation();
 

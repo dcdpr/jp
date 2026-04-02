@@ -1,17 +1,10 @@
-use std::sync::Arc;
-
 use camino_tempfile::tempdir;
 use datetime_literal::datetime;
-use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
 use jp_storage::Storage;
 use test_log::test;
 
 use crate::Workspace;
-
-fn test_config() -> Arc<AppConfig> {
-    Arc::new(AppConfig::new_test())
-}
 
 /// Create a Storage for fixture setup and a Workspace pointing to the same
 /// storage path.
@@ -32,14 +25,11 @@ fn test_clean_workspace_reports_no_repairs() {
 
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
     storage.write_test_conversation(&id, &Conversation::default());
-    storage.write_test_conversations_metadata(id);
 
     let report = ws.sanitize().unwrap();
 
     assert!(!report.has_repairs());
     assert!(report.trashed.is_empty());
-    assert!(!report.active_reassigned);
-    assert!(!report.default_created);
 }
 
 #[test]
@@ -48,7 +38,6 @@ fn test_invalid_conversations_are_trashed() {
 
     let valid_id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
     storage.write_test_conversation(&valid_id, &Conversation::default());
-    storage.write_test_conversations_metadata(valid_id);
 
     // Two different kinds of invalid: bad dirname + empty dir with valid ID.
     let bad_id = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
@@ -56,131 +45,88 @@ fn test_invalid_conversations_are_trashed() {
     storage.create_test_conversation_dir(&bad_id.to_dirname(None));
 
     let report = ws.sanitize().unwrap();
-
     assert_eq!(report.trashed.len(), 2);
-    assert!(!report.active_reassigned);
-    assert!(!report.default_created);
 }
 
 #[test]
-fn test_reassigns_active_when_trashed() {
+fn test_trashed_conversations_not_loaded() {
     let (_tmp, storage, mut ws) = setup();
 
     let id1 = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
     let id2 = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
     storage.write_test_conversation(&id2, &Conversation::default());
 
-    // id1 is active but invalid (empty dir, will fail validation).
+    // id1 is invalid (empty dir).
     storage.create_test_conversation_dir(&id1.to_dirname(None));
-    storage.write_test_conversations_metadata(id1);
 
     let report = ws.sanitize().unwrap();
+    assert_eq!(report.trashed.len(), 1);
 
-    assert!(report.active_reassigned);
-    assert!(!report.default_created);
-
-    ws.load_conversation_index().unwrap();
-    assert_eq!(ws.active_conversation_id(), id2);
+    // After sanitize + load, only the valid conversation should be accessible.
+    ws.load_conversation_index();
+    assert!(ws.acquire_conversation(&id2).is_ok());
+    assert!(ws.acquire_conversation(&id1).is_err());
 }
 
 #[test]
-fn test_reassigns_to_most_recent_valid() {
+fn test_load_index_populates_all_conversations() {
     let (_tmp, storage, mut ws) = setup();
 
     let id1 = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
     let id2 = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
-    let id3 = ConversationId::try_from(datetime!(2024-01-03 00:00:00 Z)).unwrap();
     storage.write_test_conversation(&id1, &Conversation::default());
     storage.write_test_conversation(&id2, &Conversation::default());
 
-    // id3 is active but invalid.
-    storage.create_test_conversation_dir(&id3.to_dirname(None));
-    storage.write_test_conversations_metadata(id3);
+    ws.sanitize().unwrap();
+    ws.load_conversation_index();
 
-    let report = ws.sanitize().unwrap();
-
-    assert!(report.active_reassigned);
-    ws.load_conversation_index().unwrap();
-    assert_eq!(ws.active_conversation_id(), id2);
+    // Both conversations should be in the index.
+    assert!(ws.acquire_conversation(&id1).is_ok());
+    assert!(ws.acquire_conversation(&id2).is_ok());
 }
 
 #[test]
-fn test_reassigns_when_active_has_no_directory() {
+fn test_eager_load_populates_metadata_and_events() {
     let (_tmp, storage, mut ws) = setup();
 
     let id1 = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
     let id2 = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
-    let id3 = ConversationId::try_from(datetime!(2024-01-03 00:00:00 Z)).unwrap();
     storage.write_test_conversation(&id1, &Conversation::default());
     storage.write_test_conversation(&id2, &Conversation::default());
 
-    // Metadata points to id3 which has no directory at all.
-    storage.write_test_conversations_metadata(id3);
-
-    let report = ws.sanitize().unwrap();
-
-    assert!(report.trashed.is_empty());
-    assert!(report.active_reassigned);
-    assert!(!report.default_created);
-
-    ws.load_conversation_index().unwrap();
-    assert_eq!(ws.active_conversation_id(), id2);
+    ws.sanitize().unwrap();
+    ws.load_conversation_index();
+    let handle = ws.acquire_conversation(&id1).unwrap();
+    ws.eager_load_conversation(&handle).unwrap();
+    // Metadata and events should be available without lazy-loading.
+    assert_eq!(ws.metadata(&handle).unwrap().title, None);
+    assert!(ws.events(&handle).unwrap().is_empty());
 }
 
 #[test]
-fn test_default_created_when_all_trashed() {
+fn test_eager_load_missing_conversation_errors() {
+    let (_tmp, _storage, mut ws) = setup();
+
+    let missing = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+    ws.load_conversation_index();
+
+    // Can't even acquire a handle for a missing conversation.
+    assert!(ws.acquire_conversation(&missing).is_err());
+}
+
+#[test]
+fn test_all_conversations_trashed_produces_empty_workspace() {
     let (_tmp, storage, mut ws) = setup();
 
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
-
-    // Only conversation is invalid.
     storage.create_test_conversation_dir(&id.to_dirname(None));
-    storage.write_test_conversations_metadata(id);
 
     let report = ws.sanitize().unwrap();
-
-    assert!(report.active_reassigned);
-    assert!(report.default_created);
     assert_eq!(report.trashed.len(), 1);
 
-    ws.load_conversation_index().unwrap();
-    ws.ensure_active_conversation_stream(test_config()).unwrap();
-}
-
-#[test]
-fn test_corrupt_global_metadata_reassigns_to_valid() {
-    let (_tmp, storage, mut ws) = setup();
-
-    let id1 = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
-    let id2 = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
-    storage.write_test_conversation(&id1, &Conversation::default());
-    storage.write_test_conversation(&id2, &Conversation::default());
-    storage.write_test_corrupt_conversations_metadata();
-
-    let report = ws.sanitize().unwrap();
-
-    assert!(report.trashed.is_empty());
-    assert!(report.active_reassigned);
-    assert!(!report.default_created);
-
-    ws.load_conversation_index().unwrap();
-    assert_eq!(ws.active_conversation_id(), id2);
-}
-
-#[test]
-fn test_corrupt_global_metadata_with_no_conversations() {
-    let (_tmp, storage, mut ws) = setup();
-
-    storage.write_test_corrupt_conversations_metadata();
-
-    let report = ws.sanitize().unwrap();
-
-    // Empty workspace with corrupt metadata is silently repaired.
-    assert!(!report.has_repairs());
-    assert!(!storage.conversations_metadata_exists());
-
-    ws.load_conversation_index().unwrap();
-    ws.ensure_active_conversation_stream(test_config()).unwrap();
+    // Fresh workspace after all trashed.
+    ws.load_conversation_index();
+    assert_eq!(ws.conversations().count(), 0);
 }
 
 #[test]
@@ -189,7 +135,6 @@ fn test_skips_dot_prefixed_directories() {
 
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
     storage.write_test_conversation(&id, &Conversation::default());
-    storage.write_test_conversations_metadata(id);
 
     // These should be silently ignored, not trashed.
     storage.create_test_conversation_dir(".trash");
@@ -228,16 +173,13 @@ fn test_sanitize_then_load_with_mixed_valid_and_invalid() {
     storage.create_test_conversation_dir(&id2.to_dirname(None));
     storage.create_test_conversation_dir(&id4.to_dirname(None));
 
-    // Active points to id4 (invalid).
-    storage.write_test_conversations_metadata(id4);
-
     let report = ws.sanitize().unwrap();
-
     assert_eq!(report.trashed.len(), 2);
-    assert!(report.active_reassigned);
-    assert!(!report.default_created);
 
-    ws.load_conversation_index().unwrap();
-    assert_eq!(ws.active_conversation_id(), id3);
-    assert!(ws.get_conversation(&id1).is_some());
+    ws.load_conversation_index();
+    // Only valid conversations should be in the index.
+    assert!(ws.acquire_conversation(&id1).is_ok());
+    assert!(ws.acquire_conversation(&id3).is_ok());
+    assert!(ws.acquire_conversation(&id2).is_err());
+    assert!(ws.acquire_conversation(&id4).is_err());
 }

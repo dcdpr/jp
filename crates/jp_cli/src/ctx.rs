@@ -9,7 +9,7 @@ use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
 use jp_mcp::id::{McpServerId, McpToolId};
 use jp_printer::Printer;
 use jp_task::TaskHandler;
-use jp_workspace::Workspace;
+use jp_workspace::{Workspace, session::Session};
 use tokio::{
     runtime::{Handle, Runtime},
     task::JoinSet,
@@ -27,6 +27,12 @@ pub(crate) struct Ctx {
 
     /// Global CLI arguments.
     pub(crate) term: Term,
+
+    /// The resolved terminal session identity, if any.
+    ///
+    /// `None` when no session could be detected (e.g. no controlling
+    /// terminal, no `$JP_SESSION`, and no recognized terminal env vars).
+    pub(crate) session: Option<Session>,
 
     /// The printer for output.
     pub(crate) printer: Arc<Printer>,
@@ -63,6 +69,7 @@ impl Ctx {
         runtime: Runtime,
         args: Globals,
         config: impl Into<Arc<AppConfig>>,
+        session: Option<Session>,
         printer: Printer,
     ) -> Self {
         let config = config.into();
@@ -75,6 +82,7 @@ impl Ctx {
                 args,
                 is_tty: io::stdout().is_terminal(),
             },
+            session,
             printer: Arc::new(printer),
             mcp_client,
             task_handler: TaskHandler::default(),
@@ -176,16 +184,10 @@ pub(crate) trait IntoPartialAppConfig {
     #[expect(unused_variables)]
     fn apply_conversation_config(
         &self,
-        workspace: Option<&Workspace>,
+        workspace: &Workspace,
         partial: PartialAppConfig,
-
-        // Whenever called the `partial` argument might be empty, or contain
-        // any subset of the full configuration. This might prevent validating
-        // certain fields before applying them. In these situations, the
-        // `merged_config` argument can be used to provide the full
-        // configuration, and the partial configuration can be validated against
-        // it.
         merged_config: Option<&PartialAppConfig>,
+        handle: &jp_workspace::ConversationHandle,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         Ok(partial)
     }

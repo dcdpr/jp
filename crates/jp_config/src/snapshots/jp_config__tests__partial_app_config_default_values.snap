@@ -125,6 +125,7 @@ Ok(
                     },
                 },
                 start_local: None,
+                default_id: None,
             },
             style: PartialStyleConfig {
                 code: PartialCodeConfig {

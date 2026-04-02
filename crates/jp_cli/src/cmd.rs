@@ -1,14 +1,17 @@
 mod attachment;
 mod config;
 mod conversation;
+pub(crate) mod conversation_id;
 mod init;
 mod query;
+pub(crate) mod target;
 
 use std::{fmt, num::NonZeroU8};
 
 use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 use serde_json::Value;
+pub(crate) use target::ConversationLoadRequest;
 
 use crate::{Ctx, ctx::IntoPartialAppConfig};
 
@@ -41,14 +44,40 @@ pub(crate) enum Commands {
 }
 
 impl Commands {
-    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) async fn run(
+        self,
+        ctx: &mut Ctx,
+        handles: Vec<jp_workspace::ConversationHandle>,
+    ) -> Output {
         match self {
-            Commands::Query(args) => Box::pin(args.run(ctx)).await,
-            Commands::Config(args) => args.run(ctx),
-            Commands::Attachment(args) => args.run(ctx),
-            Commands::AttachmentAdd(args) => args.run(ctx),
-            Commands::Conversation(args) => args.run(ctx).await,
+            Commands::Query(args) => {
+                debug_assert!(handles.len() < 2, "Query commands use 0 or 1 handle");
+                Box::pin(args.run(ctx, handles.into_iter().next())).await
+            }
+            Commands::Config(args) => args.run(ctx, handles),
+            Commands::Conversation(args) => args.run(ctx, handles).await,
+            Commands::Attachment(args) => {
+                debug_assert!(handles.is_empty(), "Attachment commands don't use handles");
+                args.run(ctx)
+            }
+            Commands::AttachmentAdd(args) => {
+                debug_assert!(handles.is_empty(), "Attachment commands don't use handles");
+                args.run(ctx)
+            }
             Commands::Init(_) => unreachable!("handled before workspace initialization"),
+        }
+    }
+
+    /// Declare what conversations this command needs and whether any should
+    /// participate in the config loading pipeline.
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        match self {
+            Commands::Query(args) => args.conversation_load_request(),
+            Commands::Config(args) => args.conversation_load_request(),
+            Commands::Conversation(args) => args.conversation_load_request(),
+            Commands::Init(_) | Commands::Attachment(_) | Commands::AttachmentAdd(_) => {
+                ConversationLoadRequest::none()
+            }
         }
     }
 
@@ -83,13 +112,14 @@ impl IntoPartialAppConfig for Commands {
 
     fn apply_conversation_config(
         &self,
-        workspace: Option<&Workspace>,
+        workspace: &Workspace,
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
+        handle: &jp_workspace::ConversationHandle,
     ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         match self {
             Commands::Query(args) => {
-                args.apply_conversation_config(workspace, partial, merged_config)
+                args.apply_conversation_config(workspace, partial, merged_config, handle)
             }
             _ => Ok(partial),
         }
@@ -292,6 +322,31 @@ impl From<crate::error::Error> for Error {
             MissingStructuredData => {
                 [("message", "No structured data in response".to_owned())].into()
             }
+            LockTimeout(id) => [
+                (
+                    "message",
+                    format!("Timed out waiting for lock on conversation {id}"),
+                ),
+                (
+                    "suggestion",
+                    "Use --no-persist to skip locking, or set $JP_LOCK_DURATION".to_owned(),
+                ),
+            ]
+            .into(),
+            NoConversationTarget => [
+                (
+                    "message",
+                    "No conversation targeted. Use one of the following:".to_owned(),
+                ),
+                (
+                    "suggestion",
+                    "--id=<id>    target a specific conversation\n--id=last    continue the most \
+                     recently active conversation\n--new        start a new \
+                     conversation\n$JP_SESSION  set a session identity for automatic tracking"
+                        .to_owned(),
+                ),
+            ]
+            .into(),
             CliConfig(error) => {
                 [("message", "CLI Config error".to_owned()), ("error", error)].into()
             }
@@ -518,11 +573,6 @@ impl From<jp_workspace::Error> for Error {
                 ("message", "Exists".into()),
                 ("target", target.into()),
                 ("id", id.into()),
-            ]
-            .into(),
-            CannotRemoveActiveConversation(conversation_id) => [
-                ("message", "Cannot remove active conversation".into()),
-                ("conversation_id", conversation_id.to_string().into()),
             ]
             .into(),
             Id(error) => [

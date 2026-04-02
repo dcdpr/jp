@@ -53,6 +53,7 @@ expression: "AppConfig::fields()"
     "editor.cmd",
     "editor.envs",
     "conversation.attachments",
+    "conversation.default_id",
     "conversation.start_local",
     "conversation.tools.tools",
     "conversation.tools.*.enable",

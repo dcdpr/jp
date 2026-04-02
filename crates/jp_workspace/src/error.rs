@@ -1,5 +1,4 @@
 use camino::Utf8PathBuf;
-use jp_conversation::ConversationId;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -28,9 +27,6 @@ pub enum Error {
 
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
-
-    #[error("Cannot remove active conversation: {0}")]
-    CannotRemoveActiveConversation(ConversationId),
 
     #[error("{target} already exists: {id}")]
     Exists { target: &'static str, id: String },

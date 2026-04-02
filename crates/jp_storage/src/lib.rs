@@ -1,4 +1,5 @@
 pub mod error;
+pub mod lock;
 pub mod value;
 
 pub mod load;
@@ -6,14 +7,12 @@ pub mod persist;
 pub mod trash;
 pub mod validate;
 
-use std::{cell::OnceCell, fs, io::BufReader, iter};
+use std::{fs, io::BufReader};
 
 use camino::{FromPathBufError, Utf8DirEntry, Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, NaiveDateTime, Utc};
 pub use error::Error;
-use jp_conversation::{Conversation, ConversationId, ConversationStream, ConversationsMetadata};
-use jp_id::Id as _;
-use jp_tombmap::TombMap;
+use jp_conversation::{Conversation, ConversationId, ConversationStream};
 pub use load::LoadError;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use relative_path::RelativePath;
@@ -25,7 +24,7 @@ pub const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
 pub const CONVERSATIONS_DIR: &str = "conversations";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Storage {
     /// The path to the original storage directory.
     root: Utf8PathBuf,
@@ -179,152 +178,155 @@ impl Storage {
             .unwrap_or_else(|| self.root_with_path(path))
     }
 
-    pub fn persist_conversations_and_events(
-        &mut self,
-        conversations: &TombMap<ConversationId, OnceCell<Conversation>>,
-        events: &TombMap<ConversationId, OnceCell<ConversationStream>>,
-        active_conversation_id: &ConversationId,
-        active_conversation: &Conversation,
+    /// Persist a single conversation's metadata and events to disk.
+    ///
+    /// Handles directory naming, stale directory cleanup (when a conversation
+    /// is renamed or moved between workspace/user storage), and atomic writes.
+    pub fn persist_conversation(
+        &self,
+        id: &ConversationId,
+        metadata: &Conversation,
+        events: &ConversationStream,
     ) -> Result<()> {
-        let root = self.root.as_path();
-        let user = self.user.as_deref().unwrap_or(root);
-
-        let conversations_dir = root.join(CONVERSATIONS_DIR);
+        let conversations_dir = self.root.join(CONVERSATIONS_DIR);
+        let user = self.user.as_deref().unwrap_or(&self.root);
         let user_conversations_dir = user.join(CONVERSATIONS_DIR);
 
-        trace!(
-            global = %conversations_dir,
-            user = %user_conversations_dir,
-            "Persisting conversations."
-        );
+        let dir_name = id.to_dirname(metadata.title.as_deref());
+        let conv_dir = if metadata.user {
+            user_conversations_dir.join(&dir_name)
+        } else {
+            conversations_dir.join(&dir_name)
+        };
 
-        // Append the active conversation to the list of conversations to
-        // persist.
-        let all_conversations = conversations
-            .iter()
-            .filter_map(|(id, conversation)| conversation.get().map(|v| (id, v)))
-            .chain(iter::once((active_conversation_id, active_conversation)));
+        // Remove stale directories from previous titles or storage locations.
+        remove_stale_conversation_dirs(id, &conv_dir, &conversations_dir, &user_conversations_dir)?;
 
-        for (id, conversation) in all_conversations {
-            let dir_name = id.to_dirname(conversation.title.as_deref());
-            let conv_dir = if conversation.user {
-                user_conversations_dir.join(dir_name)
-            } else {
-                conversations_dir.join(dir_name)
-            };
+        fs::create_dir_all(&conv_dir)?;
+        write_json(&conv_dir.join(METADATA_FILE), metadata)?;
+        write_json(&conv_dir.join(EVENTS_FILE), events)?;
 
-            // If the conversation is being modified (e.g. moved or renamed) and
-            // its events are not yet loaded in memory, we load them from disk
-            // before we potentially delete the old directory.
-            let mut stream = events.get(id).and_then(|v| v.get());
-            let loaded_stream;
-            if stream.is_none()
-                && (conversations.is_modified(id) || id == active_conversation_id)
-                && let Ok(s) = self.load_conversation_stream(id)
-            {
-                loaded_stream = Some(s);
-                stream = loaded_stream.as_ref();
-            }
+        Ok(())
+    }
 
-            // Only remove unused conversations if their IDs have changed.
-            if conversations.is_modified(id)
-                || conversations.is_removed(id)
-                || id == active_conversation_id
-            {
-                remove_unused_conversation_dirs(
-                    id,
-                    &conv_dir,
-                    &conversations_dir,
-                    &user_conversations_dir,
-                )?;
-            }
-
-            // Don't write metadata for non-existent conversations.
-            let Some(stream) = stream else {
-                continue;
-            };
-
-            fs::create_dir_all(&conv_dir)?;
-
-            // Write conversation metadata
-            let meta_path = conv_dir.join(METADATA_FILE);
-            write_json(&meta_path, conversation)?;
-
-            let events_path = conv_dir.join(EVENTS_FILE);
-            write_json(&events_path, stream)?;
-        }
-
-        // Don't mark active conversation as removed.
-        let removed_ids = conversations
-            .removed_keys()
-            .filter(|&id| id != active_conversation_id)
-            .collect::<Vec<_>>();
+    /// Remove a conversation's persisted data from disk.
+    ///
+    /// Removes all directories matching the conversation ID in both workspace
+    /// and user storage.
+    pub fn remove_conversation(&self, id: &ConversationId) -> Result<()> {
+        let conversations_dir = self.root.join(CONVERSATIONS_DIR);
+        let user = self.user.as_deref().unwrap_or(&self.root);
+        let user_conversations_dir = user.join(CONVERSATIONS_DIR);
+        let prefix = id.to_dirname(None);
 
         for dir in [&conversations_dir, &user_conversations_dir] {
-            let mut deleted = Vec::new();
-            for entry in dir_entries(&dir) {
-                let path = entry.path();
-                let dir_matches_id = path.file_name().is_some_and(|v| {
-                    removed_ids.iter().any(|d| {
-                        let removed_id = d.target_id();
-
-                        v == &*removed_id || v.starts_with(&format!("{removed_id}-"))
-                    })
-                });
-
-                if path.is_dir()
-                    && dir_matches_id
-                    && let Ok(path) = path.strip_prefix(dir)
+            if !dir.exists() {
+                continue;
+            }
+            for entry in dir.read_dir_utf8().into_iter().flatten().flatten() {
+                let name = entry.file_name();
+                if (name == prefix || name.starts_with(&format!("{prefix}-")))
+                    && entry.path().is_dir()
                 {
-                    deleted.push(path.to_path_buf());
+                    fs::remove_dir_all(entry.path())?;
                 }
             }
-
-            remove_deleted(root, dir, deleted.into_iter())?;
         }
 
         Ok(())
     }
 
-    pub fn persist_conversations_metadata(&self, metadata: &ConversationsMetadata) -> Result<()> {
-        // Only persist metadata if the active conversation has a directory on
-        // disk. This prevents writing a metadata file that references a
-        // conversation that was never persisted (e.g., a fresh in-memory
-        // conversation on first run).
-        let id = &metadata.active_conversation_id;
-        let exists = [Some(&self.root), self.user.as_ref()]
-            .into_iter()
-            .flatten()
-            .any(|root| find_conversation_dir_path(root, id).is_some());
+    const SESSIONS_DIR: &'static str = "sessions";
 
-        if !exists {
-            return Ok(());
+    /// Load a session mapping from user storage.
+    ///
+    /// Returns `Ok(None)` if user storage is not configured or the mapping
+    /// file does not exist. Returns `Err` on I/O or parse errors.
+    pub fn load_session_data<T: serde::de::DeserializeOwned>(
+        &self,
+        session_key: &str,
+    ) -> Result<Option<T>> {
+        let Some(user) = self.user.as_deref() else {
+            return Ok(None);
+        };
+
+        let path = user
+            .join(Self::SESSIONS_DIR)
+            .join(format!("{session_key}.json"));
+
+        if !path.is_file() {
+            return Ok(None);
         }
 
-        let root = self.user.as_deref().unwrap_or(self.root.as_path());
-        let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
-        trace!(path = %metadata_path, "Persisting user conversations metadata.");
+        value::read_json(&path).map(Some)
+    }
 
-        write_json(&metadata_path, metadata)?;
+    /// Save a session mapping to user storage.
+    ///
+    /// Creates the sessions directory if it does not exist.
+    /// Returns `Err` if user storage is not configured.
+    pub fn save_session_data<T: serde::Serialize>(
+        &self,
+        session_key: &str,
+        data: &T,
+    ) -> Result<()> {
+        let user = self
+            .user
+            .as_deref()
+            .ok_or(Error::NotDir(Utf8PathBuf::from("<no user storage>")))?;
 
+        let path = user
+            .join(Self::SESSIONS_DIR)
+            .join(format!("{session_key}.json"));
+
+        write_json(&path, data)?;
         Ok(())
     }
 
-    /// Remove the global conversations metadata file.
+    /// List orphaned lock files in user storage.
     ///
-    /// After removal, [`load_conversations_metadata`] will return default
-    /// metadata.
-    ///
-    /// [`load_conversations_metadata`]: Self::load_conversations_metadata
-    pub fn remove_conversations_metadata(&self) -> Result<()> {
-        let root = self.user.as_deref().unwrap_or(self.root.as_path());
-        let metadata_path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
+    /// A lock file is orphaned if no process holds the `flock` on it.
+    /// This attempts a non-blocking lock; if it succeeds, the file is
+    /// orphaned and its path is returned.
+    #[must_use]
+    pub fn list_orphaned_lock_files(&self) -> Vec<Utf8PathBuf> {
+        let Some(user) = self.user.as_deref() else {
+            return vec![];
+        };
 
-        if metadata_path.is_file() {
-            fs::remove_file(&metadata_path)?;
-        }
+        let locks_dir = user.join(lock::LOCKS_DIR);
+        dir_entries(&locks_dir)
+            .filter_map(|entry| {
+                let path = entry.into_path();
+                if path.extension().is_none_or(|ext| ext != "lock") {
+                    return None;
+                }
 
-        Ok(())
+                // Try to acquire the lock. If we succeed, nobody holds it
+                // and the file is orphaned.
+                lock::is_orphaned_lock(&path).then_some(path)
+            })
+            .collect()
+    }
+
+    /// List session mapping files in user storage.
+    #[must_use]
+    pub fn list_session_files(&self) -> Vec<Utf8PathBuf> {
+        let Some(user) = self.user.as_deref() else {
+            return vec![];
+        };
+
+        let sessions_dir = user.join(Self::SESSIONS_DIR);
+        dir_entries(&sessions_dir)
+            .filter_map(|entry| {
+                let path = entry.into_path();
+                if path.extension().is_some_and(|ext| ext == "json") {
+                    Some(path)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Remove all ephemeral conversations, except the active one.
@@ -407,6 +409,44 @@ fn get_expiring_timestamp(root: &Utf8Path) -> Option<DateTime<Utc>> {
     parse_datetime(&ts[1..ts.len() - 1])
 }
 
+/// Remove stale conversation directories left over from renames or
+/// workspace/user storage moves.
+fn remove_stale_conversation_dirs(
+    id: &ConversationId,
+    target_dir: &Utf8Path,
+    workspace_dir: &Utf8Path,
+    user_dir: &Utf8Path,
+) -> Result<()> {
+    let prefix = id.to_dirname(None);
+    let mut stale = vec![];
+
+    for parent in [workspace_dir, user_dir] {
+        stale.push(parent.join(&prefix));
+        if let Ok(entries) = parent.read_dir_utf8() {
+            for entry in entries.flatten() {
+                let path = entry.into_path();
+                if path.is_dir()
+                    && path
+                        .file_name()
+                        .is_some_and(|n| n.starts_with(&format!("{prefix}-")))
+                {
+                    stale.push(path);
+                }
+            }
+        }
+    }
+
+    stale.retain(|d| d != target_dir);
+
+    for dir in stale {
+        if dir.exists() {
+            fs::remove_dir_all(dir)?;
+        }
+    }
+
+    Ok(())
+}
+
 fn dir_entries(path: impl AsRef<Utf8Path>) -> impl Iterator<Item = Utf8DirEntry> {
     path.as_ref()
         .read_dir_utf8()
@@ -455,83 +495,6 @@ fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<ConversationI
         .ok()
 }
 
-fn remove_unused_conversation_dirs(
-    id: &ConversationId,
-    conversation_dir: &Utf8Path,
-    workspace_conversations_dir: &Utf8Path,
-    user_conversations_dir: &Utf8Path,
-) -> Result<()> {
-    // Gather all possible conversation directory names
-    let mut dirs = vec![];
-    for conversations_dir in &[workspace_conversations_dir, user_conversations_dir] {
-        let pat = id.to_dirname(None);
-        dirs.push(conversations_dir.join(&pat));
-        for entry in dir_entries(conversations_dir) {
-            let path = entry.into_path();
-            if !path.is_dir() {
-                continue;
-            }
-            if path
-                .file_name()
-                .is_none_or(|v| !v.starts_with(&format!("{pat}-")))
-            {
-                continue;
-            }
-
-            dirs.push(path);
-        }
-    }
-
-    // Exclude the one we actually want to keep
-    dirs.retain(|d| d != conversation_dir);
-
-    // Remove the rest
-    for dir in dirs {
-        if !dir.exists() {
-            continue;
-        }
-
-        fs::remove_dir_all(dir)?;
-    }
-
-    Ok(())
-}
-
-fn remove_deleted(
-    root: &Utf8Path,
-    dir: &Utf8Path,
-    deleted: impl Iterator<Item = Utf8PathBuf>,
-) -> Result<()> {
-    for entry in deleted {
-        let mut path = dir.join(entry);
-        if path.is_file() {
-            fs::remove_file(&path)?;
-        } else if path.is_dir() {
-            fs::remove_dir_all(&path)?;
-        } else {
-            warn!(
-                path = %path,
-                "File or directory marked for deletion not found. Skipping."
-            );
-        }
-
-        // Remove empty parent directories, until we reach the root.
-        while let Some(parent) = path.parent() {
-            if parent.as_os_str() == "" || parent == root || !parent.is_dir() {
-                break;
-            }
-            if dir_entries(parent).count() != 0 {
-                break;
-            }
-
-            fs::remove_dir(parent)?;
-            path = parent.to_path_buf();
-        }
-    }
-
-    Ok(())
-}
-
 // Internal methods for testing.
 #[cfg(debug_assertions)]
 impl Storage {
@@ -548,18 +511,6 @@ impl Storage {
         fs::create_dir_all(&dir).unwrap();
         write_json(&dir.join(METADATA_FILE), conversation).unwrap();
         write_json(&dir.join(EVENTS_FILE), &ConversationStream::new_test()).unwrap();
-    }
-
-    /// Write the global conversations metadata file.
-    ///
-    /// Writes to user storage if configured, otherwise the workspace root.
-    /// For test fixture setup only.
-    #[doc(hidden)]
-    pub fn write_test_conversations_metadata(&self, active_id: ConversationId) {
-        let root = self.user.as_deref().unwrap_or(self.root.as_path());
-        let path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        write_json(&path, &ConversationsMetadata::new(active_id)).unwrap();
     }
 
     /// Read the raw persisted events file content for a conversation.
@@ -587,25 +538,6 @@ impl Storage {
     pub fn create_test_conversation_dir(&self, dirname: &str) {
         let dir = self.root.join(CONVERSATIONS_DIR).join(dirname);
         fs::create_dir_all(&dir).unwrap();
-    }
-
-    /// Write corrupt (unparseable) data to the global conversations metadata
-    /// file. For test fixture setup only.
-    #[doc(hidden)]
-    pub fn write_test_corrupt_conversations_metadata(&self) {
-        let root = self.user.as_deref().unwrap_or(self.root.as_path());
-        let path = root.join(CONVERSATIONS_DIR).join(METADATA_FILE);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, "corrupt").unwrap();
-    }
-
-    /// Returns whether the global conversations metadata file exists on disk.
-    /// For test assertions only.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn conversations_metadata_exists(&self) -> bool {
-        let root = self.user.as_deref().unwrap_or(self.root.as_path());
-        root.join(CONVERSATIONS_DIR).join(METADATA_FILE).is_file()
     }
 }
 

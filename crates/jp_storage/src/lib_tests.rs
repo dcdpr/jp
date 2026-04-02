@@ -38,46 +38,6 @@ fn test_storage_new_errors_on_source_file() {
 }
 
 #[test]
-fn test_load_user_conversations_metadata_reads_existing() {
-    let original_dir = tempdir().unwrap();
-    let user_dir = tempdir().unwrap();
-    let name = "test";
-    let id = "1234";
-    let user_workspace_dir = user_dir.path().join(format!("{name}-{id}"));
-    let meta_path = user_workspace_dir.join(METADATA_FILE);
-    let existing_id = ConversationId::default();
-    let existing_meta = ConversationsMetadata::new(existing_id);
-    write_json(&meta_path, &existing_meta).unwrap();
-
-    let storage = Storage::new(original_dir.path())
-        .unwrap()
-        .with_user_storage(user_dir.path(), name, id)
-        .unwrap();
-    let loaded_meta = storage.load_conversations_metadata().unwrap();
-    assert_eq!(loaded_meta, existing_meta);
-}
-
-#[test]
-fn test_load_user_conversations_metadata_creates_default_when_missing() {
-    let storage_dir = tempdir().unwrap();
-    let user_dir = tempdir().unwrap();
-    let name = "test";
-    let id = "1234";
-
-    let storage = Storage::new(storage_dir.path())
-        .unwrap()
-        .with_user_storage(user_dir.path(), name, id)
-        .unwrap();
-    let loaded_meta = storage.load_conversations_metadata().unwrap();
-    let default_meta = ConversationsMetadata::default();
-
-    assert_eq!(
-        loaded_meta.active_conversation_id,
-        default_meta.active_conversation_id
-    );
-}
-
-#[test]
 fn test_conversation_dir_name_generation() {
     let id = ConversationId::from_str("jp-c17457886043-otvo8").unwrap();
     assert_eq!(id.to_dirname(None), "17457886043");

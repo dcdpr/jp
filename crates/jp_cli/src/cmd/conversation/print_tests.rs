@@ -16,7 +16,11 @@ use serde_json::{Map, json};
 use tokio::runtime::Runtime;
 
 use super::*;
-use crate::{Globals, ctx::Ctx};
+use crate::{
+    Globals,
+    cmd::{conversation_id::PositionalIds, target::ConversationTarget},
+    ctx::Ctx,
+};
 
 /// Strip ANSI escape codes for readable assertions.
 fn strip_ansi(s: &str) -> String {
@@ -50,16 +54,16 @@ fn setup_ctx_with_config(
         Runtime::new().unwrap(),
         Globals::default(),
         config,
+        None,
         printer,
     );
 
     let id = make_id(1000);
     ctx.workspace
         .create_conversation_with_id(id, Conversation::default(), ctx.config());
-    ctx.workspace.get_events_mut(&id).unwrap().extend(events);
-    ctx.workspace
-        .set_active_conversation_id(id, DateTime::<Utc>::UNIX_EPOCH)
-        .unwrap();
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = ctx.workspace.test_lock(h);
+    lock.as_mut().update_events(|e| e.extend(events));
 
     (ctx, id, out, runtime)
 }
@@ -75,8 +79,13 @@ fn prints_user_message() {
         ts(0, 0, 0),
     )]);
 
-    let print = Print { id: Some(id) };
-    let result = print.run(&mut ctx);
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -91,8 +100,13 @@ fn prints_assistant_message() {
         ts(0, 0, 1),
     )]);
 
-    let print = Print { id: Some(id) };
-    let result = print.run(&mut ctx);
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -113,8 +127,13 @@ fn prints_reasoning_full() {
         ConversationEvent::new(ChatResponse::message("Here is my answer.\n\n"), ts(0, 0, 1)),
     ]);
 
-    let print = Print { id: Some(id) };
-    let result = print.run(&mut ctx);
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -136,8 +155,13 @@ fn hides_reasoning_when_hidden() {
         ConversationEvent::new(ChatResponse::message("Visible answer.\n\n"), ts(0, 0, 1)),
     ]);
 
-    let print = Print { id: Some(id) };
-    let result = print.run(&mut ctx);
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -160,8 +184,13 @@ fn truncates_reasoning() {
         ts(0, 0, 0),
     )]);
 
-    let print = Print { id: Some(id) };
-    let result = print.run(&mut ctx);
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -194,8 +223,13 @@ fn prints_tool_call_and_result() {
         ),
     ]);
 
-    let print = Print { id: Some(id) };
-    let result = print.run(&mut ctx);
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -215,8 +249,13 @@ fn prints_structured_data() {
         ts(0, 0, 0),
     )]);
 
-    let print = Print { id: Some(id) };
-    let result = print.run(&mut ctx);
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -236,8 +275,13 @@ fn turn_separators_between_turns() {
         ConversationEvent::new(ChatResponse::message("Second answer.\n\n"), ts(0, 1, 2)),
     ]);
 
-    let print = Print { id: Some(id) };
-    let result = print.run(&mut ctx);
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -247,14 +291,19 @@ fn turn_separators_between_turns() {
 }
 
 #[test]
-fn defaults_to_active_conversation() {
-    let (mut ctx, _id, out, _rt) = setup_ctx(vec![ConversationEvent::new(
+fn prints_conversation_by_id() {
+    let (mut ctx, id, out, _rt) = setup_ctx(vec![ConversationEvent::new(
         ChatRequest::from("active conversation content"),
         ts(0, 0, 0),
     )]);
 
-    let print = Print { id: None };
-    let result = print.run(&mut ctx);
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -269,8 +318,13 @@ fn defaults_to_active_conversation() {
 fn empty_conversation_produces_no_content() {
     let (mut ctx, id, out, _rt) = setup_ctx(vec![]);
 
-    let print = Print { id: Some(id) };
-    let result = print.run(&mut ctx);
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();
@@ -314,8 +368,13 @@ fn full_conversation_round_trip() {
         ),
     ]);
 
-    let print = Print { id: Some(id) };
-    let result = print.run(&mut ctx);
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
     ctx.printer.flush();
 
     result.unwrap();

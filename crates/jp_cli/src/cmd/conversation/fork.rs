@@ -2,15 +2,17 @@ use std::{str::FromStr as _, time::Duration};
 
 use chrono::{DateTime, Utc};
 use jp_conversation::ConversationId;
+use jp_workspace::ConversationHandle;
 
-use crate::{cmd::Output, ctx::Ctx};
+use crate::{
+    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    ctx::Ctx,
+};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Fork {
-    /// Conversation ID to fork.
-    ///
-    /// Defaults to the active conversation if not specified.
-    id: Option<ConversationId>,
+    #[command(flatten)]
+    target: PositionalIds<true, true>,
 
     #[arg(short, long, default_value = "false")]
     activate: bool,
@@ -46,22 +48,25 @@ fn parse_duration(s: &str) -> Result<DateTime<Utc>, String> {
 }
 
 impl Fork {
-    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        ConversationLoadRequest::explicit_or_session(&self.target.ids)
+    }
+
+    pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
+        for source in handles {
+            self.fork_one(ctx, source)?;
+        }
+        ctx.printer.println("Conversation forked.");
+        Ok(())
+    }
+
+    fn fork_one(&self, ctx: &mut Ctx, source: &ConversationHandle) -> Output {
         let now = ctx.now();
-
-        let original_id = self
-            .id
-            .unwrap_or_else(|| ctx.workspace.active_conversation_id());
-
-        let mut new_conversation = ctx.workspace.try_get_conversation(&original_id)?.clone();
+        let mut new_conversation = ctx.workspace.metadata(source)?.clone();
         new_conversation.last_activated_at = now;
         new_conversation.expires_at = None;
 
-        let mut new_events = ctx
-            .workspace
-            .try_get_events(&original_id)?
-            .clone()
-            .with_created_at(now);
+        let mut new_events = ctx.workspace.events(source)?.clone().with_created_at(now);
 
         new_events.retain(|event| {
             self.from.is_none_or(|from| event.timestamp >= from)
@@ -101,15 +106,23 @@ impl Fork {
             new_events.base_config(),
         );
 
-        ctx.workspace
-            .try_get_events_mut(&new_id)?
-            .extend(new_events);
+        let new_handle = ctx.workspace.acquire_conversation(&new_id)?;
+        let conv = ctx
+            .workspace
+            .lock_conversation(new_handle, None)?
+            .expect("newly created conversation should not be locked")
+            .into_mut();
+        conv.update_events(|events| events.extend(new_events));
 
-        if self.activate {
-            ctx.workspace.set_active_conversation_id(new_id, now)?;
+        if self.activate
+            && let Some(session) = &ctx.session
+            && let Err(error) = ctx
+                .workspace
+                .activate_session_conversation(session, new_id, now)
+        {
+            tracing::warn!(%error, "Failed to write session mapping.");
         }
 
-        ctx.printer.println("Conversation forked.");
         Ok(())
     }
 }

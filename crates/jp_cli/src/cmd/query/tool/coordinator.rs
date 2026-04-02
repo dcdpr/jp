@@ -94,6 +94,7 @@ use jp_llm::tool::executor::{Executor, ExecutorResult, ExecutorSource, Permissio
 use jp_mcp::Client;
 use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
+use jp_workspace::ConversationMut;
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
@@ -630,7 +631,7 @@ impl ToolCoordinator {
         printer: &Printer,
         prompt_backend: &dyn PromptBackend,
         inquiry_backend: Arc<dyn InquiryBackend>,
-        events: &mut ConversationStream,
+        conv: &ConversationMut,
         mcp_client: &Client,
         root: &Utf8Path,
         tool_renderer: &ToolRenderer,
@@ -746,7 +747,7 @@ impl ToolCoordinator {
                         &mut prompt_active,
                         prompter.clone(),
                         &inquiry_backend,
-                        events,
+                        conv,
                         mcp_client,
                         root,
                         &cancellation_token,
@@ -787,11 +788,13 @@ impl ToolCoordinator {
                     Ok(answer) => {
                         if let Some(tool) = executing_tools.get_mut(&index) {
                             let id = inquiry::tool_call_inquiry_id(&tool.tool_id, &question_id);
-                            events
-                                .current_turn_mut()
-                                .add_inquiry_response(InquiryResponse::new(id, answer.clone()))
-                                .build()
-                                .expect("Invalid ConversationStream state");
+                            conv.update_events(|events| {
+                                events
+                                    .current_turn_mut()
+                                    .add_inquiry_response(InquiryResponse::new(id, answer.clone()))
+                                    .build()
+                                    .expect("Invalid ConversationStream state");
+                            });
 
                             tool.accumulated_answers.insert(question_id, answer);
                             self.set_tool_state(&tool.tool_id, ToolCallState::Running);
@@ -1033,7 +1036,7 @@ impl ToolCoordinator {
         prompt_active: &mut bool,
         prompter: Arc<ToolPrompter>,
         inquiry_backend: &Arc<dyn InquiryBackend>,
-        events: &mut ConversationStream,
+        conv: &ConversationMut,
         mcp_client: &Client,
         root: &Utf8Path,
         cancellation_token: &CancellationToken,
@@ -1196,15 +1199,17 @@ impl ToolCoordinator {
                     // snapshot.
                     let inquiry_id = inquiry::tool_call_inquiry_id(&tool_id, &question.id);
 
-                    events
-                        .current_turn_mut()
-                        .add_inquiry_request(InquiryRequest::new(
-                            inquiry_id.clone(),
-                            InquirySource::tool(tool_name.clone()),
-                            tool_question_to_inquiry_question(&question),
-                        ))
-                        .build()
-                        .expect("Invalid ConversationStream state");
+                    conv.update_events(|events| {
+                        events
+                            .current_turn_mut()
+                            .add_inquiry_request(InquiryRequest::new(
+                                inquiry_id.clone(),
+                                InquirySource::tool(tool_name.clone()),
+                                tool_question_to_inquiry_question(&question),
+                            ))
+                            .build()
+                            .expect("Invalid ConversationStream state");
+                    });
 
                     Self::spawn_inquiry(
                         index,
@@ -1213,7 +1218,7 @@ impl ToolCoordinator {
                         tool_name,
                         question,
                         Arc::clone(inquiry_backend),
-                        events.clone(),
+                        conv.events().clone(),
                         cancellation_token.child_token(),
                         event_tx.clone(),
                     );

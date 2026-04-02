@@ -177,8 +177,27 @@ impl Task for TitleGeneratorTask {
         self: Box<Self>,
         ctx: &mut Workspace,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        if let Some(mut conversation) = ctx.get_conversation_mut(&self.conversation_id) {
-            conversation.title = self.title;
+        if let Ok(handle) = ctx.acquire_conversation(&self.conversation_id) {
+            // Lock the conversation before writing the title. The query's
+            // lock has been released by the time task sync runs.
+            let Some(lock) = ctx.lock_conversation(handle, None)? else {
+                warn!(
+                    conversation_id = %self.conversation_id,
+                    "Could not lock conversation for title update, skipping."
+                );
+                return Ok(());
+            };
+            let mut conv = lock.into_mut();
+            conv.update_metadata(|m| m.title = self.title.clone());
+            if let Err(e) = conv.flush() {
+                warn!(error = %e, "Failed to persist title update.");
+            }
+        }
+
+        // Update terminal title now that we have a generated name.
+        if let Some(title) = &self.title {
+            let display = format!("{}: {title}", self.conversation_id);
+            jp_term::osc::set_title(display);
         }
 
         Ok(())
