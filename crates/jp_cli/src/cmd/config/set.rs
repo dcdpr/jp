@@ -1,6 +1,6 @@
 use std::fs;
 
-use jp_config::{PartialAppConfig, fs::load_partial};
+use jp_config::PartialAppConfig;
 use jp_workspace::ConversationHandle;
 
 use crate::{
@@ -28,7 +28,7 @@ impl Set {
         )?;
 
         if handles.is_empty() {
-            self.set_in_file(ctx, config_delta)
+            self.set_in_file(ctx, &config_delta)
         } else {
             Self::set_in_conversations(ctx, handles, config_delta)
         }
@@ -58,7 +58,7 @@ impl Set {
         Ok(())
     }
 
-    fn set_in_file(self, ctx: &mut Ctx, config_delta: PartialAppConfig) -> Output {
+    fn set_in_file(self, ctx: &mut Ctx, config_delta: &PartialAppConfig) -> Output {
         let target = super::Target {
             user_workspace: self.file_target.user_workspace,
             user_global: self.file_target.user_global,
@@ -69,10 +69,7 @@ impl Set {
             return Err("No configuration file found for the given target.".into());
         };
 
-        config.edit_content(|partial: &mut PartialAppConfig| {
-            *partial = load_partial(partial.clone(), config_delta)?;
-            Ok(())
-        })?;
+        config.merge_delta(&config_delta)?;
 
         if let Some(parent) = config.path.parent() {
             fs::create_dir_all(parent)?;

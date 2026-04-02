@@ -111,6 +111,7 @@ tokio = { version = "1", default-features = false, features = ["full"] }
 tokio-stream = { version = "0.1", default-features = false }
 tokio-util = { version = "0.7", default-features = false }
 toml = { version = "1", default-features = false }
+toml_edit = { version = "0.25", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 two-face = { version = "0.5", default-features = false }

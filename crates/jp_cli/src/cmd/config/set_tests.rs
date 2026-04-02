@@ -250,6 +250,55 @@ fn set_errors_without_cfg_args() {
 }
 
 #[test]
+fn set_in_file_preserves_existing_formatting() {
+    let (mut ctx, tmp) = setup(vec![kv("conversation.default_id=ask")], &[]);
+
+    let config_path = tmp.path().join(".jp/config.toml");
+    let original = indoc::indoc! {r#"
+        extends = [
+            "config/personas/default.toml",
+            "mcp/tools/**/*.toml",
+        ]
+
+        [providers.llm.aliases]
+        anthropic = "anthropic/claude-sonnet-4-6"
+        haiku = "anthropic/claude-haiku-4-5"
+
+        [style.code]
+        copy_link = "osc8"
+    "#};
+    fs::write(&config_path, original).unwrap();
+
+    let set = Set {
+        file_target: FileTarget::default(),
+        conversation: FlagIds::default(),
+    };
+    set.run(&mut ctx, vec![]).unwrap();
+
+    let content = fs::read_to_string(&config_path).unwrap();
+
+    // The delta should be applied
+    assert!(
+        content.contains(r#"default_id = "ask""#),
+        "delta applied: {content}"
+    );
+
+    // Existing content should be preserved exactly
+    assert!(
+        content.contains(r#"anthropic = "anthropic/claude-sonnet-4-6""#),
+        "aliases should remain as compact strings: {content}"
+    );
+    assert!(
+        content.contains("extends = ["),
+        "extends array preserved: {content}"
+    );
+    assert!(
+        content.contains(r#"copy_link = "osc8""#),
+        "style preserved: {content}"
+    );
+}
+
+#[test]
 fn load_request_none_when_no_ids() {
     let set = Set {
         file_target: FileTarget::default(),
