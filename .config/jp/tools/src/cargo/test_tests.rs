@@ -5,7 +5,7 @@ use camino_tempfile::tempdir;
 use jp_tool::Action;
 
 use super::*;
-use crate::util::runner::MockProcessRunner;
+use crate::util::runner::{MockProcessRunner, RunnerOpts};
 
 #[test]
 fn test_cargo_test_success() {
@@ -81,21 +81,20 @@ impl EnvCapturingRunner {
 }
 
 impl ProcessRunner for EnvCapturingRunner {
-    fn run_with_env_and_stdin(
+    fn run_with_opts(
         &self,
         program: &str,
         args: &[&str],
         working_dir: &Utf8Path,
-        env: &[(&str, &str)],
-        stdin: Option<&str>,
+        opts: &RunnerOpts<'_>,
     ) -> Result<ProcessOutput, io::Error> {
-        *self.captured_env.lock().unwrap() = env
+        *self.captured_env.lock().unwrap() = opts
+            .env
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
 
-        self.inner
-            .run_with_env_and_stdin(program, args, working_dir, env, stdin)
+        self.inner.run_with_opts(program, args, working_dir, opts)
     }
 }
 
