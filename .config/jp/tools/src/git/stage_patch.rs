@@ -171,7 +171,15 @@ fn build_file_patch<R: ProcessRunner>(
         return Err(format!("Patch IDs {patch_ids:?} not found (available: {available:?})").into());
     }
 
-    Ok(format!("{header}\n{}", hunks.join("\n")))
+    // Ensure the patch ends with a newline. Non-last hunks lose their
+    // trailing newline during the `\n@@ ` split (the newline becomes part
+    // of the delimiter). `git apply` requires every diff line to be
+    // newline-terminated; without it the patch is rejected as corrupt.
+    let mut patch = format!("{header}\n{}", hunks.join("\n"));
+    if !patch.ends_with('\n') {
+        patch.push('\n');
+    }
+    Ok(patch)
 }
 
 #[cfg(test)]

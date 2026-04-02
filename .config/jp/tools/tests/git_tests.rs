@@ -384,6 +384,29 @@ async fn stage_patch_single_hunk() {
 }
 
 #[tokio::test]
+async fn stage_patch_non_last_hunk() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    commit_then_modify(&root, "nl.rs", "a\nb\nc\nd\ne\n", "A\nb\nc\nd\nE\n");
+
+    // Stage only the FIRST hunk (a→A), which is not the last.
+    run_ok(
+        ctx(&root),
+        tool_with_answers(
+            "git_stage_patch",
+            &json!({"patches": [{"path": "nl.rs", "ids": [0]}]}),
+            &json!({"stage_changes": true}),
+        ),
+    )
+    .await;
+
+    assert_eq!(staged_content(&root, "nl.rs"), "A\nb\nc\nd\ne\n");
+}
+
+#[tokio::test]
 async fn stage_patch_selective_hunk() {
     if !has_git() {
         return;
