@@ -11,9 +11,6 @@ fn multiple_hunks() {
     let root = temp_dir.path();
     let filename = "test_script.rs";
 
-    let modified_content = "fn main() -> () {\n    {};\n    println!(\"Hello World\");\n}\n";
-    fs::write(root.join(filename), modified_content).unwrap();
-
     let mock_diff = indoc::indoc! {r#"
         diff --git a/test_script.rs b/test_script.rs
         index 1234567..abcdefg 100644
@@ -27,13 +24,32 @@ fn multiple_hunks() {
         +    println!("Hello World");
     "#};
 
-    let runner = MockProcessRunner::success(mock_diff);
+    // Index (original) content — context comes from here, not the working tree.
+    let index_content = "fn main() {\n    {};\n    println!(\"Hello\");\n}\n";
+
+    let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&[
+            "diff-files",
+            "-p",
+            "--minimal",
+            "--unified=0",
+            "--",
+            filename,
+        ])
+        .returns_success(mock_diff)
+        .expect("git")
+        .args(&["show", ":test_script.rs"])
+        .returns_success(index_content);
+
     let content =
         git_list_patches_impl(root, Some(vec![filename.to_string()].into()), &runner, &[])
             .unwrap()
             .into_content()
             .unwrap();
 
+    // Context shows the INDEX version: `println!("Hello")` not
+    // `println!("Hello World")`, and `fn main() {` not `fn main() -> () {`.
     assert_eq!(content, indoc::indoc! {r#"
         <patches>
             <patch>
@@ -43,7 +59,7 @@ fn multiple_hunks() {
                     [0] -fn main() {
                     [1] +fn main() -> () {
                              {};
-                             println!("Hello World");
+                             println!("Hello");
                          }
                 </diff>
             </patch>
@@ -51,7 +67,7 @@ fn multiple_hunks() {
                 <path>test_script.rs</path>
                 <id>1</id>
                 <diff>
-                         fn main() -> () {
+                         fn main() {
                              {};
                     [0] -    println!("Hello");
                     [1] +    println!("Hello World");
@@ -67,9 +83,6 @@ fn single_hunk() {
     let root = temp_dir.path();
     let filename = "simple.rs";
 
-    let content = "fn foo() -> i32 {\n    42\n}\n";
-    fs::write(root.join(filename), content).unwrap();
-
     let mock_diff = indoc::indoc! {r"
         diff --git a/simple.rs b/simple.rs
         index abc123..def456 100644
@@ -80,16 +93,28 @@ fn single_hunk() {
         +    42
     "};
 
-    let runner = MockProcessRunner::success(mock_diff);
-    let content = git_list_patches_impl(
-        root,
-        Some(vec!["simple.rs".to_string()].into()),
-        &runner,
-        &[],
-    )
-    .unwrap()
-    .into_content()
-    .unwrap();
+    let index_content = "fn foo() -> i32 {\n    0\n}\n";
+
+    let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&[
+            "diff-files",
+            "-p",
+            "--minimal",
+            "--unified=0",
+            "--",
+            filename,
+        ])
+        .returns_success(mock_diff)
+        .expect("git")
+        .args(&["show", ":simple.rs"])
+        .returns_success(index_content);
+
+    let content =
+        git_list_patches_impl(root, Some(vec![filename.to_string()].into()), &runner, &[])
+            .unwrap()
+            .into_content()
+            .unwrap();
 
     assert_eq!(content, indoc::indoc! {"
         <patches>
@@ -114,7 +139,19 @@ fn no_changes() {
 
     fs::write(root.join(filename), "fn main() {}\n").unwrap();
 
-    let runner = MockProcessRunner::success("");
+    // Diff returns empty, so git show is never called.
+    let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&[
+            "diff-files",
+            "-p",
+            "--minimal",
+            "--unified=0",
+            "--",
+            filename,
+        ])
+        .returns_success("");
+
     let content =
         git_list_patches_impl(root, Some(vec![filename.to_string()].into()), &runner, &[])
             .unwrap()
@@ -150,8 +187,7 @@ fn context_lines_aligned_with_diff_lines() {
     let root = temp_dir.path();
     let filename = "context.rs";
 
-    let content = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n";
-    fs::write(root.join(filename), content).unwrap();
+    let index_content = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n";
 
     let mock_diff = indoc::indoc! {r"
         diff --git a/context.rs b/context.rs
@@ -163,7 +199,21 @@ fn context_lines_aligned_with_diff_lines() {
         +MODIFIED
     "};
 
-    let runner = MockProcessRunner::success(mock_diff);
+    let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&[
+            "diff-files",
+            "-p",
+            "--minimal",
+            "--unified=0",
+            "--",
+            filename,
+        ])
+        .returns_success(mock_diff)
+        .expect("git")
+        .args(&["show", ":context.rs"])
+        .returns_success(index_content);
+
     let content =
         git_list_patches_impl(root, Some(vec![filename.to_string()].into()), &runner, &[])
             .unwrap()
@@ -209,7 +259,7 @@ fn missing_file_produces_warning_not_error() {
     "};
 
     // missing.rs: git diff-files returns empty (unknown to git), file doesn't
-    // exist on disk → warning. exists.rs: returns actual diff.
+    // exist on disk → warning. exists.rs: returns actual diff + index content.
     let runner = MockProcessRunner::builder()
         .expect("git")
         .args(&[
@@ -230,7 +280,10 @@ fn missing_file_produces_warning_not_error() {
             "--",
             "exists.rs",
         ])
-        .returns_success(mock_diff);
+        .returns_success(mock_diff)
+        .expect("git")
+        .args(&["show", ":exists.rs"])
+        .returns_success("fn main() {}\n");
 
     let content = git_list_patches_impl(
         root,
@@ -244,4 +297,61 @@ fn missing_file_produces_warning_not_error() {
 
     assert!(content.contains("File not found: missing.rs"));
     assert!(content.contains("<path>exists.rs</path>"));
+}
+
+#[test]
+fn pure_insertion_context_from_index() {
+    let temp_dir = tempdir().unwrap();
+    let root = temp_dir.path();
+    let filename = "insert.rs";
+
+    // Index has 4 lines, working tree inserts a new line after line 2.
+    let index_content = "aaa\nbbb\nccc\nddd\n";
+
+    let mock_diff = indoc::indoc! {r"
+        diff --git a/insert.rs b/insert.rs
+        index abc..def 100644
+        --- a/insert.rs
+        +++ b/insert.rs
+        @@ -2,0 +3 @@
+        +NEW
+    "};
+
+    let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&[
+            "diff-files",
+            "-p",
+            "--minimal",
+            "--unified=0",
+            "--",
+            filename,
+        ])
+        .returns_success(mock_diff)
+        .expect("git")
+        .args(&["show", ":insert.rs"])
+        .returns_success(index_content);
+
+    let content =
+        git_list_patches_impl(root, Some(vec![filename.to_string()].into()), &runner, &[])
+            .unwrap()
+            .into_content()
+            .unwrap();
+
+    // Pure insertion after line 2: context before includes lines 1-2,
+    // context after includes lines 3-4. The NEW line goes between them.
+    assert_eq!(content, indoc::indoc! {"
+        <patches>
+            <patch>
+                <path>insert.rs</path>
+                <id>0</id>
+                <diff>
+                         aaa
+                         bbb
+                    [0] +NEW
+                         ccc
+                         ddd
+                </diff>
+            </patch>
+        </patches>"});
 }

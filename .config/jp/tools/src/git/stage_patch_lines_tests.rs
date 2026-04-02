@@ -7,18 +7,28 @@ use crate::util::runner::MockProcessRunner;
 fn parse_hunk_header_simple() {
     let h = parse_hunk_header("@@ -5 +5 @@").unwrap();
     assert_eq!(h.old_start, 5);
+    assert_eq!(h.new_start, 5);
 }
 
 #[test]
 fn parse_hunk_header_with_counts() {
     let h = parse_hunk_header("@@ -5,3 +5,2 @@").unwrap();
     assert_eq!(h.old_start, 5);
+    assert_eq!(h.new_start, 5);
 }
 
 #[test]
 fn parse_hunk_header_zero_count() {
     let h = parse_hunk_header("@@ -5,0 +5,3 @@").unwrap();
     assert_eq!(h.old_start, 5);
+    assert_eq!(h.new_start, 5);
+}
+
+#[test]
+fn parse_hunk_header_different_old_new_start() {
+    let h = parse_hunk_header("@@ -3,0 +4,1 @@").unwrap();
+    assert_eq!(h.old_start, 3);
+    assert_eq!(h.new_start, 4);
 }
 
 #[test]
@@ -65,7 +75,26 @@ fn sub_hunk_select_second_pair() {
 fn sub_hunk_pure_addition() {
     let hunk = "@@ -0,0 +1,3 @@\n+line1\n+line2\n+line3";
     let result = build_sub_hunk(hunk, &[0, 1]).unwrap();
-    assert_eq!(result, "@@ -0,0 +0,2 @@\n+line1\n+line2\n");
+    // Offset = 1 - 0 = 1, so new_start = 0 + 1 = 1
+    assert_eq!(result, "@@ -0,0 +1,2 @@\n+line1\n+line2\n");
+}
+
+#[test]
+fn sub_hunk_insertion_after_existing_line() {
+    // Insert after old line 3: new_start is 4 (after line 3)
+    let hunk = "@@ -3,0 +4,1 @@\n+pub mod turn_iter;";
+    let result = build_sub_hunk(hunk, &[0]).unwrap();
+    // Must preserve +4 (after line 3), not +3 (before line 3)
+    assert_eq!(result, "@@ -3,0 +4,1 @@\n+pub mod turn_iter;\n");
+}
+
+#[test]
+fn sub_hunk_insertion_subset_preserves_offset() {
+    // Insert 3 lines after old line 7
+    let hunk = "@@ -7,0 +8,3 @@\n+line1\n+line2\n+line3";
+    let result = build_sub_hunk(hunk, &[0]).unwrap();
+    // Offset = 8 - 7 = 1, old_start stays 7, new_start = 8
+    assert_eq!(result, "@@ -7,0 +8,1 @@\n+line1\n");
 }
 
 #[test]
