@@ -644,6 +644,13 @@ user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
+[[publisher.toml_edit]]
+version = "0.25.4+spec-1.1.0"
+when = "2026-03-04"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
 [[publisher.toml_parser]]
 version = "1.0.9+spec-1.1.0"
 when = "2026-02-16"
