@@ -1,4 +1,4 @@
-use std::{cmp::min, fs};
+use std::cmp::min;
 
 use camino::Utf8Path;
 use serde::Serialize;
@@ -103,11 +103,16 @@ fn git_list_patches_impl<R: ProcessRunner>(
             continue;
         };
 
-        // For deleted files the working tree copy is gone, so context lines
-        // will be empty. For existing files we read them for pretty-printing
-        // context around each hunk.
-        let file_content = fs::read_to_string(root.join(path)).unwrap_or_default();
-        let source_lines: Vec<_> = file_content.lines().collect();
+        // Read the index (staged) version for context lines. This avoids
+        // showing working-tree changes from other hunks as misleading
+        // context, which confused patch application.
+        let index_content = runner
+            .run_with_env("git", &["show", &format!(":{path}")], root, env)
+            .ok()
+            .filter(|o| o.status.is_success())
+            .map(|o| o.stdout)
+            .unwrap_or_default();
+        let source_lines: Vec<_> = index_content.lines().collect();
 
         let mut tail = tail.to_string();
         tail.insert_str(0, "@@ ");
@@ -141,9 +146,9 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
     // Parse the header to find coordinates.
     let parts: Vec<_> = hunk_with_header.split_whitespace().collect();
 
-    // Find part starting with '+' (target file coordinates).
-    let new_file_part = parts.iter().find(|p| p.starts_with('+')).unwrap_or(&"+0,0");
-    let coords: Vec<_> = new_file_part.trim_start_matches('+').split(',').collect();
+    // Use old-file coordinates since context comes from the index.
+    let old_file_part = parts.iter().find(|p| p.starts_with('-')).unwrap_or(&"-0,0");
+    let coords: Vec<_> = old_file_part.trim_start_matches('-').split(',').collect();
 
     let start_line: usize = coords[0].parse().unwrap_or(0);
     let count: usize = if coords.len() > 1 {
@@ -157,17 +162,19 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
     let max_index = diff_line_count.saturating_sub(1);
     let index_prefix_width = format!("[{max_index}] ").len();
 
-    // Calculate context indices (0-indexed).
-    let line_idx = if start_line > 0 { start_line - 1 } else { 0 };
+    // Context boundaries depend on whether this hunk removes old lines.
+    let (ctx_before_end, ctx_after_start) = if count == 0 {
+        // Pure insertion after old line `start_line`.
+        // Context before includes up to and including that line.
+        (start_line, start_line)
+    } else {
+        // Removal/replacement: lines start_line..start_line+count are affected.
+        let first_affected = start_line.saturating_sub(1); // 0-indexed
+        (first_affected, first_affected + count)
+    };
 
-    // 3 lines before.
-    let ctx_before_start = line_idx.saturating_sub(3);
-    let ctx_before_end = line_idx;
-
-    // 3 lines after.
-    let hunk_end_idx = line_idx + count;
-    let ctx_after_start = hunk_end_idx;
-    let ctx_after_end = min(source_lines.len(), hunk_end_idx + 3);
+    let ctx_before_start = ctx_before_end.saturating_sub(3);
+    let ctx_after_end = min(source_lines.len(), ctx_after_start + 3);
 
     let mut result = String::new();
     let mut line_index = 0;

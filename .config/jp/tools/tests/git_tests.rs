@@ -521,6 +521,30 @@ async fn stage_patch_lines_all_lines_same_as_full_hunk() {
 }
 
 #[tokio::test]
+async fn stage_patch_lines_pure_insertion_into_tracked_file() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    // Insert a new line between existing lines.
+    commit_then_modify(&root, "ins.rs", "aaa\nbbb\nccc\n", "aaa\nbbb\nNEW\nccc\n");
+
+    // The diff inserts NEW after line 2: @@ -2,0 +3,1 @@
+    run_ok(
+        ctx(&root),
+        tool(
+            "git_stage_patch_lines",
+            &json!({"path": "ins.rs", "patch_id": 0, "lines": [0]}),
+        ),
+    )
+    .await;
+
+    // The insertion must land AFTER "bbb", not before it.
+    assert_eq!(staged_content(&root, "ins.rs"), "aaa\nbbb\nNEW\nccc\n");
+}
+
+#[tokio::test]
 async fn stage_patch_lines_pure_addition_from_intent_to_add() {
     if !has_git() {
         return;

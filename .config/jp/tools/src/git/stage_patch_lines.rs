@@ -56,6 +56,7 @@ enum DiffLineKind {
 #[derive(Debug)]
 struct HunkHeader {
     old_start: usize,
+    new_start: usize,
 }
 
 fn parse_hunk_header(header: &str) -> Result<HunkHeader, String> {
@@ -64,11 +65,20 @@ fn parse_hunk_header(header: &str) -> Result<HunkHeader, String> {
     let old_part = parts
         .get(1)
         .ok_or("Invalid hunk header: missing old range")?;
+    let new_part = parts
+        .get(2)
+        .ok_or("Invalid hunk header: missing new range")?;
 
     let old_range = old_part.trim_start_matches('-');
     let (old_start, _old_count) = parse_range(old_range)?;
 
-    Ok(HunkHeader { old_start })
+    let new_range = new_part.trim_start_matches('+');
+    let (new_start, _new_count) = parse_range(new_range)?;
+
+    Ok(HunkHeader {
+        old_start,
+        new_start,
+    })
 }
 
 fn parse_range(range: &str) -> Result<(usize, usize), String> {
@@ -227,7 +237,16 @@ fn build_sub_hunk(hunk: &str, selected: &[usize]) -> Result<String, String> {
         body.push('\n');
     }
 
-    let hunk_header = format!("@@ -{old_start},{removals} +{old_start},{additions} @@");
+    // Preserve the offset between old and new positions from the original
+    // hunk header. This is critical for pure insertions where new_start
+    // differs from old_start (e.g. @@ -3,0 +4,1 @@ inserts AFTER line 3).
+    #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
+    let new_start = {
+        let offset = header.new_start as isize - header.old_start as isize;
+        (old_start as isize + offset).max(0) as usize
+    };
+
+    let hunk_header = format!("@@ -{old_start},{removals} +{new_start},{additions} @@");
     Ok(format!("{hunk_header}\n{body}"))
 }
 
