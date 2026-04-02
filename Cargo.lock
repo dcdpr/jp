@@ -1898,6 +1898,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "camino",
+ "htmd",
  "jp_attachment",
  "jp_mcp",
  "reqwest",
