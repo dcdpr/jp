@@ -52,6 +52,24 @@ async fn test_list_files() {
             given: vec!["test/b.txt", "test/c.md", "test/d/e.txt"],
             expected: vec!["test/b.txt", "test/c.md", "test/d/e.txt"],
         }),
+        ("partial-prefix", TestCase {
+            prefixes: vec!["rfd/D"],
+            extensions: vec![],
+            given: vec!["rfd/D01-foo.md", "rfd/D02-bar.md", "rfd/001-baz.md"],
+            expected: vec!["rfd/D01-foo.md", "rfd/D02-bar.md"],
+        }),
+        ("partial-prefix-with-extension", TestCase {
+            prefixes: vec!["rfd/D"],
+            extensions: vec!["md"],
+            given: vec!["rfd/D01-foo.md", "rfd/D02-bar.txt", "rfd/001-baz.md"],
+            expected: vec!["rfd/D01-foo.md"],
+        }),
+        ("partial-prefix-nested", TestCase {
+            prefixes: vec!["src/foo"],
+            extensions: vec![],
+            given: vec!["src/foo.rs", "src/foo_tests.rs", "src/bar.rs"],
+            expected: vec!["src/foo.rs", "src/foo_tests.rs"],
+        }),
     ]);
 
     for (

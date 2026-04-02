@@ -1,6 +1,5 @@
-use fancy_regex::Regex;
 use htmd::HtmlToMarkdown;
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use serde::Deserialize;
 use url::Url;
 
@@ -16,7 +15,7 @@ const HAIKU_MODEL: &str = "claude-haiku-4-5";
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 
 pub(crate) async fn web_fetch(url: Url) -> ToolResult {
-    let response = reqwest::get(url.clone()).await?;
+    let response = http_client().get(url.clone()).send().await?;
 
     let content_type = response
         .headers()
@@ -37,24 +36,18 @@ pub(crate) async fn web_fetch(url: Url) -> ToolResult {
         return Ok(truncate(&body, SUMMARIZE_THRESHOLD).into());
     }
 
-    let title = extract_title(&body);
     let md = html_to_markdown(&body)?;
 
-    let content = match title {
-        Some(ref t) if !t.is_empty() => format!("# {t}\n\n{md}"),
-        _ => md,
-    };
-
-    if content.len() <= SUMMARIZE_THRESHOLD {
-        return Ok(content.into());
+    if md.len() <= SUMMARIZE_THRESHOLD {
+        return Ok(md.into());
     }
 
     // Try Haiku summarization for large pages
-    if let Some(summary) = try_summarize(&url, &content).await {
+    if let Some(summary) = try_summarize(&url, &md).await {
         return Ok(summary.into());
     }
 
-    Ok(truncate(&content, SUMMARIZE_THRESHOLD).into())
+    Ok(truncate(&md, SUMMARIZE_THRESHOLD).into())
 }
 
 fn html_to_markdown(html: &str) -> Result<String, Error> {
@@ -64,26 +57,6 @@ fn html_to_markdown(html: &str) -> Result<String, Error> {
 
     let md = converter.convert(html)?;
     Ok(collapse_blank_lines(&md))
-}
-
-fn extract_title(html: &str) -> Option<String> {
-    let re = Regex::new(r"(?is)<title[^>]*>(.*?)</title>").ok()?;
-    let caps = re.captures(html).ok()??;
-    let raw = caps.get(1)?.as_str().trim();
-    if raw.is_empty() {
-        return None;
-    }
-
-    Some(decode_html_entities(raw))
-}
-
-fn decode_html_entities(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&apos;", "'")
 }
 
 fn is_binary(content_type: &str) -> bool {
@@ -157,7 +130,7 @@ async fn summarize(api_key: &str, url: &Url, content: &str) -> Result<String, Er
         "messages": [{"role": "user", "content": prompt}]
     });
 
-    let resp = reqwest::Client::new()
+    let resp = http_client()
         .post(ANTHROPIC_API_URL)
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
@@ -190,6 +163,22 @@ async fn summarize(api_key: &str, url: &Url, content: &str) -> Result<String, Er
 #[derive(Deserialize)]
 struct HaikuResponse {
     content: Vec<ContentBlock>,
+}
+
+fn http_client() -> reqwest::Client {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        USER_AGENT,
+        HeaderValue::from_static(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like \
+             Gecko) Chrome/137.0.0.0 Safari/537.36",
+        ),
+    );
+
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .expect("failed to build HTTP client")
 }
 
 #[derive(Deserialize)]

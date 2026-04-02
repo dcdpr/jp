@@ -39,10 +39,25 @@ pub(crate) async fn fs_list_files(
 
     let mut entries = vec![];
     for prefix in &prefixes {
-        let prefixed = root.join(prefix.trim_start_matches('/'));
+        let normalized = prefix.trim_start_matches('/');
+        let prefixed = root.join(normalized);
+
+        // When the prefix points to an existing directory, walk it directly.
+        // Otherwise, walk the parent directory and filter to entries whose
+        // root-relative path starts with the prefix. This supports partial
+        // filename prefixes like "docs/rfd/D".
+        let (walk_dir, path_filter): (Utf8PathBuf, Option<String>) =
+            if prefixed.is_dir() || normalized.is_empty() {
+                (prefixed, None)
+            } else {
+                let parent = prefixed
+                    .parent()
+                    .map_or_else(|| root.to_owned(), Utf8PathBuf::from);
+                (parent, Some(normalized.to_owned()))
+            };
 
         let (tx, matches) = crossbeam_channel::unbounded();
-        WalkBuilder::new(&prefixed)
+        WalkBuilder::new(&walk_dir)
             // Include hidden and otherwise ignored files.
             .standard_filters(false)
             .follow_links(false)
@@ -53,6 +68,7 @@ pub(crate) async fn fs_list_files(
             .run(|| {
                 let tx = tx.clone();
                 let extensions = extensions.clone();
+                let path_filter = path_filter.clone();
                 Box::new(move |entry| {
                     // Ignore invalid entries.
                     let Ok(entry) = entry else {
@@ -81,6 +97,13 @@ pub(crate) async fn fs_list_files(
                     let Ok(path) = path.strip_prefix(root) else {
                         return WalkState::Continue;
                     };
+
+                    // Filter by partial prefix if the original prefix wasn't a directory.
+                    if let Some(filter) = &path_filter
+                        && !path.as_str().starts_with(filter.as_str())
+                    {
+                        return WalkState::Continue;
+                    }
 
                     let _result = tx.send(path.to_string());
 

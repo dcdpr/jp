@@ -74,7 +74,7 @@ fn cargo_test_impl<R: ProcessRunner>(
         let kind = l.get("type").and_then(Value::as_str).unwrap_or_default();
         let event = l.get("event").and_then(Value::as_str).unwrap_or_default();
 
-        if kind != "test" {
+        if kind != "test" || event == "started" {
             continue;
         }
         total_tests += 1;

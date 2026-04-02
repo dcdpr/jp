@@ -1,51 +1,5 @@
 use super::*;
 
-mod extract_title {
-    use super::*;
-
-    #[test]
-    fn basic() {
-        let html = "<html><head><title>Hello World</title></head><body></body></html>";
-        assert_eq!(extract_title(html), Some("Hello World".into()));
-    }
-
-    #[test]
-    fn with_html_entities() {
-        let html = "<title>Foo &amp; Bar &lt;Baz&gt;</title>";
-        assert_eq!(extract_title(html), Some("Foo & Bar <Baz>".into()));
-    }
-
-    #[test]
-    fn with_whitespace() {
-        let html = "<title>  \n  Some Title  \n  </title>";
-        assert_eq!(extract_title(html), Some("Some Title".into()));
-    }
-
-    #[test]
-    fn case_insensitive() {
-        let html = "<TITLE>Upper Case</TITLE>";
-        assert_eq!(extract_title(html), Some("Upper Case".into()));
-    }
-
-    #[test]
-    fn with_attributes() {
-        let html = r#"<title lang="en">Attributed</title>"#;
-        assert_eq!(extract_title(html), Some("Attributed".into()));
-    }
-
-    #[test]
-    fn empty_title() {
-        let html = "<title>  </title>";
-        assert_eq!(extract_title(html), None);
-    }
-
-    #[test]
-    fn no_title() {
-        let html = "<html><head></head><body>Hello</body></html>";
-        assert_eq!(extract_title(html), None);
-    }
-}
-
 mod is_binary {
     use super::*;
 
@@ -209,22 +163,5 @@ mod html_to_markdown {
         let html = "<html><head></head><body></body></html>";
         let md = html_to_markdown(html).unwrap();
         assert!(md.trim().is_empty(), "expected empty but got: {md:?}");
-    }
-}
-
-mod decode_html_entities {
-    use super::*;
-
-    #[test]
-    fn all_entities() {
-        assert_eq!(
-            decode_html_entities("&amp; &lt; &gt; &quot; &#39; &apos;"),
-            "& < > \" ' '"
-        );
-    }
-
-    #[test]
-    fn no_entities() {
-        assert_eq!(decode_html_entities("plain text"), "plain text");
     }
 }
