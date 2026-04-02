@@ -53,7 +53,7 @@ pub(crate) async fn fs_list_files(
                 let parent = prefixed
                     .parent()
                     .map_or_else(|| root.to_owned(), Utf8PathBuf::from);
-                (parent, Some(normalized.to_owned()))
+                (parent, Some(normalized.replace('/', std::path::MAIN_SEPARATOR_STR)))
             };
 
         let (tx, matches) = crossbeam_channel::unbounded();
