@@ -35,13 +35,14 @@ pub(crate) async fn fs_create_file(
             lang => lang,
         };
 
-        let mut response = format!("Create file '{}'", path.as_str().bold().blue());
+        let mut response = format!("Created file '{}'", path.as_str().bold().blue());
         if let Some(content) = content {
             let code_block = format!("`````{lang}\n{content}\n`````");
             let highlighted = Formatter::new()
                 .format_terminal(&code_block)
                 .unwrap_or(code_block);
             response.push_str(&format!(" with content:\n\n{highlighted}\n"));
+            response.push_str(&format!("\n{response}\n"));
         }
 
         return Ok(response.into());
