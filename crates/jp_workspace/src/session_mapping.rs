@@ -110,6 +110,24 @@ impl Workspace {
             .collect()
     }
 
+    /// Returns the active conversation ID from every session mapping.
+    #[must_use]
+    pub fn all_active_conversation_ids(&self) -> Vec<ConversationId> {
+        let Some(storage) = self.storage.as_ref() else {
+            return vec![];
+        };
+
+        storage
+            .list_session_files()
+            .into_iter()
+            .filter_map(|path| {
+                let key = path.file_stem()?;
+                let mapping: SessionMapping = storage.load_session_data(key).ok()??;
+                mapping.active_conversation_id()
+            })
+            .collect()
+    }
+
     /// Record that the given session activated a conversation.
     ///
     /// Writes the session mapping to disk. If no mapping exists yet, one is
