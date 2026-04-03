@@ -18,6 +18,10 @@ use crate::{
 pub(crate) struct Print {
     #[command(flatten)]
     target: PositionalIds<true, true>,
+
+    /// Print only the last N turns. Without a value, prints the last turn.
+    #[arg(long, num_args = 0..=1, default_missing_value = "1")]
+    last: Option<usize>,
 }
 
 impl Print {
@@ -25,17 +29,20 @@ impl Print {
         ConversationLoadRequest::explicit_or_session(&self.target.ids)
     }
 
-    #[expect(clippy::unused_self)]
     pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         for handle in handles {
-            Self::print_conversation(ctx, handle)?;
+            Self::print_conversation(ctx, handle, self.last)?;
         }
         ctx.printer.println("");
         ctx.printer.flush();
         Ok(())
     }
 
-    fn print_conversation(ctx: &mut Ctx, handle: &ConversationHandle) -> Output {
+    fn print_conversation(
+        ctx: &mut Ctx,
+        handle: &ConversationHandle,
+        last: Option<usize>,
+    ) -> Output {
         let events = ctx.workspace.events(handle)?.clone();
         let cfg = ctx.config();
         let pretty = ctx.printer.pretty_printing_enabled();
@@ -54,53 +61,62 @@ impl Print {
             ctx.term.is_tty,
         );
 
+        let all_turns: Vec<_> = events.iter_turns().collect();
+        let start = last.map_or(0, |n| all_turns.len().saturating_sub(n));
+
         let mut is_first_turn = true;
 
-        for event_with_cfg in events.iter() {
-            match &event_with_cfg.event.kind {
-                EventKind::TurnStart(_) => {
-                    if !is_first_turn {
-                        printer.println("\n---\n");
+        for turn in &all_turns[start..] {
+            for event_with_cfg in turn {
+                match &event_with_cfg.event.kind {
+                    EventKind::TurnStart(_) => {
+                        if !is_first_turn {
+                            printer.println("\n---\n");
+                        }
+                        is_first_turn = false;
                     }
-                    is_first_turn = false;
-                }
 
-                EventKind::ChatRequest(req) => {
-                    render_user_message(&printer, &cfg, pretty, &req.content)?;
-                }
-
-                EventKind::ChatResponse(resp) => {
-                    render_chat_response(&printer, &cfg, pretty, resp)?;
-                }
-
-                EventKind::ToolCallRequest(req) => {
-                    let tool_cfg = cfg.conversation.tools.get(&req.name);
-                    if !tool_cfg.as_ref().is_some_and(|c| c.style().hidden) {
-                        let params_style = tool_cfg
-                            .as_ref()
-                            .map(|c| c.style().parameters.clone())
-                            .unwrap_or_default();
-                        tool_renderer.render_tool_call(&req.name, &req.arguments, &params_style);
+                    EventKind::ChatRequest(req) => {
+                        render_user_message(&printer, &cfg, pretty, &req.content)?;
                     }
-                }
 
-                EventKind::ToolCallResponse(resp) => {
-                    let name = find_tool_name_for_response(&events, resp);
-                    let tool_cfg = name.as_deref().and_then(|n| cfg.conversation.tools.get(n));
-                    if !tool_cfg.as_ref().is_some_and(|c| c.style().hidden) {
-                        let inline = tool_cfg
-                            .as_ref()
-                            .map(|c| c.style().inline_results.clone())
-                            .unwrap_or_default();
-                        let link = tool_cfg
-                            .as_ref()
-                            .map(|c| c.style().results_file_link.clone())
-                            .unwrap_or_default();
-                        tool_renderer.render_result(resp, &inline, &link);
+                    EventKind::ChatResponse(resp) => {
+                        render_chat_response(&printer, &cfg, pretty, resp)?;
                     }
-                }
 
-                EventKind::InquiryRequest(_) | EventKind::InquiryResponse(_) => {}
+                    EventKind::ToolCallRequest(req) => {
+                        let tool_cfg = cfg.conversation.tools.get(&req.name);
+                        if !tool_cfg.as_ref().is_some_and(|c| c.style().hidden) {
+                            let params_style = tool_cfg
+                                .as_ref()
+                                .map(|c| c.style().parameters.clone())
+                                .unwrap_or_default();
+                            tool_renderer.render_tool_call(
+                                &req.name,
+                                &req.arguments,
+                                &params_style,
+                            );
+                        }
+                    }
+
+                    EventKind::ToolCallResponse(resp) => {
+                        let name = find_tool_name_for_response(&events, resp);
+                        let tool_cfg = name.as_deref().and_then(|n| cfg.conversation.tools.get(n));
+                        if !tool_cfg.as_ref().is_some_and(|c| c.style().hidden) {
+                            let inline = tool_cfg
+                                .as_ref()
+                                .map(|c| c.style().inline_results.clone())
+                                .unwrap_or_default();
+                            let link = tool_cfg
+                                .as_ref()
+                                .map(|c| c.style().results_file_link.clone())
+                                .unwrap_or_default();
+                            tool_renderer.render_result(resp, &inline, &link);
+                        }
+                    }
+
+                    EventKind::InquiryRequest(_) | EventKind::InquiryResponse(_) => {}
+                }
             }
         }
 
