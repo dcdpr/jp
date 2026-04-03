@@ -124,6 +124,13 @@ user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
+[[publisher.countme]]
+version = "3.0.1"
+when = "2022-03-08"
+user-id = 2699
+user-login = "matklad"
+user-name = "Alex Kladov"
+
 [[publisher.dyn-clone]]
 version = "1.0.20"
 when = "2025-07-27"
@@ -212,6 +219,13 @@ when = "2025-08-06"
 user-id = 359
 user-login = "seanmonstar"
 user-name = "Sean McArthur"
+
+[[publisher.hashbrown]]
+version = "0.14.5"
+when = "2024-04-28"
+user-id = 2915
+user-login = "Amanieu"
+user-name = "Amanieu d'Antras"
 
 [[publisher.hashbrown]]
 version = "0.15.5"
@@ -357,6 +371,13 @@ user-id = 2017
 user-login = "mbrubeck"
 user-name = "Matt Brubeck"
 
+[[publisher.once_cell]]
+version = "1.21.3"
+when = "2025-03-28"
+user-id = 2699
+user-login = "matklad"
+user-name = "Alex Kladov"
+
 [[publisher.once_cell_polyfill]]
 version = "1.70.1"
 when = "2025-05-22"
@@ -497,6 +518,13 @@ user-id = 359
 user-login = "seanmonstar"
 user-name = "Sean McArthur"
 
+[[publisher.rowan]]
+version = "0.15.11"
+when = "2023-03-25"
+user-id = 2699
+user-login = "matklad"
+user-name = "Alex Kladov"
+
 [[publisher.rustix]]
 version = "1.1.2"
 when = "2025-09-09"
@@ -587,6 +615,13 @@ when = "2024-01-10"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
+
+[[publisher.text-size]]
+version = "1.1.0"
+when = "2021-01-13"
+user-id = 2699
+user-login = "matklad"
+user-name = "Alex Kladov"
 
 [[publisher.thiserror]]
 version = "2.0.18"
