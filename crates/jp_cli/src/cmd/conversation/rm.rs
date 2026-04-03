@@ -6,7 +6,11 @@ use jp_conversation::ConversationId;
 use jp_workspace::ConversationHandle;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    cmd::{
+        ConversationLoadRequest, Output,
+        conversation_id::PositionalIds,
+        lock::{LockOutcome, LockRequest, acquire_lock},
+    },
     ctx::Ctx,
     format::conversation::DetailsFmt,
 };
@@ -78,15 +82,11 @@ fn remove(
     force: bool,
 ) -> Output {
     let id = handle.id();
-    let lock = ctx
-        .workspace
-        .lock_conversation(handle, None)?
-        .ok_or_else(|| {
-            crate::cmd::Error::from(format!(
-                "Conversation {} is locked by another session.",
-                id.to_string().bold().yellow()
-            ))
-        })?;
+    let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx))? {
+        LockOutcome::Acquired(lock) => lock,
+        LockOutcome::NewConversation => unreachable!("new conversation not allowed"),
+        LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),
+    };
 
     confirm_and_remove(ctx, id, &lock, active_id, force)?;
     ctx.workspace.remove_conversation_with_lock(lock.into_mut());

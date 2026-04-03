@@ -1,8 +1,9 @@
 use std::{str::FromStr as _, time::Duration};
 
 use chrono::{DateTime, Utc};
-use jp_conversation::ConversationId;
-use jp_workspace::ConversationHandle;
+use jp_conversation::ConversationStream;
+use jp_workspace::{ConversationHandle, ConversationLock};
+use tracing::debug;
 
 use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
@@ -54,77 +55,64 @@ impl Fork {
 
     pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         for source in handles {
-            self.fork_one(ctx, source)?;
+            let lock = fork_conversation(ctx, source, |events| {
+                events.retain(|event| {
+                    self.from.is_none_or(|from| event.timestamp >= from)
+                        && self.until.is_none_or(|until| event.timestamp <= until)
+                });
+
+                if let Some(last) = self.last {
+                    events.retain_last_turns(last.unwrap_or(1));
+                }
+            })?;
+
+            if self.activate
+                && let Some(session) = &ctx.session
+                && let Err(error) =
+                    ctx.workspace
+                        .activate_session_conversation(session, lock.id(), ctx.now())
+            {
+                tracing::warn!(%error, "Failed to write session mapping.");
+            }
         }
         ctx.printer.println("Conversation forked.");
         Ok(())
     }
+}
 
-    fn fork_one(&self, ctx: &mut Ctx, source: &ConversationHandle) -> Output {
-        let now = ctx.now();
-        let mut new_conversation = ctx.workspace.metadata(source)?.clone();
-        new_conversation.last_activated_at = now;
-        new_conversation.expires_at = None;
+/// Fork a conversation and return the new conversation's lock.
+pub(crate) fn fork_conversation(
+    ctx: &mut Ctx,
+    source: &ConversationHandle,
+    mut filter: impl FnMut(&mut ConversationStream),
+) -> crate::Result<ConversationLock> {
+    let now = ctx.now();
 
-        let mut new_events = ctx.workspace.events(source)?.clone().with_created_at(now);
+    let mut new_conversation = ctx.workspace.metadata(source)?.clone();
+    new_conversation.last_activated_at = now;
+    new_conversation.expires_at = None;
 
-        new_events.retain(|event| {
-            self.from.is_none_or(|from| event.timestamp >= from)
-                && self.until.is_none_or(|until| event.timestamp <= until)
-        });
+    let mut new_events = ctx.workspace.events(source)?.clone().with_created_at(now);
 
-        if let Some(last) = self.last {
-            let n = last.unwrap_or(1);
-            let turn_count = new_events
-                .iter()
-                .filter(|e| e.event.is_turn_start())
-                .count();
+    filter(&mut new_events);
+    new_events.sanitize();
 
-            if turn_count > n {
-                let skip = turn_count - n;
-                let mut turns_seen = 0;
-                let mut keeping = false;
+    let lock = ctx.workspace.create_and_lock_conversation(
+        new_conversation,
+        new_events.base_config(),
+        ctx.session.as_ref(),
+    )?;
 
-                new_events.retain(|event| {
-                    if event.is_turn_start() {
-                        turns_seen += 1;
-                        if turns_seen > skip {
-                            keeping = true;
-                        }
-                    }
-                    keeping
-                });
-            }
-        }
+    lock.as_mut()
+        .update_events(|events| events.extend(new_events));
 
-        new_events.sanitize();
+    debug!(
+        source = source.id().to_string(),
+        fork = lock.id().to_string(),
+        "Forked conversation."
+    );
 
-        let new_id = ConversationId::try_from(ctx.now())?;
-        ctx.workspace.create_conversation_with_id(
-            new_id,
-            new_conversation,
-            new_events.base_config(),
-        );
-
-        let new_handle = ctx.workspace.acquire_conversation(&new_id)?;
-        let conv = ctx
-            .workspace
-            .lock_conversation(new_handle, None)?
-            .expect("newly created conversation should not be locked")
-            .into_mut();
-        conv.update_events(|events| events.extend(new_events));
-
-        if self.activate
-            && let Some(session) = &ctx.session
-            && let Err(error) = ctx
-                .workspace
-                .activate_session_conversation(session, new_id, now)
-        {
-            tracing::warn!(%error, "Failed to write session mapping.");
-        }
-
-        Ok(())
-    }
+    Ok(lock)
 }
 
 #[cfg(test)]

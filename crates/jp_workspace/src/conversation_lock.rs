@@ -1,24 +1,26 @@
-//! Guard-scoped persistence for conversations (RFD D02).
+//! Guard-scoped persistence for conversations.
 //!
 //! Two types provide guard-scoped persistence:
 //!
-//! - [`ConversationLock`] — cross-process exclusive access to a conversation.
-//!   Holds the OS-level `flock` and provides read access. Produces
-//!   [`ConversationMut`] scopes for writes.
+//! - [`ConversationLock`] — exclusive access to a conversation. When backed by
+//!   storage, holds an OS-level `flock` for cross-process exclusion. For
+//!   in-memory workspaces the flock is absent, but the type-level guarantee
+//!   (only one lock per conversation) still holds within the process. Provides
+//!   read access and produces [`ConversationMut`] scopes for writes.
 //!
 //! - [`ConversationMut`] — a mutable scope over a conversation. Automatically
-//!   persists modified data to disk when dropped. Uses a callback-based API
-//!   for writes to make it structurally impossible to hold a write lock guard
-//!   across `.await` points.
+//!   persists modified data to disk when dropped (if a persist backend is
+//!   configured). Uses a callback-based API for writes to make it structurally
+//!   impossible to hold a write lock guard across `.await` points.
 //!
 //! # Type Hierarchy
 //!
 //! ```text
 //! ConversationLock
-//! ├── Holds Arc<ConversationFileLock>       — cross-process exclusion
-//! ├── Holds Arc<RwLock<Conversation>>       — shared with Workspace
-//! ├── Holds Arc<RwLock<ConversationStream>> — shared with Workspace
-//! ├── Read methods: metadata(), events()    — return RwLockReadGuard
+//! ├── Holds Option<Arc<ConversationFileLock>> — cross-process exclusion (if storage)
+//! ├── Holds Arc<RwLock<Conversation>>         — shared with Workspace
+//! ├── Holds Arc<RwLock<ConversationStream>>   — shared with Workspace
+//! ├── Read methods: metadata(), events()      — return RwLockReadGuard
 //! ├── as_mut()   → ConversationMut (borrows flock via Arc clone)
 //! └── into_mut() → ConversationMut (consumes lock, takes flock ownership)
 //!
@@ -51,11 +53,11 @@
 //!
 //! # Persistence Model
 //!
-//! - **`flush()?`** — explicit persist at checkpoints (e.g., after each turn
-//!   in the LLM loop). I/O errors propagate via `?`, halting the loop.
-//! - **`Drop`** — safety net. If the `ConversationMut` drops while dirty
-//!   (e.g., due to `?` unwinding), `Drop` persists the data. Errors are
-//!   logged but cannot be propagated from `Drop`.
+//! - **`flush()?`** — explicit persist at checkpoints (e.g., after each turn in
+//!   the LLM loop). I/O errors propagate via `?`, halting the loop.
+//! - **`Drop`** — safety net. If the `ConversationMut` drops while dirty (e.g.,
+//!   due to `?` unwinding), `Drop` persists the data. Errors are logged but
+//!   cannot be propagated from `Drop`.
 //!
 //! Long-running loops should call `flush()` at each checkpoint so disk errors
 //! halt immediately rather than letting the loop continue with unsaved data.
@@ -72,6 +74,17 @@ use tracing::info;
 
 use crate::{handle::ConversationHandle, persist::PersistBackend};
 
+/// Result of attempting to acquire a conversation lock.
+#[derive(Debug)]
+pub enum LockResult {
+    /// Lock acquired successfully.
+    Acquired(ConversationLock),
+
+    /// Another process holds the lock. The handle is returned so the caller can
+    /// retry without re-acquiring it.
+    AlreadyLocked(ConversationHandle),
+}
+
 /// Cross-process exclusive access to a conversation.
 ///
 /// Proves that the `flock` is held. Provides read access and produces
@@ -86,7 +99,9 @@ pub struct ConversationLock {
     metadata: Arc<RwLock<Conversation>>,
     events: Arc<RwLock<ConversationStream>>,
     writer: Option<Arc<dyn PersistBackend>>,
-    file_lock: Arc<ConversationFileLock>,
+
+    /// Cross-process flock. `None` for in-memory workspaces without storage.
+    file_lock: Option<Arc<ConversationFileLock>>,
 }
 
 impl ConversationLock {
@@ -100,14 +115,14 @@ impl ConversationLock {
         metadata: Arc<RwLock<Conversation>>,
         events: Arc<RwLock<ConversationStream>>,
         writer: Option<Arc<dyn PersistBackend>>,
-        file_lock: ConversationFileLock,
+        file_lock: Option<ConversationFileLock>,
     ) -> Self {
         Self {
             id: handle.into_inner(),
             metadata,
             events,
             writer,
-            file_lock: Arc::new(file_lock),
+            file_lock: file_lock.map(Arc::new),
         }
     }
 
@@ -140,7 +155,7 @@ impl ConversationLock {
             events: Arc::clone(&self.events),
             dirty: AtomicBool::new(false),
             writer: self.writer.clone(),
-            _file_lock: Arc::clone(&self.file_lock),
+            _file_lock: self.file_lock.clone(),
         }
     }
 
@@ -157,51 +172,6 @@ impl ConversationLock {
             dirty: AtomicBool::new(false),
             writer: self.writer,
             _file_lock: self.file_lock,
-        }
-    }
-
-    /// Create a test lock with no-op flock and no persistence.
-    #[cfg(debug_assertions)]
-    #[doc(hidden)]
-    #[must_use]
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "handle is consumed intentionally"
-    )]
-    pub fn test_lock(
-        handle: ConversationHandle,
-        metadata: Arc<RwLock<Conversation>>,
-        events: Arc<RwLock<ConversationStream>>,
-    ) -> Self {
-        Self {
-            id: handle.id(),
-            metadata,
-            events,
-            writer: None,
-            file_lock: Arc::new(ConversationFileLock::test_noop()),
-        }
-    }
-
-    /// Create a test lock with a mock persist backend.
-    #[cfg(debug_assertions)]
-    #[doc(hidden)]
-    #[must_use]
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "handle is consumed intentionally"
-    )]
-    pub fn test_lock_with_writer(
-        handle: ConversationHandle,
-        metadata: Arc<RwLock<Conversation>>,
-        events: Arc<RwLock<ConversationStream>>,
-        writer: Arc<dyn PersistBackend>,
-    ) -> Self {
-        Self {
-            id: handle.id(),
-            metadata,
-            events,
-            writer: Some(writer),
-            file_lock: Arc::new(ConversationFileLock::test_noop()),
         }
     }
 }
@@ -232,8 +202,10 @@ pub struct ConversationMut {
     events: Arc<RwLock<ConversationStream>>,
     dirty: AtomicBool,
     writer: Option<Arc<dyn PersistBackend>>,
-    // Holds the flock alive. Released when the last Arc reference drops.
-    _file_lock: Arc<ConversationFileLock>,
+
+    // Holds the flock alive. Released when the last Arc reference drops. `None`
+    // for in-memory workspaces without storage.
+    _file_lock: Option<Arc<ConversationFileLock>>,
 }
 
 impl ConversationMut {

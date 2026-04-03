@@ -4,7 +4,11 @@ use jp_config::PartialAppConfig;
 use jp_workspace::ConversationHandle;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::FlagIds},
+    cmd::{
+        ConversationLoadRequest, Output,
+        conversation_id::FlagIds,
+        lock::{LockOutcome, LockRequest, acquire_lock},
+    },
     config_pipeline,
     ctx::Ctx,
 };
@@ -41,16 +45,15 @@ impl Set {
     ) -> Output {
         config_delta.resolve_model_aliases(&ctx.config().providers.llm.aliases);
 
-        let session = ctx.session.as_ref().map(|s| s.id.as_str().to_owned());
-
         for handle in handles {
-            let id = handle.id();
-            let conv = ctx
-                .workspace
-                .lock_conversation(handle, session.as_deref())?
-                .ok_or(crate::error::Error::LockTimeout(id))?
-                .into_mut();
+            let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx))? {
+                LockOutcome::Acquired(lock) => lock,
+                LockOutcome::NewConversation => unreachable!("new conversation not allowed"),
+                LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),
+            };
 
+            let conv = lock.into_mut();
+            let id = conv.id();
             conv.update_events(|events| events.add_config_delta(config_delta.clone()));
             ctx.printer
                 .println(format!("Set configuration in conversation {id}"));

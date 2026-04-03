@@ -12,7 +12,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, error::Result};
+use crate::error::Result;
 
 pub(crate) const LOCKS_DIR: &str = "locks";
 
@@ -121,51 +121,44 @@ impl Drop for ConversationFileLock {
     }
 }
 
-impl ConversationFileLock {
-    /// Create a no-op lock for test environments without on-disk storage.
-    #[cfg(debug_assertions)]
-    #[doc(hidden)]
-    #[must_use]
-    pub fn test_noop() -> Self {
-        Self {
-            file: None,
-            path: Utf8PathBuf::from("/dev/null"),
-        }
-    }
-}
-
 impl super::Storage {
     /// Try to acquire an exclusive lock on a conversation.
     ///
     /// `session` is the current session identity, written to the lock file for
     /// diagnostic purposes.
     ///
+    /// The lock file is placed in user storage if available, otherwise in
+    /// workspace storage.
+    ///
     /// Returns `Ok(Some(lock))` if the lock was acquired, `Ok(None)` if another
-    /// process holds it, or `Err` on I/O errors or missing user storage.
+    /// process holds it, or `Err` on I/O errors.
     pub fn try_lock_conversation(
         &self,
         conversation_id: &str,
         session: Option<&str>,
     ) -> Result<Option<ConversationFileLock>> {
-        let user = self
-            .user
-            .as_deref()
-            .ok_or(Error::NotDir(Utf8PathBuf::from("<no user storage>")))?;
-
-        let path = user.join(LOCKS_DIR).join(format!("{conversation_id}.lock"));
+        let base = self.user.as_deref().unwrap_or(&self.root);
+        let path = base.join(LOCKS_DIR).join(format!("{conversation_id}.lock"));
 
         ConversationFileLock::try_acquire(path, session)
     }
 
     /// Read lock holder info for a conversation.
     ///
-    /// Returns `None` if there's no lock file, no user storage, or the file
-    /// can't be parsed.
+    /// Returns `None` if there's no lock file or the file can't be parsed.
+    /// Checks user storage first, then workspace storage.
     #[must_use]
     pub fn read_conversation_lock_info(&self, conversation_id: &str) -> Option<LockInfo> {
-        let user = self.user.as_deref()?;
-        let path = user.join(LOCKS_DIR).join(format!("{conversation_id}.lock"));
+        let lock_file = format!("{conversation_id}.lock");
 
+        if let Some(user) = self.user.as_deref() {
+            let path = user.join(LOCKS_DIR).join(&lock_file);
+            if let Some(info) = read_lock_info(&path) {
+                return Some(info);
+            }
+        }
+
+        let path = self.root.join(LOCKS_DIR).join(&lock_file);
         read_lock_info(&path)
     }
 }

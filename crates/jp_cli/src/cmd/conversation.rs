@@ -4,7 +4,7 @@ use super::{ConversationLoadRequest, Output};
 use crate::ctx::Ctx;
 
 mod edit;
-mod fork;
+pub(crate) mod fork;
 mod grep;
 mod ls;
 mod print;

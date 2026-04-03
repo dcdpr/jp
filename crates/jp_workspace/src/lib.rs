@@ -11,13 +11,13 @@ mod id;
 pub mod persist;
 mod sanitize;
 pub mod session;
-mod session_mapping;
+pub(crate) mod session_mapping;
 mod state;
 
 use std::sync::{Arc, OnceLock};
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
-pub use conversation_lock::{ConversationLock, ConversationMut};
+pub use conversation_lock::{ConversationLock, ConversationMut, LockResult};
 pub use error::Error;
 use error::Result;
 pub use handle::ConversationHandle;
@@ -32,7 +32,7 @@ pub use sanitize::{SanitizeReport, TrashedConversation};
 use state::State;
 use tracing::{debug, trace, warn};
 
-use crate::persist::PersistBackend;
+use crate::{persist::PersistBackend, session::Session};
 
 const APPLICATION: &str = "jp";
 
@@ -268,7 +268,16 @@ impl Workspace {
             .filter_map(|(id, cell)| cell.get().map(|arc| (id, arc.read_arc())))
     }
 
-    /// Creates a new conversation.
+    /// Create a new conversation in memory.
+    ///
+    /// Returns the conversation ID. No data is written to disk and no
+    /// cross-process lock is acquired. Persistence happens when a
+    /// [`ConversationMut`] holding this conversation is flushed or dropped.
+    ///
+    /// For code that needs cross-process exclusion from the start, use
+    /// [`create_and_lock_conversation`] instead.
+    ///
+    /// [`create_and_lock_conversation`]: Self::create_and_lock_conversation
     pub fn create_conversation(
         &mut self,
         conversation: Conversation,
@@ -277,7 +286,11 @@ impl Workspace {
         self.create_conversation_with_id(ConversationId::default(), conversation, config)
     }
 
-    /// Creates a new conversation with the given ID.
+    /// Create a new conversation in memory with a specific ID.
+    ///
+    /// See [`create_conversation`] for details.
+    ///
+    /// [`create_conversation`]: Self::create_conversation
     pub fn create_conversation_with_id(
         &mut self,
         id: ConversationId,
@@ -303,6 +316,83 @@ impl Workspace {
             )));
 
         id
+    }
+
+    /// Create a new conversation and acquire an exclusive lock on it.
+    ///
+    /// Inserts into in-memory state and acquires the cross-process flock
+    /// atomically, so no other process can claim the same conversation ID.
+    /// If storage is not configured, the lock has no flock backing but
+    /// still provides the type-level mutation guarantee.
+    pub fn create_and_lock_conversation(
+        &mut self,
+        conversation: Conversation,
+        config: Arc<AppConfig>,
+        session: Option<&Session>,
+    ) -> Result<ConversationLock> {
+        let id = self.create_conversation(conversation, config);
+        self.lock_new_conversation(id, session)
+    }
+
+    /// Create a new conversation with a specific ID and acquire an exclusive
+    /// lock on it.
+    ///
+    /// See [`create_and_lock_conversation`] for details.
+    ///
+    /// [`create_and_lock_conversation`]: Self::create_and_lock_conversation
+    pub fn create_and_lock_conversation_with_id(
+        &mut self,
+        id: ConversationId,
+        conversation: Conversation,
+        config: Arc<AppConfig>,
+        session: Option<&Session>,
+    ) -> Result<ConversationLock> {
+        self.create_conversation_with_id(id, conversation, config);
+        self.lock_new_conversation(id, session)
+    }
+
+    /// Lock a just-created conversation.
+    ///
+    /// Acquires the flock if storage is configured, otherwise returns a lock
+    /// without flock backing (for in-memory workspaces).
+    fn lock_new_conversation(
+        &self,
+        id: ConversationId,
+        session: Option<&Session>,
+    ) -> Result<ConversationLock> {
+        let file_lock = self
+            .storage
+            .as_ref()
+            .map(|s| s.try_lock_conversation(&id.to_string(), session.map(|s| s.id.as_str())))
+            .transpose()?
+            .flatten();
+
+        let metadata = self
+            .state
+            .conversations
+            .get(&id)
+            .and_then(|cell| cell.get())
+            .expect("just created")
+            .clone();
+
+        let events = self
+            .state
+            .events
+            .get(&id)
+            .and_then(|cell| cell.get())
+            .expect("just created")
+            .clone();
+
+        let writer = if self.disable_persistence {
+            None
+        } else {
+            self.persist_backend.clone()
+        };
+
+        let handle = ConversationHandle::new(id);
+        Ok(ConversationLock::new(
+            handle, metadata, events, writer, file_lock,
+        ))
     }
 
     /// Returns the globally unique ID of the workspace.
@@ -361,21 +451,23 @@ impl Workspace {
 
     /// Acquire an exclusive cross-process lock on a conversation.
     ///
-    /// Returns `Ok(Some(lock))` if the lock was acquired, `Ok(None)` if another
-    /// process holds it. The caller is responsible for retry/timeout.
+    /// Returns `Ok(LockResult::Acquired(lock))` if the lock was acquired, or
+    /// `Ok(LockResult::AlreadyLocked(handle))` if another process holds it,
+    /// giving the handle back so the caller can retry.
     ///
     /// Returns an error if conversation data cannot be loaded from disk (e.g.
     /// the user deleted a required file).
     pub fn lock_conversation(
         &self,
         handle: ConversationHandle,
-        session: Option<&str>,
-    ) -> Result<Option<ConversationLock>> {
+        session: Option<&Session>,
+    ) -> Result<LockResult> {
+        let session = session.map(|s| s.id.as_str());
         let storage = self.storage.as_ref().ok_or(Error::MissingStorage)?;
         let id = handle.id();
 
         let Some(file_lock) = storage.try_lock_conversation(&id.to_string(), session)? else {
-            return Ok(None);
+            return Ok(LockResult::AlreadyLocked(handle));
         };
 
         if let Some(cell) = self.state.conversations.get(&id) {
@@ -407,8 +499,12 @@ impl Workspace {
             self.persist_backend.clone()
         };
 
-        Ok(Some(ConversationLock::new(
-            handle, metadata, events, writer, file_lock,
+        Ok(LockResult::Acquired(ConversationLock::new(
+            handle,
+            metadata,
+            events,
+            writer,
+            Some(file_lock),
         )))
     }
 
@@ -431,12 +527,12 @@ impl Workspace {
 
     /// Read the lock holder info for a conversation.
     #[must_use]
-    pub fn read_lock_info(&self, id: &ConversationId) -> Option<LockInfo> {
+    pub fn conversation_lock_info(&self, id: &ConversationId) -> Option<LockInfo> {
         let storage = self.storage.as_ref()?;
         storage.read_conversation_lock_info(&id.to_string())
     }
 
-    /// Create a [`ConversationLock`] backed by a no-op flock for tests.
+    /// Create a [`ConversationLock`] without a cross-process flock for tests.
     #[cfg(debug_assertions)]
     #[doc(hidden)]
     #[must_use]
@@ -466,11 +562,8 @@ impl Workspace {
             .expect("test_lock: events not found")
             .clone();
 
-        if let Some(writer) = &self.persist_backend {
-            ConversationLock::test_lock_with_writer(handle, metadata, events, Arc::clone(writer))
-        } else {
-            ConversationLock::test_lock(handle, metadata, events)
-        }
+        let writer = self.persist_backend.clone();
+        ConversationLock::new(handle, metadata, events, writer, None)
     }
 
     fn rebuild_persist_backend(&mut self) {

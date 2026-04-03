@@ -20,7 +20,11 @@ use jp_printer::PrinterWriter;
 use jp_workspace::ConversationHandle;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    cmd::{
+        ConversationLoadRequest, Output,
+        conversation_id::PositionalIds,
+        lock::{LockOutcome, LockRequest, acquire_lock},
+    },
     ctx::Ctx,
 };
 
@@ -63,16 +67,14 @@ impl Edit {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
-        let session = ctx.session.as_ref().map(|s| s.id.as_str().to_owned());
-
         for handle in handles {
-            let id = handle.id();
-            let conv = ctx
-                .workspace
-                .lock_conversation(handle, session.as_deref())?
-                .ok_or(crate::error::Error::LockTimeout(id))?
-                .into_mut();
+            let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx))? {
+                LockOutcome::Acquired(lock) => lock,
+                LockOutcome::NewConversation => unreachable!("new conversation not allowed"),
+                LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),
+            };
 
+            let conv = lock.into_mut();
             if let Some(user) = self.local {
                 conv.update_metadata(|m| m.user = user.unwrap_or(!m.user));
             }
