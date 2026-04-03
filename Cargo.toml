@@ -30,7 +30,6 @@ jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
 
 grizzly = { path = "crates/contrib/grizzly" }
-json_edit = { path = "crates/contrib/json_edit" }
 
 ahash = { version = "0.8", default-features = false, features = ["runtime-rng", "std", "serde"] }
 assert_matches = { version = "1", default-features = false }
