@@ -61,12 +61,12 @@ impl Print {
             ctx.term.is_tty,
         );
 
-        let all_turns: Vec<_> = events.iter_turns().collect();
-        let start = last.map_or(0, |n| all_turns.len().saturating_sub(n));
+        let turns = events.iter_turns();
+        let skip = last.map_or(0, |n| turns.len().saturating_sub(n));
 
         let mut is_first_turn = true;
 
-        for turn in &all_turns[start..] {
+        for turn in turns.skip(skip) {
             for event_with_cfg in turn {
                 match &event_with_cfg.event.kind {
                     EventKind::TurnStart(_) => {
