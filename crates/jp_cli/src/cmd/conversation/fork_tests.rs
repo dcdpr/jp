@@ -4,7 +4,7 @@ use camino_tempfile::tempdir;
 use chrono::TimeZone as _;
 use jp_config::AppConfig;
 use jp_conversation::{
-    Conversation, ConversationEvent, ConversationStream,
+    Conversation, ConversationEvent, ConversationId, ConversationStream,
     event::{ChatRequest, ChatResponse, TurnStart},
 };
 use jp_printer::{OutputFormat, Printer};

@@ -181,12 +181,15 @@ impl Task for TitleGeneratorTask {
         if let Ok(handle) = ctx.acquire_conversation(&self.conversation_id) {
             // Lock the conversation before writing the title. The query's
             // lock has been released by the time task sync runs.
-            let Some(lock) = ctx.lock_conversation(handle, None)? else {
-                warn!(
-                    conversation_id = %self.conversation_id,
-                    "Could not lock conversation for title update, skipping."
-                );
-                return Ok(());
+            let lock = match ctx.lock_conversation(handle, None)? {
+                jp_workspace::LockResult::Acquired(lock) => lock,
+                jp_workspace::LockResult::AlreadyLocked(_) => {
+                    warn!(
+                        conversation_id = %self.conversation_id,
+                        "Could not lock conversation for title update, skipping."
+                    );
+                    return Ok(());
+                }
             };
             let mut conv = lock.into_mut();
             conv.update_metadata(|m| m.title = self.title.clone());

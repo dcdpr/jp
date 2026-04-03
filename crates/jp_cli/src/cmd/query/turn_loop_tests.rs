@@ -152,10 +152,10 @@ async fn test_quit_during_streaming_persists_content() {
         .expect("failed to enable persistence");
 
     // Create a conversation with an initial user query
-    let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-
-    let handle = workspace.acquire_conversation(&conv_id).unwrap();
-    let lock = workspace.test_lock(handle);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
 
     let chat_request = ChatRequest::from("What is 2+2?");
 
@@ -231,10 +231,10 @@ async fn test_normal_completion_persists_content() {
         .persisted_at(&storage)
         .expect("failed to enable persistence");
 
-    let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-
-    let handle = workspace.acquire_conversation(&conv_id).unwrap();
-    let lock = workspace.test_lock(handle);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
 
     let chat_request = ChatRequest::from("Hello");
 
@@ -312,10 +312,10 @@ async fn test_tool_call_cycle_completes_with_followup() {
         .persisted_at(&storage)
         .expect("failed to enable persistence");
 
-    let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-
-    let handle = workspace.acquire_conversation(&conv_id).unwrap();
-    let lock = workspace.test_lock(handle);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
 
     let chat_request = ChatRequest::from("List files in current directory");
 
@@ -403,10 +403,10 @@ async fn test_quit_during_tool_execution_persists() {
         .persisted_at(&storage)
         .expect("failed to enable persistence");
 
-    let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-
-    let handle = workspace.acquire_conversation(&conv_id).unwrap();
-    let lock = workspace.test_lock(handle);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
 
     let chat_request = ChatRequest::from("Run a tool");
 
@@ -491,10 +491,10 @@ async fn test_multiple_tool_calls_in_sequence() {
         .persisted_at(&storage)
         .expect("failed to enable persistence");
 
-    let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-
-    let handle = workspace.acquire_conversation(&conv_id).unwrap();
-    let lock = workspace.test_lock(handle);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
 
     let chat_request = ChatRequest::from("Do multiple things");
 
@@ -618,10 +618,10 @@ async fn test_empty_tool_response_continues_cycle() {
         .persisted_at(&storage)
         .expect("failed to enable persistence");
 
-    let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-
-    let handle = workspace.acquire_conversation(&conv_id).unwrap();
-    let lock = workspace.test_lock(handle);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
 
     let chat_request = ChatRequest::from("Use unknown tool");
 
@@ -720,11 +720,10 @@ async fn test_tool_restart_on_shutdown_signal() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+        let conv_id = lock.id();
 
         let chat_request = ChatRequest::from("Please use a tool");
 
@@ -840,11 +839,10 @@ async fn test_merged_stream_exits_after_tool_response() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+        let conv_id = lock.id();
 
         let chat_request = ChatRequest::from("Please use echo_tool");
 
@@ -950,11 +948,9 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
@@ -1091,11 +1087,9 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
@@ -1239,11 +1233,9 @@ async fn test_tool_call_with_run_mode_unattended() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
@@ -1375,11 +1367,9 @@ async fn test_tool_call_with_run_mode_skip() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
@@ -1545,11 +1535,9 @@ async fn test_multiple_tools_with_different_run_modes() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Use both tools");
 
@@ -1743,11 +1731,9 @@ async fn test_tool_call_returns_error() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Use failing_tool");
 
@@ -1921,11 +1907,9 @@ async fn test_waiting_indicator_shows_during_delay() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Hello");
 
@@ -2005,11 +1989,9 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Hello");
 
@@ -2082,11 +2064,9 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Hello");
 
@@ -2165,11 +2145,9 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Create a file");
 
@@ -2364,10 +2342,9 @@ async fn test_turn_start_event_is_emitted() {
         .persisted_at(&storage)
         .expect("failed to enable persistence");
 
-    let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-
-    let handle = workspace.acquire_conversation(&conv_id).unwrap();
-    let lock = workspace.test_lock(handle);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
 
     let chat_request = ChatRequest::from("Hello");
 
@@ -2425,10 +2402,9 @@ async fn test_turn_start_index_increments_across_turns() {
         .persisted_at(&storage)
         .expect("failed to enable persistence");
 
-    let conv_id = workspace.create_conversation(Conversation::default(), config.clone().into());
-
-    let handle = workspace.acquire_conversation(&conv_id).unwrap();
-    let lock = workspace.test_lock(handle);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
 
     let mcp_client = jp_mcp::Client::default();
 
@@ -2524,11 +2500,9 @@ async fn test_markdown_flushed_before_tool_header() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Do something");
 
@@ -2688,11 +2662,9 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Use both tools");
 
@@ -2873,11 +2845,9 @@ async fn test_single_tool_call_rendered_with_args() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Read a file");
 
@@ -3164,11 +3134,9 @@ async fn test_tool_with_single_inquiry() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Use the tool");
 
@@ -3304,11 +3272,9 @@ async fn test_tool_with_multiple_inquiries() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Multi-question tool");
 
@@ -3457,11 +3423,9 @@ async fn test_parallel_tools_one_with_inquiry() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Use both tools");
 
@@ -3607,11 +3571,9 @@ async fn test_parallel_tools_both_with_inquiries() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Both need inquiries");
 
@@ -3754,7 +3716,6 @@ async fn test_parallel_tools_both_with_inquiries() {
 /// Without the fix, the counter would reach 2 after step 2, exceeding the
 /// budget of 1 and causing a hard failure.
 #[tokio::test]
-#[expect(clippy::too_many_lines)]
 async fn test_retry_counter_resets_on_successful_event() {
     struct MidStreamRateLimitProvider {
         call_index: Arc<AtomicUsize>,
@@ -3819,11 +3780,9 @@ async fn test_retry_counter_resets_on_successful_event() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Hello");
         let call_index = Arc::new(AtomicUsize::new(0));
@@ -3907,11 +3866,9 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             .persisted_at(&storage)
             .expect("failed to enable persistence");
 
-        let conv_id =
-            workspace.create_conversation(Conversation::default(), Arc::new(config.clone()));
-
-        let handle = workspace.acquire_conversation(&conv_id).unwrap();
-        let lock = workspace.test_lock(handle);
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
 
         let chat_request = ChatRequest::from("Use the tool");
 

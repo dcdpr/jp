@@ -57,7 +57,7 @@ use std::{
     env, fs,
     io::{self, BufRead as _, IsTerminal},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -102,9 +102,15 @@ use turn_loop::run_turn_loop;
 
 use super::{
     ConversationLoadRequest, Output, attachment::register_attachment, conversation_id::FlagIds,
+    lock::LockOutcome,
 };
 use crate::{
-    Ctx, PATH_STRING_PREFIX, cmd,
+    Ctx, PATH_STRING_PREFIX,
+    cmd::{
+        self,
+        conversation::fork,
+        lock::{LockRequest, acquire_lock},
+    },
     ctx::IntoPartialAppConfig,
     editor::{self, Editor},
     error::{Error, Result},
@@ -315,66 +321,13 @@ impl Query {
         let now = ctx.now();
         let cfg = ctx.config();
 
-        let session_str = ctx.session.as_ref().map(|s| s.id.as_str().to_owned());
-
         // Resolve the target conversation and acquire an exclusive lock.
         //
         // Three paths:
         // 1. --new: create a fresh conversation (already locked).
         // 2. --fork/--id/session: resolve an existing conversation, lock it.
         // 3. Lock contention: user picks "new" or "fork" from the prompt.
-        let lock = if self.is_new() {
-            self.create_new_conversation(ctx, session_str.as_deref())?
-        } else {
-            // Handle --fork: fork the conversation before locking.
-            let mut target_id = handle.as_ref().map(ConversationHandle::id);
-            if let Some(fork_turns) = &self.fork {
-                let source_id = target_id.ok_or(Error::NoConversationTarget)?;
-                target_id = Some(self.fork_conversation(ctx, source_id, *fork_turns)?);
-            }
-
-            let conv_id = target_id
-                .or_else(|| handle.as_ref().map(ConversationHandle::id))
-                .ok_or(Error::NoConversationTarget)?;
-
-            if ctx.term.args.persist {
-                match acquire_conversation_lock(
-                    &ctx.workspace,
-                    conv_id,
-                    ctx.term.is_tty,
-                    session_str.as_deref(),
-                    &ctx.printer,
-                )? {
-                    LockOutcome::Acquired(l) => l,
-                    LockOutcome::NewConversation => {
-                        self.create_new_conversation(ctx, session_str.as_deref())?
-                    }
-                    LockOutcome::ForkConversation => {
-                        let new_id = self.fork_conversation(ctx, conv_id, None)?;
-                        let LockOutcome::Acquired(l) = acquire_conversation_lock(
-                            &ctx.workspace,
-                            new_id,
-                            ctx.term.is_tty,
-                            session_str.as_deref(),
-                            &ctx.printer,
-                        )?
-                        else {
-                            return Err(Error::LockTimeout(new_id).into());
-                        };
-                        l
-                    }
-                }
-            } else {
-                // `--no-persist` still acquires a lock for API consistency.
-                let h = ctx
-                    .workspace
-                    .acquire_conversation(&conv_id)
-                    .expect("target conversation must exist");
-                ctx.workspace
-                    .lock_conversation(h, session_str.as_deref())?
-                    .ok_or(Error::LockTimeout(conv_id))?
-            }
-        };
+        let lock = self.acquire_lock(ctx, handle)?;
 
         // Record this conversation as the session's active conversation.
         if let Some(session) = &ctx.session
@@ -649,21 +602,14 @@ impl Query {
     }
 
     /// Create a new conversation and return an exclusive lock.
-    fn create_new_conversation(
-        &self,
-        ctx: &mut Ctx,
-        session: Option<&str>,
-    ) -> Result<ConversationLock> {
+    fn create_new_conversation(&self, ctx: &mut Ctx) -> Result<ConversationLock> {
         let cfg = ctx.config();
         let ws = &mut ctx.workspace;
 
         let conversation = Conversation::default().with_local(self.is_local(&cfg.conversation));
-        let id = ws.create_conversation(conversation, cfg.clone());
-
-        let h = ws.acquire_conversation(&id).expect("just created");
-        let lock = ws
-            .lock_conversation(h, session)?
-            .expect("just created conversation should not be locked");
+        let lock =
+            ws.create_and_lock_conversation(conversation, cfg.clone(), ctx.session.as_ref())?;
+        let id = lock.id();
 
         if let Some(duration) = self.expires_in_duration() {
             let mut conv = lock.as_mut();
@@ -686,71 +632,6 @@ impl Query {
         );
 
         Ok(lock)
-    }
-
-    /// Fork a conversation and return the new conversation's ID.
-    #[expect(clippy::unused_self)]
-    fn fork_conversation(
-        &self,
-        ctx: &mut Ctx,
-        source_id: ConversationId,
-        keep_turns: Option<usize>,
-    ) -> Result<ConversationId> {
-        let now = ctx.now();
-        let cfg = ctx.config();
-
-        let source = ctx.workspace.acquire_conversation(&source_id)?;
-        let mut new_conversation = ctx.workspace.metadata(&source)?.clone();
-        new_conversation.last_activated_at = now;
-        new_conversation.expires_at = None;
-
-        let mut new_events = ctx.workspace.events(&source)?.clone().with_created_at(now);
-
-        if let Some(n) = keep_turns {
-            let turn_count = new_events
-                .iter()
-                .filter(|e| e.event.is_turn_start())
-                .count();
-
-            if turn_count > n {
-                let skip = turn_count - n;
-                let mut turns_seen = 0;
-                let mut keeping = false;
-
-                new_events.retain(|event| {
-                    if event.is_turn_start() {
-                        turns_seen += 1;
-                        if turns_seen > skip {
-                            keeping = true;
-                        }
-                    }
-                    keeping
-                });
-            }
-        }
-
-        new_events.sanitize();
-
-        let new_id = ConversationId::try_from(now)?;
-        ctx.workspace
-            .create_conversation_with_id(new_id, new_conversation, cfg.clone());
-
-        let new_handle = ctx.workspace.acquire_conversation(&new_id)?;
-        let conv = ctx
-            .workspace
-            .lock_conversation(new_handle, None)?
-            .expect("newly created conversation should not be locked")
-            .into_mut();
-        conv.update_events(|events| events.extend(new_events));
-
-        debug!(
-            source = source_id.to_string(),
-            fork = new_id.to_string(),
-            keep_turns = ?keep_turns,
-            "Forked conversation."
-        );
-
-        Ok(new_id)
     }
 
     // Open the editor for the query, if requested.
@@ -904,6 +785,48 @@ impl Query {
             .map(Duration::from)
             .or_else(|| Some(Duration::new(0, 0)))
     }
+
+    fn acquire_lock(
+        &self,
+        ctx: &mut Ctx,
+        handle: Option<ConversationHandle>,
+    ) -> Result<ConversationLock> {
+        // Handle --new: create a fresh conversation.
+        if self.is_new() {
+            return self.create_new_conversation(ctx);
+        }
+
+        let handle = handle.ok_or(Error::NoConversationTarget)?;
+
+        // Handle --fork: fork the conversation before locking.
+        if let Some(fork_turns) = &self.fork {
+            return fork_conversation(ctx, &handle, *fork_turns);
+        }
+
+        // `--no-persist` still acquires a lock for API consistency.
+        let req = LockRequest::from_ctx(handle, ctx)
+            .allow_new(!ctx.term.args.persist)
+            .allow_fork(!ctx.term.args.persist);
+
+        match acquire_lock(req)? {
+            LockOutcome::Acquired(lock) => Ok(lock),
+            LockOutcome::NewConversation => self.create_new_conversation(ctx),
+            LockOutcome::ForkConversation(handle) => fork_conversation(ctx, &handle, None),
+        }
+    }
+}
+
+/// Fork a conversation and return the new conversation's lock.
+fn fork_conversation(
+    ctx: &mut Ctx,
+    source: &ConversationHandle,
+    fork_turns: Option<usize>,
+) -> Result<ConversationLock> {
+    fork::fork_conversation(ctx, source, |events| {
+        if let Some(n) = fork_turns {
+            events.retain_last_turns(n);
+        }
+    })
 }
 
 fn get_config_delta_from_cli(
@@ -1311,109 +1234,6 @@ fn string_or_path(s: &str) -> Result<String> {
     }
 
     Ok(s.to_owned())
-}
-
-/// Result of attempting to acquire a conversation lock.
-enum LockOutcome {
-    /// Lock acquired successfully.
-    Acquired(ConversationLock),
-    /// User chose to start a new conversation instead.
-    NewConversation,
-    /// User chose to fork the locked conversation.
-    ForkConversation,
-}
-
-/// Acquire an exclusive conversation lock with polling and timeout.
-///
-/// Polls `lock_conversation` at 500ms intervals. The default timeout is
-/// 30 seconds, overridable via `$JP_LOCK_DURATION` (humantime format, e.g.
-/// `10s`, `2m`). Setting `$JP_LOCK_DURATION=0s` disables waiting entirely.
-///
-/// In interactive terminals, shows a selection prompt on timeout instead of
-/// failing immediately.
-fn acquire_conversation_lock(
-    workspace: &Workspace,
-    id: ConversationId,
-    is_tty: bool,
-    session: Option<&str>,
-    printer: &Printer,
-) -> Result<LockOutcome> {
-    let timeout = lock_timeout();
-    let start = Instant::now();
-
-    loop {
-        let handle = workspace.acquire_conversation(&id)?;
-        if let Some(lock) = workspace.lock_conversation(handle, session)? {
-            return Ok(LockOutcome::Acquired(lock));
-        }
-
-        if start.elapsed() >= timeout {
-            if !is_tty {
-                return Err(Error::LockTimeout(id));
-            }
-
-            return prompt_lock_contention(workspace, id, session, printer);
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    }
-}
-
-/// Show an interactive prompt when a conversation lock times out.
-fn prompt_lock_contention(
-    workspace: &Workspace,
-    id: ConversationId,
-    session: Option<&str>,
-    printer: &Printer,
-) -> Result<LockOutcome> {
-    let options = vec![
-        "Continue waiting",
-        "Start a new conversation",
-        "Fork this conversation",
-        "Cancel",
-    ];
-
-    let holder = workspace.read_lock_info(&id);
-    let msg = match &holder {
-        Some(info) => {
-            let who = match &info.session {
-                Some(s) => format!("pid {}, session {s}", info.pid),
-                None => format!("pid {}", info.pid),
-            };
-            format!("Conversation {id} is locked ({who}).")
-        }
-        None => format!("Conversation {id} is locked by another session."),
-    };
-
-    let selected =
-        inquire::Select::new(&msg, options).prompt_with_writer(&mut printer.err_writer())?;
-
-    match selected {
-        "Continue waiting" => {
-            // Re-enter the polling loop with a fresh timeout.
-            let timeout = lock_timeout();
-            let start = Instant::now();
-            loop {
-                let handle = workspace.acquire_conversation(&id)?;
-                if let Some(lock) = workspace.lock_conversation(handle, session)? {
-                    return Ok(LockOutcome::Acquired(lock));
-                }
-                if start.elapsed() >= timeout {
-                    return prompt_lock_contention(workspace, id, session, printer);
-                }
-                std::thread::sleep(Duration::from_millis(500));
-            }
-        }
-        "Start a new conversation" => Ok(LockOutcome::NewConversation),
-        "Fork this conversation" => Ok(LockOutcome::ForkConversation),
-        _ => Err(Error::LockTimeout(id)),
-    }
-}
-
-fn lock_timeout() -> Duration {
-    env::var("JP_LOCK_DURATION")
-        .ok()
-        .and_then(|val| val.parse::<humantime::Duration>().ok())
-        .map_or(Duration::from_secs(30), Duration::from)
 }
 
 #[cfg(test)]

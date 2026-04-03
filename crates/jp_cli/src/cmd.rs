@@ -3,6 +3,7 @@ mod config;
 mod conversation;
 pub(crate) mod conversation_id;
 mod init;
+mod lock;
 mod query;
 pub(crate) mod target;
 

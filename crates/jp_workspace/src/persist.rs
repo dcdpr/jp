@@ -29,8 +29,8 @@ pub trait PersistBackend: Send + Sync + std::fmt::Debug {
 
 /// Filesystem-backed persistence that delegates to [`Storage`].
 ///
-/// Constructed from a `Storage` reference at workspace initialization time.
-/// The `Storage` paths are captured so persistence can be invoked from
+/// Constructed from a `Storage` reference at workspace initialization time. The
+/// `Storage` paths are captured so persistence can be invoked from
 /// `ConversationMut::Drop` without requiring a live `Storage` reference.
 #[derive(Debug)]
 pub struct FsPersistBackend {

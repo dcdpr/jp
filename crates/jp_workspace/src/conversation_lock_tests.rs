@@ -16,20 +16,23 @@ fn test_handle() -> ConversationHandle {
 
 fn test_lock_with_mock() -> (ConversationLock, Arc<MockPersistBackend>) {
     let mock = Arc::new(MockPersistBackend::new());
-    let lock = ConversationLock::test_lock_with_writer(
+    let lock = ConversationLock::new(
         test_handle(),
         Arc::new(RwLock::new(Conversation::default())),
         Arc::new(RwLock::new(ConversationStream::new_test())),
-        Arc::clone(&mock) as _,
+        Some(Arc::clone(&mock) as _),
+        None,
     );
     (lock, mock)
 }
 
 fn test_lock_no_writer() -> ConversationLock {
-    ConversationLock::test_lock(
+    ConversationLock::new(
         test_handle(),
         Arc::new(RwLock::new(Conversation::default())),
         Arc::new(RwLock::new(ConversationStream::new_test())),
+        None,
+        None,
     )
 }
 
