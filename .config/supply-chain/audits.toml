@@ -117,6 +117,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "1.1.1"
 
+[[audits.rowan]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.15.11 -> 0.16.1"
+
 [[audits.rsqlite-vfs]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -176,6 +181,11 @@ delta = "5.2.0 -> 5.3.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.4.3"
+
+[[audits.text-size]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "1.1.0 -> 1.1.1"
 
 [[audits.time-core]]
 who = "rgrant <rgrant@contract.design>"
@@ -343,6 +353,12 @@ user-id = 6743 # Ed Page (epage)
 start = "2023-04-13"
 end = "2027-02-13"
 
+[[trusted.countme]]
+criteria = "safe-to-deploy"
+user-id = 2699 # Alex Kladov (matklad)
+start = "2021-01-16"
+end = "2027-04-03"
+
 [[trusted.dyn-clone]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
@@ -420,6 +436,12 @@ criteria = "safe-to-deploy"
 user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-03-13"
 end = "2027-02-13"
+
+[[trusted.hashbrown]]
+criteria = "safe-to-deploy"
+user-id = 2915 # Amanieu d'Antras (Amanieu)
+start = "2019-04-02"
+end = "2027-04-03"
 
 [[trusted.hashbrown]]
 criteria = "safe-to-deploy"
@@ -565,6 +587,12 @@ user-id = 539 # Josh Stone (cuviper)
 start = "2019-06-10"
 end = "2027-02-13"
 
+[[trusted.once_cell]]
+criteria = "safe-to-deploy"
+user-id = 2699 # Alex Kladov (matklad)
+start = "2019-05-07"
+end = "2027-04-03"
+
 [[trusted.once_cell_polyfill]]
 criteria = "safe-to-deploy"
 user-id = 6743 # Ed Page (epage)
@@ -685,6 +713,12 @@ user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-03-04"
 end = "2027-02-13"
 
+[[trusted.rowan]]
+criteria = "safe-to-deploy"
+user-id = 2699 # Alex Kladov (matklad)
+start = "2019-03-31"
+end = "2027-04-03"
+
 [[trusted.rustix]]
 criteria = "safe-to-deploy"
 user-id = 6825 # Dan Gohman (sunfishcode)
@@ -774,6 +808,12 @@ criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-06-04"
 end = "2027-02-13"
+
+[[trusted.text-size]]
+criteria = "safe-to-deploy"
+user-id = 2699 # Alex Kladov (matklad)
+start = "2020-04-11"
+end = "2027-04-03"
 
 [[trusted.thiserror]]
 criteria = "safe-to-deploy"
