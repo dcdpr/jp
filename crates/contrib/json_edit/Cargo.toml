@@ -1,0 +1,18 @@
+[package]
+name = "json_edit"
+description = "A format-preserving JSON and JSON5 editor built on rowan."
+edition = "2024"
+license = "MIT"
+publish = false
+version = "0.1.0"
+
+[dependencies]
+rowan = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+indoc = { workspace = true }
+pretty_assertions = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
