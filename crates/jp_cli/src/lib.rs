@@ -437,8 +437,10 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     )
     .map_err(Error::Task)?;
 
-    // Remove ephemeral conversations that are no longer needed.
-    ctx.workspace.remove_ephemeral_conversations(&[]);
+    // Remove ephemeral conversations that are no longer needed, but protect
+    // any conversation that is active in a terminal session.
+    let active_ids = ctx.workspace.all_active_conversation_ids();
+    ctx.workspace.remove_ephemeral_conversations(&active_ids);
 
     // Remove orphaned lock files and stale session mappings.
     ctx.workspace.cleanup_stale_files();

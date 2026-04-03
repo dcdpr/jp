@@ -251,6 +251,50 @@ fn cleanup_removes_stale_hwnd_session() {
 }
 
 #[test]
+fn all_active_conversation_ids_across_sessions() {
+    let (_tmp, mut ws) = setup();
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+
+    let session_a = Session {
+        id: SessionId::new("sess-a").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let session_b = Session {
+        id: SessionId::new("sess-b").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+
+    let id1 = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let id2 = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+
+    ws.create_conversation_with_id(
+        id1,
+        jp_conversation::Conversation::default(),
+        config.clone(),
+    );
+    ws.create_conversation_with_id(id2, jp_conversation::Conversation::default(), config);
+
+    ws.activate_session_conversation(&session_a, id1, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    ws.activate_session_conversation(&session_b, id2, datetime!(2025-07-19 15:00:00 Z))
+        .unwrap();
+
+    let mut active = ws.all_active_conversation_ids();
+    active.sort();
+
+    let mut expected = vec![id1, id2];
+    expected.sort();
+
+    assert_eq!(active, expected);
+}
+
+#[test]
+fn all_active_conversation_ids_empty_when_no_sessions() {
+    let (_tmp, ws) = setup();
+    assert!(ws.all_active_conversation_ids().is_empty());
+}
+
+#[test]
 fn cleanup_keeps_env_session_with_live_conversations() {
     let (_tmp, mut ws) = setup();
     let session = Session {
