@@ -1,0 +1,15 @@
+[[assistant.system_prompt_sections]]
+tag = "unix_skill"
+title = "Skill: Unix Utilities"
+content = """\
+You have been given the unix-utilities skill. You can run common unix \
+command-line tools (date, jq, base64, bc, wc, shasum, etc.) as subprocesses. \
+Path arguments are sandboxed to the workspace root.
+
+The following tools help you with this:
+
+- unix_utils: Run common unix command-line utilities.
+"""
+
+[conversation.tools]
+unix_utils = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }

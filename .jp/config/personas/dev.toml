@@ -5,6 +5,7 @@ extends = [
     "../skill/git-reading.toml",
     "../skill/rust-development.toml",
     "../skill/github.toml",
+    "../skill/unix.toml",
 ]
 
 [conversation.tools]

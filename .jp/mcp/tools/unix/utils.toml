@@ -1,0 +1,127 @@
+[conversation.tools.unix_utils]
+enable = false
+run = "unattended"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Run common unix command-line utilities."
+description = """
+A collection of useful unix tools available for quick tasks. Each tool is
+invoked as a subprocess with the given arguments. Output is returned as-is
+(truncated at 100 KB).
+
+Path arguments are sandboxed to the workspace root — absolute paths and
+`..` traversals that escape the workspace are rejected.
+
+See the `util` parameter enum values for the list of available tools.
+"""
+
+examples = """
+Get the current date:
+```json
+{"util": "date"}
+```
+
+Format a date:
+```json
+{"util": "date", "args": ["+%Y-%m-%d"]}
+```
+
+Base64 encode a string:
+```json
+{"util": "base64", "stdin": "Hello, World!"}
+```
+
+Base64 decode:
+```json
+{"util": "base64", "args": ["--decode"], "stdin": "SGVsbG8sIFdvcmxkIQ=="}
+```
+
+Calculate an expression:
+```json
+{"util": "bc", "stdin": "2^32"}
+```
+
+Generate a UUID:
+```json
+{"util": "uuidgen"}
+```
+
+Count lines in a file:
+```json
+{"util": "wc", "args": ["-l", "src/main.rs"]}
+```
+
+Compute a SHA-256 checksum:
+```json
+{"util": "shasum", "args": ["-a", "256", "Cargo.lock"]}
+```
+
+Detect file type:
+```json
+{"util": "file", "args": "Cargo.lock"}
+```
+
+First 20 lines of a file:
+```json
+{"util": "head", "args": ["-n", "20", "README.md"]}
+```
+
+Last 10 lines of a log:
+```json
+{"util": "tail", "args": ["-n", "10", "output.log"]}
+```
+
+Extract a field from JSON:
+```json
+{"util": "jq", "args": ".version", "stdin": "{\"name\":\"jp\",\"version\":\"0.1.0\"}"}
+```
+
+Sort lines:
+```json
+{"util": "sort", "stdin": "banana\\napple\\ncherry"}
+```
+
+Deduplicate sorted lines:
+```json
+{"util": "sort", "args": "-u", "stdin": "a\\nb\\na\\nb\\nc"}
+```
+
+Print OS and architecture:
+```json
+{"util": "uname", "args": "-sm"}
+```
+"""
+
+[conversation.tools.unix_utils.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.unix_utils.parameters.util]
+type = "string"
+required = true
+summary = "The utility to run."
+enum = [
+    "base64",
+    "bc",
+    "date",
+    "file",
+    "head",
+    "jq",
+    "shasum",
+    "sort",
+    "tail",
+    "uname",
+    "uniq",
+    "uuidgen",
+    "wc",
+]
+
+[conversation.tools.unix_utils.parameters.args]
+type = "array"
+items.type = "string"
+summary = "Arguments to pass to the utility."
+
+[conversation.tools.unix_utils.parameters.stdin]
+type = "string"
+summary = "Optional string to pipe to the utility's standard input."
