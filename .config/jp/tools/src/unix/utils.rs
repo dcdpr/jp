@@ -71,7 +71,7 @@ fn unix_utils_impl<R: ProcessRunner>(
         stdin,
         env: &env_refs,
         clean_env: true,
-        macos_sandbox_profile: Some(&sandbox_profile),
+        macos_sandbox_profile: sandbox_profile.as_deref(),
     };
 
     let ProcessOutput {
@@ -228,7 +228,11 @@ fn sandbox_profile(
     workspace_root: &Utf8Path,
     util: &str,
     binary: &ResolvedBinary,
-) -> Result<String, std::io::Error> {
+) -> Result<Option<String>, std::io::Error> {
+    if !cfg!(target_os = "macos") {
+        return Ok(None);
+    }
+
     let mut read_paths: Vec<String> = vec!["/dev".to_owned(), workspace_root.to_string()];
 
     // Symlink chain: every ancestor of every link in the chain.
@@ -253,7 +257,7 @@ fn sandbox_profile(
         subpaths.push_str(&format!("    (subpath \"{p}\")\n"));
     }
 
-    Ok(format!(
+    Ok(Some(format!(
         "(version 1)\n\
          (deny default)\n\
          (allow process*)\n\
@@ -261,7 +265,7 @@ fn sandbox_profile(
          (allow file-read*\n\
          \x20   (literal \"/\")\n\
          {subpaths})"
-    ))
+    )))
 }
 
 /// Additional read paths required by specific utilities that cannot be
