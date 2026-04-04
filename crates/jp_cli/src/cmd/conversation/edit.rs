@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
 use chrono::Utc;
 use jp_config::{
@@ -44,9 +44,14 @@ pub(crate) struct Edit {
     #[arg(long, group = "edit")]
     local: Option<Option<bool>>,
 
-    /// Set the expiration time of the conversation.
+    /// Toggle or set the expiration time of the conversation.
+    ///
+    /// Without a value, toggles: removes expiration if set, or sets it to
+    /// expire immediately (when no longer active) if unset.
+    ///
+    /// Accepts a duration (e.g. `1h`, `30m`) or `now` for immediate expiration.
     #[arg(long = "tmp", group = "edit")]
-    expires_at: Option<Option<humantime::Duration>>,
+    expires_at: Option<Option<ExpirationDuration>>,
 
     /// Remove the expiration time of the conversation.
     #[arg(long = "no-tmp", group = "edit", conflicts_with = "expires_at")]
@@ -95,9 +100,16 @@ impl Edit {
             }
 
             if let Some(ephemeral) = self.expires_at {
-                conv.update_metadata(|m| {
-                    let duration = ephemeral.map_or(Duration::ZERO, Into::into);
-                    m.expires_at = Some(Utc::now() + duration);
+                conv.update_metadata(|m| match ephemeral {
+                    Some(dur) => m.expires_at = Some(Utc::now() + dur.0),
+                    None => {
+                        // Toggle: remove if set, expire now if unset.
+                        if m.expires_at.is_some() {
+                            m.expires_at = None;
+                        } else {
+                            m.expires_at = Some(Utc::now());
+                        }
+                    }
                 });
             } else if self.no_expires_at {
                 conv.update_metadata(|m| m.expires_at = None);
@@ -160,9 +172,9 @@ async fn generate_titles(
     let llm_events =
         collect_with_retry(provider.as_ref(), &model_details, query, &retry_config).await?;
 
-    // Pipe raw streaming events through the EventBuilder so that
-    // structured JSON chunks are concatenated and parsed into a
-    // proper Value (rather than individual Value::String fragments).
+    // Pipe raw streaming events through the EventBuilder so that structured
+    // JSON chunks are concatenated and parsed into a proper Value (rather than
+    // individual Value::String fragments).
     let mut builder = EventBuilder::new();
     let mut flushed = Vec::new();
     for event in llm_events {
@@ -210,3 +222,25 @@ async fn generate_titles(
         choice => Ok(choice.to_owned()),
     }
 }
+
+/// Duration value for `--tmp`, supporting `now` as an alias for zero duration.
+#[derive(Debug, Clone, Copy)]
+struct ExpirationDuration(Duration);
+
+impl FromStr for ExpirationDuration {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("now") {
+            Ok(Self(Duration::ZERO))
+        } else {
+            humantime::parse_duration(s)
+                .map(Self)
+                .map_err(|e| e.to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "edit_tests.rs"]
+mod tests;
