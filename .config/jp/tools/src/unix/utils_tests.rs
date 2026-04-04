@@ -6,7 +6,9 @@ use camino_tempfile::tempdir;
 use jp_tool::{Action, Outcome};
 
 use super::*;
-use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput};
+use crate::util::runner::MockProcessRunner;
+#[cfg(unix)]
+use crate::util::runner::{ExitCode, ProcessOutput};
 
 fn ctx() -> (camino_tempfile::Utf8TempDir, Context) {
     let dir = tempdir().unwrap();
