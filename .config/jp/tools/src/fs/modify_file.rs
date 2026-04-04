@@ -802,8 +802,8 @@ fn apply_changes<R: ProcessRunner>(
         Some(true) => {}
         Some(false) => {
             return Err(
-                "The proposed file changes were reviewed and rejected. Changes were not \
-                 applied. You may retry with different changes."
+                "The proposed file changes were reviewed and rejected. Changes were not applied. \
+                 You may retry with different changes."
                     .into(),
             );
         }
