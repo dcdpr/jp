@@ -59,7 +59,7 @@ impl Commands {
             Commands::Conversation(args) => args.run(ctx, handles).await,
             Commands::Attachment(args) => {
                 debug_assert!(handles.is_empty(), "Attachment commands don't use handles");
-                args.run(ctx)
+                args.run(ctx).await
             }
             Commands::AttachmentAdd(args) => {
                 debug_assert!(handles.is_empty(), "Attachment commands don't use handles");

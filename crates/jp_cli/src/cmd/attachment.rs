@@ -17,6 +17,7 @@ use crate::{
 
 pub(super) mod add;
 mod ls;
+mod print;
 mod rm;
 
 #[derive(Debug, clap::Args)]
@@ -26,11 +27,12 @@ pub(crate) struct Attachment {
 }
 
 impl Attachment {
-    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         match self.command {
             Commands::Add(args) => args.run(ctx),
             Commands::Remove(args) => args.run(ctx),
             Commands::List(args) => args.run(ctx),
+            Commands::Print(args) => args.run(ctx).await,
         }
     }
 }
@@ -45,7 +47,7 @@ impl IntoPartialAppConfig for Attachment {
         match &self.command {
             Commands::Add(args) => args.apply_cli_config(workspace, partial, merged_config),
             Commands::Remove(args) => args.apply_cli_config(workspace, partial, merged_config),
-            Commands::List(_) => Ok(partial),
+            Commands::List(_) | Commands::Print(_) => Ok(partial),
         }
     }
 }
@@ -63,6 +65,10 @@ enum Commands {
     /// List attachments in context.
     #[command(name = "ls", alias = "l")]
     List(ls::Ls),
+
+    /// Preview how an attachment will render for the LLM.
+    #[command(name = "print", alias = "p")]
+    Print(print::Print),
 }
 
 pub(crate) fn validate_attachment(uri: &Url) -> Result<()> {
