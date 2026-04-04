@@ -13,8 +13,8 @@ use jp_config::{
     providers::llm::ollama::OllamaConfig,
 };
 use jp_conversation::{
-    ConversationEvent, ConversationStream,
-    event::{ChatResponse, EventKind, ToolCallRequest},
+    ConversationStream,
+    event::{ChatResponse, EventKind},
     thread::text_attachments_to_xml,
 };
 use ollama_rs::{
@@ -28,7 +28,7 @@ use ollama_rs::{
     },
     models::{LocalModel, ModelOptions},
 };
-use serde_json::{Map, Value};
+use serde_json::Value;
 use tracing::{debug, trace, warn};
 use url::Url;
 
@@ -146,10 +146,7 @@ fn map_event(
     if let Some(thinking) = message.thinking
         && !thinking.is_empty()
     {
-        events.push(Event::Part {
-            index: 0,
-            event: ConversationEvent::now(ChatResponse::reasoning(thinking)),
-        });
+        events.push(Event::reasoning(0, thinking));
     }
 
     let has_content = !message.content.is_empty();
@@ -163,36 +160,28 @@ fn map_event(
     }
 
     if has_content {
-        let response = if is_structured {
-            ChatResponse::structured(Value::String(message.content))
+        if is_structured {
+            events.push(Event::structured(1, message.content));
         } else {
-            ChatResponse::message(message.content)
-        };
-        events.push(Event::Part {
-            index: 1,
-            event: ConversationEvent::now(response),
-        });
+            events.push(Event::message(1, message.content));
+        }
     }
 
     for (
-        index,
+        idx,
         ToolCall {
             function: ToolCallFunction { name, arguments },
         },
     ) in message.tool_calls.into_iter().enumerate()
     {
-        let index = index + 2;
-        events.push(Event::Part {
-            index,
-            event: ConversationEvent::now(ToolCallRequest {
-                id: format!("{name}_{index}"),
-                name,
-                arguments: match arguments {
-                    Value::Object(map) => map,
-                    v => Map::from_iter([("input".into(), v)]),
-                },
-            }),
-        });
+        let index = idx + 2;
+        let id = format!("{name}_{index}");
+        let args_json = match arguments {
+            Value::Object(map) => serde_json::to_string(&map).unwrap_or_default(),
+            v => serde_json::to_string(&v).unwrap_or_default(),
+        };
+        events.push(Event::tool_call_start(index, id, &name));
+        events.push(Event::tool_call_args(index, args_json));
         events.push(Event::flush(index));
     }
 

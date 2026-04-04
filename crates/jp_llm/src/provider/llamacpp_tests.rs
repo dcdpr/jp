@@ -1,3 +1,5 @@
+use jp_conversation::ConversationEvent;
+
 use super::*;
 
 #[test]

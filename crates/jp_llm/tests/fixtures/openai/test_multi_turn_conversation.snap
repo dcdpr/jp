@@ -4,9 +4,8 @@ expression: v
 ---
 [
     [
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -17,19 +16,14 @@ expression: v
                     "openai_item_id": String("msg_041d39a5f38ada5b016995b6b7779c8193833b79e838ac020e"),
                 },
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -41,14 +35,9 @@ expression: v
                     "openai_encrypted_content": String("gAAAAABplba8Wh-U9drlhfjMiMgVbCcyAFz9u3qI2q2OZMBdh0ZshtkmGckR_F7LZopxKGkXpuoM2ZJmn9SWMDCyOSsllLG9AQier849NrH_9u_zhv-Haqv4yDNfr7RZgMxxR9eGR2SL-oQ7UFRs2hnWDeOlQ8Q0LBKZmvJfP-L6TWxcLwClNYdmwO5JKxinl2q1oqpVx85IrF8wu5u0ydJeOA2EeGjQ6S2dMNOgg5yJ60T2nx2tZIlvMRfHyBhOg_8q2rFlDdpv9qY0SMTtI04NWX2uSoV_m7t49aeR6CtWYYmUfZmsVy1326s7a3JFIwi6swEeF-9Zt7RKjL7OIDVA4H2AeUQCoBqD5jZ1MoxCC6MaEgVHlU-LICufWURDJG_pCk896nyJ9ns_DUACxoXHfuJH6IAAyV1LhF4FWNyXm8V70jBV0Kt81xMpTD9WcYbHOz3Oo_O3jjX9Rdg84K1Cs0Z6s5qLzOHk188SF2SO-IsWPFywjVYlpqXdJKXuqKM1jXbiUTadfNkNyZOZEy7CanUC2ILLYPtHMsLF7SxLgpKhO1bPm0PHvpQRIPTlTdl-ZVLk9a6fUXt0xqppp55yyHzvToRBtTyyDs_u8BmjGFhb9XibGzDJh45MXBelC01fBAzehf33HO_MgtIGSfCUdy-GJWTM_Y4E5pWnyjTUNULi36ChTJd6OSJGalv3OpwxybJ-Rl1uUFHrnj0j9ZIc5k-47UXe8EisztTYSA8FuE7SEoOZ1n2luwOKpVrumlHuLsufzCgPKb0x5YWb1A-OV5JzU7KYQ9THDSwgAQNoWr5oRV9WKDwcEaKFpl75qvDOxgripdcRqOhrH1HjGR7GWjhet1jTsRKVT7uTxcRJNwDqhDwZMEndMGVubf9x1mJJ_BFMCdQ-jFCsAJl1Q_2N7qR62FRPuQbIZwjRbYlmzC-_KLyg532Tb338RwQgeqBnaouDvmZqfH_plMixGWvSQJS6ufbj_XCIGkWn-nduVQIqXMBvvtXu_FHloeYp_GsnNOp2NXRZ61EPByMsTe80F374o5tJr0DjgFfv5nPhSoDsIEhOk8FG2WpIus8JOodzL81CGIWwwj3xVM6EpL-P-jeY00lufMHrV_Wpp51I84gpZKDCBh5ZIYqbtLq2aYaU3kVkQn6YdBKCfyDFmI-DXUupHPCNCGfItJZ7QqAFshysG2skPN6_hxYGN02FMYjSUqkxdbxUxOZ8zofmTAeJl4NrrlTOf1qa3NPlmegXOFyMmCBF91s="),
                 },
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -59,19 +48,14 @@ expression: v
                     "openai_item_id": String("msg_041d39a5f38ada5b016995b6bc8d4c8193af33c487121c33a4"),
                 },
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
@@ -85,19 +69,14 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -108,19 +87,14 @@ expression: v
                     "openai_item_id": String("msg_041d39a5f38ada5b016995b6be38788193898973e5d13be9d2"),
                 },
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -132,14 +106,9 @@ expression: v
                     "openai_encrypted_content": String("gAAAAABplbbBtL1hSuIVryOPhWKyrvYUf809uHwx2yaqsB7z_9tGj9pCAO9mE5zVteQAllL8pcEjsLSQ5GoxCeFzRKO3reInb0VdUz7VCr62ekmAhF9Q_qWyGs44flnqiIU_LR0gm-3CDf1gthsnmz5WYosWzmX18YrCxgjtfsaUBmRVNzTHt9RNkOC3ehEgnZfTYT4LhYc61F71kdLLDKpEvh4IdrnNJj6rLAViPhfWl1oU3lGrLXT_pHuM0Jap5X07ajhgBLlXzSSnrHGNWRQQB5ofqoRHgmEw9qA8HW4tllVb264ZyunETcw5PFOeTzwfFt1ao04WxGs10lZeNYYVwTmGJ74Ib9tVUxXAyEuV8SGFQg_BM9gT4pctZI0VTSKzOa-jOXbBM-Iz6JoP4XfSiNa7lvtuxPz8slbpYA7VmkWdg-WR_Fh5wST1P1hKIPw44iuSLfg9PEMYGUVXlu0UxYySwxI9DFMDzgG0qTMNqeIy64WgRpEDl2wxV3j1-3NfEDSK2NkuMY1HD_1-L5VJQLrL9nURJJFQR--iQZDlp1eGFvo9_E1KV15Eq6zVbaF6WAb30Du80aaTspg5fES-2rx5vEwzN9uvqjFIkvbVfp78UdDhSwEjthpAJfinO-eocN2o21-oSFQsRyFsRXEUVoZQimFH_fHW9z9DBefHFVxmOIJwsUcMUA40JXOrgk-eYZUB3kT7Qy30Fsrkq7DEbY-D62qP0GzBKEAMQOELUrxCnzHIRDA_Wwh0kgzNDi2M62lLeFNV_qylDj40cLFi6wQBMsVJIMMNc73p8e8yqzouNJhFGxSR2T-aFXnwvp7GCPVQLSJ5FMF2nHJu_4uX5bJeI2xW44m26TJN6t5HpoeB4Tf_97LsNgxC-GfEUTd5QNgvJNT30I5hRfioqvbnS5iMhSa-vCTYzpW4KEcJoXEVNX7RlZHRx9AnYvdaNvU9i4WW-kykCiZG89GTCyPBbbuRAC67N1KpjfWm5Kz1klc-QmCvL0gy6YqaJY8OhczYsQKB2mermcr-Ml2TAsltIXccj4tZXC-WxrnD1s5bDtJ50Jbk5DmGCz76-BsV3hDpjenpT2bQ"),
                 },
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -150,11 +119,7 @@ expression: v
                     "openai_item_id": String("msg_041d39a5f38ada5b016995b6c1391c8193966a5438ed4ddcf7"),
                 },
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),

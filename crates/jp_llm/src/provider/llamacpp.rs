@@ -13,7 +13,7 @@ use jp_config::{
     providers::llm::llamacpp::LlamacppConfig,
 };
 use jp_conversation::{
-    ConversationEvent, ConversationStream,
+    ConversationStream,
     event::{ChatResponse, EventKind, ToolCallResponse},
     thread::text_attachments_to_xml,
 };
@@ -31,9 +31,7 @@ use crate::{
     event::{Event, FinishReason},
     provider::Provider,
     query::ChatQuery,
-    stream::aggregator::{
-        reasoning::ReasoningExtractor, tool_call_request::ToolCallRequestAggregator,
-    },
+    stream::aggregator::reasoning::ReasoningExtractor,
     tool::ToolDefinition,
 };
 
@@ -99,7 +97,7 @@ impl Provider for Llamacpp {
 
         let mut state = StreamState {
             extractor: ReasoningExtractor::default(),
-            tool_calls: ToolCallRequestAggregator::default(),
+            tool_call_indices: Vec::new(),
             reasoning_flushed: false,
             finish_reason: None,
             is_structured,
@@ -116,7 +114,9 @@ impl Provider for Llamacpp {
 /// Mutable state carried across SSE events in a single stream.
 struct StreamState {
     extractor: ReasoningExtractor,
-    tool_calls: ToolCallRequestAggregator,
+    /// Tracks which tool call indices have been seen, so we can flush them
+    /// on finish.
+    tool_call_indices: Vec<usize>,
     reasoning_flushed: bool,
     /// Captured from `finish_reason` in the last choice delta. Emitted as
     /// `Event::Finished` when the `[DONE]` sentinel arrives.
@@ -182,10 +182,7 @@ fn handle_sse_event(
                 if let Some(reasoning) = &delta.reasoning_content
                     && !reasoning.is_empty()
                 {
-                    events.push(Ok(Event::Part {
-                        index: 0,
-                        event: ConversationEvent::now(ChatResponse::reasoning(reasoning.clone())),
-                    }));
+                    events.push(Ok(Event::reasoning(0, reasoning.clone())));
                 }
 
                 // Content
@@ -201,15 +198,11 @@ fn handle_sse_event(
                     if delta.reasoning_content.is_some() {
                         flush_reasoning_if_needed(&mut events, &mut state.reasoning_flushed);
 
-                        let response = if state.is_structured {
-                            ChatResponse::structured(Value::String(content.clone()))
+                        if state.is_structured {
+                            events.push(Ok(Event::structured(1, content.clone())));
                         } else {
-                            ChatResponse::message(content.clone())
-                        };
-                        events.push(Ok(Event::Part {
-                            index: 1,
-                            event: ConversationEvent::now(response),
-                        }));
+                            events.push(Ok(Event::message(1, content.clone())));
+                        }
                     } else {
                         // Might contain <think> tags — feed through extractor.
                         state.extractor.handle(content);
@@ -227,11 +220,26 @@ fn handle_sse_event(
 
                     for tc in tool_calls {
                         let index = tc.index as usize + 2;
-                        let name = tc.function.as_ref().and_then(|f| f.name.clone());
-                        let arguments = tc.function.as_ref().and_then(|f| f.arguments.as_deref());
-                        state
-                            .tool_calls
-                            .add_chunk(index, tc.id.clone(), name, arguments);
+
+                        if !state.tool_call_indices.contains(&index) {
+                            state.tool_call_indices.push(index);
+                        }
+
+                        let id = tc.id.clone().unwrap_or_default();
+                        let name = tc
+                            .function
+                            .as_ref()
+                            .and_then(|f| f.name.clone())
+                            .unwrap_or_default();
+                        if !id.is_empty() || !name.is_empty() {
+                            events.push(Ok(Event::tool_call_start(index, id, name)));
+                        }
+
+                        if let Some(args) =
+                            tc.function.as_ref().and_then(|f| f.arguments.as_deref())
+                        {
+                            events.push(Ok(Event::tool_call_args(index, args)));
+                        }
                     }
                 }
 
@@ -253,19 +261,10 @@ fn handle_sse_event(
                     events.push(Ok(Event::flush(1)));
 
                     if matches!(reason.as_str(), "tool_calls" | "stop") {
-                        events.extend(state.tool_calls.finalize_all().into_iter().flat_map(
-                            |(index, result)| {
-                                vec![
-                                    result
-                                        .map(|call| Event::Part {
-                                            index,
-                                            event: ConversationEvent::now(call),
-                                        })
-                                        .map_err(|e| StreamError::other(e.to_string())),
-                                    Ok(Event::flush(index)),
-                                ]
-                            },
-                        ));
+                        for &index in &state.tool_call_indices {
+                            events.push(Ok(Event::flush(index)));
+                        }
+                        state.tool_call_indices.clear();
                     }
 
                     // Per the OpenAI spec.
@@ -299,23 +298,16 @@ fn drain_extractor(extractor: &mut ReasoningExtractor, is_structured: bool) -> V
 
     if !extractor.reasoning.is_empty() {
         let reasoning = mem::take(&mut extractor.reasoning);
-        events.push(Event::Part {
-            index: 0,
-            event: ConversationEvent::now(ChatResponse::reasoning(reasoning)),
-        });
+        events.push(Event::reasoning(0, reasoning));
     }
 
     if !extractor.other.is_empty() {
         let content = mem::take(&mut extractor.other);
-        let response = if is_structured {
-            ChatResponse::structured(Value::String(content))
+        if is_structured {
+            events.push(Event::structured(1, content));
         } else {
-            ChatResponse::message(content)
-        };
-        events.push(Event::Part {
-            index: 1,
-            event: ConversationEvent::now(response),
-        });
+            events.push(Event::message(1, content));
+        }
     }
 
     events

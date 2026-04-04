@@ -4,9 +4,8 @@ expression: v
 ---
 [
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -15,14 +14,9 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
@@ -40,19 +34,14 @@ expression: v
                     "google_thought_signature": String("CiQBvj72+/34HShSSwxZHdFYG/Uz79kQfaEtCJY4kUcuRwVmB8oKWgG+Pvb7TAxpZRLOS6xvWS4BBfo4TJwLrjSC47mnjZdpkv3Insht7YT1P659y3MWIWZlGYDuBbbcGfHhVoVMSdc0cM1lr9JWP1L8zMLXJl+nmHDSv92BIQYLjgrVAQG+Pvb7fzfxJOsj3rVWUY8w1//REQkU4hdjNy4fpIhahXiE+htLdjeN3KO4Suexk7SK5LT8zsZZsZiBXWuQz92DNlPhtbkpAvojwnrkSh2++2xJJgYym6Ehqe/u9ggVg12KAF3wf8riFXx5aIy3yFPwrnlHRlqbh3SzO82xxuXpgmhrqVu74yXaAXj3fPLxZcRPbis9qt1TnlUk3U7nORztpHA/bF18Y4TMJDY+2bC9O5vcHmvunNcazdKO0buNU5dmnfeVRXjYztobprUp4dSjdr0Z4grdAQG+Pvb7XlXYNdmCL7H3k5p2PC8zbgFi6HeJdBviSwJ/qRz7rMw1himJDOb7a3iCnUIlDkknZrtT5PRlnLey/uvtc8QG9V170c6ziVBcyAi89dntdB0ZIyEaS0FMjs6EPVcu47w0HfzmeKXpmq01lE9l3K8JQMFyVowy+rj8bWZAHs/1rVcLwtH6PZTth2env+DfpTF0dWcc/j8Xk7PK8c/8VKLqvRlZrh7PCNKBQCnckREX0H+Q4iNer8q4GqH/tBm1k7/ODiVltzjusGMqHrdomoFoLrS9nE2V7lQqCtUBAb4+9vvd3MDMKUnElgy6BkpJui4380Ewh1rjz/rIi+bzUJTJJv+zKgfyQzJAFfZaqZHzVMMbwkxZjfF0zw7kO/Y1aC0zD+vQgaTBTznnqSaZ9CinYizaqg0qwOfV5T6SNiFszHZch5BQiPFPgNsxQwPvG2PtV3k3G7baopyC+fOG/PCOz3ZG+C8cTLVRrdfuIL9u2Iig3ES92U9Hqj9H8357iReJoX7UoqOvIWDFwYCIbCUjF6AsyyauaGBeZjS3KJoYaX02qG33gu5JJ5dZUD6CFP7ACs4BAb4+9vsFcITNIYmu4c977pHmWY9EUCCZUgiGoxOeIUkJiCQW3pYBoEO9phUogA0JooFkOkXAj31YQBPFvY4xr87hl5wU5UgGYk7934Y9BrjlgLkjaxeeNSrB3M6sdNihagLu+REXtLHbhpTYGLAf7f/cMuQe6HDcmKXGwMyXB1FkpwZqa5j11e6Cg+KMMUJ45rZ3ksHztp3qLNuiufOfeitikTAk7E4HaJ89Nz+418V1OmC73Kh6YhKBrVBWFROmODnwE64Nbt05C6akF/4KTwG+Pvb7X7aQpOfbNbOqiREdeethDSKSNoyJo8eh8VgjX9g66bqHVNEFzFFVReqYN7hYt+57rZ0++6jjRtAUJeuhg5MRtNWf+Anpfqe4PMA="),
                 },
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -61,11 +50,7 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),

@@ -40,7 +40,7 @@
     "summary": "System notification queue delivers asynchronous subsystem notifications to the assistant by embedding them in existing conversation messages."
   },
   "012-typed-llm-streaming-events.md": {
-    "hash": "67de200a999ce9c6f4badda33fd5b242c1951858688b48c35d684a53d819b20c",
+    "hash": "945b8f5720bc9c4937d15202d019d425b75cd62f5df4ab534d58f5eaf6ce690a",
     "summary": "Decouple streaming transport from persistence by replacing ConversationEvent in Event::Part with a purpose-built EventPart enum."
   },
   "013-named-query-templates.md": {

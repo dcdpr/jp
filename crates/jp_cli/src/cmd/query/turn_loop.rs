@@ -23,7 +23,7 @@ use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
     Provider,
     error::StreamError,
-    event::Event,
+    event::{Event, EventPart, ToolCallPart},
     model::ModelDetails,
     provider::get_provider,
     query::ChatQuery,
@@ -355,19 +355,19 @@ pub(super) async fn run_turn_loop(
                             // Register preparing tool calls. Flush the markdown
                             // buffer first so buffered text appears before the
                             // "Calling tool" line (fixes Issue 1).
-                            if let Event::Part { ref event, .. } = event
-                                && let Some(req) = event.as_tool_call_request()
+                            if let Event::Part {
+                                part: EventPart::ToolCall(ToolCallPart::Start { id, name }),
+                                ..
+                            } = &event
                             {
                                 turn_coordinator.flush_renderer();
                                 turn_coordinator.transition_to_tool_call();
 
-                                tool_renderer.register(&req.id, &req.name, &tick_tx);
-                                tool_coordinator.set_tool_state(
-                                    &req.id,
-                                    ToolCallState::ReceivingArguments {
-                                        name: req.name.clone(),
-                                    },
-                                );
+                                tool_renderer.register(id, name, &tick_tx);
+                                tool_coordinator
+                                    .set_tool_state(id, ToolCallState::ReceivingArguments {
+                                        name: name.clone(),
+                                    });
                             }
 
                             let is_flush = matches!(event, Event::Flush { .. });

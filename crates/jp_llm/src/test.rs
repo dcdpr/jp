@@ -18,19 +18,33 @@ use jp_config::{
 use jp_conversation::{
     ConversationEvent, ConversationStream,
     event::{ChatRequest, ToolCallResponse},
-    event_builder::EventBuilder,
     stream::ConversationEventWithConfig,
     thread::{Thread, ThreadBuilder},
 };
 use jp_test::mock::{Snap, Vcr};
 
 use crate::{
-    event::Event,
+    event::{Event, FinishReason},
+    event_builder::EventBuilder,
     model::{ModelDetails, ReasoningDetails},
     provider::get_provider,
     query::ChatQuery,
     tool::{ToolDefinition, ToolDocs},
 };
+
+/// An entry in the per-request event log used for snapshot testing.
+///
+/// Captures the output of the streaming pipeline (flushed `ConversationEvent`s)
+/// plus the finish signal.
+#[derive(Debug, Clone)]
+#[expect(dead_code, reason = "fields read via Debug formatting in snapshots")]
+pub enum TestEvent {
+    /// A flushed `ConversationEvent` produced by `EventBuilder`.
+    Flushed(ConversationEvent),
+
+    /// The stream finished with this reason.
+    Finished(FinishReason),
+}
 
 #[allow(clippy::large_enum_variant)]
 pub enum TestRequest {
@@ -39,7 +53,7 @@ pub enum TestRequest {
         model: ModelDetails,
         query: ChatQuery,
         #[expect(clippy::type_complexity)]
-        assert: Arc<dyn Fn(&[Vec<Event>])>,
+        assert: Arc<dyn Fn(&[Vec<TestEvent>])>,
         /// Runs after the turn completes, with the full conversation history.
         #[expect(clippy::type_complexity)]
         assert_history: Arc<dyn Fn(&[ConversationEventWithConfig])>,
@@ -206,7 +220,7 @@ impl TestRequest {
     }
 
     #[expect(dead_code)]
-    pub fn assert_chat(mut self, assert: impl Fn(&[Vec<Event>]) + 'static) -> Self {
+    pub fn assert_chat(mut self, assert: impl Fn(&[Vec<TestEvent>]) + 'static) -> Self {
         if let Self::Chat { assert: a, .. } = &mut self {
             *a = Arc::new(assert);
         }
@@ -488,8 +502,12 @@ pub async fn run_chat_completion(
 
                         for llm_event in events {
                             match llm_event {
-                                Event::Part { index: idx, event } => {
-                                    builder.handle_part(idx, event);
+                                Event::Part {
+                                    index: idx,
+                                    part,
+                                    metadata,
+                                } => {
+                                    builder.handle_part(idx, part, metadata);
                                 }
                                 Event::Flush {
                                     index: idx,
@@ -500,11 +518,7 @@ pub async fn run_chat_completion(
                                         event.timestamp =
                                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
 
-                                        all_events[index].push(Event::Part {
-                                            index: idx,
-                                            event: event.clone(),
-                                        });
-                                        all_events[index].push(Event::flush(idx));
+                                        all_events[index].push(TestEvent::Flushed(event.clone()));
 
                                         history.push(ConversationEventWithConfig {
                                             event: event.clone(),
@@ -519,11 +533,7 @@ pub async fn run_chat_completion(
                                         event.timestamp =
                                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
 
-                                        all_events[index].push(Event::Part {
-                                            index: 0,
-                                            event: event.clone(),
-                                        });
-                                        all_events[index].push(Event::flush(0));
+                                        all_events[index].push(TestEvent::Flushed(event.clone()));
 
                                         history.push(ConversationEventWithConfig {
                                             event: event.clone(),
@@ -532,7 +542,7 @@ pub async fn run_chat_completion(
                                         stream.extend(std::iter::once(event));
                                     }
 
-                                    all_events[index].push(Event::Finished(reason));
+                                    all_events[index].push(TestEvent::Finished(reason));
                                 }
                             }
                         }

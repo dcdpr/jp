@@ -4,9 +4,8 @@ expression: v
 ---
 [
     [
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -15,19 +14,14 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -36,14 +30,9 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -52,19 +41,14 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 2,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
@@ -78,19 +62,14 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 2,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -99,19 +78,14 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -120,14 +94,9 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -136,11 +105,7 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),

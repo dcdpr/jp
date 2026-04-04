@@ -1,8 +1,8 @@
 use jp_config::AppConfig;
-use jp_conversation::{ConversationEvent, event::ChatResponse};
+use jp_conversation::event::ChatResponse;
 use jp_llm::event::FinishReason;
 use jp_printer::{OutputFormat, Printer};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, json};
 
 use super::{super::state::TurnState, *};
 
@@ -23,10 +23,10 @@ fn test_transitions_to_executing_on_tool_call() {
         arguments: serde_json::Map::new(),
     };
 
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(tool_call),
-    });
+    coordinator.handle_event(
+        &mut stream,
+        Event::tool_call_start(0, tool_call.id.clone(), tool_call.name.clone()),
+    );
 
     // Simulate flush
     coordinator.handle_event(&mut stream, Event::flush(0));
@@ -54,12 +54,7 @@ fn test_transitions_to_complete_no_tools() {
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
     // Simulate message
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ChatResponse::Message {
-            message: "Hi".into(),
-        }),
-    });
+    coordinator.handle_event(&mut stream, Event::message(0, "Hi"));
 
     let action = coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
@@ -83,14 +78,7 @@ fn test_continues_after_tool_execution() {
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
     // Simulate LLM producing a tool call (Part + Flush + Finished).
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ToolCallRequest {
-            id: "1".into(),
-            name: "t".into(),
-            arguments: Map::default(),
-        }),
-    });
+    coordinator.handle_event(&mut stream, Event::tool_call_start(0, "1", "t"));
     coordinator.handle_event(&mut stream, Event::flush(0));
     coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
@@ -126,18 +114,8 @@ fn test_peek_partial_content() {
     assert_eq!(coordinator.peek_partial_content(), None);
 
     // Add a partial message (not flushed)
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ChatResponse::Message {
-            message: "Hello ".into(),
-        }),
-    });
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ChatResponse::Message {
-            message: "world".into(),
-        }),
-    });
+    coordinator.handle_event(&mut stream, Event::message(0, "Hello "));
+    coordinator.handle_event(&mut stream, Event::message(0, "world"));
 
     // Should have partial content
     assert_eq!(
@@ -160,12 +138,10 @@ fn test_buffered_markdown_flushed_before_tool_call() {
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
     // LLM sends a partial markdown line (no trailing newline / block boundary)
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ChatResponse::Message {
-            message: "Now wire the config into `ChatResponseRenderer`:".into(),
-        }),
-    });
+    coordinator.handle_event(
+        &mut stream,
+        Event::message(0, "Now wire the config into `ChatResponseRenderer`:"),
+    );
 
     // Nothing rendered yet — buffer is waiting for a complete block
     printer.flush();
@@ -177,10 +153,10 @@ fn test_buffered_markdown_flushed_before_tool_call() {
         name: "fs_read_file".into(),
         arguments: serde_json::Map::new(),
     };
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 1,
-        event: ConversationEvent::now(tool_call),
-    });
+    coordinator.handle_event(
+        &mut stream,
+        Event::tool_call_start(1, tool_call.id.clone(), tool_call.name.clone()),
+    );
 
     // The buffered markdown should now be flushed
     printer.flush();
@@ -200,12 +176,7 @@ fn test_prepare_continuation() {
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
     // Add partial content
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ChatResponse::Message {
-            message: "Partial".into(),
-        }),
-    });
+    coordinator.handle_event(&mut stream, Event::message(0, "Partial"));
     assert!(coordinator.peek_partial_content().is_some());
 
     // Prepare continuation resets state
@@ -226,30 +197,20 @@ fn test_multi_part_tool_call_deferred_to_flush() {
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    // First Part: name + id, empty arguments (from content_block_start)
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 1,
-        event: ConversationEvent::now(ToolCallRequest {
-            id: "call_99".into(),
-            name: "fs_create_file".into(),
-            arguments: serde_json::Map::new(),
-        }),
-    });
+    // First Part: name + id (from content_block_start)
+    coordinator.handle_event(
+        &mut stream,
+        Event::tool_call_start(1, "call_99", "fs_create_file"),
+    );
 
     // Not in pending_tool_calls yet (no flush)
     assert!(coordinator.pending_tool_calls.is_empty());
 
-    // Second Part: full arguments (from content_block_stop)
-    let mut args = serde_json::Map::new();
-    args.insert("path".into(), "test.rs".into());
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 1,
-        event: ConversationEvent::now(ToolCallRequest {
-            id: "call_99".into(),
-            name: "fs_create_file".into(),
-            arguments: args,
-        }),
-    });
+    // Argument chunks arrive incrementally
+    coordinator.handle_event(
+        &mut stream,
+        Event::tool_call_args(1, r#"{"path": "test.rs"}"#),
+    );
 
     // Still not in pending (no flush yet)
     assert!(coordinator.pending_tool_calls.is_empty());
@@ -290,18 +251,8 @@ fn test_structured_output_rendered_as_json_code_fence() {
     });
 
     // Streamed structured chunks
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ChatResponse::Structured {
-            data: Value::String("{\"name\"".into()),
-        }),
-    });
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ChatResponse::Structured {
-            data: Value::String(": \"Alice\"}".into()),
-        }),
-    });
+    coordinator.handle_event(&mut stream, Event::structured(0, "{\"name\""));
+    coordinator.handle_event(&mut stream, Event::structured(0, ": \"Alice\"}"));
 
     coordinator.handle_event(&mut stream, Event::flush(0));
     let action = coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
@@ -339,12 +290,7 @@ fn test_structured_output_persisted_with_parsed_json() {
         schema: Some(Map::from_iter([("type".into(), json!("object"))])),
     });
 
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ChatResponse::Structured {
-            data: Value::String("{\"name\": \"Alice\"}".into()),
-        }),
-    });
+    coordinator.handle_event(&mut stream, Event::structured(0, "{\"name\": \"Alice\"}"));
     coordinator.handle_event(&mut stream, Event::flush(0));
     coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
@@ -372,12 +318,7 @@ fn test_structured_not_routed_to_chat_renderer() {
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
     // Send a structured chunk — it must NOT go through the markdown formatter.
-    coordinator.handle_event(&mut stream, Event::Part {
-        index: 0,
-        event: ConversationEvent::now(ChatResponse::Structured {
-            data: Value::String("# heading".into()),
-        }),
-    });
+    coordinator.handle_event(&mut stream, Event::structured(0, "# heading"));
     coordinator.handle_event(&mut stream, Event::flush(0));
     coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
