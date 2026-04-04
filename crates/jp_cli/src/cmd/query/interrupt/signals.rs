@@ -116,6 +116,14 @@ pub fn handle_llm_event(
 }
 
 /// Apply provider-issued metadata patches to historical conversation events.
+///
+/// NOTE: This mutates the stream in-place, which deviates from the append-only
+/// principle established in RFD 064 (non-destructive compaction). This is
+/// acceptable for now because the targets are opaque provider metadata
+/// (cryptographic signatures), not user-visible content, and the overlay/
+/// projection infrastructure from RFD 064 does not exist yet. Once RFD 064
+/// lands, this should migrate to an append-only patch event that the
+/// projection layer applies at request-build time.
 fn apply_history_patches(stream: &mut ConversationStream, patches: &[EventPatch]) {
     let mut count = 0;
 

@@ -132,7 +132,7 @@ pub struct Resource {
     /// Optional MCP annotations (audience, priority, lastModified).
     pub annotations: Option<Annotations>,
 
-    // --- JP extensions (all defaultable, absent for MCP-sourced resources) ---
+    // JP extensions (all defaultable, absent for MCP-sourced resources)
 
     /// Short name of the resource.
     ///

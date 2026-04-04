@@ -222,7 +222,7 @@ pub(crate) fn build_partial_from_cfg_args(
 ) -> Result<PartialAppConfig> {
     if args.is_empty() {
         return Err(Error::CliConfig(
-            "No configuration values to set. Use --cfg KEY=VALUE to specify values.".into(),
+            "No configuration values to set. Use `--cfg` to specify values.".into(),
         ));
     }
 

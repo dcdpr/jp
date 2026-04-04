@@ -308,10 +308,10 @@ impl ToolRenderer {
             if let Ok(pretty) = serde_json::to_string_pretty(&json) {
                 format!("```json\n{pretty}\n```")
             } else {
-                raw_content.trim().to_owned()
+                raw_content.trim_end().to_owned()
             }
         } else {
-            raw_content.trim().to_owned()
+            raw_content.trim_end().to_owned()
         };
 
         // Extract language from code fence if present

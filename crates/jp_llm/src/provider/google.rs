@@ -24,7 +24,7 @@ use jp_conversation::{
 use serde_json::{Map, Value};
 use tracing::{debug, trace};
 
-use super::{EventStream, Provider};
+use super::{EventStream, Provider, trace_to_tmpfile};
 use crate::{
     StreamErrorKind,
     error::{Error, Result, StreamError, looks_like_quota_error},
@@ -78,7 +78,7 @@ impl Provider for Google {
 
         debug!(stream = true, "Google chat completion stream request.");
         trace!(
-            request = serde_json::to_string(&request).unwrap_or_default(),
+            request = %trace_to_tmpfile("jp-google-request", &request),
             "Request payload."
         );
 

@@ -31,7 +31,7 @@ use jp_conversation::{
 use serde_json::{Map, Value, json};
 use tracing::{debug, info, trace, warn};
 
-use super::Provider;
+use super::{Provider, trace_to_tmpfile};
 use crate::{
     error::{
         Error, Result, StreamError, StreamErrorKind, extract_retry_from_text,
@@ -160,7 +160,7 @@ impl Provider for Anthropic {
 
         debug!(stream = true, "Anthropic chat completion stream request.");
         trace!(
-            request = serde_json::to_string(&request).unwrap_or_default(),
+            request = %trace_to_tmpfile("jp-anthropic-request", &request),
             "Request payload."
         );
 

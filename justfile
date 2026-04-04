@@ -1,12 +1,12 @@
 bacon_version        := "3.22.0"
-binstall_version     := "1.17.8"
+binstall_version     := "1.17.9"
 deny_version         := "0.19.0"
-expand_version       := "1.0.120"
+expand_version       := "1.0.121"
 insta_version        := "1.46.3"
 jilu_version         := "0.13.2"
-llvm_cov_version     := "0.8.4"
-nextest_version      := "0.9.126"
-shear_version        := "1.9.1"
+llvm_cov_version     := "0.8.5"
+nextest_version      := "0.9.132"
+shear_version        := "1.11.2"
 vet_version          := "0.10.2"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
@@ -723,7 +723,7 @@ docs-ci: _install_ci_matchers
 coverage-ci: _coverage-setup _install_ci_matchers
     cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
     cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
-    cargo llvm-cov report --doctests --lcov --output-path lcov.info
+    cargo llvm-cov report --doctests --lcov --output-path lcov.info --profile=coverage
 
 _coverage-setup: (_rustup_component "llvm-tools") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
 

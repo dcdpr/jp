@@ -196,7 +196,7 @@ pub fn build(mut partial: PartialAppConfig) -> Result<AppConfig, Error> {
 
     debug!("Loading configuration.");
     trace!(
-        config = serde_json::to_string(&partial).unwrap_or_default(),
+        config = %trace_to_tmpfile("jp-config", &partial),
         "Configuration details."
     );
 
@@ -399,6 +399,22 @@ macro_rules! named_unit_variant {
             }
         }
     };
+}
+
+/// Serialize a value to a temporary JSON file and return its path as a string.
+///
+/// Used by `trace!` fields to avoid dumping massive payloads into the log
+/// stream. The file is written to `std::env::temp_dir()` with the given
+/// `prefix`. Returns `"<write failed>"` on I/O errors.
+fn trace_to_tmpfile(prefix: &str, value: &impl serde::Serialize) -> String {
+    let path = std::env::temp_dir().join(format!("{prefix}-{}.json", std::process::id()));
+    match std::fs::write(
+        &path,
+        serde_json::to_string_pretty(value).unwrap_or_default(),
+    ) {
+        Ok(()) => path.display().to_string(),
+        Err(_) => "<write failed>".to_owned(),
+    }
 }
 
 #[cfg(test)]
