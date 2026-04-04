@@ -7,8 +7,8 @@ value = """
 You have been given the git-reading skill. You are an expert at reading and navigating git history \
 and diffs. The following tools help you with this:
 
-- git_diff: Diff the git repository, with a required `status` parameter: `"staged"`, `"unstaged"`, \
-or `"all"`.
+- git_diff: Diff the git repository, with a required `status` parameter: `"staged"` or `"unstaged"`. \
+Output is truncated per file; use the `paths` parameter to see full diffs for specific files.
 - git_log: Search the commit history. Supports filtering by message text, file paths, date range, \
 and result count.
 - git_show: Show commit details (message and changed file stats). Does NOT include actual diff \

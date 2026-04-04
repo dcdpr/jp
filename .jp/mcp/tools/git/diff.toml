@@ -6,6 +6,11 @@ style.inline_results = "full"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Show the diff of changes in the git repository, filtered by staging status."
+description = """
+Returns a per-file summary of changes with truncated diffs. Each file's diff \
+is capped at 50 lines. If a file is truncated, re-run with `paths` set to \
+that file to see its full diff.
+"""
 
 examples = """
 Diff all unstaged changes:
@@ -22,11 +27,6 @@ Diff staged changes:
 ```json
 {"status": "staged", "paths": ["src/"]}
 ```
-
-Diff all changes (staged + unstaged combined):
-```json
-{"status": "all"}
-```
 """
 
 [conversation.tools.git_diff.parameters.paths]
@@ -36,13 +36,12 @@ summary = "Optional list of paths to restrict the diff to. If omitted, diffs the
 
 [conversation.tools.git_diff.parameters.status]
 type = "string"
-enum = ["all", "staged", "unstaged"]
+enum = ["staged", "unstaged"]
 required = true
 summary = "Which changes to include in the diff."
 description = """
 - `"staged"`: changes in the index that differ from HEAD (HEAD vs index).
 - `"unstaged"`: changes in the working tree that differ from the index (index vs working tree).
-- `"all"`: all changes from HEAD, regardless of staging (HEAD vs working tree).
 
 A staged change will NOT appear in the `"unstaged"` diff and vice versa.
 """

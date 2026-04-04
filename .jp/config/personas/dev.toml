@@ -9,8 +9,9 @@ extends = [
 ]
 
 [conversation.tools]
-fs_move_file.questions.move_dirty_file.answer = true
+fs_create_file.questions.overwrite_file.answer = true
 fs_modify_file.questions.modify_dirty_file.answer = true
+fs_move_file.questions.move_dirty_file.answer = true
 
 [[conversation.attachments]]
 type = "cmd"
