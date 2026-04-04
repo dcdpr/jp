@@ -153,6 +153,13 @@ fn validate_args(
     Ok(())
 }
 
+/// Whether a byte is a path separator on the current platform.
+///
+/// On Unix only `/` counts; on Windows both `/` and `\` do.
+fn is_sep(b: u8) -> bool {
+    std::path::is_separator(b as char)
+}
+
 /// Scan a single fragment byte-by-byte for path references outside the
 /// workspace.
 fn scan_fragment(
@@ -165,14 +172,16 @@ fn scan_fragment(
 
     for i in 0..bytes.len() {
         let ch = bytes[i];
-        if ch != b'/' && ch != b'~' && ch != b'.' {
+        if !is_sep(ch) && ch != b'~' && ch != b'.' {
             continue;
         }
 
         let candidate = &fragment[i..];
 
         // Tilde: always reject (tools may expand ~ internally).
-        if ch == b'~' && (candidate == "~" || candidate.starts_with("~/")) {
+        if ch == b'~'
+            && (candidate == "~" || (candidate.len() > 1 && is_sep(candidate.as_bytes()[1])))
+        {
             return Err(format!(
                 "Home directory references are not allowed: '{original_arg}'"
             ));
@@ -180,7 +189,7 @@ fn scan_fragment(
 
         // Absolute path: reject if it resolves to an existing path
         // outside the workspace.
-        if ch == b'/' {
+        if is_sep(ch) {
             let normalized = clean(Path::new(candidate));
             if exists(&normalized) && !normalized.starts_with(root) {
                 return Err(format!(
@@ -189,11 +198,10 @@ fn scan_fragment(
             }
         }
 
-        // Dot as path start: at position 0 or right after a `/`.
-        // Treats the substring as relative to the workspace root and
-        // rejects if it escapes — regardless of whether the target
-        // exists.
-        if ch == b'.' && (i == 0 || bytes[i - 1] == b'/') {
+        // Dot as path start: at position 0 or right after a path separator.
+        // Treats the substring as relative to the workspace root and rejects if
+        // it escapes — regardless of whether the target exists.
+        if ch == b'.' && (i == 0 || is_sep(bytes[i - 1])) {
             let joined = root.join(candidate);
             let normalized = clean(&joined);
             if !normalized.starts_with(root) {
