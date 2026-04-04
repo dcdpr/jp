@@ -31,6 +31,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: None,
+                title: None,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -72,6 +73,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: None,
+                title: None,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -123,6 +125,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: None,
+                title: None,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -176,6 +179,7 @@ fn test_conversation_fork() {
                 from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
                 until: None,
                 last: None,
+                title: None,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -228,6 +232,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
                 last: None,
+                title: None,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -280,6 +285,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: Some(None),
+                title: None,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -356,6 +362,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: Some(Some(2)),
+                title: None,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -431,6 +438,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: Some(Some(10)),
+                title: None,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -474,6 +482,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: Some(Some(1)),
+                title: None,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -507,6 +516,36 @@ fn test_conversation_fork() {
                 assert_eq!(convs[1].2.iter().count(), 3);
             },
         }),
+        ("with custom title", TestCase {
+            args: Fork {
+                target: PositionalIds::default(),
+                activate: false,
+                from: None,
+                until: None,
+                last: None,
+                title: Some("my custom title".to_owned()),
+            },
+            setup: |ctx| {
+                let id = ConversationId::try_from(ctx.now()).unwrap();
+                ctx.workspace.create_conversation_with_id(
+                    id,
+                    Conversation::new("original title").with_last_activated_at(ctx.now()),
+                    ctx.config(),
+                );
+
+                let h = ctx.workspace.acquire_conversation(&id).unwrap();
+                let _lock = ctx.workspace.test_lock(h);
+                id
+            },
+            assert: |mut convs, source_id| {
+                assert_eq!(convs.len(), 2);
+                convs.sort_by_key(|v| v.0);
+                assert_eq!(source_id, convs[0].0);
+
+                assert_eq!(convs[0].1.title.as_deref(), Some("original title"));
+                assert_eq!(convs[1].1.title.as_deref(), Some("my custom title"));
+            },
+        }),
         ("with from and until", TestCase {
             args: Fork {
                 target: PositionalIds::default(),
@@ -514,6 +553,7 @@ fn test_conversation_fork() {
                 from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
                 until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()),
                 last: None,
+                title: None,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -631,4 +671,127 @@ fn test_conversation_fork() {
             resume_unwind(panic);
         }
     }
+}
+
+/// Create two conversations with distinct content, fork only one, and verify
+/// the fork carries the source's events (not the other conversation's).
+#[test]
+fn fork_targets_correct_source() {
+    let tmp = tempdir().unwrap();
+    let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
+    let config = AppConfig::new_test();
+    let storage = tmp.path().join(".jp");
+    let user = tmp.path().join("user");
+    let workspace = Workspace::new(tmp.path())
+        .persisted_at(&storage)
+        .unwrap()
+        .with_local_storage_at(&user, "test", "abc")
+        .unwrap();
+    let mut ctx = Ctx::new(
+        workspace,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        config,
+        None,
+        printer,
+    );
+
+    // Create conversation A with distinct content.
+    let id_a = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        id_a,
+        Conversation::new("conv-a").with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+    let h_a = ctx.workspace.acquire_conversation(&id_a).unwrap();
+    let lock_a = ctx.workspace.test_lock(h_a);
+    lock_a.as_mut().update_events(|e| {
+        e.extend(vec![
+            ConversationEvent::new(
+                ChatRequest::from("alpha question"),
+                Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+            ),
+            ConversationEvent::new(
+                ChatResponse::message("alpha answer"),
+                Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
+            ),
+        ]);
+    });
+    drop(lock_a);
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+
+    // Create conversation B with different content.
+    let id_b = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        id_b,
+        Conversation::new("conv-b").with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+    let h_b = ctx.workspace.acquire_conversation(&id_b).unwrap();
+    let lock_b = ctx.workspace.test_lock(h_b);
+    lock_b.as_mut().update_events(|e| {
+        e.extend(vec![
+            ConversationEvent::new(
+                ChatRequest::from("beta question"),
+                Utc.with_ymd_and_hms(2020, 2, 1, 0, 0, 0).unwrap(),
+            ),
+            ConversationEvent::new(
+                ChatResponse::message("beta answer"),
+                Utc.with_ymd_and_hms(2020, 2, 1, 0, 1, 0).unwrap(),
+            ),
+        ]);
+    });
+    drop(lock_b);
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+
+    // Fork conversation B only.
+    let fork = Fork {
+        target: PositionalIds::default(),
+        activate: false,
+        from: None,
+        until: None,
+        last: None,
+        title: Some("forked-from-b".to_owned()),
+    };
+    let handle_b = ctx.workspace.acquire_conversation(&id_b).unwrap();
+    fork.run(&mut ctx, &[handle_b]).unwrap();
+
+    // Should now have 3 conversations: A, B, and the fork.
+    let all: Vec<_> = ctx
+        .workspace
+        .conversations()
+        .map(|(id, conv)| (*id, conv.clone()))
+        .collect();
+    assert_eq!(all.len(), 3);
+
+    // Find the forked conversation (the one that is neither A nor B).
+    let (fork_id, fork_conv) = all
+        .iter()
+        .find(|(id, _)| *id != id_a && *id != id_b)
+        .unwrap();
+
+    // Title comes from the --title flag, not from the source.
+    assert_eq!(fork_conv.title.as_deref(), Some("forked-from-b"));
+
+    // The fork should carry B's content, not A's.
+    let fork_handle = ctx.workspace.acquire_conversation(fork_id).unwrap();
+    let fork_events = ctx.workspace.events(&fork_handle).unwrap();
+    let requests: Vec<&str> = fork_events
+        .iter()
+        .filter_map(|e| e.event.as_chat_request())
+        .map(|r| r.content.as_str())
+        .collect();
+    assert_eq!(requests, vec!["beta question"]);
+
+    // Conversation A is untouched.
+    let handle_a = ctx.workspace.acquire_conversation(&id_a).unwrap();
+    let a_events = ctx.workspace.events(&handle_a).unwrap();
+    let a_requests: Vec<&str> = a_events
+        .iter()
+        .filter_map(|e| e.event.as_chat_request())
+        .map(|r| r.content.as_str())
+        .collect();
+    assert_eq!(a_requests, vec!["alpha question"]);
 }
