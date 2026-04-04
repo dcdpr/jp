@@ -878,6 +878,7 @@ impl clap::Args for ToolDirectives {
             clap::Arg::new("tools")
                 .short('t')
                 .long("tool")
+                .alias("tools")
                 .help("The tool(s) to enable")
                 .long_help(
                     "The tool(s) to enable.\n\nIf an existing tool is configured with a matching \
@@ -895,6 +896,7 @@ impl clap::Args for ToolDirectives {
             clap::Arg::new("no_tools")
                 .short('T')
                 .long("no-tool")
+                .alias("no-tools")
                 .help("Disable tool(s)")
                 .long_help(
                     "Disable tool(s).\n\nIf provided without a value, all enabled tools will be \
