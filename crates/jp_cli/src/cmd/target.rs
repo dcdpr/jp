@@ -197,7 +197,7 @@ impl ConversationTarget {
     /// respective variants. Anything else is parsed as a conversation ID.
     pub(crate) fn parse(s: &str) -> Result<Self> {
         match s {
-            "" => Ok(Self::Picker),
+            "?" | "" => Ok(Self::Picker),
             "last" | "last-active" | "last-activated" | "l" => Ok(Self::LastActivated),
             "last-created" => Ok(Self::LastCreated),
             "previous" | "prev" | "p" => Ok(Self::Previous),

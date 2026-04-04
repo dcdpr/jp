@@ -32,7 +32,7 @@ use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 use url::Url;
 
-use super::{EventStream, ModelDetails, Provider};
+use super::{EventStream, ModelDetails, Provider, trace_to_tmpfile};
 use crate::{
     error::{Error, Result, StreamError},
     event::{Event, FinishReason},
@@ -79,7 +79,7 @@ impl Provider for Ollama {
         let (request, is_structured) = create_request(model, query)?;
 
         trace!(
-            request = serde_json::to_string(&request).unwrap_or_default(),
+            request = %trace_to_tmpfile("jp-ollama-request", &request),
             "Sending request to Ollama."
         );
 

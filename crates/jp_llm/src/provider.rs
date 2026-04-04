@@ -60,6 +60,21 @@ pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dy
     Ok(provider)
 }
 
+/// Serialize a value to a temporary JSON file and return its path as a string.
+///
+/// Used by `trace!` fields to avoid dumping massive request payloads into the
+/// log stream.
+pub(crate) fn trace_to_tmpfile(prefix: &str, value: &impl serde::Serialize) -> String {
+    let path = std::env::temp_dir().join(format!("{prefix}-{}.json", std::process::id()));
+    match std::fs::write(
+        &path,
+        serde_json::to_string_pretty(value).unwrap_or_default(),
+    ) {
+        Ok(()) => path.display().to_string(),
+        Err(_) => "<write failed>".to_owned(),
+    }
+}
+
 #[cfg(test)]
 #[path = "provider_tests.rs"]
 mod tests;

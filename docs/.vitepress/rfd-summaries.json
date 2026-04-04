@@ -72,7 +72,7 @@
     "summary": "Abandoned RFD split into RFD 048 and RFD 049; preserved for historical context on non-interactive mode design."
   },
   "020-parallel-conversations.md": {
-    "hash": "f9689ba2c4e1caff792de738a074411eaad44985171edb93012b7e92fef4480e",
+    "hash": "7773bf58ef6c80411b39606bacaa8ac521ff2055524a63c2b39f259af9b2448a",
     "summary": "Replace global active conversation with per-session tracking and add conversation locks for parallel terminal work."
   },
   "021-printer-live-redirection.md": {
@@ -248,11 +248,11 @@
     "summary": "Adds local-only CLI usage tracking to record command invocations and argument patterns per workspace for adaptive features."
   },
   "063-usage-based-wizard-field-ordering.md": {
-    "hash": "0ad593a54402a40cd633d40994157ad8b4958de5dd6d7246b0c6924138fa54b2",
+    "hash": "475b19da222659579749ff52204f42901e86c88084da88a32659b37ca805e66c",
     "summary": "Extend config wizard with frecency-based field ordering using CLI usage tracking data."
   },
   "064-non-destructive-conversation-compaction.md": {
-    "hash": "b6cecaddc01242c39a8fc87d5ba44a7bfd631476965af3f7060ad8d06aaa6a16",
+    "hash": "66901f99e90942de48cb1dfb2033ac3b36c8e58fd8c99f1131155eed78e4bc2d",
     "summary": "Non-destructive conversation compaction through overlay events that project reduced views without mutating stored data."
   },
   "065-typed-resource-model-for-attachments.md": {

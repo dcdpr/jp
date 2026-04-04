@@ -47,10 +47,17 @@ pub enum Event {
     /// Instruct the caller to patch the conversation stream based on the
     /// patching rules.
     ///
-    /// This allows providers LLM providers to inform the caller about an
-    /// invalid event stream that the provider can fix, but which should ideally
-    /// also be applied to the conversation stream itself so that the error
-    /// doesn't show up again in the future.
+    /// This allows LLM providers to inform the caller about an invalid event
+    /// stream that the provider can fix, but which should ideally also be
+    /// applied to the conversation stream itself so that the error doesn't
+    /// show up again in the future.
+    ///
+    /// Currently, the caller applies these patches by mutating the stream
+    /// in-place (see `apply_history_patches` in `signals.rs`). This is a
+    /// known deviation from the append-only stream principle (RFD 064).
+    /// When RFD 064's overlay/projection infrastructure lands, patches
+    /// should be stored as stream events and applied at projection time
+    /// instead.
     Patch(Vec<EventPatch>),
 
     /// The response was finished.

@@ -134,7 +134,7 @@ fn field_usage_scores(
 
     let mut scores: HashMap<String, f64> = HashMap::new();
 
-    // --cfg values: parse with KvAssignment to extract field paths.
+    // `--cfg` values: parse with KvAssignment to extract field paths.
     // The clap arg ID for `--cfg` is `config` (the Rust field name).
     // We use KvAssignment::from_str rather than splitting on '='
     // because the assignment syntax supports =, :=, +=, :+= etc.
