@@ -24,7 +24,7 @@
     "summary": "Llamacpp provider will drop the openai crate to properly extract reasoning content from all three llama.cpp reasoning formats."
   },
   "008-ordered-tool-directives.md": {
-    "hash": "e42d1633b20b6f55cded79d628f11b56c3bc1eda48dcc2a71231e716f39e7eaf",
+    "hash": "e968be4f749d05dad93d0a8a04f108274491a5e00585ee2d1b24285026577425",
     "summary": "Make CLI tool flags order-sensitive, processing `--tool` and `--no-tools` left-to-right instead of in fixed order."
   },
   "009-stateful-tool-protocol.md": {

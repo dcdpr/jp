@@ -247,45 +247,8 @@ pub(crate) struct Query {
     #[arg(long = "hide-tool-calls")]
     hide_tool_calls: bool,
 
-    /// The tool(s) to enable.
-    ///
-    /// If an existing tool is configured with a matching name, it will be
-    /// enabled for the duration of the query.
-    ///
-    /// If no arguments are provided, all configured tools will be enabled.
-    ///
-    /// You can provide this flag multiple times to enable multiple tools. It
-    /// can be combined with `--no-tools` to disable all enabled tools before
-    /// enabling a specific one.
-    #[arg(
-        short = 't',
-        long = "tool",
-        action = ArgAction::Append,
-        num_args = 0..=1,
-        value_parser = |s: &str| -> Result<Option<String>> {
-            if s.is_empty() { Ok(None) } else { Ok(Some(s.to_string())) }
-        },
-        default_missing_value = "",
-    )]
-    tools: Vec<Option<String>>,
-
-    /// Disable tools.
-    ///
-    /// If provided without a value, all enabled tools will be disabled,
-    /// otherwise pass the argument multiple times to disable one or more tools.
-    ///
-    /// Any tools that were enabled before this flag is set will be disabled.
-    #[arg(
-        short = 'T',
-        long = "no-tools",
-        action = ArgAction::Append,
-        num_args = 0..=1,
-        value_parser = |s: &str| -> Result<Option<String>> {
-            if s.is_empty() { Ok(None) } else { Ok(Some(s.to_string())) }
-        },
-        default_missing_value = "",
-    )]
-    no_tools: Vec<Option<String>>,
+    #[command(flatten)]
+    tool_directives: ToolDirectives,
 
     /// Set the expiration date of the conversation.
     ///
@@ -816,6 +779,139 @@ impl Query {
     }
 }
 
+/// A single tool selection directive from the CLI.
+///
+/// Directives are evaluated left-to-right, allowing users to compose tool sets
+/// precisely (e.g. `--no-tools --tool=write --no-tools=fs_modify_file`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ToolDirective {
+    EnableAll,
+    DisableAll,
+    Enable(String),
+    Disable(String),
+}
+
+impl ToolDirective {
+    /// Returns the single-tool directive as a string slice.
+    #[must_use]
+    fn as_single(&self) -> Option<&str> {
+        match self {
+            Self::Enable(name) | Self::Disable(name) => Some(name.as_str()),
+            _ => None,
+        }
+    }
+}
+
+/// Ordered sequence of tool directives parsed from `--tool` and `--no-tools`.
+///
+/// Implements manual [`clap::Args`] and [`clap::FromArgMatches`] to recover the
+/// position of each flag value using [`ArgMatches::indices_of`], then merges
+/// and sorts them by index into a single ordered list.
+///
+/// [`ArgMatches::indices_of`]: clap::ArgMatches::indices_of
+#[derive(Debug, Clone, Default)]
+struct ToolDirectives(Vec<ToolDirective>);
+
+impl std::ops::Deref for ToolDirectives {
+    type Target = [ToolDirective];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl clap::FromArgMatches for ToolDirectives {
+    fn from_arg_matches(matches: &clap::ArgMatches) -> std::result::Result<Self, clap::Error> {
+        let tool_values: Vec<String> = matches
+            .get_many("tools")
+            .map(|v| v.cloned().collect())
+            .unwrap_or_default();
+        let tool_indices: Vec<_> = matches
+            .indices_of("tools")
+            .map(Iterator::collect)
+            .unwrap_or_default();
+
+        let no_tool_values: Vec<String> = matches
+            .get_many("no_tools")
+            .map(|v| v.cloned().collect())
+            .unwrap_or_default();
+        let no_tool_indices: Vec<_> = matches
+            .indices_of("no_tools")
+            .map(Iterator::collect)
+            .unwrap_or_default();
+
+        let mut indexed = vec![];
+        for (val, idx) in tool_values.into_iter().zip(tool_indices) {
+            let directive = if val.is_empty() {
+                ToolDirective::EnableAll
+            } else {
+                ToolDirective::Enable(val)
+            };
+            indexed.push((idx, directive));
+        }
+
+        for (val, idx) in no_tool_values.into_iter().zip(no_tool_indices) {
+            let directive = if val.is_empty() {
+                ToolDirective::DisableAll
+            } else {
+                ToolDirective::Disable(val)
+            };
+            indexed.push((idx, directive));
+        }
+
+        indexed.sort_by_key(|(idx, _)| *idx);
+        Ok(Self(indexed.into_iter().map(|(_, d)| d).collect()))
+    }
+
+    fn update_from_arg_matches(
+        &mut self,
+        matches: &clap::ArgMatches,
+    ) -> std::result::Result<(), clap::Error> {
+        *self = Self::from_arg_matches(matches)?;
+        Ok(())
+    }
+}
+
+impl clap::Args for ToolDirectives {
+    fn augment_args(cmd: clap::Command) -> clap::Command {
+        cmd.arg(
+            clap::Arg::new("tools")
+                .short('t')
+                .long("tool")
+                .help("The tool(s) to enable")
+                .long_help(
+                    "The tool(s) to enable.\n\nIf an existing tool is configured with a matching \
+                     name, it will be enabled for the duration of the query.\n\nIf no arguments \
+                     are provided, all configured tools will be enabled.\n\nYou can provide this \
+                     flag multiple times to enable multiple tools. Flags are evaluated \
+                     left-to-right, so `--no-tools --tool=write` first disables everything, then \
+                     re-enables only 'write'.",
+                )
+                .action(ArgAction::Append)
+                .num_args(0..=1)
+                .default_missing_value(""),
+        )
+        .arg(
+            clap::Arg::new("no_tools")
+                .short('T')
+                .long("no-tool")
+                .help("Disable tool(s)")
+                .long_help(
+                    "Disable tool(s).\n\nIf provided without a value, all enabled tools will be \
+                     disabled, otherwise pass the argument multiple times to disable one or more \
+                     tools.\n\nFlags are evaluated left-to-right together with `--tool`.",
+                )
+                .action(ArgAction::Append)
+                .num_args(0..=1)
+                .default_missing_value(""),
+        )
+    }
+
+    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
+        Self::augment_args(cmd)
+    }
+}
+
 /// Fork a conversation and return the new conversation's lock.
 fn fork_conversation(
     ctx: &mut Ctx,
@@ -871,8 +967,7 @@ impl IntoPartialAppConfig for Query {
             parameters,
             hide_reasoning,
             hide_tool_calls,
-            tools,
-            no_tools,
+            tool_directives,
             reasoning,
             no_reasoning,
             expires_in: _,
@@ -893,7 +988,7 @@ impl IntoPartialAppConfig for Query {
                 .or_insert(config);
         }
 
-        apply_enable_tools(&mut partial, tools, no_tools, merged_config)?;
+        apply_enable_tools(&mut partial, tool_directives, merged_config)?;
         apply_tool_use(
             &mut partial,
             tool_use.as_ref().map(|v| v.as_deref()),
@@ -1009,35 +1104,23 @@ fn apply_editor(partial: &mut PartialAppConfig, editor: Option<Option<&Editor>>,
 
 fn apply_enable_tools(
     partial: &mut PartialAppConfig,
-    tools: &[Option<String>],
-    no_tools: &[Option<String>],
+    directives: &ToolDirectives,
     merged_config: Option<&PartialAppConfig>,
 ) -> BoxedResult<()> {
-    // A bare `--tools` (None) means "enable all". Named `--tools foo`
-    // entries are collected separately so they can override `Explicit`
-    // tools even when `enable_all` is active.
-    let enable_all = !tools.is_empty() && tools.iter().any(Option::is_none);
-    let named_tools: Vec<&str> = tools.iter().filter_map(|v| v.as_deref()).collect();
-
-    let disable_all = !no_tools.is_empty() && no_tools.iter().any(Option::is_none);
-    let named_no_tools: Vec<&str> = no_tools.iter().filter_map(|v| v.as_deref()).collect();
-
-    let has_tools = enable_all || !named_tools.is_empty();
-    let has_no_tools = disable_all || !named_no_tools.is_empty();
-
-    if enable_all && disable_all {
-        return Err("cannot pass both --no-tools and --tools without arguments".into());
+    if directives.is_empty() {
+        return Ok(());
     }
 
     let existing_tools = merged_config.map_or(&partial.conversation.tools.tools, |v| {
         &v.conversation.tools.tools
     });
 
-    let missing = named_tools
+    // Validate all named tools exist.
+    let missing: HashSet<_> = directives
         .iter()
-        .chain(named_no_tools.iter())
-        .filter(|name| !existing_tools.contains_key(**name))
-        .collect::<HashSet<_>>();
+        .filter_map(ToolDirective::as_single)
+        .filter(|name| !existing_tools.contains_key(*name))
+        .collect();
 
     if missing.len() == 1 {
         return Err(ToolError::NotFound {
@@ -1051,61 +1134,48 @@ fn apply_enable_tools(
         .into());
     }
 
-    // Disable all first, if all tools are to be disabled.
-    // Skip tools with Enable::Always (core tools cannot be disabled).
-    if disable_all {
-        partial
-            .conversation
-            .tools
-            .tools
-            .iter_mut()
-            .filter(|(_, v)| !v.enable.is_some_and(Enable::is_always))
-            .for_each(|(_, v)| v.enable = Some(Enable::Off));
-
-    // Enable all tools first if all tools are to be enabled, but skip
-    // tools that require explicit activation.
-    } else if enable_all {
-        partial
-            .conversation
-            .tools
-            .tools
-            .iter_mut()
-            .filter(|(_, v)| !v.enable.is_some_and(Enable::is_explicit))
-            .for_each(|(_, v)| v.enable = Some(Enable::On));
+    // Validate that core tools are not disabled by name.
+    for d in directives.iter() {
+        if let ToolDirective::Disable(name) = d
+            && let Some(tool) = partial.conversation.tools.tools.get(name.as_str())
+            && tool.enable.is_some_and(Enable::is_always)
+        {
+            return Err(format!("Tool '{name}' is a system tool and cannot be disabled").into());
+        }
     }
 
-    // Then enable individually named tools. This activates even `Explicit`
-    // tools, since the user is naming them specifically.
-    if has_tools {
-        partial
-            .conversation
-            .tools
-            .tools
-            .iter_mut()
-            .filter(|(name, _)| named_tools.iter().any(|v| v == name))
-            .for_each(|(_, v)| v.enable = Some(Enable::On));
-    }
-
-    // And finally disable individually named tools.
-    // Error if trying to disable a core tool.
-    if has_no_tools {
-        for name in &named_no_tools {
-            if let Some(tool) = partial.conversation.tools.tools.get(*name)
-                && tool.enable.is_some_and(Enable::is_always)
-            {
-                return Err(
-                    format!("Tool '{name}' is a system tool and cannot be disabled").into(),
-                );
+    // Apply directives left-to-right.
+    for d in directives.iter() {
+        match d {
+            ToolDirective::EnableAll => {
+                partial
+                    .conversation
+                    .tools
+                    .tools
+                    .iter_mut()
+                    .filter(|(_, v)| !v.enable.is_some_and(Enable::is_explicit))
+                    .for_each(|(_, v)| v.enable = Some(Enable::On));
+            }
+            ToolDirective::DisableAll => {
+                partial
+                    .conversation
+                    .tools
+                    .tools
+                    .iter_mut()
+                    .filter(|(_, v)| !v.enable.is_some_and(Enable::is_always))
+                    .for_each(|(_, v)| v.enable = Some(Enable::Off));
+            }
+            ToolDirective::Enable(name) => {
+                if let Some(tool) = partial.conversation.tools.tools.get_mut(name.as_str()) {
+                    tool.enable = Some(Enable::On);
+                }
+            }
+            ToolDirective::Disable(name) => {
+                if let Some(tool) = partial.conversation.tools.tools.get_mut(name.as_str()) {
+                    tool.enable = Some(Enable::Off);
+                }
             }
         }
-
-        partial
-            .conversation
-            .tools
-            .tools
-            .iter_mut()
-            .filter(|(name, _)| named_no_tools.iter().any(|v| v == name))
-            .for_each(|(_, v)| v.enable = Some(Enable::Off));
     }
 
     Ok(())

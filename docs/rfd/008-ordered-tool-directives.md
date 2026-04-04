@@ -1,6 +1,6 @@
 # RFD 008: Ordered Tool Directives
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-13
