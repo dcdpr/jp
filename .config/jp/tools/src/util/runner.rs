@@ -155,29 +155,25 @@ impl DuctProcessRunner {
         program: &'a str,
         args: &'a [&'a str],
         opts: &'a RunnerOpts<'_>,
-    ) -> Result<(String, Vec<String>), std::io::Error> {
-        // macOS sandbox
-        if let Some(profile) = opts.macos_sandbox_profile {
-            if cfg!(target_os = "macos") {
-                let mut sandbox_args = vec![
-                    "-p".to_owned(),
-                    profile.to_owned(),
-                    "--".to_owned(),
-                    program.to_owned(),
-                ];
-                sandbox_args.extend(args.iter().map(|s| (*s).to_owned()));
-                return Ok(("sandbox-exec".to_owned(), sandbox_args));
-            }
-
-            return Err(std::io::Error::other(
-                "macOS sandbox profile requested but not running on macOS",
-            ));
+    ) -> (String, Vec<String>) {
+        // macOS sandbox — only available on macOS, silently skipped elsewhere.
+        if cfg!(target_os = "macos")
+            && let Some(profile) = opts.macos_sandbox_profile
+        {
+            let mut sandbox_args = vec![
+                "-p".to_owned(),
+                profile.to_owned(),
+                "--".to_owned(),
+                program.to_owned(),
+            ];
+            sandbox_args.extend(args.iter().map(|s| (*s).to_owned()));
+            return ("sandbox-exec".to_owned(), sandbox_args);
         }
 
-        Ok((
+        (
             program.to_owned(),
             args.iter().map(|s| (*s).to_owned()).collect(),
-        ))
+        )
     }
 }
 
@@ -189,7 +185,7 @@ impl ProcessRunner for DuctProcessRunner {
         working_dir: &Utf8Path,
         opts: &RunnerOpts<'_>,
     ) -> Result<ProcessOutput, std::io::Error> {
-        let (program, args) = Self::resolve_command(program, args, opts)?;
+        let (program, args) = Self::resolve_command(program, args, opts);
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
 
         let mut command = cmd(&program, &arg_refs)
@@ -277,7 +273,6 @@ impl MockProcessRunner {
     }
 
     /// Create a mock that expects no commands. Panics if any command is run.
-    #[expect(dead_code)]
     pub fn never_called() -> Self {
         Self {
             expectations: Arc::new(Mutex::new(VecDeque::new())),
