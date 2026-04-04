@@ -35,6 +35,10 @@ pub(crate) struct Fork {
     /// Fork the last N turns of the conversation. Defaults to 1.
     #[arg(long, short = 'l')]
     last: Option<Option<usize>>,
+
+    /// Set a custom title for the forked conversation.
+    #[arg(long, short)]
+    title: Option<String>,
 }
 
 fn parse_duration(s: &str) -> Result<DateTime<Utc>, String> {
@@ -65,6 +69,12 @@ impl Fork {
                     events.retain_last_turns(last.unwrap_or(1));
                 }
             })?;
+
+            if let Some(title) = &self.title {
+                lock.as_mut().update_metadata(|m| {
+                    m.title = Some(title.clone());
+                });
+            }
 
             if self.activate
                 && let Some(session) = &ctx.session
