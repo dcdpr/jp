@@ -32,8 +32,6 @@ fn test_exists(p: &Path) -> bool {
     .any(|known| s == *known)
 }
 
-// --- tool dispatch ---
-
 #[test]
 fn rejects_unknown_util() {
     let (_dir, ctx) = ctx();
@@ -45,6 +43,7 @@ fn rejects_unknown_util() {
     });
 }
 
+#[cfg(unix)]
 #[test]
 fn runs_allowed_util_with_args() {
     let (_dir, ctx) = ctx();
@@ -59,6 +58,7 @@ fn runs_allowed_util_with_args() {
     assert!(content.contains("2025-01-15"), "got: {content}");
 }
 
+#[cfg(unix)]
 #[test]
 fn runs_util_without_args() {
     let (_dir, ctx) = ctx();
@@ -75,6 +75,7 @@ fn runs_util_without_args() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn includes_stderr_on_failure() {
     let (_dir, ctx) = ctx();
@@ -93,6 +94,7 @@ fn includes_stderr_on_failure() {
     assert!(content.contains("status"), "got: {content}");
 }
 
+#[cfg(unix)]
 #[test]
 fn omits_empty_fields() {
     let (_dir, ctx) = ctx();
@@ -109,8 +111,7 @@ fn omits_empty_fields() {
     assert!(!content.contains("status"), "got: {content}");
 }
 
-// --- output truncation ---
-
+#[cfg(unix)]
 #[test]
 fn truncates_large_stdout() {
     let (_dir, ctx) = ctx();
@@ -126,6 +127,7 @@ fn truncates_large_stdout() {
     assert!(content.len() < big_output.len(), "output should be smaller");
 }
 
+#[cfg(unix)]
 #[test]
 fn does_not_truncate_small_output() {
     let (_dir, ctx) = ctx();
@@ -138,8 +140,6 @@ fn does_not_truncate_small_output() {
 
     assert!(!content.contains("[Truncated:"), "got: {content}");
 }
-
-// --- validate_args ---
 
 #[test]
 fn validate_args_cases() {
@@ -207,8 +207,7 @@ fn validate_args_scans_all_positions() {
     assert!(validate_args(root, &["abc~/secret".into()], test_exists).is_err());
 }
 
-// --- integration: validation blocks execution ---
-
+#[cfg(unix)]
 #[test]
 fn absolute_path_blocks_execution() {
     let (_dir, ctx) = ctx();
@@ -220,6 +219,7 @@ fn absolute_path_blocks_execution() {
     assert_matches!(result.unwrap(), Outcome::Error { .. });
 }
 
+#[cfg(unix)]
 #[test]
 fn flag_value_escape_blocks_execution() {
     let (_dir, ctx) = ctx();
@@ -231,6 +231,7 @@ fn flag_value_escape_blocks_execution() {
     assert_matches!(result.unwrap(), Outcome::Error { .. });
 }
 
+#[cfg(unix)]
 #[test]
 fn tilde_blocks_execution() {
     let (_dir, ctx) = ctx();
@@ -244,6 +245,7 @@ fn tilde_blocks_execution() {
     });
 }
 
+#[cfg(unix)]
 #[test]
 fn safe_path_reaches_runner() {
     let (_dir, ctx) = ctx();
