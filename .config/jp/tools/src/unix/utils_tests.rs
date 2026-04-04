@@ -20,8 +20,11 @@ fn ctx() -> (camino_tempfile::Utf8TempDir, Context) {
 }
 
 /// Simulated filesystem for tests. Only these paths "exist".
+///
+/// Normalizes backslashes so the mock works on Windows where
+/// `clean_path::clean` rewrites `/` to `\`.
 fn test_exists(p: &Path) -> bool {
-    let s = p.to_string_lossy();
+    let s = p.to_string_lossy().replace('\\', "/");
     [
         "/etc/passwd",
         "/etc/shadow",
