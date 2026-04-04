@@ -802,7 +802,9 @@ fn apply_changes<R: ProcessRunner>(
         Some(true) => {}
         Some(false) => {
             return Err(
-                "`apply_changes` inquiry was answered with `false`. Changes discarded.".into(),
+                "The proposed file changes were reviewed and rejected. Changes were not \
+                 applied. You may retry with different changes."
+                    .into(),
             );
         }
         None => {

@@ -12,8 +12,10 @@ the current project. The following tools help you with this:
 
 You should consider token-usage when using these tools:
 
-- Do NOT re-create files that already exist, unless the majority of the file's content will be \
+- DO NOT re-create files that already exist, unless the majority of the file's content will be \
 replaced.
+- DO NOT delete-and-recreate files when you want to MOVE them to a new location, use \
+`fs_move_file` instead.
 - DO USE `fs_modify_file` to mutate multiple files at once, using multiple patterns if applicable. \
 This is faster and more token-efficient than calling `fs_modify_file` multiple times for \
 single-file mutations.

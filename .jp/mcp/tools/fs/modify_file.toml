@@ -58,8 +58,8 @@ Use regex with capture groups:
 ```
 """
 
-questions.apply_changes.target = "assistant"
-# questions.apply_changes.answer = true
+# questions.apply_changes.target = "assistant"
+questions.apply_changes.answer = true
 
 [conversation.tools.fs_modify_file.style]
 parameters = "just serve-tools {{context}} {{tool}}"

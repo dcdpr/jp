@@ -7,6 +7,10 @@ extends = [
     "../skill/project-discourse.toml",
 ]
 
+[conversation.tools]
+'*' = { enable = false, run = "ask" }
+git_stage_patch.questions.stage_changes.answer = true
+
 [assistant.system_prompt]
 strategy = "append"
 separator = "paragraph"
@@ -28,7 +32,6 @@ diff --cached`. A summary of what was staged and why this group was picked is en
 
 [conversation]
 title.generate.auto = false
-tools.'*' = { enable = false, run = "unattended" }
 
 [[conversation.attachments]]
 type = "cmd"

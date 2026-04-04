@@ -1,7 +1,6 @@
 [conversation.tools.git_stage_patch]
 enable = "explicit"
 run = "unattended"
-style.inline_results = "full"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
@@ -23,8 +22,10 @@ Stage patches across multiple files:
 ```
 """
 
-# questions.stage_changes.target = "assistant"
-questions.stage_changes.answer = true
+[conversation.tools.git_stage_patch.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "off"
 
 [conversation.tools.git_stage_patch.parameters.patches]
 type = "array"

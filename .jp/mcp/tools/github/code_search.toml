@@ -23,6 +23,11 @@ Search in another repository:
 ```
 """
 
+[conversation.tools.github_code_search.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
+
 [conversation.tools.github_code_search.parameters.repository]
 type = "string"
 summary = "Repository to search for code."
