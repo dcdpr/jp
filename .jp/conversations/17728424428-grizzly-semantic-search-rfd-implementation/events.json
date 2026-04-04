@@ -248,7 +248,8 @@
         "request": {
           "max_retries": 5,
           "base_backoff_ms": 1000,
-          "max_backoff_secs": 60
+          "max_backoff_secs": 60,
+          "cache": true
         }
       },
       "conversation": {
@@ -1336,7 +1337,8 @@
             }
           },
           "file:///docs/rfd/032-grizzly-semantic-search.md"
-        ]
+        ],
+        "start_local": false
       },
       "style": {
         "code": {
