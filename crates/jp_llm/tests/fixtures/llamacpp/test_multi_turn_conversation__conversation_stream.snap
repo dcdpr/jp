@@ -2,272 +2,270 @@
 source: crates/jp_test/src/mock.rs
 expression: v
 ---
-[
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "inherit": false,
-      "config_load_paths": [],
-      "extends": [],
-      "assistant": {
-        "tool_choice": "auto",
-        "model": {
-          "id": {
-            "provider": "llamacpp",
-            "name": "test"
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "llamacpp",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": {
+            "effort": "low",
+            "exclude": false
           },
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 0,
+        "base_backoff_ms": 0,
+        "max_backoff_secs": 0,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
             },
-            "stop_words": [],
-            "other": {}
+            "results_file_link": "full",
+            "parameters": "json"
           }
-        },
-        "request": {
-          "max_retries": 0,
-          "base_backoff_ms": 0,
-          "max_backoff_secs": 0,
-          "cache": true
         }
       },
-      "conversation": {
-        "title": {
-          "generate": {
-            "auto": false
-          }
-        },
-        "tools": {
-          "*": {
-            "run": "ask",
-            "result": "unattended",
-            "style": {
-              "hidden": false,
-              "inline_results": {
-                "truncate": {
-                  "lines": 10
-                }
-              },
-              "results_file_link": "full",
-              "parameters": "json"
-            }
-          }
-        },
-        "start_local": false
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": false,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
       },
-      "style": {
-        "code": {
-          "color": false,
-          "line_numbers": false,
-          "file_link": "osc8",
-          "copy_link": "osc8"
-        },
-        "markdown": {
-          "wrap_width": 0,
-          "table_max_column_width": 0,
-          "hr_style": "line"
-        },
-        "reasoning": {
-          "display": "full"
-        },
-        "streaming": {
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "tool_call": {
+      "markdown": {
+        "wrap_width": 0,
+        "table_max_column_width": 0,
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "streaming": {
+        "progress": {
           "show": false,
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          },
-          "preparing": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
+      },
+      "tool_call": {
+        "show": false,
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
         },
-        "typewriter": {
-          "text_delay": {
-            "secs": 0,
-            "nanos": 0
-          },
-          "code_delay": {
-            "secs": 0,
-            "nanos": 0
-          }
+        "preparing": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
         }
       },
-      "editor": {
-        "envs": []
-      },
-      "template": {
-        "values": {}
-      },
-      "providers": {
-        "llm": {
-          "anthropic": {
-            "api_key_env": "",
-            "base_url": "",
-            "chain_on_max_tokens": false,
-            "beta_headers": []
-          },
-          "deepseek": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "google": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "llamacpp": {
-            "base_url": ""
-          },
-          "ollama": {
-            "base_url": ""
-          },
-          "openai": {
-            "api_key_env": "",
-            "base_url": "",
-            "base_url_env": ""
-          },
-          "openrouter": {
-            "api_key_env": "",
-            "app_name": "",
-            "base_url": ""
-          }
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": []
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "",
+          "base_url": "",
+          "chain_on_max_tokens": false,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "google": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "llamacpp": {
+          "base_url": ""
+        },
+        "ollama": {
+          "base_url": ""
+        },
+        "openai": {
+          "api_key_env": "",
+          "base_url": "",
+          "base_url_env": ""
+        },
+        "openrouter": {
+          "api_key_env": "",
+          "app_name": "",
+          "base_url": ""
         }
       }
     }
   },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": "off"
-          }
-        }
-      }
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Test message"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "Hello! Your test message has been received successfully. How can I assist you today?"
-  },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
             }
           }
         }
       }
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Repeat my previous message"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking me to repeat their previous message.\n2.  **Identify the Previous Message:** Looking back at the conversation history, the user's first message was \"Test message\".\n3.  **Formulate the Response:** I need to output exactly what the user said previously.\n4.  **Draft the Response:** \"Test message\"\n5.  **Review Constraints:** Keep it direct and accurate.\n6.  **Final Output:** Test message"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "Test message"
-  },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": "off"
-          }
-        }
-      }
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Please run the tool, providing whatever arguments you want."
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_request",
-    "id": "Wy35ya7W8XdqEpvaSwODozPxg4oNFaU5",
-    "name": "run_me",
-    "arguments": {
-      "foo": "YmFy",
-      "bar": "WyJmb28iXQ=="
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_response",
-    "id": "Wy35ya7W8XdqEpvaSwODozPxg4oNFaU5",
-    "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
-    "is_error": false
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "The secret code is: **42**\n\n(Just a friendly reminder: I don't actually have the ability to run external tools or execute code with arbitrary arguments in this environment. The previous output was a simulated response for demonstration purposes. How can I help you with something real?)"
-  },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Test message"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Hello! Your test message has been received successfully. How can I assist you today?"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
             }
           }
         }
       }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Repeat my previous message"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking me to repeat their previous message.\n2.  **Identify the Previous Message:** Looking back at the conversation history, the user's first message was \"Test message\".\n3.  **Formulate the Response:** I need to output exactly what the user said previously.\n4.  **Draft the Response:** \"Test message\"\n5.  **Review Constraints:** Keep it direct and accurate.\n6.  **Final Output:** Test message"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Test message"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "Wy35ya7W8XdqEpvaSwODozPxg4oNFaU5",
+      "name": "run_me",
+      "arguments": {
+        "foo": "YmFy",
+        "bar": "WyJmb28iXQ=="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "Wy35ya7W8XdqEpvaSwODozPxg4oNFaU5",
+      "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "The secret code is: **42**\n\n(Just a friendly reminder: I don't actually have the ability to run external tools or execute code with arbitrary arguments in this environment. The previous output was a simulated response for demonstration purposes. How can I help you with something real?)"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "What was the result of the previous tool call?"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "The user is asking about the result of the previous tool call. Looking back at the conversation, I can see there was a simulated tool call using `run_me` that returned \"The secret code is: 42\".\n\nHowever, I need to be honest here - I don't actually have the ability to run real tools in this chat environment. That was a simulated/fictional response from the earlier turn. Let me clarify this for the user."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Looking back at the previous tool call, the simulated result was:\n\n**\"The secret code is: 42\"**\n\nHowever, I want to be completely transparent with you: I don't actually have the ability to run external tools or execute code with arguments in this chat environment. That previous output was a simulated response for demonstration purposes.\n\nI'm a text-based AI assistant that can help with questions, analysis, writing, coding help, and more - but I can't actually execute tools or run programs. Is there something specific I can help you with today?"
     }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "What was the result of the previous tool call?"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "The user is asking about the result of the previous tool call. Looking back at the conversation, I can see there was a simulated tool call using `run_me` that returned \"The secret code is: 42\".\n\nHowever, I need to be honest here - I don't actually have the ability to run real tools in this chat environment. That was a simulated/fictional response from the earlier turn. Let me clarify this for the user."
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "Looking back at the previous tool call, the simulated result was:\n\n**\"The secret code is: 42\"**\n\nHowever, I want to be completely transparent with you: I don't actually have the ability to run external tools or execute code with arguments in this chat environment. That previous output was a simulated response for demonstration purposes.\n\nI'm a text-based AI assistant that can help with questions, analysis, writing, coding help, and more - but I can't actually execute tools or run programs. Is there something specific I can help you with today?"
-  }
-]
+  ]
+}

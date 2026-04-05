@@ -2,169 +2,167 @@
 source: crates/jp_test/src/mock.rs
 expression: v
 ---
-[
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "inherit": false,
-      "config_load_paths": [],
-      "extends": [],
-      "assistant": {
-        "tool_choice": "auto",
-        "model": {
-          "id": {
-            "provider": "openai",
-            "name": "test"
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openai",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": {
+            "effort": "low",
+            "exclude": false
           },
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 0,
+        "base_backoff_ms": 0,
+        "max_backoff_secs": 0,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
             },
-            "stop_words": [],
-            "other": {}
+            "results_file_link": "full",
+            "parameters": "json"
           }
-        },
-        "request": {
-          "max_retries": 0,
-          "base_backoff_ms": 0,
-          "max_backoff_secs": 0,
-          "cache": true
         }
       },
-      "conversation": {
-        "title": {
-          "generate": {
-            "auto": false
-          }
-        },
-        "tools": {
-          "*": {
-            "run": "ask",
-            "result": "unattended",
-            "style": {
-              "hidden": false,
-              "inline_results": {
-                "truncate": {
-                  "lines": 10
-                }
-              },
-              "results_file_link": "full",
-              "parameters": "json"
-            }
-          }
-        },
-        "start_local": false
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": false,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
       },
-      "style": {
-        "code": {
-          "color": false,
-          "line_numbers": false,
-          "file_link": "osc8",
-          "copy_link": "osc8"
-        },
-        "markdown": {
-          "wrap_width": 0,
-          "table_max_column_width": 0,
-          "hr_style": "line"
-        },
-        "reasoning": {
-          "display": "full"
-        },
-        "streaming": {
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "tool_call": {
+      "markdown": {
+        "wrap_width": 0,
+        "table_max_column_width": 0,
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "streaming": {
+        "progress": {
           "show": false,
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          },
-          "preparing": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "typewriter": {
-          "text_delay": {
-            "secs": 0,
-            "nanos": 0
-          },
-          "code_delay": {
-            "secs": 0,
-            "nanos": 0
-          }
+          "delay_secs": 0,
+          "interval_ms": 0
         }
       },
-      "editor": {
-        "envs": []
+      "tool_call": {
+        "show": false,
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        },
+        "preparing": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
       },
-      "template": {
-        "values": {}
-      },
-      "providers": {
-        "llm": {
-          "anthropic": {
-            "api_key_env": "",
-            "base_url": "",
-            "chain_on_max_tokens": false,
-            "beta_headers": []
-          },
-          "deepseek": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "google": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "llamacpp": {
-            "base_url": ""
-          },
-          "ollama": {
-            "base_url": ""
-          },
-          "openai": {
-            "api_key_env": "",
-            "base_url": "",
-            "base_url_env": ""
-          },
-          "openrouter": {
-            "api_key_env": "",
-            "app_name": "",
-            "base_url": ""
-          }
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": []
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "",
+          "base_url": "",
+          "chain_on_max_tokens": false,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "google": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "llamacpp": {
+          "base_url": ""
+        },
+        "ollama": {
+          "base_url": ""
+        },
+        "openai": {
+          "api_key_env": "",
+          "base_url": "",
+          "base_url_env": ""
+        },
+        "openrouter": {
+          "api_key_env": "",
+          "app_name": "",
+          "base_url": ""
         }
       }
     }
   },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Test message"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "I see that the user just sent a \"Test message.\" It seems like they might be looking for some acknowledgment, so I want to respond briefly and effectively. I’ll also offer my assistance and mention what I can do to help them. It’s important to be warm yet straightforward, making sure they feel welcome to ask anything they need. A simple and friendly response could go a long way here!",
-    "metadata": {
-      "openai_item_id": "cnNfMGYyYzAxMDM2YWJmOTExMTAxNjk5NWI2YjVjYjc0ODE5Mzg2NjJiYzIzNzlhM2ViNTQ=",
-      "openai_encrypted_content": "Z0FBQUFBQnBsYmE0WFFGQ2FsNDZ4ZnNHLUlEV1NDanNjYW9WM01scUtJbjd1OWpwT2llcUZFNklHN3VQSHdWekNBejdjc1VnYllsWHZaQnlnNXlYSzBXWTdrc0ZiQnJ6eTg1LTZTRUNFMnN0aWJSSl9JbllTdjJXUVNDbU5oZm9kakdCZ210RU1OcTdfVEpyRUEwVzF3NlIyeE9FTU1vdHo3XzhwSllVME9fQzdYeXo3YTlHbms0Ui1hSWd6bHJubEQ1Ui1RMS1ZNTJqZVFUdlg5eHl4TDNEYXZTZEFlVEtKWDZLVE53M1M1Tm41bmo1OEhNdXgzX1pXRGZoMTcxYmYyaGJCeVJsa3NzMEtOdndVdVJhQlMxNmU3alVNRE1sQ1BVSTNLajNPcHVKbzNRS0d5aEV0cng2X1N5a1dCZzBGOGNESFRPU1RpLVUwOUhmbUd6ZG92WEFFSzRtSXhCN3ZzVkZ1TGhqaTI3N09QNGZHQjFtdjVpMUl0dDcwd3N1dUhpaDNuZE5sSUd4SnRYTDd3OVYxUFBpX0NHdkxzdnhrSmFVWTJsTUhYelk4Ulhha1lPaTMtZHBjWThXY0dqcDlXTm9WbTRScjlsbVJPOF93dmk0QXlKV0M5bXlxaDRCaGd6bDlqaFNBVUdPM29iZmczVjZHVU90WFozTjFYRDdfbElnTGZKMkhHdFZGM1NURUtsX0tIaGFWWlZCVkprb2sxTmVPVWZuODVNdTlYMWl2aFhPTmNsU2hfOUY3b0Vodkl0MHl0d0F2WUp3MVpZbmtoNkVTRzhfZXFqam8xbGhPZzBBOElOaTNHVE12V1VxV0Y0ZzdKLVlTQnBJWnJLUFJ5dW9YVFVFVkx4QkpaME5qa0loWTl6elVmdzB1U1lPUUhyVzN2bk9OQkR5V3FwV1pOaXNiVUo0UVIwYXdSYUtZNU5udjg5R2RoQ3RVVGFZeVhZelhmUlQycm9VR1pJNXdNR0xYbmRDbjFwOEx4MGllZEtkdFprSzByUXdudXlPS3dFTDFwb2w3Y203WjZfdXU5MXpDU0pOVld4M1RsX2NmUFZ3YkRNcmlBT1ZlMmk2dXpHcGRyaWp2anZ1OEMwUWdMaTR3NWpfdnVqQ2ZzN2NOczRGeEVySGxLLWZhcDR3ejl1TVJKZGlQRllad2JkRXlTb0xSTkJ1b3NWem9Db1JJcFI0allYNVotSi1NRXhNMFloVVZLS01xWmkzRV9JX3YwRXZybE1ZV3ZLaGtyREpQS1hyZ0JqWWNZWHN3MzE0TEotLTN5U2lyRklvVUp2ejJsMU41YmNQQW00V3ZJMnBweGJoZUlremFfOTU0WWNiblQwd3oxaz0="
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Test message"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "I see that the user just sent a \"Test message.\" It seems like they might be looking for some acknowledgment, so I want to respond briefly and effectively. I’ll also offer my assistance and mention what I can do to help them. It’s important to be warm yet straightforward, making sure they feel welcome to ask anything they need. A simple and friendly response could go a long way here!",
+      "metadata": {
+        "openai_item_id": "cnNfMGYyYzAxMDM2YWJmOTExMTAxNjk5NWI2YjVjYjc0ODE5Mzg2NjJiYzIzNzlhM2ViNTQ=",
+        "openai_encrypted_content": "Z0FBQUFBQnBsYmE0WFFGQ2FsNDZ4ZnNHLUlEV1NDanNjYW9WM01scUtJbjd1OWpwT2llcUZFNklHN3VQSHdWekNBejdjc1VnYllsWHZaQnlnNXlYSzBXWTdrc0ZiQnJ6eTg1LTZTRUNFMnN0aWJSSl9JbllTdjJXUVNDbU5oZm9kakdCZ210RU1OcTdfVEpyRUEwVzF3NlIyeE9FTU1vdHo3XzhwSllVME9fQzdYeXo3YTlHbms0Ui1hSWd6bHJubEQ1Ui1RMS1ZNTJqZVFUdlg5eHl4TDNEYXZTZEFlVEtKWDZLVE53M1M1Tm41bmo1OEhNdXgzX1pXRGZoMTcxYmYyaGJCeVJsa3NzMEtOdndVdVJhQlMxNmU3alVNRE1sQ1BVSTNLajNPcHVKbzNRS0d5aEV0cng2X1N5a1dCZzBGOGNESFRPU1RpLVUwOUhmbUd6ZG92WEFFSzRtSXhCN3ZzVkZ1TGhqaTI3N09QNGZHQjFtdjVpMUl0dDcwd3N1dUhpaDNuZE5sSUd4SnRYTDd3OVYxUFBpX0NHdkxzdnhrSmFVWTJsTUhYelk4Ulhha1lPaTMtZHBjWThXY0dqcDlXTm9WbTRScjlsbVJPOF93dmk0QXlKV0M5bXlxaDRCaGd6bDlqaFNBVUdPM29iZmczVjZHVU90WFozTjFYRDdfbElnTGZKMkhHdFZGM1NURUtsX0tIaGFWWlZCVkprb2sxTmVPVWZuODVNdTlYMWl2aFhPTmNsU2hfOUY3b0Vodkl0MHl0d0F2WUp3MVpZbmtoNkVTRzhfZXFqam8xbGhPZzBBOElOaTNHVE12V1VxV0Y0ZzdKLVlTQnBJWnJLUFJ5dW9YVFVFVkx4QkpaME5qa0loWTl6elVmdzB1U1lPUUhyVzN2bk9OQkR5V3FwV1pOaXNiVUo0UVIwYXdSYUtZNU5udjg5R2RoQ3RVVGFZeVhZelhmUlQycm9VR1pJNXdNR0xYbmRDbjFwOEx4MGllZEtkdFprSzByUXdudXlPS3dFTDFwb2w3Y203WjZfdXU5MXpDU0pOVld4M1RsX2NmUFZ3YkRNcmlBT1ZlMmk2dXpHcGRyaWp2anZ1OEMwUWdMaTR3NWpfdnVqQ2ZzN2NOczRGeEVySGxLLWZhcDR3ejl1TVJKZGlQRllad2JkRXlTb0xSTkJ1b3NWem9Db1JJcFI0allYNVotSi1NRXhNMFloVVZLS01xWmkzRV9JX3YwRXZybE1ZV3ZLaGtyREpQS1hyZ0JqWWNZWHN3MzE0TEotLTN5U2lyRklvVUp2ejJsMU41YmNQQW00V3ZJMnBweGJoZUlremFfOTU0WWNiblQwd3oxaz0="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Received your test message. How can I help you today?",
+      "metadata": {
+        "openai_item_id": "bXNnXzBmMmMwMTAzNmFiZjkxMTEwMTY5OTViNmI4MmYyODgxOTM4YzAxMGU4NDgxNmZjZWMz"
+      }
     }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "Received your test message. How can I help you today?",
-    "metadata": {
-      "openai_item_id": "bXNnXzBmMmMwMTAzNmFiZjkxMTEwMTY5OTViNmI4MmYyODgxOTM4YzAxMGU4NDgxNmZjZWMz"
-    }
-  }
-]
+  ]
+}

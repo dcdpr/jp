@@ -2,201 +2,199 @@
 source: crates/jp_test/src/mock.rs
 expression: v
 ---
-[
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "inherit": false,
-      "config_load_paths": [],
-      "extends": [],
-      "assistant": {
-        "tool_choice": "auto",
-        "model": {
-          "id": {
-            "provider": "openrouter",
-            "name": "test"
-          },
-          "parameters": {
-            "reasoning": "off",
-            "stop_words": [],
-            "other": {}
-          }
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openrouter",
+          "name": "test"
         },
-        "request": {
-          "max_retries": 0,
-          "base_backoff_ms": 0,
-          "max_backoff_secs": 0,
-          "cache": true
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
         }
       },
-      "conversation": {
-        "title": {
-          "generate": {
-            "auto": false
-          }
-        },
-        "tools": {
-          "*": {
-            "run": "ask",
-            "result": "unattended",
-            "style": {
-              "hidden": false,
-              "inline_results": {
-                "truncate": {
-                  "lines": 10
-                }
-              },
-              "results_file_link": "full",
-              "parameters": "json"
-            }
-          }
-        },
-        "start_local": false
+      "request": {
+        "max_retries": 0,
+        "base_backoff_ms": 0,
+        "max_backoff_secs": 0,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
       },
-      "style": {
-        "code": {
-          "color": false,
-          "line_numbers": false,
-          "file_link": "osc8",
-          "copy_link": "osc8"
-        },
-        "markdown": {
-          "wrap_width": 0,
-          "table_max_column_width": 0,
-          "hr_style": "line"
-        },
-        "reasoning": {
-          "display": "full"
-        },
-        "streaming": {
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
           }
-        },
-        "tool_call": {
+        }
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": false,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
+      },
+      "markdown": {
+        "wrap_width": 0,
+        "table_max_column_width": 0,
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "streaming": {
+        "progress": {
           "show": false,
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          },
-          "preparing": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "typewriter": {
-          "text_delay": {
-            "secs": 0,
-            "nanos": 0
-          },
-          "code_delay": {
-            "secs": 0,
-            "nanos": 0
-          }
+          "delay_secs": 0,
+          "interval_ms": 0
         }
       },
-      "editor": {
-        "envs": []
+      "tool_call": {
+        "show": false,
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        },
+        "preparing": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
       },
-      "template": {
-        "values": {}
-      },
-      "providers": {
-        "llm": {
-          "anthropic": {
-            "api_key_env": "",
-            "base_url": "",
-            "chain_on_max_tokens": false,
-            "beta_headers": []
-          },
-          "deepseek": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "google": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "llamacpp": {
-            "base_url": ""
-          },
-          "ollama": {
-            "base_url": ""
-          },
-          "openai": {
-            "api_key_env": "",
-            "base_url": "",
-            "base_url_env": ""
-          },
-          "openrouter": {
-            "api_key_env": "",
-            "app_name": "",
-            "base_url": ""
-          }
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": []
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "",
+          "base_url": "",
+          "chain_on_max_tokens": false,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "google": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "llamacpp": {
+          "base_url": ""
+        },
+        "ollama": {
+          "base_url": ""
+        },
+        "openai": {
+          "api_key_env": "",
+          "base_url": "",
+          "base_url_env": ""
+        },
+        "openrouter": {
+          "api_key_env": "",
+          "app_name": "",
+          "base_url": ""
         }
       }
     }
   },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Please run the tool, providing whatever arguments you want."
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "",
-    "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBxdW9hbHFXUzFJbThOSUJpNVhqNFVEMmFGeEJ2MEpLZ29lN01PRDVFRDYyTDVfUXhZWEI2ZHV2RDBPQ1ZyamZ5dGg3ZTdOYTQ1YmlfMDBJRVdsdi1kcE81cjg0TnEzcGVHR1VjdmVzc1N4YUlMbUF4UXRuSE02YVlxUlp5YkFkWmVTYXhCQ2k5czZ0Ql9CTk9yRnhzbkZJa01TWDdkM1lWa2swd01SRmIwV0RaQmlDV3N3UDZKblp4TWFXWVBtbGVMVEgwRFFSSWprVzl1d2dKNTNQY09ZUjBNNzlaTGlPYUM5N2NULVdFOTRwUHpKRlVPdUlxQjVEWWR4R0p3Vmo3VFk4MjFlX0xCOW0zNnZUYmRxbHZSQmpVbkVsOFRTNnFDYkJlcmlUR1Y1LUp5MXM3TVlFbk1fU08temtpbWt2YUwtQlp4ZFlKMWZFMzh2VEdhOS1peWZvV3VvanR5QUNwUmpCZk45RjZieXBGRGVCcUN0SjM5aW9oa3FnQ1pMT3dkeFlHa2xfa181cENBOC1VenZaWVB3amhtNHd6TVNaYkI4SVFGR0tWc0FKNjlQNEhRQUhsRm5hRmFCTW0xb1FIZ0lQVmdPUnpmNGtnT0I0R1JzUDd3OWlsTjdxWktfakZJN0xnWjA1YjdxQzFlQk01UG1TMlcybkRxeUkxR0o1dXdBZUNkdHo2bWtSRk8wRjczczc4ODNSZVBMR2NuM041dF9UeDNkT0o4TUZ0cGNoTWFrc2hjUWVzejlReGJxekpweTRQZlJPN3hSRXJDSjJJTnlGNWlqRkN3UEM3czE2Qkk4dTZzUmxiRUdSUFZrQjN4ZEtydmlicHRiWUZGX0xWMTA1cTdhY2NEb3VNajhnTEZORmw0N0R1amFQRWt1WjhCT3BVeWJoOG1fektOdmlqSXpieldZZm9GNmNPNS01NUVLUUtpbk9yYlBUa0Jhb1d0SnV6SUc5M09sRnFKUVFTTWN3QXE4MVNzMm9XRS1Nc1d1c000OFJhdFVHdkItTEFlcUF6R0RNeVVZWjV4NmxoSmVlYXdnLXg0ZEE1RUppa292QkdtemRCbU9hcDl4OVhMZEcxTUoxeW9ZbkF3cWpVenRIT3d4TUZPRUk1ZFh1V1Z3WFJFZEVjazlXOWNJcWtBX0NYZG9MUDA2X3RTV3dLbnB3SkJndzlGUDJlUFVTTVhWVm8=",
-      "openrouter_metadata": [
-        {
-          "id": "cnNfMDNjYjQ4YmMxNmIwOGQ5OTAxNjlhYWVhMWEwNDY0ODE5MGFlNjRiMGE2ZmU3ZDJjODM=",
-          "index": 0,
-          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
-        }
-      ]
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnBxdW9hbHFXUzFJbThOSUJpNVhqNFVEMmFGeEJ2MEpLZ29lN01PRDVFRDYyTDVfUXhZWEI2ZHV2RDBPQ1ZyamZ5dGg3ZTdOYTQ1YmlfMDBJRVdsdi1kcE81cjg0TnEzcGVHR1VjdmVzc1N4YUlMbUF4UXRuSE02YVlxUlp5YkFkWmVTYXhCQ2k5czZ0Ql9CTk9yRnhzbkZJa01TWDdkM1lWa2swd01SRmIwV0RaQmlDV3N3UDZKblp4TWFXWVBtbGVMVEgwRFFSSWprVzl1d2dKNTNQY09ZUjBNNzlaTGlPYUM5N2NULVdFOTRwUHpKRlVPdUlxQjVEWWR4R0p3Vmo3VFk4MjFlX0xCOW0zNnZUYmRxbHZSQmpVbkVsOFRTNnFDYkJlcmlUR1Y1LUp5MXM3TVlFbk1fU08temtpbWt2YUwtQlp4ZFlKMWZFMzh2VEdhOS1peWZvV3VvanR5QUNwUmpCZk45RjZieXBGRGVCcUN0SjM5aW9oa3FnQ1pMT3dkeFlHa2xfa181cENBOC1VenZaWVB3amhtNHd6TVNaYkI4SVFGR0tWc0FKNjlQNEhRQUhsRm5hRmFCTW0xb1FIZ0lQVmdPUnpmNGtnT0I0R1JzUDd3OWlsTjdxWktfakZJN0xnWjA1YjdxQzFlQk01UG1TMlcybkRxeUkxR0o1dXdBZUNkdHo2bWtSRk8wRjczczc4ODNSZVBMR2NuM041dF9UeDNkT0o4TUZ0cGNoTWFrc2hjUWVzejlReGJxekpweTRQZlJPN3hSRXJDSjJJTnlGNWlqRkN3UEM3czE2Qkk4dTZzUmxiRUdSUFZrQjN4ZEtydmlicHRiWUZGX0xWMTA1cTdhY2NEb3VNajhnTEZORmw0N0R1amFQRWt1WjhCT3BVeWJoOG1fektOdmlqSXpieldZZm9GNmNPNS01NUVLUUtpbk9yYlBUa0Jhb1d0SnV6SUc5M09sRnFKUVFTTWN3QXE4MVNzMm9XRS1Nc1d1c000OFJhdFVHdkItTEFlcUF6R0RNeVVZWjV4NmxoSmVlYXdnLXg0ZEE1RUppa292QkdtemRCbU9hcDl4OVhMZEcxTUoxeW9ZbkF3cWpVenRIT3d4TUZPRUk1ZFh1V1Z3WFJFZEVjazlXOWNJcWtBX0NYZG9MUDA2X3RTV3dLbnB3SkJndzlGUDJlUFVTTVhWVm8=",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMDNjYjQ4YmMxNmIwOGQ5OTAxNjlhYWVhMWEwNDY0ODE5MGFlNjRiMGE2ZmU3ZDJjODM=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "call_L9Z0sQ0ZuY1BxWOfPbnWU7wf",
+      "name": "run_me",
+      "arguments": {
+        "foo": "cnVuIHdpdGggZGVmYXVsdA==",
+        "bar": "Zm9v"
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "call_L9Z0sQ0ZuY1BxWOfPbnWU7wf",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnBxdW9iTHdLbDNjZ3U3QThLbmZ2aEdxdjRiYmFpTGNrZHJiYjI4aVZHYVY3ODhuOTlLckMxTWMtUnJrMC1EX3I2TEJSYTctY1NjMmRDYS05QUZQeHhRR3kzXzZQMktPb04xNGlnQldBM0dLLVRDSThRT0FQVDFXTGltV2lDLTlwUGg3eVVzYVBKby1CMnk1T3lCVWtZTlQwSW1jb01ZUTlBYy1TSzlSQlVjb0REdzlFZ2pIRW5kLXkyVHpJWkZaWG5MNm04d29rYm9udzVyY0N1QkZfLVhVTTBheTdHY081RTlDM0Y3a214WmF3Zkh1OUJPM0Vzb0d3YmNUTk1DUzBqVURUeHlMaGY1aHUxMGd3V1NiblNQZjJ2RnZwOXo4a1NLbE9FNkliSW5OYTZNXzU0VVVYSnFmeUlVZU1nSEtvZVhoTHZma3NzX2J4Y1lkb21EalRUcjF2SmVIWGJpbmo2bTEyZG9nYk5BRVpEV0F0VjFPWGVHcnZZaVpnYjNmcTZzcjVuYW4wSGZET21tdC00ZTFQalB0YkVaeEtlN0p2cHJ2RUN6WHJwT3NUU0lCVTlDSW9IYk9mV3dDZHY4UDlDZ0hKV2VLUDNaYkR2d21VWk5JZEh5SWdZSFBWcnZta24waEdKU3NFZ3MwMG5xY3dveFQ5ZlVWcndzM2lqV0JoMEMzdEdQdklnb21GMU1JUG9fUmRjeUhnT0lCUzNWLXQwMTVEMW5mTDNJRmMxVzdTcXZ1c09PVUFfRVVad18xWkF5RTZzZG8yRUl6cTVTbC1YUF9HQndKSGticDRHZjVkLVNOYlZ4UGpnQkd1aVJielpiMFFCS05xcE1pc003V3JXd19aZEY2ZmdzZFdHUFBBbDdBaE9IekphOEN4bjVOVW9WM1ZwYV9sbklGeVlIRWg0S3hvUUJNd0NKOXhMcXdkM2dTMC1CYUdTX2l5MTdPN293UjZONklCSGFxd2hNQWlCQnZHaXp0ajF2Wk00YzBSQVJCOWduRmxwSXdZODVrSTVtcXBaNmxyZENVei1tTmJMVml4WE4xeGRNREZ5bjJMMDg1Zk1lUjlBNnRRS0pmSG9UWlFBQXAteXh4cmNuTFRGeURxOFZvNHdSS3ZiTm93S0pvN05uN0Frd3N4T1BwWkVld3VRWmNrcmFPSUxEYW5XZ2N5TnNwTTNWc2d1aERUX1VESVA=",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMGM1OWFiMGFmY2E5ZDBiMDAxNjlhYWVhMWI0ZTg0ODE5MGI5NTljYzFmYzJlMDk4YzE=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "I ran the tool with default arguments. The tool responded: \"working!\"\n\nIf you'd like me to run it again with different arguments, tell me what inputs to use (or say \"choose for me\") and I'll run it."
     }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_request",
-    "id": "call_L9Z0sQ0ZuY1BxWOfPbnWU7wf",
-    "name": "run_me",
-    "arguments": {
-      "foo": "cnVuIHdpdGggZGVmYXVsdA==",
-      "bar": "Zm9v"
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_response",
-    "id": "call_L9Z0sQ0ZuY1BxWOfPbnWU7wf",
-    "content": "d29ya2luZyE=",
-    "is_error": false
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "",
-    "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBxdW9iTHdLbDNjZ3U3QThLbmZ2aEdxdjRiYmFpTGNrZHJiYjI4aVZHYVY3ODhuOTlLckMxTWMtUnJrMC1EX3I2TEJSYTctY1NjMmRDYS05QUZQeHhRR3kzXzZQMktPb04xNGlnQldBM0dLLVRDSThRT0FQVDFXTGltV2lDLTlwUGg3eVVzYVBKby1CMnk1T3lCVWtZTlQwSW1jb01ZUTlBYy1TSzlSQlVjb0REdzlFZ2pIRW5kLXkyVHpJWkZaWG5MNm04d29rYm9udzVyY0N1QkZfLVhVTTBheTdHY081RTlDM0Y3a214WmF3Zkh1OUJPM0Vzb0d3YmNUTk1DUzBqVURUeHlMaGY1aHUxMGd3V1NiblNQZjJ2RnZwOXo4a1NLbE9FNkliSW5OYTZNXzU0VVVYSnFmeUlVZU1nSEtvZVhoTHZma3NzX2J4Y1lkb21EalRUcjF2SmVIWGJpbmo2bTEyZG9nYk5BRVpEV0F0VjFPWGVHcnZZaVpnYjNmcTZzcjVuYW4wSGZET21tdC00ZTFQalB0YkVaeEtlN0p2cHJ2RUN6WHJwT3NUU0lCVTlDSW9IYk9mV3dDZHY4UDlDZ0hKV2VLUDNaYkR2d21VWk5JZEh5SWdZSFBWcnZta24waEdKU3NFZ3MwMG5xY3dveFQ5ZlVWcndzM2lqV0JoMEMzdEdQdklnb21GMU1JUG9fUmRjeUhnT0lCUzNWLXQwMTVEMW5mTDNJRmMxVzdTcXZ1c09PVUFfRVVad18xWkF5RTZzZG8yRUl6cTVTbC1YUF9HQndKSGticDRHZjVkLVNOYlZ4UGpnQkd1aVJielpiMFFCS05xcE1pc003V3JXd19aZEY2ZmdzZFdHUFBBbDdBaE9IekphOEN4bjVOVW9WM1ZwYV9sbklGeVlIRWg0S3hvUUJNd0NKOXhMcXdkM2dTMC1CYUdTX2l5MTdPN293UjZONklCSGFxd2hNQWlCQnZHaXp0ajF2Wk00YzBSQVJCOWduRmxwSXdZODVrSTVtcXBaNmxyZENVei1tTmJMVml4WE4xeGRNREZ5bjJMMDg1Zk1lUjlBNnRRS0pmSG9UWlFBQXAteXh4cmNuTFRGeURxOFZvNHdSS3ZiTm93S0pvN05uN0Frd3N4T1BwWkVld3VRWmNrcmFPSUxEYW5XZ2N5TnNwTTNWc2d1aERUX1VESVA=",
-      "openrouter_metadata": [
-        {
-          "id": "cnNfMGM1OWFiMGFmY2E5ZDBiMDAxNjlhYWVhMWI0ZTg0ODE5MGI5NTljYzFmYzJlMDk4YzE=",
-          "index": 0,
-          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
-        }
-      ]
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "I ran the tool with default arguments. The tool responded: \"working!\"\n\nIf you'd like me to run it again with different arguments, tell me what inputs to use (or say \"choose for me\") and I'll run it."
-  }
-]
+  ]
+}

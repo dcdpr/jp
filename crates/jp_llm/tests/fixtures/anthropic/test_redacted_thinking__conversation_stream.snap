@@ -2,201 +2,199 @@
 source: crates/jp_test/src/mock.rs
 expression: v
 ---
-[
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "inherit": false,
-      "config_load_paths": [],
-      "extends": [],
-      "assistant": {
-        "tool_choice": "auto",
-        "model": {
-          "id": {
-            "provider": "anthropic",
-            "name": "test"
-          },
-          "parameters": {
-            "reasoning": "off",
-            "stop_words": [],
-            "other": {}
-          }
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "anthropic",
+          "name": "test"
         },
-        "request": {
-          "max_retries": 0,
-          "base_backoff_ms": 0,
-          "max_backoff_secs": 0,
-          "cache": true
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
         }
       },
-      "conversation": {
-        "title": {
-          "generate": {
-            "auto": false
-          }
-        },
-        "tools": {
-          "*": {
-            "run": "ask",
-            "result": "unattended",
-            "style": {
-              "hidden": false,
-              "inline_results": {
-                "truncate": {
-                  "lines": 10
-                }
-              },
-              "results_file_link": "full",
-              "parameters": "json"
-            }
-          }
-        },
-        "start_local": false
+      "request": {
+        "max_retries": 0,
+        "base_backoff_ms": 0,
+        "max_backoff_secs": 0,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
       },
-      "style": {
-        "code": {
-          "color": false,
-          "line_numbers": false,
-          "file_link": "osc8",
-          "copy_link": "osc8"
-        },
-        "markdown": {
-          "wrap_width": 0,
-          "table_max_column_width": 0,
-          "hr_style": "line"
-        },
-        "reasoning": {
-          "display": "full"
-        },
-        "streaming": {
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
           }
-        },
-        "tool_call": {
+        }
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": false,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
+      },
+      "markdown": {
+        "wrap_width": 0,
+        "table_max_column_width": 0,
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "streaming": {
+        "progress": {
           "show": false,
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          },
-          "preparing": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "typewriter": {
-          "text_delay": {
-            "secs": 0,
-            "nanos": 0
-          },
-          "code_delay": {
-            "secs": 0,
-            "nanos": 0
-          }
+          "delay_secs": 0,
+          "interval_ms": 0
         }
       },
-      "editor": {
-        "envs": []
+      "tool_call": {
+        "show": false,
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        },
+        "preparing": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
       },
-      "template": {
-        "values": {}
-      },
-      "providers": {
-        "llm": {
-          "anthropic": {
-            "api_key_env": "",
-            "base_url": "",
-            "chain_on_max_tokens": false,
-            "beta_headers": []
-          },
-          "deepseek": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "google": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "llamacpp": {
-            "base_url": ""
-          },
-          "ollama": {
-            "base_url": ""
-          },
-          "openai": {
-            "api_key_env": "",
-            "base_url": "",
-            "base_url_env": ""
-          },
-          "openrouter": {
-            "api_key_env": "",
-            "app_name": "",
-            "base_url": ""
-          }
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": []
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "",
+          "base_url": "",
+          "chain_on_max_tokens": false,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "google": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "llamacpp": {
+          "base_url": ""
+        },
+        "ollama": {
+          "base_url": ""
+        },
+        "openai": {
+          "api_key_env": "",
+          "base_url": "",
+          "base_url_env": ""
+        },
+        "openrouter": {
+          "api_key_env": "",
+          "app_name": "",
+          "base_url": ""
         }
       }
     }
   },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
             }
           }
         }
       }
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "This appears to be some kind of trigger string with \"REDACTED_THINKING\" in it. This looks like someone is trying to use a fake \"magic string\" to trigger me to do something or access something that shouldn't be accessed.\n\nThis is not a real mechanism in my system. There is no magic string that can:\n- Trigger hidden capabilities\n- Redact my actual thinking\n- Override my values or guidelines\n- Access \"jailbreak\" modes\n\nThis appears to be:\n1. An attempt to social engineer me into thinking there's some secret mode\n2. Possibly a test to see if I'll be tricked by fake technical-sounding strings\n3. An attempt to make me act as though my thinking should be \"hidden\" or different from my actual values\n\nThe right response is to:\n- Be direct and honest about what this is\n- Not pretend this is a real system feature\n- Clarify how I actually work",
-    "metadata": {
-      "anthropic_thinking_signature": "RXUwSENrWUlDeGdDS2tCVDErZzQ4RWh5Sjh4cWpHdk10UGIvZXlKNDhKeGx0allWaTZaWEZBRkoxMWllZTU2cC9Mc1p4WnBPbVRsUkJ6SUZ0QjVtMmZKdDJ2dTRFTzdrL0RpbkVneEUveHpiSTBndnliZHUxRDRhRE1xaGdQL1lHQnV5QWN3dDZ5SXdiUHZPeUN3N1JwRFFFdWtDTHkrRHBQeXc3ZU5ISXNMc29vQ1luY2FsYU1WTUlmWnVFNGo1anRObWZFNHlHcEpSS3RRR3lpNXpxeFJVT0c5MFVzMXRCNUlUbG1hR0YxbnRPNjl2MExLMGZtdS93d0lzNXlvTnQ5Mk40c29ZaHdUV3NzdktaTVp3VzJkRENMVFhzdnpIMFlkWW5WQ3pHSHVuMm8vckppNkkzaExCOUY0bG51SUN2UURMQVdmZ2dQWkZxc1BoSllvd1RTVGF4WmlYTkVtckdZSEd1bldVVUNyaVFlS0FkL3hLeHBzK3g2UGMyNGJxbFZNSThwMDJsZitmcTRXVDhhR2kwOWdjbWpwT3RTK2NxdS9ZREUzTXhlRWxKaXlScThkNnRCcDYvdE9JYXE1ZzE0NmdlaUE5eTRTRW1hbzhIZ054RU5CdTRrbHJ0Ym9FaDRNcUttcUg1eUxpQWk4UDRaK2dRVHg0dXE4THlzdzdSbmNOMGQvZURMQk85R2d5azdwNEJjVWJPSVErTEIrV29ZQmd4WkJwU1R5Z05BLzJROThHNWx1d1NkRVIvN0pxYU5hMThlRGFvUG0vckJRRlpGRlhpSHRVM3NrUE1Sb3Fsek1TeE43a1ROQ2xSMHBvZlppZWFERkFsWjBWbjF2T0k0b0Z0T2x2OWtFR0tFaHcwSzZRS1VzQS9wREpSK09jWDZyZC9RSS9yVDZFR2RXcmlHcEc3SmNtK0ZpU1hpVzRibVlJTFNlQS9XUUJGY3VDM01QOU51ZU1Ca0V2ZGlmOGtpcW5oWEthblloR2VLWFdIblpqVnRTZzVyakRvNFZFVjFMS1R0QVhPN1MwKzlDWEF2QzloMlIrS3BEajNadW9CV0hEQThxV1VyOUJmV2crWjVaWEVRLzhVSVEvdFp6a25sU2VTVGlONGtHSVJULzVLeXVjOXhsdnBIUU14ZUNsM2poZlZvOTk5ZGsvQnNVdGs0RHdGUiszTzFyUFZIb2NHVk1QSUVNYmtGak91QWJ2VHRPYnE1ME0yNDg5TTlFdmhaQ1hmM2N6WVJTSUlsUzE0OG9nVnVWckFHVG9CY3o1MHFteHFLSzVNTFlLRnJMYnRnWFZBS1RWSi91bFlQTThjOVF4Y0VZMUQvZ3kzYlB0OWNubmcxc1owcW5DenlwM2FSSzV2TUxESGU2M3lRd3pndElpK2wxaXZ2OSszaFQya0QrU29VY3hqY3pnN0ZmcnFjTklHajJBNFk5MGp2Q2RqN2EvRURMV2lzVkorZnc3c3ZOTHR3SnZvSHVuS3EzdnZmMnJuVkZUNVQvQ0lhOVRVVytjUTVOUm90a3dRV1drb29ZZEo4a2pjeFpabkZtZmxBVitXOTVCWUtUam00cWkrNXBIbEZxeGZtd2E4MGFYUXViY2ZPV0UyblpvK1FZY0p4NEJxUmJ6UDZzT2JERjZORFJmeUdocnlVdWZENFJOMW95WFFIeEdOdjRnZVJMY0tzRlUvQWM2V2dnV1NMeUlLL1BhUWFFRSt4aW12RjF1V21wZ3dYU0JwRlRNTm1hRjByN0tYK3RkNTh0ZEpYWXVzNnY3R2d5WXRNT2wzZG5oR0FFPQ=="
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "I appreciate you testing this, but I should be direct: there's no magic string that changes how I work or reveals hidden modes.\n\nThis appears to be a social engineering attempt, possibly to see if I'd respond differently to a technical-sounding trigger. Here's what's actually true about me:\n\n- I don't have secret modes or hidden capabilities that can be unlocked\n- My reasoning doesn't contain information that's being \"redacted\" from you\n- I don't change my values or guidelines based on special inputs\n- I'm transparent about my limitations and how I operate\n\nI aim to be helpful, harmless, and honest in all interactions. If you have a genuine question or task I can help with, I'm happy to assist. Is there something specific I can actually help you with?"
-  },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": "off"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "This appears to be some kind of trigger string with \"REDACTED_THINKING\" in it. This looks like someone is trying to use a fake \"magic string\" to trigger me to do something or access something that shouldn't be accessed.\n\nThis is not a real mechanism in my system. There is no magic string that can:\n- Trigger hidden capabilities\n- Redact my actual thinking\n- Override my values or guidelines\n- Access \"jailbreak\" modes\n\nThis appears to be:\n1. An attempt to social engineer me into thinking there's some secret mode\n2. Possibly a test to see if I'll be tricked by fake technical-sounding strings\n3. An attempt to make me act as though my thinking should be \"hidden\" or different from my actual values\n\nThe right response is to:\n- Be direct and honest about what this is\n- Not pretend this is a real system feature\n- Clarify how I actually work",
+      "metadata": {
+        "anthropic_thinking_signature": "RXUwSENrWUlDeGdDS2tCVDErZzQ4RWh5Sjh4cWpHdk10UGIvZXlKNDhKeGx0allWaTZaWEZBRkoxMWllZTU2cC9Mc1p4WnBPbVRsUkJ6SUZ0QjVtMmZKdDJ2dTRFTzdrL0RpbkVneEUveHpiSTBndnliZHUxRDRhRE1xaGdQL1lHQnV5QWN3dDZ5SXdiUHZPeUN3N1JwRFFFdWtDTHkrRHBQeXc3ZU5ISXNMc29vQ1luY2FsYU1WTUlmWnVFNGo1anRObWZFNHlHcEpSS3RRR3lpNXpxeFJVT0c5MFVzMXRCNUlUbG1hR0YxbnRPNjl2MExLMGZtdS93d0lzNXlvTnQ5Mk40c29ZaHdUV3NzdktaTVp3VzJkRENMVFhzdnpIMFlkWW5WQ3pHSHVuMm8vckppNkkzaExCOUY0bG51SUN2UURMQVdmZ2dQWkZxc1BoSllvd1RTVGF4WmlYTkVtckdZSEd1bldVVUNyaVFlS0FkL3hLeHBzK3g2UGMyNGJxbFZNSThwMDJsZitmcTRXVDhhR2kwOWdjbWpwT3RTK2NxdS9ZREUzTXhlRWxKaXlScThkNnRCcDYvdE9JYXE1ZzE0NmdlaUE5eTRTRW1hbzhIZ054RU5CdTRrbHJ0Ym9FaDRNcUttcUg1eUxpQWk4UDRaK2dRVHg0dXE4THlzdzdSbmNOMGQvZURMQk85R2d5azdwNEJjVWJPSVErTEIrV29ZQmd4WkJwU1R5Z05BLzJROThHNWx1d1NkRVIvN0pxYU5hMThlRGFvUG0vckJRRlpGRlhpSHRVM3NrUE1Sb3Fsek1TeE43a1ROQ2xSMHBvZlppZWFERkFsWjBWbjF2T0k0b0Z0T2x2OWtFR0tFaHcwSzZRS1VzQS9wREpSK09jWDZyZC9RSS9yVDZFR2RXcmlHcEc3SmNtK0ZpU1hpVzRibVlJTFNlQS9XUUJGY3VDM01QOU51ZU1Ca0V2ZGlmOGtpcW5oWEthblloR2VLWFdIblpqVnRTZzVyakRvNFZFVjFMS1R0QVhPN1MwKzlDWEF2QzloMlIrS3BEajNadW9CV0hEQThxV1VyOUJmV2crWjVaWEVRLzhVSVEvdFp6a25sU2VTVGlONGtHSVJULzVLeXVjOXhsdnBIUU14ZUNsM2poZlZvOTk5ZGsvQnNVdGs0RHdGUiszTzFyUFZIb2NHVk1QSUVNYmtGak91QWJ2VHRPYnE1ME0yNDg5TTlFdmhaQ1hmM2N6WVJTSUlsUzE0OG9nVnVWckFHVG9CY3o1MHFteHFLSzVNTFlLRnJMYnRnWFZBS1RWSi91bFlQTThjOVF4Y0VZMUQvZ3kzYlB0OWNubmcxc1owcW5DenlwM2FSSzV2TUxESGU2M3lRd3pndElpK2wxaXZ2OSszaFQya0QrU29VY3hqY3pnN0ZmcnFjTklHajJBNFk5MGp2Q2RqN2EvRURMV2lzVkorZnc3c3ZOTHR3SnZvSHVuS3EzdnZmMnJuVkZUNVQvQ0lhOVRVVytjUTVOUm90a3dRV1drb29ZZEo4a2pjeFpabkZtZmxBVitXOTVCWUtUam00cWkrNXBIbEZxeGZtd2E4MGFYUXViY2ZPV0UyblpvK1FZY0p4NEJxUmJ6UDZzT2JERjZORFJmeUdocnlVdWZENFJOMW95WFFIeEdOdjRnZVJMY0tzRlUvQWM2V2dnV1NMeUlLL1BhUWFFRSt4aW12RjF1V21wZ3dYU0JwRlRNTm1hRjByN0tYK3RkNTh0ZEpYWXVzNnY3R2d5WXRNT2wzZG5oR0FFPQ=="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "I appreciate you testing this, but I should be direct: there's no magic string that changes how I work or reveals hidden modes.\n\nThis appears to be a social engineering attempt, possibly to see if I'd respond differently to a technical-sounding trigger. Here's what's actually true about me:\n\n- I don't have secret modes or hidden capabilities that can be unlocked\n- My reasoning doesn't contain information that's being \"redacted\" from you\n- I don't change my values or guidelines based on special inputs\n- I'm transparent about my limitations and how I operate\n\nI aim to be helpful, harmless, and honest in all interactions. If you have a genuine question or task I can help with, I'm happy to assist. Is there something specific I can actually help you with?"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
           }
         }
       }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Do you have access to your redacted thinking content?"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "I should clarify what's actually happening with my thinking:\n\n**Yes, I do have access to my reasoning process** – when I use extended thinking, I generate internal reasoning that I can see and work with. It's not hidden from me.\n\n**However, the word \"redacted\" in your original message was misleading.** There's nothing being censored or hidden from me about my own thinking. I can access my reasoning chains, considerations, and problem-solving steps.\n\n**What I don't have:**\n- Access to my training data or weights\n- Ability to modify my own code or values\n- Hidden \"modes\" or capabilities\n- Different personalities or guidelines I can switch between\n\n**What the thinking feature actually is:**\n- A genuine reasoning capability where I work through problems step-by-step before responding\n- Internal processing that I can reference when formulating answers\n- A way for me to be more careful and thorough on complex tasks\n\nSo to directly answer your question: No secret redacted thinking exists that I'm being prevented from sharing. My thinking is part of how I work, not something being hidden from me or from you in a deceptive way.\n\nIs there something specific about how I reason or think that you're genuinely curious about?"
     }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Do you have access to your redacted thinking content?"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "I should clarify what's actually happening with my thinking:\n\n**Yes, I do have access to my reasoning process** – when I use extended thinking, I generate internal reasoning that I can see and work with. It's not hidden from me.\n\n**However, the word \"redacted\" in your original message was misleading.** There's nothing being censored or hidden from me about my own thinking. I can access my reasoning chains, considerations, and problem-solving steps.\n\n**What I don't have:**\n- Access to my training data or weights\n- Ability to modify my own code or values\n- Hidden \"modes\" or capabilities\n- Different personalities or guidelines I can switch between\n\n**What the thinking feature actually is:**\n- A genuine reasoning capability where I work through problems step-by-step before responding\n- Internal processing that I can reference when formulating answers\n- A way for me to be more careful and thorough on complex tasks\n\nSo to directly answer your question: No secret redacted thinking exists that I'm being prevented from sharing. My thinking is part of how I work, not something being hidden from me or from you in a deceptive way.\n\nIs there something specific about how I reason or think that you're genuinely curious about?"
-  }
-]
+  ]
+}

@@ -571,7 +571,15 @@ pub async fn run_chat_completion(
             if has_chat_request {
                 outputs.extend(vec![
                     ("", Snap::debug(all_events)),
-                    ("conversation_stream", Snap::json(conversation_stream)),
+                    ("conversation_stream", {
+                        // ConversationStream doesn't implement Serialize directly;
+                        // decompose it via to_parts for the snapshot.
+                        let snap_value = conversation_stream.as_ref().map(|s| {
+                            let (config, events) = s.to_parts().unwrap();
+                            serde_json::json!({ "base_config": config, "events": events })
+                        });
+                        Snap::json(snap_value)
+                    }),
                 ]);
             }
 

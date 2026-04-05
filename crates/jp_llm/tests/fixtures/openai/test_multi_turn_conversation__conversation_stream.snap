@@ -2,292 +2,290 @@
 source: crates/jp_test/src/mock.rs
 expression: v
 ---
-[
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "inherit": false,
-      "config_load_paths": [],
-      "extends": [],
-      "assistant": {
-        "tool_choice": "auto",
-        "model": {
-          "id": {
-            "provider": "openai",
-            "name": "test"
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openai",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": {
+            "effort": "low",
+            "exclude": false
           },
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 0,
+        "base_backoff_ms": 0,
+        "max_backoff_secs": 0,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
             },
-            "stop_words": [],
-            "other": {}
+            "results_file_link": "full",
+            "parameters": "json"
           }
-        },
-        "request": {
-          "max_retries": 0,
-          "base_backoff_ms": 0,
-          "max_backoff_secs": 0,
-          "cache": true
         }
       },
-      "conversation": {
-        "title": {
-          "generate": {
-            "auto": false
-          }
-        },
-        "tools": {
-          "*": {
-            "run": "ask",
-            "result": "unattended",
-            "style": {
-              "hidden": false,
-              "inline_results": {
-                "truncate": {
-                  "lines": 10
-                }
-              },
-              "results_file_link": "full",
-              "parameters": "json"
-            }
-          }
-        },
-        "start_local": false
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": false,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
       },
-      "style": {
-        "code": {
-          "color": false,
-          "line_numbers": false,
-          "file_link": "osc8",
-          "copy_link": "osc8"
-        },
-        "markdown": {
-          "wrap_width": 0,
-          "table_max_column_width": 0,
-          "hr_style": "line"
-        },
-        "reasoning": {
-          "display": "full"
-        },
-        "streaming": {
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "tool_call": {
+      "markdown": {
+        "wrap_width": 0,
+        "table_max_column_width": 0,
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "streaming": {
+        "progress": {
           "show": false,
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          },
-          "preparing": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
+      },
+      "tool_call": {
+        "show": false,
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
         },
-        "typewriter": {
-          "text_delay": {
-            "secs": 0,
-            "nanos": 0
-          },
-          "code_delay": {
-            "secs": 0,
-            "nanos": 0
-          }
+        "preparing": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
         }
       },
-      "editor": {
-        "envs": []
-      },
-      "template": {
-        "values": {}
-      },
-      "providers": {
-        "llm": {
-          "anthropic": {
-            "api_key_env": "",
-            "base_url": "",
-            "chain_on_max_tokens": false,
-            "beta_headers": []
-          },
-          "deepseek": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "google": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "llamacpp": {
-            "base_url": ""
-          },
-          "ollama": {
-            "base_url": ""
-          },
-          "openai": {
-            "api_key_env": "",
-            "base_url": "",
-            "base_url_env": ""
-          },
-          "openrouter": {
-            "api_key_env": "",
-            "app_name": "",
-            "base_url": ""
-          }
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": []
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "",
+          "base_url": "",
+          "chain_on_max_tokens": false,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "google": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "llamacpp": {
+          "base_url": ""
+        },
+        "ollama": {
+          "base_url": ""
+        },
+        "openai": {
+          "api_key_env": "",
+          "base_url": "",
+          "base_url_env": ""
+        },
+        "openrouter": {
+          "api_key_env": "",
+          "app_name": "",
+          "base_url": ""
         }
       }
     }
   },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": "off"
-          }
-        }
-      }
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Test message"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "Received your test message — everything looks good. How can I help you today?",
-    "metadata": {
-      "openai_item_id": "bXNnXzA0MWQzOWE1ZjM4YWRhNWIwMTY5OTViNmI3Nzc5YzgxOTM4MzNiNzllODM4YWMwMjBl"
-    }
-  },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
             }
           }
         }
       }
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Repeat my previous message"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "**Repeating message**\n\nThe user asked me to repeat their previous message, which was \"Test message.\" I think it makes sense to echo that back to them clearly. I’ll respond simply with, \"Test message.\" I wonder if I should include quotes or just keep it straightforward. However, since their request is just to repeat it, I’ll stick to the original text and return exactly what they said!",
-    "metadata": {
-      "openai_item_id": "cnNfMDQxZDM5YTVmMzhhZGE1YjAxNjk5NWI2YmI5ZmVjODE5MzgxY2FmZDUyZDJjNWFhYjk=",
-      "openai_encrypted_content": "Z0FBQUFBQnBsYmE4V2gtVTlkcmxoZmpNaU1nVmJDY3lBRno5dTNxSTJxMk9aTUJkaDBac2h0a21HY2tSX0Y3TFpvcHhLR2tYcHVvTTJaSm1uOVNXTURDeU9Tc2xsTEc5QVFpZXI4NDlOckhfOXVfemh2LUhhcXY0eUROZnI3UlpnTXh4UjllR1IyU0wtb1E3VUZSczJobldEZU9sUThRMExCS1ptdkpmUC1MNlRXeGNMd0NsTllkbXdPNUpLeGlubDJxMW9xcFZ4ODVJckY4d3U1dTB5ZEplT0EyRWVHalE2UzJkTU5PZ2c1eUo2MFQybngydFpJbHZNUmZIeUJoT2dfOHEyckZsRGRwdjlxWTBTTVR0STA0TldYMnVTb1ZfbTd0NDlhZVI2Q3RXWVltVWZabXNWeTEzMjZzN2EzSkZJd2k2c3dFZUYtOVp0N1JLakw3T0lEVkE0SDJBZVVRQ29CcUQ1aloxTW94Q0M2TWFFZ1ZIbFUtTElDdWZXVVJESkdfcENrODk2bnlKOW5zX0RVQUN4b1hIZnVKSDZJQUF5VjFMaEY0RldOeVhtOFY3MGpCVjBLdDgxeE1wVEQ5V2NZYkhPejNPb19PM2pqWDlSZGc4NEsxQ3MwWjZzNXFMek9IazE4OFNGMlNPLUlzV1BGeXdqVllscHFYZEpLWHVxS00xalhiaVVUYWRmTmtOeVpPWkV5N0NhblVDMklMTFlQdEhNc0xGN1N4TGdwS2hPMWJQbTBQSHZwUVJJUFRsVGRsLVpWTGs5YTZmVVh0MHhxcHBwNTV5eUh6dlRvUkJ0VHl5RHNfdThCbWpHRmhiOVhpYkd6REpoNDVNWEJlbEMwMWZCQXplaGYzM0hPX01ndElHU2ZDVWR5LUdKV1RNX1k0RTVwV255alRVTlVMaTM2Q2hUSmQ2T1NKR2FsdjNPcHd4eWJKLVJsMXVVRkhybmowajlaSWM1ay00N1VYZThFaXN6dFRZU0E4RnVFN1NFb09aMW4ybHV3T0twVnJ1bWxIdUxzdWZ6Q2dQS2IweDVZV2IxQS1PVjVKelU3S1lROVRIRFN3Z0FRTm9XcjVvUlY5V0tEd2NFYUtGcGw3NXF2RE94Z3JpcGRjUnFPaHJIMUhqR1I3R1dqaGV0MWpUc1JLVlQ3dVR4Y1JKTndEcWhEd1pNRW5kTUdWdWJmOXgxbUpKX0JGTUNkUS1qRkNzQUpsMVFfMk43cVI2MkZSUHVRYklad2pSYllsbXpDLV9LTHlnNTMyVGIzMzhSd1FnZXFCbmFvdUR2bVpxZkhfcGxNaXhHV3ZTUUpTNnVmYmpfWENJR2tXbi1uZHVWUUlxWE1CdnZ0WHVfRkhsb2VZcF9Hc25OT3AyTlhSWjYxRVBCeU1zVGU4MEYzNzRvNXRKcjBEamdGZnY1blBoU29Ec0lFaE9rOEZHMldwSXVzOEpPb2R6TDgxQ0dJV3d3ajN4Vk02RXBMLVAtamVZMDBsdWZNSHJWX1dwcDUxSTg0Z3BaS0RDQmg1WklZcWJ0THEyYVlhVTNrVmtRbjZZZEJLQ2Z5REZtSS1EWFV1cEhQQ05DR2ZJdEpaN1FxQUZzaHlzRzJza1BONl9oeFlHTjAyRk1ZalNVcWt4ZGJ4VXhPWjh6b2ZtVEFlSmw0TnJybFRPZjFxYTNOUGxtZWdYT0Z5TW1DQkY5MXM9"
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "Test message",
-    "metadata": {
-      "openai_item_id": "bXNnXzA0MWQzOWE1ZjM4YWRhNWIwMTY5OTViNmJjOGQ0YzgxOTNhZjMzYzQ4NzEyMWMzM2E0"
-    }
-  },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": "off"
-          }
-        }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Test message"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Received your test message — everything looks good. How can I help you today?",
+      "metadata": {
+        "openai_item_id": "bXNnXzA0MWQzOWE1ZjM4YWRhNWIwMTY5OTViNmI3Nzc5YzgxOTM4MzNiNzllODM4YWMwMjBl"
       }
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Please run the tool, providing whatever arguments you want."
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_request",
-    "id": "call_kTWQScGzaHfcWiOR06c4Z6PJ",
-    "name": "run_me",
-    "arguments": {
-      "foo": "Zm9v",
-      "bar": "Zm9v"
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_response",
-    "id": "call_kTWQScGzaHfcWiOR06c4Z6PJ",
-    "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
-    "is_error": false
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "I ran the tool with the arguments you provided. The tool returned: \"The secret code is: 42\".",
-    "metadata": {
-      "openai_item_id": "bXNnXzA0MWQzOWE1ZjM4YWRhNWIwMTY5OTViNmJlMzg3ODgxOTM4OTg5NzNlNWQxM2JlOWQy"
-    }
-  },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
             }
           }
         }
       }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Repeat my previous message"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "**Repeating message**\n\nThe user asked me to repeat their previous message, which was \"Test message.\" I think it makes sense to echo that back to them clearly. I’ll respond simply with, \"Test message.\" I wonder if I should include quotes or just keep it straightforward. However, since their request is just to repeat it, I’ll stick to the original text and return exactly what they said!",
+      "metadata": {
+        "openai_item_id": "cnNfMDQxZDM5YTVmMzhhZGE1YjAxNjk5NWI2YmI5ZmVjODE5MzgxY2FmZDUyZDJjNWFhYjk=",
+        "openai_encrypted_content": "Z0FBQUFBQnBsYmE4V2gtVTlkcmxoZmpNaU1nVmJDY3lBRno5dTNxSTJxMk9aTUJkaDBac2h0a21HY2tSX0Y3TFpvcHhLR2tYcHVvTTJaSm1uOVNXTURDeU9Tc2xsTEc5QVFpZXI4NDlOckhfOXVfemh2LUhhcXY0eUROZnI3UlpnTXh4UjllR1IyU0wtb1E3VUZSczJobldEZU9sUThRMExCS1ptdkpmUC1MNlRXeGNMd0NsTllkbXdPNUpLeGlubDJxMW9xcFZ4ODVJckY4d3U1dTB5ZEplT0EyRWVHalE2UzJkTU5PZ2c1eUo2MFQybngydFpJbHZNUmZIeUJoT2dfOHEyckZsRGRwdjlxWTBTTVR0STA0TldYMnVTb1ZfbTd0NDlhZVI2Q3RXWVltVWZabXNWeTEzMjZzN2EzSkZJd2k2c3dFZUYtOVp0N1JLakw3T0lEVkE0SDJBZVVRQ29CcUQ1aloxTW94Q0M2TWFFZ1ZIbFUtTElDdWZXVVJESkdfcENrODk2bnlKOW5zX0RVQUN4b1hIZnVKSDZJQUF5VjFMaEY0RldOeVhtOFY3MGpCVjBLdDgxeE1wVEQ5V2NZYkhPejNPb19PM2pqWDlSZGc4NEsxQ3MwWjZzNXFMek9IazE4OFNGMlNPLUlzV1BGeXdqVllscHFYZEpLWHVxS00xalhiaVVUYWRmTmtOeVpPWkV5N0NhblVDMklMTFlQdEhNc0xGN1N4TGdwS2hPMWJQbTBQSHZwUVJJUFRsVGRsLVpWTGs5YTZmVVh0MHhxcHBwNTV5eUh6dlRvUkJ0VHl5RHNfdThCbWpHRmhiOVhpYkd6REpoNDVNWEJlbEMwMWZCQXplaGYzM0hPX01ndElHU2ZDVWR5LUdKV1RNX1k0RTVwV255alRVTlVMaTM2Q2hUSmQ2T1NKR2FsdjNPcHd4eWJKLVJsMXVVRkhybmowajlaSWM1ay00N1VYZThFaXN6dFRZU0E4RnVFN1NFb09aMW4ybHV3T0twVnJ1bWxIdUxzdWZ6Q2dQS2IweDVZV2IxQS1PVjVKelU3S1lROVRIRFN3Z0FRTm9XcjVvUlY5V0tEd2NFYUtGcGw3NXF2RE94Z3JpcGRjUnFPaHJIMUhqR1I3R1dqaGV0MWpUc1JLVlQ3dVR4Y1JKTndEcWhEd1pNRW5kTUdWdWJmOXgxbUpKX0JGTUNkUS1qRkNzQUpsMVFfMk43cVI2MkZSUHVRYklad2pSYllsbXpDLV9LTHlnNTMyVGIzMzhSd1FnZXFCbmFvdUR2bVpxZkhfcGxNaXhHV3ZTUUpTNnVmYmpfWENJR2tXbi1uZHVWUUlxWE1CdnZ0WHVfRkhsb2VZcF9Hc25OT3AyTlhSWjYxRVBCeU1zVGU4MEYzNzRvNXRKcjBEamdGZnY1blBoU29Ec0lFaE9rOEZHMldwSXVzOEpPb2R6TDgxQ0dJV3d3ajN4Vk02RXBMLVAtamVZMDBsdWZNSHJWX1dwcDUxSTg0Z3BaS0RDQmg1WklZcWJ0THEyYVlhVTNrVmtRbjZZZEJLQ2Z5REZtSS1EWFV1cEhQQ05DR2ZJdEpaN1FxQUZzaHlzRzJza1BONl9oeFlHTjAyRk1ZalNVcWt4ZGJ4VXhPWjh6b2ZtVEFlSmw0TnJybFRPZjFxYTNOUGxtZWdYT0Z5TW1DQkY5MXM9"
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Test message",
+      "metadata": {
+        "openai_item_id": "bXNnXzA0MWQzOWE1ZjM4YWRhNWIwMTY5OTViNmJjOGQ0YzgxOTNhZjMzYzQ4NzEyMWMzM2E0"
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "call_kTWQScGzaHfcWiOR06c4Z6PJ",
+      "name": "run_me",
+      "arguments": {
+        "foo": "Zm9v",
+        "bar": "Zm9v"
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "call_kTWQScGzaHfcWiOR06c4Z6PJ",
+      "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "I ran the tool with the arguments you provided. The tool returned: \"The secret code is: 42\".",
+      "metadata": {
+        "openai_item_id": "bXNnXzA0MWQzOWE1ZjM4YWRhNWIwMTY5OTViNmJlMzg3ODgxOTM4OTg5NzNlNWQxM2JlOWQy"
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "What was the result of the previous tool call?"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_item_id": "cnNfMDQxZDM5YTVmMzhhZGE1YjAxNjk5NWI2YmVlYmEwODE5M2FmYzkyN2NjMDQzNzkyZWM=",
+        "openai_encrypted_content": "Z0FBQUFBQnBsYmJCdEwxaFN1SVZyeU9QaFdLeXJ2WVVmODA5dUh3eDJ5YXFzQjd6Xzl0R2o5cENBTzltRTV6VnRlUUFsbEw4cGNFanNMU1E1R294Q2VGelJLTzNyZUluYjBWZFV6N1ZDcjYyZWttQWhGOVFfcVd5R3M0NGZsbnFpSVVfTFIwZ20tM0NEZjFndGhzbm16NVdZb3NXem1YMThZckN4Z2p0ZnNhVUJtUlZOelRIdDlSTmtPQzNlaEVnblpmVFlUNExoWWM2MUY3MWtkTExES3BFdmg0SWRybk5KajZyTEFWaVBoZldsMW9VM2xHckxYVF9wSHVNMEphcDVYMDdhamhnQkxsWHpTU25ySEdOV1JRUUI1b2Zxb1JIZ21FdzlxQThIVzR0bGxWYjI2NFp5dW5FVGN3NVBGT2VUendmRnQxYW8wNFd4R3MxMGxaZU5ZWVZ3VG1HSjc0SWI5dFZVeFhBeUV1VjhTR0ZRZ19CTTlnVDRwY3RaSTBWVFNLek9hLWpPWGJCTS1JejZKb1A0WGZTaU5hN2x2dHV4UHo4c2xicFlBN1Zta1dkZy1XUl9GaDV3U1QxUDFoS0lQdzQ0aXVTTGZnOVBFTVlHVVZYbHUwVXhZeVN3eEk5REZNRHpnRzBxVE1OcWVJeTY0V2dScEVEbDJ3eFYzajEtM05mRURTSzJOa3VNWTFIRF8xLUw1VkpRTHJMOW5VUkpKRlFSLS1pUVpEbHAxZUdGdm85X0UxS1YxNUVxNnpWYmFGNldBYjMwRHU4MGFhVHNwZzVmRVMtMnJ4NXZFd3pOOXV2cWpGSWt2YlZmcDc4VWREaFN3RWp0aHBBSmZpbk8tZW9jTjJvMjEtb1NGUXNSeUZzUlhFVVZvWlFpbUZIX2ZIVzl6OURCZWZIRlZ4bU9JSndzVWNNVUE0MEpYT3Jnay1lWVpVQjNrVDdReTMwRnNya3E3REViWS1ENjJxUDBHekJLRUFNUU9FTFVyeENuekhJUkRBX1d3aDBrZ3pORGkyTTYybExlRk5WX3F5bERqNDBjTEZpNndRQk1zVkpJTU1OYzczcDhlOHlxem91TkpoRkd4U1IyVC1hRlhud3ZwN0dDUFZRTFNKNUZNRjJuSEp1XzR1WDViSmVJMnhXNDRtMjZUSk42dDVIcG9lQjRUZl85N0xzTmd4Qy1HZkVVVGQ1UU5ndkpOVDMwSTVoUmZpb3F2Ym5TNWlNaFNhLXZDVFl6cFc0S0VjSm9YRVZOWDdSbFpIUng5QW5ZdmRhTnZVOWk0V1cta3lrQ2laRzg5R1RDeVBCYmJ1UkFDNjdOMUtwamZXbTVLejFrbGMtUW1DdkwwZ3k2WXFhSlk4T2hjellzUUtCMm1lcm1jci1NbDJUQXNsdElYY2NqNHRaWEMtV3hybkQxczViRHRKNTBKYms1RG1HQ3o3Ni1Cc1YzaERwamVucFQyYlE="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "The tool returned: \"The secret code is: 42\".",
+      "metadata": {
+        "openai_item_id": "bXNnXzA0MWQzOWE1ZjM4YWRhNWIwMTY5OTViNmMxMzkxYzgxOTM5NjZhNTQzOGVkNGRkY2Y3"
+      }
     }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "What was the result of the previous tool call?"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "",
-    "metadata": {
-      "openai_item_id": "cnNfMDQxZDM5YTVmMzhhZGE1YjAxNjk5NWI2YmVlYmEwODE5M2FmYzkyN2NjMDQzNzkyZWM=",
-      "openai_encrypted_content": "Z0FBQUFBQnBsYmJCdEwxaFN1SVZyeU9QaFdLeXJ2WVVmODA5dUh3eDJ5YXFzQjd6Xzl0R2o5cENBTzltRTV6VnRlUUFsbEw4cGNFanNMU1E1R294Q2VGelJLTzNyZUluYjBWZFV6N1ZDcjYyZWttQWhGOVFfcVd5R3M0NGZsbnFpSVVfTFIwZ20tM0NEZjFndGhzbm16NVdZb3NXem1YMThZckN4Z2p0ZnNhVUJtUlZOelRIdDlSTmtPQzNlaEVnblpmVFlUNExoWWM2MUY3MWtkTExES3BFdmg0SWRybk5KajZyTEFWaVBoZldsMW9VM2xHckxYVF9wSHVNMEphcDVYMDdhamhnQkxsWHpTU25ySEdOV1JRUUI1b2Zxb1JIZ21FdzlxQThIVzR0bGxWYjI2NFp5dW5FVGN3NVBGT2VUendmRnQxYW8wNFd4R3MxMGxaZU5ZWVZ3VG1HSjc0SWI5dFZVeFhBeUV1VjhTR0ZRZ19CTTlnVDRwY3RaSTBWVFNLek9hLWpPWGJCTS1JejZKb1A0WGZTaU5hN2x2dHV4UHo4c2xicFlBN1Zta1dkZy1XUl9GaDV3U1QxUDFoS0lQdzQ0aXVTTGZnOVBFTVlHVVZYbHUwVXhZeVN3eEk5REZNRHpnRzBxVE1OcWVJeTY0V2dScEVEbDJ3eFYzajEtM05mRURTSzJOa3VNWTFIRF8xLUw1VkpRTHJMOW5VUkpKRlFSLS1pUVpEbHAxZUdGdm85X0UxS1YxNUVxNnpWYmFGNldBYjMwRHU4MGFhVHNwZzVmRVMtMnJ4NXZFd3pOOXV2cWpGSWt2YlZmcDc4VWREaFN3RWp0aHBBSmZpbk8tZW9jTjJvMjEtb1NGUXNSeUZzUlhFVVZvWlFpbUZIX2ZIVzl6OURCZWZIRlZ4bU9JSndzVWNNVUE0MEpYT3Jnay1lWVpVQjNrVDdReTMwRnNya3E3REViWS1ENjJxUDBHekJLRUFNUU9FTFVyeENuekhJUkRBX1d3aDBrZ3pORGkyTTYybExlRk5WX3F5bERqNDBjTEZpNndRQk1zVkpJTU1OYzczcDhlOHlxem91TkpoRkd4U1IyVC1hRlhud3ZwN0dDUFZRTFNKNUZNRjJuSEp1XzR1WDViSmVJMnhXNDRtMjZUSk42dDVIcG9lQjRUZl85N0xzTmd4Qy1HZkVVVGQ1UU5ndkpOVDMwSTVoUmZpb3F2Ym5TNWlNaFNhLXZDVFl6cFc0S0VjSm9YRVZOWDdSbFpIUng5QW5ZdmRhTnZVOWk0V1cta3lrQ2laRzg5R1RDeVBCYmJ1UkFDNjdOMUtwamZXbTVLejFrbGMtUW1DdkwwZ3k2WXFhSlk4T2hjellzUUtCMm1lcm1jci1NbDJUQXNsdElYY2NqNHRaWEMtV3hybkQxczViRHRKNTBKYms1RG1HQ3o3Ni1Cc1YzaERwamVucFQyYlE="
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "The tool returned: \"The secret code is: 42\".",
-    "metadata": {
-      "openai_item_id": "bXNnXzA0MWQzOWE1ZjM4YWRhNWIwMTY5OTViNmMxMzkxYzgxOTM5NjZhNTQzOGVkNGRkY2Y3"
-    }
-  }
-]
+  ]
+}

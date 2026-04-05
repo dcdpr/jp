@@ -5,7 +5,9 @@ use jp_conversation::ConversationId;
 use rayon::prelude::*;
 use tracing::{debug, trace};
 
-use crate::{CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage, dir_entries};
+use crate::{
+    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage, dir_entries,
+};
 
 /// Result of validating all conversation directories across storage roots.
 #[derive(Debug, Default)]
@@ -56,6 +58,13 @@ pub enum ValidationError {
     /// is not a JSON object.
     #[error("{METADATA_FILE}: {source}")]
     CorruptMetadata {
+        /// The underlying parse error.
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// The per-conversation base config file exists but is not valid JSON.
+    #[error("{BASE_CONFIG_FILE}: {source}")]
+    CorruptBaseConfig {
         /// The underlying parse error.
         source: Box<dyn std::error::Error + Send + Sync>,
     },
@@ -188,6 +197,18 @@ fn validate_entry(
         dirname: dirname.to_owned(),
     })?;
 
+    // base_config.json is optional for backward compat (old conversations have
+    // the base config packed into events.json), but if it exists it must be
+    // valid JSON.
+    let base_config_path = entry_path.join(BASE_CONFIG_FILE);
+    if base_config_path.is_file() {
+        validate_json_file(&base_config_path).map_err(|source| InvalidConversation {
+            conversations_dir: conversations_dir.to_path_buf(),
+            error: ValidationError::CorruptBaseConfig { source },
+            dirname: dirname.to_owned(),
+        })?;
+    }
+
     let events_path = entry_path.join(EVENTS_FILE);
     if !events_path.is_file() {
         return Err(InvalidConversation {
@@ -215,10 +236,13 @@ fn validate_entry(
 ///
 /// [`IgnoredAny`]: serde::de::IgnoredAny
 fn validate_metadata(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    validate_json_file(path)
+}
+
+/// Confirm a file is valid JSON.
+fn validate_json_file(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use serde::de::IgnoredAny;
 
-    // Confirm the file is valid JSON. IgnoredAny accepts any valid JSON
-    // value (object, array, string, etc.) without allocating.
     let buf = std::fs::read(path)?;
     serde_json::from_slice::<IgnoredAny>(&buf)?;
     Ok(())

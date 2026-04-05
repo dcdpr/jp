@@ -2,211 +2,209 @@
 source: crates/jp_test/src/mock.rs
 expression: v
 ---
-[
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "inherit": false,
-      "config_load_paths": [],
-      "extends": [],
-      "assistant": {
-        "tool_choice": "auto",
-        "model": {
-          "id": {
-            "provider": "google",
-            "name": "test"
-          },
-          "parameters": {
-            "reasoning": "off",
-            "stop_words": [],
-            "other": {}
-          }
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "google",
+          "name": "test"
         },
-        "request": {
-          "max_retries": 0,
-          "base_backoff_ms": 0,
-          "max_backoff_secs": 0,
-          "cache": true
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
         }
       },
-      "conversation": {
-        "title": {
-          "generate": {
-            "auto": false
-          }
-        },
-        "tools": {
-          "*": {
-            "run": "ask",
-            "result": "unattended",
-            "style": {
-              "hidden": false,
-              "inline_results": {
-                "truncate": {
-                  "lines": 10
-                }
-              },
-              "results_file_link": "full",
-              "parameters": "json"
-            }
-          }
-        },
-        "start_local": false
-      },
-      "style": {
-        "code": {
-          "color": false,
-          "line_numbers": false,
-          "file_link": "osc8",
-          "copy_link": "osc8"
-        },
-        "markdown": {
-          "wrap_width": 0,
-          "table_max_column_width": 0,
-          "hr_style": "line"
-        },
-        "reasoning": {
-          "display": "full"
-        },
-        "streaming": {
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "tool_call": {
-          "show": false,
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          },
-          "preparing": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "typewriter": {
-          "text_delay": {
-            "secs": 0,
-            "nanos": 0
-          },
-          "code_delay": {
-            "secs": 0,
-            "nanos": 0
-          }
-        }
-      },
-      "editor": {
-        "envs": []
-      },
-      "template": {
-        "values": {}
-      },
-      "providers": {
-        "llm": {
-          "anthropic": {
-            "api_key_env": "",
-            "base_url": "",
-            "chain_on_max_tokens": false,
-            "beta_headers": []
-          },
-          "deepseek": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "google": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "llamacpp": {
-            "base_url": ""
-          },
-          "ollama": {
-            "base_url": ""
-          },
-          "openai": {
-            "api_key_env": "",
-            "base_url": "",
-            "base_url_env": ""
-          },
-          "openrouter": {
-            "api_key_env": "",
-            "app_name": "",
-            "base_url": ""
-          }
-        }
+      "request": {
+        "max_retries": 0,
+        "base_backoff_ms": 0,
+        "max_backoff_secs": 0,
+        "cache": true
       }
-    }
-  },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
-            }
-          }
-        }
-      }
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Please run the tool, providing whatever arguments you want."
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "**Considering Tool Execution**\n\nI'm focusing on how to execute the `run_me` tool. It takes `bar` and `foo` as arguments. I've noted that `bar` can be either \"foo\" or a list of strings. I'm currently thinking through the potential complexities of constructing the command line for various input scenarios.\n\n\n**Analyzing Argument Strategies**\n\nI've decided to proceed by selecting a strategy for the tool execution. Considering all options, I've chosen to define `bar` as a list of strings and `foo` as a user-provided string. Specifically, I'll set `bar` to `[\"example1\", \"example2\"]` and `foo` to \"customValue.\" This will thoroughly test the arguments.\n\n\n**Deciding Argument Values**\n\nI've examined several argument combinations for `run_me`, opting to use both. Now, I'm setting `bar` to `[\"example1\", \"example2 \"]` (a list of strings) and `foo` to `\"custom_foo_value\"` (a user-provided string) to trigger different valid types. The tool code will be formed using these arguments, to ensure proper execution. I am focusing on the Python syntax and quoting to ensure all are valid.\n\n\n"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_request",
-    "id": "run_me_1",
-    "name": "run_me",
-    "arguments": {
-      "bar": [
-        "ZXhhbXBsZTE=",
-        "ZXhhbXBsZTI="
-      ],
-      "foo": "Y3VzdG9tX2Zvb192YWx1ZQ=="
     },
-    "metadata": {
-      "google_thought_signature": "Q2lRQnZqNzIrK0RPcG0vajhUazVIUlRjcVltYWZibkxKWWFuRC9lSWpZdjAwTjRvVEtRS1Z3RytQdmI3NFlHbUdqS0NDTGlDcXNMMnpFS0hkRlF1MnpWcWExeWtGaG5hVzZuQ2c0VVVkWUtKOUlYQUUyWFFHMWlpa1BNczZXUm8ybzhYYk81UE1uclZiTXVjOTkrcld2SFpqOU0rWVFZaHY4amVlekVBWFFyQUFRRytQdmI3K0VPUUVielRiQnhSU2ppalFRMDFNeExPVE9lS0EzMnZER3dqV2hmQVFlZFJWcUY3eUE1aGZwRWs1L1crNmNWTUhpUi9PMnphOGxaSUZQeFpSYktkWmJSaU9JSGdHSFp6MGNOS0JQSmZnTkE4WkpLYXA3ZEZMTlVaNUZTbWhUSmhGS1pnUVVqSldXVlplczdiQUJiZnRydldRS0tSZ01Tc1FmSkw2WEpTaFVYNFNPY0FNNy9Hb2owODlFOEVTQVFFUVlGQjhOMTBzMWVEc0Qyd3ZtdkJMWi9rdm1pOFlwUzdBaUE0WnpIbGRZd0FMdUVwSG5OWis4MjBQd3IyQVFHK1B2YjdKQzUyME9RUlRoSmxSNkwxbzd5NjJrYnZmejhXTzVIQTZCZG1hM3hyUURKeE9SVjd2b1JIMFEzZEVJTnpLSGI0RWVlNmFZSWpOR0ZwUytacUxqNHVyNk5RTjhjcThST0RpdlRJbzk4V3RBVUVTVitoU1AzZVZnckhKd2Jrb3ZhK1EyblFIOVd0ZWhGOGRreks3aDdwRjB0YnN0MmVmL0hHY05IZE4vWHRhUUlwd2djL0hubDhLeEJKOThXY2FOL1dnbkIvVUtrQ3d1RmVhSFQyMkFJNUpHbUF3Yi9VeGxUcU0wV05UM1kxUFNEZDd6ZjYzQ0hPTWY0UWdzLzJ6ZlliMFkwRCt4eEJyZ1dFY04zVHJTNkJRRElhcWJKaWt0b3dCVWl2Q3doTEFvVXZ0VVFNU2tnOTB2clhEWHh0bTc3TCtRcXBBUUcrUHZiN1FHOTBocmFyMEN0WGFqbDF4T2RBMUlCRU0xUThrZERhUExKbkZJZ082UXRHaXlMR0JSL2xmUHQzUzdyQXRzK05YdGJORmJlazh6TjZZaVVKeDkyQXQxcTNmaHRrNkxFM05TeGRYbHVvenE1TDlBQjg4bWoxejVRRnY3QTVadWpTRVZrSzY4TVlLclV5V0tLdnJ3ZFh5TlhSR1hrZWg1KzIzM3ovdE1IZWo0SGIySXNBeE5WMHNWZlpsTURHamh5M21IWWdjVnFTcG12ZEVsc0RubDFnVk1Mam1Zb0t6d0VCdmo3Misya0gwcUVBWGRVaGVyYm1TdDc0TWdDVmQwTlpDbW56NDV2Zks3M2JWUlFUM1Vhb3JtaFlFMVJFcUlSSENEN0RMKzVmWVc1SUxObkhkYXpGU3BtbHZXZGJjclVsYXJEdk9FRU1PMHlteGNrb2hFeFFiQlEzRU5VSG1TdTdSU1JNSjh3WlFCZTU5VzVZcDYrQWp1Y0Qva29PdXJ6djE2RWFieXVoQ3lNNUVvVWwwazBNNlIyQnI0RENJUkxKUjlOMUJYWEc5alRPMy9YOHNwOVV3NVZwMU9WRWlleFJ2UVN6Z2RvRHNVbXR4cVhRV2dERytXSzVTYy9iNkpXNmpwMk4zMEgxbkNuaGQzbmlJTDhLd3dFQnZqNzIrNzVyUTg4SGtOaXFwcVhqUmpZYWNCdFVTK2VvQWFiUE95ZWx6WGFGcVVrZnNsU0RudjJvdE5Md3U5NlFJaU5aZVlLNzdPbmE2L0ZrL3pBYSthdy9oNE9XK1MwWGlhaDJGQjJQUVY4RDliZmhhNVJVNjJ3S2svMlY0VDJXQ0t1czl2WURSQklaQXExd3VKOW1NUVVON2dRRi9UYTFUSWtPTUFzWXZIR1R5djF5MVNhTmhwcUhtMXY4R2UzYXpmemVSenM0MVh4RmtoVFFQcjJNVW9UbTBnbElFdFJRc25obk5LcDJmakp0L2Zhcitab2lJRXpkeHQ1R2ZtVVlUUzRLbWdFQnZqNzIrelNHVTFhYitLSlE1UnJtcGcxMEprU2pTZnc3Zk9Ic0tpeElnem02K2R2VURQeUs3dVpMWGN3dXJaaWtqcnpTOFJzRm14eUw5c2xtb3JuOWM5Z2ZNaHFYY1BGeG5mRGJzV09rbTNBVG9aZ01reWJrU05Sb0QzbUFibnAvdEYrYWxQVFA5WTRXdGQ1WG92Zy9PTGprdHBwaVJBYWxBRmd4MDMrZzhNL01aWWpJQTU1WFNBd2R1bFFTZ1VmMklEWTJXNEwwaW1tZ0Nzc0JBYjQrOXZ1SFIzQkpZam1tY0QrLzNmS0hFbHVMS0ZTTkllRFA3NE5ZdlBkYzdqSGEzUmp0cXVyZHV2RHByY1ZzOXNodjQ4NjNXeUlVT2FtWUh2VThqckIzK1ROM05SbW9zdXR2QXJtN1gweGNpUVYrRkZ5clpkNmZvNTExa0RKQW82NUE5Z0cvbm03V1U5Y2JEZloweDhhVWt3SEhkVDhYYy9MNkpnVlVUeERteHFqdmJZYUNBcEVNZzNLZUNFaWNmYnZWejhkbFdWZWtLK3hQTWZ4Nnlqd3hsdUUxemxpb1BMZ3FHTHlQNzl6azNQdHRUbDVHQm1wUTRXQlNaRWdOYUF2T2p2NHcwMTdUdEhjSzZRRUJ2ajcyKzRmZTZhV01uZUxGd1FNczNxSHI0MHNkbzdFR1k1NUhyZ3M1N0E0aUhNQWx2WnRHZXp3NkpCczJpb1VLeFU3NVk3Z0pPTGtUOGNvTUdVN2U5TmdvbzAxaXFvMXZyOWJ0a0R0eFRUS2dGeW93SEVsejE1SWE5N3ZSNW9jWmYreWZ5MFRnaG0rd2o2Uk5VRjNJQXArMElMMHBXb1oybGhCcUFwU0ZPZjhwZ3N0d0NvSHFDZXoyakNnRzJ0N2NRZEQxbzZMbzgwS1JlQ1ROVmdrV3Vud3VFTDdrNzlsM3BPNDJGbWFZSndHakJIZDc2cnJlUlpzT1FSd0VzaUNzZmFwOUo2b0YzSndkVk5nRlk2TThWWUhNS3NXeGdSK01hcXVSNnV6NWpIUUo1S3hKanVKWFdncXhBUUcrUHZiNzNNZllWdUpzZWxoMW83UnNTQWVjWXp6ckw0bHd6dE1wdENXSHhSanpoQlgxT0g0Zmo0Yy83cy9UbHR0eTlhemhtUFRxT2NvQjE2ZEs5MS84UjBrSzV6TlE4SklMTmRyM0xDYzE5TXg4OWVKUHlDQXdQUW9idkNpZzJ0ZGJLb284ZjU3R01yN2syMTEwWEgzQWhUUGY1SEJUS2h6NFA3UW9ycmFiSmFYYTRYUFFTbzFWTXhLV2FpVlhtTXJaTW1aNDNsbFRTbVVJQmJHTUtUOTZHNmsyckhLTmNCTEl3M0hpbjQwVVdncUVBZ0crUHZiN0U4RnkxYUI2OEZPMXFBaDMraUlBS3crSmVrdHpFcVhHMTI5UnNVMURQMlZtQkVYN3VYcFBvQ3pUaXlDbzJDd3BCS1RidkIzVGE1czBiMnBNOHRveEpVUmhkWWxMclFVTi9nQ2N5K3Z5YjVha3VjMjZ3R1MxTWErd0FQTGtjYkNrUVJ4RHZrS3JoV2VEeGdibzc3RlJ3b1dGM0w2ckw2blFLWTMzbmVKdDI0WmdnbkdrUnNZYWo4SkhFVDlFR01hdjNkYzRnUm10VGw4STdFZmQ3R2pHRWFqRFQ1OU9GOFpodEZBRWQ4YkZvUWEyRmhBMS9yK3BBd2tVSkJZVW9kMWh2YjJ0d2xBclZoMFFjRTVVWTJ4UDJ0YXZVcWJjS0xDeTR5a3RxaGdlN0Q0bUhXT0hEaW5hSFZjbnQ4Mkh1QURaR1pkbjR6aWw1d3pqWTlZb010WFNDdFFCQWI0Kzl2c3JBRERSempvOG1TWXRCbkp4MEZ1ZTdsMDFmemdkRlFpNXhBNXljMWJ6cEt5UTIxbG1KWXBUZnVYUVNrSE1lQnM1cmV2WWwyS0M0K2lGRUNOcVFMZExNcFVjWndRRHFzQkdVc3p0TU1tcllERVM0bHRpaTBPU3RiK3J6bmxyQng0MkpSczBTa2NVdXZBUTN1LzdrRTdRdkRBK24rcEVpVlNrMlJxVVI1bWxPZVBKaE93S3dBMDdQVTIvNmFGUUZjUkNNMDNuQTBNQ2lRMmRCYVIwajRWMkM1Y1ZtN0hKYzRsNk42UFR6bVJJR3pJZXhZaEkyYXVLOEswbmNrbFBPUUZWUnVtZjJjZWQ4K3NLa0VUbzllVUtSZ0crUHZiN0RLTldxM3o1eWdGa0kzK3E1a0c4Qlc3aVYxaEVOWmxoUVJyNXdqWGNXN3NQTVUwQ1dtekJVa3VCLzc4cXNCQUlrRjlEYnFBU2VCLy9RWWZKZGlXUXQyTT0="
-    }
-  },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": "off"
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
           }
+        }
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": false,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
+      },
+      "markdown": {
+        "wrap_width": 0,
+        "table_max_column_width": 0,
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "streaming": {
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
+      },
+      "tool_call": {
+        "show": false,
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        },
+        "preparing": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
+      },
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": []
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "",
+          "base_url": "",
+          "chain_on_max_tokens": false,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "google": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "llamacpp": {
+          "base_url": ""
+        },
+        "ollama": {
+          "base_url": ""
+        },
+        "openai": {
+          "api_key_env": "",
+          "base_url": "",
+          "base_url_env": ""
+        },
+        "openrouter": {
+          "api_key_env": "",
+          "app_name": "",
+          "base_url": ""
         }
       }
     }
   },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_response",
-    "id": "run_me_1",
-    "content": "d29ya2luZyE=",
-    "is_error": false
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "\"I ran the `run_me` tool with `bar` set to `['example1', 'example2']` and `foo` set to `'custom_foo_value'`. The tool returned `{'run_me_response': {'content': 'working!'}}`.\""
-  }
-]
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "**Considering Tool Execution**\n\nI'm focusing on how to execute the `run_me` tool. It takes `bar` and `foo` as arguments. I've noted that `bar` can be either \"foo\" or a list of strings. I'm currently thinking through the potential complexities of constructing the command line for various input scenarios.\n\n\n**Analyzing Argument Strategies**\n\nI've decided to proceed by selecting a strategy for the tool execution. Considering all options, I've chosen to define `bar` as a list of strings and `foo` as a user-provided string. Specifically, I'll set `bar` to `[\"example1\", \"example2\"]` and `foo` to \"customValue.\" This will thoroughly test the arguments.\n\n\n**Deciding Argument Values**\n\nI've examined several argument combinations for `run_me`, opting to use both. Now, I'm setting `bar` to `[\"example1\", \"example2 \"]` (a list of strings) and `foo` to `\"custom_foo_value\"` (a user-provided string) to trigger different valid types. The tool code will be formed using these arguments, to ensure proper execution. I am focusing on the Python syntax and quoting to ensure all are valid.\n\n\n"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "run_me_1",
+      "name": "run_me",
+      "arguments": {
+        "bar": [
+          "ZXhhbXBsZTE=",
+          "ZXhhbXBsZTI="
+        ],
+        "foo": "Y3VzdG9tX2Zvb192YWx1ZQ=="
+      },
+      "metadata": {
+        "google_thought_signature": "Q2lRQnZqNzIrK0RPcG0vajhUazVIUlRjcVltYWZibkxKWWFuRC9lSWpZdjAwTjRvVEtRS1Z3RytQdmI3NFlHbUdqS0NDTGlDcXNMMnpFS0hkRlF1MnpWcWExeWtGaG5hVzZuQ2c0VVVkWUtKOUlYQUUyWFFHMWlpa1BNczZXUm8ybzhYYk81UE1uclZiTXVjOTkrcld2SFpqOU0rWVFZaHY4amVlekVBWFFyQUFRRytQdmI3K0VPUUVielRiQnhSU2ppalFRMDFNeExPVE9lS0EzMnZER3dqV2hmQVFlZFJWcUY3eUE1aGZwRWs1L1crNmNWTUhpUi9PMnphOGxaSUZQeFpSYktkWmJSaU9JSGdHSFp6MGNOS0JQSmZnTkE4WkpLYXA3ZEZMTlVaNUZTbWhUSmhGS1pnUVVqSldXVlplczdiQUJiZnRydldRS0tSZ01Tc1FmSkw2WEpTaFVYNFNPY0FNNy9Hb2owODlFOEVTQVFFUVlGQjhOMTBzMWVEc0Qyd3ZtdkJMWi9rdm1pOFlwUzdBaUE0WnpIbGRZd0FMdUVwSG5OWis4MjBQd3IyQVFHK1B2YjdKQzUyME9RUlRoSmxSNkwxbzd5NjJrYnZmejhXTzVIQTZCZG1hM3hyUURKeE9SVjd2b1JIMFEzZEVJTnpLSGI0RWVlNmFZSWpOR0ZwUytacUxqNHVyNk5RTjhjcThST0RpdlRJbzk4V3RBVUVTVitoU1AzZVZnckhKd2Jrb3ZhK1EyblFIOVd0ZWhGOGRreks3aDdwRjB0YnN0MmVmL0hHY05IZE4vWHRhUUlwd2djL0hubDhLeEJKOThXY2FOL1dnbkIvVUtrQ3d1RmVhSFQyMkFJNUpHbUF3Yi9VeGxUcU0wV05UM1kxUFNEZDd6ZjYzQ0hPTWY0UWdzLzJ6ZlliMFkwRCt4eEJyZ1dFY04zVHJTNkJRRElhcWJKaWt0b3dCVWl2Q3doTEFvVXZ0VVFNU2tnOTB2clhEWHh0bTc3TCtRcXBBUUcrUHZiN1FHOTBocmFyMEN0WGFqbDF4T2RBMUlCRU0xUThrZERhUExKbkZJZ082UXRHaXlMR0JSL2xmUHQzUzdyQXRzK05YdGJORmJlazh6TjZZaVVKeDkyQXQxcTNmaHRrNkxFM05TeGRYbHVvenE1TDlBQjg4bWoxejVRRnY3QTVadWpTRVZrSzY4TVlLclV5V0tLdnJ3ZFh5TlhSR1hrZWg1KzIzM3ovdE1IZWo0SGIySXNBeE5WMHNWZlpsTURHamh5M21IWWdjVnFTcG12ZEVsc0RubDFnVk1Mam1Zb0t6d0VCdmo3Misya0gwcUVBWGRVaGVyYm1TdDc0TWdDVmQwTlpDbW56NDV2Zks3M2JWUlFUM1Vhb3JtaFlFMVJFcUlSSENEN0RMKzVmWVc1SUxObkhkYXpGU3BtbHZXZGJjclVsYXJEdk9FRU1PMHlteGNrb2hFeFFiQlEzRU5VSG1TdTdSU1JNSjh3WlFCZTU5VzVZcDYrQWp1Y0Qva29PdXJ6djE2RWFieXVoQ3lNNUVvVWwwazBNNlIyQnI0RENJUkxKUjlOMUJYWEc5alRPMy9YOHNwOVV3NVZwMU9WRWlleFJ2UVN6Z2RvRHNVbXR4cVhRV2dERytXSzVTYy9iNkpXNmpwMk4zMEgxbkNuaGQzbmlJTDhLd3dFQnZqNzIrNzVyUTg4SGtOaXFwcVhqUmpZYWNCdFVTK2VvQWFiUE95ZWx6WGFGcVVrZnNsU0RudjJvdE5Md3U5NlFJaU5aZVlLNzdPbmE2L0ZrL3pBYSthdy9oNE9XK1MwWGlhaDJGQjJQUVY4RDliZmhhNVJVNjJ3S2svMlY0VDJXQ0t1czl2WURSQklaQXExd3VKOW1NUVVON2dRRi9UYTFUSWtPTUFzWXZIR1R5djF5MVNhTmhwcUhtMXY4R2UzYXpmemVSenM0MVh4RmtoVFFQcjJNVW9UbTBnbElFdFJRc25obk5LcDJmakp0L2Zhcitab2lJRXpkeHQ1R2ZtVVlUUzRLbWdFQnZqNzIrelNHVTFhYitLSlE1UnJtcGcxMEprU2pTZnc3Zk9Ic0tpeElnem02K2R2VURQeUs3dVpMWGN3dXJaaWtqcnpTOFJzRm14eUw5c2xtb3JuOWM5Z2ZNaHFYY1BGeG5mRGJzV09rbTNBVG9aZ01reWJrU05Sb0QzbUFibnAvdEYrYWxQVFA5WTRXdGQ1WG92Zy9PTGprdHBwaVJBYWxBRmd4MDMrZzhNL01aWWpJQTU1WFNBd2R1bFFTZ1VmMklEWTJXNEwwaW1tZ0Nzc0JBYjQrOXZ1SFIzQkpZam1tY0QrLzNmS0hFbHVMS0ZTTkllRFA3NE5ZdlBkYzdqSGEzUmp0cXVyZHV2RHByY1ZzOXNodjQ4NjNXeUlVT2FtWUh2VThqckIzK1ROM05SbW9zdXR2QXJtN1gweGNpUVYrRkZ5clpkNmZvNTExa0RKQW82NUE5Z0cvbm03V1U5Y2JEZloweDhhVWt3SEhkVDhYYy9MNkpnVlVUeERteHFqdmJZYUNBcEVNZzNLZUNFaWNmYnZWejhkbFdWZWtLK3hQTWZ4Nnlqd3hsdUUxemxpb1BMZ3FHTHlQNzl6azNQdHRUbDVHQm1wUTRXQlNaRWdOYUF2T2p2NHcwMTdUdEhjSzZRRUJ2ajcyKzRmZTZhV01uZUxGd1FNczNxSHI0MHNkbzdFR1k1NUhyZ3M1N0E0aUhNQWx2WnRHZXp3NkpCczJpb1VLeFU3NVk3Z0pPTGtUOGNvTUdVN2U5TmdvbzAxaXFvMXZyOWJ0a0R0eFRUS2dGeW93SEVsejE1SWE5N3ZSNW9jWmYreWZ5MFRnaG0rd2o2Uk5VRjNJQXArMElMMHBXb1oybGhCcUFwU0ZPZjhwZ3N0d0NvSHFDZXoyakNnRzJ0N2NRZEQxbzZMbzgwS1JlQ1ROVmdrV3Vud3VFTDdrNzlsM3BPNDJGbWFZSndHakJIZDc2cnJlUlpzT1FSd0VzaUNzZmFwOUo2b0YzSndkVk5nRlk2TThWWUhNS3NXeGdSK01hcXVSNnV6NWpIUUo1S3hKanVKWFdncXhBUUcrUHZiNzNNZllWdUpzZWxoMW83UnNTQWVjWXp6ckw0bHd6dE1wdENXSHhSanpoQlgxT0g0Zmo0Yy83cy9UbHR0eTlhemhtUFRxT2NvQjE2ZEs5MS84UjBrSzV6TlE4SklMTmRyM0xDYzE5TXg4OWVKUHlDQXdQUW9idkNpZzJ0ZGJLb284ZjU3R01yN2syMTEwWEgzQWhUUGY1SEJUS2h6NFA3UW9ycmFiSmFYYTRYUFFTbzFWTXhLV2FpVlhtTXJaTW1aNDNsbFRTbVVJQmJHTUtUOTZHNmsyckhLTmNCTEl3M0hpbjQwVVdncUVBZ0crUHZiN0U4RnkxYUI2OEZPMXFBaDMraUlBS3crSmVrdHpFcVhHMTI5UnNVMURQMlZtQkVYN3VYcFBvQ3pUaXlDbzJDd3BCS1RidkIzVGE1czBiMnBNOHRveEpVUmhkWWxMclFVTi9nQ2N5K3Z5YjVha3VjMjZ3R1MxTWErd0FQTGtjYkNrUVJ4RHZrS3JoV2VEeGdibzc3RlJ3b1dGM0w2ckw2blFLWTMzbmVKdDI0WmdnbkdrUnNZYWo4SkhFVDlFR01hdjNkYzRnUm10VGw4STdFZmQ3R2pHRWFqRFQ1OU9GOFpodEZBRWQ4YkZvUWEyRmhBMS9yK3BBd2tVSkJZVW9kMWh2YjJ0d2xBclZoMFFjRTVVWTJ4UDJ0YXZVcWJjS0xDeTR5a3RxaGdlN0Q0bUhXT0hEaW5hSFZjbnQ4Mkh1QURaR1pkbjR6aWw1d3pqWTlZb010WFNDdFFCQWI0Kzl2c3JBRERSempvOG1TWXRCbkp4MEZ1ZTdsMDFmemdkRlFpNXhBNXljMWJ6cEt5UTIxbG1KWXBUZnVYUVNrSE1lQnM1cmV2WWwyS0M0K2lGRUNOcVFMZExNcFVjWndRRHFzQkdVc3p0TU1tcllERVM0bHRpaTBPU3RiK3J6bmxyQng0MkpSczBTa2NVdXZBUTN1LzdrRTdRdkRBK24rcEVpVlNrMlJxVVI1bWxPZVBKaE93S3dBMDdQVTIvNmFGUUZjUkNNMDNuQTBNQ2lRMmRCYVIwajRWMkM1Y1ZtN0hKYzRsNk42UFR6bVJJR3pJZXhZaEkyYXVLOEswbmNrbFBPUUZWUnVtZjJjZWQ4K3NLa0VUbzllVUtSZ0crUHZiN0RLTldxM3o1eWdGa0kzK3E1a0c4Qlc3aVYxaEVOWmxoUVJyNXdqWGNXN3NQTVUwQ1dtekJVa3VCLzc4cXNCQUlrRjlEYnFBU2VCLy9RWWZKZGlXUXQyTT0="
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "run_me_1",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "\"I ran the `run_me` tool with `bar` set to `['example1', 'example2']` and `foo` set to `'custom_foo_value'`. The tool returned `{'run_me_response': {'content': 'working!'}}`.\""
+    }
+  ]
+}

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, Config as _, PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize, Serializer};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tracing::error;
 
 pub mod turn_iter;
@@ -14,7 +14,7 @@ pub use turn_iter::{IterTurns, Turn};
 pub use turn_mut::TurnMut;
 
 use crate::{
-    compat::deserialize_config_delta,
+    compat::deserialize_partial_config,
     event::{ChatRequest, ConversationEvent, EventKind, InquiryId, ToolCallResponse, TurnStart},
     storage::{decode_event_value, encode_event},
 };
@@ -26,7 +26,7 @@ use crate::{
 /// deserialization. This keeps the encoding concern isolated to the storage
 /// layer — the inner [`ConversationEvent`] types serialize as plain text.
 #[derive(Debug, Clone, PartialEq)]
-pub enum InternalEvent {
+enum InternalEvent {
     /// The configuration state of the conversation is updated.
     ///
     /// When this event is emitted, all subsequent events in the stream are
@@ -73,15 +73,10 @@ impl Serialize for InternalEvent {
 }
 
 impl InternalEvent {
-    /// Create a new [`InternalEvent::ConfigDelta`].
-    pub fn config_delta(delta: impl Into<ConfigDelta>) -> Self {
-        Self::ConfigDelta(delta.into())
-    }
-
     /// Convert an internal event into an [`ConversationEvent`]. Returns `None`
     /// if the event is a config delta.
     #[must_use]
-    pub fn into_event(self) -> Option<ConversationEvent> {
+    fn into_event(self) -> Option<ConversationEvent> {
         match self {
             Self::Event(event) => Some(*event),
             Self::ConfigDelta(_) => None,
@@ -90,7 +85,7 @@ impl InternalEvent {
 
     /// Get a reference to [`InternalEvent::Event`], if applicable.
     #[must_use]
-    pub fn as_event(&self) -> Option<&ConversationEvent> {
+    fn as_event(&self) -> Option<&ConversationEvent> {
         match self {
             Self::Event(event) => Some(event),
             Self::ConfigDelta(_) => None,
@@ -152,6 +147,29 @@ impl From<PartialAppConfig> for ConfigDelta {
             timestamp: Utc::now(),
             delta: Box::new(config),
         }
+    }
+}
+
+/// Deserialize a [`ConfigDelta`] from a raw JSON value, tolerating schema
+/// changes.
+///
+/// Delegates to [`deserialize_partial_config`] for the `delta` subtree and
+/// extracts the timestamp separately.
+pub(crate) fn deserialize_config_delta(value: &Value) -> ConfigDelta {
+    let delta = value
+        .get("delta")
+        .cloned()
+        .map_or_else(PartialAppConfig::empty, deserialize_partial_config);
+
+    let timestamp = value
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(|s| crate::parse_dt(s).ok())
+        .unwrap_or_else(Utc::now);
+
+    ConfigDelta {
+        timestamp,
+        delta: Box::new(delta),
     }
 }
 
@@ -383,7 +401,7 @@ impl ConversationStream {
     ///
     /// [`TurnStart`]: crate::event::TurnStart
     #[must_use]
-    pub fn schema(&self) -> Option<serde_json::Map<String, serde_json::Value>> {
+    pub fn schema(&self) -> Option<Map<String, Value>> {
         // Find the last TurnStart, then take the first ChatRequest after it.
         let turn_start = self
             .events
@@ -1197,49 +1215,103 @@ impl From<ConversationEvent> for ConversationEventWithConfig {
     }
 }
 
-impl Serialize for ConversationStream {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut stream: Vec<InternalEvent> = Vec::with_capacity(self.events.len() + 1);
+impl ConversationStream {
+    /// Construct a stream from a base config and serialized events.
+    ///
+    /// The storage layer reads `base_config.json` as a raw JSON [`Value`] and
+    /// `events.json` as raw JSON values. All deserialization, including
+    /// schema-aware stripping of unknown fields from the base config, stays
+    /// inside `jp_conversation`.
+    ///
+    /// The returned stream has `created_at` set to [`Utc::now()`]. The caller
+    /// should chain [`.with_created_at()`] to set the correct creation time
+    /// from the conversation ID.
+    ///
+    /// [`.with_created_at()`]: Self::with_created_at
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if event deserialization or config conversion fails.
+    pub fn from_parts(base_config: Value, events: Vec<Value>) -> Result<Self, StreamError> {
+        let base_config = crate::compat::deserialize_partial_config(base_config);
 
-        // We store the base config as the first (delta) event in the stream.
-        stream.push(InternalEvent::ConfigDelta(ConfigDelta {
-            delta: Box::new(self.base_config.to_partial()),
-            timestamp: self.created_at,
-        }));
+        let events = events
+            .into_iter()
+            .map(|v| serde_json::from_value(v).map_err(StreamError::Json))
+            .collect::<Result<Vec<_>, _>>()?;
 
-        // Then we append all other events in the stream.
-        stream.extend(self.events.iter().cloned());
-        stream.serialize(serializer)
+        Ok(Self {
+            base_config: AppConfig::from_partial(base_config, vec![])?.into(),
+            events,
+            created_at: Utc::now(),
+        })
     }
-}
 
-impl<'de> Deserialize<'de> for ConversationStream {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::Error;
+    /// Decompose the stream into its storable parts.
+    ///
+    /// Returns the base config and the serialized events array as raw JSON. The
+    /// storage layer writes these to `base_config.json` and `events.json`
+    /// respectively.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization fails.
+    pub fn to_parts(&self) -> Result<(Value, Vec<Value>), StreamError> {
+        let base_config =
+            serde_json::to_value(self.base_config.to_partial()).map_err(StreamError::Json)?;
 
-        let mut events: Vec<InternalEvent> = Vec::deserialize(deserializer)?;
+        let events = self
+            .events
+            .iter()
+            .map(|e| serde_json::to_value(e).map_err(StreamError::Json))
+            .collect::<Result<_, _>>()?;
+
+        Ok((base_config, events))
+    }
+
+    /// Construct a stream from the legacy on-disk format where the base config
+    /// was packed as the first element in the events array.
+    ///
+    /// Used by the storage layer's backward-compatibility migration path. If
+    /// the first element is not a `ConfigDelta`, returns `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if event deserialization or config conversion fails.
+    pub fn from_legacy_events(events: Vec<Value>) -> Result<Option<Self>, StreamError> {
         if events.is_empty() {
-            return Err(Error::custom("Cannot deserialize empty event stream"));
+            return Ok(None);
         }
 
-        match events.remove(0) {
-            InternalEvent::ConfigDelta(base_config) => Ok(Self {
-                created_at: base_config.timestamp,
-                base_config: AppConfig::from_partial(base_config.into(), vec![])
-                    .map_err(Error::custom)?
-                    .into(),
-                events,
-            }),
-            InternalEvent::Event(_) => Err(Error::custom(
-                "Event stream file is invalid: first event must be a ConfigDelta",
-            )),
+        // Peek at the first element's type tag.
+        let tag = events[0]
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+
+        if tag != "config_delta" {
+            return Ok(None);
         }
+
+        // Extract timestamp from the first element.
+        let created_at = events[0]
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(|s| crate::parse_dt(s).ok())
+            .unwrap_or_else(Utc::now);
+
+        // Extract the delta subtree as the base config value.
+        let base_config = events[0]
+            .get("delta")
+            .cloned()
+            .unwrap_or(Value::Object(Map::default()));
+
+        // Remaining elements are events. from_parts handles compat stripping.
+        let events = events.into_iter().skip(1).collect();
+        let mut stream = Self::from_parts(base_config, events)?;
+        stream.created_at = created_at;
+
+        Ok(Some(stream))
     }
 }
 
@@ -1255,6 +1327,10 @@ pub enum StreamError {
     /// An error occurred for the stream [`AppConfig`].
     #[error(transparent)]
     Config(#[from] jp_config::ConfigError),
+
+    /// A JSON serialization or deserialization error.
+    #[error(transparent)]
+    Json(serde_json::Error),
 
     /// A [`ToolCallResponse`] was pushed without a matching [`ToolCallRequest`]
     /// in the stream.
@@ -1318,7 +1394,7 @@ impl<'de> Deserialize<'de> for InternalEvent {
             .unwrap_or_default();
 
         if tag == "config_delta" {
-            return Ok(Self::ConfigDelta(deserialize_config_delta(value)));
+            return Ok(Self::ConfigDelta(deserialize_config_delta(&value)));
         }
 
         // Decode base64-encoded storage fields before deserializing.

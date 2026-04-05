@@ -2,212 +2,210 @@
 source: crates/jp_test/src/mock.rs
 expression: v
 ---
-[
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "inherit": false,
-      "config_load_paths": [],
-      "extends": [],
-      "assistant": {
-        "tool_choice": "auto",
-        "model": {
-          "id": {
-            "provider": "openai",
-            "name": "test"
-          },
-          "parameters": {
-            "reasoning": "off",
-            "stop_words": [],
-            "other": {}
-          }
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openai",
+          "name": "test"
         },
-        "request": {
-          "max_retries": 0,
-          "base_backoff_ms": 0,
-          "max_backoff_secs": 0,
-          "cache": true
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
         }
       },
-      "conversation": {
-        "title": {
-          "generate": {
-            "auto": false
-          }
-        },
-        "tools": {
-          "*": {
-            "run": "ask",
-            "result": "unattended",
-            "style": {
-              "hidden": false,
-              "inline_results": {
-                "truncate": {
-                  "lines": 10
-                }
-              },
-              "results_file_link": "full",
-              "parameters": "json"
-            }
-          }
-        },
-        "start_local": false
+      "request": {
+        "max_retries": 0,
+        "base_backoff_ms": 0,
+        "max_backoff_secs": 0,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
       },
-      "style": {
-        "code": {
-          "color": false,
-          "line_numbers": false,
-          "file_link": "osc8",
-          "copy_link": "osc8"
-        },
-        "markdown": {
-          "wrap_width": 0,
-          "table_max_column_width": 0,
-          "hr_style": "line"
-        },
-        "reasoning": {
-          "display": "full"
-        },
-        "streaming": {
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
           }
-        },
-        "tool_call": {
+        }
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": false,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
+      },
+      "markdown": {
+        "wrap_width": 0,
+        "table_max_column_width": 0,
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "streaming": {
+        "progress": {
           "show": false,
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          },
-          "preparing": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "typewriter": {
-          "text_delay": {
-            "secs": 0,
-            "nanos": 0
-          },
-          "code_delay": {
-            "secs": 0,
-            "nanos": 0
-          }
+          "delay_secs": 0,
+          "interval_ms": 0
         }
       },
-      "editor": {
-        "envs": []
+      "tool_call": {
+        "show": false,
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        },
+        "preparing": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
       },
-      "template": {
-        "values": {}
-      },
-      "providers": {
-        "llm": {
-          "anthropic": {
-            "api_key_env": "",
-            "base_url": "",
-            "chain_on_max_tokens": false,
-            "beta_headers": []
-          },
-          "deepseek": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "google": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "llamacpp": {
-            "base_url": ""
-          },
-          "ollama": {
-            "base_url": ""
-          },
-          "openai": {
-            "api_key_env": "",
-            "base_url": "",
-            "base_url_env": ""
-          },
-          "openrouter": {
-            "api_key_env": "",
-            "app_name": "",
-            "base_url": ""
-          }
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": []
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "",
+          "base_url": "",
+          "chain_on_max_tokens": false,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "google": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "llamacpp": {
+          "base_url": ""
+        },
+        "ollama": {
+          "base_url": ""
+        },
+        "openai": {
+          "api_key_env": "",
+          "base_url": "",
+          "base_url_env": ""
+        },
+        "openrouter": {
+          "api_key_env": "",
+          "app_name": "",
+          "base_url": ""
         }
       }
     }
   },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
             }
           }
         }
       }
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Please run the tool, providing whatever arguments you want."
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "**Using the tool**\n\nI need to call a tool before I respond to the user. I can use functions.run_me with certain parameters: foo can be any string, while bar must be set to \"foo.\" It's simpler if I just call functions.run_me. The user asked me to provide whatever arguments I want, so I’ll use foo set to \"executed\" and bar as \"foo.\" Once I get the output from the tool, I'll reply to the user!",
-    "metadata": {
-      "openai_item_id": "cnNfMDQ4N2VhNjc4ZTBmOTFhNzAxNjlhYWVhMTJlOTI4ODFhMjhiODM2ZjcwMjY5MjljMTE=",
-      "openai_encrypted_content": "Z0FBQUFBQnBxdW9WTEdQM3FGNi1kWW1NMU9BcVNSaGh0bHQxRmxxUjdXR0ZwNDRCdFdrNU42QllGQndtMkNObng3U1FLNGIxbHJ3SzlBNVlIaWlnQy1EaFJlM1NtcTFvbXJqNDhadldQOHJMbllpQU5vQWlFM3VSc1RPbWQyaVlJWElFSDdZcG1JMVUyMjdGdVNGTFd2TnpVWmRrekh3Y0d3NGh4ZGhiaThPdXpqbTlQWWw1ckVXZjYyNFp0SWI2QXIzeUI0YXFmanhINk5KZjc4R2pSaUNBeVJjdURNMWhPTlZNLVkzbDNmbTJ0TjRFYkFxbUZJVjNCWWJ6d3VSMDVtWTZIbkJfMl9fRmdORUVlZzJqNVA0VHVwNzN0TEZnN2FRanh1czcya1JKdlc1TUdaY3hmN1ZwQXB5d09PY2k3c294VXRDUmNfWEpvUVp1YkwweUtoNVJvcjRvWXp0UjRiY1k1QWlpVlRoTmFoMDMxZnVZNHZKQ1FqTDdWQWVydmthWGVhdU0zUmVJOUs5R0l4ejZGc1cyd3VBczZlYm9wVkw1UWt3VnlKMVRHbURjaGdkcTFYeHR5YVVMQUZyWGhxank1MGVOSVdTLVFLTkt0VnZ2VWNqWXhiZDdhRHJWNEROZWQyd0ZHcW5lLTlUcU9pXzloU1lMRE9nTmg4a2t1M0dwakVEb2NxMmNva29LT1RNU2VjNlhxTWJRSlpsbUQ5Vm00aF9sclZsLU1FbWZzRHZTbFhCSTlGNXJ4dkJUaVFneTdHU3VkNUozd1VSalVlaW53QUZtYVNxQmhZWDlEcmNXc3RvOTg1azgxWVloS1YwRlBnSWduUzFtMU9aNHFaQkNCTzhOODh4bW9VSjRpeXFrSDUtT3FWM0NTVk9qVl9TR0ZaRU5SdFExeFVRY2VkVS02Z3lDZ1d3SmxYRHlwcjJpYmZFLTR2eGVIQXhWeS1xS2hIeWdVS0hKMGN1WU9RQ2xxbFd5LUVYYTRDZVNDQjNOazlHUWYtYXh1a1g4RU1weXhvUlQ1MHRRdDdqRFBFRUFpaFRzbTdPMkVTQ2t6c2p0OTh0ZlRwZll4RzE5bVlHNTFIbWVkcDBKUjd1bm5SR1dlUWpYUTJ3VGxzS3E4bmJnMElBTlQ2dmdIa1Q3OGtRWE55WGpfdkpObURPbkh3UWVtRDh4bDYxS195UUhheWlNUEFTS19fVE1GUXpnWVpWTFBRY3VvbC1kemRKcDRZd2ppUGFVaHpLN25CNk5xOVE5WGY1ejVQb1RVc3k1bFB3RWQ4b09ZSWJuN0oxVk5NRDE5MjRnU0lSZWZjV1VlbVVrMWNKUFhaOWh0LUVhUEVhRVFWWWFZVk1ZNkdYaTJJVDhPMTdPMklrZm1XRHMxejluRjk1REY1VjhkakNYSkljTnBJd09pYkdUaENMSGpSbVZoNjUydFZ5dFBTMjJpSk1QdDRCb3U5cklqSW1DU0lSQWtQUGRLLU1NaTJBUmtHWmVpTmV0MWxlNmJCc0pGTkN5dFVZVllESGdjLTZLNjBqN1VFb3FVZ000QWxaUFUtWFd0cURCRm16U1dRaXNYdnFQNDBqU3dxQ3dPTGxtY1oyX2FZMWhOeWlIOVFmZXZDcUpUZUs2NkxWMldzLWdPSlFOYmExSDNMMUd1ajN1NjlQSGlSbUtHY25EOHBfejJ3TU1Qa3RENGVjOFZhQ1VIa0hWTUFQTU5CRi1wcXpZcDVrdkdyLWpHc1pjYUhxUHcyNFlSZDhmalVycmd6SUFfQzZKZFNDNWwtV1JkWHpfeUI5SzlqUDd4NWxBWXFGclRmRzV5YklMN0dlSEdRSzFneUMtYmd6NGw1aXQ2dnd2a0FhaGNaV19GUTFIYjZxNDFaLUxLbmljUjl6ZldZV0ZpTHVHZ1Y2MHMwTkllYThuWjJnT056UDZpcElpSWVpd29jNi1QbTdmOXJ2ZmtadDhGR0U5QTlFSVlvdHFoVzhTR1lsNVpfYmRWR1RoXzdDZlBveE56M3lOcFhoNWEyblE4WGlCbmVzZTFHQTZ6STJoZGRvLW1yNVUtWlY1NkE5dGRjLUExUmdLN1J1WG16WU95TGxmelExUURLUXZLUTREdnJ0V1lUcG4xV2ZEWERwd3BuSm1DMnc2SGJCSFZpME9rOGZ5czNWc2lzdThwTDhBZHc9PQ=="
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_request",
-    "id": "call_QQuf1B1LkLboUYsCcYcBhyiz",
-    "name": "run_me",
-    "arguments": {
-      "foo": "ZXhlY3V0ZWQ=",
-      "bar": "Zm9v"
-    }
-  },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "parameters": {
-            "reasoning": "off"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "**Using the tool**\n\nI need to call a tool before I respond to the user. I can use functions.run_me with certain parameters: foo can be any string, while bar must be set to \"foo.\" It's simpler if I just call functions.run_me. The user asked me to provide whatever arguments I want, so I’ll use foo set to \"executed\" and bar as \"foo.\" Once I get the output from the tool, I'll reply to the user!",
+      "metadata": {
+        "openai_item_id": "cnNfMDQ4N2VhNjc4ZTBmOTFhNzAxNjlhYWVhMTJlOTI4ODFhMjhiODM2ZjcwMjY5MjljMTE=",
+        "openai_encrypted_content": "Z0FBQUFBQnBxdW9WTEdQM3FGNi1kWW1NMU9BcVNSaGh0bHQxRmxxUjdXR0ZwNDRCdFdrNU42QllGQndtMkNObng3U1FLNGIxbHJ3SzlBNVlIaWlnQy1EaFJlM1NtcTFvbXJqNDhadldQOHJMbllpQU5vQWlFM3VSc1RPbWQyaVlJWElFSDdZcG1JMVUyMjdGdVNGTFd2TnpVWmRrekh3Y0d3NGh4ZGhiaThPdXpqbTlQWWw1ckVXZjYyNFp0SWI2QXIzeUI0YXFmanhINk5KZjc4R2pSaUNBeVJjdURNMWhPTlZNLVkzbDNmbTJ0TjRFYkFxbUZJVjNCWWJ6d3VSMDVtWTZIbkJfMl9fRmdORUVlZzJqNVA0VHVwNzN0TEZnN2FRanh1czcya1JKdlc1TUdaY3hmN1ZwQXB5d09PY2k3c294VXRDUmNfWEpvUVp1YkwweUtoNVJvcjRvWXp0UjRiY1k1QWlpVlRoTmFoMDMxZnVZNHZKQ1FqTDdWQWVydmthWGVhdU0zUmVJOUs5R0l4ejZGc1cyd3VBczZlYm9wVkw1UWt3VnlKMVRHbURjaGdkcTFYeHR5YVVMQUZyWGhxank1MGVOSVdTLVFLTkt0VnZ2VWNqWXhiZDdhRHJWNEROZWQyd0ZHcW5lLTlUcU9pXzloU1lMRE9nTmg4a2t1M0dwakVEb2NxMmNva29LT1RNU2VjNlhxTWJRSlpsbUQ5Vm00aF9sclZsLU1FbWZzRHZTbFhCSTlGNXJ4dkJUaVFneTdHU3VkNUozd1VSalVlaW53QUZtYVNxQmhZWDlEcmNXc3RvOTg1azgxWVloS1YwRlBnSWduUzFtMU9aNHFaQkNCTzhOODh4bW9VSjRpeXFrSDUtT3FWM0NTVk9qVl9TR0ZaRU5SdFExeFVRY2VkVS02Z3lDZ1d3SmxYRHlwcjJpYmZFLTR2eGVIQXhWeS1xS2hIeWdVS0hKMGN1WU9RQ2xxbFd5LUVYYTRDZVNDQjNOazlHUWYtYXh1a1g4RU1weXhvUlQ1MHRRdDdqRFBFRUFpaFRzbTdPMkVTQ2t6c2p0OTh0ZlRwZll4RzE5bVlHNTFIbWVkcDBKUjd1bm5SR1dlUWpYUTJ3VGxzS3E4bmJnMElBTlQ2dmdIa1Q3OGtRWE55WGpfdkpObURPbkh3UWVtRDh4bDYxS195UUhheWlNUEFTS19fVE1GUXpnWVpWTFBRY3VvbC1kemRKcDRZd2ppUGFVaHpLN25CNk5xOVE5WGY1ejVQb1RVc3k1bFB3RWQ4b09ZSWJuN0oxVk5NRDE5MjRnU0lSZWZjV1VlbVVrMWNKUFhaOWh0LUVhUEVhRVFWWWFZVk1ZNkdYaTJJVDhPMTdPMklrZm1XRHMxejluRjk1REY1VjhkakNYSkljTnBJd09pYkdUaENMSGpSbVZoNjUydFZ5dFBTMjJpSk1QdDRCb3U5cklqSW1DU0lSQWtQUGRLLU1NaTJBUmtHWmVpTmV0MWxlNmJCc0pGTkN5dFVZVllESGdjLTZLNjBqN1VFb3FVZ000QWxaUFUtWFd0cURCRm16U1dRaXNYdnFQNDBqU3dxQ3dPTGxtY1oyX2FZMWhOeWlIOVFmZXZDcUpUZUs2NkxWMldzLWdPSlFOYmExSDNMMUd1ajN1NjlQSGlSbUtHY25EOHBfejJ3TU1Qa3RENGVjOFZhQ1VIa0hWTUFQTU5CRi1wcXpZcDVrdkdyLWpHc1pjYUhxUHcyNFlSZDhmalVycmd6SUFfQzZKZFNDNWwtV1JkWHpfeUI5SzlqUDd4NWxBWXFGclRmRzV5YklMN0dlSEdRSzFneUMtYmd6NGw1aXQ2dnd2a0FhaGNaV19GUTFIYjZxNDFaLUxLbmljUjl6ZldZV0ZpTHVHZ1Y2MHMwTkllYThuWjJnT056UDZpcElpSWVpd29jNi1QbTdmOXJ2ZmtadDhGR0U5QTlFSVlvdHFoVzhTR1lsNVpfYmRWR1RoXzdDZlBveE56M3lOcFhoNWEyblE4WGlCbmVzZTFHQTZ6STJoZGRvLW1yNVUtWlY1NkE5dGRjLUExUmdLN1J1WG16WU95TGxmelExUURLUXZLUTREdnJ0V1lUcG4xV2ZEWERwd3BuSm1DMnc2SGJCSFZpME9rOGZ5czNWc2lzdThwTDhBZHc9PQ=="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "call_QQuf1B1LkLboUYsCcYcBhyiz",
+      "name": "run_me",
+      "arguments": {
+        "foo": "ZXhlY3V0ZWQ=",
+        "bar": "Zm9v"
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
           }
         }
       }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "call_QQuf1B1LkLboUYsCcYcBhyiz",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Tool ran successfully. Output: \"working!\"",
+      "metadata": {
+        "openai_item_id": "bXNnXzA0ODdlYTY3OGUwZjkxYTcwMTY5YWFlYTE2Njc3MDgxYTJhNTRiY2FhZmM3MDYzODc3"
+      }
     }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_response",
-    "id": "call_QQuf1B1LkLboUYsCcYcBhyiz",
-    "content": "d29ya2luZyE=",
-    "is_error": false
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "Tool ran successfully. Output: \"working!\"",
-    "metadata": {
-      "openai_item_id": "bXNnXzA0ODdlYTY3OGUwZjkxYTcwMTY5YWFlYTE2Njc3MDgxYTJhNTRiY2FhZmM3MDYzODc3"
-    }
-  }
-]
+  ]
+}

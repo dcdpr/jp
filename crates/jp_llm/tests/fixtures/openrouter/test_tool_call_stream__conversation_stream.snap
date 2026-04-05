@@ -2,201 +2,199 @@
 source: crates/jp_test/src/mock.rs
 expression: v
 ---
-[
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "inherit": false,
-      "config_load_paths": [],
-      "extends": [],
-      "assistant": {
-        "tool_choice": "auto",
-        "model": {
-          "id": {
-            "provider": "openrouter",
-            "name": "test"
-          },
-          "parameters": {
-            "reasoning": "off",
-            "stop_words": [],
-            "other": {}
-          }
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openrouter",
+          "name": "test"
         },
-        "request": {
-          "max_retries": 0,
-          "base_backoff_ms": 0,
-          "max_backoff_secs": 0,
-          "cache": true
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
         }
       },
-      "conversation": {
-        "title": {
-          "generate": {
-            "auto": false
-          }
-        },
-        "tools": {
-          "*": {
-            "run": "ask",
-            "result": "unattended",
-            "style": {
-              "hidden": false,
-              "inline_results": {
-                "truncate": {
-                  "lines": 10
-                }
-              },
-              "results_file_link": "full",
-              "parameters": "json"
-            }
-          }
-        },
-        "start_local": false
+      "request": {
+        "max_retries": 0,
+        "base_backoff_ms": 0,
+        "max_backoff_secs": 0,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
       },
-      "style": {
-        "code": {
-          "color": false,
-          "line_numbers": false,
-          "file_link": "osc8",
-          "copy_link": "osc8"
-        },
-        "markdown": {
-          "wrap_width": 0,
-          "table_max_column_width": 0,
-          "hr_style": "line"
-        },
-        "reasoning": {
-          "display": "full"
-        },
-        "streaming": {
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
           }
-        },
-        "tool_call": {
+        }
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": false,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
+      },
+      "markdown": {
+        "wrap_width": 0,
+        "table_max_column_width": 0,
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "streaming": {
+        "progress": {
           "show": false,
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          },
-          "preparing": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "typewriter": {
-          "text_delay": {
-            "secs": 0,
-            "nanos": 0
-          },
-          "code_delay": {
-            "secs": 0,
-            "nanos": 0
-          }
+          "delay_secs": 0,
+          "interval_ms": 0
         }
       },
-      "editor": {
-        "envs": []
+      "tool_call": {
+        "show": false,
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        },
+        "preparing": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
       },
-      "template": {
-        "values": {}
-      },
-      "providers": {
-        "llm": {
-          "anthropic": {
-            "api_key_env": "",
-            "base_url": "",
-            "chain_on_max_tokens": false,
-            "beta_headers": []
-          },
-          "deepseek": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "google": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "llamacpp": {
-            "base_url": ""
-          },
-          "ollama": {
-            "base_url": ""
-          },
-          "openai": {
-            "api_key_env": "",
-            "base_url": "",
-            "base_url_env": ""
-          },
-          "openrouter": {
-            "api_key_env": "",
-            "app_name": "",
-            "base_url": ""
-          }
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": []
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "",
+          "base_url": "",
+          "chain_on_max_tokens": false,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "google": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "llamacpp": {
+          "base_url": ""
+        },
+        "ollama": {
+          "base_url": ""
+        },
+        "openai": {
+          "api_key_env": "",
+          "base_url": "",
+          "base_url_env": ""
+        },
+        "openrouter": {
+          "api_key_env": "",
+          "app_name": "",
+          "base_url": ""
         }
       }
     }
   },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Please run the tool, providing whatever arguments you want."
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "",
-    "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBxdW9lNkFPWEdwNXZZUmxjSzUybVBIXzNGUFlYVnpvaVFXRTBKb05WLWZJRXR4ejlxNmhIbnRiVjRiUS1KdF9qRkxsbktpbllUdURldU5VdlJxTEhhcjBidm1lVFlUbUpodHdJMTA3dFl6YVFKQWJ4TGZreHM1RW9uOVpoLWZTcG01VXN5S2Y1V01GYVNOdjIwQnE0em5GNmk2LVR0Y1FMNU9EOHhYbW4xcmtBSURZbjRQc1RIQ1hOTVMwem1jX0pBSEl1Rnl1QkR0bUEyaUhXTlY1ZkQwbG01ZzBzTUVJOXdIY2VRdUdmeXpmbkYtQlhpbHd6ME00Ykd4VHhMdEJGb0tING9yR2FmbHBFNXZZT05HZHlUdVRTbmdMb013NTNqQVJ1U0hXeDVadGhOVnJoY1lWVl9vWEZqWXdJamcyLUZJZlhuUDFQb3lXTFFyVWRxTVlGdnhOd3FvU2k5VjkzZzRPWE5FTy1YVlFiV19WbjZHcG9zVlpRNmtYeWNGU05Hek01NlJOMGZ5S1lTQ1B5LWZsNHJXbk9LYTg4aE9XNVhkcGR4VjQyNjRzM3ZtVGtEeTh5d0lTb1IyOGRFOEhrNXNXazF3LWhoaTFfbXBwSWc3LTZscGJZMUZEajJZX1J4Mk5vTWU3RVZkMlVETkpHcWk0XzBFV21rbU1qMmZ4bTd1aWRVdmxVNWJ4dy1JVFdRaTBlckpxV1FkUVRwNjlFWHV6RGVTYURkV0FIMVp1RmJXeDdLMlZWYTNMWVE0TVVpSGc1aGwwaGJKSWtpc0h5UVhHbkpyLTJ6WmdkUW5hZlRZSzcwVVlkYTFLTmVSa1IzdzQ4ZlRickk2U2NwLVBWSE9fNmV5VVJ1dXFDMXBGblR0aDIzZzRDQVdWMjNKQkd1U1F4SGRDNng5aGRpWWUwWm00VlFrSllQQzhuR3MySEV1a1BBUWMwUXYxQ2YtWmxsbGxVc0ZCbkE2X0xDaWlST0RnNlBlNFVZUUdZUWFIR0RRXzRZa1BFSXlFSmlxUlhTcWVkZmhTYzI0ZUI3SzRGMHFyOE82NmNqcjVMbWg1Ym54VHB5S2NhTDVqcngtLTZ2WDIwTm5RRlZRbUpUeVZPZGc4bHBKYnZKaE9lUFFXTzRRanFlOWQ4dS0zdTE0QXNlSW82UmxuczNWX1BJSlFEZnRrUzA2NnJxTGpsajVvbnFPTEI=",
-      "openrouter_metadata": [
-        {
-          "id": "cnNfMDIzYWIwMTA0OWRjYWYzOTAxNjlhYWVhMWRlMjI4ODE5NDg4NTQxMmQ0NGFhMTM1OTI=",
-          "index": 0,
-          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
-        }
-      ]
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnBxdW9lNkFPWEdwNXZZUmxjSzUybVBIXzNGUFlYVnpvaVFXRTBKb05WLWZJRXR4ejlxNmhIbnRiVjRiUS1KdF9qRkxsbktpbllUdURldU5VdlJxTEhhcjBidm1lVFlUbUpodHdJMTA3dFl6YVFKQWJ4TGZreHM1RW9uOVpoLWZTcG01VXN5S2Y1V01GYVNOdjIwQnE0em5GNmk2LVR0Y1FMNU9EOHhYbW4xcmtBSURZbjRQc1RIQ1hOTVMwem1jX0pBSEl1Rnl1QkR0bUEyaUhXTlY1ZkQwbG01ZzBzTUVJOXdIY2VRdUdmeXpmbkYtQlhpbHd6ME00Ykd4VHhMdEJGb0tING9yR2FmbHBFNXZZT05HZHlUdVRTbmdMb013NTNqQVJ1U0hXeDVadGhOVnJoY1lWVl9vWEZqWXdJamcyLUZJZlhuUDFQb3lXTFFyVWRxTVlGdnhOd3FvU2k5VjkzZzRPWE5FTy1YVlFiV19WbjZHcG9zVlpRNmtYeWNGU05Hek01NlJOMGZ5S1lTQ1B5LWZsNHJXbk9LYTg4aE9XNVhkcGR4VjQyNjRzM3ZtVGtEeTh5d0lTb1IyOGRFOEhrNXNXazF3LWhoaTFfbXBwSWc3LTZscGJZMUZEajJZX1J4Mk5vTWU3RVZkMlVETkpHcWk0XzBFV21rbU1qMmZ4bTd1aWRVdmxVNWJ4dy1JVFdRaTBlckpxV1FkUVRwNjlFWHV6RGVTYURkV0FIMVp1RmJXeDdLMlZWYTNMWVE0TVVpSGc1aGwwaGJKSWtpc0h5UVhHbkpyLTJ6WmdkUW5hZlRZSzcwVVlkYTFLTmVSa1IzdzQ4ZlRickk2U2NwLVBWSE9fNmV5VVJ1dXFDMXBGblR0aDIzZzRDQVdWMjNKQkd1U1F4SGRDNng5aGRpWWUwWm00VlFrSllQQzhuR3MySEV1a1BBUWMwUXYxQ2YtWmxsbGxVc0ZCbkE2X0xDaWlST0RnNlBlNFVZUUdZUWFIR0RRXzRZa1BFSXlFSmlxUlhTcWVkZmhTYzI0ZUI3SzRGMHFyOE82NmNqcjVMbWg1Ym54VHB5S2NhTDVqcngtLTZ2WDIwTm5RRlZRbUpUeVZPZGc4bHBKYnZKaE9lUFFXTzRRanFlOWQ4dS0zdTE0QXNlSW82UmxuczNWX1BJSlFEZnRrUzA2NnJxTGpsajVvbnFPTEI=",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMDIzYWIwMTA0OWRjYWYzOTAxNjlhYWVhMWRlMjI4ODE5NDg4NTQxMmQ0NGFhMTM1OTI=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "call_Vvg5Dy9TkCdqYIkRawxATO3Z",
+      "name": "run_me",
+      "arguments": {
+        "foo": "aGVsbG8=",
+        "bar": "Zm9v"
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "call_Vvg5Dy9TkCdqYIkRawxATO3Z",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnBxdW9mN0ljVUxMN0g4eGQzSFNMcFZPdEV3b0p5dUJ3Sy1VcnNtSkxfRF8tc3IyblJ4UncxV05kMGZTQnFRLUR5QWk4V0ZrNUwtVm5EV0liT2o3bGtiQ1haYl9fSDZFWGdnRERfcGtwbUs0U2htV0w2YkFCeXdxUDJCMXBqaGRTZTZPVGQtbmZuQ05tOHNURmhIdXRDNkZ5SE5mLURVTDNNYzVJRl82VFBfcXhHU250T19EcU1fNG9ZbFoyTFNXUGJ5eFd6V1g5akdsWlItLWVweDBRTlN4Qlo1N2ZuOWJCOEVaZklOdFhLcnB0Y3FaaXIyN0NIY2Q3NHZXVFVtWllZSlZ0dWJkcUpveVFCdEI5N1NmYXhaVzdCTkZBeGx3RFBEYU1hcXBOWnphaHpadFl0MDF4dnUwMkFWSWIwa0JxMTRlNDZpeUFMTURiZC0ycEo4anM0eVVJenJhejhDYi1ldmtvOS1Bei1HSHlxZS04d2lJN19hUFlvV2xpM0ZqN2NLQWJhaWEteFRWTlJrcTZHc19HY1NRVXFibEY2S0JIWjc3Y2RaZWx3TmEzNTBRTzhTWTNLenRuN0NqWmtfczFnekEta3dNOW5fZ09pakVjZHZ5UUtTNnhZdVBYOGxxNEhGRmlFb0Q4YmhCYm9BanpOcGV0Tm9sQkFRRHFQU2kweHd1QzZZTkIyX1lwb2t3Mk9RbWx2akQxWDkzbWx6bFVvdExManJ2Skt1VTZmUXdOU1ktY2VBYzM3SjJBOG9YU1BfT2ZOdXRXc0RmWGUyZmRpMEJIbEd6cThJV1VFR0NaX2Z0SC1mS1hySWxCZnR2VkcySE8zTDYzbXp1RUlnbGd5TGZNdlpLSVJDd3diVlV1OTlJbXZvRWFOTnRRaXZNaWdOYlIyVS1YRWFmUDlUeU50a01URkoydjdsaE9IYmFfX3JkVlJIMXd1T243alIyQ3N3U3M3bnREQWxxSnpFSVdMd2xXSUNEUEdJWWh5bllXOWwwcUNDcGwtTUgwd0RfTEo1MFhLUm5KSXNlZUVGZkNESWdzaDdTZVVMVk9XOFhCRXMzd0NzMkQwNUV2TE5UQ0tRU1FwMXRJM2toU3c0aGtNc2VpNS1MWlBuLWJjZDhyLUJQSzNKVTRPampRWjJtU2JXa0pqNHpnVElXd2pIclVUendibTVJNWlIUVpXN01Qa0FPQjk=",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMDI0ZDMxZWRmZjhhNjg0NTAxNjlhYWVhMWVlZmE4ODE5M2FkYWEwYjMxZjM0NDIyMTY=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "The tool ran and returned: \"working!\""
     }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_request",
-    "id": "call_Vvg5Dy9TkCdqYIkRawxATO3Z",
-    "name": "run_me",
-    "arguments": {
-      "foo": "aGVsbG8=",
-      "bar": "Zm9v"
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_response",
-    "id": "call_Vvg5Dy9TkCdqYIkRawxATO3Z",
-    "content": "d29ya2luZyE=",
-    "is_error": false
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "",
-    "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBxdW9mN0ljVUxMN0g4eGQzSFNMcFZPdEV3b0p5dUJ3Sy1VcnNtSkxfRF8tc3IyblJ4UncxV05kMGZTQnFRLUR5QWk4V0ZrNUwtVm5EV0liT2o3bGtiQ1haYl9fSDZFWGdnRERfcGtwbUs0U2htV0w2YkFCeXdxUDJCMXBqaGRTZTZPVGQtbmZuQ05tOHNURmhIdXRDNkZ5SE5mLURVTDNNYzVJRl82VFBfcXhHU250T19EcU1fNG9ZbFoyTFNXUGJ5eFd6V1g5akdsWlItLWVweDBRTlN4Qlo1N2ZuOWJCOEVaZklOdFhLcnB0Y3FaaXIyN0NIY2Q3NHZXVFVtWllZSlZ0dWJkcUpveVFCdEI5N1NmYXhaVzdCTkZBeGx3RFBEYU1hcXBOWnphaHpadFl0MDF4dnUwMkFWSWIwa0JxMTRlNDZpeUFMTURiZC0ycEo4anM0eVVJenJhejhDYi1ldmtvOS1Bei1HSHlxZS04d2lJN19hUFlvV2xpM0ZqN2NLQWJhaWEteFRWTlJrcTZHc19HY1NRVXFibEY2S0JIWjc3Y2RaZWx3TmEzNTBRTzhTWTNLenRuN0NqWmtfczFnekEta3dNOW5fZ09pakVjZHZ5UUtTNnhZdVBYOGxxNEhGRmlFb0Q4YmhCYm9BanpOcGV0Tm9sQkFRRHFQU2kweHd1QzZZTkIyX1lwb2t3Mk9RbWx2akQxWDkzbWx6bFVvdExManJ2Skt1VTZmUXdOU1ktY2VBYzM3SjJBOG9YU1BfT2ZOdXRXc0RmWGUyZmRpMEJIbEd6cThJV1VFR0NaX2Z0SC1mS1hySWxCZnR2VkcySE8zTDYzbXp1RUlnbGd5TGZNdlpLSVJDd3diVlV1OTlJbXZvRWFOTnRRaXZNaWdOYlIyVS1YRWFmUDlUeU50a01URkoydjdsaE9IYmFfX3JkVlJIMXd1T243alIyQ3N3U3M3bnREQWxxSnpFSVdMd2xXSUNEUEdJWWh5bllXOWwwcUNDcGwtTUgwd0RfTEo1MFhLUm5KSXNlZUVGZkNESWdzaDdTZVVMVk9XOFhCRXMzd0NzMkQwNUV2TE5UQ0tRU1FwMXRJM2toU3c0aGtNc2VpNS1MWlBuLWJjZDhyLUJQSzNKVTRPampRWjJtU2JXa0pqNHpnVElXd2pIclVUendibTVJNWlIUVpXN01Qa0FPQjk=",
-      "openrouter_metadata": [
-        {
-          "id": "cnNfMDI0ZDMxZWRmZjhhNjg0NTAxNjlhYWVhMWVlZmE4ODE5M2FkYWEwYjMxZjM0NDIyMTY=",
-          "index": 0,
-          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
-        }
-      ]
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "The tool ran and returned: \"working!\""
-  }
-]
+  ]
+}

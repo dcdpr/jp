@@ -1,4 +1,8 @@
 use chrono::TimeZone as _;
+use jp_config::{
+    PartialConfig as _,
+    conversation::tool::{PartialToolConfig, RunMode},
+};
 use serde_json::{Map, Value};
 
 use super::*;
@@ -135,11 +139,18 @@ fn test_trim_trailing_empty_turn_keeps_non_empty_turn() {
 }
 
 #[test]
-fn test_conversation_stream_serialization_roundtrip() {
+fn test_to_parts_from_parts_roundtrip() {
     let mut stream = ConversationStream::new_test();
 
-    insta::assert_json_snapshot!(&stream);
+    // Empty stream roundtrips.
+    let (base_config, events) = stream.to_parts().unwrap();
+    assert!(events.is_empty());
+    let stream2 = ConversationStream::from_parts(base_config, events)
+        .unwrap()
+        .with_created_at(stream.created_at);
+    assert_eq!(stream, stream2);
 
+    // Add some events and roundtrip again.
     stream
         .events
         .push(InternalEvent::Event(Box::new(ConversationEvent::new(
@@ -154,14 +165,34 @@ fn test_conversation_stream_serialization_roundtrip() {
             Utc.with_ymd_and_hms(2020, 1, 2, 0, 0, 0).unwrap(),
         ))));
 
-    insta::assert_json_snapshot!(&stream);
-    let json = serde_json::to_string(&stream).unwrap();
-    let stream2 = serde_json::from_str::<ConversationStream>(&json).unwrap();
-    assert_eq!(stream, stream2);
+    let (base_config, events) = stream.to_parts().unwrap();
+    assert_eq!(events.len(), 2);
+    let stream3 = ConversationStream::from_parts(base_config, events)
+        .unwrap()
+        .with_created_at(stream.created_at);
+    assert_eq!(stream, stream3);
 }
 
 #[test]
-fn test_serialization_base64_encodes_tool_call_fields() {
+fn test_from_parts_strips_unknown_base_config_fields() {
+    let stream = ConversationStream::new_test();
+    let (mut base_config, events) = stream.to_parts().unwrap();
+
+    // Inject unknown fields into the base config JSON, simulating a schema
+    // change where a field was removed.
+    let obj = base_config.as_object_mut().unwrap();
+    obj.insert("removed_field".into(), Value::String("stale".into()));
+
+    // from_parts should strip the unknown field and load successfully.
+    let result = ConversationStream::from_parts(base_config, events);
+    assert!(
+        result.is_ok(),
+        "from_parts should tolerate unknown fields in base config"
+    );
+}
+
+#[test]
+fn test_to_parts_base64_encodes_tool_call_fields() {
     let mut stream = ConversationStream::new_test();
 
     let mut args = Map::new();
@@ -177,8 +208,9 @@ fn test_serialization_base64_encodes_tool_call_fields() {
         result: Ok("file contents here".into()),
     });
 
-    // Serialize to JSON (as storage would).
-    let json = serde_json::to_string(&stream).unwrap();
+    // Serialize via to_parts (as storage would).
+    let (_config, events) = stream.to_parts().unwrap();
+    let json = serde_json::to_string(&events).unwrap();
 
     // The raw JSON should NOT contain the plain-text values — they
     // should be base64-encoded.
@@ -191,8 +223,9 @@ fn test_serialization_base64_encodes_tool_call_fields() {
         "Tool response content should be base64-encoded on disk"
     );
 
-    // Roundtrip should recover the original values.
-    let stream2 = serde_json::from_str::<ConversationStream>(&json).unwrap();
+    // Roundtrip via from_parts should recover the original values.
+    let base_config = serde_json::to_value(stream.base_config().to_partial()).unwrap();
+    let stream2 = ConversationStream::from_parts(base_config, events).unwrap();
 
     let req = stream2
         .iter()
@@ -628,4 +661,177 @@ fn test_sanitize_noop_on_healthy_stream() {
         len_before,
         "Healthy stream should be unchanged"
     );
+}
+
+// --- InternalEvent config delta roundtrip tests ---
+
+/// Serialize a [`ConfigDelta`] as an [`InternalEvent`] and deserialize it back.
+fn roundtrip_delta(delta: ConfigDelta) -> ConfigDelta {
+    let event = InternalEvent::ConfigDelta(delta);
+    let json = serde_json::to_value(&event).unwrap();
+    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
+    match deserialized {
+        InternalEvent::ConfigDelta(d) => d,
+        InternalEvent::Event(_) => panic!("expected ConfigDelta"),
+    }
+}
+
+#[test]
+fn test_roundtrip_default_config_preserves_all_fields() {
+    let original = ConfigDelta::from(jp_config::AppConfig::new_test().to_partial());
+    let result = roundtrip_delta(original.clone());
+
+    let original_json = serde_json::to_value(&original).unwrap();
+    let result_json = serde_json::to_value(&result).unwrap();
+    assert_eq!(original_json, result_json);
+}
+
+#[test]
+fn test_roundtrip_empty_delta() {
+    let original = ConfigDelta::from(jp_config::PartialAppConfig::empty());
+    let result = roundtrip_delta(original.clone());
+    assert_eq!(original, result);
+}
+
+#[test]
+fn test_roundtrip_delta_with_tool_defaults() {
+    let mut partial = jp_config::PartialAppConfig::empty();
+    partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
+
+    let original = ConfigDelta::from(partial);
+    let result = roundtrip_delta(original.clone());
+
+    let original_json = serde_json::to_value(&original).unwrap();
+    let result_json = serde_json::to_value(&result).unwrap();
+    assert_eq!(original_json, result_json);
+}
+
+/// Per-tool entries are serialized as flattened keys alongside "*" in the
+/// tools object. The schema only knows about "*", so a naive strip would
+/// remove all per-tool config.
+#[test]
+fn test_roundtrip_delta_with_per_tool_overrides() {
+    let mut partial = jp_config::PartialAppConfig::empty();
+    partial.conversation.tools.defaults.run = Some(RunMode::Ask);
+
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("fs_read_file".into(), PartialToolConfig {
+            run: Some(RunMode::Unattended),
+            ..Default::default()
+        });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("cargo_check".into(), PartialToolConfig {
+            run: Some(RunMode::Unattended),
+            ..Default::default()
+        });
+
+    let original = ConfigDelta::from(partial);
+    let result = roundtrip_delta(original.clone());
+
+    let original_json = serde_json::to_value(&original).unwrap();
+    let result_json = serde_json::to_value(&result).unwrap();
+    assert_eq!(original_json, result_json);
+}
+
+#[test]
+fn test_roundtrip_delta_strip_unknown_field_preserves_rest() {
+    let mut partial = jp_config::PartialAppConfig::empty();
+    partial.style.code.color = Some(false);
+    let original = ConfigDelta::from(partial);
+
+    let event = InternalEvent::ConfigDelta(original);
+    let mut json = serde_json::to_value(&event).unwrap();
+    json["delta"]["style"]["code"]["removed_field"] = serde_json::json!("stale");
+
+    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
+    let InternalEvent::ConfigDelta(result) = deserialized else {
+        panic!("expected ConfigDelta");
+    };
+    assert_eq!(result.delta.style.code.color, Some(false));
+}
+
+// --- deserialize_config_delta tests ---
+
+#[test]
+fn test_deserialize_config_delta_extracts_timestamp_and_delta() {
+    let value = serde_json::json!({
+        "timestamp": "2025-01-01 00:00:00.0",
+        "delta": {
+            "style": { "code": { "color": false } }
+        }
+    });
+
+    let delta = deserialize_config_delta(&value);
+    assert_eq!(delta.timestamp.to_string(), "2025-01-01 00:00:00 UTC");
+    assert_eq!(delta.delta.style.code.color, Some(false));
+}
+
+#[test]
+fn test_deserialize_config_delta_preserves_timestamp_on_bad_delta() {
+    let value = serde_json::json!({
+        "timestamp": "2024-12-25 18:30:00.0",
+        "delta": "not an object at all"
+    });
+
+    let delta = deserialize_config_delta(&value);
+    assert_eq!(delta.timestamp.to_string(), "2024-12-25 18:30:00 UTC");
+    assert!(delta.delta.is_empty());
+}
+
+// --- from_parts / to_parts stream-level compat tests ---
+
+#[test]
+fn test_from_parts_tolerates_unknown_fields_in_config_deltas() {
+    let mut partial = jp_config::PartialAppConfig::empty();
+    partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
+    partial.style.code.color = Some(false);
+
+    let mut stream = ConversationStream::new_test().with_config_delta(partial);
+    stream.start_turn(ChatRequest::from("hello"));
+
+    let (base_config, mut events) = stream.to_parts().unwrap();
+
+    // Inject unknown fields into the config delta events in the stream.
+    for event in &mut events {
+        if event.get("type").and_then(|v| v.as_str()) == Some("config_delta")
+            && let Some(delta) = event.get_mut("delta")
+            && let Some(obj) = delta.as_object_mut()
+        {
+            obj.insert("removed_top_field".into(), serde_json::json!("stale"));
+        }
+    }
+
+    let result = ConversationStream::from_parts(base_config, events)
+        .unwrap()
+        .with_created_at(stream.created_at);
+
+    assert_eq!(result.len(), stream.len());
+
+    let config = result.config().unwrap();
+    assert_eq!(config.conversation.tools.defaults.run, RunMode::Unattended);
+    assert!(!config.style.code.color);
+}
+
+#[test]
+fn test_from_parts_tolerates_config_deltas_with_only_unknown_fields() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+
+    let (base_config, mut events) = stream.to_parts().unwrap();
+
+    // Inject config delta events where every field is unknown.
+    events.push(serde_json::json!({
+        "type": "config_delta",
+        "timestamp": "2025-01-01 00:01:00.0",
+        "delta": { "removed_section": { "a": 1 } }
+    }));
+
+    let result = ConversationStream::from_parts(base_config, events).unwrap();
+    assert_eq!(result.len(), 2); // TurnStart + ChatRequest
 }

@@ -2,14 +2,15 @@ use std::{fs, io::BufReader};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
-use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_conversation::{Conversation, ConversationId, ConversationStream, StreamError};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use serde::de::DeserializeOwned;
 use tracing::warn;
 
 use crate::{
-    CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage, build_conversation_dir_prefix,
-    dir_entries, find_conversation_dir_path, load_conversation_id_from_entry, parse_datetime,
+    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage,
+    build_conversation_dir_prefix, dir_entries, find_conversation_dir_path,
+    load_conversation_id_from_entry, parse_datetime,
 };
 
 type Result<T> = std::result::Result<T, LoadError>;
@@ -36,7 +37,10 @@ impl LoadError {
     /// (as opposed to a system-level I/O failure or missing data).
     #[must_use]
     pub fn is_corrupt(&self) -> bool {
-        matches!(self.error, LoadErrorInner::Json(_))
+        matches!(
+            self.error,
+            LoadErrorInner::Json(_) | LoadErrorInner::Stream(_)
+        )
     }
 }
 
@@ -47,6 +51,9 @@ pub enum LoadErrorInner {
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+
+    #[error("invalid conversation stream: {0}")]
+    Stream(StreamError),
 
     #[error("conversation stream not found for {0}")]
     MissingConversationStream(ConversationId),
@@ -101,22 +108,51 @@ impl Storage {
     }
 
     pub fn load_conversation_stream(&self, id: &ConversationId) -> Result<ConversationStream> {
-        let this = &self;
-        for root in [Some(&this.root), this.user.as_ref()] {
+        for root in [Some(&self.root), self.user.as_ref()] {
             let Some(root) = root else {
                 continue;
             };
 
-            let Some(path) = find_conversation_dir_path(root, id).map(|v| v.join(EVENTS_FILE))
-            else {
+            let Some(conv_dir) = find_conversation_dir_path(root, id) else {
                 continue;
             };
 
-            if !path.is_file() {
+            let events_path = conv_dir.join(EVENTS_FILE);
+            if !events_path.is_file() {
                 continue;
             }
 
-            return self.read_json(&path);
+            let base_config_path = conv_dir.join(BASE_CONFIG_FILE);
+            if base_config_path.is_file() {
+                // New format: separate `base_config.json` and `events.json`.
+                let base_config = self.read_json(&base_config_path)?;
+                let events = self.read_json(&events_path)?;
+
+                return ConversationStream::from_parts(base_config, events)
+                    .map(|stream| stream.with_created_at(id.timestamp()))
+                    .map_err(|error| LoadError {
+                        path: conv_dir,
+                        error: LoadErrorInner::Stream(error),
+                    });
+            }
+
+            // Legacy format: base config packed as first element in events.json.
+            let events = self.read_json(&events_path)?;
+            match ConversationStream::from_legacy_events(events) {
+                Ok(Some(stream)) => return Ok(stream),
+                Ok(None) => {
+                    return Err(LoadError {
+                        path: conv_dir,
+                        error: LoadErrorInner::Stream(StreamError::FromEmptyIterator),
+                    });
+                }
+                Err(error) => {
+                    return Err(LoadError {
+                        path: conv_dir,
+                        error: LoadErrorInner::Stream(error),
+                    });
+                }
+            }
         }
 
         let path = build_conversation_dir_prefix(&self.root, id);

@@ -2,184 +2,182 @@
 source: crates/jp_test/src/mock.rs
 expression: v
 ---
-[
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "inherit": false,
-      "config_load_paths": [],
-      "extends": [],
-      "assistant": {
-        "tool_choice": "auto",
-        "model": {
-          "id": {
-            "provider": "openrouter",
-            "name": "test"
-          },
-          "parameters": {
-            "reasoning": {
-              "effort": "low",
-              "exclude": false
-            },
-            "stop_words": [],
-            "other": {}
-          }
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openrouter",
+          "name": "test"
         },
-        "request": {
-          "max_retries": 0,
-          "base_backoff_ms": 0,
-          "max_backoff_secs": 0,
-          "cache": true
+        "parameters": {
+          "reasoning": {
+            "effort": "low",
+            "exclude": false
+          },
+          "stop_words": [],
+          "other": {}
         }
       },
-      "conversation": {
-        "title": {
-          "generate": {
-            "auto": false
+      "request": {
+        "max_retries": 0,
+        "base_backoff_ms": 0,
+        "max_backoff_secs": 0,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
           }
+        }
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": false,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
+      },
+      "markdown": {
+        "wrap_width": 0,
+        "table_max_column_width": 0,
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "streaming": {
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
+      },
+      "tool_call": {
+        "show": false,
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
         },
-        "tools": {
-          "*": {
-            "run": "ask",
-            "result": "unattended",
-            "style": {
-              "hidden": false,
-              "inline_results": {
-                "truncate": {
-                  "lines": 10
-                }
-              },
-              "results_file_link": "full",
-              "parameters": "json"
+        "preparing": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
+      },
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": []
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "",
+          "base_url": "",
+          "chain_on_max_tokens": false,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "google": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "llamacpp": {
+          "base_url": ""
+        },
+        "ollama": {
+          "base_url": ""
+        },
+        "openai": {
+          "api_key_env": "",
+          "base_url": "",
+          "base_url_env": ""
+        },
+        "openrouter": {
+          "api_key_env": "",
+          "app_name": "",
+          "base_url": ""
+        }
+      }
+    }
+  },
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "name": "anthropic/claude-haiku-4.5"
             }
           }
-        },
-        "start_local": false
-      },
-      "style": {
-        "code": {
-          "color": false,
-          "line_numbers": false,
-          "file_link": "osc8",
-          "copy_link": "osc8"
-        },
-        "markdown": {
-          "wrap_width": 0,
-          "table_max_column_width": 0,
-          "hr_style": "line"
-        },
-        "reasoning": {
-          "display": "full"
-        },
-        "streaming": {
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "tool_call": {
-          "show": false,
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          },
-          "preparing": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "typewriter": {
-          "text_delay": {
-            "secs": 0,
-            "nanos": 0
-          },
-          "code_delay": {
-            "secs": 0,
-            "nanos": 0
-          }
-        }
-      },
-      "editor": {
-        "envs": []
-      },
-      "template": {
-        "values": {}
-      },
-      "providers": {
-        "llm": {
-          "anthropic": {
-            "api_key_env": "",
-            "base_url": "",
-            "chain_on_max_tokens": false,
-            "beta_headers": []
-          },
-          "deepseek": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "google": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "llamacpp": {
-            "base_url": ""
-          },
-          "ollama": {
-            "base_url": ""
-          },
-          "openai": {
-            "api_key_env": "",
-            "base_url": "",
-            "base_url_env": ""
-          },
-          "openrouter": {
-            "api_key_env": "",
-            "app_name": "",
-            "base_url": ""
-          }
         }
       }
-    }
-  },
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "assistant": {
-        "model": {
-          "id": {
-            "name": "anthropic/claude-haiku-4.5"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Test message"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "This is a simple test message. The user is likely checking whether I'm working or testing my capabilities. I should respond in a friendly, helpful way to confirm that I'm functioning and ready to assist.",
+      "metadata": {
+        "anthropic_thinking_signature": "RXZRQ0NrWUlDeGdDS2tCVU96RGZTZ1ZjQy9hU2hKY0xmcTZscS9tdTI2cnhIQnRoejljYjZtMlRjL2lWRjVBL2wzaXBVdU1qdWl0cmVVWTNqc2srOGFoeElpcWZsbGxyTzl1NUVnd3ROMmNwd1M5U3RLL0Rra1FhRE5GY2dCNVluK1hTSTc1NVRpSXdhYkI1OEFwQXlSNm5abFBxSVA2RzlZVFZhcDlJYnRRV1dham9SVVlkSUhHdWRoamNvWE5qQ1p0QURwMVNMa0c2S3RzQmEwazZINUpZejRNaWIrYXMxeFoyMU5yVm5kTmszTWc4NllNOHorK2tTSGJrYUpJbkVuR2tkVmgvQWlYc3dPNlFJd3h6TWZyclBoUCt0ZFlESG5VV1JaNUhiOHNTVW1YdGpCelBpU0ZmQ1VxeDREcGV2dUNqNGNOTCtYU1ViRUpnaTJhdGFZRTdQNkxMaVFhY3JFbzd4OTdLWmlhQ2xxMjFaSjNTUkRXVFcwNHNmcEowdWdLbkJpNG04aW0xOGNybjVuRFJXZW9hOUhNNFZ2NFQxZm51RG0rckY0Y2VLUzVnekFVZkxjUUZLUVZETFFhRkllczJBcXV2N2tZeEdpRERqV1NJWG5zNC8ybnN2MHltbnY3MTRSU1d0WUFDWmttOTZJK2xHQUU9",
+        "openrouter_metadata": [
+          {
+            "index": 0,
+            "field": "YW50aHJvcGljX3RoaW5raW5nX3NpZ25hdHVyZQ=="
           }
-        }
+        ]
       }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Hello! I'm working and ready to help. What would you like to know or discuss?"
     }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Test message"
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "This is a simple test message. The user is likely checking whether I'm working or testing my capabilities. I should respond in a friendly, helpful way to confirm that I'm functioning and ready to assist.",
-    "metadata": {
-      "anthropic_thinking_signature": "RXZRQ0NrWUlDeGdDS2tCVU96RGZTZ1ZjQy9hU2hKY0xmcTZscS9tdTI2cnhIQnRoejljYjZtMlRjL2lWRjVBL2wzaXBVdU1qdWl0cmVVWTNqc2srOGFoeElpcWZsbGxyTzl1NUVnd3ROMmNwd1M5U3RLL0Rra1FhRE5GY2dCNVluK1hTSTc1NVRpSXdhYkI1OEFwQXlSNm5abFBxSVA2RzlZVFZhcDlJYnRRV1dham9SVVlkSUhHdWRoamNvWE5qQ1p0QURwMVNMa0c2S3RzQmEwazZINUpZejRNaWIrYXMxeFoyMU5yVm5kTmszTWc4NllNOHorK2tTSGJrYUpJbkVuR2tkVmgvQWlYc3dPNlFJd3h6TWZyclBoUCt0ZFlESG5VV1JaNUhiOHNTVW1YdGpCelBpU0ZmQ1VxeDREcGV2dUNqNGNOTCtYU1ViRUpnaTJhdGFZRTdQNkxMaVFhY3JFbzd4OTdLWmlhQ2xxMjFaSjNTUkRXVFcwNHNmcEowdWdLbkJpNG04aW0xOGNybjVuRFJXZW9hOUhNNFZ2NFQxZm51RG0rckY0Y2VLUzVnekFVZkxjUUZLUVZETFFhRkllczJBcXV2N2tZeEdpRERqV1NJWG5zNC8ybnN2MHltbnY3MTRSU1d0WUFDWmttOTZJK2xHQUU9",
-      "openrouter_metadata": [
-        {
-          "index": 0,
-          "field": "YW50aHJvcGljX3RoaW5raW5nX3NpZ25hdHVyZQ=="
-        }
-      ]
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "message": "Hello! I'm working and ready to help. What would you like to know or discuss?"
-  }
-]
+  ]
+}

@@ -2,169 +2,167 @@
 source: crates/jp_test/src/mock.rs
 expression: v
 ---
-[
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "inherit": false,
-      "config_load_paths": [],
-      "extends": [],
-      "assistant": {
-        "tool_choice": "auto",
-        "model": {
-          "id": {
-            "provider": "google",
-            "name": "test"
-          },
-          "parameters": {
-            "reasoning": "off",
-            "stop_words": [],
-            "other": {}
-          }
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "google",
+          "name": "test"
         },
-        "request": {
-          "max_retries": 0,
-          "base_backoff_ms": 0,
-          "max_backoff_secs": 0,
-          "cache": true
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
         }
       },
-      "conversation": {
-        "title": {
-          "generate": {
-            "auto": false
-          }
-        },
-        "tools": {
-          "*": {
-            "run": "ask",
-            "result": "unattended",
-            "style": {
-              "hidden": false,
-              "inline_results": {
-                "truncate": {
-                  "lines": 10
-                }
-              },
-              "results_file_link": "full",
-              "parameters": "json"
-            }
-          }
-        },
-        "start_local": false
+      "request": {
+        "max_retries": 0,
+        "base_backoff_ms": 0,
+        "max_backoff_secs": 0,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
       },
-      "style": {
-        "code": {
-          "color": false,
-          "line_numbers": false,
-          "file_link": "osc8",
-          "copy_link": "osc8"
-        },
-        "markdown": {
-          "wrap_width": 0,
-          "table_max_column_width": 0,
-          "hr_style": "line"
-        },
-        "reasoning": {
-          "display": "full"
-        },
-        "streaming": {
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
           }
-        },
-        "tool_call": {
+        }
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": false,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
+      },
+      "markdown": {
+        "wrap_width": 0,
+        "table_max_column_width": 0,
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "streaming": {
+        "progress": {
           "show": false,
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          },
-          "preparing": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
-        },
-        "typewriter": {
-          "text_delay": {
-            "secs": 0,
-            "nanos": 0
-          },
-          "code_delay": {
-            "secs": 0,
-            "nanos": 0
-          }
+          "delay_secs": 0,
+          "interval_ms": 0
         }
       },
-      "editor": {
-        "envs": []
+      "tool_call": {
+        "show": false,
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        },
+        "preparing": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
       },
-      "template": {
-        "values": {}
-      },
-      "providers": {
-        "llm": {
-          "anthropic": {
-            "api_key_env": "",
-            "base_url": "",
-            "chain_on_max_tokens": false,
-            "beta_headers": []
-          },
-          "deepseek": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "google": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "llamacpp": {
-            "base_url": ""
-          },
-          "ollama": {
-            "base_url": ""
-          },
-          "openai": {
-            "api_key_env": "",
-            "base_url": "",
-            "base_url_env": ""
-          },
-          "openrouter": {
-            "api_key_env": "",
-            "app_name": "",
-            "base_url": ""
-          }
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": []
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "",
+          "base_url": "",
+          "chain_on_max_tokens": false,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "google": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "llamacpp": {
+          "base_url": ""
+        },
+        "ollama": {
+          "base_url": ""
+        },
+        "openai": {
+          "api_key_env": "",
+          "base_url": "",
+          "base_url_env": ""
+        },
+        "openrouter": {
+          "api_key_env": "",
+          "app_name": "",
+          "base_url": ""
         }
       }
     }
   },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Please run the tool, providing whatever arguments you want."
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_request",
-    "id": "run_me_0",
-    "name": "run_me",
-    "arguments": {
-      "bar": "Zm9v",
-      "foo": "YmFy"
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
     },
-    "metadata": {
-      "google_thought_signature": "Q2lRQnZqNzIrL2FtR3dQZ1VaM29RcUlUSStaeUlRQVJLS2Vvd1pIMmFLUkRRMjRUdWRNS1hnRytQdmI3c0l4akNsR2N4WmM3Y2Y5VGs4WHJJaEpKYlI0TkJERXJlMTNiUDJoWmpCQk9GbG5WNzFTeWpsMCt4aVlDQVVERUZyYTZwOEhDMWF0eVN2aWJTUy9OTFRkTnVKeGp5Qkh2bGZXNUJRWFU2MWZvbUY4QnpYVDk4dk1LMHdFQnZqNzIrMlJVZTk2eDUxdXpQaEY5bnpFVVpueE05Yy90UG1GM1dGZzJXYTFKNndwQ1Z3Sk9Ha2xJMVlKYWpwQndER29EVzFyaHAzMlpOVFZ1VWdQK0JqcjNSTmowN3dmVTdUWHdwa3c1WHJmejAvM0ZpS2o5QitUUzZqeVBENTk2QVNnYlpueDFhb3M4YmVTN1ppT2JoQnJkTndxY0RObThHVEV2cENBK3FhaEkyVmJxVG5BZm9IblBVcjcvemllbGVmVWVyazlqMkZXK2lPSUtQMHFsNmQ1TzNwQVd3WnVCTDQweG8weEtpZXJkcnJ0VG5senRTd2hsQ3hKY0xnZG5neEloMkYrcXNNZElsYW5MdU1lRzhBZEJDdGdCQWI0Kzl2djBQZy90MXZrTWNQM3E1cUpNOU5mQUZrUmdGditKbG9UUUxaT3NiTTRWUlZWVXF5RWticVI2M0F1NStOc3hmbnhiTFJZQUtaNFZPaWdpSFdNbmt6MlkzeGdwUzFOSXhDMFRxQUtiVytORmh2UjIwdExBUHY4d2hnZm9VMzNwbVMxbUJORkpCTmZXaGVqNTJJR0YzUjE1b1ZxYm9ZS1ptWmx6UDNLb1lMZzU5bHhWNmh0NXRxbU8wd2ZjQVZhZFJDR1dRWkZ3aEhldCtkbE55Z2J3clZYcDcyeGhqeHpqbjRSYjYyNEdTZEY0eU4xTERsRFVzeTZXK1MyRTd3WFlOSkpKQTFRRTI2dUJmUVZBenpIWWhpbWo4ZnJLQ3JvQkFiNCs5dnNrZTYvNkY5bG1iOThxTStwVFpaV0hCQ2ZVK3hmK2pyVHpIQVZKUWRiSWJyd09XN0YxQXpvWEc0bnRKZXpWVWZ3bDBqK2lZZW13UGMyRXBZamRDN0Jrd0RPeG1DS0d2b0x5cUh5NUVWSmlNV3E5UnYwWFpzSVhFUXY1aFFMM3lQbHUzMUdaNGZycWhsZGx0ZytnSXZWRllWMXJQaGU4cmFyOVRhQzRVMlh4MUcyeW56MUNhOVdiVXVON09EcEcxZDVUQUhVM1Jjb3NNbXhNc254eVFpazBZRWpsbFVnYk82VWdkYXlNSkJpNlNNallyM1puQ3FvQkFiNCs5dnNvL2lhNDVwSUp4TE9GU1N5RzVFUXJxR1RFVlVPTnp5UmtkNm93d3ZPT0lpVnphMGpGUXBBbDZKUEgxeUFXeGQzRjdwY3NzV2tOWmtGWWpQVER3bGRlVXE5aEhSZTJRZzc2NG11eEllR0Vna2xqRENzYzFseEp6dUQrMkFwQXJHbCt5Yko1dGpoSkZleXdtUFVhVEFWZ1kzMzVuTVJXYWVpQW5jL1ViQytpaTBmN3gzblFZM2gzM3VHZklsVHBkdHBvdm1YaURWUjQ3blBWZVY4WjdrZkRVS0pBK1hvPQ=="
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "run_me_0",
+      "name": "run_me",
+      "arguments": {
+        "bar": "Zm9v",
+        "foo": "YmFy"
+      },
+      "metadata": {
+        "google_thought_signature": "Q2lRQnZqNzIrL2FtR3dQZ1VaM29RcUlUSStaeUlRQVJLS2Vvd1pIMmFLUkRRMjRUdWRNS1hnRytQdmI3c0l4akNsR2N4WmM3Y2Y5VGs4WHJJaEpKYlI0TkJERXJlMTNiUDJoWmpCQk9GbG5WNzFTeWpsMCt4aVlDQVVERUZyYTZwOEhDMWF0eVN2aWJTUy9OTFRkTnVKeGp5Qkh2bGZXNUJRWFU2MWZvbUY4QnpYVDk4dk1LMHdFQnZqNzIrMlJVZTk2eDUxdXpQaEY5bnpFVVpueE05Yy90UG1GM1dGZzJXYTFKNndwQ1Z3Sk9Ha2xJMVlKYWpwQndER29EVzFyaHAzMlpOVFZ1VWdQK0JqcjNSTmowN3dmVTdUWHdwa3c1WHJmejAvM0ZpS2o5QitUUzZqeVBENTk2QVNnYlpueDFhb3M4YmVTN1ppT2JoQnJkTndxY0RObThHVEV2cENBK3FhaEkyVmJxVG5BZm9IblBVcjcvemllbGVmVWVyazlqMkZXK2lPSUtQMHFsNmQ1TzNwQVd3WnVCTDQweG8weEtpZXJkcnJ0VG5senRTd2hsQ3hKY0xnZG5neEloMkYrcXNNZElsYW5MdU1lRzhBZEJDdGdCQWI0Kzl2djBQZy90MXZrTWNQM3E1cUpNOU5mQUZrUmdGditKbG9UUUxaT3NiTTRWUlZWVXF5RWticVI2M0F1NStOc3hmbnhiTFJZQUtaNFZPaWdpSFdNbmt6MlkzeGdwUzFOSXhDMFRxQUtiVytORmh2UjIwdExBUHY4d2hnZm9VMzNwbVMxbUJORkpCTmZXaGVqNTJJR0YzUjE1b1ZxYm9ZS1ptWmx6UDNLb1lMZzU5bHhWNmh0NXRxbU8wd2ZjQVZhZFJDR1dRWkZ3aEhldCtkbE55Z2J3clZYcDcyeGhqeHpqbjRSYjYyNEdTZEY0eU4xTERsRFVzeTZXK1MyRTd3WFlOSkpKQTFRRTI2dUJmUVZBenpIWWhpbWo4ZnJLQ3JvQkFiNCs5dnNrZTYvNkY5bG1iOThxTStwVFpaV0hCQ2ZVK3hmK2pyVHpIQVZKUWRiSWJyd09XN0YxQXpvWEc0bnRKZXpWVWZ3bDBqK2lZZW13UGMyRXBZamRDN0Jrd0RPeG1DS0d2b0x5cUh5NUVWSmlNV3E5UnYwWFpzSVhFUXY1aFFMM3lQbHUzMUdaNGZycWhsZGx0ZytnSXZWRllWMXJQaGU4cmFyOVRhQzRVMlh4MUcyeW56MUNhOVdiVXVON09EcEcxZDVUQUhVM1Jjb3NNbXhNc254eVFpazBZRWpsbFVnYk82VWdkYXlNSkJpNlNNallyM1puQ3FvQkFiNCs5dnNvL2lhNDVwSUp4TE9GU1N5RzVFUXJxR1RFVlVPTnp5UmtkNm93d3ZPT0lpVnphMGpGUXBBbDZKUEgxeUFXeGQzRjdwY3NzV2tOWmtGWWpQVER3bGRlVXE5aEhSZTJRZzc2NG11eEllR0Vna2xqRENzYzFseEp6dUQrMkFwQXJHbCt5Yko1dGpoSkZleXdtUFVhVEFWZ1kzMzVuTVJXYWVpQW5jL1ViQytpaTBmN3gzblFZM2gzM3VHZklsVHBkdHBvdm1YaURWUjQ3blBWZVY4WjdrZkRVS0pBK1hvPQ=="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "run_me_0",
+      "content": "d29ya2luZyE=",
+      "is_error": false
     }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "tool_call_response",
-    "id": "run_me_0",
-    "content": "d29ya2luZyE=",
-    "is_error": false
-  }
-]
+  ]
+}

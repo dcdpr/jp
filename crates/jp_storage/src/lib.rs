@@ -7,7 +7,10 @@ pub mod persist;
 pub mod trash;
 pub mod validate;
 
-use std::{fs, io::BufReader};
+use std::{
+    fs,
+    io::{self, BufReader},
+};
 
 use camino::{FromPathBufError, Utf8DirEntry, Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -22,6 +25,7 @@ use crate::{error::Result, value::write_json};
 
 pub const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
+const BASE_CONFIG_FILE: &str = "base_config.json";
 pub const CONVERSATIONS_DIR: &str = "conversations";
 
 #[derive(Debug, Clone)]
@@ -182,6 +186,13 @@ impl Storage {
     ///
     /// Handles directory naming, stale directory cleanup (when a conversation
     /// is renamed or moved between workspace/user storage), and atomic writes.
+    ///
+    /// The conversation is stored as three files:
+    /// - `metadata.json` — lightweight conversation metadata.
+    /// - `base_config.json` — the initial `PartialAppConfig` snapshot, written
+    ///   once at creation time. Subsequent persists skip this file.
+    /// - `events.json` — the event stream (config deltas + conversation
+    ///   events).
     pub fn persist_conversation(
         &self,
         id: &ConversationId,
@@ -203,8 +214,22 @@ impl Storage {
         remove_stale_conversation_dirs(id, &conv_dir, &conversations_dir, &user_conversations_dir)?;
 
         fs::create_dir_all(&conv_dir)?;
+
+        let (base_config, events_json) = events
+            .to_parts()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
         write_json(&conv_dir.join(METADATA_FILE), metadata)?;
-        write_json(&conv_dir.join(EVENTS_FILE), events)?;
+
+        // Write base_config.json only once at creation time. The base config is
+        // immutable after creation; users who manually edit it will see their
+        // changes preserved.
+        let base_config_path = conv_dir.join(BASE_CONFIG_FILE);
+        if !base_config_path.is_file() {
+            write_json(&base_config_path, &base_config)?;
+        }
+
+        write_json(&conv_dir.join(EVENTS_FILE), &events_json)?;
 
         Ok(())
     }
@@ -500,8 +525,9 @@ fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<ConversationI
 impl Storage {
     /// Write a minimal valid conversation to the workspace storage root.
     ///
-    /// Creates a conversation directory with valid `metadata.json` and
-    /// `events.json` files. For test fixture setup only.
+    /// Creates a conversation directory with valid `metadata.json`,
+    /// `base_config.json`, and `events.json` files. For test fixture setup
+    /// only.
     #[doc(hidden)]
     pub fn write_test_conversation(&self, id: &ConversationId, conversation: &Conversation) {
         let dir = self
@@ -510,7 +536,11 @@ impl Storage {
             .join(id.to_dirname(conversation.title.as_deref()));
         fs::create_dir_all(&dir).unwrap();
         write_json(&dir.join(METADATA_FILE), conversation).unwrap();
-        write_json(&dir.join(EVENTS_FILE), &ConversationStream::new_test()).unwrap();
+
+        let stream = ConversationStream::new_test();
+        let (base_config, events) = stream.to_parts().unwrap();
+        write_json(&dir.join(BASE_CONFIG_FILE), &base_config).unwrap();
+        write_json(&dir.join(EVENTS_FILE), &events).unwrap();
     }
 
     /// Read the raw persisted events file content for a conversation.

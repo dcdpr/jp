@@ -212,8 +212,8 @@
     "summary": "Auto-refresh stale conversation titles periodically by re-running LLM generation when accumulated turns exceed a configured threshold."
   },
   "054-split-conversation-config-and-events.md": {
-    "hash": "716d382ca9c81c76a5b3760f6727ba3ac44bdc049d4eb366d29366f83e1f535a",
-    "summary": "Split conversation events.json into separate base_config.json and events.json files for better readability and clarity."
+    "hash": "918816273d291677e6884fb729d09805f0020e7518fae42a42dd97f0096d2b45",
+    "summary": "Split conversation storage: extract immutable base config snapshot into separate base_config.json file from events.json."
   },
   "055-tool-groups.md": {
     "hash": "3dca640be74e78962b40bb3a9b52d5130bbc7e4ac6a3514b8f4ca121d2a93795",

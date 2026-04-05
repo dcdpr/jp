@@ -2,191 +2,189 @@
 source: crates/jp_test/src/mock.rs
 expression: v
 ---
-[
-  {
-    "type": "config_delta",
-    "timestamp": "2020-01-01 00:00:00.0",
-    "delta": {
-      "inherit": false,
-      "config_load_paths": [],
-      "extends": [],
-      "assistant": {
-        "tool_choice": "auto",
-        "model": {
-          "id": {
-            "provider": "openrouter",
-            "name": "test"
-          },
-          "parameters": {
-            "reasoning": "off",
-            "stop_words": [],
-            "other": {}
-          }
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [],
+    "assistant": {
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openrouter",
+          "name": "test"
         },
-        "request": {
-          "max_retries": 0,
-          "base_backoff_ms": 0,
-          "max_backoff_secs": 0,
-          "cache": true
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
         }
       },
-      "conversation": {
-        "title": {
-          "generate": {
-            "auto": false
-          }
-        },
-        "tools": {
-          "*": {
-            "run": "ask",
-            "result": "unattended",
-            "style": {
-              "hidden": false,
-              "inline_results": {
-                "truncate": {
-                  "lines": 10
-                }
-              },
-              "results_file_link": "full",
-              "parameters": "json"
-            }
-          }
-        },
-        "start_local": false
+      "request": {
+        "max_retries": 0,
+        "base_backoff_ms": 0,
+        "max_backoff_secs": 0,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
       },
-      "style": {
-        "code": {
-          "color": false,
-          "line_numbers": false,
-          "file_link": "osc8",
-          "copy_link": "osc8"
-        },
-        "markdown": {
-          "wrap_width": 0,
-          "table_max_column_width": 0,
-          "hr_style": "line"
-        },
-        "reasoning": {
-          "display": "full"
-        },
-        "streaming": {
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
           }
-        },
-        "tool_call": {
+        }
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": false,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "osc8"
+      },
+      "markdown": {
+        "wrap_width": 0,
+        "table_max_column_width": 0,
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full"
+      },
+      "streaming": {
+        "progress": {
           "show": false,
-          "progress": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          },
-          "preparing": {
-            "show": false,
-            "delay_secs": 0,
-            "interval_ms": 0
-          }
+          "delay_secs": 0,
+          "interval_ms": 0
+        }
+      },
+      "tool_call": {
+        "show": false,
+        "progress": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
         },
-        "typewriter": {
-          "text_delay": {
-            "secs": 0,
-            "nanos": 0
-          },
-          "code_delay": {
-            "secs": 0,
-            "nanos": 0
-          }
+        "preparing": {
+          "show": false,
+          "delay_secs": 0,
+          "interval_ms": 0
         }
       },
-      "editor": {
-        "envs": []
-      },
-      "template": {
-        "values": {}
-      },
-      "providers": {
-        "llm": {
-          "anthropic": {
-            "api_key_env": "",
-            "base_url": "",
-            "chain_on_max_tokens": false,
-            "beta_headers": []
-          },
-          "deepseek": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "google": {
-            "api_key_env": "",
-            "base_url": ""
-          },
-          "llamacpp": {
-            "base_url": ""
-          },
-          "ollama": {
-            "base_url": ""
-          },
-          "openai": {
-            "api_key_env": "",
-            "base_url": "",
-            "base_url_env": ""
-          },
-          "openrouter": {
-            "api_key_env": "",
-            "app_name": "",
-            "base_url": ""
-          }
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    },
+    "editor": {
+      "envs": []
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "",
+          "base_url": "",
+          "chain_on_max_tokens": false,
+          "beta_headers": []
+        },
+        "deepseek": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "google": {
+          "api_key_env": "",
+          "base_url": ""
+        },
+        "llamacpp": {
+          "base_url": ""
+        },
+        "ollama": {
+          "base_url": ""
+        },
+        "openai": {
+          "api_key_env": "",
+          "base_url": "",
+          "base_url_env": ""
+        },
+        "openrouter": {
+          "api_key_env": "",
+          "app_name": "",
+          "base_url": ""
         }
       }
     }
   },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_request",
-    "content": "Generate a title for this conversation.",
-    "schema": {
-      "type": "object",
-      "required": [
-        "titles"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "titles": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "description": "A concise, descriptive title for the conversation"
-          },
-          "minItems": 1,
-          "maxItems": 1
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Generate a title for this conversation.",
+      "schema": {
+        "type": "object",
+        "required": [
+          "titles"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "titles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "A concise, descriptive title for the conversation"
+            },
+            "minItems": 1,
+            "maxItems": 1
+          }
         }
       }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnBxdW9WM1lMVkhLaE1qdldyVTVyRHd1Y1NXbDdfSDZOWVN5bFlLdVlyZm5EVzNvUWRSUDNOSVZ6Z1lyN1Boc0ZtUTl0cUFrZ1o2X3paa2pjSklOS0lLNWN3LTFNME81cU5vVmdrOHpPeTIxYWVmVE5SaTBPOTNpdUpGazZJSHA4SGZ4d1hYRWNoemxJZnpVYVk2LVlCN3JxcHRzb1ZUZDNrNXNHZGdvSzdGWGR3ZUZHWmJfUjZkQjJRbG80OG95dzZVQi1XU2EzbnF4dlgyUW1aZ3FCaDkteE8yeS1SVVFpNlIzYmNBUFFxT0o4aEk4OVBaek1nZ2RaOW14Y2NPT0FXXzYtX1BncFd2Qzl4Qnk1aDZZQmpKNzF6M3h6UTI4cTFMNnhkOVBIWldLcmdrME1YOWx6ZUNDYm9la1dhV3R3TFU5QklSX1FyS01EXzl0emtRZEVfM3pNUVFVdE9JSWFYdmpqZmF2T0RTU3pfM0x5QUJPZkNqWC1SeVQ0VHJvbmNvWEs1Nmo2LWdOcHppSlBHck9LLVUxLXZwLWJVWjhiQVdLYTBUdVctcm8wWENuQ0tjcnVkSFhrR21EM2FXaThwYW5uUEJLRFNURGk4QVJIMHlJWWdRTHVucm1KdWhBZThpajEtMVg2bVE1eURodEdOV09TUWM4VHBfRWRfSFJOTE52bjBHb3ZtZjYtMlVOUXFXYlJuTmw4MTBKQ01mbmZmNTZFUGhkREJIWm5CT1pKMnNHQnlnWW5GYXczVTZTQlZ6d0xFSzVsUzZfV1hoT2FUSXp2VUljQTNvRW1fekpOWEJhZjJhVXVNVmsyZElSMXR0SEk2MEtPcG9tS3NFaEI5T1Vadi1KTWVvdFc3a3d3bHA3bm4wX1cxMWt4VG1wcmIwTXpqemplNTA1elYyMTNVZUdmR09iMldfbk9DWlJ1eUM0WkRZdXVyMmJxdklDeDFlcTF2S0JJcVpFMHlSUFA0azNSYnFBbmUteEdmYTZfZ1hPRUo0aEJmcElDblhubW9OcjY0VVo3dEo1eW1WS3JXNDZMblZsMldLaFF6aVdHdmZWVzZleTVUOXlMVWpiYUQ3QWlZQ2d0T3h5RXRXRnZMSFNqakI2NGVPYmZVT0JXZ3E4SngtdENoOUFweTFLdEhfVjB4ZWFRMHpqV3pKaWgwYlRjOFlQSE5GRlZOM1NrUEdiWEs=",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMGQyZjhiMzJiYTFiMGVlMDAxNjlhYWVhMTUwNWEwODE5MzgzNmQwOTQ0YTBlMTQ4OWM=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "data": {
+        "titles": [
+          "Generate a title for this conversation"
+        ]
+      }
     }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "reasoning": "",
-    "metadata": {
-      "openai_encrypted_content": "Z0FBQUFBQnBxdW9WM1lMVkhLaE1qdldyVTVyRHd1Y1NXbDdfSDZOWVN5bFlLdVlyZm5EVzNvUWRSUDNOSVZ6Z1lyN1Boc0ZtUTl0cUFrZ1o2X3paa2pjSklOS0lLNWN3LTFNME81cU5vVmdrOHpPeTIxYWVmVE5SaTBPOTNpdUpGazZJSHA4SGZ4d1hYRWNoemxJZnpVYVk2LVlCN3JxcHRzb1ZUZDNrNXNHZGdvSzdGWGR3ZUZHWmJfUjZkQjJRbG80OG95dzZVQi1XU2EzbnF4dlgyUW1aZ3FCaDkteE8yeS1SVVFpNlIzYmNBUFFxT0o4aEk4OVBaek1nZ2RaOW14Y2NPT0FXXzYtX1BncFd2Qzl4Qnk1aDZZQmpKNzF6M3h6UTI4cTFMNnhkOVBIWldLcmdrME1YOWx6ZUNDYm9la1dhV3R3TFU5QklSX1FyS01EXzl0emtRZEVfM3pNUVFVdE9JSWFYdmpqZmF2T0RTU3pfM0x5QUJPZkNqWC1SeVQ0VHJvbmNvWEs1Nmo2LWdOcHppSlBHck9LLVUxLXZwLWJVWjhiQVdLYTBUdVctcm8wWENuQ0tjcnVkSFhrR21EM2FXaThwYW5uUEJLRFNURGk4QVJIMHlJWWdRTHVucm1KdWhBZThpajEtMVg2bVE1eURodEdOV09TUWM4VHBfRWRfSFJOTE52bjBHb3ZtZjYtMlVOUXFXYlJuTmw4MTBKQ01mbmZmNTZFUGhkREJIWm5CT1pKMnNHQnlnWW5GYXczVTZTQlZ6d0xFSzVsUzZfV1hoT2FUSXp2VUljQTNvRW1fekpOWEJhZjJhVXVNVmsyZElSMXR0SEk2MEtPcG9tS3NFaEI5T1Vadi1KTWVvdFc3a3d3bHA3bm4wX1cxMWt4VG1wcmIwTXpqemplNTA1elYyMTNVZUdmR09iMldfbk9DWlJ1eUM0WkRZdXVyMmJxdklDeDFlcTF2S0JJcVpFMHlSUFA0azNSYnFBbmUteEdmYTZfZ1hPRUo0aEJmcElDblhubW9OcjY0VVo3dEo1eW1WS3JXNDZMblZsMldLaFF6aVdHdmZWVzZleTVUOXlMVWpiYUQ3QWlZQ2d0T3h5RXRXRnZMSFNqakI2NGVPYmZVT0JXZ3E4SngtdENoOUFweTFLdEhfVjB4ZWFRMHpqV3pKaWgwYlRjOFlQSE5GRlZOM1NrUEdiWEs=",
-      "openrouter_metadata": [
-        {
-          "id": "cnNfMGQyZjhiMzJiYTFiMGVlMDAxNjlhYWVhMTUwNWEwODE5MzgzNmQwOTQ0YTBlMTQ4OWM=",
-          "index": 0,
-          "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
-        }
-      ]
-    }
-  },
-  {
-    "timestamp": "2020-01-01 00:00:00.0",
-    "type": "chat_response",
-    "data": {
-      "titles": [
-        "Generate a title for this conversation"
-      ]
-    }
-  }
-]
+  ]
+}
