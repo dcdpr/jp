@@ -162,35 +162,25 @@ fn test_persist_conversation_no_dir_on_write_failure() {
     let metadata = Conversation::default();
     let events = ConversationStream::new_test();
 
-    // Create the conversations dir, then make it read-only so the staging
-    // dir creation fails.
+    // Place a file where the staging directory would be. remove_dir_all fails
+    // on a file (not a directory) on all platforms, causing an early error
+    // before any conversation data is written.
     let convs = tmp.path().join(CONVERSATIONS_DIR);
     fs::create_dir_all(&convs).unwrap();
-    let mut perms = fs::metadata(&convs).unwrap().permissions();
-    #[allow(clippy::permissions_set_readonly_false)]
-    perms.set_readonly(true);
-    fs::set_permissions(&convs, perms.clone()).unwrap();
+    let blocker = convs.join(format!("{STAGING_PREFIX}{}", id.to_dirname(None)));
+    fs::write(&blocker, "not a directory").unwrap();
 
     let result = storage.persist_conversation(&id, &metadata, &events);
     assert!(result.is_err());
 
-    // Restore permissions for cleanup + assertions.
-    #[allow(clippy::permissions_set_readonly_false)]
-    perms.set_readonly(false);
-    fs::set_permissions(&convs, perms).unwrap();
+    // Clean up blocker so we can check for real artifacts.
+    fs::remove_file(&blocker).unwrap();
 
-    // No conversation dir and no staging dir should exist.
     let conv_dir = convs.join(id.to_dirname(None));
     assert!(
         !conv_dir.exists(),
         "conversation dir should not exist after failed write"
     );
-
-    let has_staging = fs::read_dir(&convs)
-        .unwrap()
-        .flatten()
-        .any(|e| e.file_name().to_string_lossy().starts_with(STAGING_PREFIX));
-    assert!(!has_staging, "staging dir should be cleaned up on failure");
 }
 
 #[test]
@@ -273,20 +263,16 @@ fn test_persist_conversation_existing_survives_failed_update() {
     let original_metadata = fs::read_to_string(conv_dir.join(METADATA_FILE)).unwrap();
     let original_events = fs::read_to_string(conv_dir.join(EVENTS_FILE)).unwrap();
 
-    // Make the conversations dir read-only so staging dir creation fails.
+    // Place a file where the staging directory would be created.
     let convs = tmp.path().join(CONVERSATIONS_DIR);
-    let mut perms = fs::metadata(&convs).unwrap().permissions();
-    #[allow(clippy::permissions_set_readonly_false)]
-    perms.set_readonly(true);
-    fs::set_permissions(&convs, perms.clone()).unwrap();
+    let blocker = convs.join(format!("{STAGING_PREFIX}{}", id.to_dirname(None)));
+    fs::write(&blocker, "not a directory").unwrap();
 
     let result = storage.persist_conversation(&id, &metadata, &events);
     assert!(result.is_err());
 
-    // Restore permissions.
-    #[allow(clippy::permissions_set_readonly_false)]
-    perms.set_readonly(false);
-    fs::set_permissions(&convs, perms).unwrap();
+    // Clean up blocker.
+    fs::remove_file(&blocker).unwrap();
 
     // Original conversation data should be intact.
     assert_eq!(

@@ -33,30 +33,20 @@ fn write_json_no_tmp_file_left_on_success() {
 }
 
 #[test]
-fn write_json_preserves_original_on_write_to_readonly_dir() {
+fn write_json_preserves_original_on_write_failure() {
     let tmp = tempdir().unwrap();
-    let dir = tmp.path().join("readonly");
-    fs::create_dir(&dir).unwrap();
-    let path = dir.join("out.json");
+    let path = tmp.path().join("out.json");
 
-    // Write initial content.
     write_json(&path, &json!({"original": true})).unwrap();
 
-    // Make the directory read-only so the temp file can't be created.
-    let mut perms = fs::metadata(&dir).unwrap().permissions();
-    #[allow(clippy::permissions_set_readonly_false)]
-    perms.set_readonly(true);
-    fs::set_permissions(&dir, perms.clone()).unwrap();
+    // Place a directory at the .tmp path. File::create fails on all platforms
+    // when the target is an existing directory.
+    let blocker = Utf8PathBuf::from(format!("{path}{TMP_SUFFIX}"));
+    fs::create_dir(&blocker).unwrap();
 
     let result = write_json(&path, &json!({"new": true}));
-    assert!(result.is_err(), "write should fail on read-only dir");
+    assert!(result.is_err(), "write should fail when .tmp path is a directory");
 
-    // Restore permissions for cleanup + assertions.
-    #[allow(clippy::permissions_set_readonly_false)]
-    perms.set_readonly(false);
-    fs::set_permissions(&dir, perms).unwrap();
-
-    // Original file should be untouched.
     let content: serde_json::Value = read_json(&path).unwrap();
     assert_eq!(content, json!({"original": true}));
 }
