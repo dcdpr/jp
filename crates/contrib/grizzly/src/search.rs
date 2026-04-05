@@ -55,6 +55,30 @@ impl Default for SearchParams {
     }
 }
 
+impl SearchParams {
+    /// Return a copy with glob-style wildcard queries (`"*"`) removed.
+    ///
+    /// Users pass `queries: ["*"]` to mean "match everything" (e.g. when
+    /// filtering by tags only), but `*` is not a wildcard in SQL LIKE or
+    /// FTS5. Stripping it makes the search fall through to the tag/ID-only
+    /// path.
+    fn without_wildcards(&self) -> Self {
+        Self {
+            queries: self
+                .queries
+                .iter()
+                .filter(|q| q.trim() != "*")
+                .cloned()
+                .collect(),
+            tags: self.tags.clone(),
+            ids: self.ids.clone(),
+            context: self.context,
+            limit: self.limit,
+            mode: self.mode,
+        }
+    }
+}
+
 /// A search result with matching lines from a note.
 pub struct SearchMatch {
     /// The note's unique identifier.
@@ -112,23 +136,26 @@ struct ScoredNote {
 /// Dispatches to FTS5 or LIKE search based on [`SearchMode`]. In `Auto` mode,
 /// FTS5 is attempted first with a fallback to LIKE on error or empty results.
 pub fn execute(conn: &Connection, cte: &str, params: &SearchParams) -> Result<Vec<SearchMatch>> {
+    // Treat "*" as a match-all wildcard (glob convention), not a literal.
+    let params = params.without_wildcards();
+
     let has_queries = params.queries.iter().any(|q| !q.trim().is_empty());
     if !has_queries {
-        return execute_like(conn, cte, params);
+        return execute_like(conn, cte, &params);
     }
 
     match params.mode {
-        SearchMode::Like => execute_like(conn, cte, params),
-        SearchMode::Fts => execute_fts(conn, cte, params),
-        SearchMode::Auto => match execute_fts(conn, cte, params) {
+        SearchMode::Like => execute_like(conn, cte, &params),
+        SearchMode::Fts => execute_fts(conn, cte, &params),
+        SearchMode::Auto => match execute_fts(conn, cte, &params) {
             Ok(results) if !results.is_empty() => Ok(results),
             Ok(_) => {
                 tracing::debug!("FTS5 returned no results, falling back to LIKE");
-                execute_like(conn, cte, params)
+                execute_like(conn, cte, &params)
             }
             Err(e) => {
                 tracing::debug!(error = %e, "FTS5 search failed, falling back to LIKE");
-                execute_like(conn, cte, params)
+                execute_like(conn, cte, &params)
             }
         },
     }

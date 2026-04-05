@@ -248,3 +248,58 @@ fn auto_uses_fts_when_available() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].note_id, "note-1");
 }
+
+#[test]
+fn wildcard_query_with_tag_filter() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["*".into()],
+        tags: vec!["productivity".into()],
+        context: 1,
+        ..Default::default()
+    });
+    assert_eq!(results.len(), 2);
+
+    let ids: Vec<&str> = results.iter().map(|r| r.note_id.as_str()).collect();
+    assert!(ids.contains(&"note-1"));
+    assert!(ids.contains(&"note-2"));
+}
+
+#[test]
+fn wildcard_query_with_nested_tag_filter() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["*".into()],
+        tags: vec!["projects/jp".into()],
+        context: 1,
+        ..Default::default()
+    });
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].note_id, "note-1");
+}
+
+#[test]
+fn nested_tag_filter_with_content_query() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["capturing".into()],
+        tags: vec!["projects/jp".into()],
+        context: 1,
+        ..Default::default()
+    });
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].note_id, "note-1");
+}
+
+#[test]
+fn nested_tag_filter_excludes_untagged() {
+    let db = BearDb::in_memory().unwrap();
+    // note-2 has "intervals" but is NOT tagged projects/jp
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["intervals".into()],
+        tags: vec!["projects/jp".into()],
+        context: 1,
+        ..Default::default()
+    });
+    assert!(results.is_empty());
+}

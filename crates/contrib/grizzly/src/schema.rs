@@ -1,4 +1,5 @@
 use rusqlite::Connection;
+use tracing::{debug, warn};
 
 use crate::Error;
 
@@ -15,41 +16,88 @@ pub struct SchemaMetadata {
 }
 
 /// Discover the junction table and column names from the Bear database.
+///
+/// Core Data junction tables follow the pattern `Z_<number><RELATIONSHIP>`.
+/// We look for tables whose columns reference both notes (column ending in
+/// `NOTES`) and tags (column ending in `TAGS`). Multiple candidates may exist
+/// (e.g. `Z_5TAGS`, `Z_5NOTETAGS`), so we validate each by checking it
+/// actually joins `ZSFNOTE` and `ZSFNOTETAG` rows.
 pub fn discover(conn: &Connection) -> Result<SchemaMetadata, Error> {
-    // Find the junction table matching Z_<number>TAGS
-    let junction_table = conn
-        .query_row(
-            "SELECT name FROM sqlite_master
-             WHERE type = 'table' AND name GLOB 'Z_[0-9]*TAGS'
-             LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| Error::SchemaDiscovery)?;
+    // Find ALL candidate junction tables containing "TAGS" in the name.
+    let mut stmt = conn.prepare(
+        "SELECT name FROM sqlite_master
+         WHERE type = 'table' AND name GLOB 'Z_[0-9]*TAGS'
+         ORDER BY name",
+    )?;
 
-    // Read column names from the junction table
-    let columns = conn
-        .prepare(&format!("PRAGMA table_info({junction_table})"))?
-        .query_map([], |row| row.get::<_, String>("name"))?
+    let candidates: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
 
-    let notes_column = columns
-        .iter()
-        .find(|c| c.ends_with("NOTES"))
-        .cloned()
-        .ok_or(Error::SchemaDiscovery)?;
+    if candidates.is_empty() {
+        warn!("no junction table candidates found matching Z_[0-9]*TAGS");
+        return Err(Error::SchemaDiscovery);
+    }
 
-    let tags_column = columns
-        .iter()
-        .find(|c| c.ends_with("TAGS"))
-        .cloned()
-        .ok_or(Error::SchemaDiscovery)?;
+    debug!(?candidates, "junction table candidates");
 
-    Ok(SchemaMetadata {
-        junction_table,
-        notes_column,
-        tags_column,
-    })
+    // Try each candidate — pick the first one that has valid columns AND
+    // produces at least one note-tag link.
+    for table in &candidates {
+        let columns = conn
+            .prepare(&format!("PRAGMA table_info({table})"))?
+            .query_map([], |row| row.get::<_, String>("name"))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let notes_col = columns.iter().find(|c| c.ends_with("NOTES"));
+        let tags_col = columns.iter().find(|c| c.ends_with("TAGS"));
+
+        let (Some(notes_col), Some(tags_col)) = (notes_col, tags_col) else {
+            debug!(
+                table,
+                ?columns,
+                "skipping candidate: missing NOTES or TAGS column"
+            );
+            continue;
+        };
+
+        // Validate: does this junction table actually link ZSFNOTE rows to
+        // ZSFNOTETAG rows? A dead or unrelated table will have zero matches.
+        let count: i64 = conn
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM {table} jt
+                     WHERE EXISTS (SELECT 1 FROM ZSFNOTE n WHERE n.Z_PK = jt.{notes_col})
+                       AND EXISTS (SELECT 1 FROM ZSFNOTETAG t WHERE t.Z_PK = jt.{tags_col})
+                     LIMIT 1"
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if count == 0 {
+            debug!(
+                table,
+                notes_col, tags_col, "skipping candidate: no valid note-tag links"
+            );
+            continue;
+        }
+
+        debug!(table, notes_col, tags_col, count, "selected junction table");
+
+        return Ok(SchemaMetadata {
+            junction_table: table.clone(),
+            notes_column: notes_col.clone(),
+            tags_column: tags_col.clone(),
+        });
+    }
+
+    warn!(
+        ?candidates,
+        "none of the junction table candidates produced valid note-tag links"
+    );
+    Err(Error::SchemaDiscovery)
 }
 
 /// Generate a normalizing CTE that abstracts Bear's Core Data schema into clean
