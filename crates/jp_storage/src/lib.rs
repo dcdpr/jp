@@ -184,13 +184,27 @@ impl Storage {
 
     /// Persist a single conversation's metadata and events to disk.
     ///
-    /// Handles directory naming, stale directory cleanup (when a conversation
-    /// is renamed or moved between workspace/user storage), and atomic writes.
+    /// Uses a staging directory and atomic directory swap for write safety:
     ///
-    /// The conversation is stored as three files:
+    /// 1. Write all files into a `.staging-{name}` directory.
+    /// 2. Copy non-managed files from the existing conversation directory
+    ///    (e.g. `QUERY_MESSAGE.md`) into the staging directory.
+    /// 3. Rename the existing directory to `.old-{name}`.
+    /// 4. Rename the staging directory to the final name.
+    /// 5. Remove the `.old-{name}` backup.
+    ///
+    /// If any write in step 1 fails, the staging directory is removed and
+    /// the existing conversation is untouched. The rename in step 4 is a
+    /// single syscall, so readers never see a partially-written directory.
+    ///
+    /// Recovery: if the process crashes between steps 3 and 4, the next
+    /// startup's validation pass detects the `.old-*` / `.staging-*` pair
+    /// and completes or rolls back the swap.
+    ///
+    /// The conversation is stored as three managed files:
     /// - `metadata.json` — lightweight conversation metadata.
     /// - `base_config.json` — the initial `PartialAppConfig` snapshot, written
-    ///   once at creation time. Subsequent persists skip this file.
+    ///   once at creation time. Subsequent persists preserve the existing file.
     /// - `events.json` — the event stream (config deltas + conversation
     ///   events).
     pub fn persist_conversation(
@@ -204,32 +218,72 @@ impl Storage {
         let user_conversations_dir = user.join(CONVERSATIONS_DIR);
 
         let dir_name = id.to_dirname(metadata.title.as_deref());
-        let conv_dir = if metadata.user {
-            user_conversations_dir.join(&dir_name)
+        let parent_dir = if metadata.user {
+            &user_conversations_dir
         } else {
-            conversations_dir.join(&dir_name)
+            &conversations_dir
         };
+        let conv_dir = parent_dir.join(&dir_name);
 
         // Remove stale directories from previous titles or storage locations.
         remove_stale_conversation_dirs(id, &conv_dir, &conversations_dir, &user_conversations_dir)?;
-
-        fs::create_dir_all(&conv_dir)?;
 
         let (base_config, events_json) = events
             .to_parts()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
-        write_json(&conv_dir.join(METADATA_FILE), metadata)?;
+        // Step 1: Write all managed files into a staging directory.
+        let staging_dir = parent_dir.join(staging_dir_name(&dir_name));
+        if staging_dir.exists() {
+            fs::remove_dir_all(&staging_dir)?;
+        }
+        fs::create_dir_all(&staging_dir)?;
 
-        // Write base_config.json only once at creation time. The base config is
-        // immutable after creation; users who manually edit it will see their
-        // changes preserved.
-        let base_config_path = conv_dir.join(BASE_CONFIG_FILE);
-        if !base_config_path.is_file() {
-            write_json(&base_config_path, &base_config)?;
+        let result = (|| -> Result<()> {
+            write_json(&staging_dir.join(METADATA_FILE), metadata)?;
+
+            // base_config.json is immutable after creation. If the conversation
+            // already has one on disk, copy it into the staging dir so user
+            // edits are preserved. Otherwise write a fresh one.
+            let existing_base_config = conv_dir.join(BASE_CONFIG_FILE);
+            if existing_base_config.is_file() {
+                fs::copy(&existing_base_config, staging_dir.join(BASE_CONFIG_FILE))?;
+            } else {
+                write_json(&staging_dir.join(BASE_CONFIG_FILE), &base_config)?;
+            }
+
+            write_json(&staging_dir.join(EVENTS_FILE), &events_json)?;
+
+            // Step 2: Copy non-managed files from the existing conversation
+            // directory into the staging directory.
+            if conv_dir.is_dir() {
+                copy_non_managed_files(&conv_dir, &staging_dir)?;
+            }
+
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            drop(fs::remove_dir_all(&staging_dir));
+            return Err(e);
         }
 
-        write_json(&conv_dir.join(EVENTS_FILE), &events_json)?;
+        // Step 3: Move the old directory out of the way.
+        let old_dir = parent_dir.join(old_dir_name(&dir_name));
+        if old_dir.exists() {
+            fs::remove_dir_all(&old_dir)?;
+        }
+        if conv_dir.is_dir() {
+            fs::rename(&conv_dir, &old_dir)?;
+        }
+
+        // Step 4: Rename staging → final (single atomic syscall).
+        fs::rename(&staging_dir, &conv_dir)?;
+
+        // Step 5: Remove the backup.
+        if old_dir.is_dir() {
+            drop(fs::remove_dir_all(&old_dir));
+        }
 
         Ok(())
     }
@@ -432,6 +486,48 @@ fn get_expiring_timestamp(root: &Utf8Path) -> Option<DateTime<Utc>> {
     }
 
     parse_datetime(&ts[1..ts.len() - 1])
+}
+
+/// The dot-prefixed staging directory name used during atomic conversation
+/// persistence. The dot prefix makes it invisible to directory scanning
+/// (validation, ID loading, `find_conversation_dir_path`).
+pub(crate) const STAGING_PREFIX: &str = ".staging-";
+
+/// The dot-prefixed backup directory name used during the atomic swap in
+/// [`Storage::persist_conversation`]. Holds the old conversation directory
+/// between the two renames.
+pub(crate) const OLD_PREFIX: &str = ".old-";
+
+/// Build the staging directory name for a conversation dir name.
+fn staging_dir_name(dir_name: &str) -> String {
+    format!("{STAGING_PREFIX}{dir_name}")
+}
+
+/// Build the old/backup directory name for a conversation dir name.
+fn old_dir_name(dir_name: &str) -> String {
+    format!("{OLD_PREFIX}{dir_name}")
+}
+
+/// The set of files managed by [`Storage::persist_conversation`].
+const MANAGED_FILES: &[&str] = &[METADATA_FILE, BASE_CONFIG_FILE, EVENTS_FILE];
+
+/// Copy non-managed files from `src` to `dst`.
+///
+/// Files whose names match [`MANAGED_FILES`] are skipped — those are written
+/// fresh by the persistence logic. Everything else (e.g. `QUERY_MESSAGE.md`)
+/// is copied so it survives the directory swap.
+fn copy_non_managed_files(src: &Utf8Path, dst: &Utf8Path) -> Result<()> {
+    for entry in dir_entries(src) {
+        let name = entry.file_name().to_owned();
+        if MANAGED_FILES.contains(&name.as_str()) {
+            continue;
+        }
+        let src_path = entry.into_path();
+        if src_path.is_file() {
+            fs::copy(&src_path, dst.join(&name))?;
+        }
+    }
+    Ok(())
 }
 
 /// Remove stale conversation directories left over from renames or
