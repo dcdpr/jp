@@ -45,7 +45,10 @@ fn write_json_preserves_original_on_write_failure() {
     fs::create_dir(&blocker).unwrap();
 
     let result = write_json(&path, &json!({"new": true}));
-    assert!(result.is_err(), "write should fail when .tmp path is a directory");
+    assert!(
+        result.is_err(),
+        "write should fail when .tmp path is a directory"
+    );
 
     let content: serde_json::Value = read_json(&path).unwrap();
     assert_eq!(content, json!({"original": true}));
