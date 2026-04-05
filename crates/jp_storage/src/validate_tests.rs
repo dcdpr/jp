@@ -5,14 +5,19 @@ use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use test_log::test;
 
 use super::*;
-use crate::{CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage, value::write_json};
+use crate::{
+    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage, value::write_json,
+};
 
 /// Write a valid conversation to disk under the given storage root.
 fn write_valid(storage: &camino::Utf8Path, id: &ConversationId) {
     let dir = storage.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
     fs::create_dir_all(&dir).unwrap();
     write_json(&dir.join(METADATA_FILE), &Conversation::default()).unwrap();
-    write_json(&dir.join(EVENTS_FILE), &ConversationStream::new_test()).unwrap();
+    let stream = ConversationStream::new_test();
+    let (base_config, events) = stream.to_parts().unwrap();
+    write_json(&dir.join(BASE_CONFIG_FILE), &base_config).unwrap();
+    write_json(&dir.join(EVENTS_FILE), &events).unwrap();
 }
 
 #[test]
@@ -58,7 +63,10 @@ fn test_missing_metadata_is_detected() {
     let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
     let dir = tmp.path().join(CONVERSATIONS_DIR).join(id.to_dirname(None));
     fs::create_dir_all(&dir).unwrap();
-    write_json(&dir.join(EVENTS_FILE), &ConversationStream::new_test()).unwrap();
+    let stream = ConversationStream::new_test();
+    let (base_config, events) = stream.to_parts().unwrap();
+    write_json(&dir.join(BASE_CONFIG_FILE), &base_config).unwrap();
+    write_json(&dir.join(EVENTS_FILE), &events).unwrap();
 
     let result = storage.validate_conversations();
     assert_eq!(result.invalid.len(), 1);
@@ -77,7 +85,10 @@ fn test_corrupt_metadata_is_detected() {
     let dir = tmp.path().join(CONVERSATIONS_DIR).join(id.to_dirname(None));
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join(METADATA_FILE), "not json").unwrap();
-    write_json(&dir.join(EVENTS_FILE), &ConversationStream::new_test()).unwrap();
+    let stream = ConversationStream::new_test();
+    let (base_config, events) = stream.to_parts().unwrap();
+    write_json(&dir.join(BASE_CONFIG_FILE), &base_config).unwrap();
+    write_json(&dir.join(EVENTS_FILE), &events).unwrap();
 
     let result = storage.validate_conversations();
     assert_eq!(result.invalid.len(), 1);

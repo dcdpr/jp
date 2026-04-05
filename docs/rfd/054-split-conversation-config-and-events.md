@@ -1,6 +1,6 @@
 # RFD 054: Split Conversation Config and Events
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-11
