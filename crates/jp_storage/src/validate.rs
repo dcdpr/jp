@@ -6,7 +6,8 @@ use rayon::prelude::*;
 use tracing::{debug, trace};
 
 use crate::{
-    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage, dir_entries,
+    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, OLD_PREFIX, STAGING_PREFIX,
+    Storage, dir_entries, value::cleanup_tmp_files,
 };
 
 /// Result of validating all conversation directories across storage roots.
@@ -151,12 +152,20 @@ impl Storage {
 fn validate_root(conversations_dir: &Utf8Path, result: &mut ValidationResult) {
     trace!(root = %conversations_dir, "Validating conversation root.");
 
+    // Clean up orphaned staging directories left by interrupted atomic
+    // conversation writes, and .tmp files inside conversation dirs.
+    cleanup_staging_dirs(conversations_dir);
+
     let entries: Vec<_> = dir_entries(conversations_dir)
         .filter(|entry| {
             entry.file_type().ok().is_some_and(|ft| ft.is_dir())
                 && !entry.file_name().starts_with('.')
         })
         .collect();
+
+    for entry in &entries {
+        cleanup_tmp_files(entry.path());
+    }
 
     let outcomes: Vec<_> = entries
         .par_iter()
@@ -275,6 +284,61 @@ fn validate_events(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Se
     let buf = std::fs::read(path)?;
     serde_json::from_slice::<Vec<EventProbe>>(&buf)?;
     Ok(())
+}
+
+/// Clean up orphaned staging and backup directories from interrupted atomic
+/// conversation writes.
+///
+/// Handles three crash scenarios:
+///
+/// 1. **`.staging-X` exists, `X` exists**: crash during staging writes or
+///    before the swap started. Remove the staging dir.
+/// 2. **`.old-X` exists, `.staging-X` exists, `X` missing**: crash between
+///    rename-old and rename-staging (steps 3–4 in `persist_conversation`).
+///    Roll back: rename `.old-X` → `X`, remove `.staging-X`.
+/// 3. **`.old-X` exists, `X` exists**: crash after the swap completed but
+///    before the backup was removed (step 5). Remove the `.old-X` dir.
+fn cleanup_staging_dirs(conversations_dir: &Utf8Path) {
+    let entries: Vec<_> = dir_entries(conversations_dir).collect();
+
+    // Collect names into sets for cross-referencing.
+    let names: Vec<String> = entries.iter().map(|e| e.file_name().to_owned()).collect();
+
+    for entry in &entries {
+        let name = entry.file_name();
+
+        if let Some(dir_name) = name.strip_prefix(OLD_PREFIX) {
+            let has_final = names.iter().any(|n| n == dir_name);
+            let staging_name = format!("{STAGING_PREFIX}{dir_name}");
+            let has_staging = names.iter().any(|n| n == &staging_name);
+
+            if !has_final && has_staging {
+                // Crash between steps 3 and 4: roll back.
+                trace!(path = %entry.path(), "Rolling back interrupted swap.");
+                drop(std::fs::rename(
+                    entry.path(),
+                    conversations_dir.join(dir_name),
+                ));
+                drop(std::fs::remove_dir_all(
+                    conversations_dir.join(&staging_name),
+                ));
+            } else {
+                // Step 5 didn't complete, or stale backup. Remove it.
+                trace!(path = %entry.path(), "Removing orphaned backup directory.");
+                drop(std::fs::remove_dir_all(entry.path()));
+            }
+        } else if let Some(dir_name) = name.strip_prefix(STAGING_PREFIX) {
+            let old_name = format!("{OLD_PREFIX}{dir_name}");
+            let has_old = names.iter().any(|n| n == &old_name);
+
+            // If there's a matching .old- dir, it was handled above.
+            // Otherwise this is a stale staging dir from a failed write.
+            if !has_old {
+                trace!(path = %entry.path(), "Removing orphaned staging directory.");
+                drop(std::fs::remove_dir_all(entry.path()));
+            }
+        }
+    }
 }
 
 #[cfg(test)]

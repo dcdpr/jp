@@ -5,7 +5,7 @@ use std::{
 
 use camino_tempfile::tempdir;
 use chrono::TimeZone as _;
-use jp_conversation::ConversationId;
+use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use serde_json::json;
 use test_log::test;
 
@@ -124,4 +124,177 @@ fn test_remove_ephemeral_conversations() {
     assert!(!convs.join(id3.to_dirname(Some(title))).exists());
     assert!(convs.join(id4.to_dirname(None)).exists());
     assert!(convs.join(id5.to_dirname(Some("foo"))).exists());
+}
+
+#[test]
+fn test_persist_conversation_creates_all_files() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let metadata = Conversation::default();
+    let events = ConversationStream::new_test();
+
+    storage
+        .persist_conversation(&id, &metadata, &events)
+        .unwrap();
+
+    let conv_dir = tmp.path().join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    assert!(conv_dir.join(METADATA_FILE).is_file());
+    assert!(conv_dir.join(BASE_CONFIG_FILE).is_file());
+    assert!(conv_dir.join(EVENTS_FILE).is_file());
+
+    // No staging dir should remain.
+    let has_staging = fs::read_dir(tmp.path().join(CONVERSATIONS_DIR))
+        .unwrap()
+        .flatten()
+        .any(|e| e.file_name().to_string_lossy().starts_with(STAGING_PREFIX));
+    assert!(
+        !has_staging,
+        "no staging directory should remain after success"
+    );
+}
+
+#[test]
+fn test_persist_conversation_no_dir_on_write_failure() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let metadata = Conversation::default();
+    let events = ConversationStream::new_test();
+
+    // Create the conversations dir, then make it read-only so the staging
+    // dir creation fails.
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+    fs::create_dir_all(&convs).unwrap();
+    let mut perms = fs::metadata(&convs).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(true);
+    fs::set_permissions(&convs, perms.clone()).unwrap();
+
+    let result = storage.persist_conversation(&id, &metadata, &events);
+    assert!(result.is_err());
+
+    // Restore permissions for cleanup + assertions.
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    fs::set_permissions(&convs, perms).unwrap();
+
+    // No conversation dir and no staging dir should exist.
+    let conv_dir = convs.join(id.to_dirname(None));
+    assert!(
+        !conv_dir.exists(),
+        "conversation dir should not exist after failed write"
+    );
+
+    let has_staging = fs::read_dir(&convs)
+        .unwrap()
+        .flatten()
+        .any(|e| e.file_name().to_string_lossy().starts_with(STAGING_PREFIX));
+    assert!(!has_staging, "staging dir should be cleaned up on failure");
+}
+
+#[test]
+fn test_persist_conversation_preserves_existing_base_config() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let metadata = Conversation::default();
+    let events = ConversationStream::new_test();
+
+    // First persist creates base_config.json.
+    storage
+        .persist_conversation(&id, &metadata, &events)
+        .unwrap();
+
+    let conv_dir = tmp.path().join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    let base_config_path = conv_dir.join(BASE_CONFIG_FILE);
+
+    // Simulate a user editing base_config.json.
+    let original_content = fs::read_to_string(&base_config_path).unwrap();
+    let marker = format!("{original_content}{{\"user_edit\": true}}");
+    fs::write(&base_config_path, &marker).unwrap();
+
+    // Second persist should preserve the user-edited base_config.json.
+    storage
+        .persist_conversation(&id, &metadata, &events)
+        .unwrap();
+
+    let after = fs::read_to_string(&base_config_path).unwrap();
+    assert_eq!(
+        after, marker,
+        "base_config.json should be preserved across persists"
+    );
+}
+
+#[test]
+fn test_persist_conversation_preserves_non_managed_files() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let metadata = Conversation::default();
+    let events = ConversationStream::new_test();
+
+    // First persist.
+    storage
+        .persist_conversation(&id, &metadata, &events)
+        .unwrap();
+
+    // Add a non-managed file (like QUERY_MESSAGE.md from the editor).
+    let conv_dir = tmp.path().join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    let extra_file = conv_dir.join("QUERY_MESSAGE.md");
+    fs::write(&extra_file, "user query content").unwrap();
+
+    // Second persist should not destroy the extra file.
+    storage
+        .persist_conversation(&id, &metadata, &events)
+        .unwrap();
+
+    assert!(extra_file.is_file());
+    assert_eq!(
+        fs::read_to_string(&extra_file).unwrap(),
+        "user query content"
+    );
+}
+
+#[test]
+fn test_persist_conversation_existing_survives_failed_update() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let metadata = Conversation::default();
+    let events = ConversationStream::new_test();
+
+    // Initial persist.
+    storage
+        .persist_conversation(&id, &metadata, &events)
+        .unwrap();
+
+    let conv_dir = tmp.path().join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    let original_metadata = fs::read_to_string(conv_dir.join(METADATA_FILE)).unwrap();
+    let original_events = fs::read_to_string(conv_dir.join(EVENTS_FILE)).unwrap();
+
+    // Make the conversations dir read-only so staging dir creation fails.
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+    let mut perms = fs::metadata(&convs).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(true);
+    fs::set_permissions(&convs, perms.clone()).unwrap();
+
+    let result = storage.persist_conversation(&id, &metadata, &events);
+    assert!(result.is_err());
+
+    // Restore permissions.
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    fs::set_permissions(&convs, perms).unwrap();
+
+    // Original conversation data should be intact.
+    assert_eq!(
+        fs::read_to_string(conv_dir.join(METADATA_FILE)).unwrap(),
+        original_metadata
+    );
+    assert_eq!(
+        fs::read_to_string(conv_dir.join(EVENTS_FILE)).unwrap(),
+        original_events
+    );
 }
