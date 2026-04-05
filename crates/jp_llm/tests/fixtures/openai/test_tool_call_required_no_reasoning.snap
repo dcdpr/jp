@@ -4,9 +4,8 @@ expression: v
 ---
 [
     [
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
@@ -20,19 +19,14 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -43,11 +37,7 @@ expression: v
                     "openai_item_id": String("msg_036a6ed1df999103016995b6be41e08192bc609baaf0911a6e"),
                 },
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),

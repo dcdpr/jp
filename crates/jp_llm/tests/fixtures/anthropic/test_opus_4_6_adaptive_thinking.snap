@@ -4,9 +4,8 @@ expression: v
 ---
 [
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -17,14 +16,9 @@ expression: v
                     "anthropic_thinking_signature": String("EqkBCkYICxgCKkDo5w3BcOFDM2J7MsIKxgUfuba9NpwDavusotnNesPeZa7anZZRQjr0ND/Y4T9kgQgbRz4ipY8/DiooFD5PtwvCEgxCrzRQWKp3DFaDFpUaDHk19S7V88wZwgPfoCIwGRx3KbxmvLkdgwSTzHJF2hRQn+hgOS7KFdKl1m/iTlZEGv3rG1C6839Uav6sSIzTKhE/X1Lmefe/CmpfaYUh+i74kBgB"),
                 },
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -33,11 +27,7 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),

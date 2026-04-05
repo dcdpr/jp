@@ -3,7 +3,6 @@ use std::env;
 use async_trait::async_trait;
 use base64::Engine as _;
 use futures::{StreamExt as _, TryStreamExt as _, stream};
-use indexmap::IndexMap;
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -14,7 +13,7 @@ use jp_config::{
     providers::llm::openrouter::OpenrouterConfig,
 };
 use jp_conversation::{
-    ConversationEvent, ConversationStream,
+    ConversationStream,
     event::{ChatResponse, EventKind},
     thread::{Thread, ThreadParts, text_attachments_to_xml},
 };
@@ -39,10 +38,9 @@ use super::{EventStream, ModelDetails};
 use crate::{
     Error, StreamError,
     error::{Result, StreamErrorKind, looks_like_quota_error},
-    event::{self, Event},
+    event::{self, Event, EventPart},
     provider::{Provider, openai::parameters_with_strict_mode},
     query::ChatQuery,
-    stream::aggregator::tool_call_request::ToolCallRequestAggregator,
 };
 
 static PROVIDER: ProviderId = ProviderId::Openrouter;
@@ -112,7 +110,7 @@ impl Provider for Openrouter {
 
         let (request, is_structured) = build_request(query, model)?;
         let mut state = AggregationState {
-            tool_calls: ToolCallRequestAggregator::default(),
+            tool_call_indices: Vec::new(),
             aggregating_reasoning: false,
             aggregating_message: false,
             is_structured,
@@ -130,8 +128,9 @@ impl Provider for Openrouter {
 
 /// Aggregation state for a single stream of events.
 struct AggregationState {
-    /// Tool call aggregator.
-    tool_calls: ToolCallRequestAggregator,
+    /// Tracks which tool call indices have been seen, so we can flush them
+    /// on finish.
+    tool_call_indices: Vec<usize>,
 
     /// Did the stream of events have any reasoning content?
     aggregating_reasoning: bool,
@@ -238,9 +237,9 @@ impl MultiProviderMetadata {
     }
 }
 
-impl From<MultiProviderMetadata> for IndexMap<String, Value> {
+impl From<MultiProviderMetadata> for Map<String, Value> {
     fn from(val: MultiProviderMetadata) -> Self {
-        let mut map = IndexMap::new();
+        let mut map = Map::new();
 
         if let Some(v) = val.openai_encrypted_content {
             map.insert("openai_encrypted_content".into(), v);
@@ -335,14 +334,17 @@ fn map_event(
     if !reasoning.is_empty() || has_reasoning_details {
         state.aggregating_reasoning = true;
 
-        let event = ConversationEvent::now(ChatResponse::reasoning(reasoning));
-        let event = if has_reasoning_details {
-            Ok(event.with_metadata(reasoning_details))
+        let metadata = if has_reasoning_details {
+            reasoning_details.into()
         } else {
-            Ok(event)
+            Map::new()
         };
 
-        events.push(event.map(|event| Event::Part { index: 0, event }));
+        events.push(Ok(Event::Part {
+            index: 0,
+            part: EventPart::Reasoning(reasoning),
+            metadata,
+        }));
     }
 
     if let Some(content) = content
@@ -350,15 +352,11 @@ fn map_event(
     {
         state.aggregating_message = true;
 
-        let response = if state.is_structured {
-            ChatResponse::structured(Value::String(content))
+        if state.is_structured {
+            events.push(Ok(Event::structured(1, content)));
         } else {
-            ChatResponse::message(content)
-        };
-        events.push(Ok(Event::Part {
-            index: 1,
-            event: ConversationEvent::now(response),
-        }));
+            events.push(Ok(Event::message(1, content)));
+        }
     }
 
     if finish_reason.is_some() {
@@ -383,29 +381,27 @@ fn map_event(
     ) in tool_calls.into_iter().enumerate()
     {
         let index = idx + index + 2;
-        state
-            .tool_calls
-            .add_chunk(index, id, function.name, function.arguments.as_deref());
+
+        if !state.tool_call_indices.contains(&index) {
+            state.tool_call_indices.push(index);
+        }
+
+        let id = id.unwrap_or_default();
+        let name = function.name.unwrap_or_default();
+        if !id.is_empty() || !name.is_empty() {
+            events.push(Ok(Event::tool_call_start(index, id, name)));
+        }
+
+        if let Some(args) = function.arguments.as_deref() {
+            events.push(Ok(Event::tool_call_args(index, args)));
+        }
     }
 
     if let Some(FinishReason::ToolCalls | FinishReason::Stop) = finish_reason {
-        events.extend(
-            state
-                .tool_calls
-                .finalize_all()
-                .into_iter()
-                .flat_map(|(index, result)| {
-                    vec![
-                        result
-                            .map(|call| Event::Part {
-                                index,
-                                event: ConversationEvent::now(call),
-                            })
-                            .map_err(|e| StreamError::other(e.to_string())),
-                        Ok(Event::flush(index)),
-                    ]
-                }),
-        );
+        for &index in &state.tool_call_indices {
+            events.push(Ok(Event::flush(index)));
+        }
+        state.tool_call_indices.clear();
     }
 
     match finish_reason {

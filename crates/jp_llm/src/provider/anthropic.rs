@@ -14,7 +14,6 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use chrono::NaiveDate;
 use futures::{FutureExt as _, StreamExt as _, TryStreamExt as _, pin_mut, stream};
-use indexmap::IndexMap;
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -26,7 +25,7 @@ use jp_config::{
 };
 use jp_conversation::{
     ConversationStream,
-    event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest},
+    event::{ChatResponse, ConversationEvent, EventKind},
 };
 use serde_json::{Map, Value, json};
 use tracing::{debug, info, trace, warn};
@@ -37,13 +36,11 @@ use crate::{
         Error, Result, StreamError, StreamErrorKind, extract_retry_from_text,
         looks_like_quota_error,
     },
-    event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
+    event::{Event, EventMatcher, EventPart, EventPatch, FinishReason, PatchAction},
+    event_builder::EventBuilder,
     model::{ModelDeprecation, ModelDetails, ReasoningDetails},
     query::ChatQuery,
-    stream::{
-        EventStream,
-        aggregator::tool_call_request::{AggregationError, ToolCallRequestAggregator},
-    },
+    stream::EventStream,
     tool::ToolDefinition,
 };
 
@@ -185,8 +182,12 @@ fn call(
     is_structured: bool,
 ) -> EventStream {
     Box::pin(try_stream!({
-        let mut tool_call_aggregator = ToolCallRequestAggregator::new();
-        let mut events = vec![];
+        // Buffer flushed ConversationEvents for chaining. When MaxTokens hits,
+        // these are passed to chain() to build the continuation request. We use
+        // EventBuilder to accumulate streaming parts into complete events with
+        // merged metadata (needed for thinking signatures).
+        let mut chain_builder = EventBuilder::new();
+        let mut chain_events = vec![];
 
         // If a tool call is requested, we cannot chain on max tokens, as the
         // Anthropic API expects the response to a tool call to contain the tool
@@ -198,7 +199,7 @@ fn call(
             .create_stream(request.clone())
             .await
             .map_err(StreamError::from)
-            .map_ok(|v| stream::iter(map_event(v, &mut tool_call_aggregator, is_structured)))
+            .map_ok(|v| stream::iter(map_event(v, is_structured)))
             .try_flatten()
             .chain(future::ready(Ok(Event::Finished(FinishReason::Completed))).into_stream())
             .peekable();
@@ -229,7 +230,9 @@ fn call(
                 event if should_chain(&event, tool_calls_requested, chain_on_max_tokens) => {
                     debug!("Max tokens reached, auto-requesting more tokens.");
 
-                    for await event in chain(client.clone(), request.clone(), events, is_structured)
+                    chain_events.extend(chain_builder.drain());
+                    for await event in
+                        chain(client.clone(), request.clone(), chain_events, is_structured)
                     {
                         yield event?;
                     }
@@ -239,14 +242,22 @@ fn call(
                     yield done;
                     return;
                 }
-                Event::Part { event, index } => {
-                    if event.is_tool_call_request() {
+                Event::Part {
+                    index,
+                    part,
+                    metadata,
+                } => {
+                    if part.is_tool_call() {
                         tool_calls_requested = true;
                     } else if chain_on_max_tokens {
-                        events.push(event.clone());
+                        chain_builder.handle_part(index, part.clone(), metadata.clone());
                     }
 
-                    yield Event::Part { event, index };
+                    yield Event::Part {
+                        index,
+                        part,
+                        metadata,
+                    };
                 }
                 flush @ Event::Flush { .. } => {
                     let next_event = stream.as_mut().peek().await.and_then(|e| e.as_ref().ok());
@@ -258,6 +269,12 @@ fn call(
                         && should_chain(event, tool_calls_requested, chain_on_max_tokens)
                     {
                         continue;
+                    }
+
+                    // Flush the chain builder so accumulated parts become
+                    // complete ConversationEvents with merged metadata.
+                    if chain_on_max_tokens && let Event::Flush { index, metadata } = &flush {
+                        chain_events.extend(chain_builder.handle_flush(*index, metadata.clone()));
                     }
 
                     yield flush;
@@ -337,11 +354,7 @@ fn chain(
             // as the model is configured to reason with less tokens than the
             // total maximum number of tokens allowed, so we do not need to
             // worry about omitting valid reasoning content here.
-            if event
-                .as_conversation_event()
-                .and_then(ConversationEvent::as_chat_response)
-                .is_some_and(ChatResponse::is_reasoning)
-            {
+            if event.as_part().is_some_and(EventPart::is_reasoning) {
                 continue;
             }
 
@@ -349,13 +362,7 @@ fn chain(
             // overlap. Sometimes the assistant will start a chaining response
             // with a small amount of content that was already seen in the
             // previous response, and we want to avoid duplicating that.
-            if let Some(
-                ChatResponse::Message { message: content }
-                | ChatResponse::Reasoning { reasoning: content },
-            ) = event
-                .as_conversation_event_mut()
-                .and_then(ConversationEvent::as_chat_response_mut)
-            {
+            if let Some(content) = event.as_part_mut().and_then(EventPart::as_text_mut) {
                 if should_merge {
                     let merge_point = find_merge_point(&previous_content, content, 500);
                     content.replace_range(..merge_point, "");
@@ -1075,7 +1082,6 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
 
 fn map_event(
     event: types::MessagesStreamEvent,
-    agg: &mut ToolCallRequestAggregator,
     is_structured: bool,
 ) -> Vec<std::result::Result<Event, StreamError>> {
     use types::MessagesStreamEvent::*;
@@ -1089,15 +1095,14 @@ fn map_event(
         ContentBlockStart {
             content_block,
             index,
-        } => map_content_start(content_block, index, agg, is_structured)
+        } => map_content_start(content_block, index, is_structured)
             .into_iter()
             .map(Ok)
             .collect(),
-        ContentBlockDelta { delta, index } => map_content_delta(delta, index, agg, is_structured)
-            .into_iter()
-            .map(Ok)
-            .collect(),
-        ContentBlockStop { index } => map_content_stop(index, agg),
+        ContentBlockDelta { delta, index } => {
+            vec![Ok(map_content_delta(delta, index, is_structured))]
+        }
+        ContentBlockStop { index } => vec![Ok(Event::flush(index))],
         MessageDelta { delta, .. } => map_message_delta(&delta).into_iter().map(Ok).collect(),
         _ => vec![],
     }
@@ -1509,32 +1514,16 @@ fn convert_event(
 fn map_content_start(
     item: types::MessageContent,
     index: usize,
-    agg: &mut ToolCallRequestAggregator,
     is_structured: bool,
 ) -> Option<Event> {
     use types::MessageContent::*;
 
-    let mut metadata = IndexMap::new();
-    let kind: EventKind = match item {
-        // Initial part indicating a tool call request has started. The eventual
-        // fully-aggregated arguments will be sent in a separate Part.
-        ToolUse(types::ToolUse { id, name, .. }) => {
-            *agg = ToolCallRequestAggregator::default();
-            agg.add_chunk(index, Some(id.clone()), Some(name.clone()), None);
-            let request = ToolCallRequest {
-                id,
-                name,
-                arguments: Map::new(),
-            };
-
-            return Some(Event::Part {
-                index,
-                event: request.into(),
-            });
-        }
-        Text(text) if is_structured => ChatResponse::structured(Value::String(text.text)).into(),
-        Text(text) if !text.text.is_empty() => ChatResponse::message(text.text).into(),
-        Document(_) | Text(_) => return None,
+    let mut metadata = Map::new();
+    match item {
+        ToolUse(types::ToolUse { id, name, .. }) => Some(Event::tool_call_start(index, id, name)),
+        Text(text) if is_structured => Some(Event::structured(index, text.text)),
+        Text(text) if !text.text.is_empty() => Some(Event::message(index, text.text)),
+        Document(_) | Text(_) => None,
         Thinking(types::Thinking {
             thinking,
             signature,
@@ -1545,78 +1534,45 @@ fn map_content_start(
                 metadata.insert(THINKING_SIGNATURE_KEY.to_owned(), signature.into());
             }
 
-            ChatResponse::reasoning(thinking).into()
+            Some(Event::Part {
+                index,
+                part: EventPart::Reasoning(thinking),
+                metadata,
+            })
         }
         RedactedThinking { data } => {
             metadata.insert(REDACTED_THINKING_KEY.to_owned(), data.into());
-            ChatResponse::reasoning("").into()
+            Some(Event::Part {
+                index,
+                part: EventPart::Reasoning(String::new()),
+                metadata,
+            })
         }
         ToolResult(_) => unreachable!("never triggered by the API"),
-    };
-
-    Some(Event::Part {
-        event: ConversationEvent::now(kind).with_metadata(metadata),
-        index,
-    })
+    }
 }
 
-fn map_content_delta(
-    delta: types::ContentBlockDelta,
-    index: usize,
-    agg: &mut ToolCallRequestAggregator,
-    is_structured: bool,
-) -> Option<Event> {
-    let mut metadata = IndexMap::new();
-    let kind: EventKind = match delta {
+fn map_content_delta(delta: types::ContentBlockDelta, index: usize, is_structured: bool) -> Event {
+    match delta {
         types::ContentBlockDelta::TextDelta { text } if is_structured => {
-            ChatResponse::structured(Value::String(text)).into()
+            Event::structured(index, text)
         }
-        types::ContentBlockDelta::TextDelta { text } => ChatResponse::message(text).into(),
-        types::ContentBlockDelta::ThinkingDelta { thinking } => {
-            ChatResponse::reasoning(thinking).into()
-        }
+        types::ContentBlockDelta::TextDelta { text } => Event::message(index, text),
+        types::ContentBlockDelta::ThinkingDelta { thinking } => Event::reasoning(index, thinking),
         // This is only used for thinking blocks, and we need to store this
         // signature to pass it back to the assistant in the message
         // history.
         //
         // See: <https://docs.anthropic.com/en/docs/build-with-claude/streaming#thinking-delta>
-        types::ContentBlockDelta::SignatureDelta { signature } => {
-            metadata.insert(THINKING_SIGNATURE_KEY.to_owned(), signature.into());
-            ChatResponse::reasoning("").into()
-        }
-        types::ContentBlockDelta::InputJsonDelta { partial_json } => {
-            agg.add_chunk(index, None, None, Some(&partial_json));
-            return None;
-        }
-    };
-
-    Some(Event::Part {
-        event: ConversationEvent::now(kind).with_metadata(metadata),
-        index,
-    })
-}
-
-fn map_content_stop(
-    index: usize,
-    agg: &mut ToolCallRequestAggregator,
-) -> Vec<std::result::Result<Event, StreamError>> {
-    let mut events = vec![];
-
-    // Check if we're buffering a tool call request
-    match agg.finalize(index) {
-        Ok(tool_call) => events.push(Ok(Event::Part {
-            event: ConversationEvent::now(tool_call),
+        types::ContentBlockDelta::SignatureDelta { signature } => Event::Part {
             index,
-        })),
-        Err(AggregationError::UnknownIndex) => {}
-        Err(error) => {
-            events.push(Err(StreamError::other(error.to_string())));
-            return events;
+            part: EventPart::Reasoning(String::new()),
+            metadata: Map::from_iter([(THINKING_SIGNATURE_KEY.to_owned(), signature.into())]),
+        },
+        types::ContentBlockDelta::InputJsonDelta { partial_json } => {
+            Event::tool_call_args(index, partial_json)
         }
     }
-
-    events.push(Ok(Event::flush(index)));
-    events
 }
 
 fn map_message_delta(delta: &types::MessageDelta) -> Option<Event> {

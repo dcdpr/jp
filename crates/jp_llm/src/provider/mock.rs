@@ -12,17 +12,13 @@
 //! ```ignore
 //! use jp_llm::provider::mock::MockProvider;
 //! use jp_llm::event::{Event, FinishReason};
-//! use jp_conversation::event::{ConversationEvent, ChatResponse};
 //!
 //! // Create a provider that returns a simple message
 //! let provider = MockProvider::with_message("Hello, world!");
 //!
 //! // Or create one with custom events for more complex scenarios
 //! let provider = MockProvider::new(vec![
-//!     Event::Part {
-//!         index: 0,
-//!         event: ConversationEvent::now(ChatResponse::message("Hello")),
-//!     },
+//!     Event::message(0, "Hello"),
 //!     Event::flush(0),
 //!     Event::Finished(FinishReason::Completed),
 //! ]);
@@ -31,7 +27,6 @@
 use async_trait::async_trait;
 use futures::stream;
 use jp_config::model::id::{ModelIdConfig, Name, ProviderId};
-use jp_conversation::event::{ChatResponse, ToolCallRequest};
 use serde_json::{Map, Value};
 
 use super::Provider;
@@ -78,10 +73,7 @@ impl MockProvider {
     #[must_use]
     pub fn with_message(content: &str) -> Self {
         Self::new(vec![
-            Event::Part {
-                index: 0,
-                event: ChatResponse::message(content).into(),
-            },
+            Event::message(0, content),
             Event::flush(0),
             Event::Finished(FinishReason::Completed),
         ])
@@ -91,15 +83,9 @@ impl MockProvider {
     #[must_use]
     pub fn with_reasoning_and_message(reasoning: &str, message: &str) -> Self {
         Self::new(vec![
-            Event::Part {
-                index: 0,
-                event: ChatResponse::reasoning(reasoning).into(),
-            },
+            Event::reasoning(0, reasoning),
             Event::flush(0),
-            Event::Part {
-                index: 1,
-                event: ChatResponse::message(message).into(),
-            },
+            Event::message(1, message),
             Event::flush(1),
             Event::Finished(FinishReason::Completed),
         ])
@@ -113,10 +99,7 @@ impl MockProvider {
         let mut events = Vec::with_capacity(chunks.len() + 2);
 
         for &chunk in chunks {
-            events.push(Event::Part {
-                index: 0,
-                event: ChatResponse::message(chunk).into(),
-            });
+            events.push(Event::message(0, chunk));
         }
 
         events.push(Event::flush(0));
@@ -130,18 +113,14 @@ impl MockProvider {
     pub fn with_tool_call(
         tool_id: impl Into<String>,
         tool_name: impl Into<String>,
-        arguments: Map<String, Value>,
+        arguments: &Map<String, Value>,
     ) -> Self {
+        let id = tool_id.into();
+        let name = tool_name.into();
+        let args_json = serde_json::to_string(arguments).unwrap_or_default();
         Self::new(vec![
-            Event::Part {
-                index: 0,
-                event: ToolCallRequest {
-                    id: tool_id.into(),
-                    name: tool_name.into(),
-                    arguments,
-                }
-                .into(),
-            },
+            Event::tool_call_start(0, &id, &name),
+            Event::tool_call_args(0, args_json),
             Event::flush(0),
             Event::Finished(FinishReason::Completed),
         ])

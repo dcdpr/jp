@@ -4,9 +4,8 @@ expression: v
 ---
 [
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -15,19 +14,14 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -36,14 +30,9 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -52,19 +41,14 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
@@ -80,19 +64,14 @@ expression: v
                     "google_thought_signature": String("Ci8Bvj72+3gAPAC9iNkgEQOmpDE/eDYP6zq+NxN7WFtfdATJLMbWDRPio+xfg9XBwwpiAb4+9vvrtgO72uX5wT7j9Ks65NfY0zTSlJTnPFxDyk4xO2TfL2m2dvRN/CxLiPgMfhBgRZrtK/e1ULBH72ISzkGKPFtWy6Y6bgrBjISen1PkrJEkhR2bNcSWBS2Wunt5MwgKxQEBvj72+6otdhbltBAqURteHf9liLw1l9lOvi1AZtTx0Pvkv7qKWXepP2IX/t8PhK7iDGxJK9Jw0wkVqI0bLEPktdAJjyOTnxSJSKZaLIXTMaGBOxcQg/E4JuXchFzat33ToQZkPZH+14cUUhBdboIj7IEIZat+4PY1KBfa2mfpVNCej/n6uPHEtvGDX+39vTUwGvFQoxo1oRPlSHyrj6M6tzhVSh9JCvRJUygOEefTMLy779bDVVyBuvFwL5GkVNqDsFzysQrfAQG+Pvb769spZgCf9+DLiZiWZI0lNvmLe68QzbaYLeJiMjHMtiR0dl2SWADHfqkjK8/6QriCtb1uJ4C1WT1h7voR+YU25Ko3bxRKRiGnldXT9Rm/e5TrCpC5BBpkRT5U1Xy25qW0oyvCwkm0BsLgbOnj5hay9roMC3ouY7ancRohwc6R+/g6oIazEIgnSxfhsiKqHCFD90VPA9enD1sEUK9SEXeSUD+LqmI5XF7Qp7KM0N3NGhi6YAQ+Seo/sOPMARW3xUKFhurJf+x5jdpW2pk0MQEugz1kxHFrYEM0Bl8K5gEBvj72+/KowDSgpQX8BM39ypyHulv/j0F80A2JDUzd/e30thjGdCTdJn/TV4It9uN4LgkeU3RsSKXhJiZjctOU64fzoe0LwWtWyopAuFd9Ns0SiYsrvnUmgEGE9wDA4KhCmZSS7gnwYqvluyO72esajXO1nAYiq/Ear9APw6o4RL+6y5EvhlLj8xARLwIWkiqq0MRogMPL6EZctCPe3FOZXdA3YGV5rcs5pICIamzkgrDvSEN3K4db1APk519fsiyqLOM45+VX4GZjU6Or7AZfXlpqDNnx/+7fPX2A4+BJq+0+H06a0ArNAQG+Pvb7bvDsBxYIAbvmmVJqiL+4LaqfJ8ho+sjb+cueffmTlaAyYnTKjaZ1eQbahMcTWBheoSQpvSWVCvT3c8MHBUABtVTPjRunBd6wZ+EEf1gNLuAn/d88SJxXlr1wlpgpT6uGKWhylthpy/MG/utllkhjlbV6akgkCKLQE+NKhp3CHBLNP7yF2UqjwJLTt9PRNjdCbL45BwLwcYwalZVSqbEnubImVJqBGgsq9MfTBLhWq1d+NrbpZPesZM+RkWzt7TotgxsHW6xJHkU="),
                 },
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -101,19 +80,14 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -122,14 +96,9 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -138,11 +107,7 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),

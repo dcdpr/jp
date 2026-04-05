@@ -7,11 +7,11 @@ use jp_config::{
 use jp_conversation::{
     ConversationEvent, ConversationStream,
     event::{ChatRequest, ChatResponse},
-    event_builder::EventBuilder,
     thread::ThreadBuilder,
 };
 use jp_llm::{
     event::Event,
+    event_builder::EventBuilder,
     provider,
     retry::{RetryConfig, collect_with_retry},
     title,
@@ -179,7 +179,13 @@ async fn generate_titles(
     let mut flushed = Vec::new();
     for event in llm_events {
         match event {
-            Event::Part { index, event } => builder.handle_part(index, event),
+            Event::Part {
+                index,
+                part,
+                metadata,
+            } => {
+                builder.handle_part(index, part, metadata);
+            }
             Event::Flush { index, metadata } => {
                 flushed.extend(builder.handle_flush(index, metadata));
             }

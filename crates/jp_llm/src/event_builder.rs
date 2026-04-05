@@ -1,6 +1,6 @@
 //! Event accumulation for the query stream pipeline.
 //!
-//! The [`EventBuilder`] accumulates streamed `jp_llm::Event` chunks from the
+//! The [`EventBuilder`] accumulates streamed [`EventPart`] chunks from the
 //! LLM into complete [`ConversationEvent`]s. It uses index-based buffering
 //! where each index represents one logical event.
 //!
@@ -9,12 +9,12 @@
 //! LLM providers stream events with an index:
 //!
 //! ```text
-//! Part { index: 0, ChatResponse::Reasoning("Let ") }
-//! Part { index: 0, ChatResponse::Reasoning("me think") }
+//! Part { index: 0, Reasoning("Let ") }
+//! Part { index: 0, Reasoning("me think") }
 //! Flush { index: 0 }  → Reasoning complete, pushed to stream
 //!
-//! Part { index: 1, ChatResponse::Message("The ") }
-//! Part { index: 1, ChatResponse::Message("answer") }
+//! Part { index: 1, Message("The ") }
+//! Part { index: 1, Message("answer") }
 //! Flush { index: 1 }  → Message complete, pushed to stream
 //! ```
 //!
@@ -26,28 +26,27 @@
 //!   index are complete and should be merged into a single `ConversationEvent`
 //! - **Order preservation**: Flush events arrive in index order
 //! - **Tool calls may be multi-part**: Providers that stream tool calls
-//!   incrementally (e.g. Anthropic) emit an initial Part with name + id
-//!   when the tool call starts, followed by a final Part with the parsed
-//!   arguments once all JSON chunks have arrived. The Flush after the last
-//!   Part marks the tool call as complete.
+//!   incrementally (e.g. Anthropic) emit `ToolCallPart::Start` when the tool
+//!   call begins, followed by `ToolCallPart::ArgumentChunk` events as JSON
+//!   arrives. The Flush after the last chunk marks the tool call as complete.
 
 use std::collections::{HashMap, hash_map::Entry};
 
-use indexmap::IndexMap;
+use jp_conversation::{
+    ConversationEvent,
+    event::{ChatResponse, ToolCallRequest},
+};
 use serde_json::{Map, Value};
 use tracing::warn;
 
-use crate::{
-    ConversationEvent, EventKind,
-    event::{ChatResponse, ToolCallRequest},
-};
+use crate::event::{EventPart, ToolCallPart};
 
 /// Accumulates streamed events into complete [`ConversationEvent`]s.
 pub struct EventBuilder {
     /// Index-based buffers for accumulating partial events.
     buffers: HashMap<usize, IndexBuffer>,
 
-    /// Metadata accumulated from `jp_llm::Event::Part`s, keyed by stream index.
+    /// Metadata accumulated from streaming parts, keyed by stream index.
     metadata: HashMap<usize, Map<String, Value>>,
 }
 
@@ -102,68 +101,61 @@ impl EventBuilder {
         }
     }
 
-    /// Handles a partial event from the LLM stream.
+    /// Handles a streaming chunk from the LLM.
     ///
     /// Accumulates the event content into the buffer for the given index.
-    pub fn handle_part(&mut self, index: usize, event: ConversationEvent) {
+    pub fn handle_part(&mut self, index: usize, part: EventPart, metadata: Map<String, Value>) {
         // Accumulate metadata from each part (e.g. thinking signatures).
-        if !event.metadata.is_empty() {
-            self.metadata
-                .entry(index)
-                .or_default()
-                .extend(event.metadata);
+        if !metadata.is_empty() {
+            self.metadata.entry(index).or_default().extend(metadata);
         }
 
-        match event.kind {
-            EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => {
-                match self.buffers.entry(index) {
-                    Entry::Occupied(mut e) => match e.get_mut().as_reasoning_mut() {
-                        Some(content) => content.push_str(&reasoning),
-                        None => warn_mismatch(e.get(), "Reasoning"),
-                    },
-                    Entry::Vacant(e) => {
-                        e.insert(IndexBuffer::Reasoning { content: reasoning });
-                    }
-                }
-            }
-            EventKind::ChatResponse(ChatResponse::Message { message }) => {
-                match self.buffers.entry(index) {
-                    Entry::Occupied(mut e) => match e.get_mut().as_message_mut() {
-                        Some(content) => content.push_str(&message),
-                        None => warn_mismatch(e.get(), "Message"),
-                    },
-                    Entry::Vacant(e) => {
-                        e.insert(IndexBuffer::Message { content: message });
-                    }
-                }
-            }
-            EventKind::ToolCallRequest(request) => match self.buffers.entry(index) {
-                Entry::Occupied(mut e) => e.get_mut().merge_tool_call(request),
+        match part {
+            EventPart::Reasoning(reasoning) => match self.buffers.entry(index) {
+                Entry::Occupied(mut e) => match e.get_mut().as_reasoning_mut() {
+                    Some(content) => content.push_str(&reasoning),
+                    None => warn_mismatch(e.get(), "Reasoning"),
+                },
                 Entry::Vacant(e) => {
-                    e.insert(IndexBuffer::ToolCall { request });
+                    e.insert(IndexBuffer::Reasoning { content: reasoning });
                 }
             },
-            EventKind::ChatResponse(ChatResponse::Structured { data }) => {
-                let Value::String(chunk) = data else {
-                    warn!("Structured part with non-string data; ignoring");
-                    return;
-                };
-
-                match self.buffers.entry(index) {
-                    Entry::Occupied(mut e) => match e.get_mut().as_structured_mut() {
-                        Some(content) => content.push_str(&chunk),
-                        None => warn_mismatch(e.get(), "Structured"),
-                    },
-                    Entry::Vacant(e) => {
-                        e.insert(IndexBuffer::Structured { content: chunk });
-                    }
+            EventPart::Message(message) => match self.buffers.entry(index) {
+                Entry::Occupied(mut e) => match e.get_mut().as_message_mut() {
+                    Some(content) => content.push_str(&message),
+                    None => warn_mismatch(e.get(), "Message"),
+                },
+                Entry::Vacant(e) => {
+                    e.insert(IndexBuffer::Message { content: message });
                 }
-            }
-            EventKind::ChatRequest(_)
-            | EventKind::ToolCallResponse(_)
-            | EventKind::InquiryRequest(_)
-            | EventKind::InquiryResponse(_)
-            | EventKind::TurnStart(_) => {}
+            },
+            EventPart::ToolCall(tool_call_part) => match self.buffers.entry(index) {
+                Entry::Occupied(mut e) => e.get_mut().merge_tool_call_part(tool_call_part),
+                Entry::Vacant(e) => {
+                    let buffer = match tool_call_part {
+                        ToolCallPart::Start { id, name } => IndexBuffer::ToolCall {
+                            id,
+                            name,
+                            arguments_json: String::new(),
+                        },
+                        ToolCallPart::ArgumentChunk(json) => IndexBuffer::ToolCall {
+                            id: String::new(),
+                            name: String::new(),
+                            arguments_json: json,
+                        },
+                    };
+                    e.insert(buffer);
+                }
+            },
+            EventPart::Structured(chunk) => match self.buffers.entry(index) {
+                Entry::Occupied(mut e) => match e.get_mut().as_structured_mut() {
+                    Some(content) => content.push_str(&chunk),
+                    None => warn_mismatch(e.get(), "Structured"),
+                },
+                Entry::Vacant(e) => {
+                    e.insert(IndexBuffer::Structured { content: chunk });
+                }
+            },
         }
     }
 
@@ -175,7 +167,7 @@ impl EventBuilder {
     pub fn handle_flush(
         &mut self,
         index: usize,
-        metadata: IndexMap<String, Value>,
+        metadata: Map<String, Value>,
     ) -> Option<ConversationEvent> {
         let buffer = self.buffers.remove(&index)?;
 
@@ -190,7 +182,25 @@ impl EventBuilder {
             IndexBuffer::Message { content } => {
                 ConversationEvent::now(ChatResponse::Message { message: content })
             }
-            IndexBuffer::ToolCall { request } => ConversationEvent::now(request),
+            IndexBuffer::ToolCall {
+                id,
+                name,
+                arguments_json,
+            } => {
+                let arguments = if arguments_json.trim().is_empty() {
+                    serde_json::Map::new()
+                } else {
+                    serde_json::from_str(&arguments_json).unwrap_or_else(|e| {
+                        warn!("Failed to parse tool call arguments JSON: {e}");
+                        serde_json::Map::new()
+                    })
+                };
+                ConversationEvent::now(ToolCallRequest {
+                    id,
+                    name,
+                    arguments,
+                })
+            }
             IndexBuffer::Structured { content } => {
                 let data = serde_json::from_str::<Value>(&content).unwrap_or_else(|e| {
                     warn!("Failed to parse structured response JSON: {e}");
@@ -214,8 +224,10 @@ impl EventBuilder {
 
     /// Flushes all remaining buffers.
     ///
-    /// This is used when the stream ends (e.g. on `jp_llm::Event::Finished`) to
+    /// This is used when the stream ends (e.g. on [`Event::Finished`]) to
     /// ensure any partially accumulated events are not silently dropped.
+    ///
+    /// [`Event::Finished`]: crate::event::Event::Finished
     #[expect(
         clippy::needless_collect,
         reason = "collect breaks the borrow on self.buffers"
@@ -224,7 +236,7 @@ impl EventBuilder {
         let indices: Vec<usize> = self.buffers.keys().copied().collect();
         indices
             .into_iter()
-            .filter_map(|index| self.handle_flush(index, IndexMap::new()))
+            .filter_map(|index| self.handle_flush(index, Map::new()))
             .collect()
     }
 }
@@ -247,16 +259,20 @@ enum IndexBuffer {
         /// The message content accumulated so far.
         content: String,
     },
-    /// Accumulates a tool call request (may be multi-part).
+    /// Accumulates a tool call request (identity + argument JSON chunks).
     ToolCall {
-        /// The tool call request accumulated so far.
-        request: ToolCallRequest,
+        /// Tool call ID. First non-empty value wins.
+        id: String,
+        /// Tool name. First non-empty value wins.
+        name: String,
+        /// Raw JSON arguments accumulated from chunks.
+        arguments_json: String,
     },
     /// Accumulates streamed JSON chunks for a structured response.
     ///
-    /// During streaming, providers emit `ChatResponse::Structured` parts
-    /// with `Value::String` chunks. On flush, the concatenated string is
-    /// parsed into a `Value`. If parsing fails, the raw string is preserved.
+    /// During streaming, providers emit `EventPart::Structured` chunks.
+    /// On flush, the concatenated string is parsed into a `Value`. If
+    /// parsing fails, the raw string is preserved.
     Structured {
         /// The JSON string accumulated so far.
         content: String,
@@ -264,12 +280,14 @@ enum IndexBuffer {
 }
 
 impl IndexBuffer {
-    /// Merges an incoming tool call request into this buffer.
-    ///
-    /// First non-empty value wins for id and name; arguments are extended.
-    /// Logs a warning if the buffer is not a `ToolCall`.
-    fn merge_tool_call(&mut self, incoming: ToolCallRequest) {
-        let Self::ToolCall { request } = self else {
+    /// Merges an incoming tool call part into this buffer.
+    fn merge_tool_call_part(&mut self, part: ToolCallPart) {
+        let Self::ToolCall {
+            id,
+            name,
+            arguments_json,
+        } = self
+        else {
             warn!(
                 buffer_type = self.as_str(),
                 "Expected ToolCall buffer; ignoring merge."
@@ -277,13 +295,22 @@ impl IndexBuffer {
             return;
         };
 
-        if request.id.is_empty() && !incoming.id.is_empty() {
-            request.id = incoming.id;
+        match part {
+            ToolCallPart::Start {
+                id: incoming_id,
+                name: incoming_name,
+            } => {
+                if id.is_empty() && !incoming_id.is_empty() {
+                    *id = incoming_id;
+                }
+                if name.is_empty() && !incoming_name.is_empty() {
+                    *name = incoming_name;
+                }
+            }
+            ToolCallPart::ArgumentChunk(json) => {
+                arguments_json.push_str(&json);
+            }
         }
-        if request.name.is_empty() && !incoming.name.is_empty() {
-            request.name = incoming.name;
-        }
-        request.arguments.extend(incoming.arguments);
     }
 
     /// Returns a mutable reference to the reasoning buffer content, if any.

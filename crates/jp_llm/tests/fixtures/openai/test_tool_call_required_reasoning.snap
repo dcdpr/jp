@@ -4,9 +4,8 @@ expression: v
 ---
 [
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -18,14 +17,9 @@ expression: v
                     "openai_encrypted_content": String("gAAAAABpquoVLGP3qF6-dYmM1OAqSRhhtlt1FlqR7WGFp44BtWk5N6BYFBwm2CNnx7SQK4b1lrwK9A5YHiigC-DhRe3Smq1omrj48ZvWP8rLnYiANoAiE3uRsTOmd2iYIXIEH7YpmI1U227FuSFLWvNzUZdkzHwcGw4hxdhbi8Ouzjm9PYl5rEWf624ZtIb6Ar3yB4aqfjxH6NJf78GjRiCAyRcuDM1hONVM-Y3l3fm2tN4EbAqmFIV3BYbzwuR05mY6HnB_2__FgNEEeg2j5P4Tup73tLFg7aQjxus72kRJvW5MGZcxf7VpApywOOci7soxUtCRc_XJoQZubL0yKh5Ror4oYztR4bcY5AiiVThNah031fuY4vJCQjL7VAervkaXeauM3ReI9K9GIxz6FsW2wuAs6ebopVL5QkwVyJ1TGmDchgdq1XxtyaULAFrXhqjy50eNIWS-QKNKtVvvUcjYxbd7aDrV4DNed2wFGqne-9TqOi_9hSYLDOgNh8kku3GpjEDocq2cokoKOTMSec6XqMbQJZlmD9Vm4h_lrVl-MEmfsDvSlXBI9F5rxvBTiQgy7GSud5J3wURjUeinwAFmaSqBhYX9DrcWsto985k81YYhKV0FPgIgnS1m1OZ4qZBCBO8N88xmoUJ4iyqkH5-OqV3CSVOjV_SGFZENRtQ1xUQcedU-6gyCgWwJlXDypr2ibfE-4vxeHAxVy-qKhHygUKHJ0cuYOQClqlWy-EXa4CeSCB3Nk9GQf-axukX8EMpyxoRT50tQt7jDPEEAihTsm7O2ESCkzsjt98tfTpfYxG19mYG51Hmedp0JR7unnRGWeQjXQ2wTlsKq8nbg0IANT6vgHkT78kQXNyXj_vJNmDOnHwQemD8xl61K_yQHayiMPASK__TMFQzgYZVLPQcuol-dzdJp4YwjiPaUhzK7nB6Nq9Q9Xf5z5PoTUsy5lPwEd8oOYIbn7J1VNMD1924gSIRefcWUemUk1cJPXZ9ht-EaPEaEQVYaYVMY6GXi2IT8O17O2IkfmWDs1z9nF95DF5V8djCXJIcNpIwOibGThCLHjRmVh652tVytPS22iJMPt4Bou9rIjImCSIRAkPPdK-MMi2ARkGZeiNet1le6bBsJFNCytUYVYDHgc-6K60j7UEoqUgM4AlZPU-XWtqDBFmzSWQisXvqP40jSwqCwOLlmcZ2_aY1hNyiH9QfevCqJTeK66LV2Ws-gOJQNba1H3L1Guj3u69PHiRmKGcnD8p_z2wMMPktD4ec8VaCUHkHVMAPMNBF-pqzYp5kvGr-jGsZcaHqPw24YRd8fjUrrgzIA_C6JdSC5l-WRdXz_yB9K9jP7x5lAYqFrTfG5ybIL7GeHGQK1gyC-bgz4l5it6vwvkAahcZW_FQ1Hb6q41Z-LKnicR9zfWYWFiLuGgV60s0NIea8nZ2gONzP6ipIiIeiwoc6-Pm7f9rvfkZt8FGE9A9EIYotqhW8SGYl5Z_bdVGTh_7CfPoxNz3yNpXh5a2nQ8XiBnese1GA6zI2hddo-mr5U-ZV56A9tdc-A1RgK7RuXmzYOyLlfzQ1QDKQvKQ4DvrtWYTpn1WfDXDpwpnJmC2w6HbBHVi0Ok8fys3Vsisu8pL8Adw=="),
                 },
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
@@ -39,19 +33,14 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -62,11 +51,7 @@ expression: v
                     "openai_item_id": String("msg_0487ea678e0f91a70169aaea16677081a2a54bcaafc7063877"),
                 },
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),

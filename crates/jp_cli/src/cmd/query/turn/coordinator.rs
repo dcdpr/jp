@@ -2,11 +2,13 @@ use std::sync::Arc;
 
 use jp_config::style::StyleConfig;
 use jp_conversation::{
-    ConversationEvent, ConversationStream, EventKind,
+    ConversationEvent, ConversationStream,
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
+};
+use jp_llm::{
+    event::{Event, EventPart, FinishReason, ToolCallPart},
     event_builder::EventBuilder,
 };
-use jp_llm::event::{Event, FinishReason};
 use jp_printer::Printer;
 
 use crate::cmd::query::{
@@ -151,27 +153,40 @@ impl TurnCoordinator {
 
     fn handle_streaming_event(&mut self, stream: &mut ConversationStream, event: Event) -> Action {
         match event {
-            Event::Part { index, event } => {
-                if let EventKind::ToolCallRequest(_) = &event.kind {
-                    // Flush any buffered markdown so it appears before the
-                    // tool-call output rather than being delayed until after.
-                    self.chat_renderer.flush();
-                    self.chat_renderer.transition_to_tool_call();
+            Event::Part {
+                index,
+                part,
+                metadata,
+            } => {
+                match &part {
+                    EventPart::ToolCall(ToolCallPart::Start { .. }) => {
+                        // Flush any buffered markdown so it appears before the
+                        // tool-call output rather than being delayed until after.
+                        self.chat_renderer.flush();
+                        self.chat_renderer.transition_to_tool_call();
+                    }
+                    EventPart::Message(text) => {
+                        self.chat_renderer.render(&ChatResponse::Message {
+                            message: text.clone(),
+                        });
+                    }
+                    EventPart::Reasoning(text) => {
+                        self.chat_renderer.render(&ChatResponse::Reasoning {
+                            reasoning: text.clone(),
+                        });
+                    }
+                    EventPart::Structured(chunk) => {
+                        self.structured_renderer
+                            .render_chunk(&ChatResponse::Structured {
+                                data: serde_json::Value::String(chunk.clone()),
+                            });
+                    }
+                    EventPart::ToolCall(ToolCallPart::ArgumentChunk(_)) => {
+                        // Forwarded to EventBuilder only; no rendering.
+                    }
                 }
 
-                match &event.kind {
-                    EventKind::ChatResponse(
-                        resp @ (ChatResponse::Message { .. } | ChatResponse::Reasoning { .. }),
-                    ) => {
-                        self.chat_renderer.render(resp);
-                    }
-                    EventKind::ChatResponse(resp @ ChatResponse::Structured { .. }) => {
-                        self.structured_renderer.render_chunk(resp);
-                    }
-                    _ => {}
-                }
-
-                self.event_builder.handle_part(index, event);
+                self.event_builder.handle_part(index, part, metadata);
                 Action::Continue
             }
             Event::Flush { index, metadata } => {

@@ -27,7 +27,6 @@ mod compat;
 pub mod conversation;
 pub mod error;
 pub mod event;
-pub mod event_builder;
 pub(crate) mod storage;
 pub mod stream;
 pub mod thread;

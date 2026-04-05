@@ -7,8 +7,6 @@ use async_anthropic::errors::AnthropicError;
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use serde_json::Value;
 
-use crate::stream::aggregator::tool_call_request::AggregationError;
-
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 /// A provider-agnostic streaming error.
@@ -330,9 +328,6 @@ pub enum Error {
 
     #[error(transparent)]
     ModelId(#[from] jp_config::model::id::ModelIdError),
-
-    #[error(transparent)]
-    ToolCallRequestAggregator(#[from] AggregationError),
 }
 
 #[cfg(test)]

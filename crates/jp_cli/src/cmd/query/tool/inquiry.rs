@@ -22,12 +22,12 @@ use jp_config::assistant::{sections::SectionConfig, tool_choice::ToolChoice};
 use jp_conversation::{
     ConversationEvent, ConversationStream, EventKind,
     event::{ChatRequest, ChatResponse},
-    event_builder::EventBuilder,
     thread::Thread,
 };
 use jp_llm::{
     Provider,
     event::Event,
+    event_builder::EventBuilder,
     model::ModelDetails,
     query::ChatQuery,
     retry::{RetryConfig, collect_with_retry},
@@ -299,7 +299,13 @@ impl InquiryBackend for LlmInquiryBackend {
         let mut flushed = Vec::new();
         for event in llm_events {
             match event {
-                Event::Part { index, event } => builder.handle_part(index, event),
+                Event::Part {
+                    index,
+                    part,
+                    metadata,
+                } => {
+                    builder.handle_part(index, part, metadata);
+                }
                 Event::Flush { index, metadata } => {
                     flushed.extend(builder.handle_flush(index, metadata));
                 }

@@ -4,9 +4,8 @@ expression: v
 ---
 [
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -15,14 +14,9 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
@@ -41,19 +35,14 @@ expression: v
                     "google_thought_signature": String("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"),
                 },
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -62,11 +51,7 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),

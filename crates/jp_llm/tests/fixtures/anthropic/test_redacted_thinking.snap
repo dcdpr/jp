@@ -4,9 +4,8 @@ expression: v
 ---
 [
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -17,14 +16,9 @@ expression: v
                     "anthropic_thinking_signature": String("Eu0HCkYICxgCKkBT1+g48EhyJ8xqjGvMtPb/eyJ48JxltjYVi6ZXFAFJ11iee56p/LsZxZpOmTlRBzIFtB5m2fJt2vu4EO7k/DinEgxE/xzbI0gvybdu1D4aDMqhgP/YGBuyAcwt6yIwbPvOyCw7RpDQEukCLy+DpPyw7eNHIsLsooCYncalaMVMIfZuE4j5jtNmfE4yGpJRKtQGyi5zqxRUOG90Us1tB5ITlmaGF1ntO69v0LK0fmu/wwIs5yoNt92N4soYhwTWssvKZMZwW2dDCLTXsvzH0YdYnVCzGHun2o/rJi6I3hLB9F4lnuICvQDLAWfggPZFqsPhJYowTSTaxZiXNEmrGYHGunWUUCriQeKAd/xKxps+x6Pc24bqlVMI8p02lf+fq4WT8aGi09gcmjpOtS+cqu/YDE3MxeElJiyRq8d6tBp6/tOIaq5g146geiA9y4SEmao8HgNxENBu4klrtboEh4MqKmqH5yLiAi8P4Z+gQTx4uq8Lysw7RncN0d/eDLBO9Ggyk7p4BcUbOIQ+LB+WoYBgxZBpSTygNA/2Q98G5luwSdER/7JqaNa18eDaoPm/rBQFZFFXiHtU3skPMRoqlzMSxN7kTNClR0pofZieaDFAlZ0Vn1vOI4oFtOlv9kEGKEhw0K6QKUsA/pDJR+OcX6rd/QI/rT6EGdWriGpG7Jcm+FiSXiW4bmYILSeA/WQBFcuC3MP9NueMBkEvdif8kiqnhXKanYhGeKXWHnZjVtSg5rjDo4VEV1LKTtAXO7S0+9CXAvC9h2R+KpDj3ZuoBWHDA8qWUr9BfWg+Z5ZXEQ/8UIQ/tZzknlSeSTiN4kGIRT/5Kyuc9xlvpHQMxeCl3jhfVo999dk/BsUtk4DwFR+3O1rPVHocGVMPIEMbkFjOuAbvTtObq50M2489M9EvhZCXf3czYRSIIlS148ogVuVrAGToBcz50qmxqKK5MLYKFrLbtgXVAKTVJ/ulYPM8c9QxcEY1D/gy3bPt9cnng1sZ0qnCzyp3aRK5vMLDHe63yQwzgtIi+l1ivv9+3hT2kD+SoUcxjczg7FfrqcNIGj2A4Y90jvCdj7a/EDLWisVJ+fw7svNLtwJvoHunKq3vvf2rnVFT5T/CIa9TUW+cQ5NRotkwQWWkooYdJ8kjcxZZnFmflAV+W95BYKTjm4qi+5pHlFqxfmwa80aXQubcfOWE2nZo+QYcJx4BqRbzP6sObDF6NDRfyGhryUufD4RN1oyXQHxGNv4geRLcKsFU/Ac6WggWSLyIK/PaQaEE+ximvF1uWmpgwXSBpFTMNmaF0r7KX+td58tdJXYus6v7GgyYtMOl3dnhGAE="),
                 },
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -33,19 +27,14 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
     ],
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -54,11 +43,7 @@ expression: v
                 ),
                 metadata: {},
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),

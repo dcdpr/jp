@@ -18,7 +18,7 @@ use jp_config::{
 };
 use jp_conversation::{
     ConversationStream,
-    event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest},
+    event::{ChatResponse, ConversationEvent, EventKind},
     thread::{ThreadParts, text_attachments_to_xml},
 };
 use serde_json::{Map, Value};
@@ -628,39 +628,37 @@ fn map_candidate(
 
         let index = state.current_virtual_index;
         let mut event = match data {
-            types::ContentData::Text(text) if mode.is_reasoning() => Event::Part {
-                event: ConversationEvent::now(ChatResponse::reasoning(text)),
-                index,
-            },
-            types::ContentData::Text(text) if is_structured => Event::Part {
-                event: ConversationEvent::now(ChatResponse::structured(Value::String(text))),
-                index,
-            },
-            types::ContentData::Text(text) => Event::Part {
-                event: ConversationEvent::now(ChatResponse::message(text)),
-                index,
-            },
+            types::ContentData::Text(text) if mode.is_reasoning() => Event::reasoning(index, text),
+            types::ContentData::Text(text) if is_structured => Event::structured(index, text),
+            types::ContentData::Text(text) => Event::message(index, text),
             types::ContentData::FunctionCall(types::FunctionCall {
                 id,
                 name,
                 arguments,
-            }) => Event::Part {
-                event: ConversationEvent::now(ToolCallRequest {
-                    id: id.unwrap_or_else(|| format!("{name}_{index}")),
-                    name,
-                    arguments: match arguments {
-                        serde_json::Value::Object(map) => map,
-                        v => serde_json::Map::from_iter([("input".into(), v)]),
-                    },
-                }),
-                index,
-            },
+            }) => {
+                let tool_id = id.unwrap_or_else(|| format!("{name}_{index}"));
+                let args_json = match arguments {
+                    Value::Object(map) => serde_json::to_string(&map).unwrap_or_default(),
+                    v => serde_json::to_string(&v).unwrap_or_default(),
+                };
+
+                // Google sends tool calls as a single block. Attach the thought
+                // signature (if present) to the start event so it propagates
+                // through `EventBuilder` into the persisted
+                // `ConversationEvent`.
+                let mut start = Event::tool_call_start(index, tool_id, name);
+                if let Some(v) = thought_signature {
+                    start.add_metadata_field(THOUGHT_SIGNATURE_KEY, v);
+                }
+                events.push(start);
+                events.push(Event::tool_call_args(index, args_json));
+
+                continue;
+            }
             _ => continue,
         };
 
-        if let Some(v) = thought_signature
-            && let Event::Part { event, .. } = &mut event
-        {
+        if let Some(v) = thought_signature {
             event.add_metadata_field(THOUGHT_SIGNATURE_KEY, v);
         }
 
@@ -998,7 +996,7 @@ impl From<GeminiError> for StreamError {
                 let status = value
                     .get("status")
                     .or_else(|| value.pointer("/error/code"))
-                    .and_then(serde_json::Value::as_u64);
+                    .and_then(Value::as_u64);
 
                 match status {
                     Some(429) => StreamError::rate_limit(None).with_source(err),

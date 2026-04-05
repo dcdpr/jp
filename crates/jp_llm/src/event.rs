@@ -1,6 +1,4 @@
-use indexmap::IndexMap;
-use jp_conversation::ConversationEvent;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// Represents a completed event from the LLM.
 ///
@@ -15,10 +13,12 @@ use serde_json::Value;
 ///
 /// Only after [`Event::Flush`] is produced with the given `index` value, should
 /// all previous parts be merged into a single [`ConversationEvent`] (e.g. via
-/// [`EventBuilder`](jp_conversation::event_builder::EventBuilder)).
+/// [`EventBuilder`](crate::event_builder::EventBuilder)).
+///
+/// [`ConversationEvent`]: jp_conversation::ConversationEvent
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    /// A part of a completed event.
+    /// A streaming chunk from the LLM provider.
     Part {
         /// The index of the final message in the array of complete messages
         /// streamed by the provider.
@@ -28,8 +28,11 @@ pub enum Event {
         /// different `index` values corresponding to their relative order.
         index: usize,
 
-        /// The event.
-        event: ConversationEvent,
+        /// The streaming data chunk.
+        part: EventPart,
+
+        /// Metadata accumulated during streaming (e.g. thinking signatures).
+        metadata: Map<String, Value>,
     },
 
     /// Flush one or more [`Event::Part`]s.
@@ -41,7 +44,7 @@ pub enum Event {
         index: usize,
 
         /// Additional opaque metadata associated with the event.
-        metadata: IndexMap<String, Value>,
+        metadata: Map<String, Value>,
     },
 
     /// Instruct the caller to patch the conversation stream based on the
@@ -62,6 +65,80 @@ pub enum Event {
 
     /// The response was finished.
     Finished(FinishReason),
+}
+
+/// A chunk of streaming data from an LLM provider.
+///
+/// Each variant maps to a distinct content type that providers differentiate
+/// between. The [`EventBuilder`] accumulates these into [`ConversationEvent`]s
+/// on [`Event::Flush`].
+///
+/// [`EventBuilder`]: crate::event_builder::EventBuilder
+/// [`ConversationEvent`]: jp_conversation::ConversationEvent
+#[derive(Debug, Clone, PartialEq)]
+pub enum EventPart {
+    /// A chunk of assistant message content.
+    Message(String),
+
+    /// A chunk of reasoning/thinking content.
+    Reasoning(String),
+
+    /// A chunk of structured response JSON.
+    Structured(String),
+
+    /// Tool call streaming data.
+    ToolCall(ToolCallPart),
+}
+
+/// Streaming events for a single tool call.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolCallPart {
+    /// Tool call identity. First non-empty value wins per field when multiple
+    /// Start events arrive for the same index.
+    Start {
+        /// Unique identifier for this tool call.
+        id: String,
+
+        /// Name of the tool to execute.
+        name: String,
+    },
+
+    /// A raw JSON chunk of tool call arguments.
+    ArgumentChunk(String),
+}
+
+impl EventPart {
+    /// Returns the text content of this part, if it's a message or reasoning
+    /// chunk.
+    #[must_use]
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::Message(s) | Self::Reasoning(s) => Some(s),
+            Self::Structured(_) | Self::ToolCall(_) => None,
+        }
+    }
+
+    /// Returns a mutable reference to the text content, if it's a message or
+    /// reasoning chunk.
+    #[must_use]
+    pub fn as_text_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Message(s) | Self::Reasoning(s) => Some(s),
+            Self::Structured(_) | Self::ToolCall(_) => None,
+        }
+    }
+
+    /// Returns `true` if this is a reasoning chunk.
+    #[must_use]
+    pub const fn is_reasoning(&self) -> bool {
+        matches!(self, Self::Reasoning(_))
+    }
+
+    /// Returns `true` if this is a tool call event.
+    #[must_use]
+    pub const fn is_tool_call(&self) -> bool {
+        matches!(self, Self::ToolCall(_))
+    }
 }
 
 /// A patch to apply to historical conversation events.
@@ -94,10 +171,63 @@ pub enum PatchAction {
 }
 
 impl Event {
+    /// Create a new [`Event::Part`] with a message chunk.
+    #[must_use]
+    pub fn message(index: usize, content: impl Into<String>) -> Self {
+        Self::Part {
+            index,
+            part: EventPart::Message(content.into()),
+            metadata: Map::new(),
+        }
+    }
+
+    /// Create a new [`Event::Part`] with a reasoning chunk.
+    #[must_use]
+    pub fn reasoning(index: usize, content: impl Into<String>) -> Self {
+        Self::Part {
+            index,
+            part: EventPart::Reasoning(content.into()),
+            metadata: Map::new(),
+        }
+    }
+
+    /// Create a new [`Event::Part`] with a structured JSON chunk.
+    #[must_use]
+    pub fn structured(index: usize, content: impl Into<String>) -> Self {
+        Self::Part {
+            index,
+            part: EventPart::Structured(content.into()),
+            metadata: Map::new(),
+        }
+    }
+
+    /// Create a new [`Event::Part`] with a tool call start signal.
+    #[must_use]
+    pub fn tool_call_start(index: usize, id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self::Part {
+            index,
+            part: EventPart::ToolCall(ToolCallPart::Start {
+                id: id.into(),
+                name: name.into(),
+            }),
+            metadata: Map::new(),
+        }
+    }
+
+    /// Create a new [`Event::Part`] with a tool call argument chunk.
+    #[must_use]
+    pub fn tool_call_args(index: usize, json: impl Into<String>) -> Self {
+        Self::Part {
+            index,
+            part: EventPart::ToolCall(ToolCallPart::ArgumentChunk(json.into())),
+            metadata: Map::new(),
+        }
+    }
+
     /// Create a new [`Event::Flush`] event.
     #[must_use]
     pub fn flush(index: usize) -> Self {
-        Self::flush_with_metadata(index, IndexMap::new())
+        Self::flush_with_metadata(index, Map::new())
     }
 
     /// Create a new [`Event::Flush`] event with a single metadata field.
@@ -107,41 +237,50 @@ impl Event {
         key: impl Into<String>,
         value: impl Into<Value>,
     ) -> Self {
-        Self::flush_with_metadata(index, IndexMap::from_iter([(key.into(), value.into())]))
+        Self::flush_with_metadata(index, Map::from_iter([(key.into(), value.into())]))
     }
 
     /// Create a new [`Event::Flush`] event with additional metadata.
     #[must_use]
-    pub fn flush_with_metadata(index: usize, metadata: IndexMap<String, Value>) -> Self {
+    pub fn flush_with_metadata(index: usize, metadata: Map<String, Value>) -> Self {
         Self::Flush { index, metadata }
     }
 
+    /// Returns the [`EventPart`] if this is a `Part` event.
     #[must_use]
-    pub fn is_conversation_event(&self) -> bool {
-        matches!(self, Self::Part { .. })
-    }
-
-    #[must_use]
-    pub fn as_conversation_event(&self) -> Option<&ConversationEvent> {
+    pub fn as_part(&self) -> Option<&EventPart> {
         match self {
-            Self::Part { event, .. } => Some(event),
+            Self::Part { part, .. } => Some(part),
             _ => None,
         }
     }
 
+    /// Returns a mutable reference to the [`EventPart`] if this is a `Part`
+    /// event.
     #[must_use]
-    pub fn as_conversation_event_mut(&mut self) -> Option<&mut ConversationEvent> {
+    pub fn as_part_mut(&mut self) -> Option<&mut EventPart> {
         match self {
-            Self::Part { event, .. } => Some(event),
+            Self::Part { part, .. } => Some(part),
             _ => None,
         }
     }
 
+    /// Attaches a metadata field to a `Part` or `Flush` event. No-op for
+    /// other variants.
     #[must_use]
-    pub fn into_conversation_event(self) -> Option<ConversationEvent> {
+    pub fn with_metadata_field(mut self, key: impl Into<String>, value: impl Into<Value>) -> Self {
+        self.add_metadata_field(key, value);
+        self
+    }
+
+    /// Attaches a metadata field to a `Part` or `Flush` event. No-op for
+    /// other variants.
+    pub fn add_metadata_field(&mut self, key: impl Into<String>, value: impl Into<Value>) {
         match self {
-            Self::Part { event, .. } => Some(event),
-            _ => None,
+            Self::Part { metadata, .. } | Self::Flush { metadata, .. } => {
+                metadata.insert(key.into(), value.into());
+            }
+            _ => {}
         }
     }
 }

@@ -1,6 +1,6 @@
 # RFD 012: Typed LLM Streaming Events
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-15

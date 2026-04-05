@@ -21,8 +21,8 @@ use jp_config::{
     model::id::{self, Name, PartialModelIdConfig, ProviderId},
 };
 use jp_conversation::{
-    Conversation, ConversationEvent,
-    event::{ChatRequest, ChatResponse, InquirySource, TurnStart},
+    Conversation,
+    event::{ChatRequest, InquirySource, TurnStart},
 };
 use jp_inquire::prompt::MockPromptBackend;
 use jp_llm::{
@@ -78,24 +78,14 @@ impl SequentialMockProvider {
     fn with_tool_then_message(tool_id: &str, tool_name: &str, final_message: &str) -> Self {
         // First response: tool call
         let tool_call_events = vec![
-            Event::Part {
-                index: 0,
-                event: ConversationEvent::now(ToolCallRequest {
-                    id: tool_id.to_string(),
-                    name: tool_name.to_string(),
-                    arguments: Map::new(),
-                }),
-            },
+            Event::tool_call_start(0, tool_id.to_string(), tool_name.to_string()),
             Event::flush(0),
             Event::Finished(FinishReason::Completed),
         ];
 
         // Second response: final message
         let message_events = vec![
-            Event::Part {
-                index: 0,
-                event: ConversationEvent::now(ChatResponse::message(final_message)),
-            },
+            Event::message(0, final_message),
             Event::flush(0),
             Event::Finished(FinishReason::Completed),
         ];
@@ -501,32 +491,15 @@ async fn test_multiple_tool_calls_in_sequence() {
     // Create provider with multiple tool calls in first response
     let provider: Arc<dyn Provider> = Arc::new({
         let tool_call_events = vec![
-            Event::Part {
-                index: 0,
-                event: ConversationEvent::now(ToolCallRequest {
-                    id: "call_1".to_string(),
-                    name: "tool_a".to_string(),
-                    arguments: Map::new(),
-                }),
-            },
-            Event::Part {
-                index: 1,
-                event: ConversationEvent::now(ToolCallRequest {
-                    id: "call_2".to_string(),
-                    name: "tool_b".to_string(),
-                    arguments: Map::new(),
-                }),
-            },
+            Event::tool_call_start(0, "call_1".to_string(), "tool_a".to_string()),
+            Event::tool_call_start(1, "call_2".to_string(), "tool_b".to_string()),
             Event::flush(0),
             Event::flush(1),
             Event::Finished(FinishReason::Completed),
         ];
 
         let message_events = vec![
-            Event::Part {
-                index: 0,
-                event: ConversationEvent::now(ChatResponse::message("Both tasks completed.")),
-            },
+            Event::message(0, "Both tasks completed."),
             Event::flush(0),
             Event::Finished(FinishReason::Completed),
         ];
@@ -1544,32 +1517,19 @@ async fn test_multiple_tools_with_different_run_modes() {
         // Provider returns two tool calls, then a message
         let provider: Arc<dyn Provider> = Arc::new({
             let tool_call_events = vec![
-                Event::Part {
-                    index: 0,
-                    event: ConversationEvent::now(ToolCallRequest {
-                        id: "call_ask".to_string(),
-                        name: "tool_ask".to_string(),
-                        arguments: Map::new(),
-                    }),
-                },
-                Event::Part {
-                    index: 1,
-                    event: ConversationEvent::now(ToolCallRequest {
-                        id: "call_unattended".to_string(),
-                        name: "tool_unattended".to_string(),
-                        arguments: Map::new(),
-                    }),
-                },
+                Event::tool_call_start(0, "call_ask".to_string(), "tool_ask".to_string()),
+                Event::tool_call_start(
+                    1,
+                    "call_unattended".to_string(),
+                    "tool_unattended".to_string(),
+                ),
                 Event::flush(0),
                 Event::flush(1),
                 Event::Finished(FinishReason::Completed),
             ];
 
             let message_events = vec![
-                Event::Part {
-                    index: 0,
-                    event: ConversationEvent::now(ChatResponse::message("Both tools completed.")),
-                },
+                Event::message(0, "Both tools completed."),
                 Event::flush(0),
                 Event::Finished(FinishReason::Completed),
             ];
@@ -1874,10 +1834,7 @@ impl Provider for DelayedMockProvider {
         tokio::time::sleep(self.delay).await;
 
         let events = vec![
-            Event::Part {
-                index: 0,
-                event: ConversationEvent::now(ChatResponse::message(&self.response)),
-            },
+            Event::message(0, &self.response),
             Event::flush(0),
             Event::Finished(FinishReason::Completed),
         ];
@@ -2160,26 +2117,19 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
 
         let tool_call_events: Vec<Result<Event, jp_llm::error::StreamError>> = vec![
             // Initial Part: name+id known, arguments still streaming
-            Ok(Event::Part {
-                index: 0,
-                event: ConversationEvent::now(ToolCallRequest {
-                    id: "call_multi".to_string(),
-                    name: "fs_create_file".to_string(),
-                    arguments: Map::new(),
-                }),
-            }),
+            Ok(Event::tool_call_start(
+                0,
+                "call_multi".to_string(),
+                "fs_create_file".to_string(),
+            )),
         ];
 
-        let args_clone = args.clone();
         let delayed_events: Vec<Result<Event, jp_llm::error::StreamError>> = vec![
-            Ok(Event::Part {
-                index: 0,
-                event: ConversationEvent::now(ToolCallRequest {
-                    id: "call_multi".to_string(),
-                    name: "fs_create_file".to_string(),
-                    arguments: args_clone,
-                }),
-            }),
+            Ok(Event::tool_call_start(
+                0,
+                "call_multi".to_string(),
+                "fs_create_file".to_string(),
+            )),
             Ok(Event::flush(0)),
             Ok(Event::Finished(FinishReason::Completed)),
         ];
@@ -2202,10 +2152,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             Box::pin(first_stream.chain(delay_stream).chain(rest_stream));
 
         let message_events: Vec<Result<Event, jp_llm::error::StreamError>> = vec![
-            Ok(Event::Part {
-                index: 0,
-                event: ConversationEvent::now(ChatResponse::message("File created.")),
-            }),
+            Ok(Event::message(0, "File created.")),
             Ok(Event::flush(0)),
             Ok(Event::Finished(FinishReason::Completed)),
         ];
@@ -2510,28 +2457,15 @@ async fn test_markdown_flushed_before_tool_header() {
         // in the same response. The message must appear before the header.
         let provider: Arc<dyn Provider> = Arc::new({
             let events = vec![
-                Event::Part {
-                    index: 0,
-                    event: ConversationEvent::now(ChatResponse::message("Let me check that.\n\n")),
-                },
+                Event::message(0, "Let me check that.\n\n"),
                 Event::flush(0),
-                Event::Part {
-                    index: 1,
-                    event: ConversationEvent::now(ToolCallRequest {
-                        id: "call_1".to_string(),
-                        name: "fs_read_file".to_string(),
-                        arguments: Map::new(),
-                    }),
-                },
+                Event::tool_call_start(1, "call_1".to_string(), "fs_read_file".to_string()),
                 Event::flush(1),
                 Event::Finished(FinishReason::Completed),
             ];
 
             let followup = vec![
-                Event::Part {
-                    index: 0,
-                    event: ConversationEvent::now(ChatResponse::message("Done.\n\n")),
-                },
+                Event::message(0, "Done.\n\n"),
                 Event::flush(0),
                 Event::Finished(FinishReason::Completed),
             ];
@@ -2676,32 +2610,17 @@ async fn test_parallel_tool_calls_rendered_atomically() {
 
         let provider: Arc<dyn Provider> = Arc::new({
             let tool_events = vec![
-                Event::Part {
-                    index: 0,
-                    event: ConversationEvent::now(ToolCallRequest {
-                        id: "call_a".to_string(),
-                        name: "tool_a".to_string(),
-                        arguments: args_a,
-                    }),
-                },
-                Event::Part {
-                    index: 1,
-                    event: ConversationEvent::now(ToolCallRequest {
-                        id: "call_b".to_string(),
-                        name: "tool_b".to_string(),
-                        arguments: args_b,
-                    }),
-                },
+                Event::tool_call_start(0, "call_a".to_string(), "tool_a".to_string()),
+                Event::tool_call_args(0, serde_json::to_string(&args_a).unwrap()),
+                Event::tool_call_start(1, "call_b".to_string(), "tool_b".to_string()),
+                Event::tool_call_args(1, serde_json::to_string(&args_b).unwrap()),
                 Event::flush(0),
                 Event::flush(1),
                 Event::Finished(FinishReason::Completed),
             ];
 
             let followup = vec![
-                Event::Part {
-                    index: 0,
-                    event: ConversationEvent::now(ChatResponse::message("Both done.\n\n")),
-                },
+                Event::message(0, "Both done.\n\n"),
                 Event::flush(0),
                 Event::Finished(FinishReason::Completed),
             ];
@@ -2856,23 +2775,14 @@ async fn test_single_tool_call_rendered_with_args() {
 
         let provider: Arc<dyn Provider> = Arc::new({
             let events = vec![
-                Event::Part {
-                    index: 0,
-                    event: ConversationEvent::now(ToolCallRequest {
-                        id: "call_1".to_string(),
-                        name: "fs_read_file".to_string(),
-                        arguments: args,
-                    }),
-                },
+                Event::tool_call_start(0, "call_1".to_string(), "fs_read_file".to_string()),
+                Event::tool_call_args(0, serde_json::to_string(&args).unwrap()),
                 Event::flush(0),
                 Event::Finished(FinishReason::Completed),
             ];
 
             let followup = vec![
-                Event::Part {
-                    index: 0,
-                    event: ConversationEvent::now(ChatResponse::message("Here.\n\n")),
-                },
+                Event::message(0, "Here.\n\n"),
                 Event::flush(0),
                 Event::Finished(FinishReason::Completed),
             ];
@@ -3028,10 +2938,7 @@ fn structured_inquiry_events(inquiry_id: &str, answer: &Value) -> Vec<Event> {
     });
 
     vec![
-        Event::Part {
-            index: 0,
-            event: ChatResponse::structured(Value::String(data.to_string())).into(),
-        },
+        Event::structured(0, data.to_string()),
         Event::flush(0),
         Event::Finished(FinishReason::Completed),
     ]
@@ -3045,10 +2952,7 @@ fn unkeyed_structured_events(answer: &Value) -> Vec<Event> {
     });
 
     vec![
-        Event::Part {
-            index: 0,
-            event: ChatResponse::structured(Value::String(data.to_string())).into(),
-        },
+        Event::structured(0, data.to_string()),
         Event::flush(0),
         Event::Finished(FinishReason::Completed),
     ]
@@ -3056,14 +2960,7 @@ fn unkeyed_structured_events(answer: &Value) -> Vec<Event> {
 
 fn single_tool_call_events(id: &str, name: &str) -> Vec<Event> {
     vec![
-        Event::Part {
-            index: 0,
-            event: ConversationEvent::now(ToolCallRequest {
-                id: id.to_string(),
-                name: name.to_string(),
-                arguments: Map::new(),
-            }),
-        },
+        Event::tool_call_start(0, id.to_string(), name.to_string()),
         Event::flush(0),
         Event::Finished(FinishReason::Completed),
     ]
@@ -3071,10 +2968,7 @@ fn single_tool_call_events(id: &str, name: &str) -> Vec<Event> {
 
 fn final_message_events(content: &str) -> Vec<Event> {
     vec![
-        Event::Part {
-            index: 0,
-            event: ConversationEvent::now(ChatResponse::message(content)),
-        },
+        Event::message(0, content),
         Event::flush(0),
         Event::Finished(FinishReason::Completed),
     ]
@@ -3434,22 +3328,8 @@ async fn test_parallel_tools_one_with_inquiry() {
         // 2. Structured inquiry answer (for inquiry_tool)
         // 3. Final message
         let parallel_events = vec![
-            Event::Part {
-                index: 0,
-                event: ConversationEvent::now(ToolCallRequest {
-                    id: "call_inq".to_string(),
-                    name: "inquiry_tool".to_string(),
-                    arguments: Map::new(),
-                }),
-            },
-            Event::Part {
-                index: 1,
-                event: ConversationEvent::now(ToolCallRequest {
-                    id: "call_norm".to_string(),
-                    name: "normal_tool".to_string(),
-                    arguments: Map::new(),
-                }),
-            },
+            Event::tool_call_start(0, "call_inq".to_string(), "inquiry_tool".to_string()),
+            Event::tool_call_start(1, "call_norm".to_string(), "normal_tool".to_string()),
             Event::flush(0),
             Event::flush(1),
             Event::Finished(FinishReason::Completed),
@@ -3583,22 +3463,8 @@ async fn test_parallel_tools_both_with_inquiries() {
         // 3. Structured answer (no inquiry_id — order-independent)
         // 4. Final message
         let parallel_events = vec![
-            Event::Part {
-                index: 0,
-                event: ConversationEvent::now(ToolCallRequest {
-                    id: "call_a".to_string(),
-                    name: "tool_a".to_string(),
-                    arguments: Map::new(),
-                }),
-            },
-            Event::Part {
-                index: 1,
-                event: ConversationEvent::now(ToolCallRequest {
-                    id: "call_b".to_string(),
-                    name: "tool_b".to_string(),
-                    arguments: Map::new(),
-                }),
-            },
+            Event::tool_call_start(0, "call_a".to_string(), "tool_a".to_string()),
+            Event::tool_call_start(1, "call_b".to_string(), "tool_b".to_string()),
             Event::flush(0),
             Event::flush(1),
             Event::Finished(FinishReason::Completed),
@@ -3744,19 +3610,13 @@ async fn test_retry_counter_resets_on_successful_event() {
             let events: Vec<Result<Event, StreamError>> = if idx < 2 {
                 // Calls 0 and 1: partial content then rate limit error.
                 vec![
-                    Ok(Event::Part {
-                        index: 0,
-                        event: ChatResponse::message("partial ").into(),
-                    }),
+                    Ok(Event::message(0, "partial ")),
                     Err(StreamError::rate_limit(None)),
                 ]
             } else {
                 // Call 2: complete successfully.
                 vec![
-                    Ok(Event::Part {
-                        index: 0,
-                        event: ChatResponse::message("done.").into(),
-                    }),
+                    Ok(Event::message(0, "done.")),
                     Ok(Event::flush(0)),
                     Ok(Event::Finished(FinishReason::Completed)),
                 ]

@@ -1,9 +1,8 @@
 use std::collections::VecDeque;
 
-use jp_conversation::{ConversationEvent, event::ChatResponse};
 use tracing::debug;
 
-use crate::event::{Event, FinishReason};
+use crate::event::{Event, EventPart, FinishReason};
 
 /// A stateful processor that manages chaining multiple streams together.
 ///
@@ -297,13 +296,9 @@ impl EventChain {
 /// Helper to get text length of an event (if it's a message/reasoning part).
 fn event_text_len(event: &Event) -> usize {
     event
-        .as_conversation_event()
-        .and_then(ConversationEvent::as_chat_response)
-        .map_or(0, |v| match v {
-            ChatResponse::Message { message } => message.len(),
-            ChatResponse::Reasoning { reasoning } => reasoning.len(),
-            ChatResponse::Structured { .. } => 0,
-        })
+        .as_part()
+        .and_then(EventPart::as_text)
+        .map_or(0, str::len)
 }
 
 /// Reconstruct text from a deque of events.
@@ -315,16 +310,7 @@ fn reconstruct_text(events: &VecDeque<Event>) -> (String, Vec<(usize, usize)>) {
     let mut map = Vec::new();
 
     for (i, event) in events.iter().enumerate() {
-        let content = event
-            .as_conversation_event()
-            .and_then(ConversationEvent::as_chat_response)
-            .and_then(|v| match v {
-                ChatResponse::Message { message } => Some(message.as_str()),
-                ChatResponse::Reasoning { reasoning } => Some(reasoning.as_str()),
-                ChatResponse::Structured { .. } => None,
-            });
-
-        if let Some(content) = content
+        if let Some(content) = event.as_part().and_then(EventPart::as_text)
             && !content.is_empty()
         {
             s.push_str(content);
@@ -337,15 +323,7 @@ fn reconstruct_text(events: &VecDeque<Event>) -> (String, Vec<(usize, usize)>) {
 /// Mutates the event to remove `count` bytes/chars from the start of its text
 /// content.
 fn trim_event_start(event: &mut Event, count: usize) {
-    let Some(content) = event
-        .as_conversation_event_mut()
-        .and_then(ConversationEvent::as_chat_response_mut)
-        .and_then(|v| match v {
-            ChatResponse::Message { message } => Some(message),
-            ChatResponse::Reasoning { reasoning } => Some(reasoning),
-            ChatResponse::Structured { .. } => None,
-        })
-    else {
+    let Some(content) = event.as_part_mut().and_then(EventPart::as_text_mut) else {
         return;
     };
 
@@ -381,148 +359,3 @@ fn find_merge_point(left: &str, right: &str, max_search: usize, min_overlap: usi
     // No overlap found
     0
 }
-
-// TODO
-// #[cfg(test)]
-// mod tests {
-//     use jp_conversation::{
-//         event::{ChatResponse, EventKind},
-//         thread::Thread,
-//     };
-//     use serde::{Deserialize, Serialize};
-//     use test_log::test;
-//     use time::macros::utc_datetime;
-//
-//     use super::*;
-//
-//     #[derive(Debug, Serialize, Deserialize, PartialEq)]
-//     struct TestEvent {
-//         // #[serde(with = "jp_serde::repr::base64_string")]
-//         content: String,
-//     }
-//
-//     #[test]
-//     fn test_event_chain() {
-//         let mut chain = EventChain::new();
-//
-//         // Normal mode
-//         let mut events = vec![
-//             Event::Part {
-//                 event: ConversationEvent {
-//                     timestamp: utc_datetime!(2022-01-01 00:00:00),
-//                     kind: ChatResponse::Message {
-//                         message: "Hello".to_string(),
-//                     }
-//                     .into(),
-//                     metadata: Default::default(),
-//                 },
-//                 index: 0,
-//             },
-//             Event::Part {
-//                 event: ConversationEvent {
-//                     timestamp: utc_datetime!(2022-01-01 00:00:00),
-//                     kind: ChatResponse::Message {
-//                         message: "World".to_string(),
-//                     }
-//                     .into(),
-//                     metadata: Default::default(),
-//                 },
-//                 index: 1,
-//             },
-//             Event::Finished(FinishReason::MaxTokens),
-//         ];
-//
-//         let mut out = chain.ingest(events.remove(0));
-//         assert_eq!(out, vec![]);
-//
-//         out = chain.ingest(events.remove(0));
-//         assert_eq!(out, vec![]);
-//
-//         out = chain.ingest(events.remove(0));
-//         assert_eq!(out, vec![]);
-//
-//         out = chain.ingest(events.remove(0));
-//         assert_eq!(out, vec![Event::Part {
-//             event: ConversationEvent {
-//                 timestamp: utc_datetime!(2022-01-01 00:00:00),
-//                 kind: ChatResponse::Message {
-//                     message: "Hello".to_string(),
-//                 }
-//                 .into(),
-//                 metadata: Default::default(),
-//             },
-//             index: 0,
-//         }]);
-//
-//         out = chain.ingest(events.remove(0));
-//         assert_eq!(out, vec![Event::Part {
-//             event: ConversationEvent {
-//                 timestamp: utc_datetime!(2022-01-01 00:00:00),
-//                 kind: EventKind::ChatResponse(ChatResponse::Message {
-//                     message: "World".to_string(),
-//                 }),
-//                 metadata: Default::default(),
-//             },
-//             index: 0,
-//         }]);
-//         assert_eq!(chain.ingest(events.remove(0)), vec![]);
-//
-//         // Merging mode
-//         chain.state = ChainState::Merging;
-//         chain.min_overlap = 3;
-//
-//         out = chain.ingest(events.remove(0));
-//         assert_eq!(out, vec![Event::Part {
-//             event: ConversationEvent {
-//                 timestamp: utc_datetime!(2022-01-01 00:00:00),
-//                 kind: EventKind::ChatResponse(ChatResponse::Message {
-//                     message: "Hello".to_string(),
-//                 }),
-//                 metadata: Default::default(),
-//             },
-//             index: 0,
-//         }]);
-//
-//         out = chain.ingest(events.remove(0));
-//         assert_eq!(out, vec![Event::Part {
-//             event: ConversationEvent {
-//                 timestamp: utc_datetime!(2022-01-01 00:00:00),
-//                 kind: EventKind::ChatResponse(ChatResponse::Message {
-//                     message: "World".to_string(),
-//                 }),
-//                 metadata: Default::default(),
-//             },
-//             index: 0,
-//         }]);
-//         assert_eq!(chain.ingest(events.remove(0)), vec![]);
-//
-//         // Merging mode, with overlap
-//         chain.state = ChainState::Merging;
-//         chain.min_overlap = 4;
-//
-//         out = chain.ingest(events.remove(0));
-//         assert_eq!(out, vec![Event::Part {
-//             event: ConversationEvent {
-//                 timestamp: utc_datetime!(2022-01-01 00:00:00),
-//                 kind: EventKind::ChatResponse(ChatResponse::Message {
-//                     message: "Hello".to_string(),
-//                 }),
-//                 metadata: Default::default(),
-//             },
-//             index: 0,
-//         }]);
-//
-//         out = chain.ingest(events.remove(0));
-//         assert_eq!(out, vec![Event::Part {
-//             event: ConversationEvent {
-//                 timestamp: utc_datetime!(2022-01-01 00:00:00),
-//                 kind: EventKind::ChatResponse(ChatResponse::Message {
-//                     message: "World".to_string(),
-//                 }),
-//                 metadata: Default::default(),
-//             },
-//             index: 0,
-//         }]);
-//         assert_eq!(chain.ingest(events.remove(0)), vec![]);
-//     }
-// }

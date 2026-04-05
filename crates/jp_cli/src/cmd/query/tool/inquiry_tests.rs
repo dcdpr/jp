@@ -3,10 +3,7 @@ use std::collections::HashMap;
 use jp_config::model::id::{ModelIdConfig, ProviderId};
 use jp_conversation::{
     ConversationStream,
-    event::{
-        ConversationEvent, InquiryQuestion, InquiryRequest, InquirySource, ToolCallRequest,
-        ToolCallResponse,
-    },
+    event::{InquiryQuestion, InquiryRequest, InquirySource, ToolCallRequest, ToolCallResponse},
 };
 use jp_llm::{
     event::{Event, FinishReason},
@@ -23,12 +20,7 @@ use super::*;
 #[expect(clippy::needless_pass_by_value)]
 fn structured_provider(data: Value) -> MockProvider {
     MockProvider::new(vec![
-        Event::Part {
-            index: 0,
-            event: ConversationEvent::now(ChatResponse::structured(Value::String(
-                data.to_string(),
-            ))),
-        },
+        Event::structured(0, data.to_string()),
         Event::flush(0),
         Event::Finished(FinishReason::Completed),
     ])

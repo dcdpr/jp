@@ -17,7 +17,7 @@ use jp_config::{
 };
 use jp_conversation::{
     ConversationStream,
-    event::{ChatResponse, ConversationEvent, EventKind, ToolCallRequest, ToolCallResponse},
+    event::{ChatResponse, ConversationEvent, EventKind, ToolCallResponse},
     thread::text_attachments_to_xml,
 };
 use openai_responses::{
@@ -719,7 +719,6 @@ async fn map_error(error: OpenaiStreamError) -> std::result::Result<types::Event
 }
 
 /// Map an Openai [`types::Event`] into one or more [`Event`]s.
-#[expect(clippy::too_many_lines)]
 fn map_event(
     event: types::Event,
     is_structured: bool,
@@ -737,13 +736,10 @@ fn map_event(
         OutputItemAdded {
             output_index,
             item: types::OutputItem::Message(_),
-        } => vec![Ok(Event::Part {
-            event: ConversationEvent::now(if is_structured {
-                ChatResponse::structured(Value::String(String::new()))
-            } else {
-                ChatResponse::message(String::new())
-            }),
-            index: output_index as usize,
+        } => vec![Ok(if is_structured {
+            Event::structured(output_index as usize, String::new())
+        } else {
+            Event::message(output_index as usize, String::new())
         })],
 
         // Skip all reasoning events when reasoning is disabled. The model
@@ -761,24 +757,18 @@ fn map_event(
         OutputItemAdded {
             output_index,
             item: types::OutputItem::Reasoning(_),
-        } => vec![Ok(Event::Part {
-            event: ConversationEvent::now(ChatResponse::reasoning(String::new())),
-            index: output_index as usize,
-        })],
+        } => vec![Ok(Event::reasoning(output_index as usize, String::new()))],
 
         OutputTextDelta {
             delta,
             output_index,
             ..
         } => {
-            let response = if is_structured {
-                ChatResponse::structured(Value::String(delta))
+            let index = output_index as usize;
+            vec![Ok(if is_structured {
+                Event::structured(index, delta)
             } else {
-                ChatResponse::message(delta)
-            };
-            vec![Ok(Event::Part {
-                event: ConversationEvent::now(response),
-                index: output_index as usize,
+                Event::message(index, delta)
             })]
         }
 
@@ -786,18 +776,15 @@ fn map_event(
             delta,
             output_index,
             ..
-        } => vec![Ok(Event::Part {
-            event: ConversationEvent::now(ChatResponse::reasoning(delta)),
-            index: output_index as usize,
-        })],
+        } => vec![Ok(Event::reasoning(output_index as usize, delta))],
 
         OutputItemDone { item, output_index } => {
             let index = output_index as usize;
             let mut events = vec![];
             let metadata = match &item {
-                types::OutputItem::FunctionCall(_) => IndexMap::new(),
+                types::OutputItem::FunctionCall(_) => Map::new(),
                 types::OutputItem::Message(v) => {
-                    let mut map = IndexMap::new();
+                    let mut map = Map::new();
                     map.insert(ITEM_ID_KEY.to_owned(), v.id.clone().into());
                     if let Some(phase) = &v.phase {
                         let phase_str = match phase {
@@ -809,7 +796,7 @@ fn map_event(
                     map
                 }
                 types::OutputItem::Reasoning(v) => {
-                    let mut map = IndexMap::new();
+                    let mut map = Map::new();
                     map.insert(ITEM_ID_KEY.into(), v.id.clone().into());
                     map.insert(
                         ENCRYPTED_CONTENT_KEY.into(),
@@ -831,20 +818,8 @@ fn map_event(
                 ..
             }) = item
             {
-                events.push(Ok(Event::Part {
-                    index,
-                    event: ConversationEvent::now(ToolCallRequest {
-                        id: call_id,
-                        name,
-                        arguments: if let Ok(arguments) = serde_json::from_str(&arguments) {
-                            arguments
-                        } else {
-                            let mut map = Map::new();
-                            map.insert("input".to_owned(), arguments.into());
-                            map
-                        },
-                    }),
-                }));
+                events.push(Ok(Event::tool_call_start(index, &call_id, &name)));
+                events.push(Ok(Event::tool_call_args(index, arguments)));
             }
 
             events.push(Ok(Event::flush_with_metadata(index, metadata)));

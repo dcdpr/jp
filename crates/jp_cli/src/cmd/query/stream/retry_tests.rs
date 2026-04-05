@@ -6,7 +6,7 @@ use jp_config::{
 };
 use jp_conversation::{
     Conversation,
-    event::{ChatRequest, ChatResponse, ConversationEvent},
+    event::{ChatRequest, ChatResponse},
 };
 use jp_llm::{StreamError, event::Event};
 use jp_printer::{OutputFormat, Printer};
@@ -197,14 +197,8 @@ async fn partial_content_flushed_on_retry() {
 
     // Simulate partial content accumulated in the event builder
     conv.update_events(|stream| {
-        turn_coordinator.handle_event(stream, Event::Part {
-            index: 0,
-            event: ConversationEvent::now(ChatResponse::message("Hello ")),
-        });
-        turn_coordinator.handle_event(stream, Event::Part {
-            index: 0,
-            event: ConversationEvent::now(ChatResponse::message("world")),
-        });
+        turn_coordinator.handle_event(stream, Event::message(0, "Hello "));
+        turn_coordinator.handle_event(stream, Event::message(0, "world"));
     });
 
     // Verify partial content exists before the error

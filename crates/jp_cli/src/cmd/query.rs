@@ -38,7 +38,7 @@
 //! document.
 //!
 //! [`TurnCoordinator`]: turn::coordinator::TurnCoordinator
-//! [`EventBuilder`]: jp_conversation::event_builder::EventBuilder
+//! [`EventBuilder`]: jp_llm::event_builder::EventBuilder
 //! [`ConversationEvent`]: jp_conversation::event::ConversationEvent
 //! [`ChatResponseRenderer`]: stream::renderer::ChatResponseRenderer
 //! [`StreamRetryState`]: stream::retry::StreamRetryState

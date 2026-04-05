@@ -4,9 +4,8 @@ expression: v
 ---
 [
     [
-        Part {
-            index: 0,
-            event: ConversationEvent {
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
@@ -18,14 +17,9 @@ expression: v
                     "openai_encrypted_content": String("gAAAAABplba4XQFCal46xfsG-IDWSCjscaoV3MlqKIn7u9jpOieqFE6IG7uPHwVzCAz7csUgbYlXvZByg5yXK0WY7ksFbBrzy85-6SECE2stibRJ_InYSv2WQSCmNhfodjGBgmtEMNq7_TJrEA0W1w6R2xOEMMotz7_8pJYU0O_C7Xyz7a9Gnk4R-aIgzlrnlD5R-Q1-Y52jeQTvX9xyxL3DavSdAeTKJX6KTNw3S5Nn5nj58HMux3_ZWDfh171bf2hbByRlkss0KNvwUuRaBS16e7jUMDMlCPUI3Kj3OpuJo3QKGyhEtrx6_SykWBg0F8cDHTOSTi-U09HfmGzdovXAEK4mIxB7vsVFuLhji277OP4fGB1mv5i1Itt70wsuuHih3ndNlIGxJtXL7w9V1PPi_CGvLsvxkJaUY2lMHXzY8RXakYOi3-dpcY8WcGjp9WNoVm4Rr9lmRO8_wvi4AyJWC9myqh4Bhgzl9jhSAUGO3obfg3V6GUOtXZ3N1XD7_lIgLfJ2HGtVF3STEKl_KHhaVZVBVJkok1NeOUfn85Mu9X1ivhXONclSh_9F7oEhvIt0ytwAvYJw1ZYnkh6ESG8_eqjjo1lhOg0A8INi3GTMvWUqWF4g7J-YSBpIZrKPRyuoXTUEVLxBJZ0NjkIhY9zzUfw0uSYOQHrW3vnONBDyWqpWZNisbUJ4QR0awRaKY5Nnv89GdhCtUTaYyXYzXfRT2roUGZI5wMGLXndCn1p8Lx0iedKdtZkK0rQwnuyOKwEL1pol7cm7Z6_uu91zCSJNVWx3Tl_cfPVwbDMriAOVe2i6uzGpdrijvjvu8C0QgLi4w5j_vujCfs7cNs4FxErHlK-fap4wz9uMRJdiPFYZwbdEySoLRNBuosVzoCoRIpR4jYX5Z-J-MExM0YhUVKKMqZi3E_I_v0EvrlMYWvKhkrDJPKXrgBjYcYXsw314LJ--3ySirFIoUJvz2l1N5bcPAm4WvI2ppxbheIkza_954YcbnT0wz1k="),
                 },
             },
-        },
-        Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            event: ConversationEvent {
+        ),
+        Flushed(
+            ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
@@ -36,11 +30,7 @@ expression: v
                     "openai_item_id": String("msg_0f2c01036abf9111016995b6b82f2881938c010e84816fcec3"),
                 },
             },
-        },
-        Flush {
-            index: 1,
-            metadata: {},
-        },
+        ),
         Finished(
             Completed,
         ),
