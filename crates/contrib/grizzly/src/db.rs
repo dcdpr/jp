@@ -50,6 +50,12 @@ impl BearDb {
         // Discover schema metadata with a temporary connection
         let conn = Self::open_readonly(&path_str)?;
         let meta = schema::discover(&conn)?;
+        tracing::info!(
+            junction_table = %meta.junction_table,
+            notes_column = %meta.notes_column,
+            tags_column = %meta.tags_column,
+            "discovered Bear schema"
+        );
         let cte = schema::normalizing_cte(&meta);
         drop(conn);
 
@@ -168,7 +174,8 @@ pub(crate) mod tests {
             INSERT INTO ZSFNOTETAG (Z_PK, ZTITLE)
             VALUES
                 (1, 'productivity'),
-                (2, 'personal');
+                (2, 'personal'),
+                (3, 'projects/jp');
 
             CREATE TABLE Z_5TAGS (
                 Z_5NOTES INTEGER,
@@ -179,7 +186,8 @@ pub(crate) mod tests {
             VALUES
                 (1, 1),
                 (2, 1),
-                (3, 2);
+                (3, 2),
+                (1, 3);
             ",
         )
         .unwrap();

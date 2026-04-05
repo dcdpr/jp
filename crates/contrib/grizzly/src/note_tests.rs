@@ -8,7 +8,7 @@ fn get_note_by_id() {
 
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0].title, "Getting Things Done");
-    assert_eq!(notes[0].tags, vec!["productivity"]);
+    assert_eq!(notes[0].tags, vec!["productivity", "projects/jp"]);
 }
 
 #[test]
