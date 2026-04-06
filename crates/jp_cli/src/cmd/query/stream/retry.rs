@@ -90,7 +90,7 @@ impl StreamRetryState {
         }
 
         if self.is_tty {
-            let _ = write!(printer.out_writer(), "\r\x1b[K");
+            let _ = write!(printer.err_writer(), "\r\x1b[K");
         }
 
         self.line_active = false;
@@ -132,10 +132,10 @@ impl StreamRetryState {
 
         if self.is_tty {
             // Overwrite any previous retry line in-place.
-            let _ = write!(printer.out_writer(), "\r\x1b[K{msg}");
+            let _ = write!(printer.err_writer(), "\r\x1b[K{msg}");
             self.line_active = true;
         } else {
-            printer.println(msg);
+            printer.eprintln(msg);
         }
     }
 }

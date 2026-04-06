@@ -20,7 +20,7 @@ use crate::typewriter::VisibleCharsIterator;
 /// A shared buffer that can be written to.
 pub type SharedBuffer = Arc<Mutex<String>>;
 
-/// A centralized printer that handles output to out/err via a background
+/// A centralized printer that handles output to out/err/tty via a background
 /// thread.
 #[derive(Debug)]
 pub struct Printer {
@@ -29,6 +29,9 @@ pub struct Printer {
 
     /// The output format.
     format: OutputFormat,
+
+    /// Whether a TTY writer is available for interactive prompts.
+    has_tty: bool,
 
     /// The worker thread handle.
     worker_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
@@ -46,6 +49,7 @@ impl Clone for Printer {
         Self {
             tx: self.tx.clone(),
             format: self.format,
+            has_tty: self.has_tty,
             worker_handle: self.worker_handle.clone(),
             delay_control: self.delay_control.clone(),
         }
@@ -54,11 +58,17 @@ impl Clone for Printer {
 
 impl Printer {
     /// Create a new printer with the given writers and format.
-    pub fn new<O, E>(out: O, err: E, format: OutputFormat) -> Self
+    pub fn new<O, E>(
+        out: O,
+        err: E,
+        tty: Option<Box<dyn io::Write + Send>>,
+        format: OutputFormat,
+    ) -> Self
     where
         O: io::Write + Send + 'static,
         E: io::Write + Send + 'static,
     {
+        let has_tty = tty.is_some();
         let (tx, rx) = mpsc::channel();
         let delay_control = Arc::new(DelayControl {
             skip: Mutex::new(false),
@@ -71,6 +81,7 @@ impl Printer {
                 let mut worker = Worker {
                     out,
                     err,
+                    tty,
                     rx,
                     delay_control,
                     format,
@@ -82,15 +93,21 @@ impl Printer {
         Self {
             tx,
             format,
+            has_tty,
             worker_handle: Arc::new(Mutex::new(Some(handle))),
             delay_control,
         }
     }
 
     /// Create a new printer that writes to the terminal (stdout/stderr).
+    ///
+    /// If `/dev/tty` (Unix) or `CONOUT$` (Windows) is available, it is opened
+    /// for interactive prompt output. This allows prompts to render on the
+    /// terminal even when stdout and stderr are redirected.
     #[must_use]
     pub fn terminal(format: OutputFormat) -> Self {
-        Self::new(io::stdout(), io::stderr(), format)
+        let tty = open_tty().map(|f| Box::new(f) as Box<dyn io::Write + Send>);
+        Self::new(io::stdout(), io::stderr(), tty, format)
     }
 
     /// Create a new printer that silently discards all output.
@@ -100,7 +117,7 @@ impl Printer {
     /// thread, but writes go to [`io::sink()`].
     #[must_use]
     pub fn sink() -> Self {
-        Self::new(io::sink(), io::sink(), OutputFormat::Text)
+        Self::new(io::sink(), io::sink(), None, OutputFormat::Text)
     }
 
     /// Create a new printer that writes to memory buffers.
@@ -112,7 +129,7 @@ impl Printer {
         let out_w = SharedVec(out.clone());
         let err_w = SharedVec(err.clone());
 
-        (Self::new(out_w, err_w, format), out, err)
+        (Self::new(out_w, err_w, None, format), out, err)
     }
 
     /// Returns the output format.
@@ -213,6 +230,22 @@ impl Printer {
         PrinterWriter {
             printer: self,
             target: PrintTarget::Err,
+        }
+    }
+
+    /// Get a writer for interactive prompt output.
+    ///
+    /// Prefers the TTY (`/dev/tty`) if available, falling back to `out`.
+    /// This ensures prompts always render somewhere visible.
+    #[must_use]
+    pub const fn prompt_writer(&self) -> PrinterWriter<'_> {
+        PrinterWriter {
+            printer: self,
+            target: if self.has_tty {
+                PrintTarget::Tty
+            } else {
+                PrintTarget::Out
+            },
         }
     }
 
@@ -318,6 +351,9 @@ struct Worker<O, E> {
     /// The `err` writer.
     err: E,
 
+    /// The TTY writer for interactive prompts (`/dev/tty`).
+    tty: Option<Box<dyn io::Write + Send>>,
+
     /// The receiver for print commands.
     rx: Receiver<Command>,
 
@@ -374,11 +410,20 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
 
     /// Process a print task instantly, ignoring typewriter delays.
     fn process_task_instant(&mut self, task: &PrintTask) {
-        let content = self.maybe_strip(&task.content);
+        // TTY content is never stripped — it's always a real terminal.
+        let content = if task.target == PrintTarget::Tty {
+            Cow::Borrowed(task.content.as_str())
+        } else {
+            self.maybe_strip(&task.content)
+        };
 
         let writer: &mut dyn io::Write = match task.target {
             PrintTarget::Out => &mut self.out,
             PrintTarget::Err => &mut self.err,
+            PrintTarget::Tty => match self.tty.as_mut() {
+                Some(w) => w.as_mut(),
+                None => return,
+            },
         };
 
         let _err = write!(writer, "{content}");
@@ -393,11 +438,20 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             target,
         } = task;
 
-        let content = self.maybe_strip(content);
+        // TTY content is never stripped — it's always a real terminal.
+        let content = if *target == PrintTarget::Tty {
+            Cow::Borrowed(content.as_str())
+        } else {
+            self.maybe_strip(content)
+        };
 
         let writer: &mut dyn io::Write = match target {
             PrintTarget::Out => &mut self.out,
             PrintTarget::Err => &mut self.err,
+            PrintTarget::Tty => match self.tty.as_mut() {
+                Some(w) => w.as_mut(),
+                None => return,
+            },
         };
 
         match mode {
@@ -514,11 +568,18 @@ pub enum PrintMode {
 /// The target output stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrintTarget {
-    /// Output stream.
+    /// Output stream (stdout) — assistant responses, structured data.
     Out,
 
-    /// Error stream.
+    /// Error stream (stderr) — chrome, progress, status.
     Err,
+
+    /// TTY stream (`/dev/tty`) — interactive prompts.
+    ///
+    /// Bypasses stdout/stderr redirections so prompts always render on
+    /// the terminal. Content is always written with ANSI escapes intact
+    /// (never stripped) and is never JSON-wrapped.
+    Tty,
 }
 
 #[derive(Debug, Clone)]
@@ -646,6 +707,30 @@ struct DelayControl {
 
     /// Notified when `skip` transitions to `true`.
     wake: Condvar,
+}
+
+/// Opens the controlling terminal for writing.
+///
+/// Returns `None` if no controlling terminal is available (e.g., CI,
+/// Docker without `-t`, or detached processes).
+#[cfg(unix)]
+fn open_tty() -> Option<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/tty")
+        .ok()
+}
+
+/// Opens the console output device for writing.
+#[cfg(windows)]
+fn open_tty() -> Option<std::fs::File> {
+    std::fs::OpenOptions::new().write(true).open("CONOUT$").ok()
+}
+
+/// No TTY support on this platform.
+#[cfg(not(any(unix, windows)))]
+fn open_tty() -> Option<std::fs::File> {
+    None
 }
 
 #[cfg(test)]

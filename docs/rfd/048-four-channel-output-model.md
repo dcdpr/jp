@@ -1,9 +1,10 @@
 # RFD 048: Four-Channel Output Model
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-17
+- **Tracking Issue**: [#518](https://github.com/dcdpr/jp/issues/518)
 
 ## Summary
 

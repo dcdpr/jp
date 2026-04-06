@@ -103,7 +103,7 @@ fn backoff_uses_exponential_when_no_retry_after() {
 
 #[tokio::test]
 async fn retryable_error_breaks_for_retry() {
-    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mut retry_state = make_retry_state(3);
     let mut turn_coordinator = make_turn_coordinator();
@@ -126,12 +126,12 @@ async fn retryable_error_breaks_for_retry() {
     assert!(matches!(result, LoopAction::Break));
     assert_eq!(retry_state.consecutive_failures, 1);
 
-    // Should have printed a retry notification
+    // Should have printed a retry notification to stderr
     printer.flush();
-    let output = out.lock();
+    let output = err.lock();
     assert!(
         output.contains("Server error, retrying"),
-        "Should notify user. Output: {output}"
+        "Should notify user on stderr. Output: {output}"
     );
 }
 

@@ -188,7 +188,7 @@
     "summary": "Extends --cfg with UPPERCASE keywords (NONE, WORKSPACE) and conversation IDs for config inheritance."
   },
   "048-four-channel-output-model.md": {
-    "hash": "98b9bc46d694ff76e7d0853f91f1495e26d947564a2d6bdc1fc73485726c4ce5",
+    "hash": "36dd6e0167f6d23ba454bf141d62d0d6e7495182863d25b9f63790537fa7a191",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {

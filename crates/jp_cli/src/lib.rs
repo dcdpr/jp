@@ -167,9 +167,17 @@ struct Globals {
     /// The format of the log output written to stderr.
     ///
     /// Defaults to "text" when stderr is a terminal, and "json" when stderr
-    /// is redirected to a file or pipe.
+    /// is redirected to a file or pipe. Only takes effect when tracing is
+    /// written to stderr (via `-v` or `--log-file=-`).
     #[arg(long, global = true, value_enum, default_value_t = LogFormat::Auto)]
     log_format: LogFormat,
+
+    /// Write tracing logs to an additional destination.
+    ///
+    /// Use `-` to write to stderr. Tracing is always written to a log
+    /// file regardless of this flag.
+    #[arg(long, global = true, value_name = "PATH")]
+    log_file: Option<String>,
 }
 
 /// The format used for log output on stderr.
@@ -291,6 +299,7 @@ pub fn run() -> ExitCode {
         cli.globals.quiet,
         cli.globals.log_format,
         format,
+        cli.globals.log_file.as_deref(),
     );
 
     trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
@@ -669,6 +678,7 @@ fn configure_logging(
     quiet: bool,
     log_format: LogFormat,
     output_format: OutputFormat,
+    log_file: Option<&str>,
 ) -> Option<TracingGuard> {
     use tracing::level_filters::LevelFilter;
     use tracing_subscriber::{fmt, prelude::*};
@@ -698,24 +708,11 @@ fn configure_logging(
         "tokio=off",
     ];
 
-    let mut term_filter: Vec<_> = match more {
-        0 => vec!["off".to_owned()],
-        1 => vec![reasonable_more.to_vec().join(",")],
-        _ => vec!["trace".to_owned()],
-    };
-
-    for krate in JP_CRATES {
-        term_filter.push(format!("jp_{krate}={level}"));
-    }
-
-    let term_env_filter = tracing_subscriber::EnvFilter::new(term_filter.join(","));
-
+    // File layer: always captures full trace for post-mortem debugging.
     let mut file_filter = vec![reasonable_more.to_vec().join(",")];
-
     for krate in JP_CRATES {
         file_filter.push(format!("jp_{krate}=trace"));
     }
-
     let file_env_filter = tracing_subscriber::EnvFilter::new(file_filter.join(","));
 
     let file = NamedUtf8TempFile::new().ok()?;
@@ -729,38 +726,62 @@ fn configure_logging(
 
     let registry = tracing_subscriber::registry().with(file_layer);
 
-    let use_json = match log_format {
-        LogFormat::Json => true,
-        LogFormat::Text => false,
-        // When stdout is JSON, force stderr logging to JSON too so
-        // consumers can parse both streams reliably.
-        LogFormat::Auto => output_format.is_json() || !stderr().is_terminal(),
-    };
+    // Stderr layer: only enabled when the user asks for it.
+    //
+    // By default, tracing goes only to the log file. Stderr is reserved for
+    // chrome (progress indicators, tool headers). This keeps `2> chrome.log`
+    // clean of tracing noise.
+    //
+    // `-v` implies stderr output (the user wants to see logs).
+    // `--log-file=-` is an explicit opt-in.
+    // `--quiet` suppresses stderr output regardless.
+    let log_to_stderr = !quiet && (verbose > 0 || log_file.is_some_and(|f| f == "-"));
 
-    if use_json {
-        let layer = fmt::layer().json().with_ansi(false).with_writer(io::stderr);
+    if log_to_stderr {
+        let mut term_filter: Vec<_> = match more {
+            0 => vec!["off".to_owned()],
+            1 => vec![reasonable_more.to_vec().join(",")],
+            _ => vec!["trace".to_owned()],
+        };
+        for krate in JP_CRATES {
+            term_filter.push(format!("jp_{krate}={level}"));
+        }
+        let term_env_filter = tracing_subscriber::EnvFilter::new(term_filter.join(","));
 
-        let layer = if level < LevelFilter::DEBUG {
-            layer.without_time().boxed()
-        } else {
-            layer.boxed()
+        let use_json = match log_format {
+            LogFormat::Json => true,
+            LogFormat::Text => false,
+            // When stdout is JSON, force stderr logging to JSON too so
+            // consumers can parse both streams reliably.
+            LogFormat::Auto => output_format.is_json() || !stderr().is_terminal(),
         };
 
-        registry.with(layer.with_filter(term_env_filter)).init();
-    } else {
-        let format = fmt::format().with_target(more > 0).compact();
-        let layer = fmt::layer()
-            .event_format(format)
-            .with_ansi(true)
-            .with_writer(io::stderr);
-
-        if level < LevelFilter::DEBUG {
-            registry
-                .with(layer.without_time().with_filter(term_env_filter))
-                .init();
-        } else {
+        if use_json {
+            let layer = fmt::layer().json().with_ansi(false).with_writer(io::stderr);
+            let layer = if level < LevelFilter::DEBUG {
+                layer.without_time().boxed()
+            } else {
+                layer.boxed()
+            };
             registry.with(layer.with_filter(term_env_filter)).init();
+        } else {
+            let format = fmt::format().with_target(more > 0).compact();
+            let layer = fmt::layer()
+                .event_format(format)
+                .with_ansi(true)
+                .with_writer(io::stderr);
+
+            if level < LevelFilter::DEBUG {
+                registry
+                    .with(layer.without_time().with_filter(term_env_filter))
+                    .init();
+            } else {
+                registry.with(layer.with_filter(term_env_filter)).init();
+            }
         }
+    } else {
+        // No stderr layer. Logs go only to the file.
+        registry.init();
     }
 
     Some(TracingGuard { file: Some(file) })

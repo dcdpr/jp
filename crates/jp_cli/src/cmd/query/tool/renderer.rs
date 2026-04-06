@@ -107,13 +107,13 @@ pub fn spawn_line_timer(
             tokio::select! {
                 biased;
                 () = child.cancelled() => {
-                    let _ = write!(printer.out_writer(), "\r\x1b[K");
+                    let _ = write!(printer.err_writer(), "\r\x1b[K");
                     return;
                 }
                 _ = ticker.tick() => {
                     let secs = start.elapsed().as_secs_f64();
                     let line = format_line(secs);
-                    let _ = write!(printer.out_writer(), "{line}");
+                    let _ = write!(printer.err_writer(), "{line}");
                 }
             }
         }
@@ -216,7 +216,7 @@ impl ToolRenderer {
         let args = format_args(arguments, style);
 
         let _ = writeln!(
-            self.printer.out_writer(),
+            self.printer.err_writer(),
             "Calling tool {styled_name}{args}"
         );
     }
@@ -236,9 +236,9 @@ impl ToolRenderer {
     ) {
         match format_args_custom(name, arguments, cmd, &self.root).await {
             Ok(content) if !content.is_empty() => {
-                let _ = writeln!(self.printer.out_writer(), "\n{content}");
+                let _ = writeln!(self.printer.err_writer(), "\n{content}");
                 if !content.ends_with("\n\n") {
-                    let _ = writeln!(self.printer.out_writer());
+                    let _ = writeln!(self.printer.err_writer());
                 }
             }
             Ok(_) => {}
@@ -250,7 +250,7 @@ impl ToolRenderer {
 
                 warn!(%error, tool = %name, "Custom formatter failed, falling back to JSON");
                 let json = format_args_json(filtered);
-                let _ = writeln!(self.printer.out_writer(), "{json}\n");
+                let _ = writeln!(self.printer.err_writer(), "{json}\n");
             }
         }
     }
@@ -258,13 +258,13 @@ impl ToolRenderer {
     /// Renders elapsed time for a long-running tool.
     pub fn render_progress(&self, elapsed: Duration) {
         let secs = elapsed.as_secs_f64();
-        let _ = write!(self.printer.out_writer(), "\r\x1b[K⏱ Running… {secs:.1}s");
+        let _ = write!(self.printer.err_writer(), "\r\x1b[K⏱ Running… {secs:.1}s");
     }
 
     /// Clears the current progress line.
     pub fn clear_progress(&self) {
         // Carriage return + ANSI escape to clear to end of line
-        let _ = write!(self.printer.out_writer(), "\r\x1b[K");
+        let _ = write!(self.printer.err_writer(), "\r\x1b[K");
     }
 
     /// Returns the progress configuration.
@@ -394,18 +394,18 @@ impl ToolRenderer {
                 output.push_str(&format!(" _(truncated to {max_lines} lines)_"));
             }
 
-            let _ = write!(self.printer.out_writer(), "{output}");
+            let _ = write!(self.printer.err_writer(), "{output}");
         }
 
         // Render file links
         match results_file_link {
             LinkStyle::Off => {}
             LinkStyle::Full => {
-                let _ = writeln!(self.printer.out_writer(), "see: {}\n", path.display());
+                let _ = writeln!(self.printer.err_writer(), "see: {}\n", path.display());
             }
             LinkStyle::Osc8 => {
                 let _ = writeln!(
-                    self.printer.out_writer(),
+                    self.printer.err_writer(),
                     "[{}] [{}]\n",
                     hyperlink(
                         format!("file://{}", path.display()),
@@ -466,7 +466,7 @@ impl ToolRenderer {
         self.pending.retain(|t| t.id != id);
 
         if self.line_active {
-            let _ = write!(self.printer.out_writer(), "\r\x1b[K");
+            let _ = write!(self.printer.err_writer(), "\r\x1b[K");
         }
 
         if render {
@@ -492,7 +492,7 @@ impl ToolRenderer {
         let content = self.temp_line_content();
         let secs = elapsed.as_secs_f64();
         let _ = write!(
-            self.printer.out_writer(),
+            self.printer.err_writer(),
             "\r\x1b[K{content} (receiving arguments… {secs:.1}s)",
         );
     }
@@ -511,7 +511,7 @@ impl ToolRenderer {
         if self.pending.is_empty() {
             return;
         }
-        let _ = write!(self.printer.out_writer(), "\r\x1b[K");
+        let _ = write!(self.printer.err_writer(), "\r\x1b[K");
     }
 
     /// Clears the temp line and all pending state. Stops the timer.
@@ -522,7 +522,7 @@ impl ToolRenderer {
         self.stop_timer();
 
         if self.line_active {
-            let _ = write!(self.printer.out_writer(), "\r\x1b[K");
+            let _ = write!(self.printer.err_writer(), "\r\x1b[K");
             self.line_active = false;
         }
 
@@ -554,12 +554,12 @@ impl ToolRenderer {
 
     fn write_temp_line(&self) {
         let content = self.temp_line_content();
-        let _ = write!(self.printer.out_writer(), "{content}");
+        let _ = write!(self.printer.err_writer(), "{content}");
     }
 
     fn rewrite_temp_line(&self) {
         let content = self.temp_line_content();
-        let _ = write!(self.printer.out_writer(), "\r{content}\x1b[K");
+        let _ = write!(self.printer.err_writer(), "\r{content}\x1b[K");
     }
 
     fn ensure_timer(&mut self, tick_tx: &Sender<Duration>) {

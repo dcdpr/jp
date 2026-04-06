@@ -9,10 +9,12 @@ fn strip_ansi(s: &str) -> String {
     String::from_utf8(bytes).expect("valid utf-8 after stripping ANSI")
 }
 
-fn create_renderer_with_config(config: AppConfig) -> (ChatResponseRenderer, SharedBuffer) {
-    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+fn create_renderer_with_config(
+    config: AppConfig,
+) -> (ChatResponseRenderer, SharedBuffer, SharedBuffer) {
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
     let renderer = ChatResponseRenderer::new(Arc::new(printer), config.style);
-    (renderer, out)
+    (renderer, out, err)
 }
 
 fn create_renderer() -> (ChatResponseRenderer, SharedBuffer, Printer) {
@@ -38,7 +40,7 @@ fn test_renders_message() {
 fn test_renders_reasoning_full_mode() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
-    let (mut renderer, out) = create_renderer_with_config(config);
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Reasoning {
         reasoning: "Let me think\n\n".into(),
@@ -52,7 +54,7 @@ fn test_renders_reasoning_full_mode() {
 fn test_hidden_reasoning_produces_no_output() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Hidden;
-    let (mut renderer, out) = create_renderer_with_config(config);
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Reasoning {
         reasoning: "Secret thoughts\n\n".into(),
@@ -66,7 +68,7 @@ fn test_hidden_reasoning_produces_no_output() {
 fn test_static_reasoning_shows_once() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Static;
-    let (mut renderer, out) = create_renderer_with_config(config);
+    let (mut renderer, out, err) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Reasoning {
         reasoning: "First chunk\n\n".into(),
@@ -76,14 +78,19 @@ fn test_static_reasoning_shows_once() {
     });
 
     renderer.printer.flush();
-    assert_eq!(*out.lock(), "reasoning...\n\n");
+    assert_eq!(
+        *out.lock(),
+        "",
+        "static reasoning is chrome, not assistant output"
+    );
+    assert_eq!(*err.lock(), "reasoning...\n\n");
 }
 
 #[test]
 fn test_progress_reasoning_shows_dots() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Progress;
-    let (mut renderer, out) = create_renderer_with_config(config);
+    let (mut renderer, out, err) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Reasoning {
         reasoning: "First\n\n".into(),
@@ -96,7 +103,12 @@ fn test_progress_reasoning_shows_dots() {
     });
 
     renderer.printer.flush();
-    assert_eq!(*out.lock(), "reasoning.....");
+    assert_eq!(
+        *out.lock(),
+        "",
+        "progress dots are chrome, not assistant output"
+    );
+    assert_eq!(*err.lock(), "reasoning.....");
 }
 
 #[test]
@@ -105,7 +117,7 @@ fn test_truncate_reasoning() {
     config.style.reasoning.display =
         ReasoningDisplayConfig::Truncate(TruncateChars { characters: 10 });
 
-    let (mut renderer, out) = create_renderer_with_config(config);
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Reasoning {
         reasoning: "This is a very long reasoning that should be truncated\n\n".into(),
@@ -120,7 +132,7 @@ fn test_no_separator_between_reasoning_and_message() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
     config.style.reasoning.background = None;
-    let (mut renderer, out) = create_renderer_with_config(config);
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Reasoning {
         reasoning: "Thinking\n\n".into(),
@@ -139,7 +151,7 @@ fn test_reasoning_buffer_flushed_on_message_transition() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
     config.style.reasoning.background = None;
-    let (mut renderer, out) = create_renderer_with_config(config);
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     // Reasoning without a trailing block boundary (no double newline)
     renderer.render(&ChatResponse::Reasoning {
@@ -188,7 +200,7 @@ fn test_message_buffer_flushed_on_explicit_flush() {
 fn test_whitespace_only_block_not_printed() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
-    let (mut renderer, out) = create_renderer_with_config(config);
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     // Simulate Anthropic emitting "\n\n" before a thinking block
     renderer.render(&ChatResponse::Message {
@@ -217,7 +229,7 @@ fn test_reasoning_background_color_applied() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
     config.style.reasoning.background = Some(Color::Ansi256(236));
-    let (mut renderer, out) = create_renderer_with_config(config);
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Reasoning {
         reasoning: "Deep thought\n\n".into(),
@@ -244,7 +256,7 @@ fn test_reasoning_background_not_applied_to_messages() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
     config.style.reasoning.background = Some(Color::Ansi256(236));
-    let (mut renderer, out) = create_renderer_with_config(config);
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Message {
         message: "Plain answer\n\n".into(),

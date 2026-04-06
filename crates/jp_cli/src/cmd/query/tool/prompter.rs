@@ -234,7 +234,7 @@ impl ToolPrompter {
 
             let inline_options = select_options_to_inline(&self.permission_options());
 
-            let mut writer = self.printer.out_writer();
+            let mut writer = self.printer.prompt_writer();
 
             match self
                 .prompt_backend
@@ -370,7 +370,7 @@ impl ToolPrompter {
             match serde_json::from_str::<Value>(&json) {
                 Ok(edited) => return Ok(EditResult::Edited(edited)),
                 Err(e) => {
-                    let mut writer = self.printer.out_writer();
+                    let mut writer = self.printer.prompt_writer();
                     drop(writeln!(writer, "JSON parsing error: {e}"));
 
                     let options = vec![
@@ -445,7 +445,7 @@ impl ToolPrompter {
     /// - `Ok(true)` if user confirms delivery
     /// - `Ok(false)` if user skips delivery
     pub fn prompt_result_confirmation(&self, tool_name: &str) -> Result<bool, Error> {
-        let mut writer = self.printer.out_writer();
+        let mut writer = self.printer.prompt_writer();
 
         let question = format!("Deliver {} result to assistant?", tool_name.yellow().bold());
 
@@ -531,7 +531,7 @@ impl ToolPrompter {
     /// A `QuestionResult` containing the answer and `persist_level` which indicates
     /// whether the answer should be remembered for this turn.
     pub fn prompt_question(&self, question: &jp_tool::Question) -> Result<QuestionResult, Error> {
-        let mut writer = self.printer.out_writer();
+        let mut writer = self.printer.prompt_writer();
 
         match &question.answer_type {
             AnswerType::Boolean => self.prompt_boolean_git_style(question, &mut writer),
