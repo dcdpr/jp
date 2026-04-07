@@ -43,7 +43,6 @@ use jp_printer::{OutputFormat, Printer};
 use jp_storage::Storage;
 use jp_tool::{AnswerType, Question};
 use jp_workspace::Workspace;
-use schematic::Config as _;
 use serde_json::{Map, Value, json};
 use tokio::{sync::broadcast, time::timeout};
 
@@ -687,7 +686,7 @@ async fn test_tool_restart_on_shutdown_signal() {
                 run: Some(RunMode::Unattended),
                 ..Default::default()
             })]);
-        let config = AppConfig::from_partial(partial, vec![]).expect("valid config");
+        let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
 
         let mut workspace = Workspace::new(root)
             .persisted_at(&storage)

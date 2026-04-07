@@ -226,11 +226,44 @@ impl ToPartial for AppConfig {
             editor: self.editor.to_partial(),
             template: self.template.to_partial(),
             providers: self.providers.to_partial(),
+            server: self.server.to_partial(),
         }
     }
 }
 
 impl AppConfig {
+    /// Convert a partial configuration into a full configuration, applying
+    /// `#[setting(default)]` values for any fields that are `None`.
+    ///
+    /// Schematic's [`Config::from_partial`] does **not** apply
+    /// `#[setting(default)]` values — those are only injected by
+    /// [`PartialConfig::finalize`]. Calling `from_partial` directly on a
+    /// partial that hasn't been finalized will silently fall back to the Rust
+    /// `Default` trait (e.g. `""` for `String`, `0` for `u16`).
+    ///
+    /// This method merges [`PartialConfig::default_values`] as a base layer
+    /// before converting, so callers don't need to manage the finalize step
+    /// themselves.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `default_values` fails or if the partial is missing
+    /// required fields.
+    pub fn from_partial_with_defaults(partial: PartialAppConfig) -> Result<Self, ConfigError> {
+        let partial = match PartialAppConfig::default_values(&())? {
+            Some(mut defaults) => {
+                // The `config` partial is merged into `defaults`. This ensures
+                // that, even if a value is `Some` by default, it can be
+                // overridden by the explicitly set config value.
+                defaults.merge(&(), partial)?;
+                defaults
+            }
+            None => partial,
+        };
+
+        Self::from_partial(partial, vec![])
+    }
+
     /// Return a default configuration for testing purposes.
     ///
     /// This CANNOT be used in release mode.
@@ -253,7 +286,7 @@ impl AppConfig {
         }
         .into();
 
-        Self::from_partial(partial, vec![]).expect("valid config")
+        Self::from_partial_with_defaults(partial).expect("valid config")
     }
 
     /// Build the schema for the configuration.

@@ -1034,7 +1034,7 @@ impl IntoPartialAppConfig for Query {
 ///
 /// [`LlmInquiryBackend`]: crate::cmd::query::tool::inquiry::LlmInquiryBackend
 pub(super) fn build_sections(assistant: &AssistantConfig, has_tools: bool) -> Vec<SectionConfig> {
-    let mut sections: Vec<_> = assistant.system_prompt_sections.to_vec();
+    let mut sections: Vec<_> = assistant.system_prompt_sections.clone();
     sections.extend(
         assistant
             .instructions

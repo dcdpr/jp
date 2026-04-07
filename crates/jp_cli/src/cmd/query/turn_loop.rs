@@ -645,7 +645,7 @@ async fn build_inquiry_backend(
     let default_system_prompt = inquiry_override
         .system_prompt
         .clone()
-        .or_else(|| cfg.assistant.system_prompt.clone().map(String::from));
+        .or_else(|| cfg.assistant.system_prompt.clone());
 
     // Track providers we've already constructed to avoid duplicates.
     let mut providers: IndexMap<ProviderId, Arc<dyn Provider>> = IndexMap::new();

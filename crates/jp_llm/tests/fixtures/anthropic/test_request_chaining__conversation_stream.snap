@@ -6,8 +6,11 @@ expression: v
   "base_config": {
     "inherit": false,
     "config_load_paths": [],
-    "extends": [],
+    "extends": [
+      "config.d/**/*"
+    ],
     "assistant": {
+      "system_prompt": "You are a helpful assistant.",
       "tool_choice": "auto",
       "model": {
         "id": {
@@ -26,9 +29,9 @@ expression: v
         }
       },
       "request": {
-        "max_retries": 0,
-        "base_backoff_ms": 0,
-        "max_backoff_secs": 0,
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
         "cache": true
       }
     },
@@ -58,52 +61,58 @@ expression: v
     },
     "style": {
       "code": {
-        "color": false,
+        "color": true,
         "line_numbers": false,
         "file_link": "osc8",
-        "copy_link": "osc8"
+        "copy_link": "off"
       },
       "markdown": {
-        "wrap_width": 0,
-        "table_max_column_width": 0,
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "theme": "gruvbox-dark",
         "hr_style": "line"
       },
       "reasoning": {
-        "display": "full"
+        "display": "full",
+        "background": 236
       },
       "streaming": {
         "progress": {
-          "show": false,
-          "delay_secs": 0,
-          "interval_ms": 0
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
         }
       },
       "tool_call": {
-        "show": false,
+        "show": true,
         "progress": {
-          "show": false,
-          "delay_secs": 0,
-          "interval_ms": 0
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
         },
         "preparing": {
-          "show": false,
-          "delay_secs": 0,
-          "interval_ms": 0
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
         }
       },
       "typewriter": {
         "text_delay": {
           "secs": 0,
-          "nanos": 0
+          "nanos": 3000000
         },
         "code_delay": {
           "secs": 0,
-          "nanos": 0
+          "nanos": 500000
         }
       }
     },
     "editor": {
-      "envs": []
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ]
     },
     "template": {
       "values": {}
@@ -111,34 +120,34 @@ expression: v
     "providers": {
       "llm": {
         "anthropic": {
-          "api_key_env": "",
-          "base_url": "",
-          "chain_on_max_tokens": false,
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
           "beta_headers": []
         },
         "deepseek": {
-          "api_key_env": "",
-          "base_url": ""
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
         },
         "google": {
-          "api_key_env": "",
-          "base_url": ""
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
         },
         "llamacpp": {
-          "base_url": ""
+          "base_url": "http://127.0.0.1:8080"
         },
         "ollama": {
-          "base_url": ""
+          "base_url": "http://localhost:11434"
         },
         "openai": {
-          "api_key_env": "",
-          "base_url": "",
-          "base_url_env": ""
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
         },
         "openrouter": {
-          "api_key_env": "",
-          "app_name": "",
-          "base_url": ""
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
         }
       }
     }

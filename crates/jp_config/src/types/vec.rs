@@ -141,6 +141,19 @@ impl<T: Config + Clone + PartialEq + Serialize + DeserializeOwned + ToPartial>
     }
 }
 
+/// Convert a `Vec<T>` to a `MergeableVec<T::Partial>` with replace strategy.
+///
+/// Used by `ToPartial` impls for fields with `#[setting(partial_via =
+/// MergeableVec)]` where the finalized type is `Vec<T>` but the partial is
+/// `MergeableVec<T::Partial>`.
+pub fn vec_to_mergeable_partial<T: ToPartial>(items: &[T]) -> MergeableVec<T::Partial> {
+    MergeableVec::Merged(MergedVec {
+        value: items.iter().map(ToPartial::to_partial).collect(),
+        strategy: Some(MergedVecStrategy::Replace),
+        discard_when_merged: false,
+    })
+}
+
 impl<T> FromIterator<T> for MergeableVec<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::Vec(iter.into_iter().collect())
