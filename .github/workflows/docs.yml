@@ -54,6 +54,8 @@ jobs:
       - run: corepack enable
       - run: just build-changelog > change-log.md
       - run: just build-docs
+      - if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
+        run: just plugin-registry-fetch
       - if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:

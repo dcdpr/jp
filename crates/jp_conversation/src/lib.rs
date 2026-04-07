@@ -22,6 +22,10 @@
     rustdoc::all,
     unused_doc_comments
 )]
+#![allow(
+    rustdoc::private_intra_doc_links,
+    reason = "we don't host the docs, and use them mainly for LSP integration"
+)]
 
 mod compat;
 pub mod conversation;
@@ -34,6 +38,7 @@ pub mod thread;
 pub use conversation::{Conversation, ConversationId};
 pub use error::Error;
 pub use event::{ConversationEvent, EventKind};
+pub use storage::decode_event_value;
 pub use stream::{ConversationStream, IterTurns, StreamError, Turn, TurnMut};
 
 /// A wrapper around `DateTime<Utc>` that implements `Debug` to match `time`'s

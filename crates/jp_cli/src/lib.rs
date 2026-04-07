@@ -304,7 +304,18 @@ pub fn run() -> ExitCode {
     #[cfg(feature = "dhat")]
     let _profiler = run_dhat();
 
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => {
+            if e.kind() == clap::error::ErrorKind::DisplayHelp && is_root_help_request() {
+                drop(e.print());
+                print_plugin_help_section();
+                return ExitCode::from(0);
+            }
+            // All other cases (subcommand help, version, errors): let clap handle it.
+            e.exit();
+        }
+    };
     let is_tty = stdout().is_terminal();
 
     let format = cli.globals.format.resolve(is_tty);
@@ -472,6 +483,42 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     ctx.workspace.cleanup_stale_files();
 
     output.map_err(Into::into)
+}
+
+/// Check if the current invocation is a root-level help request (`jp -h`).
+///
+/// We only inject the "Plugins:" section for root help, not for subcommand
+/// help like `jp query -h`.
+fn is_root_help_request() -> bool {
+    let args: Vec<String> = env::args().collect();
+    args.len() == 2 && (args[1] == "-h" || args[1] == "--help")
+}
+
+/// Discover plugins on `$PATH`, describe them, and print a "Plugins:" section.
+fn print_plugin_help_section() {
+    use std::io::Write as _;
+
+    let plugins = cmd::plugin::dispatch::discover_plugins();
+    if plugins.is_empty() {
+        return;
+    }
+
+    let mut descriptions: Vec<(String, String)> = Vec::new();
+    for (name, binary) in &plugins {
+        let desc = cmd::plugin::dispatch::describe_plugin(binary);
+        let display_name = desc
+            .as_ref()
+            .filter(|d| !d.command.is_empty())
+            .map_or_else(|| name.clone(), |d| d.command.join(" "));
+        let description = desc.map_or_else(|| "(no description)".into(), |d| d.description);
+        descriptions.push((display_name, description));
+    }
+
+    let mut out = io::stdout().lock();
+    drop(writeln!(out, "\nPlugins:"));
+    for (name, desc) in &descriptions {
+        drop(writeln!(out, "  {name:<16}{desc}"));
+    }
 }
 
 fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
@@ -730,6 +777,8 @@ fn configure_logging(
     for krate in JP_CRATES {
         file_filter.push(format!("jp_{krate}=trace"));
     }
+    // Plugin stderr and protocol log messages.
+    file_filter.push("plugin=trace".to_owned());
     let file_env_filter = tracing_subscriber::EnvFilter::new(file_filter.join(","));
 
     let file = NamedUtf8TempFile::new().ok()?;
@@ -763,6 +812,8 @@ fn configure_logging(
         for krate in JP_CRATES {
             term_filter.push(format!("jp_{krate}={level}"));
         }
+        // Plugin stderr and protocol log messages.
+        term_filter.push(format!("plugin={level}"));
         let term_env_filter = tracing_subscriber::EnvFilter::new(term_filter.join(","));
 
         let use_json = match log_format {

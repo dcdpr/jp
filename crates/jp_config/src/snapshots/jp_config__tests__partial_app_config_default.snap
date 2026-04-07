@@ -176,4 +176,9 @@ PartialAppConfig {
         },
         mcp: {},
     },
+    plugins: PartialPluginsConfig {
+        auto_install: None,
+        shutdown_timeout_secs: None,
+        command: {},
+    },
 }

@@ -4,6 +4,7 @@ mod conversation;
 pub(crate) mod conversation_id;
 mod init;
 mod lock;
+pub(crate) mod plugin;
 mod query;
 pub(crate) mod target;
 
@@ -17,7 +18,7 @@ pub(crate) use target::ConversationLoadRequest;
 use crate::{Ctx, ctx::IntoPartialAppConfig};
 
 #[derive(Debug, clap::Subcommand)]
-#[command(disable_help_subcommand = true)]
+#[command(disable_help_subcommand = true, allow_external_subcommands = true)]
 #[expect(clippy::large_enum_variant)]
 pub(crate) enum Commands {
     /// Initialize a new workspace.
@@ -42,6 +43,13 @@ pub(crate) enum Commands {
     /// Manage conversations.
     #[command(visible_alias = "c", alias = "conversations")]
     Conversation(conversation::Conversation),
+
+    /// Manage plugins.
+    Plugin(plugin::PluginManagement),
+
+    /// External plugin subcommand (`jp-<name>` on $PATH or registry).
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 impl Commands {
@@ -65,6 +73,8 @@ impl Commands {
                 debug_assert!(handles.is_empty(), "Attachment commands don't use handles");
                 args.run(ctx)
             }
+            Commands::Plugin(args) => args.run(ctx).await,
+            Commands::External(args) => plugin::dispatch::run_external(&args, ctx).await,
             Commands::Init(_) => unreachable!("handled before workspace initialization"),
         }
     }
@@ -76,9 +86,11 @@ impl Commands {
             Commands::Query(args) => args.conversation_load_request(),
             Commands::Config(args) => args.conversation_load_request(),
             Commands::Conversation(args) => args.conversation_load_request(),
-            Commands::Init(_) | Commands::Attachment(_) | Commands::AttachmentAdd(_) => {
-                ConversationLoadRequest::none()
-            }
+            Commands::Init(_)
+            | Commands::Attachment(_)
+            | Commands::AttachmentAdd(_)
+            | Commands::Plugin(_)
+            | Commands::External(_) => ConversationLoadRequest::none(),
         }
     }
 
@@ -90,6 +102,16 @@ impl Commands {
             Commands::AttachmentAdd(_) => "attachment-add",
             Commands::Init(_) => "init",
             Commands::Conversation(_) => "conversation",
+            Commands::Plugin(_) => "plugin",
+            Commands::External(args) => {
+                // Use first arg as the command name (it's the subcommand name).
+                // Clap puts the subcommand name as the first element.
+                if let Some(name) = args.first() {
+                    // Leak is fine: this is called once per CLI invocation.
+                    return Box::leak(format!("plugin:{name}").into_boxed_str());
+                }
+                "external"
+            }
         }
     }
 }
@@ -107,7 +129,11 @@ impl IntoPartialAppConfig for Commands {
             Commands::AttachmentAdd(args) => {
                 args.apply_cli_config(workspace, partial, merged_config)
             }
-            _ => Ok(partial),
+            Commands::Config(_)
+            | Commands::Conversation(_)
+            | Commands::Init(_)
+            | Commands::Plugin(_)
+            | Commands::External(_) => Ok(partial),
         }
     }
 
@@ -122,7 +148,13 @@ impl IntoPartialAppConfig for Commands {
             Commands::Query(args) => {
                 args.apply_conversation_config(workspace, partial, merged_config, handle)
             }
-            _ => Ok(partial),
+            Commands::Config(_)
+            | Commands::Attachment(_)
+            | Commands::AttachmentAdd(_)
+            | Commands::Conversation(_)
+            | Commands::Init(_)
+            | Commands::Plugin(_)
+            | Commands::External(_) => Ok(partial),
         }
     }
 }
