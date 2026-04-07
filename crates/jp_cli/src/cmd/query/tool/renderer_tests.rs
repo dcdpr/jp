@@ -22,18 +22,18 @@ fn create_renderer() -> (ToolRenderer, SharedBuffer, SharedBuffer) {
     let mut config = AppConfig::new_test().style;
     config.tool_call.show = true;
     let renderer = ToolRenderer::new(Arc::new(printer), config, "/tmp".into(), false);
-    (renderer, out, err)
+    (renderer, err, out)
 }
 
 fn create_renderer_with_show(show: bool) -> (ToolRenderer, SharedBuffer) {
-    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let mut config = AppConfig::new_test().style;
     config.tool_call.show = show;
     config.tool_call.preparing.show = true;
     config.tool_call.preparing.delay_secs = 0;
     config.tool_call.preparing.interval_ms = 100;
     let renderer = ToolRenderer::new(Arc::new(printer), config, "/tmp".into(), false);
-    (renderer, out)
+    (renderer, err)
 }
 
 /// Helper: render a tool call, flush, and return stripped output.
@@ -42,10 +42,10 @@ fn render_and_capture(
     style: &ParametersStyle,
     tool_name: &str,
 ) -> String {
-    let (renderer, out, _) = create_renderer();
+    let (renderer, err, _) = create_renderer();
     renderer.render_tool_call(tool_name, arguments, style);
     renderer.printer.flush();
-    strip_ansi(&out.lock())
+    strip_ansi(&err.lock())
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn test_render_tool_call_custom_does_not_run_command() {
 #[tokio::test]
 async fn test_render_custom_arguments_after_approval() {
     let root = Utf8TempDir::new().unwrap();
-    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let config = AppConfig::new_test().style;
     let renderer = ToolRenderer::new(Arc::new(printer), config, root.path().to_owned(), false);
 
@@ -113,7 +113,7 @@ async fn test_render_custom_arguments_after_approval() {
         .await;
 
     renderer.printer.flush();
-    let output = strip_ansi(&out.lock());
+    let output = strip_ansi(&err.lock());
     insta::assert_snapshot!(output);
 }
 

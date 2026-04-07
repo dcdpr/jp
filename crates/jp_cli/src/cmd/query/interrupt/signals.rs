@@ -67,7 +67,7 @@ pub fn handle_streaming_signal(
             printer.flush_instant();
 
             let action = InterruptHandler::with_backend(backend)
-                .handle_streaming_interrupt(&mut printer.out_writer(), !llm_stream_finished);
+                .handle_streaming_interrupt(&mut printer.prompt_writer(), !llm_stream_finished);
 
             // Delegate state transition to the turn coordinator
             match turn_coordinator.handle_streaming_interrupt(action, conversation_stream) {
@@ -213,7 +213,7 @@ pub fn handle_tool_signal(
             }
 
             let action = InterruptHandler::with_backend(backend)
-                .handle_tool_interrupt(&mut printer.out_writer());
+                .handle_tool_interrupt(&mut printer.prompt_writer());
 
             // Notify the state machine (reserved for future state transitions).
             turn_coordinator.handle_tool_interrupt(&action);

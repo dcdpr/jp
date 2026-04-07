@@ -137,11 +137,11 @@ impl ChatResponseRenderer {
 
             ReasoningDisplayConfig::Progress => {
                 if self.last_content_kind == Some(ContentKind::Reasoning) {
-                    self.printer.print(".");
+                    self.printer.eprint(".");
                 } else {
                     self.flush();
                     self.last_content_kind = Some(ContentKind::Reasoning);
-                    self.printer.print("reasoning...");
+                    self.printer.eprint("reasoning...");
                 }
             }
 
@@ -149,7 +149,7 @@ impl ChatResponseRenderer {
                 if self.last_content_kind != Some(ContentKind::Reasoning) {
                     self.flush();
                     self.last_content_kind = Some(ContentKind::Reasoning);
-                    self.printer.println("reasoning...\n");
+                    self.printer.eprintln("reasoning...\n");
                 }
             }
 
