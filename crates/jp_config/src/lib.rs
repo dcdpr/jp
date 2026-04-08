@@ -226,7 +226,6 @@ impl ToPartial for AppConfig {
             editor: self.editor.to_partial(),
             template: self.template.to_partial(),
             providers: self.providers.to_partial(),
-            server: self.server.to_partial(),
         }
     }
 }

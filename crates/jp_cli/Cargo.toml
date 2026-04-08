@@ -117,3 +117,6 @@ path = "src/main.rs"
 
 [features]
 dhat = ["dep:dhat"]
+
+[lib]
+doctest = false

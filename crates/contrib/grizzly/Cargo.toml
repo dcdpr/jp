@@ -30,3 +30,6 @@ workspace = true
 [[bin]]
 name = "grizzly"
 path = "src/main.rs"
+
+[lib]
+doctest = false

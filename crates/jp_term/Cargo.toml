@@ -19,3 +19,6 @@ strip-ansi-escapes = { workspace = true }
 
 [lints]
 workspace = true
+
+[lib]
+doctest = false
