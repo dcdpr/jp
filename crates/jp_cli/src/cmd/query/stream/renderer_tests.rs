@@ -17,22 +17,19 @@ fn create_renderer_with_config(
     (renderer, out, err)
 }
 
-fn create_renderer() -> (ChatResponseRenderer, SharedBuffer, Printer) {
-    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
-    let config = AppConfig::new_test().style;
-    let renderer = ChatResponseRenderer::new(Arc::new(printer.clone()), config);
-    (renderer, out, printer)
+fn create_renderer() -> (ChatResponseRenderer, SharedBuffer, SharedBuffer) {
+    create_renderer_with_config(AppConfig::new_test())
 }
 
 #[test]
 fn test_renders_message() {
-    let (mut renderer, out, printer) = create_renderer();
+    let (mut renderer, out, _err) = create_renderer();
 
     renderer.render(&ChatResponse::Message {
         message: "Hello world\n\n".into(),
     });
 
-    printer.flush();
+    renderer.printer.flush();
     assert_eq!(*out.lock(), "Hello world\n\n");
 }
 
@@ -40,6 +37,7 @@ fn test_renders_message() {
 fn test_renders_reasoning_full_mode() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Reasoning {
@@ -116,6 +114,7 @@ fn test_truncate_reasoning() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display =
         ReasoningDisplayConfig::Truncate(TruncateChars { characters: 10 });
+    config.style.reasoning.background = None;
 
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
@@ -177,19 +176,19 @@ fn test_reasoning_buffer_flushed_on_message_transition() {
 
 #[test]
 fn test_message_buffer_flushed_on_explicit_flush() {
-    let (mut renderer, out, printer) = create_renderer();
+    let (mut renderer, out, _err) = create_renderer();
 
     // Partial message with no block boundary
     renderer.render(&ChatResponse::Message {
         message: "Incomplete line".into(),
     });
 
-    printer.flush();
+    renderer.printer.flush();
     assert_eq!(*out.lock(), "");
 
     // Explicit flush forces remaining content out
     renderer.flush();
-    printer.flush();
+    renderer.printer.flush();
     assert!(
         out.lock().contains("Incomplete line"),
         "flush() should emit buffered content"
@@ -272,7 +271,7 @@ fn test_reasoning_background_not_applied_to_messages() {
 
 #[test]
 fn test_fenced_code_block_streams_without_double_fence() {
-    let (mut renderer, out, printer) = create_renderer();
+    let (mut renderer, out, _err) = create_renderer();
 
     // Simulate a fenced code block arriving in chunks
     renderer.render(&ChatResponse::Message {
@@ -285,7 +284,7 @@ fn test_fenced_code_block_streams_without_double_fence() {
         message: "```\n".into(),
     });
     renderer.flush();
-    printer.flush();
+    renderer.printer.flush();
 
     let output = out.lock().clone();
     let plain = strip_ansi(&output);
@@ -303,13 +302,13 @@ fn test_fenced_code_block_streams_without_double_fence() {
 
 #[test]
 fn test_fenced_code_block_with_language_tag() {
-    let (mut renderer, out, printer) = create_renderer();
+    let (mut renderer, out, _err) = create_renderer();
 
     renderer.render(&ChatResponse::Message {
         message: "```rust\nfn main() {}\n```\n".into(),
     });
     renderer.flush();
-    printer.flush();
+    renderer.printer.flush();
 
     let output = out.lock().clone();
     let plain = strip_ansi(&output);
@@ -325,13 +324,13 @@ fn test_fenced_code_block_with_language_tag() {
 
 #[test]
 fn test_text_before_and_after_code_block() {
-    let (mut renderer, out, printer) = create_renderer();
+    let (mut renderer, out, _err) = create_renderer();
 
     renderer.render(&ChatResponse::Message {
         message: "Before\n\n```\ncode\n```\nAfter\n\n".into(),
     });
     renderer.flush();
-    printer.flush();
+    renderer.printer.flush();
 
     let output = out.lock().clone();
     assert!(
@@ -350,7 +349,9 @@ fn test_text_before_and_after_code_block() {
 
 #[test]
 fn test_fenced_code_block_syntax_highlighting() {
-    let (mut renderer, out, printer) = create_renderer();
+    let mut config = AppConfig::new_test();
+    config.style.markdown.theme = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Message {
         message: indoc::indoc! {"
@@ -363,7 +364,7 @@ fn test_fenced_code_block_syntax_highlighting() {
         .into(),
     });
     renderer.flush();
-    printer.flush();
+    renderer.printer.flush();
 
     let output = out.lock().clone();
     // Monokai Extended theme highlighting for the Rust snippet.
@@ -402,14 +403,16 @@ fn test_fenced_code_block_syntax_highlighting() {
 
 #[test]
 fn test_no_separator_for_consecutive_messages() {
-    let (mut renderer, out, printer) = create_renderer();
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = 0;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     renderer.render(&ChatResponse::Message {
         message: "First ".into(),
     });
 
     // Flush does not print anything, until a "block" is complete
-    printer.flush();
+    renderer.printer.flush();
     assert_eq!(*out.lock(), "");
 
     renderer.render(&ChatResponse::Message {
@@ -420,18 +423,18 @@ fn test_no_separator_for_consecutive_messages() {
     // The double space between "First" and "Second" is preserved from
     // the source ("First " + " Second") — CommonMark doesn't collapse
     // interior spaces.
-    printer.flush();
+    renderer.printer.flush();
     assert_eq!(*out.lock(), "First  Second\n\n");
 }
 
 #[test]
 fn test_blank_line_after_tool_calls_before_message() {
-    let (mut renderer, out, printer) = create_renderer();
+    let (mut renderer, out, _err) = create_renderer();
 
     renderer.render(&ChatResponse::Message {
         message: "Before tools\n\n".into(),
     });
-    printer.flush();
+    renderer.printer.flush();
 
     // Simulate tool calls being rendered between message chunks.
     // The turn loop calls set_tool_call_kind() when tool calls arrive.
@@ -441,7 +444,7 @@ fn test_blank_line_after_tool_calls_before_message() {
     renderer.render(&ChatResponse::Message {
         message: "After tools\n\n".into(),
     });
-    printer.flush();
+    renderer.printer.flush();
 
     let output = out.lock().clone();
     assert_eq!(output, "Before tools\n\n\nAfter tools\n\n");
@@ -449,7 +452,7 @@ fn test_blank_line_after_tool_calls_before_message() {
 
 #[test]
 fn test_no_blank_line_for_consecutive_messages_without_tool_calls() {
-    let (mut renderer, out, printer) = create_renderer();
+    let (mut renderer, out, _err) = create_renderer();
 
     renderer.render(&ChatResponse::Message {
         message: "First paragraph\n\n".into(),
@@ -457,7 +460,7 @@ fn test_no_blank_line_for_consecutive_messages_without_tool_calls() {
     renderer.render(&ChatResponse::Message {
         message: "Second paragraph\n\n".into(),
     });
-    printer.flush();
+    renderer.printer.flush();
 
     let output = out.lock().clone();
     // No extra blank line between consecutive messages.

@@ -3,7 +3,6 @@ pub mod lock;
 pub mod value;
 
 pub mod load;
-pub mod persist;
 pub mod trash;
 pub mod validate;
 

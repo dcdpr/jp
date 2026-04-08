@@ -60,3 +60,6 @@ workspace = true
 [[bin]]
 name = "jp-tools"
 path = "src/main.rs"
+
+[lib]
+doctest = false

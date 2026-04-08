@@ -11,7 +11,6 @@ use indexmap::IndexMap;
 use schematic::{ConfigLoader, MergeError, MergeResult, PartialConfig, TransformResult};
 use tracing::{debug, error, info, trace, warn};
 
-use super::Config;
 use crate::{
     AppConfig, BoxedError, PartialAppConfig, error::Error,
     types::extending_path::ExtendingRelativePath,
@@ -185,22 +184,14 @@ pub fn load_partial_at_path_recursive<P: Into<PathBuf>>(
 /// # Errors
 ///
 /// Can error if partial validation fails.
-pub fn build(mut partial: PartialAppConfig) -> Result<AppConfig, Error> {
-    if let Some(mut defaults) = PartialAppConfig::default_values(&())? {
-        // The `config` partial is merged into `defaults`. This ensures that,
-        // even if a value is `Some` by default, it can be overridden by the
-        // explicitly set config value.
-        defaults.merge(&(), partial)?;
-        partial = defaults;
-    }
-
+pub fn build(partial: PartialAppConfig) -> Result<AppConfig, Error> {
     debug!("Loading configuration.");
     trace!(
         config = %trace_to_tmpfile("jp-config", &partial),
         "Configuration details."
     );
 
-    let mut config: AppConfig = Config::from_partial(partial, vec![])?;
+    let mut config = AppConfig::from_partial_with_defaults(partial)?;
 
     // Resolve model aliases so downstream code can assume all model IDs are
     // concrete `ModelIdOrAliasConfig::Id` variants.

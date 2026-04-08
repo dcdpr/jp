@@ -53,13 +53,13 @@ audit-as-crates-io = true
 audit-as-crates-io = true
 
 [policy.schematic]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.schematic_macros]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.schematic_types]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [[exemptions.addr2line]]
 version = "0.24.2"
@@ -551,18 +551,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.schemars_derive]]
 version = "1.0.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.schematic]]
-version = "0.19.4@git:2b726202ce70d0133d7a4bb42a7e261e13775034"
-criteria = "safe-to-deploy"
-
-[[exemptions.schematic_macros]]
-version = "0.19.3@git:2b726202ce70d0133d7a4bb42a7e261e13775034"
-criteria = "safe-to-deploy"
-
-[[exemptions.schematic_types]]
-version = "0.11.3@git:2b726202ce70d0133d7a4bb42a7e261e13775034"
 criteria = "safe-to-deploy"
 
 [[exemptions.sdd]]

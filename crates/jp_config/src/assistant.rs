@@ -23,10 +23,10 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
     internal::merge::{string_with_strategy, vec_with_strategy},
     model::{ModelConfig, PartialModelConfig},
-    partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
+    partial::{ToPartial, partial_opt, partial_opts},
     types::{
         string::{MergeableString, PartialMergeableString, PartialMergedString},
-        vec::{MergeableVec, MergedVec},
+        vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
     },
 };
 
@@ -43,12 +43,22 @@ pub struct AssistantConfig {
     ///
     /// The system prompt is the initial instruction given to the assistant to
     /// define its behavior, tone, and role.
-    #[setting(nested, default = default_system_prompt, merge = string_with_strategy)]
-    pub system_prompt: Option<MergeableString>,
+    #[setting(
+        nested,
+        partial_via = MergeableString,
+        default = default_system_prompt,
+        merge = string_with_strategy,
+    )]
+    pub system_prompt: Option<String>,
 
     /// A list of system prompt sections for the assistant.
-    #[setting(nested, default = default_sections, merge = vec_with_strategy)]
-    pub system_prompt_sections: MergeableVec<SectionConfig>,
+    #[setting(
+        nested,
+        partial_via = MergeableVec::<SectionConfig>,
+        default = default_sections,
+        merge = vec_with_strategy,
+    )]
+    pub system_prompt_sections: Vec<SectionConfig>,
 
     /// A list of instructions for the assistant.
     ///
@@ -56,8 +66,13 @@ pub struct AssistantConfig {
     /// of titled sections. This allows for better organization and easier
     /// overriding or extending of specific instructions when merging multiple
     /// configurations.
-    #[setting(nested, default = default_instructions, merge = vec_with_strategy)]
-    pub instructions: MergeableVec<InstructionsConfig>,
+    #[setting(
+        nested,
+        partial_via = MergeableVec::<InstructionsConfig>,
+        default = default_instructions,
+        merge = vec_with_strategy,
+    )]
+    pub instructions: Vec<InstructionsConfig>,
 
     /// How the assistant should choose tools to call.
     #[setting(default)]
@@ -124,9 +139,12 @@ impl ToPartial for AssistantConfig {
 
         Self::Partial {
             name: partial_opts(self.name.as_ref(), defaults.name),
-            system_prompt: partial_opt_config(self.system_prompt.as_ref(), defaults.system_prompt),
-            instructions: self.instructions.to_partial(),
-            system_prompt_sections: self.system_prompt_sections.to_partial(),
+            system_prompt: self
+                .system_prompt
+                .as_ref()
+                .map(|v| PartialMergeableString::String(v.clone())),
+            instructions: vec_to_mergeable_partial(&self.instructions),
+            system_prompt_sections: vec_to_mergeable_partial(&self.system_prompt_sections),
             tool_choice: partial_opt(&self.tool_choice, defaults.tool_choice),
             model: self.model.to_partial(),
             request: self.request.to_partial(),
