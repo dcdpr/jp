@@ -127,6 +127,86 @@ fn test_remove_ephemeral_conversations() {
 }
 
 #[test]
+fn load_all_conversation_ids_waits_for_inflight_persist() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+
+    // Simulate mid-persist: only the `.old-*` directory exists.
+    let old_dir = convs.join(format!("{OLD_PREFIX}{}", id.to_dirname(None)));
+    fs::create_dir_all(&old_dir).unwrap();
+
+    // Spawn a thread that "completes" the persist after a brief delay
+    // by creating the normal directory.
+    let convs_clone = convs.clone();
+    let id_clone = id;
+    let handle = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        fs::create_dir_all(convs_clone.join(id_clone.to_dirname(None))).unwrap();
+    });
+
+    let ids = storage.load_all_conversation_ids();
+    handle.join().unwrap();
+
+    assert!(
+        ids.contains(&id),
+        "scan should find the conversation after retry"
+    );
+}
+
+#[test]
+fn load_all_conversation_ids_skips_orphaned_inflight_dir() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+
+    // Only a `.staging-*` dir exists, no normal dir ever appears (crashed
+    // persist). The scan retries but ultimately does not return the ID.
+    let staging_dir = convs.join(format!("{STAGING_PREFIX}{}", id.to_dirname(None)));
+    fs::create_dir_all(&staging_dir).unwrap();
+
+    let ids = storage.load_all_conversation_ids();
+    assert!(
+        !ids.contains(&id),
+        "orphaned in-flight dir should not produce an ID"
+    );
+}
+
+#[test]
+fn load_all_conversation_ids_ignores_inflight_when_normal_exists() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+
+    // Both the final directory and a leftover .old- exist (crash after swap
+    // but before cleanup). Should return the ID exactly once.
+    fs::create_dir_all(convs.join(id.to_dirname(None))).unwrap();
+    fs::create_dir_all(convs.join(format!("{OLD_PREFIX}{}", id.to_dirname(None)))).unwrap();
+
+    let ids = storage.load_all_conversation_ids();
+    assert_eq!(
+        ids.iter().filter(|i| **i == id).count(),
+        1,
+        "should appear exactly once"
+    );
+}
+
+#[test]
+fn load_all_conversation_ids_still_skips_trash() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+
+    fs::create_dir_all(convs.join(".trash")).unwrap();
+
+    let ids = storage.load_all_conversation_ids();
+    assert!(ids.is_empty(), ".trash should still be invisible to scan");
+}
+
+#[test]
 fn test_persist_conversation_creates_all_files() {
     let tmp = tempdir().unwrap();
     let storage = Storage::new(tmp.path()).unwrap();
