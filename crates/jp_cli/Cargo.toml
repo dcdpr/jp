@@ -99,6 +99,9 @@ libc = { workspace = true }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_Console"] }
 
+[build-dependencies]
+chrono = { workspace = true }
+
 [dev-dependencies]
 assert_matches = { workspace = true }
 camino-tempfile = { workspace = true }
