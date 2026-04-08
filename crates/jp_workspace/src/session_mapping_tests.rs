@@ -144,29 +144,32 @@ fn no_user_storage_returns_error_on_write() {
 }
 
 #[test]
-fn env_source_is_never_considered_dead() {
+fn env_source_liveness_is_unknown() {
     let source = SessionSource::env("JP_SESSION");
-    assert!(!is_session_process_dead(&source, "anything"));
+    assert!(matches!(
+        is_session_process_liveness(&source, "anything"),
+        Liveness::Unknown
+    ));
 }
 
 #[cfg(unix)]
 #[test]
 fn getsid_with_own_pid_is_alive() {
     let pid = std::process::id().to_string();
-    assert!(!is_pid_dead(&pid));
+    assert!(matches!(pid_liveness(&pid), Liveness::Alive));
 }
 
 #[cfg(unix)]
 #[test]
 fn getsid_with_nonexistent_pid_is_dead() {
     // PID 2_000_000_000 is extremely unlikely to exist.
-    assert!(is_pid_dead("2000000000"));
+    assert!(matches!(pid_liveness("2000000000"), Liveness::Dead));
 }
 
 #[cfg(unix)]
 #[test]
-fn getsid_with_unparseable_key_is_not_dead() {
-    assert!(!is_pid_dead("not-a-pid"));
+fn getsid_with_unparseable_key_is_unknown() {
+    assert!(matches!(pid_liveness("not-a-pid"), Liveness::Unknown));
 }
 
 #[cfg(windows)]
@@ -177,7 +180,7 @@ fn hwnd_with_own_console_is_alive() {
     let hwnd = unsafe { windows_sys::Win32::System::Console::GetConsoleWindow() };
     if !hwnd.is_null() {
         let key = format!("{}", hwnd as isize);
-        assert!(!is_hwnd_dead(&key));
+        assert!(matches!(hwnd_liveness(&key), Liveness::Alive));
     }
     // If hwnd is null (no console, e.g. GUI-only CI), skip silently.
 }
@@ -186,13 +189,13 @@ fn hwnd_with_own_console_is_alive() {
 #[test]
 fn hwnd_with_nonexistent_handle_is_dead() {
     // 0xDEAD is extremely unlikely to be a valid window handle.
-    assert!(is_hwnd_dead("57005"));
+    assert!(matches!(hwnd_liveness("57005"), Liveness::Dead));
 }
 
 #[cfg(windows)]
 #[test]
-fn hwnd_with_unparseable_key_is_not_dead() {
-    assert!(!is_hwnd_dead("not-a-handle"));
+fn hwnd_with_unparseable_key_is_unknown() {
+    assert!(matches!(hwnd_liveness("not-a-handle"), Liveness::Unknown));
 }
 
 #[cfg(unix)]
@@ -221,6 +224,33 @@ fn cleanup_removes_stale_getsid_session() {
     assert!(
         ws.session_active_conversation(&session).is_none(),
         "Stale getsid session should be cleaned up when process is dead"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cleanup_keeps_getsid_session_when_process_alive() {
+    let (_tmp, ws) = setup();
+
+    // Use our own PID as the session key — guaranteed to be alive.
+    let own_pid = std::process::id().to_string();
+    let session = Session {
+        id: SessionId::new(&own_pid).unwrap(),
+        source: SessionSource::Getsid,
+    };
+
+    // Reference a conversation that does NOT exist on disk or in memory.
+    // With the old logic this would trigger "no live conversations" deletion.
+    // With the new logic the alive process takes precedence.
+    let ghost_id = ConversationId::try_from(datetime!(2025-07-19 18:00:00 Z)).unwrap();
+    ws.activate_session_conversation(&session, ghost_id, datetime!(2025-07-19 18:00:00 Z))
+        .unwrap();
+
+    ws.cleanup_stale_files();
+
+    assert!(
+        ws.session_active_conversation(&session).is_some(),
+        "Getsid session with alive process must survive cleanup even without live conversations"
     );
 }
 
@@ -295,16 +325,73 @@ fn all_active_conversation_ids_empty_when_no_sessions() {
 }
 
 #[test]
+fn cleanup_keeps_session_referencing_conversation_created_after_index_load() {
+    let tmp = tempdir().unwrap();
+    let storage_path = tmp.path().join("storage");
+    let user_root = tmp.path().join("user");
+    let fixture_storage = jp_storage::Storage::new(&storage_path).unwrap();
+
+    let mut ws = Workspace::new(tmp.path())
+        .persisted_at(&storage_path)
+        .unwrap()
+        .with_local_storage_at(&user_root, "test-ws", "abc")
+        .unwrap();
+    ws.disable_persistence();
+
+    // Session B references a conversation that exists on disk but was NOT in
+    // the workspace's in-memory index (simulates a conversation created by
+    // another process after our load_conversation_index call).
+    let session_b = Session {
+        id: SessionId::new("sess-other-tab").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let conv_other = ConversationId::try_from(datetime!(2025-07-19 16:00:00 Z)).unwrap();
+
+    // Write the conversation to disk directly via a separate Storage handle,
+    // bypassing the in-memory state. This is what another `jp` process would do.
+    fixture_storage.write_test_conversation(&conv_other, &jp_conversation::Conversation::default());
+
+    // Write a session mapping pointing at that conversation.
+    ws.activate_session_conversation(&session_b, conv_other, datetime!(2025-07-19 16:00:00 Z))
+        .unwrap();
+
+    // Verify precondition: the conversation is NOT in the in-memory index.
+    assert!(
+        !ws.conversations().any(|(id, _)| *id == conv_other),
+        "Conversation should not be in the in-memory index"
+    );
+
+    // Cleanup must NOT delete session_b — the conversation exists on disk.
+    ws.cleanup_stale_files();
+
+    assert!(
+        ws.session_active_conversation(&session_b).is_some(),
+        "Session referencing a conversation created by another process should survive cleanup"
+    );
+}
+
+#[test]
 fn cleanup_keeps_env_session_with_live_conversations() {
-    let (_tmp, mut ws) = setup();
+    let tmp = tempdir().unwrap();
+    let storage_path = tmp.path().join("storage");
+    let user_root = tmp.path().join("user");
+    let fixture_storage = jp_storage::Storage::new(&storage_path).unwrap();
+
+    let mut ws = Workspace::new(tmp.path())
+        .persisted_at(&storage_path)
+        .unwrap()
+        .with_local_storage_at(&user_root, "test-ws", "abc")
+        .unwrap();
+    ws.disable_persistence();
+
     let session = Session {
         id: SessionId::new("my-ci-session").unwrap(),
         source: SessionSource::env("JP_SESSION"),
     };
     let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
 
-    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
-    ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
+    // Write conversation to disk so the disk-based cleanup scan finds it.
+    fixture_storage.write_test_conversation(&id, &jp_conversation::Conversation::default());
 
     ws.activate_session_conversation(&session, id, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();

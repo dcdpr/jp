@@ -152,13 +152,15 @@ impl Workspace {
     /// Remove orphaned lock files and stale session mappings.
     ///
     /// - Lock files are orphaned if no process holds the flock.
-    /// - Session mappings are stale based on two criteria:
-    ///   1. **Process liveness** (Getsid/Hwnd sources): if the session leader
-    ///      process is no longer alive, the mapping is stale regardless of
-    ///      whether its conversations still exist.
-    ///   2. **Conversation existence** (all sources): if none of the
-    ///      conversations in the mapping's history exist in the workspace, the
-    ///      mapping is stale.
+    /// - Session mappings are stale based on the session source:
+    ///   - **Getsid/Hwnd** (process liveness is checkable): the session is
+    ///     deleted only when the originating process is confirmed dead. A
+    ///     live process keeps its session unconditionally — we don't check
+    ///     conversation existence because another process may be mid-persist
+    ///     or the conversation may have been created after our index loaded.
+    ///   - **Env** (liveness unknown): falls back to conversation existence.
+    ///     If none of the conversations in the history exist on disk, the
+    ///     mapping is removed.
     pub fn cleanup_stale_files(&self) {
         let Some(storage) = self.storage.as_ref() else {
             return;
@@ -171,7 +173,14 @@ impl Workspace {
         }
 
         // Remove stale session mappings.
-        let conversation_ids: HashSet<_> = self.conversations().map(|(id, _)| *id).collect();
+        //
+        // Re-scan conversation IDs from disk instead of using the in-memory
+        // state. Other processes may have created conversations after our
+        // index was loaded at startup; using the stale snapshot would
+        // incorrectly mark their sessions as having "no live conversations"
+        // and delete them.
+        let conversation_ids: HashSet<_> =
+            storage.load_all_conversation_ids().into_iter().collect();
 
         for path in storage.list_session_files() {
             let session_key = path.file_stem().unwrap_or_default();
@@ -179,30 +188,42 @@ impl Workspace {
                 continue;
             };
 
-            // Check process liveness for sources that support it.
-            if is_session_process_dead(&mapping.source, session_key) {
-                debug!(
-                    path = path.to_string(),
-                    source = mapping.source.to_string(),
-                    "Removing stale session mapping (process dead)."
-                );
+            // Sources that support liveness checking (Getsid, Hwnd) are
+            // authoritative: if the process is alive the session is valid,
+            // regardless of whether we can see its conversations right now
+            // (another process may be mid-persist, or the conversation was
+            // created after our index loaded). Only delete when the process
+            // is confirmed dead.
+            //
+            // For Env sources we can't check liveness, so we fall back to
+            // the conversation-existence heuristic.
+            let should_remove = match is_session_process_liveness(&mapping.source, session_key) {
+                Liveness::Alive => false,
+                Liveness::Dead => {
+                    debug!(
+                        path = path.to_string(),
+                        source = mapping.source.to_string(),
+                        "Removing stale session mapping (process dead)."
+                    );
+                    true
+                }
+                Liveness::Unknown => {
+                    let has_live = mapping
+                        .history
+                        .iter()
+                        .any(|entry| conversation_ids.contains(&entry.id));
 
-                drop(fs::remove_file(&path));
-                continue;
-            }
+                    if !has_live {
+                        debug!(
+                            path = path.to_string(),
+                            "Removing stale session mapping (no live conversations)."
+                        );
+                    }
+                    !has_live
+                }
+            };
 
-            // For all sources: remove if no referenced conversation exists.
-            let has_live = mapping
-                .history
-                .iter()
-                .any(|entry| conversation_ids.contains(&entry.id));
-
-            if !has_live {
-                debug!(
-                    path = path.to_string(),
-                    "Removing stale session mapping (no live conversations)."
-                );
-
+            if should_remove {
                 drop(fs::remove_file(&path));
             }
         }
@@ -233,26 +254,33 @@ impl Workspace {
     }
 }
 
-/// Check whether the process that created a session mapping is dead.
-///
-/// Returns `true` if the source supports liveness checking and the process is
-/// no longer alive. Returns `false` if liveness cannot be determined (Env
-/// sources, parse failures, unsupported platforms).
-fn is_session_process_dead(source: &SessionSource, session_key: &str) -> bool {
+/// Result of checking whether the session's originating process is still alive.
+enum Liveness {
+    /// The process is confirmed alive — do not delete the session.
+    Alive,
+    /// The process is confirmed dead — safe to delete.
+    Dead,
+    /// Liveness cannot be determined (Env sources, parse failures).
+    /// Fall back to heuristics.
+    Unknown,
+}
+
+/// Determine whether the process that created a session mapping is still alive.
+fn is_session_process_liveness(source: &SessionSource, session_key: &str) -> Liveness {
     match source {
-        SessionSource::Getsid => is_pid_dead(session_key),
-        SessionSource::Hwnd => is_hwnd_dead(session_key),
-        SessionSource::Env { .. } => false,
+        SessionSource::Getsid => pid_liveness(session_key),
+        SessionSource::Hwnd => hwnd_liveness(session_key),
+        SessionSource::Env { .. } => Liveness::Unknown,
     }
 }
 
-/// Check whether a PID is dead by sending signal 0.
+/// Check whether a session leader PID is alive or dead.
 ///
 /// See: <https://man7.org/linux/man-pages/man2/kill.2.html#:~:text=sig%20is%200>
 #[cfg(unix)]
-fn is_pid_dead(session_key: &str) -> bool {
+fn pid_liveness(session_key: &str) -> Liveness {
     let Ok(pid) = session_key.parse::<i32>() else {
-        return false;
+        return Liveness::Unknown;
     };
 
     // kill(pid, 0) checks if a process exists without sending a signal. Returns
@@ -264,43 +292,48 @@ fn is_pid_dead(session_key: &str) -> bool {
     // written by a previous JP invocation.
     let ret = unsafe { libc::kill(pid, 0) };
     if ret == 0 {
-        return false; // process exists
+        return Liveness::Alive;
     }
 
     // ESRCH = no such process. Any other errno (e.g. EPERM) means the
     // process exists but we can't signal it — treat as alive.
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+    if std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+        Liveness::Dead
+    } else {
+        Liveness::Alive
+    }
 }
 
 #[cfg(not(unix))]
-fn is_pid_dead(_session_key: &str) -> bool {
-    false
+fn pid_liveness(_session_key: &str) -> Liveness {
+    Liveness::Unknown
 }
 
-/// Check whether a console window handle is dead.
-///
-/// On Windows, check if the window handle is still valid. On other platforms,
-/// return false (can't check).
+/// Check whether a console window handle is alive or dead.
 ///
 /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-iswindow>
 #[cfg(windows)]
-fn is_hwnd_dead(session_key: &str) -> bool {
+fn hwnd_liveness(session_key: &str) -> Liveness {
     use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
 
     let Ok(hwnd) = session_key.parse::<isize>() else {
-        return false;
+        return Liveness::Unknown;
     };
 
     // IsWindow returns nonzero if the handle is a valid window.
     //
     // SAFETY: IsWindow is safe to call with any handle value — it just checks
     // validity.
-    unsafe { IsWindow(hwnd as *mut core::ffi::c_void) == 0 }
+    if unsafe { IsWindow(hwnd as *mut core::ffi::c_void) } == 0 {
+        Liveness::Dead
+    } else {
+        Liveness::Alive
+    }
 }
 
 #[cfg(not(windows))]
-fn is_hwnd_dead(_session_key: &str) -> bool {
-    false
+fn hwnd_liveness(_session_key: &str) -> Liveness {
+    Liveness::Unknown
 }
 
 #[cfg(test)]
