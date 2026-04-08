@@ -737,6 +737,12 @@ user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-07-16"
 end = "2027-02-13"
 
+[[trusted.schematic]]
+criteria = "safe-to-deploy"
+user-id = 198800
+start = "2023-05-12"
+end = "2027-04-08"
+
 [[trusted.scopeguard]]
 criteria = "safe-to-deploy"
 user-id = 2915 # Amanieu d'Antras (Amanieu)
