@@ -27,19 +27,14 @@ crossterm = { workspace = true }
 duct = { workspace = true }
 fancy-regex = { workspace = true, features = ["perf", "std", "unicode"] }
 grep-printer = { workspace = true }
-htmd = { workspace = true }
 grep-regex = { workspace = true }
 grep-searcher = { workspace = true }
+htmd = { workspace = true }
 ignore = { workspace = true }
 indoc = { workspace = true }
 quick-xml = { workspace = true, features = ["encoding", "serialize"] }
-reqwest = { workspace = true, features = [
-    "charset",
-    "http2",
-    "json",
-    "rustls-tls",
-    "stream",
-] }
+reqwest = { workspace = true, features = ["charset", "http2", "json", "rustls-tls", "stream"] }
+scraper = { workspace = true }
 serde = { workspace = true, features = ["std", "derive", "alloc"] }
 serde_json = { workspace = true, features = ["std", "preserve_order", "alloc"] }
 similar = { workspace = true, features = ["text", "unicode", "inline"] }

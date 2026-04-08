@@ -1,5 +1,6 @@
 use htmd::HtmlToMarkdown;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
+use scraper::{ElementRef, Html, Selector};
 use serde::Deserialize;
 use url::Url;
 
@@ -31,6 +32,11 @@ pub(crate) async fn web_fetch(url: Url) -> ToolResult {
     }
 
     let body = response.text().await?;
+
+    let body = match url.fragment() {
+        Some(fragment) => extract_anchor_html(&body, fragment).unwrap_or(body),
+        None => body,
+    };
 
     if !content_type.contains("html") {
         return Ok(truncate(&body, SUMMARIZE_THRESHOLD).into());
@@ -187,6 +193,89 @@ struct ContentBlock {
     block_type: String,
     #[serde(default)]
     text: String,
+}
+
+/// Given raw HTML and a URL fragment (anchor), extracts the section targeted by
+/// that anchor and returns a new HTML document containing the original `<head>`
+/// but with only the extracted section in the `<body>`.
+///
+/// Returns `None` if the anchor element isn't found, letting the caller fall
+/// back to the full page.
+pub fn extract_anchor_html(html: &str, anchor: &str) -> Option<String> {
+    let doc = Html::parse_document(html);
+
+    let selector = Selector::parse(&format!("[id=\"{}\"]", escape_css_value(anchor))).ok()?;
+    let target = doc.select(&selector).next()?;
+
+    let section_html = if is_heading(target.value().name()) {
+        extract_heading_section(&target)
+    } else {
+        target.html()
+    };
+
+    let head_html = Selector::parse("head")
+        .ok()
+        .and_then(|s| doc.select(&s).next())
+        .map(|el| el.html())
+        .unwrap_or_default();
+
+    Some(format!(
+        "<html>{head_html}<body>{section_html}</body></html>"
+    ))
+}
+
+/// Extracts a heading element and all following siblings up to (but not
+/// including) the next heading of the same or higher level.
+fn extract_heading_section(heading: &ElementRef<'_>) -> String {
+    let level = heading_level(heading.value().name()).unwrap_or(0);
+    let mut parts = vec![heading.html()];
+
+    for sibling in heading.next_siblings() {
+        if let Some(el) = ElementRef::wrap(sibling) {
+            if let Some(sib_level) = heading_level(el.value().name())
+                && sib_level <= level
+            {
+                break;
+            }
+            parts.push(el.html());
+        } else if let Some(text) = sibling.value().as_text() {
+            parts.push(text.to_string());
+        }
+    }
+
+    parts.join("")
+}
+
+fn is_heading(tag: &str) -> bool {
+    heading_level(tag).is_some()
+}
+
+fn heading_level(tag: &str) -> Option<u8> {
+    match tag {
+        "h1" => Some(1),
+        "h2" => Some(2),
+        "h3" => Some(3),
+        "h4" => Some(4),
+        "h5" => Some(5),
+        "h6" => Some(6),
+        _ => None,
+    }
+}
+
+/// Escape characters that have special meaning in CSS attribute value
+/// selectors.
+fn escape_css_value(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '"' | '\\' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

@@ -93,6 +93,7 @@ rusqlite = { version = "0.38", default-features = false }
 saphyr = { git = "https://github.com/JeanMertz/saphyr", branch = "jean/fix-multinewline-endings", default-features = false } # <https://github.com/saphyr-rs/saphyr/pull/90>
 schemars = { version = "1.0.0-alpha.17", default-features = false }
 schematic = { version = "0.19", default-features = false }
+scraper = { version = "0.25", default-features = false }
 serde = { version = "1", default-features = false }
 serde-untagged = { version = "0.1", default-features = false }
 serde_json = { version = "1", default-features = false }
