@@ -49,15 +49,16 @@
 //! Each session identity records its [`SessionSource`] — how it was determined.
 //! This drives stale mapping cleanup:
 //!
-//! | Source   | Stale detection                          |
-//! |----------|------------------------------------------|
-//! | `Getsid` | Check if the session leader PID is still |
-//! |          | alive.                                   |
-//! | `Hwnd`   | Check if the console host process is     |
-//! |          | still alive.                             |
-//! | `Env`    | Not possible — the string is opaque.     |
-//! |          | Cleaned up only when all referenced      |
-//! |          | conversations are deleted.               |
+//! | Source   | Stale detection                            |
+//! |----------|--------------------------------------------|
+//! | `Getsid` | Delete only when the session leader PID is |
+//! |          | confirmed dead. A live process keeps its   |
+//! |          | session unconditionally.                   |
+//! | `Hwnd`   | Delete only when the console window handle |
+//! |          | is no longer valid.                        |
+//! | `Env`    | Not possible — the string is opaque.       |
+//! |          | Cleaned up only when all referenced        |
+//! |          | conversations are deleted from disk.       |
 //!
 //! Stale detection runs at the end of every `jp` invocation via
 //! [`Workspace::cleanup_stale_files`].
@@ -139,12 +140,12 @@ impl fmt::Display for SessionId {
 pub enum SessionSource {
     /// Unix `getsid(0)` — the session leader PID.
     ///
-    /// Stale detection: check if the PID is still alive.
+    /// Stale detection: delete only when the PID is confirmed dead.
     Getsid,
 
     /// Windows `GetConsoleWindow()` — the console window handle.
     ///
-    /// Stale detection: check if the console host process is still alive.
+    /// Stale detection: delete only when the window handle is no longer valid.
     Hwnd,
 
     /// An environment variable provided the session identity.

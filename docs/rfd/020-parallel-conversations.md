@@ -128,7 +128,7 @@ tabs in the same window share the value, which would cause sessions to collide.
 
 Since these variables are opaque strings, session mappings sourced from them
 cannot be stale-detected via process liveness. They are only cleaned up when
-the conversation they point to no longer exists (see [Stale File
+none of the conversations they reference exist on disk (see [Stale File
 Cleanup](#stale-file-cleanup)).
 
 This list is extensible. New terminals can be added without an RFD.
@@ -184,18 +184,27 @@ determines whether and how stale detection can be performed:
 
 | Source        | `source` value                           | Stale detection                          |
 |---------------|------------------------------------------|------------------------------------------|
-| `getsid`      | `"getsid"`                               | Check if session leader PID is alive     |
-| `$JP_SESSION` | `{ "type": "env", "key": "JP_SESSION" }` | Not possible — never automatically       |
-|               |                                          | removed                                  |
-| `$TMUX_PANE`  | `{ "type": "env", "key": "TMUX_PANE" }`  | Not possible — never automatically       |
-|               |                                          | removed                                  |
-| Windows HWND  | `"hwnd"`                                 | Check if console host process is alive   |
+| `getsid`      | `"getsid"`                               | Delete only when session leader PID is   |
+|               |                                          | confirmed dead. A live process keeps its |
+|               |                                          | session unconditionally.                 |
+| Windows HWND  | `"hwnd"`                                 | Delete only when the console window      |
+|               |                                          | handle is no longer valid.               |
+| `$JP_SESSION` | `{ "type": "env", "key": "JP_SESSION" }` | Liveness unknown — removed only when     |
+|               |                                          | no referenced conversations exist on     |
+|               |                                          | disk.                                    |
+| `$TMUX_PANE`  | `{ "type": "env", "key": "TMUX_PANE" }`  | Same as `$JP_SESSION`.                   |
 
-When a stale mapping is detected (e.g., session leader process is no longer
-alive), the mapping file is deleted immediately. Mappings sourced from
-environment variables are opaque strings with no way to verify liveness, so
-they are only removed by the [Stale File Cleanup](#stale-file-cleanup) task when
-the conversation they point to no longer exists.
+For `Getsid` and `Hwnd` sources, process liveness is authoritative: if the
+session leader (or console window) is alive, the session mapping is valid
+regardless of whether its conversations are currently visible on disk (another
+process may be mid-persist, or the conversation may have been created after the
+current process loaded its index). The mapping is only deleted when the process
+is confirmed dead.
+
+Mappings sourced from environment variables are opaque strings with no way to
+verify liveness, so they fall back to a conversation-existence heuristic: the
+mapping is removed by the [Stale File Cleanup](#stale-file-cleanup) task when
+none of the conversations in its history exist on disk.
 
 When `jp query` successfully operates on a conversation, that conversation is
 pushed to the front of the session's history. When `jp query --new` creates a
@@ -803,9 +812,16 @@ conversation cleanup) via `Workspace::cleanup_stale_files()`:
   `flock` on each `.lock` file; if it succeeds, the file is orphaned and
   deleted. Uses `lock::is_orphaned_lock()` internally.
 - **Session mappings**: `Storage::list_session_files()` lists all session
-  mapping files. For each, the history is checked against the set of existing
-  conversation IDs. Mappings where no conversation in the history still exists
-  are deleted.
+  mapping files. Each mapping is evaluated based on its `SessionSource`:
+  - **Getsid/Hwnd** (process liveness checkable): the session is deleted only
+    when the originating process is confirmed dead. A live process keeps its
+    session unconditionally — conversation existence is not checked, because
+    another process may be mid-persist or the conversation may have been created
+    after the current process loaded its index.
+  - **Env** (liveness unknown): falls back to checking conversation existence.
+    Conversation IDs are re-scanned from disk (not the in-memory index) to
+    account for conversations created by other processes. Mappings where no
+    conversation in the history exists on disk are deleted.
 
 ## Implementation Details
 
