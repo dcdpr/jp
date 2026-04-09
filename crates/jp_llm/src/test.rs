@@ -331,6 +331,7 @@ pub async fn run_chat_completion(
     let vcr = Vcr::new(
         match provider_id {
             ProviderId::Anthropic => config.anthropic.base_url.clone(),
+            ProviderId::Cerebras => config.cerebras.base_url.clone(),
             ProviderId::Google => config.google.base_url.clone(),
             ProviderId::Llamacpp => config.llamacpp.base_url.clone(),
             ProviderId::Ollama => config.ollama.base_url.clone(),
@@ -352,6 +353,7 @@ pub async fn run_chat_completion(
         |recording, url| async move {
             match provider_id {
                 ProviderId::Anthropic => config.anthropic.base_url = url,
+                ProviderId::Cerebras => config.cerebras.base_url = url,
                 ProviderId::Google => config.google.base_url = format!("{url}/v1beta"),
                 ProviderId::Llamacpp => config.llamacpp.base_url = url,
                 ProviderId::Ollama => config.ollama.base_url = url,
@@ -366,6 +368,7 @@ pub async fn run_chat_completion(
 
                 match provider_id {
                     ProviderId::Anthropic => config.anthropic.api_key_env = env,
+                    ProviderId::Cerebras => config.cerebras.api_key_env = env,
                     ProviderId::Google => config.google.api_key_env = env,
                     ProviderId::Openai => config.openai.api_key_env = env,
                     ProviderId::Openrouter => config.openrouter.api_key_env = env,
@@ -683,6 +686,19 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: None,
+            features: vec![],
+        },
+        ProviderId::Cerebras => ModelDetails {
+            id: "cerebras/gpt-oss-120b".parse().unwrap(),
+            display_name: Some("GPT-OSS 120B".to_owned()),
+            context_window: Some(131_072),
+            max_output_tokens: Some(40_960),
+            reasoning: Some(ReasoningDetails::leveled(
+                false, false, true, true, true, false,
+            )),
+            knowledge_cutoff: None,
+            deprecated: None,
+            structured_output: Some(true),
             features: vec![],
         },
         ProviderId::Test => ModelDetails::empty("test/mock-model".parse().unwrap()),

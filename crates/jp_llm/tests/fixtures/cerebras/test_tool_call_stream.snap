@@ -1,0 +1,65 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user asks: \"Please run the tool, providing whatever arguments you want.\" The system has a function called run_me with parameters: foo optional (default \"foo\") and bar: string or array (no default). So we need to call the function with arbitrary arguments. Since we can choose any arguments. Let's provide a bar value, perhaps a string \"test\". The foo default is optional, but we can provide it as well. Provide something. We'll call the function.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "cde8908ab",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("example"),
+                            "bar": String("test"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user is asking: \"Please run the tool, providing whatever arguments you want.\" The tool is a function named run_me, taking arguments. The user wants the assistant to run the tool. They say \"provide whatever arguments you want\". The tool is a placeholder: it returns a message \"working!\" in commentary. There's no restriction. So we can run it with any args. Should respond with the output. We should call the function. Use run_me with arbitrary args like {\"foo\":\"example\",\"bar\":\"test\"}. The tool will respond \"working!\". Then we should provide that as answer. Possibly need to wrap in appropriate response to user. The system says we need to be concise. We just output the result. Usually after function call we respond with result. So let's call with some args.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "{\"foo\":\"example\",\"bar\":\"test\"}The tool ran successfully and returned:\n\n```\nworking!\n```",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

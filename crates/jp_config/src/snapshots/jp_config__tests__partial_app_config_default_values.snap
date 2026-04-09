@@ -249,6 +249,14 @@ Ok(
                             [],
                         ),
                     },
+                    cerebras: PartialCerebrasConfig {
+                        api_key_env: Some(
+                            "CEREBRAS_API_KEY",
+                        ),
+                        base_url: Some(
+                            "https://api.cerebras.ai",
+                        ),
+                    },
                     deepseek: PartialDeepseekConfig {
                         api_key_env: Some(
                             "DEEPSEEK_API_KEY",

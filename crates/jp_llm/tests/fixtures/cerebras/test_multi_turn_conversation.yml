@@ -1,0 +1,437 @@
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Test message"
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-a576b665-af94-4bbe-abbd-22940e748d27","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a576b665-af94-4bbe-abbd-22940e748d27","choices":[{"delta":{"reasoning":"The user says \"Test message"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a576b665-af94-4bbe-abbd-22940e748d27","choices":[{"delta":{"reasoning":"\". Likely they just test. Should respond politely"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a576b665-af94-4bbe-abbd-22940e748d27","choices":[{"delta":{"reasoning":". Probably"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a576b665-af94-4bbe-abbd-22940e748d27","choices":[{"delta":{"reasoning":" just acknowledge."},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a576b665-af94-4bbe-abbd-22940e748d27","choices":[{"delta":{"content":"Received your test message—everything looks good!"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a576b665-af94-4bbe-abbd-22940e748d27","choices":[{"delta":{"content":" Let me know if there's anything I can help you with."},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a576b665-af94-4bbe-abbd-22940e748d27","choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk","usage":{"total_tokens":121,"completion_tokens":52,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":0},"prompt_tokens":69,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"queue_time":1.436343516,"prompt_time":0.009111679999999955,"completion_time":0.028567816,"total_time":1.4922568798065186,"created":1775751424.4722273}}
+    
+    data: [DONE]
+    
+---
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Test message"
+        },
+        {
+          "role": "assistant",
+          "reasoning": "The user says \"Test message\". Likely they just test. Should respond politely. Probably just acknowledge."
+        },
+        {
+          "role": "assistant",
+          "content": "Received your test message—everything looks good! Let me know if there's anything I can help you with."
+        },
+        {
+          "role": "user",
+          "content": "Repeat my previous message"
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed",
+      "reasoning_effort": "low"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-2af66343-a505-4cc9-ae34-fafb2f377b16","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1775751426,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-2af66343-a505-4cc9-ae34-fafb2f377b16","choices":[{"delta":{"reasoning":"User wants repeat previous message: \""},"index":0}],"created":1775751426,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-2af66343-a505-4cc9-ae34-fafb2f377b16","choices":[{"delta":{"content":"Test message","reasoning":"Test message\"."},"index":0}],"created":1775751426,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-2af66343-a505-4cc9-ae34-fafb2f377b16","choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1775751426,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk","usage":{"total_tokens":126,"completion_tokens":22,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":0},"prompt_tokens":104,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"queue_time":4.722646082,"prompt_time":0.003277018999999992,"completion_time":0.011338191,"total_time":4.7408668994903564,"created":1775751426.226758}}
+    
+    data: [DONE]
+    
+---
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Test message"
+        },
+        {
+          "role": "assistant",
+          "reasoning": "The user says \"Test message\". Likely they just test. Should respond politely. Probably just acknowledge."
+        },
+        {
+          "role": "assistant",
+          "content": "Received your test message—everything looks good! Let me know if there's anything I can help you with."
+        },
+        {
+          "role": "user",
+          "content": "Repeat my previous message"
+        },
+        {
+          "role": "assistant",
+          "reasoning": "User wants repeat previous message: \"Test message\"."
+        },
+        {
+          "role": "assistant",
+          "content": "Test message"
+        },
+        {
+          "role": "user",
+          "content": "Please run the tool, providing whatever arguments you want."
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "run_me",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "foo": {
+                  "type": "string",
+                  "default": "foo"
+                },
+                "bar": {
+                  "type": [
+                    "string",
+                    "array"
+                  ],
+                  "enum": [
+                    "foo"
+                  ],
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "foo",
+                      "bar"
+                    ]
+                  }
+                }
+              },
+              "additionalProperties": true,
+              "required": [
+                "bar"
+              ]
+            }
+          }
+        }
+      ],
+      "tool_choice": {
+        "type": "function",
+        "function": {
+          "name": "run_me"
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":"The user says \"Please run the tool,"},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":" providing"},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":" whatever"},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":" arguments"},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":" you"},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":" want"},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":".\""},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":" We"},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":" have"},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":" a tool functions.run_me which takes foo? string default \"foo\" and bar: string|array. We need to call it with some"},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":" arguments. Since user says \"providing whatever arguments you want,\" we can choose arbitrary arguments. We'll call run_me with maybe foo \"hello\", bar \""},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":"world\". Use the function"},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"reasoning":"."},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"tool_calls":[{"function":{"name":"run_me","arguments":""},"type":"function","id":"21064d98f","index":0}]},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{"tool_calls":[{"function":{"arguments":"{\"foo\":\"hello\",\"bar\":\"world\"}"},"type":"function","index":0}]},"index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-15bcf6a1-3f6e-4ae5-b1a3-a0a10be0a1bf","choices":[{"delta":{},"finish_reason":"tool_calls","index":0}],"created":1775751428,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk","usage":{"total_tokens":295,"completion_tokens":110,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":0},"prompt_tokens":185,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"queue_time":0.00459456,"prompt_time":0.01050832,"completion_time":0.079309233,"total_time":0.12189102172851562,"created":1775751428.7308097}}
+    
+    data: [DONE]
+    
+---
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Test message"
+        },
+        {
+          "role": "assistant",
+          "reasoning": "The user says \"Test message\". Likely they just test. Should respond politely. Probably just acknowledge."
+        },
+        {
+          "role": "assistant",
+          "content": "Received your test message—everything looks good! Let me know if there's anything I can help you with."
+        },
+        {
+          "role": "user",
+          "content": "Repeat my previous message"
+        },
+        {
+          "role": "assistant",
+          "reasoning": "User wants repeat previous message: \"Test message\"."
+        },
+        {
+          "role": "assistant",
+          "content": "Test message"
+        },
+        {
+          "role": "user",
+          "content": "Please run the tool, providing whatever arguments you want."
+        },
+        {
+          "role": "assistant",
+          "reasoning": "The user says \"Please run the tool, providing whatever arguments you want.\" We have a tool functions.run_me which takes foo? string default \"foo\" and bar: string|array. We need to call it with some arguments. Since user says \"providing whatever arguments you want,\" we can choose arbitrary arguments. We'll call run_me with maybe foo \"hello\", bar \"world\". Use the function."
+        },
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "21064d98f",
+              "type": "function",
+              "function": {
+                "name": "run_me",
+                "arguments": "{\"foo\":\"hello\",\"bar\":\"world\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "21064d98f",
+          "content": "The secret code is: 42"
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":"The user says: \"Please run the tool, providing whatever arguments you want.\" The assistant"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" already called the tool with"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" some random args;"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" now we have output \"The"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" secret"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" code is:"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" 42\". This is presumably from a tool. The user wants the tool"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" to run, providing"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" whatever"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" arguments. The tool appears to have"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" been executed. Possibly"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" they want to see results. I think we should comply and produce final answer summarizing the tool output."},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" Possibly the tool is \"run"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":"_me\". The"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" response gave the secret code as 42"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":". The user might"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" want"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"reasoning":" that output. So we should respond with the result."},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"content":"Here’s the output from the"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"content":" tool"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"content":" run:\n\n"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"content":"**"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"content":"The"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"content":" secret code"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"content":" is"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"content":": "},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"content":"42"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{"content":"**"},"index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-0fb23ce5-cb18-4abf-85d9-eebde8d4719a","choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1775751429,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk","usage":{"total_tokens":320,"completion_tokens":150,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":0},"prompt_tokens":170,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"queue_time":0.275825665,"prompt_time":0.003992779,"completion_time":0.103009644,"total_time":0.42383384704589844,"created":1775751429.1071336}}
+    
+    data: [DONE]
+    
+---
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Test message"
+        },
+        {
+          "role": "assistant",
+          "reasoning": "The user says \"Test message\". Likely they just test. Should respond politely. Probably just acknowledge."
+        },
+        {
+          "role": "assistant",
+          "content": "Received your test message—everything looks good! Let me know if there's anything I can help you with."
+        },
+        {
+          "role": "user",
+          "content": "Repeat my previous message"
+        },
+        {
+          "role": "assistant",
+          "reasoning": "User wants repeat previous message: \"Test message\"."
+        },
+        {
+          "role": "assistant",
+          "content": "Test message"
+        },
+        {
+          "role": "user",
+          "content": "Please run the tool, providing whatever arguments you want."
+        },
+        {
+          "role": "assistant",
+          "reasoning": "The user says \"Please run the tool, providing whatever arguments you want.\" We have a tool functions.run_me which takes foo? string default \"foo\" and bar: string|array. We need to call it with some arguments. Since user says \"providing whatever arguments you want,\" we can choose arbitrary arguments. We'll call run_me with maybe foo \"hello\", bar \"world\". Use the function."
+        },
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "21064d98f",
+              "type": "function",
+              "function": {
+                "name": "run_me",
+                "arguments": "{\"foo\":\"hello\",\"bar\":\"world\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "21064d98f",
+          "content": "The secret code is: 42"
+        },
+        {
+          "role": "assistant",
+          "reasoning": "The user says: \"Please run the tool, providing whatever arguments you want.\" The assistant already called the tool with some random args; now we have output \"The secret code is: 42\". This is presumably from a tool. The user wants the tool to run, providing whatever arguments. The tool appears to have been executed. Possibly they want to see results. I think we should comply and produce final answer summarizing the tool output. Possibly the tool is \"run_me\". The response gave the secret code as 42. The user might want that output. So we should respond with the result."
+        },
+        {
+          "role": "assistant",
+          "content": "Here’s the output from the tool run:\n\n**The secret code is: 42**"
+        },
+        {
+          "role": "user",
+          "content": "What was the result of the previous tool call?"
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed",
+      "reasoning_effort": "low"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-a2338ce5-6b6a-40c3-8b95-d2e4ab10228a","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1775751432,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a2338ce5-6b6a-40c3-8b95-d2e4ab10228a","choices":[{"delta":{"reasoning":"Need to answer: result was"},"index":0}],"created":1775751432,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a2338ce5-6b6a-40c3-8b95-d2e4ab10228a","choices":[{"delta":{"reasoning":" \"The secret code is: 42\"."},"index":0}],"created":1775751432,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a2338ce5-6b6a-40c3-8b95-d2e4ab10228a","choices":[{"delta":{"content":"The tool"},"index":0}],"created":1775751432,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a2338ce5-6b6a-40c3-8b95-d2e4ab10228a","choices":[{"delta":{"content":" call returned the message:\n\n**“The secret code is: "},"index":0}],"created":1775751432,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a2338ce5-6b6a-40c3-8b95-d2e4ab10228a","choices":[{"delta":{"content":"42.”**"},"index":0}],"created":1775751432,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-a2338ce5-6b6a-40c3-8b95-d2e4ab10228a","choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1775751432,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk","usage":{"total_tokens":251,"completion_tokens":43,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":0},"prompt_tokens":208,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"queue_time":0.090249082,"prompt_time":0.005587004,"completion_time":0.019944096,"total_time":0.12120962142944336,"created":1775751432.353956}}
+    
+    data: [DONE]
+    

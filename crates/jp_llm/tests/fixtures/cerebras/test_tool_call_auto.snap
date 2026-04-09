@@ -1,0 +1,68 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user wants the assistant to run the tool \"run_me\" with whatever arguments we want. We can choose arbitrary arguments as per the definition: foo is optional default \"foo\", bar is string or array (must be provided). So let's provide something. For example: foo: \"test\", bar: [\"value1\", \"value2\"].\n\nWe need to invoke the function.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "513655edb",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("test"),
+                            "bar": Array [
+                                String("value1"),
+                                String("value2"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user asks \"Please run the tool, providing whatever arguments you want.\" The tool is a function called run_me that expects any arguments. The assistant already called the function (with foo and bar). The result is \"working!\". Now we need to respond.\n\nWe should produce a normal response explaining the outcome. Possibly ask follow-up. There's no problem. So respond: \"The tool ran successfully, returned 'working!'.\".",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool ran successfully and returned the response:\n\n```\nworking!\n```",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

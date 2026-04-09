@@ -1,0 +1,77 @@
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Generate a title for this conversation."
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed",
+      "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "structured_output",
+          "schema": {
+            "required": [
+              "titles"
+            ],
+            "properties": {
+              "titles": {
+                "items": {
+                  "description": "A concise, descriptive title for the conversation",
+                  "type": "string"
+                },
+                "type": "array",
+                "description": "{maxItems: 1, minItems: 1}"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object"
+          },
+          "strict": true
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"reasoning":"User asks: \"Generate a title for this conversation.\" We need to output in structured"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"reasoning":"_output format: JSON with"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"reasoning":" property \""},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"reasoning":"titles\": array with exactly"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"reasoning":" one string. So produce {\"titles\": [\"...\"]"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"reasoning":"}. Title should be"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"reasoning":" concise"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"reasoning":" descriptive. For this conversation: user asks for title"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"reasoning":" generation. Maybe \"Conversation Title Generation Request"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"reasoning":"\". Provide one title"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"reasoning":". Ensure correct JSON."},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"content":"{\"titles\": [\""},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{"content":"Conversation Title Generation Request\"]}"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-319e9a26-ee7f-4c9b-bdc9-8c5c8b638f7a","choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk","usage":{"total_tokens":325,"completion_tokens":92,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":0},"prompt_tokens":233,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"queue_time":0.534286758,"prompt_time":0.006969616,"completion_time":0.061335516,"total_time":0.6111609935760498,"created":1775751421.886436}}
+    
+    data: [DONE]
+    

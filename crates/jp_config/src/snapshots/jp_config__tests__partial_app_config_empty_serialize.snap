@@ -136,6 +136,10 @@ PartialAppConfig {
                 chain_on_max_tokens: None,
                 beta_headers: None,
             },
+            cerebras: PartialCerebrasConfig {
+                api_key_env: None,
+                base_url: None,
+            },
             deepseek: PartialDeepseekConfig {
                 api_key_env: None,
                 base_url: None,

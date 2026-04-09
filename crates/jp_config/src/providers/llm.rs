@@ -1,6 +1,7 @@
 //! LLM provider configurations.
 
 pub mod anthropic;
+pub mod cerebras;
 pub mod deepseek;
 pub mod google;
 pub mod llamacpp;
@@ -18,6 +19,7 @@ use crate::{
     partial::ToPartial,
     providers::llm::{
         anthropic::{AnthropicConfig, PartialAnthropicConfig},
+        cerebras::{CerebrasConfig, PartialCerebrasConfig},
         deepseek::{DeepseekConfig, PartialDeepseekConfig},
         google::{GoogleConfig, PartialGoogleConfig},
         llamacpp::{LlamacppConfig, PartialLlamacppConfig},
@@ -48,6 +50,10 @@ pub struct LlmProviderConfig {
     /// Anthropic API configuration.
     #[setting(nested)]
     pub anthropic: AnthropicConfig,
+
+    /// Cerebras API configuration.
+    #[setting(nested)]
+    pub cerebras: CerebrasConfig,
 
     /// Deepseek API configuration.
     #[setting(nested)]
@@ -80,6 +86,7 @@ impl AssignKeyValue for PartialLlmProviderConfig {
             "" => kv.try_merge_object(self)?,
             _ if kv.p("aliases") => kv.try_object()?,
             _ if kv.p("anthropic") => self.anthropic.assign(kv)?,
+            _ if kv.p("cerebras") => self.cerebras.assign(kv)?,
             _ if kv.p("deepseek") => self.deepseek.assign(kv)?,
             _ if kv.p("google") => self.google.assign(kv)?,
             _ if kv.p("llamacpp") => self.llamacpp.assign(kv)?,
@@ -114,6 +121,7 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
                 })
                 .collect(),
             anthropic: self.anthropic.delta(next.anthropic),
+            cerebras: self.cerebras.delta(next.cerebras),
             deepseek: self.deepseek.delta(next.deepseek),
             google: self.google.delta(next.google),
             llamacpp: self.llamacpp.delta(next.llamacpp),
@@ -133,6 +141,7 @@ impl ToPartial for LlmProviderConfig {
                 .map(|(k, v)| (k.clone(), v.to_partial()))
                 .collect(),
             anthropic: self.anthropic.to_partial(),
+            cerebras: self.cerebras.to_partial(),
             deepseek: self.deepseek.to_partial(),
             google: self.google.to_partial(),
             llamacpp: self.llamacpp.to_partial(),

@@ -46,6 +46,8 @@ expression: "AppConfig::fields()"
     "providers.llm.google.base_url",
     "providers.llm.deepseek.api_key_env",
     "providers.llm.deepseek.base_url",
+    "providers.llm.cerebras.api_key_env",
+    "providers.llm.cerebras.base_url",
     "providers.llm.anthropic.api_key_env",
     "providers.llm.anthropic.base_url",
     "providers.llm.anthropic.beta_headers",
