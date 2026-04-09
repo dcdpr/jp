@@ -165,3 +165,186 @@ mod html_to_markdown {
         assert!(md.trim().is_empty(), "expected empty but got: {md:?}");
     }
 }
+
+mod extract_anchor_html {
+    use super::*;
+
+    #[test]
+    fn heading_with_following_content() {
+        let html = r#"
+            <html>
+            <head><title>My Page</title></head>
+            <body>
+                <h1>Introduction</h1>
+                <p>Intro text</p>
+                <h2 id="setup">Setup</h2>
+                <p>Setup instructions</p>
+                <pre><code>example code</code></pre>
+                <h2 id="usage">Usage</h2>
+                <p>Usage text</p>
+            </body>
+            </html>
+        "#;
+
+        let result = extract_anchor_html(html, "setup").unwrap();
+
+        // Should contain the targeted section
+        assert!(result.contains("<h2"), "should contain the h2 heading");
+        assert!(result.contains("Setup"), "should contain heading text");
+        assert!(
+            result.contains("Setup instructions"),
+            "should contain section content"
+        );
+        assert!(result.contains("example code"), "should contain code block");
+
+        // Should NOT contain other sections
+        assert!(!result.contains("Introduction"), "should not contain h1");
+        assert!(!result.contains("Intro text"), "should not contain intro");
+        assert!(
+            !result.contains("Usage text"),
+            "should not contain next section"
+        );
+
+        // Should preserve the original <head>
+        assert!(
+            result.contains("<title>My Page</title>"),
+            "should preserve head"
+        );
+    }
+
+    #[test]
+    fn heading_with_nested_subheadings() {
+        let html = r#"
+            <html>
+            <head><title>Docs</title></head>
+            <body>
+                <h2 id="auth">Authentication</h2>
+                <p>Auth overview</p>
+                <h3>OAuth</h3>
+                <p>OAuth details</p>
+                <h3>API Keys</h3>
+                <p>Key details</p>
+                <h2 id="errors">Errors</h2>
+                <p>Error handling</p>
+            </body>
+            </html>
+        "#;
+
+        let result = extract_anchor_html(html, "auth").unwrap();
+
+        assert!(result.contains("Authentication"));
+        assert!(result.contains("Auth overview"));
+        assert!(result.contains("OAuth"));
+        assert!(result.contains("OAuth details"));
+        assert!(result.contains("API Keys"));
+        assert!(result.contains("Key details"));
+
+        // h2#errors is same level, should be excluded
+        assert!(!result.contains("Error handling"));
+    }
+
+    #[test]
+    fn container_element() {
+        let html = r#"
+            <html>
+            <head><title>Page</title></head>
+            <body>
+                <p>Before</p>
+                <section id="main-content">
+                    <h2>Title</h2>
+                    <p>Content here</p>
+                </section>
+                <p>After</p>
+            </body>
+            </html>
+        "#;
+
+        let result = extract_anchor_html(html, "main-content").unwrap();
+
+        assert!(result.contains("Title"));
+        assert!(result.contains("Content here"));
+        assert!(!result.contains("Before"));
+        assert!(!result.contains("After"));
+    }
+
+    #[test]
+    fn anchor_not_found() {
+        let html = "<html><head></head><body><p>Hello</p></body></html>";
+        assert!(extract_anchor_html(html, "nonexistent").is_none());
+    }
+
+    #[test]
+    fn last_heading_on_page() {
+        let html = r#"
+            <html>
+            <head></head>
+            <body>
+                <h1>Title</h1>
+                <p>Intro</p>
+                <h2 id="last">Last Section</h2>
+                <p>Final content</p>
+                <ul><li>Item 1</li><li>Item 2</li></ul>
+            </body>
+            </html>
+        "#;
+
+        let result = extract_anchor_html(html, "last").unwrap();
+
+        assert!(result.contains("Last Section"));
+        assert!(result.contains("Final content"));
+        assert!(result.contains("Item 1"));
+        assert!(!result.contains("Intro"));
+    }
+
+    #[test]
+    fn anchor_with_special_css_characters() {
+        let html = r#"
+            <html><head></head><body>
+                <div id="foo&quot;bar">Content</div>
+            </body></html>
+        "#;
+
+        // This shouldn't panic even with weird id values
+        drop(extract_anchor_html(html, "foo\"bar"));
+    }
+}
+
+mod heading_level {
+    use super::*;
+
+    #[test]
+    fn all_levels() {
+        assert_eq!(heading_level("h1"), Some(1));
+        assert_eq!(heading_level("h2"), Some(2));
+        assert_eq!(heading_level("h3"), Some(3));
+        assert_eq!(heading_level("h4"), Some(4));
+        assert_eq!(heading_level("h5"), Some(5));
+        assert_eq!(heading_level("h6"), Some(6));
+    }
+
+    #[test]
+    fn non_headings() {
+        assert_eq!(heading_level("p"), None);
+        assert_eq!(heading_level("div"), None);
+        assert_eq!(heading_level("h7"), None);
+    }
+}
+
+mod escape_css_value {
+    use super::*;
+
+    #[test]
+    fn no_special_chars() {
+        assert_eq!(escape_css_value("hello"), "hello");
+    }
+
+    #[test]
+    fn escapes_quotes() {
+        assert_eq!(escape_css_value(r#"foo"bar"#), r#"foo\"bar"#);
+    }
+
+    #[test]
+    fn escapes_backslash() {
+        assert_eq!(escape_css_value(r"foo\bar"), r"foo\\bar");
+    }
+}
