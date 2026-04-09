@@ -597,48 +597,51 @@ impl TryFrom<&LlamacppConfig> for Llamacpp {
 // output. The critical addition over the `openai` crate is the
 // `reasoning_content` field, which carries extracted reasoning for the
 // `--reasoning-format deepseek` (default) and `deepseek-legacy` modes.
+//
+// These types are also used by the `cerebras` provider, which streams an
+// identical OpenAI-compatible SSE format.
 
 #[derive(Debug, Deserialize)]
-struct StreamChunk {
+pub(crate) struct StreamChunk {
     #[serde(default)]
-    choices: Vec<StreamChoice>,
+    pub choices: Vec<StreamChoice>,
 }
 
 #[derive(Debug, Deserialize)]
-struct StreamChoice {
-    delta: StreamDelta,
+pub(crate) struct StreamChoice {
+    pub delta: StreamDelta,
     #[serde(default)]
-    finish_reason: Option<String>,
+    pub finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct StreamDelta {
+pub(crate) struct StreamDelta {
     #[serde(default)]
-    content: Option<String>,
+    pub content: Option<String>,
     /// Reasoning content extracted by the server (deepseek / deepseek-legacy).
     /// This is a non-standard `DeepSeek` extension that llama.cpp also uses.
+    #[serde(default, alias = "reasoning")]
+    pub reasoning_content: Option<String>,
     #[serde(default)]
-    reasoning_content: Option<String>,
-    #[serde(default)]
-    tool_calls: Option<Vec<ToolCallDelta>>,
+    pub tool_calls: Option<Vec<ToolCallDelta>>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ToolCallDelta {
+pub(crate) struct ToolCallDelta {
     #[serde(default)]
-    index: u32,
+    pub index: u32,
     #[serde(default)]
-    id: Option<String>,
+    pub id: Option<String>,
     #[serde(default)]
-    function: Option<FunctionDelta>,
+    pub function: Option<FunctionDelta>,
 }
 
 #[derive(Debug, Deserialize)]
-struct FunctionDelta {
+pub(crate) struct FunctionDelta {
     #[serde(default)]
-    name: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
-    arguments: Option<String>,
+    pub arguments: Option<String>,
 }
 
 #[cfg(test)]

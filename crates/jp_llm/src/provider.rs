@@ -2,6 +2,7 @@
 pub mod google;
 // pub mod xai;
 pub mod anthropic;
+pub mod cerebras;
 pub mod llamacpp;
 pub mod mock;
 pub mod ollama;
@@ -10,6 +11,7 @@ pub mod openrouter;
 
 use anthropic::Anthropic;
 use async_trait::async_trait;
+use cerebras::Cerebras;
 use google::Google;
 use jp_config::{
     model::id::{Name, ProviderId},
@@ -45,6 +47,7 @@ pub trait Provider: Send + Sync {
 pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dyn Provider>> {
     let provider: Box<dyn Provider> = match id {
         ProviderId::Anthropic => Box::new(Anthropic::try_from(&config.anthropic)?),
+        ProviderId::Cerebras => Box::new(Cerebras::try_from(&config.cerebras)?),
         ProviderId::Google => Box::new(Google::try_from(&config.google)?),
         ProviderId::Llamacpp => Box::new(Llamacpp::try_from(&config.llamacpp)?),
         ProviderId::Ollama => Box::new(Ollama::try_from(&config.ollama)?),

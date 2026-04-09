@@ -466,6 +466,8 @@ pub enum ProviderId {
     #[default]
     /// Anthropic provider. See: <https://www.anthropic.com/api>.
     Anthropic,
+    /// Cerebras provider. See: <https://cerebras.ai>.
+    Cerebras,
     /// Deepseek provider. See: <https://api-docs.deepseek.com>. UNIMPLEMENTED.
     Deepseek,
     /// Google Gemini provider. See: <https://ai.google.dev/gemini-api/docs>.
@@ -492,6 +494,7 @@ impl ProviderId {
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Anthropic => "anthropic",
+            Self::Cerebras => "cerebras",
             Self::Deepseek => "deepseek",
             Self::Google => "google",
             Self::Llamacpp => "llamacpp",

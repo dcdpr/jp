@@ -1,0 +1,187 @@
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Please run the tool, providing whatever arguments you want."
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed",
+      "reasoning_effort": "low",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "run_me",
+            "description": "",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "foo": {
+                  "type": "string",
+                  "default": "foo"
+                },
+                "bar": {
+                  "type": [
+                    "string",
+                    "array"
+                  ],
+                  "enum": [
+                    "foo"
+                  ],
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "foo",
+                      "bar"
+                    ]
+                  }
+                }
+              },
+              "additionalProperties": true,
+              "required": [
+                "bar"
+              ]
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-4d6b7945-02b0-4e6a-8415-7f061a28ef9e","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-4d6b7945-02b0-4e6a-8415-7f061a28ef9e","choices":[{"delta":{"reasoning":"We need to call"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-4d6b7945-02b0-4e6a-8415-7f061a28ef9e","choices":[{"delta":{"reasoning":" run_me with arguments."},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-4d6b7945-02b0-4e6a-8415-7f061a28ef9e","choices":[{"delta":{"reasoning":" Provide some example."},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-4d6b7945-02b0-4e6a-8415-7f061a28ef9e","choices":[{"delta":{"tool_calls":[{"function":{"name":"run_me","arguments":""},"type":"function","id":"057fcc638","index":0}]},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-4d6b7945-02b0-4e6a-8415-7f061a28ef9e","choices":[{"delta":{"tool_calls":[{"function":{"arguments":"{\"foo\":\""},"type":"function","index":0}]},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-4d6b7945-02b0-4e6a-8415-7f061a28ef9e","choices":[{"delta":{"tool_calls":[{"function":{"arguments":"example\",\"bar\":["},"type":"function","index":0}]},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-4d6b7945-02b0-4e6a-8415-7f061a28ef9e","choices":[{"delta":{"tool_calls":[{"function":{"arguments":"1,2,"},"type":"function","index":0}]},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-4d6b7945-02b0-4e6a-8415-7f061a28ef9e","choices":[{"delta":{"tool_calls":[{"function":{"arguments":"3]}"},"type":"function","index":0}]},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-4d6b7945-02b0-4e6a-8415-7f061a28ef9e","choices":[{"delta":{},"finish_reason":"tool_calls","index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk","usage":{"total_tokens":181,"completion_tokens":45,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":0},"prompt_tokens":136,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"queue_time":2.282970749,"prompt_time":0.008429921,"completion_time":0.030152933,"total_time":2.3548781871795654,"created":1775751424.5302932}}
+    
+    data: [DONE]
+    
+---
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Please run the tool, providing whatever arguments you want."
+        },
+        {
+          "role": "assistant",
+          "reasoning": "We need to call run_me with arguments. Provide some example."
+        },
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "057fcc638",
+              "type": "function",
+              "function": {
+                "name": "run_me",
+                "arguments": "{\"foo\":\"example\",\"bar\":[1,2,3]}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "057fcc638",
+          "content": "working!"
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":"The user asks \"Please run the tool, providing whatever arguments you want.\" They want the"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" assistant to run the tool. The tool is \"comment"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":"ary\" which just prints"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" \"working!\"? Actually tool run"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":"_me is defined with description \"A tool"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" that simply prints a message\"?"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" The function signature is run"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":"_me(data: object). The"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" user wants us to run the"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" tool with any arguments. We already did with"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" {\"foo\":\"example\",\"bar\":[1,2,3"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":"]}, and got \"working!\" as response"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":".\n\nNow we should respond"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":". Since we already ran the"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" tool and it printed \""},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":"working!\", we can now respond to the user confirming"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" that we ran it and"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" its output. Possibly we might ask if they'd"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" like something else. But likely they"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" just wanted us to run it. So we should"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" respond: \"I ran"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" the tool with the arguments..."},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"reasoning":" and here's the output.\""},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"content":"I ran the tool with the arguments you provided (and"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"content":" a sample payload of"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"content":" my own). The tool executed"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{"content":" successfully and printed:\n\n**working!**"},"index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-8bd6488a-8253-485c-ba6c-e96dd07cc351","choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1775751424,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk","usage":{"total_tokens":333,"completion_tokens":213,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":0},"prompt_tokens":120,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"queue_time":0.003853337,"prompt_time":0.002568279,"completion_time":0.138251324,"total_time":0.15041279792785645,"created":1775751424.5769937}}
+    
+    data: [DONE]
+    

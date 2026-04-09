@@ -1,0 +1,64 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "User asks to run the tool with whatever arguments. There's a function defined: run_me with args foo? default \"foo\" and bar: string or array. We can choose arguments. Should we pass something? Likely to demonstrate. Let's call run_me with bar: \"test\".",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "ea3be73ac",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("test"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user asks: \"Please run the tool, providing whatever arguments you want.\"\n\nWe already invoked tool with bar \"test\". Tool returned \"working!\". Now likely we need to respond to user. Provide output of tool? We can mention we ran tool with sample arguments and got \"working!\". Ask if they need something else.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I went ahead and invoked the tool with a sample argument (\u{200b}`bar=\"test\"`\u{200b}). The tool responded with:\n\n```\nworking!\n```\n\nLet me know if you’d like me to run it with different parameters or need the result used for something specific!",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

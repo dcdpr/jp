@@ -14,6 +14,7 @@ use crate::test::{TestRequest, fixture_attachment, run_test, test_model_details}
 macro_rules! test_all_providers {
         ($($fn:ident),* $(,)?) => {
             mod anthropic { use super::*; $(test_all_providers!(func; $fn, ProviderId::Anthropic);)* }
+            mod cerebras  { use super::*; $(test_all_providers!(func; $fn, ProviderId::Cerebras);)* }
             mod google    { use super::*; $(test_all_providers!(func; $fn, ProviderId::Google);)* }
             mod openai    { use super::*; $(test_all_providers!(func; $fn, ProviderId::Openai);)* }
             mod openrouter{ use super::*; $(test_all_providers!(func; $fn, ProviderId::Openrouter);)* }
@@ -156,7 +157,14 @@ async fn models(provider: ProviderId, test_name: &str) -> Result {
     run_test(provider, test_name, Some(request)).await
 }
 
+/// Providers that don't support image/vision input.
+const NO_IMAGE_SUPPORT: &[ProviderId] = &[ProviderId::Cerebras];
+
 async fn image_attachment(provider: ProviderId, test_name: &str) -> Result {
+    if NO_IMAGE_SUPPORT.contains(&provider) {
+        return Ok(());
+    }
+
     let request = TestRequest::chat(provider)
         .attachment(fixture_attachment("banana.jpg"))
         .event(ChatRequest::from(

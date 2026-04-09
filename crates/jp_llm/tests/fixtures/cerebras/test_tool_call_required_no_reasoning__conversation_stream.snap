@@ -1,0 +1,193 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "cerebras",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        }
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
+          }
+        }
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": {
+          "secs": 0,
+          "nanos": 3000000
+        },
+        "code_delay": {
+          "secs": 0,
+          "nanos": 500000
+        }
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ]
+    },
+    "template": {
+      "values": {}
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    }
+  },
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "The user asks: \"Please run the tool, providing whatever arguments you want.\" The system has a function called run_me with parameters: foo optional (default \"foo\") and bar: string or array (no default). So we need to call the function with arbitrary arguments. Since we can choose any arguments. Let's provide a bar value, perhaps a string \"test\". The foo default is optional, but we can provide it as well. Provide something. We'll call the function."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "83de034a9",
+      "name": "run_me",
+      "arguments": {
+        "foo": "ZXhhbXBsZQ==",
+        "bar": "dGVzdA=="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "83de034a9",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "The user says: \"Please run the tool, providing whatever arguments you want.\"\n\nThe tool \"run_me\" is a function that presumably does something generic? The tool signature is:\n\n```\ntype: function\nname: run_me\ndescription: This tool runs whatever code is given and returns the answer as JSON ...\nparameters:\n  type: object\n  properties:\n    foo:\n      type: string\n    bar:\n      type: string\n```\n\nWe called it with {\"foo\":\"example\",\"bar\":\"test\"} and got response \"working!\". In the previous message, my run shows a function response \"working!\" which is not JSON. The function description says answer as JSON. But we get a string \"working!\". Likely the tool just returns a string.\n\nNow the user wants me to \"run the tool, providing whatever arguments you want\". I've already run the tool. The result is \"working!\". I should respond to the user with the result, maybe discuss that the tool was run. I could also ask if they need something else.\n\nThus respond: The tool was run with arguments foo=\"example\", bar=\"test\" and returned \"working!\". If they need specific arguments, let me know."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "I ran the tool with sample arguments (`foo: \"example\"` and `bar: \"test\"`). The tool returned:\n\n```\nworking!\n```\n\nLet me know if you’d like to try it with different values or need anything else!"
+    }
+  ]
+}

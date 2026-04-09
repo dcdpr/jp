@@ -1,0 +1,146 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user says \"Test message\". Likely they just test. Should respond politely. Probably just acknowledge.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Received your test message—everything looks good! Let me know if there's anything I can help you with.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "User wants repeat previous message: \"Test message\".",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Test message",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user says \"Please run the tool, providing whatever arguments you want.\" We have a tool functions.run_me which takes foo? string default \"foo\" and bar: string|array. We need to call it with some arguments. Since user says \"providing whatever arguments you want,\" we can choose arbitrary arguments. We'll call run_me with maybe foo \"hello\", bar \"world\". Use the function.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "21064d98f",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("hello"),
+                            "bar": String("world"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user says: \"Please run the tool, providing whatever arguments you want.\" The assistant already called the tool with some random args; now we have output \"The secret code is: 42\". This is presumably from a tool. The user wants the tool to run, providing whatever arguments. The tool appears to have been executed. Possibly they want to see results. I think we should comply and produce final answer summarizing the tool output. Possibly the tool is \"run_me\". The response gave the secret code as 42. The user might want that output. So we should respond with the result.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Here’s the output from the tool run:\n\n**The secret code is: 42**",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Need to answer: result was \"The secret code is: 42\".",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool call returned the message:\n\n**“The secret code is: 42.”**",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

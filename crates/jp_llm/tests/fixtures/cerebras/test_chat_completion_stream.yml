@@ -1,0 +1,36 @@
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-oss-120b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Test message"
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed",
+      "reasoning_effort": "low"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-e6ff72f6-8443-455c-9ff3-5b0f8c2a443d","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-e6ff72f6-8443-455c-9ff3-5b0f8c2a443d","choices":[{"delta":{"reasoning":"We just need to respond."},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-e6ff72f6-8443-455c-9ff3-5b0f8c2a443d","choices":[{"delta":{"content":"Got it! Your test message"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-e6ff72f6-8443-455c-9ff3-5b0f8c2a443d","choices":[{"delta":{"content":" came through loud and clear. How can"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-e6ff72f6-8443-455c-9ff3-5b0f8c2a443d","choices":[{"delta":{"content":" I help you today?"},"index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-e6ff72f6-8443-455c-9ff3-5b0f8c2a443d","choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1775751421,"model":"gpt-oss-120b","system_fingerprint":"fp_4c26d27ac5dbffe28c72","object":"chat.completion.chunk","usage":{"total_tokens":104,"completion_tokens":35,"completion_tokens_details":{"accepted_prediction_tokens":0,"rejected_prediction_tokens":0,"reasoning_tokens":0},"prompt_tokens":69,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"queue_time":0.003879934,"prompt_time":0.00206684,"completion_time":0.017782995,"total_time":0.026737451553344727,"created":1775751421.8778915}}
+    
+    data: [DONE]
+    

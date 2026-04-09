@@ -1,0 +1,37 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "User asks: \"Generate a title for this conversation.\" We need to output in structured_output format: JSON with property \"titles\": array with exactly one string. So produce {\"titles\": [\"...\"]}. Title should be concise descriptive. For this conversation: user asks for title generation. Maybe \"Conversation Title Generation Request\". Provide one title. Ensure correct JSON.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Structured {
+                        data: Object {
+                            "titles": Array [
+                                String("Conversation Title Generation Request"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

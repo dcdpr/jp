@@ -1,0 +1,124 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Cerebras,
+            name: Name(
+                "gpt-oss-120b",
+            ),
+        },
+        display_name: Some(
+            "GPT-OSS 120B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            40960,
+        ),
+        reasoning: Some(
+            Leveled {
+                none: false,
+                xlow: false,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Cerebras,
+            name: Name(
+                "llama3.1-8b",
+            ),
+        },
+        display_name: Some(
+            "Llama 3.1 8B",
+        ),
+        context_window: Some(
+            32768,
+        ),
+        max_output_tokens: Some(
+            8192,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Cerebras,
+            name: Name(
+                "qwen-3-235b-a22b-instruct-2507",
+            ),
+        },
+        display_name: Some(
+            "Qwen 3 235B A22B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            40960,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Cerebras,
+            name: Name(
+                "zai-glm-4.7",
+            ),
+        },
+        display_name: Some(
+            "Zai GLM 4.7",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            40960,
+        ),
+        reasoning: Some(
+            Leveled {
+                none: true,
+                xlow: false,
+                low: false,
+                medium: false,
+                high: false,
+                xhigh: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        features: [],
+    },
+]

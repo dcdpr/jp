@@ -125,6 +125,10 @@ expression: v
           "chain_on_max_tokens": true,
           "beta_headers": []
         },
+        "cerebras": {
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
         "deepseek": {
           "api_key_env": "DEEPSEEK_API_KEY",
           "base_url": "https://api.deepseek.com"
