@@ -23,7 +23,7 @@ fn table_text_pretty_renders_unicode_box() {
     let header = row(&["Name", "Age"]);
     let rows = vec![row(&["Alice", "30"]), row(&["Bob", "25"])];
 
-    print_table(&printer, header, rows);
+    print_table(&printer, header, rows, false);
     let output = flush_stdout(&printer, &out);
 
     // Unicode box-drawing uses these characters
@@ -38,7 +38,7 @@ fn table_text_renders_markdown_pipes() {
     let header = row(&["Name", "Age"]);
     let rows = vec![row(&["Alice", "30"])];
 
-    print_table(&printer, header, rows);
+    print_table(&printer, header, rows, false);
     let output = flush_stdout(&printer, &out);
 
     assert!(output.contains("| Name"), "expected markdown table header");
@@ -52,7 +52,7 @@ fn table_json_returns_compact_array() {
     let header = row(&["Name", "Age"]);
     let rows = vec![row(&["Alice", "30"])];
 
-    print_table(&printer, header, rows);
+    print_table(&printer, header, rows, false);
     let output = flush_stdout(&printer, &out);
 
     let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
@@ -67,7 +67,7 @@ fn table_json_pretty_returns_indented_array() {
     let header = row(&["Id"]);
     let rows = vec![row(&["abc"])];
 
-    print_table(&printer, header, rows);
+    print_table(&printer, header, rows, false);
     let output = flush_stdout(&printer, &out);
 
     let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
@@ -80,7 +80,7 @@ fn table_empty_rows() {
     let (printer, out, _) = Printer::memory(OutputFormat::Json);
     let header = row(&["X"]);
 
-    print_table(&printer, header, vec![]);
+    print_table(&printer, header, vec![], false);
     let output = flush_stdout(&printer, &out);
 
     let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();

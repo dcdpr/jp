@@ -14,9 +14,9 @@ use serde_json::{Value, to_string, to_string_pretty};
 /// - `TextPretty` → unicode box-drawing table
 /// - `Text` → pipe-delimited markdown table
 /// - `Json` / `JsonPretty` → JSON array of objects
-pub fn print_table(printer: &Printer, header: Row, rows: Vec<Row>) {
+pub fn print_table(printer: &Printer, header: Row, rows: Vec<Row>, footer: bool) {
     let output = match printer.format() {
-        OutputFormat::TextPretty => list(header, rows),
+        OutputFormat::TextPretty => list(header, rows, footer),
         OutputFormat::Text => list_markdown(header, rows),
         OutputFormat::Json => {
             let json = list_json(header, rows);

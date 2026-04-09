@@ -4,14 +4,51 @@ pub const EMPTY: &str = "                   ";
 pub const UTF8_FULL: &str = "││──├──┤     ──╭╮╰╯";
 
 /// Render a list table with unicode box-drawing characters.
+///
+/// When `footer` is true, the header row is repeated at the bottom of the
+/// table so it stays visible when the top has scrolled off screen.
 #[must_use]
-pub fn list(header: Row, rows: Vec<Row>) -> String {
+pub fn list(header: Row, rows: Vec<Row>, footer: bool) -> String {
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
     table.set_header(header);
     table.add_rows(rows);
 
-    table.trim_fmt()
+    let rendered = table.trim_fmt();
+
+    if !footer {
+        return rendered;
+    }
+
+    // Splice a copy of the header row before the bottom border.
+    // Rendered structure:
+    //   [0] top border       ╭──╮
+    //   [1] header content   │..│
+    //   [2] separator        ├──┤
+    //   [3..n-1] data rows   │..│
+    //   [n] bottom border    ╰──╯
+    let lines: Vec<&str> = rendered.lines().collect();
+    if lines.len() < 6 {
+        return rendered;
+    }
+
+    let header_content = lines[1];
+    let separator = lines[2];
+
+    let mut out =
+        String::with_capacity(rendered.len() + separator.len() + header_content.len() + 2);
+    for line in &lines[..lines.len() - 1] {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str(separator);
+    out.push('\n');
+    out.push_str(header_content);
+    out.push('\n');
+    // Safe: guarded by `lines.len() < 5` check above.
+    out.push_str(lines.last().expect("has bottom border"));
+
+    out
 }
 
 /// Render a list table as a pipe-delimited markdown table.
