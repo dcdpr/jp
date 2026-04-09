@@ -88,7 +88,7 @@ impl Ls {
                 active: active_conversation_id == Some(*id),
                 title: conversation.title.clone(),
                 messages: conversation.events_count,
-                last_event_at: conversation.last_event_at,
+                last_event_at: conversation.last_event_at.or(Some(id.timestamp())),
                 expires_at: conversation.expires_at,
                 local: conversation.user,
             })
