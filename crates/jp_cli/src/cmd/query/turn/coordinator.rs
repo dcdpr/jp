@@ -88,7 +88,7 @@ pub enum Action {
 /// The coordinator manages:
 /// - State transitions based on events
 /// - Event accumulation via `EventBuilder`
-/// - Chat rendering via [`ChatRenderer`](crate::render::ChatRenderer)
+/// - Chat rendering via [`ChatRenderer`]
 /// - Pending tool calls for execution
 ///
 /// It does NOT:
