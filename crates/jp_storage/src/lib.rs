@@ -9,6 +9,8 @@ pub mod validate;
 use std::{
     fs,
     io::{self, BufReader},
+    thread,
+    time::Duration,
 };
 
 use camino::{FromPathBufError, Utf8DirEntry, Utf8Path, Utf8PathBuf};
@@ -488,8 +490,7 @@ fn get_expiring_timestamp(root: &Utf8Path) -> Option<DateTime<Utc>> {
 }
 
 /// The dot-prefixed staging directory name used during atomic conversation
-/// persistence. The dot prefix makes it invisible to directory scanning
-/// (validation, ID loading, `find_conversation_dir_path`).
+/// persistence.
 pub(crate) const STAGING_PREFIX: &str = ".staging-";
 
 /// The dot-prefixed backup directory name used during the atomic swap in
@@ -576,9 +577,48 @@ fn dir_entries(path: impl AsRef<Utf8Path>) -> impl Iterator<Item = Utf8DirEntry>
 }
 
 fn find_conversation_dir_path(root: &Utf8Path, id: &ConversationId) -> Option<Utf8PathBuf> {
-    dir_entries(root.join(CONVERSATIONS_DIR))
-        .find(|entry| entry.file_name().starts_with(&id.to_dirname(None)))
+    let prefix = id.to_dirname(None);
+    let conversations = root.join(CONVERSATIONS_DIR);
+
+    // Fast path: find the normal (non-dot-prefixed) directory.
+    if let Some(path) = find_normal_conversation_dir_path(&conversations, &prefix) {
+        return Some(path);
+    }
+
+    // If the directory isn't found but an in-flight persist directory exists
+    // (`.old-*` or `.staging-*`), another process is mid-atomic-swap. The
+    // rename gap is nanoseconds, so a brief retry is sufficient.
+    if !has_inflight_persist_dir(&conversations, &prefix) {
+        return None;
+    }
+
+    for _ in 0..10 {
+        thread::sleep(Duration::from_millis(1));
+
+        if let Some(path) = find_normal_conversation_dir_path(&conversations, &prefix) {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+fn find_normal_conversation_dir_path(
+    conversations: &Utf8Path,
+    prefix: &str,
+) -> Option<Utf8PathBuf> {
+    dir_entries(conversations)
+        .find(|entry| entry.file_name().starts_with(prefix))
         .map(Utf8DirEntry::into_path)
+}
+
+fn has_inflight_persist_dir(conversations: &Utf8Path, prefix: &str) -> bool {
+    dir_entries(conversations).any(|entry| {
+        let name = entry.file_name();
+        name.strip_prefix(OLD_PREFIX)
+            .or_else(|| name.strip_prefix(STAGING_PREFIX))
+            .is_some_and(|stripped| stripped.starts_with(prefix))
+    })
 }
 
 /// Builds the path prefix to the directory for a given conversation ID.
@@ -599,7 +639,7 @@ fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<ConversationI
         return None;
     }
 
-    // Skip dot-prefixed entries (e.g., .trash/).
+    // Skip dot-prefixed entries (e.g., .trash/, .old-*, .staging-*).
     if entry.file_name().starts_with('.') {
         return None;
     }
@@ -613,6 +653,24 @@ fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<ConversationI
             );
         })
         .ok()
+}
+
+/// Extract a conversation ID from an in-flight persist directory name.
+///
+/// Recognizes `.old-*` and `.staging-*` directories created by the atomic
+/// swap in [`Storage::persist_conversation`]. Returns `None` for normal
+/// entries, `.trash/`, or anything else.
+fn load_inflight_conversation_id(entry: &Utf8DirEntry) -> Option<ConversationId> {
+    if !entry.file_type().ok()?.is_dir() {
+        return None;
+    }
+
+    let name = entry
+        .file_name()
+        .strip_prefix(OLD_PREFIX)
+        .or_else(|| entry.file_name().strip_prefix(STAGING_PREFIX))?;
+
+    ConversationId::try_from_dirname(name).ok()
 }
 
 // Internal methods for testing.

@@ -1,4 +1,4 @@
-use std::{fs, io::BufReader};
+use std::{collections::HashSet, fs, io::BufReader};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
@@ -10,7 +10,7 @@ use tracing::warn;
 use crate::{
     BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage,
     build_conversation_dir_prefix, dir_entries, find_conversation_dir_path,
-    load_conversation_id_from_entry, parse_datetime,
+    load_conversation_id_from_entry, load_inflight_conversation_id, parse_datetime,
 };
 
 type Result<T> = std::result::Result<T, LoadError>;
@@ -86,6 +86,8 @@ impl PartialEq for LoadErrorInner {
 }
 
 impl Storage {
+    /// Load all conversation ids.
+    #[must_use]
     pub fn load_all_conversation_ids(&self) -> Vec<ConversationId> {
         let mut conversations = vec![];
         for root in [Some(&self.root), self.user.as_ref()] {
@@ -94,19 +96,60 @@ impl Storage {
             };
 
             let path = root.join(CONVERSATIONS_DIR);
-            conversations.extend(
-                dir_entries(&path)
-                    .collect::<Vec<_>>()
-                    .par_iter()
-                    .filter_map(load_conversation_id_from_entry)
-                    .collect::<Vec<_>>(),
-            );
+            conversations.extend(scan_conversation_ids(&path));
         }
 
         conversations.sort();
         conversations
     }
+}
 
+/// Scan a single conversations directory for IDs.
+///
+/// If any in-flight persist directories (`.old-*`, `.staging-*`) are found
+/// without a corresponding normal directory, retries briefly to let the
+/// atomic rename complete. This ensures every returned ID has a normal
+/// directory behind it, even when another process is mid-persist.
+fn scan_conversation_ids(path: &Utf8Path) -> Vec<ConversationId> {
+    let entries: Vec<_> = dir_entries(path).collect();
+
+    let normal: HashSet<_> = entries
+        .par_iter()
+        .filter_map(load_conversation_id_from_entry)
+        .collect();
+
+    let missing_inflight: Vec<_> = entries
+        .par_iter()
+        .filter_map(load_inflight_conversation_id)
+        .filter(|id| !normal.contains(id))
+        .collect();
+
+    if missing_inflight.is_empty() {
+        return normal.into_iter().collect();
+    }
+
+    // Another process is mid-atomic-swap. Retry briefly — the rename gap
+    // is nanoseconds, so 10 × 1ms is extremely generous.
+    let mut ids: HashSet<_> = normal;
+    for _ in 0..10 {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+
+        let found: Vec<_> = dir_entries(path)
+            .filter_map(|e| load_conversation_id_from_entry(&e))
+            .filter(|id| missing_inflight.contains(id) && !ids.contains(id))
+            .collect();
+
+        ids.extend(found.iter().copied());
+
+        if missing_inflight.iter().all(|id| ids.contains(id)) {
+            break;
+        }
+    }
+
+    ids.into_iter().collect()
+}
+
+impl Storage {
     pub fn load_conversation_stream(&self, id: &ConversationId) -> Result<ConversationStream> {
         for root in [Some(&self.root), self.user.as_ref()] {
             let Some(root) = root else {
