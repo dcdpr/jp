@@ -13,7 +13,7 @@ use jp_printer::Printer;
 
 use crate::cmd::query::{
     interrupt::InterruptAction,
-    stream::{ChatResponseRenderer, StructuredRenderer},
+    stream::{ChatRenderer, StructuredRenderer},
 };
 
 /// Phase of the turn state machine.
@@ -88,7 +88,7 @@ pub enum Action {
 /// The coordinator manages:
 /// - State transitions based on events
 /// - Event accumulation via `EventBuilder`
-/// - Chat rendering via `ChatResponseRenderer`
+/// - Chat rendering via [`ChatRenderer`]
 /// - Pending tool calls for execution
 ///
 /// It does NOT:
@@ -100,7 +100,7 @@ pub struct TurnCoordinator {
 
     // Components
     event_builder: EventBuilder,
-    chat_renderer: ChatResponseRenderer,
+    chat_renderer: ChatRenderer,
     structured_renderer: StructuredRenderer,
 
     /// When set, emit each completed event as NDJSON.
@@ -123,7 +123,7 @@ impl TurnCoordinator {
         Self {
             state: TurnPhase::Idle,
             event_builder: EventBuilder::new(),
-            chat_renderer: ChatResponseRenderer::new(printer.clone(), style),
+            chat_renderer: ChatRenderer::new(printer.clone(), style),
             structured_renderer: StructuredRenderer::new(printer),
             json_emitter,
             pending_tool_calls: Vec::new(),
@@ -166,14 +166,15 @@ impl TurnCoordinator {
                         self.chat_renderer.transition_to_tool_call();
                     }
                     EventPart::Message(text) => {
-                        self.chat_renderer.render(&ChatResponse::Message {
+                        self.chat_renderer.render_response(&ChatResponse::Message {
                             message: text.clone(),
                         });
                     }
                     EventPart::Reasoning(text) => {
-                        self.chat_renderer.render(&ChatResponse::Reasoning {
-                            reasoning: text.clone(),
-                        });
+                        self.chat_renderer
+                            .render_response(&ChatResponse::Reasoning {
+                                reasoning: text.clone(),
+                            });
                     }
                     EventPart::Structured(chunk) => {
                         self.structured_renderer

@@ -39,6 +39,7 @@ jp_workspace = { workspace = true }
 
 async-stream = { workspace = true }
 async-trait = { workspace = true }
+base64 = { workspace = true, features = ["std"] }
 camino = { workspace = true }
 camino-tempfile = { workspace = true }
 chrono = { workspace = true }

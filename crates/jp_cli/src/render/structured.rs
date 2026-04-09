@@ -1,7 +1,9 @@
-//! Structured output rendering for the query stream pipeline.
+//! Structured output rendering for the query stream pipeline and conversation
+//! replay.
 //!
-//! Renders streamed JSON chunks as a fenced code block. No markdown
-//! parsing, no typewriter effect — just raw JSON in a code fence.
+//! Renders structured JSON as a fenced code block. In the live-stream path,
+//! chunks arrive as `Value::String` fragments. In the replay path, the
+//! complete parsed value is pretty-printed.
 
 use std::sync::Arc;
 
@@ -34,11 +36,11 @@ impl StructuredRenderer {
     ///
     /// On the first chunk, emits the opening code fence. Subsequent chunks
     /// are appended directly.
+    ///
+    /// - `Value::String` is printed as raw text (streaming fragments).
+    /// - Any other variant is pretty-printed as complete JSON.
     pub fn render_chunk(&mut self, response: &ChatResponse) {
         let ChatResponse::Structured { data } = response else {
-            return;
-        };
-        let Value::String(chunk) = data else {
             return;
         };
 
@@ -47,7 +49,14 @@ impl StructuredRenderer {
             self.started = true;
         }
 
-        self.printer.print(chunk);
+        match data {
+            Value::String(chunk) => self.printer.print(chunk),
+            other => {
+                let text =
+                    serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string());
+                self.printer.print(text);
+            }
+        }
     }
 
     /// Close the fenced code block, if one was opened.
@@ -66,5 +75,5 @@ impl StructuredRenderer {
 }
 
 #[cfg(test)]
-#[path = "structured_renderer_tests.rs"]
+#[path = "structured_tests.rs"]
 mod tests;

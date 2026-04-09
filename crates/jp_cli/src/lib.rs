@@ -6,9 +6,11 @@ mod error;
 mod format;
 mod output;
 mod parser;
+mod render;
 mod schema;
 mod session;
 mod signals;
+mod timer;
 
 use std::{
     env, fmt,

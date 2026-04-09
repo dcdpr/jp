@@ -48,16 +48,20 @@ fn ignores_non_structured_variants() {
 }
 
 #[test]
-fn ignores_non_string_data() {
+fn pretty_prints_parsed_value() {
     let (mut renderer, out, printer) = create_renderer();
 
     renderer.render_chunk(&ChatResponse::Structured {
-        data: serde_json::json!({"already": "parsed"}),
+        data: serde_json::json!({"name": "Alice", "age": 30}),
     });
     renderer.flush();
     printer.flush();
 
-    assert_eq!(*out.lock(), "");
+    let output = out.lock().clone();
+    assert!(output.starts_with("```json\n"), "got: {output:?}");
+    assert!(output.ends_with("\n```\n"), "got: {output:?}");
+    assert!(output.contains("\"name\": \"Alice\""), "got: {output:?}");
+    assert!(output.contains("\"age\": 30"), "got: {output:?}");
 }
 
 #[test]
