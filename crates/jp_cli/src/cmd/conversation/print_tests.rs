@@ -86,6 +86,7 @@ fn prints_user_message() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: None,
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -108,6 +109,7 @@ fn prints_assistant_message() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: None,
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -136,6 +138,7 @@ fn prints_reasoning_full() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: None,
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -165,6 +168,7 @@ fn hides_reasoning_when_hidden() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: None,
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -196,6 +200,7 @@ fn truncates_reasoning() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: None,
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -236,6 +241,7 @@ fn prints_tool_call_and_result() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: None,
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -263,6 +269,7 @@ fn prints_structured_data() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: None,
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -290,6 +297,7 @@ fn turn_separators_between_turns() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: None,
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -313,6 +321,7 @@ fn prints_conversation_by_id() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: None,
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -335,6 +344,7 @@ fn empty_conversation_produces_no_content() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: None,
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -386,6 +396,7 @@ fn full_conversation_round_trip() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: None,
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -425,6 +436,7 @@ fn last_prints_only_last_turn() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: Some(1),
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -465,6 +477,7 @@ fn last_two_with_three_turns() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: Some(2),
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -493,6 +506,7 @@ fn last_exceeding_turn_count_prints_all() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: Some(5),
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -503,6 +517,183 @@ fn last_exceeding_turn_count_prints_all() {
     assert!(
         output.contains("Only question"),
         "should print everything when --last exceeds turn count, got: {output}"
+    );
+}
+
+#[test]
+fn blank_line_between_tool_calls_and_message() {
+    let (mut ctx, id, out, err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Check this"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("file contents".into()),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ChatResponse::message("Here is what I found.\n\n"),
+            ts(0, 0, 4),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+        last: None,
+        current_config: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    let chrome = err.lock().clone();
+
+    // The tool call output (stderr) should be followed by a blank line
+    // before the assistant message (stdout) resumes.
+    // ChatRenderer's flush_on_transition inserts this blank line
+    // on the stdout side when transitioning from ToolCall → Message.
+    assert!(
+        output.contains("\n\nHere is what I found."),
+        "should have blank line before message after tool calls, got stdout: {output:?}, stderr: \
+         {chrome:?}"
+    );
+}
+
+#[test]
+fn blank_line_between_message_and_tool_calls() {
+    let (mut ctx, id, out, err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Help me"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::message("Let me check something.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "grep_files".into(),
+                arguments: Map::from_iter([("pattern".into(), json!("foo"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("match found".into()),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(ChatResponse::message("Found it.\n\n"), ts(0, 0, 5)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+        last: None,
+        current_config: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    let chrome = strip_ansi(&err.lock());
+
+    // The message should end with its natural trailing newlines, and the
+    // tool call line should appear on stderr after that.
+    assert!(
+        output.contains("Let me check something."),
+        "message before tools should be present, got: {output:?}"
+    );
+    assert!(
+        chrome.contains("Calling tool grep_files"),
+        "tool call should appear in stderr, got: {chrome:?}"
+    );
+    // After tool calls, the next message should be separated.
+    assert!(
+        output.contains("\n\nFound it."),
+        "should have blank line before message after tool calls, got: {output:?}"
+    );
+}
+
+#[test]
+fn no_extra_blank_line_between_consecutive_tool_calls() {
+    let (mut ctx, id, _out, err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Do two things"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents a".into()),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc2".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("b.rs"))]),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc2".into(),
+                result: Ok("contents b".into()),
+            },
+            ts(0, 0, 5),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds {
+            ids: vec![ConversationTarget::Id(id)],
+        },
+        last: None,
+        current_config: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let chrome = strip_ansi(&err.lock());
+
+    // Both tool calls should appear in stderr without extra blank lines
+    // between them. The ToolRenderer writes each with writeln!, so they
+    // should be on consecutive lines.
+    let lines: Vec<&str> = chrome.lines().collect();
+    let tool_lines: Vec<&&str> = lines
+        .iter()
+        .filter(|l| l.starts_with("Calling tool"))
+        .collect();
+    assert_eq!(
+        tool_lines.len(),
+        2,
+        "should have exactly two tool call lines, got: {chrome:?}"
     );
 }
 
@@ -519,6 +710,7 @@ fn last_zero_prints_nothing() {
             ids: vec![ConversationTarget::Id(id)],
         },
         last: Some(0),
+        current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);

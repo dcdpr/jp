@@ -13,7 +13,7 @@
 //! - [`EventBuilder`]: Accumulates streamed chunks by index and produces
 //!   complete [`ConversationEvent`]s on flush.
 //!
-//! - [`ChatResponseRenderer`]: Renders LLM output (reasoning and messages) to
+//! - [`ChatRenderer`]: Renders LLM output (reasoning and messages) to
 //!   the terminal with display mode support.
 //!
 //! - [`StreamRetryState`]: Single source of
@@ -40,7 +40,7 @@
 //! [`TurnCoordinator`]: turn::coordinator::TurnCoordinator
 //! [`EventBuilder`]: jp_llm::event_builder::EventBuilder
 //! [`ConversationEvent`]: jp_conversation::event::ConversationEvent
-//! [`ChatResponseRenderer`]: stream::renderer::ChatResponseRenderer
+//! [`ChatRenderer`]: crate::render::ChatRenderer
 //! [`StreamRetryState`]: stream::retry::StreamRetryState
 //! [`InterruptHandler`]: interrupt::handler::InterruptHandler
 //! [`ToolCallRequest`]: jp_conversation::event::ToolCallRequest

@@ -1,7 +1,8 @@
-//! Chat response rendering for the query stream pipeline.
+//! Chat rendering for both the live-stream query pipeline and conversation
+//! replay.
 //!
-//! The [`ChatResponseRenderer`] handles rendering of `ChatResponse` events
-//! (reasoning and message content) to the terminal with low latency.
+//! The [`ChatRenderer`] handles rendering of both `ChatRequest` (user messages)
+//! and `ChatResponse` events (reasoning and message content) to the terminal.
 //!
 //! # Rendering Pipeline
 //!
@@ -50,11 +51,13 @@ enum ContentKind {
     ToolCall,
 }
 
-/// Renders `ChatResponse` events to the terminal.
+/// Renders chat events to the terminal.
 ///
-/// Handles both reasoning and message content, applying the configured
-/// display mode for reasoning.
-pub struct ChatResponseRenderer {
+/// Handles user messages, assistant reasoning, and assistant message content,
+/// applying the configured display mode for reasoning. Tracks content-kind
+/// transitions to insert appropriate spacing between different content types
+/// (e.g. blank lines between tool calls and message text).
+pub struct ChatRenderer {
     buffer: Buffer,
     formatter: Formatter,
     printer: Arc<Printer>,
@@ -65,7 +68,7 @@ pub struct ChatResponseRenderer {
     code_highlight: Option<SavedHighlightState>,
 }
 
-impl ChatResponseRenderer {
+impl ChatRenderer {
     pub fn new(printer: Arc<Printer>, config: StyleConfig) -> Self {
         let pretty = printer.pretty_printing_enabled();
         let formatter = formatter_from_config(&config, pretty);
@@ -80,12 +83,52 @@ impl ChatResponseRenderer {
         }
     }
 
-    pub fn render(&mut self, response: &ChatResponse) {
+    /// Render a `ChatResponse` (assistant output).
+    ///
+    /// Structured responses are ignored — they are handled by the
+    /// `StructuredRenderer` in the live-stream path and inline in print.
+    pub fn render_response(&mut self, response: &ChatResponse) {
         match response {
             ChatResponse::Reasoning { reasoning } => self.render_reasoning(reasoning),
             ChatResponse::Message { message } => self.render_message(message),
             ChatResponse::Structured { .. } => {}
         }
+    }
+
+    /// Render a user message (`ChatRequest` content).
+    ///
+    /// Formats the content with a horizontal rule separator and prints it
+    /// as a complete block. Participates in content-kind transition tracking
+    /// so that spacing between user messages and tool calls is correct.
+    pub fn render_request(&mut self, content: &str) {
+        self.flush_on_transition(ContentKind::Message);
+        self.flush();
+
+        let formatted = self
+            .formatter
+            .format_terminal(content.trim_end())
+            .unwrap_or_else(|_| content.trim_end().to_owned());
+        self.printer.print(&formatted);
+
+        self.render_separator();
+
+        self.last_content_kind = Some(ContentKind::Message);
+    }
+
+    /// Render a horizontal rule separator between turns.
+    ///
+    /// Routes the `---` through the markdown formatter so it renders as
+    /// a proper HR element in pretty mode.
+    pub fn render_separator(&mut self) {
+        self.flush();
+
+        let formatted = self
+            .formatter
+            .format_terminal("\n\n---\n\n")
+            .unwrap_or_else(|_| "\n\n---\n\n".to_owned());
+        self.printer.print(format!("\n{formatted}\n"));
+
+        self.last_content_kind = None;
     }
 
     /// Flush the markdown buffer if the content kind is changing.
@@ -336,5 +379,5 @@ fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {
 }
 
 #[cfg(test)]
-#[path = "renderer_tests.rs"]
+#[path = "chat_tests.rs"]
 mod tests;

@@ -82,6 +82,14 @@ pub struct DelayError(String);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Schematic)]
 pub struct DelayDuration(Duration);
 
+impl DelayDuration {
+    /// Sets the delay to `0`.
+    #[must_use]
+    pub const fn instant() -> Self {
+        Self(Duration::from_secs(0))
+    }
+}
+
 impl TryFrom<&str> for DelayDuration {
     type Error = DelayError;
 

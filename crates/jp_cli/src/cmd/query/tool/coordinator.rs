@@ -101,9 +101,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use super::{
+    ToolRenderer,
     inquiry::{self, InquiryBackend},
     prompter::{PermissionResult, ToolPrompter, permission_inquiry_id, tool_question_inquiry_id},
-    renderer::ToolRenderer,
 };
 use crate::cmd::query::turn::{TurnCoordinator, state::TurnState};
 
@@ -236,6 +236,10 @@ pub struct ToolCoordinator {
     tools_config: ToolsConfig,
     executor_source: Box<dyn ExecutorSource>,
     cancellation_token: CancellationToken,
+    /// Rendered custom argument output accumulated during the permission
+    /// phase. Keyed by tool call ID. Drained by the turn loop to write
+    /// into event metadata.
+    rendered_arguments: HashMap<String, String>,
 }
 
 impl ToolCoordinator {
@@ -246,7 +250,16 @@ impl ToolCoordinator {
             tools_config,
             executor_source,
             cancellation_token: CancellationToken::new(),
+            rendered_arguments: HashMap::new(),
         }
+    }
+
+    /// Drain accumulated rendered argument content.
+    ///
+    /// Returns `(tool_call_id, rendered_content)` pairs collected during
+    /// the permission phase. The caller writes these into event metadata.
+    pub fn drain_rendered_arguments(&mut self) -> HashMap<String, String> {
+        std::mem::take(&mut self.rendered_arguments)
     }
 
     pub fn is_prompting(&self) -> bool {
@@ -415,32 +428,31 @@ impl ToolCoordinator {
 
     /// Renders custom formatter output for a tool, if applicable.
     /// No-ops for non-Custom styles and hidden tools.
+    ///
+    /// Returns the rendered content if a custom formatter produced output.
     pub(crate) async fn render_custom_args(
         &self,
         tool_name: &str,
         arguments: &serde_json::Map<String, Value>,
         tool_renderer: &ToolRenderer,
-    ) {
+    ) -> Option<String> {
         let is_hidden = self
             .tools_config
             .get(tool_name)
             .is_some_and(|cfg| cfg.style().hidden);
 
         if is_hidden {
-            return;
+            return None;
         }
 
-        let Some(cmd) = self
+        let cmd = self
             .parameter_style(tool_name)
             .into_custom()
-            .map(CommandConfigOrString::command)
-        else {
-            return;
-        };
+            .map(CommandConfigOrString::command)?;
 
         tool_renderer
             .render_custom_arguments(tool_name, arguments, cmd)
-            .await;
+            .await
     }
 
     /// Determines permission for a single tool without blocking on user input.
@@ -589,9 +601,14 @@ impl ToolCoordinator {
 
             match decision {
                 PermissionDecision::Approved(executor) => {
+                    let id = executor.tool_id().to_owned();
                     let name = executor.tool_name().to_owned();
                     let args = executor.arguments().clone();
-                    self.render_custom_args(&name, &args, tool_renderer).await;
+                    if let Some(rendered) =
+                        self.render_custom_args(&name, &args, tool_renderer).await
+                    {
+                        self.rendered_arguments.insert(id, rendered);
+                    }
                     approved_executors.push((index, executor));
                 }
                 PermissionDecision::Skipped(response) => {
@@ -604,8 +621,13 @@ impl ToolCoordinator {
                     match self.apply_permission_result(result, &info, turn_state, executor) {
                         Ok(executor) => {
                             let args = executor.arguments().clone();
-                            self.render_custom_args(&info.tool_name, &args, tool_renderer)
-                                .await;
+                            if let Some(rendered) = self
+                                .render_custom_args(&info.tool_name, &args, tool_renderer)
+                                .await
+                            {
+                                self.rendered_arguments
+                                    .insert(info.tool_id.clone(), rendered);
+                            }
                             approved_executors.push((index, executor));
                         }
                         Err(response) => {
@@ -710,7 +732,7 @@ impl ToolCoordinator {
                 }
             });
 
-            super::renderer::spawn_tick_sender(
+            crate::timer::spawn_tick_sender(
                 progress_tx,
                 progress_config.show,
                 Duration::from_secs(u64::from(progress_config.delay_secs)),

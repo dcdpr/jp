@@ -1,0 +1,5 @@
+---
+source: crates/jp_cli/src/render/tool_tests.rs
+expression: plain
+---
+(a: 1, b: "hello")

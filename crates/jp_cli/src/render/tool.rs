@@ -15,112 +15,11 @@ use jp_md::format::Formatter;
 use jp_printer::Printer;
 use jp_term::osc::hyperlink;
 use serde_json::{Map, Value};
-use tokio::{
-    sync::mpsc::Sender,
-    time::{Instant, MissedTickBehavior},
-};
+use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-/// Spawns a timer task that sends elapsed [`Duration`] through a channel
-/// at a fixed interval.
-///
-/// After `delay`, the task sends its elapsed time every `interval`. On
-/// cancellation (or when the receiver is dropped), the task exits.
-///
-/// Returns `None` if `show` is `false`, in which case nothing is spawned.
-pub fn spawn_tick_sender(
-    tx: Sender<Duration>,
-    show: bool,
-    delay: Duration,
-    interval: Duration,
-) -> Option<CancellationToken> {
-    if !show {
-        return None;
-    }
-
-    let token = CancellationToken::new();
-    let child = token.child_token();
-    let interval = interval.max(Duration::from_millis(10));
-
-    tokio::spawn(async move {
-        let start = Instant::now();
-
-        tokio::select! {
-            () = tokio::time::sleep(delay) => {}
-            () = child.cancelled() => { return; }
-        }
-
-        let mut ticker = tokio::time::interval(interval);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-        loop {
-            tokio::select! {
-                biased;
-                () = child.cancelled() => { return; }
-                _ = ticker.tick() => {
-                    if tx.send(start.elapsed()).await.is_err() {
-                        return;
-                    }
-                }
-            }
-        }
-    });
-
-    Some(token)
-}
-
-/// Spawns a `\r`-based timer task that periodically writes a status line.
-///
-/// After `delay`, the task calls `format_line(elapsed_secs)` every
-/// `interval` and writes the result to the printer. On cancellation it
-/// clears the line with `\r\x1b[K`.
-///
-/// Returns `None` if `show` is `false`, in which case nothing is spawned.
-pub fn spawn_line_timer(
-    printer: Arc<Printer>,
-    show: bool,
-    delay: Duration,
-    interval: Duration,
-    format_line: impl Fn(f64) -> String + Send + 'static,
-) -> Option<(CancellationToken, tokio::task::JoinHandle<()>)> {
-    if !show {
-        return None;
-    }
-
-    let token = CancellationToken::new();
-    let child = token.child_token();
-    let interval = interval.max(Duration::from_millis(10));
-
-    let handle = tokio::spawn(async move {
-        let start = Instant::now();
-
-        tokio::select! {
-            () = tokio::time::sleep(delay) => {}
-            () = child.cancelled() => { return; }
-        }
-
-        let mut ticker = tokio::time::interval(interval);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-        loop {
-            tokio::select! {
-                biased;
-                () = child.cancelled() => {
-                    let _ = write!(printer.err_writer(), "\r\x1b[K");
-                    return;
-                }
-                _ = ticker.tick() => {
-                    let secs = start.elapsed().as_secs_f64();
-                    let line = format_line(secs);
-                    let _ = write!(printer.err_writer(), "{line}");
-                }
-            }
-        }
-    });
-
-    Some((token, handle))
-}
+use crate::timer::spawn_tick_sender;
 
 /// A tool in the pending list.
 struct PendingTool {
@@ -228,30 +127,45 @@ impl ToolRenderer {
     ///
     /// If the custom command fails, falls back to JSON formatting so the user
     /// always sees the arguments.
+    ///
+    /// Returns the custom-formatted content on success, so the caller can
+    /// persist it for replay. Returns `None` if the formatter produced no
+    /// output or failed (the JSON fallback is reproducible from arguments).
     pub async fn render_custom_arguments(
         &self,
         name: &str,
         arguments: &Map<String, Value>,
         cmd: ToolCommandConfig,
-    ) {
+    ) -> Option<String> {
         match format_args_custom(name, arguments, cmd, &self.root).await {
             Ok(content) if !content.is_empty() => {
-                let _ = writeln!(self.printer.err_writer(), "\n{content}");
-                if !content.ends_with("\n\n") {
-                    let _ = writeln!(self.printer.err_writer());
-                }
+                self.render_formatted_arguments(&content);
+                Some(content)
             }
-            Ok(_) => {}
+            Ok(_) => None,
             Err(error) => {
                 let filtered = filter_display_args(arguments);
                 if filtered.is_empty() {
-                    return;
+                    return None;
                 }
 
                 warn!(%error, tool = %name, "Custom formatter failed, falling back to JSON");
                 let json = format_args_json(filtered);
                 let _ = writeln!(self.printer.err_writer(), "{json}\n");
+                None
             }
+        }
+    }
+
+    /// Render already-formatted custom argument content.
+    ///
+    /// Used by [`render_custom_arguments`](Self::render_custom_arguments)
+    /// after running the formatter, and by the replay path when the stored
+    /// event has rendered arguments in its metadata.
+    pub fn render_formatted_arguments(&self, content: &str) {
+        let _ = writeln!(self.printer.err_writer(), "\n{content}");
+        if !content.ends_with("\n\n") {
+            let _ = writeln!(self.printer.err_writer());
         }
     }
 
@@ -721,5 +635,5 @@ async fn format_args_custom(
 }
 
 #[cfg(test)]
-#[path = "renderer_tests.rs"]
+#[path = "tool_tests.rs"]
 mod tests;

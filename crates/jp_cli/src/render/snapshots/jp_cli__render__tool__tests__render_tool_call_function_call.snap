@@ -1,5 +1,5 @@
 ---
-source: crates/jp_cli/src/cmd/query/tool/renderer_tests.rs
+source: crates/jp_cli/src/render/tool_tests.rs
 expression: output
 ---
 Calling tool cargo_check(package: "jp_cli")

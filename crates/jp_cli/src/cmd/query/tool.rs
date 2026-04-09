@@ -8,9 +8,9 @@ pub(crate) mod coordinator;
 pub(crate) mod executor;
 pub(crate) mod inquiry;
 pub(crate) mod prompter;
-pub(crate) mod renderer;
 
 pub(crate) use coordinator::{PermissionDecision, ToolCallState, ToolCoordinator};
 pub(crate) use executor::TerminalExecutorSource;
 pub(crate) use prompter::ToolPrompter;
-pub(crate) use renderer::{ToolRenderer, spawn_line_timer};
+
+pub(crate) use crate::{render::ToolRenderer, timer::spawn_line_timer};

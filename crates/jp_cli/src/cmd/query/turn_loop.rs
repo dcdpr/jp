@@ -18,7 +18,10 @@ use jp_config::{
     AppConfig, PartialConfig, assistant::tool_choice::ToolChoice,
     conversation::tool::QuestionTarget, model::id::ProviderId, style::streaming::StreamingConfig,
 };
-use jp_conversation::event::{ChatRequest, ToolCallRequest, ToolCallResponse};
+use jp_conversation::{
+    ConversationStream,
+    event::{ChatRequest, ToolCallRequest, ToolCallResponse},
+};
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
     Provider,
@@ -30,7 +33,7 @@ use jp_llm::{
     tool::{ToolDefinition, executor::Executor},
 };
 use jp_printer::Printer;
-use jp_workspace::ConversationLock;
+use jp_workspace::{ConversationLock, ConversationMut};
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream, errors::BroadcastStreamRecvError};
 use tokio_util::sync::CancellationToken;
@@ -48,7 +51,9 @@ use super::{
     turn::{Action, TurnCoordinator, TurnPhase, TurnState},
 };
 use crate::{
+    cmd::query::tool::coordinator::ExecutionResult,
     error::Error,
+    render::metadata::set_rendered_arguments,
     signals::{SignalRx, SignalTo},
 };
 
@@ -426,13 +431,20 @@ pub(super) async fn run_turn_loop(
                                             PermissionDecision::Approved(exec) => {
                                                 let name = exec.tool_name().to_owned();
                                                 let args = exec.arguments().clone();
-                                                tool_coordinator
+                                                if let Some(rendered) = tool_coordinator
                                                     .render_custom_args(
                                                         &name,
                                                         &args,
                                                         &tool_renderer,
                                                     )
-                                                    .await;
+                                                    .await
+                                                {
+                                                    conv.update_events(|stream| {
+                                                        store_rendered_arguments(
+                                                            stream, &req.id, &rendered,
+                                                        );
+                                                    });
+                                                }
                                                 perm_approved.push((idx, exec));
                                             }
                                             PermissionDecision::Skipped(resp) => {
@@ -461,13 +473,20 @@ pub(super) async fn run_turn_loop(
                                                 ) {
                                                     Ok(exec) => {
                                                         let args = exec.arguments().clone();
-                                                        tool_coordinator
+                                                        if let Some(rendered) = tool_coordinator
                                                             .render_custom_args(
                                                                 &info.tool_name,
                                                                 &args,
                                                                 &tool_renderer,
                                                             )
-                                                            .await;
+                                                            .await
+                                                        {
+                                                            conv.update_events(|stream| {
+                                                                store_rendered_arguments(
+                                                                    stream, &req.id, &rendered,
+                                                                );
+                                                            });
+                                                        }
                                                         perm_approved.push((idx, exec));
                                                     }
                                                     Err(resp) => {
@@ -552,21 +571,16 @@ pub(super) async fn run_turn_loop(
                         continue;
                     }
 
-                    let mut indexed_responses: Vec<(usize, _)> =
-                        execution_result.responses.into_iter().enumerate().collect();
-                    indexed_responses.extend(skipped_responses);
-                    indexed_responses.extend(unavailable_responses);
-                    indexed_responses.sort_by_key(|(index, _)| *index);
-                    let responses: Vec<_> = indexed_responses.into_iter().map(|(_, r)| r).collect();
-
-                    let follow_up = conv.update_events(|stream| {
-                        turn_coordinator.handle_tool_responses(stream, responses)
-                    });
-                    if let Action::SendFollowUp = follow_up {
+                    if commit_tool_responses(
+                        execution_result,
+                        skipped_responses,
+                        unavailable_responses,
+                        &mut tool_coordinator,
+                        &mut turn_coordinator,
+                        &mut conv,
+                    )? {
                         tool_choice = ToolChoice::Auto;
                     }
-
-                    conv.flush()?;
                     continue;
                 }
 
@@ -608,21 +622,16 @@ pub(super) async fn run_turn_loop(
                     continue;
                 }
 
-                let mut indexed_responses: Vec<(usize, _)> =
-                    execution_result.responses.into_iter().enumerate().collect();
-                indexed_responses.extend(skipped);
-                indexed_responses.extend(unavailable);
-                indexed_responses.sort_by_key(|(index, _)| *index);
-                let responses: Vec<_> = indexed_responses.into_iter().map(|(_, r)| r).collect();
-
-                let follow_up = conv.update_events(|stream| {
-                    turn_coordinator.handle_tool_responses(stream, responses)
-                });
-                if let Action::SendFollowUp = follow_up {
+                if commit_tool_responses(
+                    execution_result,
+                    skipped,
+                    unavailable,
+                    &mut tool_coordinator,
+                    &mut turn_coordinator,
+                    &mut conv,
+                )? {
                     tool_choice = ToolChoice::Auto;
                 }
-
-                conv.flush()?;
             }
         }
     }
@@ -777,6 +786,63 @@ async fn build_inquiry_overrides(
     }
 
     Ok(overrides)
+}
+
+/// Assemble tool responses from execution, skipped, and unavailable results,
+/// commit them to the conversation stream, and flush to disk.
+///
+/// Returns `true` if a follow-up LLM cycle is needed (i.e. tool responses were
+/// added and the coordinator wants to continue).
+fn commit_tool_responses(
+    result: ExecutionResult,
+    skipped: Vec<(usize, ToolCallResponse)>,
+    unavailable: Vec<(usize, ToolCallResponse)>,
+    tool: &mut ToolCoordinator,
+    turn: &mut super::turn::TurnCoordinator,
+    conv: &mut ConversationMut,
+) -> Result<bool, Error> {
+    // Persist any rendered custom-argument output accumulated during the
+    // permission phase into the corresponding ToolCallRequest events.
+    flush_rendered_arguments(tool, conv);
+
+    let mut indexed: Vec<_> = result.responses.into_iter().enumerate().collect();
+    indexed.extend(skipped);
+    indexed.extend(unavailable);
+    indexed.sort_by_key(|(idx, _)| *idx);
+    let responses: Vec<_> = indexed.into_iter().map(|(_, r)| r).collect();
+
+    let action = conv.update_events(|stream| turn.handle_tool_responses(stream, responses));
+    conv.flush()?;
+
+    Ok(matches!(action, Action::SendFollowUp))
+}
+
+/// Write a single rendered-arguments entry into event metadata.
+fn store_rendered_arguments(stream: &mut ConversationStream, tool_call_id: &str, content: &str) {
+    for event in stream.iter_mut() {
+        let is_match = event
+            .event
+            .as_tool_call_request()
+            .is_some_and(|r| r.id == tool_call_id);
+        if is_match {
+            set_rendered_arguments(event.event, content);
+            return;
+        }
+    }
+}
+
+/// Drain accumulated rendered arguments from the coordinator and write them
+/// into the corresponding `ToolCallRequest` events in the stream.
+fn flush_rendered_arguments(coordinator: &mut ToolCoordinator, conv: &mut ConversationMut) {
+    let rendered = coordinator.drain_rendered_arguments();
+    if rendered.is_empty() {
+        return;
+    }
+    conv.update_events(|stream| {
+        for (tool_call_id, content) in &rendered {
+            store_rendered_arguments(stream, tool_call_id, content);
+        }
+    });
 }
 
 fn map_llm_error(error: jp_llm::Error, models: Vec<ModelDetails>) -> Error {

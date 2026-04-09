@@ -9,15 +9,13 @@ fn strip_ansi(s: &str) -> String {
     String::from_utf8(bytes).expect("valid utf-8 after stripping ANSI")
 }
 
-fn create_renderer_with_config(
-    config: AppConfig,
-) -> (ChatResponseRenderer, SharedBuffer, SharedBuffer) {
+fn create_renderer_with_config(config: AppConfig) -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-    let renderer = ChatResponseRenderer::new(Arc::new(printer), config.style);
+    let renderer = ChatRenderer::new(Arc::new(printer), config.style);
     (renderer, out, err)
 }
 
-fn create_renderer() -> (ChatResponseRenderer, SharedBuffer, SharedBuffer) {
+fn create_renderer() -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     create_renderer_with_config(AppConfig::new_test())
 }
 
@@ -25,7 +23,7 @@ fn create_renderer() -> (ChatResponseRenderer, SharedBuffer, SharedBuffer) {
 fn test_renders_message() {
     let (mut renderer, out, _err) = create_renderer();
 
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "Hello world\n\n".into(),
     });
 
@@ -40,7 +38,7 @@ fn test_renders_reasoning_full_mode() {
     config.style.reasoning.background = None;
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Let me think\n\n".into(),
     });
 
@@ -54,7 +52,7 @@ fn test_hidden_reasoning_produces_no_output() {
     config.style.reasoning.display = ReasoningDisplayConfig::Hidden;
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Secret thoughts\n\n".into(),
     });
 
@@ -68,10 +66,10 @@ fn test_static_reasoning_shows_once() {
     config.style.reasoning.display = ReasoningDisplayConfig::Static;
     let (mut renderer, out, err) = create_renderer_with_config(config);
 
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "First chunk\n\n".into(),
     });
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Second chunk\n\n".into(),
     });
 
@@ -90,13 +88,13 @@ fn test_progress_reasoning_shows_dots() {
     config.style.reasoning.display = ReasoningDisplayConfig::Progress;
     let (mut renderer, out, err) = create_renderer_with_config(config);
 
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "First\n\n".into(),
     });
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Second\n\n".into(),
     });
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Third\n\n".into(),
     });
 
@@ -118,7 +116,7 @@ fn test_truncate_reasoning() {
 
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "This is a very long reasoning that should be truncated\n\n".into(),
     });
 
@@ -133,10 +131,10 @@ fn test_no_separator_between_reasoning_and_message() {
     config.style.reasoning.background = None;
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Thinking\n\n".into(),
     });
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "Answer\n\n".into(),
     });
 
@@ -153,7 +151,7 @@ fn test_reasoning_buffer_flushed_on_message_transition() {
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     // Reasoning without a trailing block boundary (no double newline)
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Partial reasoning".into(),
     });
 
@@ -161,7 +159,7 @@ fn test_reasoning_buffer_flushed_on_message_transition() {
     assert_eq!(*out.lock(), "", "Should not flush incomplete block yet");
 
     // Message arrives — should force-flush the buffered reasoning first
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "Answer\n\n".into(),
     });
 
@@ -179,7 +177,7 @@ fn test_message_buffer_flushed_on_explicit_flush() {
     let (mut renderer, out, _err) = create_renderer();
 
     // Partial message with no block boundary
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "Incomplete line".into(),
     });
 
@@ -202,11 +200,11 @@ fn test_whitespace_only_block_not_printed() {
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     // Simulate Anthropic emitting "\n\n" before a thinking block
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "\n\n".into(),
     });
     // Transition to reasoning triggers flush of the buffered "\n\n"
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Thinking about it\n\n".into(),
     });
 
@@ -230,7 +228,7 @@ fn test_reasoning_background_color_applied() {
     config.style.reasoning.background = Some(Color::Ansi256(236));
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
-    renderer.render(&ChatResponse::Reasoning {
+    renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Deep thought\n\n".into(),
     });
 
@@ -257,7 +255,7 @@ fn test_reasoning_background_not_applied_to_messages() {
     config.style.reasoning.background = Some(Color::Ansi256(236));
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "Plain answer\n\n".into(),
     });
 
@@ -274,13 +272,13 @@ fn test_fenced_code_block_streams_without_double_fence() {
     let (mut renderer, out, _err) = create_renderer();
 
     // Simulate a fenced code block arriving in chunks
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "```json\n".into(),
     });
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "{\"key\": \"value\"}\n".into(),
     });
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "```\n".into(),
     });
     renderer.flush();
@@ -304,7 +302,7 @@ fn test_fenced_code_block_streams_without_double_fence() {
 fn test_fenced_code_block_with_language_tag() {
     let (mut renderer, out, _err) = create_renderer();
 
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "```rust\nfn main() {}\n```\n".into(),
     });
     renderer.flush();
@@ -326,7 +324,7 @@ fn test_fenced_code_block_with_language_tag() {
 fn test_text_before_and_after_code_block() {
     let (mut renderer, out, _err) = create_renderer();
 
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "Before\n\n```\ncode\n```\nAfter\n\n".into(),
     });
     renderer.flush();
@@ -353,7 +351,7 @@ fn test_fenced_code_block_syntax_highlighting() {
     config.style.markdown.theme = None;
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: indoc::indoc! {"
             ```rust
             fn main() {
@@ -407,7 +405,7 @@ fn test_no_separator_for_consecutive_messages() {
     config.style.markdown.wrap_width = 0;
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "First ".into(),
     });
 
@@ -415,7 +413,7 @@ fn test_no_separator_for_consecutive_messages() {
     renderer.printer.flush();
     assert_eq!(*out.lock(), "");
 
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: " Second\n\n".into(),
     });
 
@@ -431,7 +429,7 @@ fn test_no_separator_for_consecutive_messages() {
 fn test_blank_line_after_tool_calls_before_message() {
     let (mut renderer, out, _err) = create_renderer();
 
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "Before tools\n\n".into(),
     });
     renderer.printer.flush();
@@ -441,7 +439,7 @@ fn test_blank_line_after_tool_calls_before_message() {
     renderer.transition_to_tool_call();
 
     // Next message content should be separated by a blank line.
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "After tools\n\n".into(),
     });
     renderer.printer.flush();
@@ -454,10 +452,10 @@ fn test_blank_line_after_tool_calls_before_message() {
 fn test_no_blank_line_for_consecutive_messages_without_tool_calls() {
     let (mut renderer, out, _err) = create_renderer();
 
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "First paragraph\n\n".into(),
     });
-    renderer.render(&ChatResponse::Message {
+    renderer.render_response(&ChatResponse::Message {
         message: "Second paragraph\n\n".into(),
     });
     renderer.printer.flush();

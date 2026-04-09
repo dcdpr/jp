@@ -1,17 +1,10 @@
-use jp_config::AppConfig;
-use jp_conversation::{
-    ConversationStream, EventKind,
-    event::{ChatResponse, ToolCallResponse},
-};
-use jp_md::format::Formatter;
-use jp_printer::Printer;
+use jp_config::style::typewriter::DelayDuration;
 use jp_workspace::ConversationHandle;
 
 use crate::{
-    cmd::{
-        ConversationLoadRequest, Output, conversation_id::PositionalIds, query::tool::ToolRenderer,
-    },
+    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
     ctx::Ctx,
+    render::{ConfigSource, TurnRenderer},
 };
 
 #[derive(Debug, clap::Args)]
@@ -22,6 +15,14 @@ pub(crate) struct Print {
     /// Print only the last N turns. Without a value, prints the last turn.
     #[arg(long, num_args = 0..=1, default_missing_value = "1")]
     last: Option<usize>,
+
+    /// Use the current workspace config instead of the per-turn config.
+    ///
+    /// By default, each turn is rendered with the config that was active when
+    /// it was created. This flag overrides that and uses the current workspace
+    /// config for all turns.
+    #[arg(long, default_value_t = false)]
+    current_config: bool,
 }
 
 impl Print {
@@ -31,7 +32,7 @@ impl Print {
 
     pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         for handle in handles {
-            Self::print_conversation(ctx, handle, self.last)?;
+            Self::print_conversation(ctx, handle, self.last, self.current_config)?;
         }
         ctx.printer.println("");
         ctx.printer.flush();
@@ -42,198 +43,47 @@ impl Print {
         ctx: &mut Ctx,
         handle: &ConversationHandle,
         last: Option<usize>,
+        current_config: bool,
     ) -> Output {
         let events = ctx.workspace.events(handle)?.clone();
         let cfg = ctx.config();
-        let pretty = ctx.printer.pretty_printing_enabled();
 
-        let printer = ctx.printer.clone();
         let root = ctx
             .workspace
             .storage_path()
             .unwrap_or(ctx.workspace.root())
             .to_path_buf();
 
-        let tool_renderer = ToolRenderer::new(
-            printer.clone(),
-            cfg.style.clone(),
-            root.clone(),
+        let source = if current_config {
+            ConfigSource::Fixed
+        } else {
+            ConfigSource::PerTurn
+        };
+
+        // Disable typewriter delays — print replays content instantly.
+        let mut style = cfg.style.clone();
+        style.typewriter.text_delay = DelayDuration::instant();
+        style.typewriter.code_delay = DelayDuration::instant();
+
+        let mut renderer = TurnRenderer::new(
+            ctx.printer.clone(),
+            style,
+            cfg.conversation.tools.clone(),
+            root,
             ctx.term.is_tty,
+            source,
         );
 
         let turns = events.iter_turns();
         let skip = last.map_or(0, |n| turns.len().saturating_sub(n));
 
-        let mut is_first_turn = true;
-
         for turn in turns.skip(skip) {
-            for event_with_cfg in turn {
-                match &event_with_cfg.event.kind {
-                    EventKind::TurnStart(_) => {
-                        if !is_first_turn {
-                            printer.println("\n---\n");
-                        }
-                        is_first_turn = false;
-                    }
-
-                    EventKind::ChatRequest(req) => {
-                        render_user_message(&printer, &cfg, pretty, &req.content)?;
-                    }
-
-                    EventKind::ChatResponse(resp) => {
-                        render_chat_response(&printer, &cfg, pretty, resp)?;
-                    }
-
-                    EventKind::ToolCallRequest(req) => {
-                        let tool_cfg = cfg.conversation.tools.get(&req.name);
-                        if !tool_cfg.as_ref().is_some_and(|c| c.style().hidden) {
-                            let params_style = tool_cfg
-                                .as_ref()
-                                .map(|c| c.style().parameters.clone())
-                                .unwrap_or_default();
-                            tool_renderer.render_tool_call(
-                                &req.name,
-                                &req.arguments,
-                                &params_style,
-                            );
-                        }
-                    }
-
-                    EventKind::ToolCallResponse(resp) => {
-                        let name = find_tool_name_for_response(&events, resp);
-                        let tool_cfg = name.as_deref().and_then(|n| cfg.conversation.tools.get(n));
-                        if !tool_cfg.as_ref().is_some_and(|c| c.style().hidden) {
-                            let inline = tool_cfg
-                                .as_ref()
-                                .map(|c| c.style().inline_results.clone())
-                                .unwrap_or_default();
-                            let link = tool_cfg
-                                .as_ref()
-                                .map(|c| c.style().results_file_link.clone())
-                                .unwrap_or_default();
-                            tool_renderer.render_result(resp, &inline, &link);
-                        }
-                    }
-
-                    EventKind::InquiryRequest(_) | EventKind::InquiryResponse(_) => {}
-                }
-            }
+            renderer.render_turn(&turn);
         }
 
+        renderer.flush();
         Ok(())
     }
-}
-
-/// Format and print a user message (`ChatRequest`).
-fn render_user_message(
-    printer: &Printer,
-    cfg: &AppConfig,
-    pretty: bool,
-    content: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let formatter = build_formatter(cfg, pretty);
-    let formatted = formatter.format_terminal(&format!("{content}\n\n---\n\n"))?;
-    printer.println(formatted);
-    Ok(())
-}
-
-/// Render a `ChatResponse`, respecting reasoning display config.
-fn render_chat_response(
-    printer: &Printer,
-    cfg: &AppConfig,
-    pretty: bool,
-    response: &ChatResponse,
-) -> Result<(), Box<dyn std::error::Error>> {
-    match response {
-        ChatResponse::Message { message } => {
-            let formatter = build_formatter(cfg, pretty);
-            let formatted = formatter.format_terminal(message)?;
-            printer.print(formatted);
-        }
-
-        ChatResponse::Reasoning { reasoning } => {
-            render_reasoning(printer, cfg, pretty, reasoning)?;
-        }
-
-        ChatResponse::Structured { data } => {
-            if let Ok(pretty) = serde_json::to_string_pretty(data) {
-                printer.println(format!("```json\n{pretty}\n```\n"));
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Render reasoning content according to the display config.
-fn render_reasoning(
-    printer: &Printer,
-    cfg: &AppConfig,
-    pretty: bool,
-    content: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use jp_config::style::reasoning::ReasoningDisplayConfig;
-
-    match cfg.style.reasoning.display {
-        ReasoningDisplayConfig::Hidden => {}
-
-        ReasoningDisplayConfig::Full => {
-            let formatter = build_formatter(cfg, pretty);
-            let formatted = formatter.format_terminal(content)?;
-            printer.print(formatted);
-        }
-
-        ReasoningDisplayConfig::Truncate(ref trunc) => {
-            let truncated: String = content.chars().take(trunc.characters).collect();
-            let suffix = if content.chars().count() > trunc.characters {
-                "..."
-            } else {
-                ""
-            };
-            let formatter = build_formatter(cfg, pretty);
-            let formatted = formatter.format_terminal(&format!("{truncated}{suffix}\n\n"))?;
-            printer.print(formatted);
-        }
-
-        // Progress/Static/Summary modes don't apply to replay — show a label.
-        ReasoningDisplayConfig::Progress
-        | ReasoningDisplayConfig::Static
-        | ReasoningDisplayConfig::Summary => {
-            printer.println("reasoning...\n");
-        }
-    }
-
-    Ok(())
-}
-
-/// Look up the tool name for a `ToolCallResponse` by finding its matching request.
-fn find_tool_name_for_response(
-    events: &ConversationStream,
-    resp: &ToolCallResponse,
-) -> Option<String> {
-    events.iter().find_map(|e| {
-        e.event
-            .as_tool_call_request()
-            .filter(|req| req.id == resp.id)
-            .map(|req| req.name.clone())
-    })
-}
-
-fn build_formatter(cfg: &AppConfig, pretty: bool) -> Formatter {
-    Formatter::with_width(cfg.style.markdown.wrap_width)
-        .table_max_column_width(cfg.style.markdown.table_max_column_width)
-        .theme(if pretty {
-            cfg.style.markdown.theme.as_deref()
-        } else {
-            None
-        })
-        .pretty_hr(pretty && cfg.style.markdown.hr_style.is_line())
-        .inline_code_bg(
-            cfg.style
-                .inline_code
-                .background
-                .map(crate::format::color_to_bg_param),
-        )
 }
 
 #[cfg(test)]
