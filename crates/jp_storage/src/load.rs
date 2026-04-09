@@ -86,6 +86,8 @@ impl PartialEq for LoadErrorInner {
 }
 
 impl Storage {
+    /// Load all conversation ids.
+    #[must_use]
     pub fn load_all_conversation_ids(&self) -> Vec<ConversationId> {
         let mut conversations = vec![];
         for root in [Some(&self.root), self.user.as_ref()] {
