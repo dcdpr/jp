@@ -26,6 +26,7 @@ fn test_assistant_config_instructions() {
         p.instructions,
         MergeableVec::Merged(MergedVec {
             strategy: None,
+            dedup: None,
             value: vec![PartialInstructionsConfig {
                 title: Some("foo".into()),
                 ..Default::default()
@@ -51,6 +52,7 @@ fn test_assistant_config_instructions() {
         p.instructions,
         MergeableVec::Merged(MergedVec {
             strategy: None,
+            dedup: None,
             value: vec![
                 PartialInstructionsConfig {
                     title: Some("foo".into()),
@@ -72,6 +74,7 @@ fn test_assistant_config_instructions() {
         p.instructions,
         MergeableVec::Merged(MergedVec {
             strategy: None,
+            dedup: None,
             value: vec![
                 PartialInstructionsConfig {
                     title: Some("foo".into()),
@@ -97,6 +100,7 @@ fn test_assistant_config_instructions() {
         p.instructions,
         MergeableVec::Merged(MergedVec {
             strategy: None,
+            dedup: None,
             value: vec![PartialInstructionsConfig {
                 title: Some("qux".into()),
                 ..Default::default()
@@ -111,6 +115,7 @@ fn test_assistant_config_instructions() {
         p.instructions,
         MergeableVec::Merged(MergedVec {
             strategy: None,
+            dedup: None,
             value: vec![PartialInstructionsConfig {
                 title: Some("boop".into()),
                 ..Default::default()
@@ -127,6 +132,7 @@ fn test_assistant_config_instructions() {
         p.instructions,
         MergeableVec::Merged(MergedVec {
             strategy: None,
+            dedup: None,
             value: vec![PartialInstructionsConfig {
                 title: Some("quux".into()),
                 items: Some(vec!["one".into()]),
@@ -142,6 +148,7 @@ fn test_assistant_config_instructions() {
         p.instructions,
         MergeableVec::Merged(MergedVec {
             strategy: None,
+            dedup: None,
             value: vec![PartialInstructionsConfig {
                 title: Some("quux".into()),
                 items: Some(vec!["two".into()]),

@@ -190,6 +190,7 @@ fn test_build_sorted_instructions() {
             },
         ],
         strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
         discard_when_merged: false,
     }
     .into();
@@ -610,4 +611,16 @@ fn test_load_partial_at_path_recursive() {
             }
         }
     }
+}
+
+#[test]
+fn test_vec_dedup_preserves_order() {
+    let result = vec_dedup(vec![3, 1, 2, 1, 3, 4], &()).unwrap();
+    assert_eq!(result, vec![3, 1, 2, 4]);
+}
+
+#[test]
+fn test_vec_dedup_no_duplicates() {
+    let result = vec_dedup(vec![1, 2, 3], &()).unwrap();
+    assert_eq!(result, vec![1, 2, 3]);
 }

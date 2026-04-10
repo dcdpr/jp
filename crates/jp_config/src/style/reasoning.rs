@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
-    fill::FillDefaults,
+    fill::{FillDefaults, fill_opt},
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::color::Color,
@@ -83,7 +83,7 @@ impl FillDefaults for PartialReasoningConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             display: self.display.or(defaults.display),
-            summary_model: self.summary_model.or(defaults.summary_model),
+            summary_model: fill_opt(self.summary_model, defaults.summary_model),
             background: self.background.or(defaults.background),
         }
     }

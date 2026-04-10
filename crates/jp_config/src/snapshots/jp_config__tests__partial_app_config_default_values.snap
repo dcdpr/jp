@@ -55,6 +55,7 @@ Ok(
                             },
                         ],
                         strategy: None,
+                        dedup: None,
                         discard_when_merged: true,
                     },
                 ),
@@ -114,7 +115,16 @@ Ok(
                     },
                     tools: {},
                 },
-                attachments: [],
+                attachments: Merged(
+                    MergedVec {
+                        value: [],
+                        strategy: None,
+                        dedup: Some(
+                            true,
+                        ),
+                        discard_when_merged: true,
+                    },
+                ),
                 inquiry: PartialInquiryConfig {
                     assistant: PartialAssistantOverrideConfig {
                         system_prompt: None,

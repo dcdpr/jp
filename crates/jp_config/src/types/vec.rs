@@ -6,7 +6,7 @@ use schematic::{Config, ConfigEnum, PartialConfig as _, Schematic};
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use serde_untagged::UntaggedEnumVisitor;
 
-use crate::{delta::PartialConfigDelta, partial::ToPartial};
+use crate::{delta::PartialConfigDelta, fill::FillDefaults, partial::ToPartial};
 
 /// Vec of `T`'s, either defaulting to a merge strategy of `replace`, or
 /// defining a specific merge strategy.
@@ -90,11 +90,20 @@ impl<T> MergeableVec<T> {
     }
 
     /// Returns `true` if the `MergeableVec` is empty.
+    ///
+    /// A `Merged` variant with no items but with metadata (e.g. `dedup` or
+    /// `strategy`) is NOT considered empty, because the metadata must still
+    /// participate in merges.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         match self {
             Self::Vec(v) => v.is_empty(),
-            Self::Merged(v) => v.value.is_empty(),
+            Self::Merged(v) => {
+                v.value.is_empty()
+                    && v.strategy.is_none()
+                    && v.dedup.is_none()
+                    && !v.discard_when_merged
+            }
         }
     }
 
@@ -110,6 +119,12 @@ impl<T> MergeableVec<T> {
             Self::Vec(_) => None,
             Self::Merged(v) => Some(v),
         }
+    }
+
+    /// Returns `true` if dedup is explicitly enabled.
+    #[must_use]
+    pub const fn dedup(&self) -> bool {
+        matches!(self, Self::Merged(v) if matches!(v.dedup, Some(true)))
     }
 }
 
@@ -136,6 +151,7 @@ impl<T: Config + Clone + PartialEq + Serialize + DeserializeOwned + ToPartial>
         MergeableVec::Merged(MergedVec {
             value,
             strategy: Some(MergedVecStrategy::Replace),
+            dedup: None,
             discard_when_merged: false,
         })
     }
@@ -150,6 +166,7 @@ pub fn vec_to_mergeable_partial<T: ToPartial>(items: &[T]) -> MergeableVec<T::Pa
     MergeableVec::Merged(MergedVec {
         value: items.iter().map(ToPartial::to_partial).collect(),
         strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
         discard_when_merged: false,
     })
 }
@@ -179,6 +196,33 @@ impl<T> From<Vec<T>> for MergeableVec<T> {
 impl<T> Default for MergeableVec<T> {
     fn default() -> Self {
         Self::Vec(Vec::default())
+    }
+}
+
+impl<T> FillDefaults for MergeableVec<T> {
+    /// Fill metadata (dedup, strategy) from defaults when self has none.
+    ///
+    /// Items are always kept from self — only the `Merged` wrapper metadata is
+    /// inherited when self is a plain `Vec` (no metadata).
+    fn fill_from(self, defaults: Self) -> Self {
+        // Already has metadata — keep as-is.
+        let Self::Vec(items) = self else {
+            return self;
+        };
+
+        // Defaults have metadata to inherit.
+        if let Self::Merged(default_merged) = defaults
+            && (default_merged.dedup.is_some() || default_merged.strategy.is_some())
+        {
+            return Self::Merged(MergedVec {
+                value: items,
+                strategy: default_merged.strategy,
+                dedup: default_merged.dedup,
+                discard_when_merged: false,
+            });
+        }
+
+        Self::Vec(items)
     }
 }
 
@@ -227,17 +271,19 @@ where
     }
 }
 
-/// Strings that are merged using the specified merge strategy.
+/// Merged vec with explicit merge strategy metadata.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Config)]
 #[serde(rename_all = "snake_case")]
 pub struct MergedVec<T> {
     /// The vec value.
     #[setting(default = vec![])]
+    #[serde(default = "Vec::new")]
     pub value: Vec<T>,
 
     /// The merge strategy.
     ///
     /// - `append`: Append the vec to the previous value.
+    /// - `prepend`: Prepend the vec before the previous value.
     /// - `replace`: Replace the previous value with the new value.
     #[setting(default, skip_serializing_if = "Option::is_none")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -248,6 +294,27 @@ pub struct MergedVec<T> {
     // `schematic`, which isn't great either, but it's wrapped in tests, so if
     // you change this you'll see what happens.
     pub strategy: Option<MergedVecStrategy>,
+
+    /// Whether to remove duplicate items after merging.
+    ///
+    /// Accepts `true`, `false`, or `"inherit"`.
+    ///
+    /// When `true`, items already present in the merged result are skipped.
+    /// Comparison uses `PartialEq`. Order is preserved (first occurrence wins).
+    ///
+    /// This flag is "sticky": once a non-discarded config in the merge chain
+    /// sets it to `true`, all subsequent merges for this field will deduplicate
+    /// — unless a later config explicitly sets it to `false`.
+    ///
+    /// `"inherit"` (or omitting the field) means "no opinion" — inherit from
+    /// the previous merge.
+    #[setting(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_dedup"
+    )]
+    pub dedup: Option<bool>,
 
     /// Whether the value is discarded when another value is merged in,
     /// regardless of the merge strategy of the other value.
@@ -273,6 +340,7 @@ where
         Self::Partial {
             value: Some(self.value.clone()),
             strategy: self.strategy,
+            dedup: self.dedup,
             discard_when_merged: Some(self.discard_when_merged),
         }
     }
@@ -291,4 +359,45 @@ pub enum MergedVecStrategy {
 
     /// Replace the previous value with the new value.
     Replace,
+}
+
+/// Deserialize `dedup` from `true`, `false`, or `"inherit"` → `Option<bool>`.
+fn deserialize_dedup<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct DedupVisitor;
+
+    impl serde::de::Visitor<'_> for DedupVisitor {
+        type Value = Option<bool>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a boolean or \"inherit\"")
+        }
+
+        fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
+            Ok(Some(v))
+        }
+
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            match v {
+                "inherit" => Ok(None),
+                "true" => Ok(Some(true)),
+                "false" => Ok(Some(false)),
+                _ => Err(serde::de::Error::unknown_variant(v, &[
+                    "true", "false", "inherit",
+                ])),
+            }
+        }
+
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(DedupVisitor)
 }
