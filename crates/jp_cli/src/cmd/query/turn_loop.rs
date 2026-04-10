@@ -53,7 +53,7 @@ use super::{
 use crate::{
     cmd::query::tool::coordinator::ExecutionResult,
     error::Error,
-    render::metadata::set_rendered_arguments,
+    render::{metadata::set_rendered_arguments, tool::RenderOutcome},
     signals::{SignalRx, SignalTo},
 };
 
@@ -387,12 +387,12 @@ pub(super) async fn run_turn_loop(
                                 LoopAction::Return(()) => return Ok(()),
                             }
 
-                            // On Flush of a tool call: print a permanent
-                            // "Calling tool X(args)" line, prepare the
-                            // executor, and decide permission immediately. For
-                            // Custom style, format_args returns empty so only
-                            // the header is printed; the custom command runs
-                            // later after approval.
+                            // On Flush of a tool call: clear the temp line,
+                            // prepare the executor, decide permission, then
+                            // render the tool call header + arguments. For
+                            // attended tools the permission prompt comes first,
+                            // so the user approves before seeing the full
+                            // rendering.
                             let flushed_req = is_flush
                                 .then(|| {
                                     conv.events()
@@ -404,16 +404,7 @@ pub(super) async fn run_turn_loop(
                                 .flatten();
                             if let Some(req) = flushed_req {
                                 tool_coordinator.set_tool_state(&req.id, ToolCallState::Queued);
-
-                                let style = tool_coordinator.parameter_style(&req.name);
-                                let hidden = tool_coordinator.is_hidden(&req.name);
-                                tool_renderer.complete(
-                                    &req.id,
-                                    &req.name,
-                                    &req.arguments,
-                                    &style,
-                                    !hidden,
-                                );
+                                tool_renderer.complete(&req.id);
 
                                 // Prepare executor and decide permission.
                                 let idx = perm_tool_index;
@@ -425,27 +416,39 @@ pub(super) async fn run_turn_loop(
                                             executor,
                                             is_tty,
                                             &turn_state,
-                                            &tool_renderer,
                                         );
                                         match decision {
                                             PermissionDecision::Approved(exec) => {
+                                                let id = exec.tool_id().to_owned();
                                                 let name = exec.tool_name().to_owned();
                                                 let args = exec.arguments().clone();
-                                                if let Some(rendered) = tool_coordinator
-                                                    .render_custom_args(
+                                                match tool_coordinator
+                                                    .render_approved_tool(
                                                         &name,
                                                         &args,
                                                         &tool_renderer,
                                                     )
                                                     .await
                                                 {
-                                                    conv.update_events(|stream| {
-                                                        store_rendered_arguments(
-                                                            stream, &req.id, &rendered,
-                                                        );
-                                                    });
+                                                    RenderOutcome::Rendered { content } => {
+                                                        if let Some(c) = content {
+                                                            conv.update_events(|stream| {
+                                                                store_rendered_arguments(
+                                                                    stream, &req.id, &c,
+                                                                );
+                                                            });
+                                                        }
+                                                        perm_approved.push((idx, exec));
+                                                    }
+                                                    RenderOutcome::Suppressed { error } => {
+                                                        perm_skipped.push((
+                                                            idx,
+                                                            ToolCoordinator::render_failed_response(
+                                                                id, &name, &error,
+                                                            ),
+                                                        ));
+                                                    }
                                                 }
-                                                perm_approved.push((idx, exec));
                                             }
                                             PermissionDecision::Skipped(resp) => {
                                                 perm_skipped.push((idx, resp));
@@ -473,21 +476,35 @@ pub(super) async fn run_turn_loop(
                                                 ) {
                                                     Ok(exec) => {
                                                         let args = exec.arguments().clone();
-                                                        if let Some(rendered) = tool_coordinator
-                                                            .render_custom_args(
+                                                        match tool_coordinator
+                                                            .render_approved_tool(
                                                                 &info.tool_name,
                                                                 &args,
                                                                 &tool_renderer,
                                                             )
                                                             .await
                                                         {
-                                                            conv.update_events(|stream| {
-                                                                store_rendered_arguments(
-                                                                    stream, &req.id, &rendered,
-                                                                );
-                                                            });
+                                                            RenderOutcome::Rendered { content } => {
+                                                                if let Some(c) = content {
+                                                                    conv.update_events(|stream| {
+                                                                        store_rendered_arguments(
+                                                                            stream, &req.id, &c,
+                                                                        );
+                                                                    });
+                                                                }
+                                                                perm_approved.push((idx, exec));
+                                                            }
+                                                            RenderOutcome::Suppressed { error } => {
+                                                                perm_skipped.push((
+                                                                    idx,
+                                                                    ToolCoordinator::render_failed_response(
+                                                                        info.tool_id.clone(),
+                                                                        &info.tool_name,
+                                                                        &error,
+                                                                    ),
+                                                                ));
+                                                            }
                                                         }
-                                                        perm_approved.push((idx, exec));
                                                     }
                                                     Err(resp) => {
                                                         perm_skipped.push((idx, resp));

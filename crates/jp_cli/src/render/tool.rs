@@ -1,4 +1,4 @@
-use std::{collections::HashSet, env, fmt::Write as _, fs, sync::Arc, time, time::Duration};
+use std::{env, fmt::Write as _, fs, sync::Arc, time, time::Duration};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::Stylize as _;
@@ -29,6 +29,19 @@ struct PendingTool {
     name: String,
 }
 
+/// Outcome of [`ToolRenderer::render_approved`].
+#[derive(Debug, Clone)]
+pub enum RenderOutcome {
+    /// Header and arguments (if any) were printed.
+    /// If a custom formatter produced output, it's returned for persistence.
+    Rendered { content: Option<String> },
+    /// Custom formatter failed — nothing was printed.
+    Suppressed {
+        /// Error message from the custom formatter.
+        error: String,
+    },
+}
+
 /// Renders tool-related output to the terminal and manages the streaming-phase
 /// display for tool calls whose arguments are still being received.
 ///
@@ -40,14 +53,14 @@ struct PendingTool {
 ///
 /// 2. **Permission/execution phase** — arguments (if not already rendered),
 ///    Custom formatter output, progress, and results. Methods:
-///    [`render_tool_call`], [`render_custom_arguments`], [`render_progress`],
+///    [`render_tool_call`], [`render_approved`], [`render_progress`],
 ///    [`render_result`].
 ///
 /// [`complete`]: Self::complete
 /// [`register`]: Self::register
 /// [`tick`]: Self::tick
 /// [`render_tool_call`]: Self::render_tool_call
-/// [`render_custom_arguments`]: Self::render_custom_arguments
+/// [`render_approved`]: Self::render_approved
 /// [`render_progress`]: Self::render_progress
 /// [`render_result`]: Self::render_result
 pub struct ToolRenderer {
@@ -61,9 +74,6 @@ pub struct ToolRenderer {
 
     /// Tools not yet permanently displayed, in registration order.
     pending: Vec<PendingTool>,
-
-    /// Tool IDs whose permanent line has been printed during streaming.
-    rendered: HashSet<String>,
 
     /// Whether a temp line is currently on screen.
     line_active: bool,
@@ -94,7 +104,6 @@ impl ToolRenderer {
             root,
             formatter,
             pending: Vec::new(),
-            rendered: HashSet::new(),
             line_active: false,
             is_tty,
             timer_token: None,
@@ -104,7 +113,7 @@ impl ToolRenderer {
     /// Renders header + arguments for a tool call.
     ///
     /// For `Custom` style, arguments are deferred to after approval via
-    /// [`Self::render_custom_arguments`] - only the header is printed here.
+    /// [`Self::render_approved`] — only the header is printed here.
     pub fn render_tool_call(
         &self,
         name: &str,
@@ -120,48 +129,71 @@ impl ToolRenderer {
         );
     }
 
-    /// Renders custom formatter output after permission approval.
+    /// Renders a tool call with all styles, printing header and arguments
+    /// atomically.
     ///
-    /// Runs the custom command and prints its content. Only meaningful for
-    /// [`ParametersStyle::Custom`]; no-ops for other styles.
+    /// For non-Custom styles: prints the header with inline-formatted arguments
+    /// in a single write.
     ///
-    /// If the custom command fails, falls back to JSON formatting so the user
-    /// always sees the arguments.
+    /// For Custom style: runs the custom formatter command first, then prints
+    /// the header followed by the formatted output. If the custom formatter
+    /// fails, nothing is printed and [`RenderOutcome::Suppressed`] is returned.
     ///
-    /// Returns the custom-formatted content on success, so the caller can
-    /// persist it for replay. Returns `None` if the formatter produced no
-    /// output or failed (the JSON fallback is reproducible from arguments).
-    pub async fn render_custom_arguments(
+    /// On success, returns `Rendered { content }` where `content` is the
+    /// custom-formatted output (if any) so the caller can persist it for replay.
+    pub async fn render_approved(
+        &self,
+        name: &str,
+        arguments: &Map<String, Value>,
+        style: &ParametersStyle,
+    ) -> RenderOutcome {
+        if let ParametersStyle::Custom(cmd_config) = style {
+            let cmd = cmd_config.clone().command();
+            self.render_custom_tool_call(name, arguments, cmd).await
+        } else {
+            self.render_tool_call(name, arguments, style);
+            RenderOutcome::Rendered { content: None }
+        }
+    }
+
+    /// Renders a Custom-style tool call: header + custom formatted output.
+    ///
+    /// Runs the custom formatter command first. If it succeeds, prints the
+    /// "Calling tool X" header followed by the formatted output. If it fails,
+    /// nothing is printed — the tool call is suppressed from the display.
+    async fn render_custom_tool_call(
         &self,
         name: &str,
         arguments: &Map<String, Value>,
         cmd: ToolCommandConfig,
-    ) -> Option<String> {
+    ) -> RenderOutcome {
         match format_args_custom(name, arguments, cmd, &self.root).await {
             Ok(content) if !content.is_empty() => {
+                let styled_name = name.yellow().bold();
+                let _ = writeln!(self.printer.err_writer(), "Calling tool {styled_name}");
                 self.render_formatted_arguments(&content);
-                Some(content)
-            }
-            Ok(_) => None,
-            Err(error) => {
-                let filtered = filter_display_args(arguments);
-                if filtered.is_empty() {
-                    return None;
+                RenderOutcome::Rendered {
+                    content: Some(content),
                 }
-
-                warn!(%error, tool = %name, "Custom formatter failed, falling back to JSON");
-                let json = format_args_json(filtered);
-                let _ = writeln!(self.printer.err_writer(), "{json}\n");
-                None
+            }
+            Ok(_) => {
+                // Custom formatter returned empty — just show the header.
+                let styled_name = name.yellow().bold();
+                let _ = writeln!(self.printer.err_writer(), "Calling tool {styled_name}");
+                RenderOutcome::Rendered { content: None }
+            }
+            Err(error) => {
+                warn!(%error, tool = %name, "Custom formatter failed, suppressing tool call display");
+                RenderOutcome::Suppressed { error }
             }
         }
     }
 
     /// Render already-formatted custom argument content.
     ///
-    /// Used by [`render_custom_arguments`](Self::render_custom_arguments)
-    /// after running the formatter, and by the replay path when the stored
-    /// event has rendered arguments in its metadata.
+    /// Used by [`render_approved`](Self::render_approved) internally and by
+    /// the replay path when the stored event has rendered arguments in its
+    /// metadata.
     pub fn render_formatted_arguments(&self, content: &str) {
         let _ = writeln!(self.printer.err_writer(), "\n{content}");
         if !content.ends_with("\n\n") {
@@ -334,12 +366,6 @@ impl ToolRenderer {
         }
     }
 
-    /// Returns `true` if the tool has been permanently rendered during the
-    /// streaming phase via [`complete`](Self::complete).
-    pub fn is_rendered(&self, id: &str) -> bool {
-        self.rendered.contains(id)
-    }
-
     /// Registers a new tool call (name known, arguments pending).
     ///
     /// Adds the tool to the rewritable temp line. Starts the tick timer on the
@@ -366,26 +392,16 @@ impl ToolRenderer {
 
     /// Completes a tool call and removes it from the temp line.
     ///
-    /// When `render` is true, prints a permanent "Calling tool ..." line.
-    /// When `render` is false, silently removes the tool from the pending
-    /// display without printing anything.
-    pub fn complete(
-        &mut self,
-        id: &str,
-        name: &str,
-        arguments: &Map<String, Value>,
-        style: &ParametersStyle,
-        render: bool,
-    ) {
+    /// This only handles the rewritable temp-line display. The permanent
+    /// "Calling tool ..." header is printed later by [`render_approved`]
+    /// after the permission decision.
+    ///
+    /// [`render_approved`]: Self::render_approved
+    pub fn complete(&mut self, id: &str) {
         self.pending.retain(|t| t.id != id);
 
         if self.line_active {
             let _ = write!(self.printer.err_writer(), "\r\x1b[K");
-        }
-
-        if render {
-            self.render_tool_call(name, arguments, style);
-            self.rendered.insert(id.to_owned());
         }
 
         if self.pending.is_empty() {
@@ -429,9 +445,6 @@ impl ToolRenderer {
     }
 
     /// Clears the temp line and all pending state. Stops the timer.
-    ///
-    /// The `rendered` set is preserved — it's needed by the permission phase to
-    /// skip already-displayed tools.
     pub fn cancel_all(&mut self) {
         self.stop_timer();
 
@@ -447,7 +460,6 @@ impl ToolRenderer {
     pub fn reset(&mut self) {
         self.line_active = false;
         self.cancel_all();
-        self.rendered.clear();
     }
 
     fn temp_line_content(&self) -> String {
@@ -514,7 +526,7 @@ fn format_args(arguments: &Map<String, Value>, style: &ParametersStyle) -> Strin
 
     match style {
         // Off and Custom produce no inline output.
-        // Custom content is rendered separately via render_custom_arguments.
+        // Custom content is rendered separately via render_approved.
         ParametersStyle::Off | ParametersStyle::Custom(_) => String::new(),
 
         ParametersStyle::Json => format_args_json(filtered),
