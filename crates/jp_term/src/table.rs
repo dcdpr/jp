@@ -45,8 +45,10 @@ pub fn list(header: Row, rows: Vec<Row>, footer: bool) -> String {
     out.push('\n');
     out.push_str(header_content);
     out.push('\n');
-    // Safe: guarded by `lines.len() < 5` check above.
-    out.push_str(lines.last().expect("has bottom border"));
+
+    if let Some(last) = lines.last() {
+        out.push_str(last);
+    }
 
     out
 }
