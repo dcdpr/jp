@@ -78,6 +78,11 @@ expression: v
           "interval_ms": 100
         }
       },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100
+      },
       "tool_call": {
         "show": true,
         "progress": {
