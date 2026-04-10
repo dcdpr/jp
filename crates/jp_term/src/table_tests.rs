@@ -19,6 +19,14 @@ fn rows() -> Vec<Row> {
     vec![r1, r2]
 }
 
+fn row(cells: &[&str]) -> Row {
+    let mut r = Row::new();
+    for c in cells {
+        r.add_cell(Cell::new(c));
+    }
+    r
+}
+
 #[test]
 fn markdown_list_table() {
     let output = list_markdown(header(), rows());
@@ -108,4 +116,49 @@ fn markdown_strips_ansi() {
     // Column widths should be based on visual width, not byte count.
     assert!(output.contains("| Bold  |"), "got: {output}");
     assert!(output.contains("| Green |"), "got: {output}");
+}
+
+#[test]
+fn list_without_footer() {
+    let output = list(header(), rows(), false);
+    let lines: Vec<&str> = output.lines().collect();
+    // top border, header, separator, 2 data rows, bottom border = 6
+    assert_eq!(lines.len(), 6);
+    assert!(lines[0].starts_with('\u{256d}'), "expected top border");
+    assert!(lines[5].starts_with('\u{2570}'), "expected bottom border");
+}
+
+#[test]
+fn list_with_footer() {
+    let data: Vec<Row> = (0..5).map(|i| row(&[&format!("name-{i}"), "99"])).collect();
+    let output = list(header(), data, true);
+    let lines: Vec<&str> = output.lines().collect();
+
+    // 5 data rows + top border + header + separator + footer separator + footer header + bottom border = 11
+    assert_eq!(lines.len(), 11, "got:\n{output}");
+
+    let header_line = lines[1];
+    let separator = lines[2];
+    let footer_sep = lines[lines.len() - 3];
+    let footer_header = lines[lines.len() - 2];
+    let bottom = lines[lines.len() - 1];
+
+    assert_eq!(
+        footer_sep, separator,
+        "footer separator should match header separator"
+    );
+    assert_eq!(
+        footer_header, header_line,
+        "footer header should match header"
+    );
+    assert!(bottom.starts_with('\u{2570}'), "expected bottom border");
+}
+
+#[test]
+fn list_footer_skipped_for_single_data_row() {
+    // A single data row produces 5 lines (top, header, sep, row, bottom),
+    // which is the minimum; the guard skips the footer.
+    let output_with = list(header(), vec![row(&["Alice", "30"])], true);
+    let output_without = list(header(), vec![row(&["Alice", "30"])], false);
+    assert_eq!(output_with, output_without);
 }

@@ -135,7 +135,8 @@ impl Ls {
             ));
         }
 
-        print_table(&ctx.printer, header, rows);
+        let footer = rows.len() > 20;
+        print_table(&ctx.printer, header, rows, footer);
         Ok(())
     }
 
