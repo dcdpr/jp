@@ -86,7 +86,8 @@ expression: v
       "lock_wait": {
         "show": true,
         "delay_secs": 1,
-        "interval_ms": 100
+        "interval_ms": 100,
+        "timeout_secs": 10
       },
       "tool_call": {
         "show": true,
