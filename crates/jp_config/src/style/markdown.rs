@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opts},
 };
 
@@ -91,6 +92,19 @@ impl PartialConfigDelta for PartialMarkdownConfig {
             ),
             theme: delta_opt(self.theme.as_ref(), next.theme),
             hr_style: delta_opt(self.hr_style.as_ref(), next.hr_style),
+        }
+    }
+}
+
+impl FillDefaults for PartialMarkdownConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            wrap_width: self.wrap_width.or(defaults.wrap_width),
+            table_max_column_width: self
+                .table_max_column_width
+                .or(defaults.table_max_column_width),
+            theme: self.theme.or(defaults.theme),
+            hr_style: self.hr_style.or(defaults.hr_style),
         }
     }
 }

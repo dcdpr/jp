@@ -6,6 +6,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, KvAssignment, missing_key},
     delta::PartialConfigDelta,
+    fill::FillDefaults,
     partial::ToPartial,
     types::json_value::JsonValue,
     util::merge_nested_indexmap,
@@ -46,6 +47,12 @@ impl PartialConfigDelta for PartialTemplateConfig {
                 })
                 .collect(),
         }
+    }
+}
+
+impl FillDefaults for PartialTemplateConfig {
+    fn fill_from(self, _defaults: Self) -> Self {
+        self
     }
 }
 

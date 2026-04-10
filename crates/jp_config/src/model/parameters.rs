@@ -10,6 +10,7 @@ use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::json_value::JsonValue,
 };
@@ -109,6 +110,20 @@ impl PartialConfigDelta for PartialParametersConfig {
             top_k: delta_opt(self.top_k.as_ref(), next.top_k),
             stop_words: delta_opt_vec(self.stop_words.as_ref(), next.stop_words),
             other: delta_opt(self.other.as_ref(), next.other),
+        }
+    }
+}
+
+impl FillDefaults for PartialParametersConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            max_tokens: self.max_tokens.or(defaults.max_tokens),
+            reasoning: self.reasoning.or(defaults.reasoning),
+            temperature: self.temperature.or(defaults.temperature),
+            top_p: self.top_p.or(defaults.top_p),
+            top_k: self.top_k.or(defaults.top_k),
+            stop_words: self.stop_words.or(defaults.stop_words),
+            other: self.other.or(defaults.other),
         }
     }
 }

@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt},
 };
 
@@ -39,6 +40,15 @@ impl PartialConfigDelta for PartialCerebrasConfig {
         Self {
             api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
+        }
+    }
+}
+
+impl FillDefaults for PartialCerebrasConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            api_key_env: self.api_key_env.or(defaults.api_key_env),
+            base_url: self.base_url.or(defaults.base_url),
         }
     }
 }

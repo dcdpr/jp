@@ -16,13 +16,13 @@ pub(crate) struct Config {
 }
 
 impl Config {
-    pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         match self.command {
             Commands::Show(args) => {
                 debug_assert!(handles.is_empty());
                 args.run(ctx)
             }
-            Commands::Set(args) => args.run(ctx, handles),
+            Commands::Set(args) => args.run(ctx, handles).await,
             Commands::Fmt(args) => {
                 debug_assert!(handles.is_empty());
                 args.run(ctx)

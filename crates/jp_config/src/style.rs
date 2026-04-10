@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::PartialConfigDelta,
+    fill::FillDefaults,
     partial::ToPartial,
     style::{
         code::{CodeConfig, PartialCodeConfig},
@@ -115,6 +116,21 @@ impl PartialConfigDelta for PartialStyleConfig {
             streaming: self.streaming.delta(next.streaming),
             tool_call: self.tool_call.delta(next.tool_call),
             typewriter: self.typewriter.delta(next.typewriter),
+        }
+    }
+}
+
+impl FillDefaults for PartialStyleConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            code: self.code.fill_from(defaults.code),
+            inline_code: self.inline_code.fill_from(defaults.inline_code),
+            markdown: self.markdown.fill_from(defaults.markdown),
+            reasoning: self.reasoning.fill_from(defaults.reasoning),
+            lock_wait: self.lock_wait.fill_from(defaults.lock_wait),
+            streaming: self.streaming.fill_from(defaults.streaming),
+            tool_call: self.tool_call.fill_from(defaults.tool_call),
+            typewriter: self.typewriter.fill_from(defaults.typewriter),
         }
     }
 }

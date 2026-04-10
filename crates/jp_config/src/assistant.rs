@@ -21,6 +21,7 @@ use crate::{
         tool_choice::ToolChoice,
     },
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
+    fill::FillDefaults,
     internal::merge::{string_with_strategy, vec_with_strategy},
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opts},
@@ -129,6 +130,20 @@ impl PartialConfigDelta for PartialAssistantConfig {
             tool_choice: delta_opt(self.tool_choice.as_ref(), next.tool_choice),
             model: self.model.delta(next.model),
             request: self.request.delta(next.request),
+        }
+    }
+}
+
+impl FillDefaults for PartialAssistantConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            name: self.name.or(defaults.name),
+            system_prompt: self.system_prompt.or(defaults.system_prompt),
+            system_prompt_sections: self.system_prompt_sections,
+            instructions: self.instructions,
+            tool_choice: self.tool_choice.or(defaults.tool_choice),
+            model: self.model.fill_from(defaults.model),
+            request: self.request.fill_from(defaults.request),
         }
     }
 }

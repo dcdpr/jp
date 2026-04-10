@@ -18,6 +18,7 @@ use serde::{
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt},
 };
 
@@ -61,6 +62,15 @@ impl PartialConfigDelta for PartialModelIdOrAliasConfig {
             (Self::Id(prev), Self::Id(next)) => Self::Id(prev.delta(next)),
             (Self::Alias(prev), Self::Alias(next)) if prev == &next => Self::empty(),
             (_, next) => next,
+        }
+    }
+}
+
+impl FillDefaults for PartialModelIdOrAliasConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        match (self, defaults) {
+            (Self::Id(s), Self::Id(d)) => Self::Id(s.fill_from(d)),
+            (s, _) => s,
         }
     }
 }
@@ -277,6 +287,15 @@ impl PartialConfigDelta for PartialModelIdConfig {
         Self {
             provider: delta_opt(self.provider.as_ref(), next.provider),
             name: delta_opt(self.name.as_ref(), next.name),
+        }
+    }
+}
+
+impl FillDefaults for PartialModelIdConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            provider: self.provider.or(defaults.provider),
+            name: self.name.or(defaults.name),
         }
     }
 }

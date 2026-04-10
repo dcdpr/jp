@@ -10,6 +10,7 @@ use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     conversation::tool::CommandConfigOrString,
     delta::{PartialConfigDelta, delta_opt},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt},
 };
 
@@ -72,6 +73,17 @@ impl PartialConfigDelta for PartialDisplayStyleConfig {
             inline_results: delta_opt(self.inline_results.as_ref(), next.inline_results),
             results_file_link: delta_opt(self.results_file_link.as_ref(), next.results_file_link),
             parameters: delta_opt(self.parameters.as_ref(), next.parameters),
+        }
+    }
+}
+
+impl FillDefaults for PartialDisplayStyleConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            hidden: self.hidden.or(defaults.hidden),
+            inline_results: self.inline_results.or(defaults.inline_results),
+            results_file_link: self.results_file_link.or(defaults.results_file_link),
+            parameters: self.parameters.or(defaults.parameters),
         }
     }
 }

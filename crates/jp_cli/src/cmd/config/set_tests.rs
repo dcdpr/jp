@@ -131,13 +131,14 @@ fn build_partial_errors_on_missing_file() {
 fn set_in_conversation_applies_config_delta() {
     let id = make_id(1000);
     let (mut ctx, _tmp) = setup(vec![kv("conversation.start_local=true")], &[id]);
+    let rt = ctx.handle().clone();
 
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let set = Set {
         file_target: FileTarget::default(),
         conversation: FlagIds::default(),
     };
-    set.run(&mut ctx, vec![handle]).unwrap();
+    rt.block_on(set.run(&mut ctx, vec![handle])).unwrap();
 
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let events = ctx.workspace.events(&handle).unwrap();
@@ -150,6 +151,7 @@ fn set_in_multiple_conversations() {
     let id1 = make_id(1000);
     let id2 = make_id(2000);
     let (mut ctx, _tmp) = setup(vec![kv("conversation.start_local=true")], &[id1, id2]);
+    let rt = ctx.handle().clone();
 
     let h1 = ctx.workspace.acquire_conversation(&id1).unwrap();
     let h2 = ctx.workspace.acquire_conversation(&id2).unwrap();
@@ -157,7 +159,7 @@ fn set_in_multiple_conversations() {
         file_target: FileTarget::default(),
         conversation: FlagIds::default(),
     };
-    set.run(&mut ctx, vec![h1, h2]).unwrap();
+    rt.block_on(set.run(&mut ctx, vec![h1, h2])).unwrap();
 
     for id in [id1, id2] {
         let handle = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -170,6 +172,7 @@ fn set_in_multiple_conversations() {
 #[test]
 fn set_in_workspace_file() {
     let (mut ctx, tmp) = setup(vec![kv("conversation.start_local=true")], &[]);
+    let rt = ctx.handle().clone();
 
     // ConfigLoader expects a file to exist.
     let config_path = tmp.path().join(".jp/config.toml");
@@ -179,7 +182,7 @@ fn set_in_workspace_file() {
         file_target: FileTarget::default(),
         conversation: FlagIds::default(),
     };
-    set.run(&mut ctx, vec![]).unwrap();
+    rt.block_on(set.run(&mut ctx, vec![])).unwrap();
 
     let content = fs::read_to_string(config_path).unwrap();
     assert!(
@@ -197,6 +200,7 @@ fn set_multiple_values_in_file() {
         ],
         &[],
     );
+    let rt = ctx.handle().clone();
 
     let config_path = tmp.path().join(".jp/config.toml");
     fs::write(&config_path, "").unwrap();
@@ -205,7 +209,7 @@ fn set_multiple_values_in_file() {
         file_target: FileTarget::default(),
         conversation: FlagIds::default(),
     };
-    set.run(&mut ctx, vec![]).unwrap();
+    rt.block_on(set.run(&mut ctx, vec![])).unwrap();
 
     let content = fs::read_to_string(config_path).unwrap();
     assert!(content.contains("start_local = true"), "got: {content}");
@@ -223,13 +227,14 @@ fn set_from_toml_file_into_conversation() {
     fs::write(&cfg_file, "[conversation]\nstart_local = true\n").unwrap();
 
     let (mut ctx, _tmp) = setup(vec![KeyValueOrPath::Path(cfg_file)], &[id]);
+    let rt = ctx.handle().clone();
 
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let set = Set {
         file_target: FileTarget::default(),
         conversation: FlagIds::default(),
     };
-    set.run(&mut ctx, vec![handle]).unwrap();
+    rt.block_on(set.run(&mut ctx, vec![handle])).unwrap();
 
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let events = ctx.workspace.events(&handle).unwrap();
@@ -240,18 +245,20 @@ fn set_from_toml_file_into_conversation() {
 #[test]
 fn set_errors_without_cfg_args() {
     let (mut ctx, _tmp) = setup(vec![], &[]);
+    let rt = ctx.handle().clone();
 
     let set = Set {
         file_target: FileTarget::default(),
         conversation: FlagIds::default(),
     };
-    let result = set.run(&mut ctx, vec![]);
+    let result = rt.block_on(set.run(&mut ctx, vec![]));
     assert!(result.is_err());
 }
 
 #[test]
 fn set_in_file_preserves_existing_formatting() {
     let (mut ctx, tmp) = setup(vec![kv("conversation.default_id=ask")], &[]);
+    let rt = ctx.handle().clone();
 
     let config_path = tmp.path().join(".jp/config.toml");
     let original = indoc::indoc! {r#"
@@ -273,7 +280,7 @@ fn set_in_file_preserves_existing_formatting() {
         file_target: FileTarget::default(),
         conversation: FlagIds::default(),
     };
-    set.run(&mut ctx, vec![]).unwrap();
+    rt.block_on(set.run(&mut ctx, vec![])).unwrap();
 
     let content = fs::read_to_string(&config_path).unwrap();
 

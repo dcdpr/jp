@@ -29,6 +29,7 @@ expression: "AppConfig::fields()"
     "style.lock_wait.delay_secs",
     "style.lock_wait.interval_ms",
     "style.lock_wait.show",
+    "style.lock_wait.timeout_secs",
     "style.inline_code.background",
     "style.code.color",
     "style.code.copy_link",

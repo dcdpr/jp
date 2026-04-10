@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
+    fill::FillDefaults,
     partial::ToPartial,
     types::color::Color,
 };
@@ -42,6 +43,14 @@ impl PartialConfigDelta for PartialInlineCodeConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             background: delta_opt(self.background.as_ref(), next.background),
+        }
+    }
+}
+
+impl FillDefaults for PartialInlineCodeConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            background: self.background.or(defaults.background),
         }
     }
 }

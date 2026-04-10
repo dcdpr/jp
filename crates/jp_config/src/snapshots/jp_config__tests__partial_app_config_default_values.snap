@@ -189,6 +189,9 @@ Ok(
                     interval_ms: Some(
                         100,
                     ),
+                    timeout_secs: Some(
+                        10,
+                    ),
                 },
                 tool_call: PartialToolCallConfig {
                     show: Some(

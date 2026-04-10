@@ -106,6 +106,7 @@ PartialAppConfig {
             show: None,
             delay_secs: None,
             interval_ms: None,
+            timeout_secs: None,
         },
         tool_call: PartialToolCallConfig {
             show: None,

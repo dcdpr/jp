@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt},
 };
 
@@ -31,6 +32,13 @@ pub struct LockWaitConfig {
     /// Interval in milliseconds between timer updates.
     #[setting(default = 100)]
     pub interval_ms: u32,
+
+    /// Timeout in seconds before showing the interactive prompt.
+    ///
+    /// After this period, the CLI stops polling silently and asks the user
+    /// whether to continue waiting, start a new conversation, or cancel.
+    #[setting(default = 10)]
+    pub timeout_secs: u32,
 }
 
 impl AssignKeyValue for PartialLockWaitConfig {
@@ -40,6 +48,7 @@ impl AssignKeyValue for PartialLockWaitConfig {
             "show" => self.show = kv.try_some_bool()?,
             "delay_secs" => self.delay_secs = kv.try_some_u32()?,
             "interval_ms" => self.interval_ms = kv.try_some_u32()?,
+            "timeout_secs" => self.timeout_secs = kv.try_some_u32()?,
             _ => return missing_key(&kv),
         }
 
@@ -53,6 +62,29 @@ impl PartialConfigDelta for PartialLockWaitConfig {
             show: delta_opt(self.show.as_ref(), next.show),
             delay_secs: delta_opt(self.delay_secs.as_ref(), next.delay_secs),
             interval_ms: delta_opt(self.interval_ms.as_ref(), next.interval_ms),
+            timeout_secs: delta_opt(self.timeout_secs.as_ref(), next.timeout_secs),
+        }
+    }
+}
+
+impl Default for LockWaitConfig {
+    fn default() -> Self {
+        Self {
+            show: true,
+            delay_secs: 1,
+            interval_ms: 100,
+            timeout_secs: 10,
+        }
+    }
+}
+
+impl FillDefaults for PartialLockWaitConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            show: self.show.or(defaults.show),
+            delay_secs: self.delay_secs.or(defaults.delay_secs),
+            interval_ms: self.interval_ms.or(defaults.interval_ms),
+            timeout_secs: self.timeout_secs.or(defaults.timeout_secs),
         }
     }
 }
@@ -65,6 +97,7 @@ impl ToPartial for LockWaitConfig {
             show: partial_opt(&self.show, defaults.show),
             delay_secs: partial_opt(&self.delay_secs, defaults.delay_secs),
             interval_ms: partial_opt(&self.interval_ms, defaults.interval_ms),
+            timeout_secs: partial_opt(&self.timeout_secs, defaults.timeout_secs),
         }
     }
 }
