@@ -297,6 +297,33 @@ mod extract_anchor_html {
     }
 
     #[test]
+    fn anchor_id_nested_inside_heading() {
+        let html = r#"
+            <html>
+            <head><title>Docs</title></head>
+            <body>
+                <h2>Previous Section</h2>
+                <p>Previous content</p>
+                <h3><div id="json-schema-limitations"><div>JSON Schema limitations</div></div></h3>
+                <p>Schema limitation details</p>
+                <div>More info here</div>
+                <h3><div id="next-section"><div>Next Section</div></div></h3>
+                <p>Next content</p>
+            </body>
+            </html>
+        "#;
+
+        let result = extract_anchor_html(html, "json-schema-limitations").unwrap();
+
+        assert!(result.contains("JSON Schema limitations"));
+        assert!(result.contains("Schema limitation details"));
+        assert!(result.contains("More info here"));
+
+        assert!(!result.contains("Previous content"));
+        assert!(!result.contains("Next content"));
+    }
+
+    #[test]
     fn anchor_with_special_css_characters() {
         let html = r#"
             <html><head></head><body>

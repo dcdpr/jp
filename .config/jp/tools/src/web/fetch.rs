@@ -209,6 +209,8 @@ pub fn extract_anchor_html(html: &str, anchor: &str) -> Option<String> {
 
     let section_html = if is_heading(target.value().name()) {
         extract_heading_section(&target)
+    } else if let Some(heading) = find_heading_ancestor(&target) {
+        extract_heading_section(&heading)
     } else {
         target.html()
     };
@@ -259,6 +261,19 @@ fn heading_level(tag: &str) -> Option<u8> {
         "h5" => Some(5),
         "h6" => Some(6),
         _ => None,
+    }
+}
+
+/// Walk up the ancestor chain looking for a heading element.
+fn find_heading_ancestor<'a>(el: &ElementRef<'a>) -> Option<ElementRef<'a>> {
+    let mut node = el.parent()?;
+    loop {
+        if let Some(element) = ElementRef::wrap(node)
+            && is_heading(element.value().name())
+        {
+            return Some(element);
+        }
+        node = node.parent()?;
     }
 }
 
