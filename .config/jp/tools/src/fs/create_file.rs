@@ -41,8 +41,8 @@ pub(crate) async fn fs_create_file(
             let highlighted = Formatter::new()
                 .format_terminal(&code_block)
                 .unwrap_or(code_block);
-            response.push_str(&format!(" with content:\n\n{highlighted}\n"));
-            response.push_str(&format!("\n{response}\n"));
+            let header = response.clone();
+            response.push_str(&format!(" with content:\n\n{highlighted}\n\n{header}"));
         }
 
         return Ok(response.into());
