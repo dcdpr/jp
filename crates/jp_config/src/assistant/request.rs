@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt},
 };
 
@@ -81,6 +82,17 @@ impl PartialConfigDelta for PartialRequestConfig {
             base_backoff_ms: delta_opt(self.base_backoff_ms.as_ref(), next.base_backoff_ms),
             max_backoff_secs: delta_opt(self.max_backoff_secs.as_ref(), next.max_backoff_secs),
             cache: delta_opt(self.cache.as_ref(), next.cache),
+        }
+    }
+}
+
+impl FillDefaults for PartialRequestConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            max_retries: self.max_retries.or(defaults.max_retries),
+            base_backoff_ms: self.base_backoff_ms.or(defaults.base_backoff_ms),
+            max_backoff_secs: self.max_backoff_secs.or(defaults.max_backoff_secs),
+            cache: self.cache.or(defaults.cache),
         }
     }
 }

@@ -179,6 +179,20 @@ Ok(
                         ),
                     },
                 },
+                lock_wait: PartialLockWaitConfig {
+                    show: Some(
+                        true,
+                    ),
+                    delay_secs: Some(
+                        1,
+                    ),
+                    interval_ms: Some(
+                        100,
+                    ),
+                    timeout_secs: Some(
+                        10,
+                    ),
+                },
                 tool_call: PartialToolCallConfig {
                     show: Some(
                         true,

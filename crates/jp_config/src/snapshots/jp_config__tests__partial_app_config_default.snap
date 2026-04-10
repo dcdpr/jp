@@ -102,6 +102,12 @@ PartialAppConfig {
                 interval_ms: None,
             },
         },
+        lock_wait: PartialLockWaitConfig {
+            show: None,
+            delay_secs: None,
+            interval_ms: None,
+            timeout_secs: None,
+        },
         tool_call: PartialToolCallConfig {
             show: None,
             progress: PartialProgressConfig {

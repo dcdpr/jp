@@ -14,6 +14,7 @@ use crate::{
     assistant::PartialAssistantConfig,
     conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_vec},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::json_value::JsonValue,
     util::merge_nested_indexmap,
@@ -67,6 +68,15 @@ impl PartialConfigDelta for PartialToolsConfig {
                     Some((name, next))
                 })
                 .collect(),
+        }
+    }
+}
+
+impl FillDefaults for PartialToolsConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            defaults: self.defaults.fill_from(defaults.defaults),
+            tools: self.tools,
         }
     }
 }
@@ -179,6 +189,17 @@ impl PartialConfigDelta for PartialToolsDefaultsConfig {
             run: delta_opt(self.run.as_ref(), next.run),
             result: delta_opt(self.result.as_ref(), next.result),
             style: self.style.delta(next.style),
+        }
+    }
+}
+
+impl FillDefaults for PartialToolsDefaultsConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            enable: self.enable.or(defaults.enable),
+            run: self.run.or(defaults.run),
+            result: self.result.or(defaults.result),
+            style: self.style.fill_from(defaults.style),
         }
     }
 }

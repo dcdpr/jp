@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::PartialConfigDelta,
+    fill::FillDefaults,
     partial::ToPartial,
     style::tool_call::{PartialProgressConfig, ProgressConfig},
 };
@@ -37,6 +38,14 @@ impl PartialConfigDelta for PartialStreamingConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             progress: self.progress.delta(next.progress),
+        }
+    }
+}
+
+impl FillDefaults for PartialStreamingConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            progress: self.progress.fill_from(defaults.progress),
         }
     }
 }

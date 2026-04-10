@@ -73,7 +73,7 @@ impl Edit {
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         for handle in handles {
-            let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx))? {
+            let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
                 LockOutcome::Acquired(lock) => lock,
                 LockOutcome::NewConversation => unreachable!("new conversation not allowed"),
                 LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),

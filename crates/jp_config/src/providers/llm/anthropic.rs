@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt, delta_opt_vec},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt},
     util,
 };
@@ -65,6 +66,17 @@ impl PartialConfigDelta for PartialAnthropicConfig {
                 next.chain_on_max_tokens,
             ),
             beta_headers: delta_opt_vec(self.beta_headers.as_ref(), next.beta_headers),
+        }
+    }
+}
+
+impl FillDefaults for PartialAnthropicConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            api_key_env: self.api_key_env.or(defaults.api_key_env),
+            base_url: self.base_url.or(defaults.base_url),
+            chain_on_max_tokens: self.chain_on_max_tokens.or(defaults.chain_on_max_tokens),
+            beta_headers: self.beta_headers.or(defaults.beta_headers),
         }
     }
 }

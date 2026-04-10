@@ -9,6 +9,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt, delta_opt_vec},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opts},
 };
 
@@ -57,6 +58,15 @@ impl PartialConfigDelta for PartialEditorConfig {
         Self {
             cmd: delta_opt(self.cmd.as_ref(), next.cmd),
             envs: delta_opt_vec(self.envs.as_ref(), next.envs),
+        }
+    }
+}
+
+impl FillDefaults for PartialEditorConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            cmd: self.cmd.or(defaults.cmd),
+            envs: self.envs.or(defaults.envs),
         }
     }
 }

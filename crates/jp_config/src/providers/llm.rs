@@ -15,6 +15,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::PartialConfigDelta,
+    fill::FillDefaults,
     model::id::ModelIdConfig,
     partial::ToPartial,
     providers::llm::{
@@ -128,6 +129,22 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
             ollama: self.ollama.delta(next.ollama),
             openai: self.openai.delta(next.openai),
             openrouter: self.openrouter.delta(next.openrouter),
+        }
+    }
+}
+
+impl FillDefaults for PartialLlmProviderConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            aliases: self.aliases,
+            anthropic: self.anthropic.fill_from(defaults.anthropic),
+            cerebras: self.cerebras.fill_from(defaults.cerebras),
+            deepseek: self.deepseek.fill_from(defaults.deepseek),
+            google: self.google.fill_from(defaults.google),
+            llamacpp: self.llamacpp.fill_from(defaults.llamacpp),
+            ollama: self.ollama.fill_from(defaults.ollama),
+            openai: self.openai.fill_from(defaults.openai),
+            openrouter: self.openrouter.fill_from(defaults.openrouter),
         }
     }
 }

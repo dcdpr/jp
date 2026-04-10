@@ -42,7 +42,7 @@ pub(crate) struct Rm {
 }
 
 impl Rm {
-    pub(crate) fn run(self, ctx: &mut Ctx, mut handles: Vec<ConversationHandle>) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx, mut handles: Vec<ConversationHandle>) -> Output {
         let active_id = ctx
             .session
             .as_ref()
@@ -59,7 +59,7 @@ impl Rm {
         }
 
         for handle in handles {
-            remove(ctx, handle, active_id, self.yes)?;
+            remove(ctx, handle, active_id, self.yes).await?;
         }
 
         ctx.printer.println("Conversation(s) removed.");
@@ -75,14 +75,14 @@ impl Rm {
     }
 }
 
-fn remove(
+async fn remove(
     ctx: &mut Ctx,
     handle: ConversationHandle,
     active_id: Option<ConversationId>,
     force: bool,
 ) -> Output {
     let id = handle.id();
-    let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx))? {
+    let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
         LockOutcome::Acquired(lock) => lock,
         LockOutcome::NewConversation => unreachable!("new conversation not allowed"),
         LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),

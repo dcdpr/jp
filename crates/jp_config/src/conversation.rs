@@ -23,6 +23,7 @@ use crate::{
         tool::{PartialToolsConfig, ToolsConfig},
     },
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_vec},
+    fill::{self, FillDefaults},
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opts},
 };
@@ -107,6 +108,19 @@ impl PartialConfigDelta for PartialConversationConfig {
     }
 }
 
+impl FillDefaults for PartialConversationConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            title: self.title.fill_from(defaults.title),
+            tools: self.tools.fill_from(defaults.tools),
+            attachments: self.attachments,
+            inquiry: self.inquiry.fill_from(defaults.inquiry),
+            start_local: self.start_local.or(defaults.start_local),
+            default_id: self.default_id.or(defaults.default_id),
+        }
+    }
+}
+
 impl ToPartial for ConversationConfig {
     fn to_partial(&self) -> Self::Partial {
         let defaults = Self::Partial::default();
@@ -152,6 +166,14 @@ impl PartialConfigDelta for PartialInquiryConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             assistant: self.assistant.delta(next.assistant),
+        }
+    }
+}
+
+impl FillDefaults for PartialInquiryConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            assistant: self.assistant.fill_from(defaults.assistant),
         }
     }
 }
@@ -220,6 +242,18 @@ impl PartialConfigDelta for PartialAssistantOverrideConfig {
             tool_choice: delta_opt(self.tool_choice.as_ref(), next.tool_choice),
             model: delta_opt_partial(self.model.as_ref(), next.model),
             request: delta_opt_partial(self.request.as_ref(), next.request),
+        }
+    }
+}
+
+impl FillDefaults for PartialAssistantOverrideConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            system_prompt: self.system_prompt.or(defaults.system_prompt),
+            system_prompt_sections: self.system_prompt_sections,
+            tool_choice: self.tool_choice.or(defaults.tool_choice),
+            model: fill::fill_opt(self.model, defaults.model),
+            request: fill::fill_opt(self.request, defaults.request),
         }
     }
 }

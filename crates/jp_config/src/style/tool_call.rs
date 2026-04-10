@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt},
 };
 
@@ -150,6 +151,36 @@ impl PartialConfigDelta for PartialPreparingConfig {
             show: delta_opt(self.show.as_ref(), next.show),
             delay_secs: delta_opt(self.delay_secs.as_ref(), next.delay_secs),
             interval_ms: delta_opt(self.interval_ms.as_ref(), next.interval_ms),
+        }
+    }
+}
+
+impl FillDefaults for PartialToolCallConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            show: self.show.or(defaults.show),
+            progress: self.progress.fill_from(defaults.progress),
+            preparing: self.preparing.fill_from(defaults.preparing),
+        }
+    }
+}
+
+impl FillDefaults for PartialProgressConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            show: self.show.or(defaults.show),
+            delay_secs: self.delay_secs.or(defaults.delay_secs),
+            interval_ms: self.interval_ms.or(defaults.interval_ms),
+        }
+    }
+}
+
+impl FillDefaults for PartialPreparingConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            show: self.show.or(defaults.show),
+            delay_secs: self.delay_secs.or(defaults.delay_secs),
+            interval_ms: self.interval_ms.or(defaults.interval_ms),
         }
     }
 }

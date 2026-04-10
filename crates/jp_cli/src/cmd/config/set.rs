@@ -23,7 +23,7 @@ pub(crate) struct Set {
 }
 
 impl Set {
-    pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         let base = ctx.config().to_partial();
         let config_delta = config_pipeline::build_partial_from_cfg_args(
             &ctx.term.args.config,
@@ -34,11 +34,11 @@ impl Set {
         if handles.is_empty() {
             self.set_in_file(ctx, &config_delta)
         } else {
-            Self::set_in_conversations(ctx, handles, config_delta)
+            Self::set_in_conversations(ctx, handles, config_delta).await
         }
     }
 
-    fn set_in_conversations(
+    async fn set_in_conversations(
         ctx: &mut Ctx,
         handles: Vec<ConversationHandle>,
         mut config_delta: PartialAppConfig,
@@ -46,7 +46,7 @@ impl Set {
         config_delta.resolve_model_aliases(&ctx.config().providers.llm.aliases);
 
         for handle in handles {
-            let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx))? {
+            let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
                 LockOutcome::Acquired(lock) => lock,
                 LockOutcome::NewConversation => unreachable!("new conversation not allowed"),
                 LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),

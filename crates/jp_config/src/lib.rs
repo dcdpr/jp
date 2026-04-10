@@ -38,6 +38,7 @@ pub mod conversation;
 mod delta;
 pub mod editor;
 pub mod error;
+pub(crate) mod fill;
 pub mod fs;
 pub(crate) mod internal;
 pub mod model;
@@ -51,6 +52,7 @@ pub mod util; // TODO: Rename
 use std::sync::Arc;
 
 pub use error::Error;
+pub use fill::FillDefaults;
 use indexmap::IndexMap;
 pub use partial::ToPartial;
 use relative_path::RelativePathBuf;
@@ -212,6 +214,22 @@ impl PartialConfigDelta for PartialAppConfig {
     }
 }
 
+impl FillDefaults for PartialAppConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            inherit: self.inherit.or(defaults.inherit),
+            config_load_paths: self.config_load_paths.or(defaults.config_load_paths),
+            extends: self.extends.or(defaults.extends),
+            assistant: self.assistant.fill_from(defaults.assistant),
+            conversation: self.conversation.fill_from(defaults.conversation),
+            style: self.style.fill_from(defaults.style),
+            editor: self.editor.fill_from(defaults.editor),
+            template: self.template.fill_from(defaults.template),
+            providers: self.providers.fill_from(defaults.providers),
+        }
+    }
+}
+
 impl ToPartial for AppConfig {
     fn to_partial(&self) -> Self::Partial {
         let defaults = Self::Partial::default();
@@ -250,13 +268,7 @@ impl AppConfig {
     /// required fields.
     pub fn from_partial_with_defaults(partial: PartialAppConfig) -> Result<Self, ConfigError> {
         let partial = match PartialAppConfig::default_values(&())? {
-            Some(mut defaults) => {
-                // The `config` partial is merged into `defaults`. This ensures
-                // that, even if a value is `Some` by default, it can be
-                // overridden by the explicitly set config value.
-                defaults.merge(&(), partial)?;
-                defaults
-            }
+            Some(defaults) => partial.fill_from(defaults),
             None => partial,
         };
 

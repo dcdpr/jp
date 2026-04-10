@@ -22,7 +22,7 @@ impl Conversation {
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         match self.command {
             Commands::Show(args) => args.run(ctx, handles),
-            Commands::Remove(args) => args.run(ctx, handles),
+            Commands::Remove(args) => args.run(ctx, handles).await,
             Commands::Edit(args) => args.run(ctx, handles).await,
             Commands::Fork(args) => args.run(ctx, &handles),
             Commands::Grep(args) => args.run(ctx, handles),

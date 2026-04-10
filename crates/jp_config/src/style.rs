@@ -2,6 +2,7 @@
 
 pub mod code;
 pub mod inline_code;
+pub mod lock_wait;
 pub mod markdown;
 pub mod reasoning;
 pub mod streaming;
@@ -16,10 +17,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::PartialConfigDelta,
+    fill::FillDefaults,
     partial::ToPartial,
     style::{
         code::{CodeConfig, PartialCodeConfig},
         inline_code::{InlineCodeConfig, PartialInlineCodeConfig},
+        lock_wait::{LockWaitConfig, PartialLockWaitConfig},
         markdown::{MarkdownConfig, PartialMarkdownConfig},
         reasoning::{PartialReasoningConfig, ReasoningConfig},
         streaming::{PartialStreamingConfig, StreamingConfig},
@@ -63,6 +66,13 @@ pub struct StyleConfig {
     #[setting(nested)]
     pub streaming: StreamingConfig,
 
+    /// Lock-wait progress indicator.
+    ///
+    /// Configures the timer shown while waiting for a conversation lock
+    /// held by another session to be released.
+    #[setting(nested)]
+    pub lock_wait: LockWaitConfig,
+
     /// Tool call content style.
     ///
     /// Configures how tool calls are displayed.
@@ -84,6 +94,7 @@ impl AssignKeyValue for PartialStyleConfig {
             _ if kv.p("inline_code") => self.inline_code.assign(kv)?,
             _ if kv.p("markdown") => self.markdown.assign(kv)?,
             _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
+            _ if kv.p("lock_wait") => self.lock_wait.assign(kv)?,
             _ if kv.p("streaming") => self.streaming.assign(kv)?,
             _ if kv.p("tool_call") => self.tool_call.assign(kv)?,
             _ if kv.p("typewriter") => self.typewriter.assign(kv)?,
@@ -101,9 +112,25 @@ impl PartialConfigDelta for PartialStyleConfig {
             inline_code: self.inline_code.delta(next.inline_code),
             markdown: self.markdown.delta(next.markdown),
             reasoning: self.reasoning.delta(next.reasoning),
+            lock_wait: self.lock_wait.delta(next.lock_wait),
             streaming: self.streaming.delta(next.streaming),
             tool_call: self.tool_call.delta(next.tool_call),
             typewriter: self.typewriter.delta(next.typewriter),
+        }
+    }
+}
+
+impl FillDefaults for PartialStyleConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            code: self.code.fill_from(defaults.code),
+            inline_code: self.inline_code.fill_from(defaults.inline_code),
+            markdown: self.markdown.fill_from(defaults.markdown),
+            reasoning: self.reasoning.fill_from(defaults.reasoning),
+            lock_wait: self.lock_wait.fill_from(defaults.lock_wait),
+            streaming: self.streaming.fill_from(defaults.streaming),
+            tool_call: self.tool_call.fill_from(defaults.tool_call),
+            typewriter: self.typewriter.fill_from(defaults.typewriter),
         }
     }
 }
@@ -115,6 +142,7 @@ impl ToPartial for StyleConfig {
             inline_code: self.inline_code.to_partial(),
             markdown: self.markdown.to_partial(),
             reasoning: self.reasoning.to_partial(),
+            lock_wait: self.lock_wait.to_partial(),
             streaming: self.streaming.to_partial(),
             tool_call: self.tool_call.to_partial(),
             typewriter: self.typewriter.to_partial(),

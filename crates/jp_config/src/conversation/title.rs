@@ -8,6 +8,7 @@ use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     conversation::title::generate::{GenerateConfig, PartialGenerateConfig},
     delta::PartialConfigDelta,
+    fill::FillDefaults,
     partial::ToPartial,
 };
 
@@ -39,6 +40,14 @@ impl PartialConfigDelta for PartialTitleConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             generate: self.generate.delta(next.generate),
+        }
+    }
+}
+
+impl FillDefaults for PartialTitleConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            generate: self.generate.fill_from(defaults.generate),
         }
     }
 }

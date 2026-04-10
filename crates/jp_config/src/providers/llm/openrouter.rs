@@ -5,6 +5,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opts},
 };
 
@@ -52,6 +53,17 @@ impl PartialConfigDelta for PartialOpenrouterConfig {
             app_name: delta_opt(self.app_name.as_ref(), next.app_name),
             app_referrer: delta_opt(self.app_referrer.as_ref(), next.app_referrer),
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
+        }
+    }
+}
+
+impl FillDefaults for PartialOpenrouterConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            api_key_env: self.api_key_env.or(defaults.api_key_env),
+            app_name: self.app_name.or(defaults.app_name),
+            app_referrer: self.app_referrer.or(defaults.app_referrer),
+            base_url: self.base_url.or(defaults.base_url),
         }
     }
 }

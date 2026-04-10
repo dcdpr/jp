@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
+    fill::FillDefaults,
     partial::{ToPartial, partial_opt},
 };
 
@@ -58,6 +59,15 @@ impl PartialConfigDelta for PartialTypewriterConfig {
         Self {
             text_delay: delta_opt(self.text_delay.as_ref(), next.text_delay),
             code_delay: delta_opt(self.code_delay.as_ref(), next.code_delay),
+        }
+    }
+}
+
+impl FillDefaults for PartialTypewriterConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            text_delay: self.text_delay.or(defaults.text_delay),
+            code_delay: self.code_delay.or(defaults.code_delay),
         }
     }
 }

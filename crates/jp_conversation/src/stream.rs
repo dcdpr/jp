@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use jp_config::{AppConfig, Config as _, PartialAppConfig, PartialConfig as _};
+use jp_config::{AppConfig, PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
 use tracing::error;
@@ -277,7 +277,7 @@ impl ConversationStream {
             partial.merge(&(), delta.into())?;
         }
 
-        AppConfig::from_partial(partial, vec![]).map_err(Into::into)
+        AppConfig::from_partial_with_defaults(partial).map_err(Into::into)
     }
 
     /// Removes all events from the end of the stream, until a [`ChatRequest`]
@@ -1168,7 +1168,8 @@ impl FromIterator<ConversationEventWithConfig> for Result<ConversationStream, St
             return Err(StreamError::FromEmptyIterator);
         };
 
-        let mut stream = ConversationStream::new(AppConfig::from_partial(config, vec![])?.into());
+        let mut stream =
+            ConversationStream::new(AppConfig::from_partial_with_defaults(config)?.into());
         stream.push(first_event);
         stream.extend(events);
 
@@ -1241,7 +1242,7 @@ impl ConversationStream {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
-            base_config: AppConfig::from_partial(base_config, vec![])?.into(),
+            base_config: AppConfig::from_partial_with_defaults(base_config)?.into(),
             events,
             created_at: Utc::now(),
         })

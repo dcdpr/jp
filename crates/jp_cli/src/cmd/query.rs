@@ -290,7 +290,7 @@ impl Query {
         // 1. --new: create a fresh conversation (already locked).
         // 2. --fork/--id/session: resolve an existing conversation, lock it.
         // 3. Lock contention: user picks "new" or "fork" from the prompt.
-        let lock = self.acquire_lock(ctx, handle)?;
+        let lock = self.acquire_lock(ctx, handle).await?;
 
         // Record this conversation as the session's active conversation.
         if let Some(session) = &ctx.session
@@ -749,7 +749,7 @@ impl Query {
             .or_else(|| Some(Duration::new(0, 0)))
     }
 
-    fn acquire_lock(
+    async fn acquire_lock(
         &self,
         ctx: &mut Ctx,
         handle: Option<ConversationHandle>,
@@ -771,7 +771,7 @@ impl Query {
             .allow_new(!ctx.term.args.persist)
             .allow_fork(!ctx.term.args.persist);
 
-        match acquire_lock(req)? {
+        match acquire_lock(req).await? {
             LockOutcome::Acquired(lock) => Ok(lock),
             LockOutcome::NewConversation => self.create_new_conversation(ctx),
             LockOutcome::ForkConversation(handle) => fork_conversation(ctx, &handle, None),

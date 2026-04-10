@@ -55,7 +55,7 @@ impl Commands {
                 debug_assert!(handles.len() < 2, "Query commands use 0 or 1 handle");
                 Box::pin(args.run(ctx, handles.into_iter().next())).await
             }
-            Commands::Config(args) => args.run(ctx, handles),
+            Commands::Config(args) => args.run(ctx, handles).await,
             Commands::Conversation(args) => args.run(ctx, handles).await,
             Commands::Attachment(args) => {
                 debug_assert!(handles.is_empty(), "Attachment commands don't use handles");
