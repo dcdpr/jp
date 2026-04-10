@@ -107,7 +107,18 @@ impl Provider for Cerebras {
 
         Ok(es
             .take_while(|event| future::ready(event.is_ok()))
-            .flat_map(move |event| stream::iter(handle_sse_event(event, &mut state)))
+            .then(move |event| {
+                let result = handle_sse_event_sync(event, &mut state);
+                async move {
+                    match result {
+                        Ok(v) => stream::iter(v).boxed(),
+                        Err(e) => {
+                            stream::iter(vec![Err(StreamError::from_eventsource(e).await)]).boxed()
+                        }
+                    }
+                }
+            })
+            .flatten()
             .boxed())
     }
 }
@@ -515,12 +526,15 @@ struct StreamState {
     is_structured: bool,
 }
 
-fn handle_sse_event(
+type SseResult =
+    std::result::Result<Vec<std::result::Result<Event, StreamError>>, reqwest_eventsource::Error>;
+
+fn handle_sse_event_sync(
     event: std::result::Result<SseEvent, reqwest_eventsource::Error>,
     state: &mut StreamState,
-) -> Vec<std::result::Result<Event, StreamError>> {
+) -> SseResult {
     match event {
-        Ok(SseEvent::Open) => vec![],
+        Ok(SseEvent::Open) => Ok(vec![]),
         Ok(SseEvent::Message(msg)) => {
             if msg.data == "[DONE]" {
                 let mut events: Vec<std::result::Result<Event, StreamError>> = vec![];
@@ -536,7 +550,7 @@ fn handle_sse_event(
                         .take()
                         .unwrap_or(FinishReason::Completed),
                 )));
-                return events;
+                return Ok(events);
             }
 
             let chunk: StreamChunk = match serde_json::from_str(&msg.data) {
@@ -547,7 +561,7 @@ fn handle_sse_event(
                         data = &msg.data,
                         "Failed to parse Cerebras chunk."
                     );
-                    return vec![];
+                    return Ok(vec![]);
                 }
             };
 
@@ -636,9 +650,9 @@ fn handle_sse_event(
                 }
             }
 
-            events
+            Ok(events)
         }
-        Err(e) => vec![Err(StreamError::from(e))],
+        Err(e) => Err(e),
     }
 }
 

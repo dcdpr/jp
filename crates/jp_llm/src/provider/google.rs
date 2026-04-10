@@ -976,7 +976,12 @@ impl From<GeminiError> for StreamError {
     fn from(err: GeminiError) -> Self {
         match err {
             GeminiError::Http(error) => Self::from(error),
-            GeminiError::EventSource(error) => Self::from(error),
+            // EventSource errors that reach here (rather than the stream
+            // `.then()` path) don't carry an unread response body, so we
+            // fall back to the status-code-only classification.
+            GeminiError::EventSource(error) => {
+                StreamError::other(error.to_string()).with_source(error)
+            }
             GeminiError::Api(ref value) => {
                 let msg = err.to_string();
 

@@ -27,13 +27,14 @@ use openai_responses::{
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 use super::{EventStream, ModelDetails, Provider};
 use crate::{
     error::{Error, Result, StreamError, StreamErrorKind},
     event::{Event, FinishReason},
     model::{ModelDeprecation, ReasoningDetails},
+    provider::trace_to_tmpfile,
     query::ChatQuery,
     tool::ToolDefinition,
 };
@@ -294,7 +295,11 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
         ..Default::default()
     };
 
-    trace!(?request, "Sending request to OpenAI.");
+    debug!("Sending request to OpenAI.");
+    trace!(
+        request = %trace_to_tmpfile("jp-openai-request", &request),
+        "Request payload."
+    );
 
     Ok((request, is_structured, reasoning_enabled))
 }
@@ -706,12 +711,9 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
 }
 
 /// Convert an OpenAI [`OpenaiStreamError`] into a [`StreamError`].
-///
-/// This needs an async function because we read the response body for context.
-/// Headers are extracted *before* consuming the body.
 async fn map_error(error: OpenaiStreamError) -> std::result::Result<types::Event, StreamError> {
     Err(match error {
-        OpenaiStreamError::Stream(error) => StreamError::from(error),
+        OpenaiStreamError::Stream(error) => StreamError::from_eventsource(error).await,
         OpenaiStreamError::Parsing(error) => {
             StreamError::other(error.to_string()).with_source(error)
         }

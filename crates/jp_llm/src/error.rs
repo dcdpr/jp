@@ -159,44 +159,63 @@ impl From<reqwest::Error> for StreamError {
     }
 }
 
-/// Canonical classifier for [`reqwest_eventsource::Error`].
-///
-/// Delegates the [`Transport`] variant to the [`reqwest::Error`] classifier.
-/// Classifies [`InvalidStatusCode`] by its HTTP status, extracts `Retry-After`
-/// headers, and honours the non-standard `x-should-retry` header used by
-/// OpenAI.
-///
-/// Provider-specific `From` impls should delegate to this when they encounter
-/// an inner [`reqwest_eventsource::Error`], rather than re-implementing the
-/// classification logic.
-///
-/// [`Transport`]: reqwest_eventsource::Error::Transport
-/// [`InvalidStatusCode`]: reqwest_eventsource::Error::InvalidStatusCode
-impl From<reqwest_eventsource::Error> for StreamError {
-    fn from(err: reqwest_eventsource::Error) -> Self {
+impl StreamError {
+    /// Classify a [`reqwest_eventsource::Error`] into a [`StreamError`].
+    ///
+    /// This is async because [`InvalidStatusCode`] carries a
+    /// [`reqwest::Response`] whose body must be read to extract the actual
+    /// API error message. Without reading the body, errors like HTTP 400
+    /// would just say "HTTP 400 Bad Request" with no indication of what
+    /// went wrong.
+    ///
+    /// Provider-specific error handlers should call this rather than
+    /// re-implementing the classification logic.
+    ///
+    /// [`InvalidStatusCode`]: reqwest_eventsource::Error::InvalidStatusCode
+    pub(crate) async fn from_eventsource(err: reqwest_eventsource::Error) -> Self {
         use reqwest_eventsource::Error;
 
         match err {
             Error::Transport(error) => Self::from(error),
             Error::InvalidStatusCode(status, response) => {
-                let headers = response.headers();
-                let retry_after = extract_retry_after(headers);
+                let headers = response.headers().clone();
+                let body = response.text().await.unwrap_or_default();
+
+                let api_msg = extract_api_error_body(&body);
+                let display = api_msg.as_deref().map_or_else(
+                    || format!("HTTP {status}"),
+                    |msg| format!("{msg} (HTTP {status})"),
+                );
+
+                if !body.is_empty() {
+                    tracing::error!(
+                        status = %status,
+                        body = %body,
+                        "API error response"
+                    );
+                }
+
+                if looks_like_quota_error(&body) {
+                    return Self::new(StreamErrorKind::InsufficientQuota, display);
+                }
+
+                let retry_after = extract_retry_after(&headers);
                 let code = status.as_u16();
 
                 // Non-standard `x-should-retry` header overrides
                 // status-code heuristics.
-                let retryable = match header_str(headers, "x-should-retry") {
+                let retryable = match header_str(&headers, "x-should-retry") {
                     Some("true") => true,
                     Some("false") => false,
                     _ => matches!(code, 408 | 409 | 429 | _ if code >= 500),
                 };
 
                 if !retryable {
-                    StreamError::other(format!("HTTP {status}"))
+                    Self::other(display)
                 } else if code == 429 {
-                    StreamError::rate_limit(retry_after)
+                    Self::rate_limit(retry_after)
                 } else {
-                    let err = StreamError::transient(format!("HTTP {status}"));
+                    let err = Self::transient(display);
                     match retry_after {
                         Some(d) => err.with_retry_after(d),
                         None => err,
@@ -207,9 +226,23 @@ impl From<reqwest_eventsource::Error> for StreamError {
             | Error::Parser(_)
             | Error::InvalidContentType(_, _)
             | Error::InvalidLastEventId(_)
-            | Error::StreamEnded) => StreamError::other(error.to_string()).with_source(error),
+            | Error::StreamEnded) => Self::other(error.to_string()).with_source(error),
         }
     }
+}
+
+/// Try to extract a human-readable error message from a JSON error response
+/// body.
+///
+/// Supports the common `{"error": {"message": "..."}}` shape used by OpenAI
+/// and compatible APIs, as well as Google's `{"error": {"message": "..."}}`.
+fn extract_api_error_body(body: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
+    parsed
+        .get("error")
+        .and_then(|e| e.get("message"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
 }
 
 /// The kind of streaming error.
