@@ -4,10 +4,8 @@
 //! content, metadata) so that raw conversation text doesn't appear in plain
 //! text on disk - keeping it out of `grep` and editor search results.
 //!
-//! The encoding is applied during [`InternalEvent`] serialization and reversed
+//! The encoding is applied during `InternalEvent` serialization and reversed
 //! during deserialization. The inner event types serialize as plain text.
-//!
-//! [`InternalEvent`]: crate::stream::InternalEvent
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Map, Value};

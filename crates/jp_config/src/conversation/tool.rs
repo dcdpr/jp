@@ -15,6 +15,7 @@ use crate::{
     conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_vec},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
+    types::json_value::JsonValue,
     util::merge_nested_indexmap,
 };
 
@@ -42,10 +43,7 @@ impl AssignKeyValue for PartialToolsConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             _ if kv.p("*") => self.defaults.assign(kv)?,
-            _ => match kv.trim_prefix_any() {
-                Some(tool_id) => self.tools.entry(tool_id).or_default().assign(kv)?,
-                None => return missing_key(&kv),
-            },
+            _ => kv.assign_to_entry(&mut self.tools)?,
         }
 
         Ok(())
@@ -292,8 +290,8 @@ pub struct ToolConfig {
     /// A free-form map of key-value pairs that configure tool behavior.
     /// Each tool defines its own supported options and defaults. Unknown
     /// options are silently forwarded.
-    #[setting(default)]
-    pub options: Map<String, Value>,
+    #[setting(nested, merge = merge_nested_indexmap)]
+    pub options: IndexMap<String, JsonValue>,
 }
 
 impl AssignKeyValue for PartialToolConfig {
@@ -311,7 +309,7 @@ impl AssignKeyValue for PartialToolConfig {
             "result" => self.result = kv.try_some_from_str()?,
             _ if kv.p("style") => self.style.assign(kv)?,
             "questions" => self.questions = kv.try_object()?,
-            "options" => self.options = Some(kv.try_object()?),
+            _ if kv.p("options") => kv.assign_to_entry(&mut self.options)?,
             _ => return missing_key(&kv),
         }
 
@@ -365,7 +363,16 @@ impl PartialConfigDelta for PartialToolConfig {
                     Some((k, next))
                 })
                 .collect(),
-            options: delta_opt(self.options.as_ref(), next.options),
+            options: next
+                .options
+                .into_iter()
+                .filter_map(|(name, next)| {
+                    if self.options.get(&name).is_some_and(|prev| prev == &next) {
+                        return None;
+                    }
+                    Some((name, next))
+                })
+                .collect(),
         }
     }
 }
@@ -394,11 +401,11 @@ impl ToPartial for ToolConfig {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.to_partial()))
                 .collect(),
-            options: if self.options.is_empty() {
-                None
-            } else {
-                Some(self.options.clone())
-            },
+            options: self
+                .options
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
         }
     }
 }
@@ -1091,7 +1098,7 @@ impl ToolConfigWithDefaults {
 
     /// Return the per-tool options map.
     #[must_use]
-    pub const fn options(&self) -> &Map<String, Value> {
+    pub const fn options(&self) -> &IndexMap<String, JsonValue> {
         &self.tool.options
     }
 

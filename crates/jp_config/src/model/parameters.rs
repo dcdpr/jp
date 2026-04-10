@@ -2,15 +2,16 @@
 
 use std::{fmt, str::FromStr};
 
+use indexmap::IndexMap;
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
 
 use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
+    types::json_value::JsonValue,
 };
 
 /// Assistant-specific configuration.
@@ -77,8 +78,8 @@ pub struct ParametersConfig {
     pub stop_words: Vec<String>,
 
     /// Other non-typed parameters that some models might support.
-    #[setting(default, flatten, merge = schematic::merge::merge_iter, skip_serializing_if = "Map::is_empty")]
-    pub other: Map<String, Value>,
+    #[setting(default, flatten, merge = schematic::merge::merge_iter, skip_serializing_if = "IndexMap::is_empty")]
+    pub other: IndexMap<String, JsonValue>,
 }
 
 impl AssignKeyValue for PartialParametersConfig {
@@ -91,11 +92,7 @@ impl AssignKeyValue for PartialParametersConfig {
             "top_k" => self.top_k = kv.try_some_u32()?,
             _ if kv.p("stop_words") => kv.try_some_vec_of_strings(&mut self.stop_words)?,
             _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
-            k => {
-                self.other
-                    .get_or_insert_default()
-                    .insert(k.to_owned(), kv.value.into_value());
-            }
+            _ => kv.assign_to_entry(self.other.get_or_insert_default())?,
         }
 
         Ok(())

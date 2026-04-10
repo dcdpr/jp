@@ -1,13 +1,14 @@
 //! Template configuration for Jean-Pierre.
 
+use indexmap::IndexMap;
 use schematic::Config;
-use serde_json::{Map, Value};
 
 use crate::{
-    BoxedError,
-    assignment::{AssignKeyValue, KvAssignment, KvValue, missing_key, type_error},
-    delta::{PartialConfigDelta, delta_opt},
-    partial::{ToPartial, partial_opt},
+    assignment::{AssignKeyValue, KvAssignment, missing_key},
+    delta::PartialConfigDelta,
+    partial::ToPartial,
+    types::json_value::JsonValue,
+    util::merge_nested_indexmap,
 };
 
 /// Template configuration.
@@ -15,45 +16,15 @@ use crate::{
 #[config(rename_all = "snake_case")]
 pub struct TemplateConfig {
     /// Template variable values used to render query templates.
-    // #[setting(nested)] TODO
-    pub values: Map<String, Value>,
+    #[setting(nested, merge = merge_nested_indexmap)]
+    pub values: IndexMap<String, JsonValue>,
 }
 
 impl AssignKeyValue for PartialTemplateConfig {
-    fn assign(&mut self, mut kv: KvAssignment) -> Result<(), BoxedError> {
+    fn assign(&mut self, mut kv: KvAssignment) -> Result<(), crate::BoxedError> {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            _ if kv.p("values") => {
-                let remaining_key = kv.key_string();
-                if remaining_key.is_empty() {
-                    return type_error(kv.key(), &kv.value, &["object"]).map_err(Into::into);
-                }
-
-                let values = self.values.get_or_insert_default();
-                let value = match kv.value {
-                    KvValue::Json(v) => v,
-                    KvValue::String(s) => Value::String(s),
-                };
-
-                let mut current = values;
-                let mut parts = remaining_key.split('.').peekable();
-                while let Some(part) = parts.next() {
-                    if parts.peek().is_none() {
-                        current.insert(part.to_string(), value);
-                        break;
-                    }
-
-                    let entry = current
-                        .entry(part.to_string())
-                        .or_insert_with(|| Value::Object(serde_json::Map::new()));
-
-                    if let Value::Object(obj) = entry {
-                        current = obj;
-                    } else {
-                        return Err("Cannot set nested value on non-object".into());
-                    }
-                }
-            }
+            _ if kv.p("values") => kv.assign_to_entry(&mut self.values)?,
             _ => return missing_key(&kv),
         }
 
@@ -64,17 +35,28 @@ impl AssignKeyValue for PartialTemplateConfig {
 impl PartialConfigDelta for PartialTemplateConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            values: delta_opt(self.values.as_ref(), next.values),
+            values: next
+                .values
+                .into_iter()
+                .filter_map(|(name, next)| {
+                    if self.values.get(&name).is_some_and(|prev| prev == &next) {
+                        return None;
+                    }
+                    Some((name, next))
+                })
+                .collect(),
         }
     }
 }
 
 impl ToPartial for TemplateConfig {
     fn to_partial(&self) -> Self::Partial {
-        let defaults = Self::Partial::default();
-
         Self::Partial {
-            values: partial_opt(&self.values, defaults.values),
+            values: self
+                .values
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
         }
     }
 }

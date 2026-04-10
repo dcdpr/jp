@@ -1,6 +1,8 @@
 use assert_matches::assert_matches;
+use serde_json::json;
 
 use super::*;
+use crate::types::json_value::JsonValue;
 
 #[test]
 fn test_kv_assignment_from_str() {
@@ -583,4 +585,46 @@ fn test_kv_assignment_try_vec_of_strings() {
     let kv = KvAssignment::try_from_cli("2", "bar").unwrap();
     let error = kv.try_vec_of_strings(&mut v).unwrap_err();
     assert_eq!(&error.to_string(), "2: unknown index");
+}
+
+#[test]
+fn test_assign_to_entry_sets_value() {
+    let mut map = IndexMap::<String, JsonValue>::new();
+    let kv = KvAssignment::try_from_cli("port", "3000").unwrap();
+    kv.assign_to_entry(&mut map).unwrap();
+    assert_eq!(map["port"], JsonValue(json!("3000")));
+}
+
+#[test]
+fn test_assign_to_entry_nested_key() {
+    let mut map = IndexMap::<String, JsonValue>::new();
+    let kv = KvAssignment::try_from_cli("web.port", "3000").unwrap();
+    kv.assign_to_entry(&mut map).unwrap();
+    assert_eq!(map["web"], JsonValue(json!({"port": "3000"})));
+}
+
+#[test]
+fn test_assign_to_entry_preserves_existing() {
+    let mut map = IndexMap::<String, JsonValue>::new();
+    map.insert("host".to_owned(), JsonValue(json!("localhost")));
+
+    let kv = KvAssignment::try_from_cli("port", "3000").unwrap();
+    kv.assign_to_entry(&mut map).unwrap();
+
+    assert_eq!(map["host"], JsonValue(json!("localhost")));
+    assert_eq!(map["port"], JsonValue(json!("3000")));
+}
+
+#[test]
+fn test_assign_to_entry_merges_into_existing() {
+    let mut map = IndexMap::<String, JsonValue>::new();
+    map.insert("web".to_owned(), JsonValue(json!({"host": "localhost"})));
+
+    let kv = KvAssignment::try_from_cli("web.port", "3000").unwrap();
+    kv.assign_to_entry(&mut map).unwrap();
+
+    assert_eq!(
+        map["web"],
+        JsonValue(json!({"host": "localhost", "port": "3000"}))
+    );
 }

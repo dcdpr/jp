@@ -6,6 +6,7 @@
 
 use std::{fmt, str::FromStr};
 
+use indexmap::IndexMap;
 use schematic::PartialConfig;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, from_str};
@@ -208,6 +209,19 @@ impl KvAssignment {
     /// Convenience method for [`Self::trim_prefix`].
     pub(crate) fn p(&mut self, segment: &str) -> bool {
         self.trim_prefix(segment)
+    }
+
+    /// Trim the first key segment and assign to the corresponding entry in
+    /// a map. Returns a missing-key error if no segment can be trimmed.
+    pub(crate) fn assign_to_entry<V>(mut self, map: &mut IndexMap<String, V>) -> AssignResult
+    where
+        V: AssignKeyValue + Default,
+    {
+        let Some(key) = self.trim_prefix_any() else {
+            return missing_key(&self);
+        };
+        map.entry(key).or_default().assign(self)?;
+        Ok(())
     }
 
     /// Parse an assignment from an environment variable.

@@ -37,6 +37,10 @@ where
             prev_value.append(&mut next_value);
             prev_value
         }
+        Some(MergedVecStrategy::Prepend) => {
+            next_value.append(&mut prev_value);
+            next_value
+        }
         Some(MergedVecStrategy::Replace) => next_value,
     };
 

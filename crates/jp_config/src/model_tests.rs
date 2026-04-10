@@ -4,9 +4,12 @@ use serde_json::{Value, json};
 use test_log::test;
 
 use super::*;
-use crate::model::{
-    id::{PartialModelIdConfig, ProviderId},
-    parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
+use crate::{
+    model::{
+        id::{PartialModelIdConfig, ProviderId},
+        parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
+    },
+    types::json_value::JsonValue,
 };
 
 #[test]
@@ -146,7 +149,7 @@ fn test_model_config_parameters() {
     p.assign(kv).unwrap();
     assert_eq!(
         p.parameters.other.and_then(|v| v.get("foo").cloned()),
-        Some(Value::String("bar".into()))
+        Some(JsonValue(serde_json::json!("bar")))
     );
 }
 

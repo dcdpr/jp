@@ -41,10 +41,7 @@ impl AssignKeyValue for PartialProviderConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             _ if kv.p("llm") => self.llm.assign(kv)?,
-            _ if kv.p("mcp") => match kv.trim_prefix_any() {
-                Some(name) => self.mcp.entry(name).or_default().assign(kv)?,
-                None => return missing_key(&kv),
-            },
+            _ if kv.p("mcp") => kv.assign_to_entry(&mut self.mcp)?,
             // _ if kv.p("tts") => self.tts.assign(kv)?,
             _ => return missing_key(&kv),
         }

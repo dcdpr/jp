@@ -109,9 +109,6 @@ expression: v
         "EDITOR"
       ]
     },
-    "template": {
-      "values": {}
-    },
     "providers": {
       "llm": {
         "anthropic": {

@@ -125,7 +125,7 @@ PartialAppConfig {
         envs: None,
     },
     template: PartialTemplateConfig {
-        values: None,
+        values: {},
     },
     providers: PartialProviderConfig {
         llm: PartialLlmProviderConfig {
