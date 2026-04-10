@@ -1,7 +1,9 @@
 use assert_matches::assert_matches;
 use schematic::{PartialConfig as _, SchemaBuilder, SchemaType, schema::LiteralValue};
+use serde_json::json;
 
 use super::*;
+use crate::types::json_value::JsonValue;
 
 #[test]
 fn test_enable_from_bool() {
@@ -287,4 +289,32 @@ fn test_tool_source_schema() {
     let schema = SchemaBuilder::build_root::<ToolSource>();
     assert_eq!(schema.name, Some("tool_source".to_owned()));
     assert_eq!(schema.ty, SchemaType::String(Box::default()));
+}
+
+#[test]
+fn test_tool_options_assign_flat() {
+    let mut p = PartialToolConfig::default();
+    let kv = KvAssignment::try_from_cli("options.verbose", "true").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.options["verbose"], JsonValue(json!("true")));
+}
+
+#[test]
+fn test_tool_options_assign_nested() {
+    let mut p = PartialToolConfig::default();
+    let kv = KvAssignment::try_from_cli("options.web.port", "3000").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.options["web"], JsonValue(json!({"port": "3000"})));
+}
+
+#[test]
+fn test_tool_options_assign_preserves_siblings() {
+    let mut p = PartialToolConfig::default();
+    p.options.insert("debug".to_owned(), JsonValue(json!(true)));
+
+    let kv = KvAssignment::try_from_cli("options.verbose", "true").unwrap();
+    p.assign(kv).unwrap();
+
+    assert_eq!(p.options["debug"], JsonValue(json!(true)));
+    assert_eq!(p.options["verbose"], JsonValue(json!("true")));
 }

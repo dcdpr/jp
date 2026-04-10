@@ -921,8 +921,8 @@ fn create_request(
 
     // See: <https://docs.claude.com/en/docs/build-with-claude/context-editing>
     if beta.context_editing() {
-        let strategy = match parameters.other.get("context_management").cloned() {
-            Some(Value::Object(strategy)) => strategy,
+        let strategy = match parameters.other.get("context_management").map(|v| &v.0) {
+            Some(Value::Object(strategy)) => strategy.clone(),
             // If no strategy is provided, but the `context_editing` feature is
             // enabled, use the default strategy.
             _ => Map::from_iter([(

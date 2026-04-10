@@ -286,6 +286,9 @@ pub enum MergedVecStrategy {
     #[default]
     Append,
 
-    /// See [`schematic::merge::replace`].
+    /// Prepend the vec before the previous value.
+    Prepend,
+
+    /// Replace the previous value with the new value.
     Replace,
 }

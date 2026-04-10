@@ -289,12 +289,12 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(ChatMessage
     if let Some(context_window) = parameters
         .other
         .get("context_window")
-        .and_then(Value::as_u64)
+        .and_then(|v| v.as_u64())
     {
         options = options.num_ctx(context_window);
     }
 
-    if let Some(keep_alive) = parameters.other.get("keep_alive").and_then(Value::as_str) {
+    if let Some(keep_alive) = parameters.other.get("keep_alive").and_then(|v| v.as_str()) {
         let unit = keep_alive
             .chars()
             .last()

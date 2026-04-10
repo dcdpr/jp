@@ -230,7 +230,7 @@ Ok(
                 ),
             },
             template: PartialTemplateConfig {
-                values: None,
+                values: {},
             },
             providers: PartialProviderConfig {
                 llm: PartialLlmProviderConfig {

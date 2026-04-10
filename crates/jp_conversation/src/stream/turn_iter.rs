@@ -3,6 +3,7 @@
 //! A "turn" is a group of events delimited by [`TurnStart`] markers. Events
 //! before the first `TurnStart` (if any) form an implicit leading turn.
 //!
+//! [`ConversationStream`]: super::ConversationStream
 //! [`TurnStart`]: crate::event::TurnStart
 
 use super::ConversationEventWithConfigRef;
