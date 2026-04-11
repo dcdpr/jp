@@ -7,6 +7,7 @@ mod edit;
 pub(crate) mod fork;
 mod grep;
 mod ls;
+mod path;
 mod print;
 mod rm;
 mod show;
@@ -27,6 +28,7 @@ impl Conversation {
             Commands::Fork(args) => args.run(ctx, &handles),
             Commands::Grep(args) => args.run(ctx, handles),
             Commands::Print(args) => args.run(ctx, &handles),
+            Commands::Path(args) => args.run(ctx, handles),
             Commands::List(args) => args.run(ctx, handles),
             Commands::Use(args) => args.run(
                 ctx,
@@ -43,6 +45,7 @@ impl Conversation {
             Commands::Fork(args) => args.conversation_load_request(),
             Commands::Grep(args) => args.conversation_load_request(),
             Commands::Print(args) => args.conversation_load_request(),
+            Commands::Path(args) => args.conversation_load_request(),
             Commands::List(args) => args.conversation_load_request(),
             Commands::Use(args) => args.conversation_load_request(),
         }
@@ -82,6 +85,10 @@ enum Commands {
     /// Print conversation history to the terminal.
     #[command(name = "print", visible_alias = "p")]
     Print(print::Print),
+
+    /// Print the filesystem path to a conversation.
+    #[command(name = "path")]
+    Path(path::Path),
     // /// Merge a conversation.
     // Merge(merge::Merge),
 

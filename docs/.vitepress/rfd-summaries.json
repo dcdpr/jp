@@ -72,7 +72,7 @@
     "summary": "Abandoned RFD split into RFD 048 and RFD 049; preserved for historical context on non-interactive mode design."
   },
   "020-parallel-conversations.md": {
-    "hash": "7773bf58ef6c80411b39606bacaa8ac521ff2055524a63c2b39f259af9b2448a",
+    "hash": "adf25ef9306b69fc3e7f103061afe87e8a9a6f01e053a91c4e7c7dafd821bfcd",
     "summary": "Replace global active conversation with per-session tracking and add conversation locks for parallel terminal work."
   },
   "021-printer-live-redirection.md": {
@@ -180,7 +180,7 @@
     "summary": "Nested workspace directories project conversation trees visually; user-local storage stays flat for durability."
   },
   "047-editor-and-path-access-for-conversations.md": {
-    "hash": "9ba5cc3be2b3ad2fc69ec2463f3a0ef6fa20677caf0b54648de65074d8805431",
+    "hash": "fafd5116726ff573299f6afb85006430dd189bae5133f03b2a9a0f522ea606a4",
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "038-config-inheritance-for-conversations.md": {

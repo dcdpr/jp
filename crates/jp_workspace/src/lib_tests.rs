@@ -8,7 +8,7 @@ use jp_config::{
     model::id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig, ProviderId},
     util::build,
 };
-use jp_storage::{CONVERSATIONS_DIR, METADATA_FILE, value::read_json};
+use jp_storage::value::read_json;
 use parking_lot::RwLock;
 use test_log::test;
 
@@ -124,14 +124,10 @@ fn test_workspace_persist_via_lock() {
 
     assert!(storage.is_dir());
 
-    let metadata_file = storage
-        .join(CONVERSATIONS_DIR)
-        .join(id.to_dirname(None))
-        .join(METADATA_FILE);
+    let metadata_path = workspace.conversation_metadata_path(&id).unwrap();
+    assert!(metadata_path.is_file());
 
-    assert!(metadata_file.is_file());
-
-    let _metadata: Conversation = read_json(&metadata_file).unwrap();
+    let _metadata: Conversation = read_json(&metadata_path).unwrap();
 }
 
 #[test]
@@ -372,18 +368,12 @@ fn test_workspace_persist_single_conversation_via_lock() {
 
     assert!(storage.is_dir());
 
-    let id1_metadata_file = storage
-        .join(CONVERSATIONS_DIR)
-        .join(id1.to_dirname(None))
-        .join(METADATA_FILE);
+    let id1_metadata = workspace.conversation_metadata_path(&id1);
+    assert!(id1_metadata.is_some_and(|p| p.is_file()));
 
-    let id2_metadata_file = storage
-        .join(CONVERSATIONS_DIR)
-        .join(id2.to_dirname(None))
-        .join(METADATA_FILE);
-
-    assert!(id1_metadata_file.is_file());
-    assert!(!id2_metadata_file.is_file());
+    // id2 was never persisted, so its directory shouldn't exist.
+    let id2_metadata = workspace.conversation_metadata_path(&id2);
+    assert!(id2_metadata.is_none());
 }
 
 /// Regression test: files in a local conversation's user-storage directory
@@ -407,10 +397,7 @@ fn test_persist_preserves_files_in_user_storage() {
     let conversation = Conversation::default().with_local(true);
     workspace.create_conversation_with_id(id, conversation, config);
 
-    let user_storage = workspace.user_storage_path().unwrap();
-    let conv_dir = user_storage
-        .join(CONVERSATIONS_DIR)
-        .join(id.to_dirname(None));
+    let conv_dir = workspace.build_conversation_dir(&id, None, true).unwrap();
     fs::create_dir_all(&conv_dir).unwrap();
     let query_file = conv_dir.join("QUERY_MESSAGE.md");
     fs::write(&query_file, "test query content").unwrap();
@@ -427,9 +414,7 @@ fn test_persist_preserves_files_in_user_storage() {
         "query file in user-storage conversation directory must survive persistence"
     );
 
-    let workspace_conv_dir = storage_path
-        .join(CONVERSATIONS_DIR)
-        .join(id.to_dirname(None));
+    let workspace_conv_dir = workspace.build_conversation_dir(&id, None, false).unwrap();
     assert!(
         !workspace_conv_dir.exists(),
         "local conversation should not create a workspace-side directory"
