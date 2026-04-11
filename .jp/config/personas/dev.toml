@@ -1,4 +1,5 @@
 extends = [
+    "../knowledge/project-structure.toml",
     "../skill/web.toml",
     "../skill/read-files.toml",
     "../skill/edit-files.toml",

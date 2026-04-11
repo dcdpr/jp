@@ -1,3 +1,7 @@
+extends = [
+    "../knowledge/project-structure.toml",
+]
+
 [conversation.tools]
 '*'.run = "unattended"
 fs_grep_files.enable = true

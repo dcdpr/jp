@@ -1,7 +1,6 @@
 [conversation.tools.git_diff]
 enable = "explicit"
 run = "unattended"
-style.inline_results = "full"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
@@ -28,6 +27,11 @@ Diff staged changes:
 {"status": "staged", "paths": ["src/"]}
 ```
 """
+
+[conversation.tools.git_diff.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
 
 [conversation.tools.git_diff.parameters.paths]
 type = "array"
