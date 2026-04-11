@@ -313,7 +313,9 @@ pub fn run() -> ExitCode {
         }
     };
 
-    if let Some(output) = output {
+    if let Some(output) = output
+        && !output.trim().is_empty()
+    {
         if code == 0 {
             println!("{output}");
         } else {

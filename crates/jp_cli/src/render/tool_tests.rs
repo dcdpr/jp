@@ -84,7 +84,7 @@ fn test_render_tool_call_empty_args() {
 #[test]
 fn test_render_tool_call_custom_does_not_run_command() {
     // Custom style with render_tool_call should NOT execute the command.
-    // The custom command is only run via render_custom_arguments after approval.
+    // The custom command is only run via render_approved after approval.
     let mut args = Map::new();
     args.insert("host".into(), Value::String("myhost".into()));
     let style = ParametersStyle::Custom(CommandConfigOrString::String("echo LEAKED".into()));
@@ -106,12 +106,13 @@ async fn test_render_custom_arguments_after_approval() {
 
     let mut args = Map::new();
     args.insert("host".into(), Value::String("myhost".into()));
-    let cmd = CommandConfigOrString::String("echo custom-output".into()).command();
+    let style = ParametersStyle::Custom(CommandConfigOrString::String("echo custom-output".into()));
 
-    renderer
-        .render_custom_arguments("ssh_run", &args, cmd)
-        .await;
+    let outcome = renderer.render_approved("ssh_run", &args, &style).await;
 
+    assert!(matches!(outcome, RenderOutcome::Rendered {
+        content: Some(_)
+    }));
     renderer.printer.flush();
     let output = strip_ansi(&err.lock());
     insta::assert_snapshot!(output);
@@ -213,61 +214,42 @@ fn test_register_duplicate_ignored() {
 }
 
 #[test]
-fn test_complete_prints_permanent_line() {
-    let (mut renderer, out) = create_renderer_with_show(true);
+fn test_complete_removes_from_pending() {
+    let (mut renderer, _out) = create_renderer_with_show(true);
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     renderer.register("id1", "fs_read_file", &tx);
 
-    let mut args = Map::new();
-    args.insert("path".into(), Value::String("/tmp/test.rs".into()));
-    renderer.complete(
-        "id1",
-        "fs_read_file",
-        &args,
-        &ParametersStyle::FunctionCall,
-        true,
-    );
+    renderer.complete("id1");
 
-    renderer.printer.flush();
-    let output = strip_ansi(&out.lock());
-    assert!(output.contains("Calling tool"), "output: {output:?}");
-    assert!(output.contains("/tmp/test.rs"), "output: {output:?}");
-    assert!(renderer.is_rendered("id1"));
     assert!(!renderer.has_pending());
 }
 
 #[test]
-fn test_complete_hidden_removes_from_pending_without_rendering() {
+fn test_complete_does_not_render_permanent_line() {
+    // Verify complete() only manages the temp line and doesn't print a
+    // permanent "Calling tool X(args)" header. In a memory buffer we
+    // can't distinguish the temp line from permanent output, so we test
+    // by completing *without* registering first — any output would be
+    // from complete() itself.
     let (mut renderer, out) = create_renderer_with_show(true);
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    renderer.register("id1", "fs_read_file", &tx);
-    renderer.complete(
-        "id1",
-        "fs_read_file",
-        &Map::new(),
-        &ParametersStyle::Off,
-        false,
-    );
+    renderer.complete("id1");
     assert!(!renderer.has_pending());
-    assert!(!renderer.is_rendered("id1"));
-    // No permanent "Calling tool" line should have been printed.
     renderer.printer.flush();
     let output = strip_ansi(&out.lock());
     assert!(
-        !output.contains("Calling tool fs_read_file("),
-        "hidden tool should not print permanent line: {output:?}"
+        !output.contains("Calling tool"),
+        "complete() should not render: {output:?}"
     );
 }
 
 #[test]
-fn test_cancel_all_clears_pending_preserves_rendered() {
+fn test_cancel_all_clears_pending() {
     let (mut renderer, _out) = create_renderer_with_show(true);
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     renderer.register("id1", "tool_a", &tx);
     renderer.register("id2", "tool_b", &tx);
-    renderer.complete("id1", "tool_a", &Map::new(), &ParametersStyle::Off, true);
+    renderer.complete("id1");
     renderer.cancel_all();
-    assert!(renderer.is_rendered("id1"), "rendered should be preserved");
     assert!(!renderer.has_pending(), "pending should be cleared");
 }
 
@@ -276,9 +258,8 @@ fn test_reset_clears_everything() {
     let (mut renderer, _out) = create_renderer_with_show(true);
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     renderer.register("id1", "tool_a", &tx);
-    renderer.complete("id1", "tool_a", &Map::new(), &ParametersStyle::Off, true);
+    renderer.complete("id1");
     renderer.reset();
-    assert!(!renderer.is_rendered("id1"), "rendered cleared after reset");
     assert!(!renderer.has_pending());
 }
 
@@ -301,11 +282,9 @@ fn test_show_false_suppresses_preparing_output() {
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     renderer.register("id1", "tool_a", &tx);
 
-    let mut args = Map::new();
-    args.insert("x".into(), Value::Number(1.into()));
-    renderer.complete("id1", "tool_a", &args, &ParametersStyle::FunctionCall, true);
+    renderer.complete("id1");
     // Should not panic; output goes to sink.
-    assert!(renderer.is_rendered("id1"));
+    assert!(!renderer.has_pending());
 }
 
 #[test]
@@ -347,7 +326,7 @@ fn test_format_args_function_call() {
 #[test]
 fn test_format_args_custom_returns_empty() {
     // format_args for Custom always returns "" — the actual command is run
-    // separately via render_custom_arguments.
+    // separately via render_approved.
     let mut args = Map::new();
     args.insert("key".into(), Value::String("value".into()));
     let style = ParametersStyle::Custom(CommandConfigOrString::String("echo custom-output".into()));

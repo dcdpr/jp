@@ -80,7 +80,7 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{
-    CommandConfigOrString, QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
+    QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
 };
 use jp_conversation::{
     ConversationStream,
@@ -105,7 +105,10 @@ use super::{
     inquiry::{self, InquiryBackend},
     prompter::{PermissionResult, ToolPrompter, permission_inquiry_id, tool_question_inquiry_id},
 };
-use crate::cmd::query::turn::{TurnCoordinator, state::TurnState};
+use crate::{
+    cmd::query::turn::{TurnCoordinator, state::TurnState},
+    render::tool::RenderOutcome,
+};
 
 #[derive(Debug)]
 enum ExecutionEvent {
@@ -402,90 +405,54 @@ impl ToolCoordinator {
         })
     }
 
-    /// Renders a tool call header + safe arguments (everything except
-    /// Custom formatter output). For Custom styles, only the header is
-    /// printed — call [`render_custom_args`] separately to run the command.
+    /// Renders the tool call header and arguments after permission approval.
     ///
-    /// [`render_custom_args`]: Self::render_custom_args
-    fn render_tool(
+    /// For non-Custom styles: prints the header with inline-formatted arguments.
+    /// For Custom style: runs the custom formatter command, then prints header +
+    /// custom output atomically. If the custom formatter fails, nothing is
+    /// printed and [`RenderOutcome::Suppressed`] is returned — the caller
+    /// should abort execution and return an error response to the LLM.
+    /// For hidden tools: renders nothing but returns `Rendered` (hidden tools
+    /// still execute).
+    pub(crate) async fn render_approved_tool(
         &self,
         tool_name: &str,
         arguments: &serde_json::Map<String, Value>,
         tool_renderer: &ToolRenderer,
-    ) {
-        let is_hidden = self
-            .tools_config
-            .get(tool_name)
-            .is_some_and(|cfg| cfg.style().hidden);
-
-        if is_hidden {
-            return;
+    ) -> RenderOutcome {
+        if self.is_hidden(tool_name) {
+            return RenderOutcome::Rendered { content: None };
         }
 
         let style = self.parameter_style(tool_name);
-        tool_renderer.render_tool_call(tool_name, arguments, &style);
-    }
-
-    /// Renders custom formatter output for a tool, if applicable.
-    /// No-ops for non-Custom styles and hidden tools.
-    ///
-    /// Returns the rendered content if a custom formatter produced output.
-    pub(crate) async fn render_custom_args(
-        &self,
-        tool_name: &str,
-        arguments: &serde_json::Map<String, Value>,
-        tool_renderer: &ToolRenderer,
-    ) -> Option<String> {
-        let is_hidden = self
-            .tools_config
-            .get(tool_name)
-            .is_some_and(|cfg| cfg.style().hidden);
-
-        if is_hidden {
-            return None;
-        }
-
-        let cmd = self
-            .parameter_style(tool_name)
-            .into_custom()
-            .map(CommandConfigOrString::command)?;
-
         tool_renderer
-            .render_custom_arguments(tool_name, arguments, cmd)
+            .render_approved(tool_name, arguments, &style)
             .await
     }
 
     /// Determines permission for a single tool without blocking on user input.
+    ///
+    /// Does NOT render any output. Rendering happens after the permission
+    /// decision via [`render_approved_tool`].
     ///
     /// Returns one of:
     /// - `Approved` — tool can run immediately (unattended, persisted "y",
     ///   non-interactive)
     /// - `Skipped` — tool should not run (persisted "n")
     /// - `NeedsPrompt` — requires an interactive user prompt
+    ///
+    /// [`render_approved_tool`]: Self::render_approved_tool
     pub fn decide_permission(
         &mut self,
         executor: Box<dyn Executor>,
         is_tty: bool,
         turn_state: &TurnState,
-        tool_renderer: &ToolRenderer,
     ) -> PermissionDecision {
         let Some(info) = executor.permission_info() else {
-            // Unattended tool — render if not already shown during
-            // streaming and approve.
-            let id = executor.tool_id();
-            let name = executor.tool_name();
-            let args = executor.arguments();
-            if !tool_renderer.is_rendered(id) {
-                self.render_tool(name, args, tool_renderer);
-            }
             return PermissionDecision::Approved(executor);
         };
 
         if !is_tty && matches!(info.run_mode, RunMode::Ask | RunMode::Edit) {
-            if !tool_renderer.is_rendered(&info.tool_id) {
-                let args_map = info.arguments.as_object().cloned().unwrap_or_default();
-                self.render_tool(&info.tool_name, &args_map, tool_renderer);
-            }
             self.set_tool_state(&info.tool_id, ToolCallState::Running);
             return PermissionDecision::Approved(executor);
         }
@@ -501,10 +468,6 @@ impl ToolCoordinator {
         if let Some(ref decision) = persisted {
             match decision.as_str() {
                 "y" | "Y" => {
-                    if !tool_renderer.is_rendered(&info.tool_id) {
-                        let args_map = info.arguments.as_object().cloned().unwrap_or_default();
-                        self.render_tool(&info.tool_name, &args_map, tool_renderer);
-                    }
                     self.set_tool_state(&info.tool_id, ToolCallState::Running);
                     return PermissionDecision::Approved(executor);
                 }
@@ -517,12 +480,6 @@ impl ToolCoordinator {
                 }
                 _ => {} // Unknown value, fall through to prompt
             }
-        }
-
-        // Needs interactive prompt.
-        if !tool_renderer.is_rendered(&info.tool_id) {
-            let args_map = info.arguments.as_object().cloned().unwrap_or_default();
-            self.render_tool(&info.tool_name, &args_map, tool_renderer);
         }
 
         PermissionDecision::NeedsPrompt { executor, info }
@@ -597,19 +554,25 @@ impl ToolCoordinator {
         let mut skipped_responses = Vec::new();
 
         for (index, executor) in std::mem::take(&mut self.executors) {
-            let decision = self.decide_permission(executor, is_tty, turn_state, tool_renderer);
+            let decision = self.decide_permission(executor, is_tty, turn_state);
 
             match decision {
                 PermissionDecision::Approved(executor) => {
                     let id = executor.tool_id().to_owned();
                     let name = executor.tool_name().to_owned();
                     let args = executor.arguments().clone();
-                    if let Some(rendered) =
-                        self.render_custom_args(&name, &args, tool_renderer).await
-                    {
-                        self.rendered_arguments.insert(id, rendered);
+                    match self.render_approved_tool(&name, &args, tool_renderer).await {
+                        RenderOutcome::Rendered { content } => {
+                            if let Some(c) = content {
+                                self.rendered_arguments.insert(id, c);
+                            }
+                            approved_executors.push((index, executor));
+                        }
+                        RenderOutcome::Suppressed { error } => {
+                            skipped_responses
+                                .push((index, Self::render_failed_response(id, &name, &error)));
+                        }
                     }
-                    approved_executors.push((index, executor));
                 }
                 PermissionDecision::Skipped(response) => {
                     skipped_responses.push((index, response));
@@ -621,14 +584,27 @@ impl ToolCoordinator {
                     match self.apply_permission_result(result, &info, turn_state, executor) {
                         Ok(executor) => {
                             let args = executor.arguments().clone();
-                            if let Some(rendered) = self
-                                .render_custom_args(&info.tool_name, &args, tool_renderer)
+                            match self
+                                .render_approved_tool(&info.tool_name, &args, tool_renderer)
                                 .await
                             {
-                                self.rendered_arguments
-                                    .insert(info.tool_id.clone(), rendered);
+                                RenderOutcome::Rendered { content } => {
+                                    if let Some(c) = content {
+                                        self.rendered_arguments.insert(info.tool_id.clone(), c);
+                                    }
+                                    approved_executors.push((index, executor));
+                                }
+                                RenderOutcome::Suppressed { error } => {
+                                    skipped_responses.push((
+                                        index,
+                                        Self::render_failed_response(
+                                            info.tool_id.clone(),
+                                            &info.tool_name,
+                                            &error,
+                                        ),
+                                    ));
+                                }
                             }
-                            approved_executors.push((index, executor));
                         }
                         Err(response) => {
                             skipped_responses.push((index, response));
@@ -981,6 +957,23 @@ impl ToolCoordinator {
         ExecutionResult {
             responses,
             restart_requested,
+        }
+    }
+
+    /// Builds an error response for a tool whose argument rendering failed.
+    ///
+    /// The response tells the LLM the tool was not executed and it may retry.
+    pub(crate) fn render_failed_response(
+        tool_id: String,
+        tool_name: &str,
+        error: &str,
+    ) -> ToolCallResponse {
+        ToolCallResponse {
+            id: tool_id,
+            result: Err(format!(
+                "Tool '{tool_name}' was not executed because the argument formatter failed: \
+                 {error}",
+            )),
         }
     }
 
