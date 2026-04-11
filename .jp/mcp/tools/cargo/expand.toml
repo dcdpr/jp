@@ -4,7 +4,7 @@ run = "unattended"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Expand the auto-generated Rust code for the given item."
+summary = "Expand the auto-generated Rust code for the given module or item."
 
 examples = """
 Expand a module in a workspace package:
