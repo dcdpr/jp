@@ -58,14 +58,35 @@ expression: v
                 "gpt-5.2-codex",
             ),
         },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
+        display_name: Some(
+            "GPT-5.2 Codex",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Leveled {
+                none: false,
+                xlow: false,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Active,
+        ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -1612,13 +1633,17 @@ expression: v
             16384,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Leveled {
+                none: false,
+                xlow: true,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: false,
             },
         ),
         knowledge_cutoff: Some(
-            2024-08-30,
+            2024-09-30,
         ),
         deprecated: Some(
             Active,
@@ -1645,13 +1670,17 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Leveled {
+                none: false,
+                xlow: true,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: false,
             },
         ),
         knowledge_cutoff: Some(
-            2024-08-30,
+            2024-09-30,
         ),
         deprecated: Some(
             Active,
@@ -1678,13 +1707,17 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Leveled {
+                none: false,
+                xlow: true,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: false,
             },
         ),
         knowledge_cutoff: Some(
-            2024-08-30,
+            2024-09-30,
         ),
         deprecated: Some(
             Active,
@@ -1717,7 +1750,7 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2024-08-30,
+            2024-05-31,
         ),
         deprecated: Some(
             Active,
@@ -1750,7 +1783,7 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2024-08-30,
+            2024-05-31,
         ),
         deprecated: Some(
             Active,
@@ -1783,7 +1816,7 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2024-08-30,
+            2024-05-31,
         ),
         deprecated: Some(
             Active,
@@ -1814,7 +1847,7 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2024-08-30,
+            2024-05-31,
         ),
         deprecated: Some(
             Active,
@@ -1909,7 +1942,7 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2024-10-01,
+            2024-09-30,
         ),
         deprecated: Some(
             Active,
@@ -1978,7 +2011,7 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2024-08-30,
+            2024-09-30,
         ),
         deprecated: Some(
             Active,
@@ -2123,14 +2156,35 @@ expression: v
                 "gpt-5.1-chat-latest",
             ),
         },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
+        display_name: Some(
+            "GPT-5.1 Chat",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: Some(
+            16384,
+        ),
+        reasoning: Some(
+            Leveled {
+                none: true,
+                xlow: false,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-09-30,
+        ),
+        deprecated: Some(
+            Active,
+        ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -2149,13 +2203,17 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Leveled {
+                none: true,
+                xlow: false,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: false,
             },
         ),
         knowledge_cutoff: Some(
-            2024-10-01,
+            2024-09-30,
         ),
         deprecated: Some(
             Active,
@@ -2182,13 +2240,17 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Leveled {
+                none: true,
+                xlow: false,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: false,
             },
         ),
         knowledge_cutoff: Some(
-            2024-10-01,
+            2024-09-30,
         ),
         deprecated: Some(
             Active,
@@ -2221,7 +2283,7 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2024-10-01,
+            2024-09-30,
         ),
         deprecated: Some(
             Active,
@@ -2254,7 +2316,7 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2024-10-01,
+            2024-09-30,
         ),
         deprecated: Some(
             Active,
@@ -2287,7 +2349,7 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2024-10-01,
+            2024-09-30,
         ),
         deprecated: Some(
             Active,
@@ -2330,13 +2392,17 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Leveled {
+                none: true,
+                xlow: false,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: true,
             },
         ),
         knowledge_cutoff: Some(
-            2025-09-01,
+            2025-08-31,
         ),
         deprecated: Some(
             Active,
@@ -2363,13 +2429,17 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Leveled {
+                none: true,
+                xlow: false,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: true,
             },
         ),
         knowledge_cutoff: Some(
-            2025-09-01,
+            2025-08-31,
         ),
         deprecated: Some(
             Active,
@@ -2406,7 +2476,7 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2025-09-01,
+            2025-08-31,
         ),
         deprecated: Some(
             Active,
@@ -2443,7 +2513,7 @@ expression: v
             },
         ),
         knowledge_cutoff: Some(
-            2025-09-01,
+            2025-08-31,
         ),
         deprecated: Some(
             Active,
@@ -2460,14 +2530,35 @@ expression: v
                 "gpt-5.2-chat-latest",
             ),
         },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
+        display_name: Some(
+            "GPT-5.2 Chat",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: Some(
+            16384,
+        ),
+        reasoning: Some(
+            Leveled {
+                none: true,
+                xlow: false,
+                low: true,
+                medium: true,
+                high: true,
+                xhigh: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Active,
+        ),
         structured_output: None,
-        features: [],
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
