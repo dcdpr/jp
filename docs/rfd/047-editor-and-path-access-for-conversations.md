@@ -1,6 +1,6 @@
 # RFD 047: Editor and Path Access for Conversations
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-16
@@ -134,7 +134,7 @@ $ jp conversation path --events --metadata
 Paths are printed to stdout, one per line. This enables shell composition:
 
 ```sh
-vim $(jp conversation path --events)
+vim $(jp conversation path --id=prev --base-config)
 cat $(jp conversation path --metadata) | jq .
 cp $(jp conversation path --events) /tmp/backup.json
 ```

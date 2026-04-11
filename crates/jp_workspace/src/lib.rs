@@ -169,6 +169,52 @@ impl Workspace {
         self.storage.as_ref().map(Storage::path)
     }
 
+    /// Build the expected conversation directory path.
+    ///
+    /// Constructs the path where a conversation would be stored, without
+    /// checking whether the directory exists. Returns `None` only if
+    /// storage is not configured.
+    #[must_use]
+    pub fn build_conversation_dir(
+        &self,
+        id: &ConversationId,
+        title: Option<&str>,
+        user: bool,
+    ) -> Option<Utf8PathBuf> {
+        Some(
+            self.storage
+                .as_ref()?
+                .build_conversation_dir(id, title, user),
+        )
+    }
+
+    /// Find the directory path for a conversation by ID.
+    ///
+    /// Returns `None` if storage is not configured or the conversation
+    /// directory does not exist on disk.
+    #[must_use]
+    pub fn conversation_dir(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
+        self.storage.as_ref()?.find_conversation_dir(id)
+    }
+
+    /// Path to a conversation's `events.json` file.
+    #[must_use]
+    pub fn conversation_events_path(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
+        self.storage.as_ref()?.conversation_events_path(id)
+    }
+
+    /// Path to a conversation's `metadata.json` file.
+    #[must_use]
+    pub fn conversation_metadata_path(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
+        self.storage.as_ref()?.conversation_metadata_path(id)
+    }
+
+    /// Path to a conversation's `base_config.json` file.
+    #[must_use]
+    pub fn conversation_base_config_path(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
+        self.storage.as_ref()?.conversation_base_config_path(id)
+    }
+
     /// Returns the path to the user storage directory, if persistence is
     /// enabled, and user storage is configured.
     #[must_use]

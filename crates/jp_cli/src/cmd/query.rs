@@ -92,7 +92,6 @@ use jp_llm::{
 };
 use jp_md::format::Formatter;
 use jp_printer::Printer;
-use jp_storage::CONVERSATIONS_DIR;
 use jp_task::task::TitleGeneratorTask;
 use jp_workspace::{ConversationHandle, ConversationLock, Workspace};
 use minijinja::{Environment, UndefinedBehavior};
@@ -318,18 +317,15 @@ impl Query {
             set_terminal_title(lock.id(), conv_title.as_deref());
         }
 
-        let root = if is_local {
-            ctx.workspace.user_storage_path()
-        } else {
-            ctx.workspace.storage_path()
-        }
-        .unwrap_or(ctx.workspace.root())
-        .to_path_buf();
-
         let cid = lock.id();
-        let conversation_path = root
-            .join(CONVERSATIONS_DIR)
-            .join(cid.to_dirname(conv_title.as_deref()));
+        let conversation_path = ctx
+            .workspace
+            .build_conversation_dir(&cid, conv_title.as_deref(), is_local)
+            .unwrap_or_else(|| {
+                ctx.workspace
+                    .root()
+                    .join(cid.to_dirname(conv_title.as_deref()))
+            });
 
         let (query_file, mut editor_provided_config, chat_request) = lock
             .as_mut()

@@ -24,10 +24,10 @@ use tracing::{trace, warn};
 
 use crate::{error::Result, value::write_json};
 
-pub const METADATA_FILE: &str = "metadata.json";
+pub(crate) const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
 const BASE_CONFIG_FILE: &str = "base_config.json";
-pub const CONVERSATIONS_DIR: &str = "conversations";
+pub(crate) const CONVERSATIONS_DIR: &str = "conversations";
 
 #[derive(Debug, Clone)]
 pub struct Storage {
@@ -387,6 +387,60 @@ impl Storage {
                 lock::is_orphaned_lock(&path).then_some(path)
             })
             .collect()
+    }
+
+    /// Build the expected conversation directory path.
+    ///
+    /// This constructs the path where a conversation *would* be stored,
+    /// regardless of whether the directory exists. Used when creating new
+    /// conversations or when the caller needs a stable path before
+    /// persistence.
+    #[must_use]
+    pub fn build_conversation_dir(
+        &self,
+        id: &ConversationId,
+        title: Option<&str>,
+        user: bool,
+    ) -> Utf8PathBuf {
+        let root = if user {
+            self.user.as_ref().unwrap_or(&self.root)
+        } else {
+            &self.root
+        };
+
+        root.join(CONVERSATIONS_DIR).join(id.to_dirname(title))
+    }
+
+    /// Find the directory path for a conversation by ID.
+    ///
+    /// Searches both workspace and user storage roots. Returns `None` if no
+    /// directory matching the conversation ID exists.
+    #[must_use]
+    pub fn find_conversation_dir(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
+        [Some(&self.root), self.user.as_ref()]
+            .into_iter()
+            .flatten()
+            .find_map(|root| find_conversation_dir_path(root, id))
+    }
+
+    /// Path to a conversation's `events.json` file, if the directory exists.
+    #[must_use]
+    pub fn conversation_events_path(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
+        self.find_conversation_dir(id).map(|d| d.join(EVENTS_FILE))
+    }
+
+    /// Path to a conversation's `metadata.json` file, if the directory exists.
+    #[must_use]
+    pub fn conversation_metadata_path(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
+        self.find_conversation_dir(id)
+            .map(|d| d.join(METADATA_FILE))
+    }
+
+    /// Path to a conversation's `base_config.json` file, if the directory exists.
+    #[must_use]
+    pub fn conversation_base_config_path(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
+        self.find_conversation_dir(id)
+            .map(|d| d.join(BASE_CONFIG_FILE))
     }
 
     /// List session mapping files in user storage.

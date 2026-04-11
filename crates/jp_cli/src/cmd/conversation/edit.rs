@@ -19,6 +19,7 @@ use jp_llm::{
 use jp_printer::PrinterWriter;
 use jp_workspace::ConversationHandle;
 
+use super::path::resolve_paths;
 use crate::{
     cmd::{
         ConversationLoadRequest, Output,
@@ -26,11 +27,10 @@ use crate::{
         lock::{LockOutcome, LockRequest, acquire_lock},
     },
     ctx::Ctx,
+    error::Error,
 };
 
 #[derive(Debug, clap::Args)]
-#[group(required = true, id = "edit")]
-#[command(arg_required_else_help = true)]
 pub(crate) struct Edit {
     #[command(flatten)]
     target: PositionalIds<true, true>,
@@ -41,7 +41,7 @@ pub(crate) struct Edit {
     /// part of the workspace storage. This means, when using a VCS, user
     /// conversations are not stored in the VCS, but are otherwise identical to
     /// workspace conversations.
-    #[arg(long, group = "edit")]
+    #[arg(long, group = "property")]
     local: Option<Option<bool>>,
 
     /// Toggle or set the expiration time of the conversation.
@@ -50,20 +50,32 @@ pub(crate) struct Edit {
     /// expire immediately (when no longer active) if unset.
     ///
     /// Accepts a duration (e.g. `1h`, `30m`) or `now` for immediate expiration.
-    #[arg(long = "tmp", group = "edit")]
+    #[arg(long = "tmp", group = "property", conflicts_with = "no_expires_at")]
     expires_at: Option<Option<ExpirationDuration>>,
 
     /// Remove the expiration time of the conversation.
-    #[arg(long = "no-tmp", group = "edit", conflicts_with = "expires_at")]
+    #[arg(long = "no-tmp", group = "property")]
     no_expires_at: bool,
 
     /// Edit the title of the conversation.
-    #[arg(long, group = "edit", conflicts_with = "no_title")]
+    #[arg(long, group = "property", conflicts_with = "no_title")]
     title: Option<Option<String>>,
 
     /// Remove the title of the conversation.
-    #[arg(long, group = "edit", conflicts_with = "title")]
+    #[arg(long, group = "property")]
     no_title: bool,
+
+    /// Open `events.json` in `$EDITOR`.
+    #[arg(long, group = "file", conflicts_with = "property")]
+    events: bool,
+
+    /// Open `metadata.json` in `$EDITOR`.
+    #[arg(long, group = "file", conflicts_with = "property")]
+    metadata: bool,
+
+    /// Open `base_config.json` in `$EDITOR`.
+    #[arg(long, group = "file", conflicts_with = "property")]
+    base_config: bool,
 }
 
 impl Edit {
@@ -72,6 +84,60 @@ impl Edit {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+        if self.has_property_flags() {
+            return self.run_property_edit(ctx, handles).await;
+        }
+
+        self.run_open_editor(ctx, handles)
+    }
+
+    /// Whether any property mutation flag is set.
+    fn has_property_flags(&self) -> bool {
+        self.local.is_some()
+            || self.expires_at.is_some()
+            || self.no_expires_at
+            || self.title.is_some()
+            || self.no_title
+    }
+
+    /// Open the conversation directory or specific files in `$EDITOR`.
+    fn run_open_editor(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+        let config = ctx.config();
+        let cmd = config.editor.command().ok_or(Error::MissingEditor)?;
+
+        let mut paths = Vec::new();
+        for handle in handles {
+            let id = handle.id();
+            paths.extend(resolve_paths(
+                &ctx.workspace,
+                &id,
+                self.events,
+                self.metadata,
+                self.base_config,
+            )?);
+        }
+
+        let output = cmd
+            .before_spawn(move |cmd| {
+                for path in &paths {
+                    cmd.arg(path.as_str());
+                }
+                Ok(())
+            })
+            .unchecked()
+            .run()?;
+
+        if !output.status.success() {
+            return Err(
+                Error::Editor(format!("Editor exited with error: {}", output.status)).into(),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Mutate conversation properties
+    async fn run_property_edit(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         for handle in handles {
             let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
                 LockOutcome::Acquired(lock) => lock,
