@@ -1081,8 +1081,7 @@ pub(crate) fn parameters_with_strict_mode(
 fn enforce_strict_object_structure(schema: &mut Value) {
     match schema {
         Value::Object(map) => {
-            // If it is an object, enforce strictness
-            if map.get("type").and_then(|t| t.as_str()) == Some("object") {
+            if is_object_type(map.get("type")) {
                 map.insert("additionalProperties".to_owned(), false.into());
 
                 // Nested objects must have ALL properties required
@@ -1103,6 +1102,18 @@ fn enforce_strict_object_structure(schema: &mut Value) {
         }
         Value::Array(arr) => arr.iter_mut().for_each(enforce_strict_object_structure),
         _ => {}
+    }
+}
+
+/// Check whether a JSON schema `type` value includes `"object"`.
+///
+/// Handles both `"object"` (string) and `["object", "null"]` (array)
+/// forms that arise after nullable injection.
+fn is_object_type(type_value: Option<&Value>) -> bool {
+    match type_value {
+        Some(Value::String(s)) => s == "object",
+        Some(Value::Array(arr)) => arr.iter().any(|v| v.as_str() == Some("object")),
+        _ => false,
     }
 }
 
