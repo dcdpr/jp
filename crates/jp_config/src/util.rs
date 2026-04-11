@@ -312,12 +312,16 @@ fn load_optional_paths(
     Ok(())
 }
 
-/// Deduplicate a vector using `transform = vec_dedup`.
+/// Order-preserving dedup for use as `transform = vec_dedup`.
 #[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
-pub(crate) fn vec_dedup<T: PartialEq + Ord>(mut v: Vec<T>, _: &()) -> TransformResult<Vec<T>> {
-    v.sort();
-    v.dedup();
-    Ok(v)
+pub(crate) fn vec_dedup<T: PartialEq>(v: Vec<T>, _: &()) -> TransformResult<Vec<T>> {
+    let mut seen = Vec::with_capacity(v.len());
+    for item in v {
+        if !seen.contains(&item) {
+            seen.push(item);
+        }
+    }
+    Ok(seen)
 }
 
 /// Merge [`IndexMap`]s of nested [`PartialConfig`]s.

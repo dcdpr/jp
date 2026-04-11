@@ -43,3 +43,48 @@ fn into_map_merged() {
     let map = v.into_map();
     assert_eq!(map["a"], 1);
 }
+
+#[test]
+fn is_empty_plain_empty() {
+    let v: MergeableMap<i32> = MergeableMap::Map(IndexMap::new());
+    assert!(v.is_empty());
+}
+
+#[test]
+fn is_empty_plain_non_empty() {
+    let v: MergeableMap<i32> = MergeableMap::Map(IndexMap::from([("a".into(), 1)]));
+    assert!(!v.is_empty());
+}
+
+#[test]
+fn is_empty_merged_with_metadata() {
+    // Empty map but with strategy set — NOT empty.
+    let v: MergeableMap<i32> = MergeableMap::Merged(MergedMap {
+        value: IndexMap::new(),
+        strategy: Some(MergedMapStrategy::Replace),
+        discard_when_merged: false,
+    });
+    assert!(!v.is_empty());
+}
+
+#[test]
+fn is_empty_merged_no_metadata() {
+    // Empty map with no metadata — IS empty.
+    let v: MergeableMap<i32> = MergeableMap::Merged(MergedMap {
+        value: IndexMap::new(),
+        strategy: None,
+        discard_when_merged: false,
+    });
+    assert!(v.is_empty());
+}
+
+#[test]
+fn is_empty_merged_discard_when_merged() {
+    // Empty map but discard_when_merged set — NOT empty.
+    let v: MergeableMap<i32> = MergeableMap::Merged(MergedMap {
+        value: IndexMap::new(),
+        strategy: None,
+        discard_when_merged: true,
+    });
+    assert!(!v.is_empty());
+}

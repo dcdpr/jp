@@ -139,8 +139,10 @@ impl FillDefaults for PartialAssistantConfig {
         Self {
             name: self.name.or(defaults.name),
             system_prompt: self.system_prompt.or(defaults.system_prompt),
-            system_prompt_sections: self.system_prompt_sections,
-            instructions: self.instructions,
+            system_prompt_sections: self
+                .system_prompt_sections
+                .fill_from(defaults.system_prompt_sections),
+            instructions: self.instructions.fill_from(defaults.instructions),
             tool_choice: self.tool_choice.or(defaults.tool_choice),
             model: self.model.fill_from(defaults.model),
             request: self.request.fill_from(defaults.request),
@@ -172,6 +174,7 @@ impl ToPartial for AssistantConfig {
 fn default_instructions(_: &()) -> TransformResult<MergeableVec<PartialInstructionsConfig>> {
     Ok(MergeableVec::Merged(MergedVec {
         strategy: None,
+        dedup: None,
         discard_when_merged: true,
         value: vec![PartialInstructionsConfig {
             title: Some("How to respond to the user".into()),

@@ -171,6 +171,7 @@ fn merge_as_vec(base: &mut Value, next: Value) {
         MergeableVec::Merged(MergedVec {
             value: from_value(next.clone()).unwrap_or_default(),
             strategy: Some(MergedVecStrategy::Replace),
+            dedup: None,
             discard_when_merged: false,
         })
     } else {

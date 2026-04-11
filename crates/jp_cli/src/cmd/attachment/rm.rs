@@ -39,7 +39,7 @@ impl IntoPartialAppConfig for Rm {
             }
         }
 
-        partial.conversation.attachments = attachments;
+        partial.conversation.attachments = attachments.into();
         Ok(partial)
     }
 }

@@ -11,6 +11,16 @@ expression: v
     ],
     "assistant": {
       "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
       "tool_choice": "auto",
       "model": {
         "id": {
@@ -56,6 +66,11 @@ expression: v
             "parameters": "json"
           }
         }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
       },
       "start_local": false
     },

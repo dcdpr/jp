@@ -96,11 +96,15 @@ impl<T> MergeableMap<T> {
     }
 
     /// Returns `true` if the map is empty.
+    ///
+    /// A `Merged` variant with no items but with metadata (e.g. `strategy`) is
+    /// NOT considered empty, because the metadata must still participate in
+    /// merges.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Map(v) => v.is_empty(),
-            Self::Merged(v) => v.value.is_empty(),
+            Self::Merged(v) => v.value.is_empty() && v.strategy.is_none() && !v.discard_when_merged,
         }
     }
 

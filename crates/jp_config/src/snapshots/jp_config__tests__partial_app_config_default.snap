@@ -61,7 +61,9 @@ PartialAppConfig {
             },
             tools: {},
         },
-        attachments: [],
+        attachments: Vec(
+            [],
+        ),
         inquiry: PartialInquiryConfig {
             assistant: PartialAssistantOverrideConfig {
                 system_prompt: None,

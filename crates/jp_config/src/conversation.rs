@@ -18,14 +18,16 @@ use crate::{
         tool_choice::ToolChoice,
     },
     conversation::{
-        attachment::AttachmentConfig,
+        attachment::{AttachmentConfig, PartialAttachmentConfig},
         title::{PartialTitleConfig, TitleConfig},
         tool::{PartialToolsConfig, ToolsConfig},
     },
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_vec},
     fill::{self, FillDefaults},
+    internal::merge::vec_with_strategy,
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opts},
+    types::vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
 };
 
 /// Conversation-specific configuration.
@@ -48,7 +50,12 @@ pub struct ConversationConfig {
     ///
     /// This section defines attachments (files, resources) that are added to
     /// conversations.
-    #[setting(nested, merge = schematic::merge::append_vec)]
+    #[setting(
+        nested,
+        partial_via = MergeableVec::<AttachmentConfig>,
+        default = default_attachments,
+        merge = vec_with_strategy,
+    )]
     pub attachments: Vec<AttachmentConfig>,
 
     /// Inquiry configuration.
@@ -79,7 +86,7 @@ impl AssignKeyValue for PartialConversationConfig {
             "" => kv.try_merge_object(self)?,
             _ if kv.p("title") => self.title.assign(kv)?,
             _ if kv.p("tools") => self.tools.assign(kv)?,
-            _ if kv.p("attachments") => kv.try_vec_of_nested(&mut self.attachments)?,
+            _ if kv.p("attachments") => kv.try_vec_of_nested(self.attachments.as_mut())?,
             _ if kv.p("inquiry") => self.inquiry.assign(kv)?,
             _ if kv.p("start_local") => self.start_local = kv.try_some_bool()?,
             "default_id" => self.default_id = kv.try_some_from_str()?,
@@ -99,7 +106,8 @@ impl PartialConfigDelta for PartialConversationConfig {
                 next.attachments
                     .into_iter()
                     .filter(|v| !self.attachments.contains(v))
-                    .collect()
+                    .collect::<Vec<_>>()
+                    .into()
             },
             inquiry: self.inquiry.delta(next.inquiry),
             start_local: delta_opt(self.start_local.as_ref(), next.start_local),
@@ -113,7 +121,7 @@ impl FillDefaults for PartialConversationConfig {
         Self {
             title: self.title.fill_from(defaults.title),
             tools: self.tools.fill_from(defaults.tools),
-            attachments: self.attachments,
+            attachments: self.attachments.fill_from(defaults.attachments),
             inquiry: self.inquiry.fill_from(defaults.inquiry),
             start_local: self.start_local.or(defaults.start_local),
             default_id: self.default_id.or(defaults.default_id),
@@ -128,7 +136,7 @@ impl ToPartial for ConversationConfig {
         Self::Partial {
             title: self.title.to_partial(),
             tools: self.tools.to_partial(),
-            attachments: self.attachments.iter().map(ToPartial::to_partial).collect(),
+            attachments: vec_to_mergeable_partial(&self.attachments),
             inquiry: self.inquiry.to_partial(),
             start_local: partial_opt(&self.start_local, defaults.start_local),
             default_id: self.default_id.clone(),
@@ -341,6 +349,23 @@ impl fmt::Display for DefaultConversationId {
             Self::Id(id) => write!(f, "{id}"),
         }
     }
+}
+
+/// Default attachments: empty vec with dedup enabled.
+///
+/// The `discard_when_merged: true` means the empty vec is thrown away when real
+/// attachments arrive, but the `dedup: Some(true)` flag inherits to the
+/// replacement (because `next` has `dedup: None` / "inherit").
+#[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
+const fn default_attachments(
+    _: &(),
+) -> schematic::TransformResult<MergeableVec<PartialAttachmentConfig>> {
+    Ok(MergeableVec::Merged(MergedVec {
+        value: vec![],
+        strategy: None,
+        dedup: Some(true),
+        discard_when_merged: true,
+    }))
 }
 
 #[cfg(test)]

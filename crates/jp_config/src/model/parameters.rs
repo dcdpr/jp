@@ -10,7 +10,7 @@ use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec},
-    fill::FillDefaults,
+    fill::{FillDefaults, fill_opt},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::json_value::JsonValue,
 };
@@ -118,7 +118,7 @@ impl FillDefaults for PartialParametersConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             max_tokens: self.max_tokens.or(defaults.max_tokens),
-            reasoning: self.reasoning.or(defaults.reasoning),
+            reasoning: fill_opt(self.reasoning, defaults.reasoning),
             temperature: self.temperature.or(defaults.temperature),
             top_p: self.top_p.or(defaults.top_p),
             top_k: self.top_k.or(defaults.top_k),
@@ -194,6 +194,15 @@ impl PartialConfigDelta for PartialReasoningConfig {
     }
 }
 
+impl FillDefaults for PartialReasoningConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        match (self, defaults) {
+            (Self::Custom(s), Self::Custom(d)) => Self::Custom(s.fill_from(d)),
+            (s, _) => s,
+        }
+    }
+}
+
 impl ToPartial for ReasoningConfig {
     fn to_partial(&self) -> Self::Partial {
         match self {
@@ -257,6 +266,15 @@ impl PartialConfigDelta for PartialCustomReasoningConfig {
         Self {
             effort: delta_opt(self.effort.as_ref(), next.effort),
             exclude: delta_opt(self.exclude.as_ref(), next.exclude),
+        }
+    }
+}
+
+impl FillDefaults for PartialCustomReasoningConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            effort: self.effort.or(defaults.effort),
+            exclude: self.exclude.or(defaults.exclude),
         }
     }
 }
