@@ -40,7 +40,7 @@ use jp_llm::{
     },
 };
 use jp_printer::{OutputFormat, Printer};
-use jp_storage::Storage;
+use jp_storage::backend::FsStorageBackend;
 use jp_tool::{AnswerType, Question};
 use jp_workspace::Workspace;
 use serde_json::{Map, Value, json};
@@ -136,9 +136,8 @@ async fn test_quit_during_streaming_persists_content() {
     let storage = root.join(".jp");
 
     let config = AppConfig::new_test();
-    let mut workspace = Workspace::new(root)
-        .persisted_at(&storage)
-        .expect("failed to enable persistence");
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
     // Create a conversation with an initial user query
     let lock = workspace
@@ -196,8 +195,7 @@ async fn test_quit_during_streaming_persists_content() {
     drop(output);
 
     // 5. Verify file on disk contains the content
-    let reader = Storage::new(&storage).unwrap();
-    let content = reader
+    let content = fs
         .read_test_events_raw(&conv_id)
         .expect("events should be persisted");
 
@@ -216,9 +214,8 @@ async fn test_normal_completion_persists_content() {
     let storage = root.join(".jp");
 
     let config = AppConfig::new_test();
-    let mut workspace = Workspace::new(root)
-        .persisted_at(&storage)
-        .expect("failed to enable persistence");
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -269,8 +266,7 @@ async fn test_normal_completion_persists_content() {
     );
 
     // Verify persistence
-    let reader = Storage::new(&storage).unwrap();
-    let content = reader
+    let content = fs
         .read_test_events_raw(&conv_id)
         .expect("events should be persisted");
 
@@ -297,9 +293,8 @@ async fn test_tool_call_cycle_completes_with_followup() {
     let storage = root.join(".jp");
 
     let config = AppConfig::new_test();
-    let mut workspace = Workspace::new(root)
-        .persisted_at(&storage)
-        .expect("failed to enable persistence");
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -354,8 +349,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
     );
 
     // Verify persistence
-    let reader = Storage::new(&storage).unwrap();
-    let content = reader
+    let content = fs
         .read_test_events_raw(&conv_id)
         .expect("events should be persisted");
 
@@ -388,9 +382,8 @@ async fn test_quit_during_tool_execution_persists() {
     let storage = root.join(".jp");
 
     let config = AppConfig::new_test();
-    let mut workspace = Workspace::new(root)
-        .persisted_at(&storage)
-        .expect("failed to enable persistence");
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -453,8 +446,7 @@ async fn test_quit_during_tool_execution_persists() {
     let _output = out.lock();
 
     // Verify persistence happened
-    let reader = Storage::new(&storage).unwrap();
-    let content = reader
+    let content = fs
         .read_test_events_raw(&conv_id)
         .expect("events should be persisted");
 
@@ -476,9 +468,8 @@ async fn test_multiple_tool_calls_in_sequence() {
     let storage = root.join(".jp");
 
     let config = AppConfig::new_test();
-    let mut workspace = Workspace::new(root)
-        .persisted_at(&storage)
-        .expect("failed to enable persistence");
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -554,8 +545,7 @@ async fn test_multiple_tool_calls_in_sequence() {
     drop(output);
 
     // Verify persistence
-    let reader = Storage::new(&storage).unwrap();
-    let content = reader
+    let content = fs
         .read_test_events_raw(&conv_id)
         .expect("events should be persisted");
 
@@ -586,9 +576,8 @@ async fn test_empty_tool_response_continues_cycle() {
     let storage = root.join(".jp");
 
     let config = AppConfig::new_test();
-    let mut workspace = Workspace::new(root)
-        .persisted_at(&storage)
-        .expect("failed to enable persistence");
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -644,8 +633,7 @@ async fn test_empty_tool_response_continues_cycle() {
     drop(output);
 
     // The second LLM call should have happened
-    let reader = Storage::new(&storage).unwrap();
-    let content = reader
+    let content = fs
         .read_test_events_raw(&conv_id)
         .expect("events should be persisted");
 
@@ -688,9 +676,8 @@ async fn test_tool_restart_on_shutdown_signal() {
             })]);
         let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -765,8 +752,7 @@ async fn test_tool_restart_on_shutdown_signal() {
         );
 
         // Verify persistence includes the final message
-        let reader = Storage::new(&storage).unwrap();
-        let content = reader
+        let content = fs
             .read_test_events_raw(&conv_id)
             .expect("events should be persisted");
 
@@ -807,9 +793,8 @@ async fn test_merged_stream_exits_after_tool_response() {
                 options: IndexMap::default(),
             });
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -867,8 +852,7 @@ async fn test_merged_stream_exits_after_tool_response() {
         drop(output);
 
         // Verify the conversation persisted with the final message
-        let reader = Storage::new(&storage).unwrap();
-        let content = reader
+        let content = fs
             .read_test_events_raw(&conv_id)
             .expect("events should be persisted");
 
@@ -916,9 +900,8 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 options: IndexMap::default(),
             });
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1055,9 +1038,8 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                 options: IndexMap::default(),
             });
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1201,9 +1183,8 @@ async fn test_tool_call_with_run_mode_unattended() {
                 options: IndexMap::default(),
             });
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1335,9 +1316,8 @@ async fn test_tool_call_with_run_mode_skip() {
                 options: IndexMap::default(),
             });
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1503,9 +1483,8 @@ async fn test_multiple_tools_with_different_run_modes() {
                 options: IndexMap::default(),
             });
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1686,9 +1665,8 @@ async fn test_tool_call_returns_error() {
                 options: IndexMap::default(),
             });
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1859,9 +1837,8 @@ async fn test_waiting_indicator_shows_during_delay() {
         config.style.streaming.progress.delay_secs = 0;
         config.style.streaming.progress.interval_ms = 100;
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1940,9 +1917,8 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
         let mut config = AppConfig::new_test();
         config.style.streaming.progress.show = false;
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2015,9 +1991,8 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
         config.style.streaming.progress.show = true;
         config.style.streaming.progress.delay_secs = 0;
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2096,9 +2071,8 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
         config.style.tool_call.preparing.delay_secs = 0;
         config.style.tool_call.preparing.interval_ms = 50;
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2282,9 +2256,8 @@ async fn test_turn_start_event_is_emitted() {
     let storage = root.join(".jp");
 
     let config = AppConfig::new_test();
-    let mut workspace = Workspace::new(root)
-        .persisted_at(&storage)
-        .expect("failed to enable persistence");
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -2342,9 +2315,8 @@ async fn test_turn_start_index_increments_across_turns() {
     let storage = root.join(".jp");
 
     let config = AppConfig::new_test();
-    let mut workspace = Workspace::new(root)
-        .persisted_at(&storage)
-        .expect("failed to enable persistence");
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -2440,9 +2412,8 @@ async fn test_markdown_flushed_before_tool_header() {
         let mut config = AppConfig::new_test();
         config.style.tool_call.show = true;
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2592,9 +2563,8 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 options: IndexMap::default(),
             });
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2760,9 +2730,8 @@ async fn test_single_tool_call_rendered_with_args() {
                 options: IndexMap::default(),
             });
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3024,9 +2993,8 @@ async fn test_tool_with_single_inquiry() {
             inquiry_tool_config(&["confirm"]),
         );
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3162,9 +3130,8 @@ async fn test_tool_with_multiple_inquiries() {
             inquiry_tool_config(&["confirm", "reason"]),
         );
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3313,9 +3280,8 @@ async fn test_parallel_tools_one_with_inquiry() {
                 options: IndexMap::default(),
             });
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3447,9 +3413,8 @@ async fn test_parallel_tools_both_with_inquiries() {
             .tools
             .insert("tool_b".to_string(), inquiry_tool_config(&["confirm_b"]));
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3636,9 +3601,8 @@ async fn test_retry_counter_resets_on_successful_event() {
         config.assistant.request.base_backoff_ms = 1;
         config.assistant.request.max_backoff_secs = 1;
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3722,9 +3686,8 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             inquiry_tool_config(&["confirm"]),
         );
 
-        let mut workspace = Workspace::new(root)
-            .persisted_at(&storage)
-            .expect("failed to enable persistence");
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)

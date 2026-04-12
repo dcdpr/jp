@@ -78,10 +78,7 @@ impl Target {
         };
 
         if self.user_workspace {
-            ctx.workspace
-                .user_storage_path()
-                .map(|p| loader.load(p))
-                .transpose()
+            ctx.user_storage_path().map(|p| loader.load(p)).transpose()
         } else if self.user_global {
             user_global_config_path(
                 std::env::home_dir()
@@ -110,10 +107,7 @@ impl Target {
 
             loader.load(current_dir).map(Some)
         } else {
-            ctx.workspace
-                .storage_path()
-                .map(|p| loader.load(p))
-                .transpose()
+            ctx.storage_path().map(|p| loader.load(p)).transpose()
         }
     }
 }

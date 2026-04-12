@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
-use jp_storage::Storage;
+use jp_storage::backend::FsStorageBackend;
 use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
@@ -22,18 +24,17 @@ fn make_id(secs: u64) -> ConversationId {
 fn setup(id: ConversationId) -> (Ctx, SharedBuffer, Utf8TempDir) {
     let tmp = tempdir().unwrap();
     let storage_path = tmp.path().join(".jp");
-    let storage = Storage::new(&storage_path).unwrap();
-    storage.write_test_conversation(&id, &Conversation::default());
+    let fs = Arc::new(FsStorageBackend::new(&storage_path).unwrap());
+    fs.write_test_conversation(&id, &Conversation::default());
 
     let config = AppConfig::new_test();
-    let mut workspace = Workspace::new(tmp.path())
-        .persisted_at(&storage_path)
-        .unwrap();
+    let mut workspace = Workspace::new(tmp.path()).with_backend(fs.clone());
     workspace.load_conversation_index();
 
     let (printer, out, _err) = Printer::memory(OutputFormat::Text);
     let ctx = Ctx::new(
         workspace,
+        Some(fs),
         Runtime::new().unwrap(),
         Globals::default(),
         config,

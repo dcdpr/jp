@@ -51,6 +51,7 @@ fn setup_ctx_with_config(
 
     let mut ctx = Ctx::new(
         workspace,
+        None,
         Runtime::new().unwrap(),
         Globals::default(),
         config,

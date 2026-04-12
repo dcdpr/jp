@@ -170,7 +170,7 @@ fn test_trash_moves_invalid_to_trash() {
     let result = storage.validate_conversations();
     assert_eq!(result.invalid.len(), 1);
 
-    storage.trash_conversation(&result.invalid[0]).unwrap();
+    trash_invalid_conversation(&result.invalid[0]).unwrap();
 
     // Original should be gone, trash should have it.
     assert!(!bad.exists());

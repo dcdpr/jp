@@ -1,15 +1,18 @@
 //! Session-to-conversation mapping.
 //!
 //! Each terminal session tracks its own conversation history. The storage
-//! format and file layout are managed by [`jp_storage::Storage`]; this module
-//! defines the domain types and the `Workspace`-level API.
+//! format and file layout are managed by the [`SessionBackend`] trait; this
+//! module defines the domain types and the `Workspace`-level API.
 //!
 //! See: `docs/rfd/020-parallel-conversations.md`
+//!
+//! [`SessionBackend`]: jp_storage::backend::SessionBackend
 
 use std::{collections::HashSet, fs};
 
 use chrono::{DateTime, Utc};
 use jp_conversation::ConversationId;
+use jp_storage::backend::FsStorageBackend;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
@@ -74,9 +77,8 @@ impl SessionMapping {
 impl Workspace {
     /// Get the active conversation ID for the given session.
     ///
-    /// Returns `None` if no session mapping exists, the session is unknown,
-    /// user storage is not configured, or the referenced conversation no
-    /// longer exists in the workspace index.
+    /// Returns `None` if no session mapping exists, the session is unknown, or
+    /// the referenced conversation no longer exists in the workspace index.
     #[must_use]
     pub fn session_active_conversation(&self, session: &Session) -> Option<ConversationId> {
         self.load_session_mapping(session)
@@ -117,16 +119,12 @@ impl Workspace {
     /// Returns the active conversation ID from every session mapping.
     #[must_use]
     pub fn all_active_conversation_ids(&self) -> Vec<ConversationId> {
-        let Some(storage) = self.storage.as_ref() else {
-            return vec![];
-        };
-
-        storage
-            .list_session_files()
+        self.sessions
+            .list_session_keys()
             .into_iter()
-            .filter_map(|path| {
-                let key = path.file_stem()?;
-                let mapping: SessionMapping = storage.load_session_data(key).ok()??;
+            .filter_map(|key| {
+                let value = self.sessions.load_session(&key).ok()??;
+                let mapping: SessionMapping = serde_json::from_value(value).ok()?;
                 mapping.active_conversation_id()
             })
             .collect()
@@ -134,8 +132,8 @@ impl Workspace {
 
     /// Record that the given session activated a conversation.
     ///
-    /// Writes the session mapping to disk. If no mapping exists yet, one is
-    /// created.
+    /// Writes the session mapping to the backing store. If no mapping exists
+    /// yet, one is created.
     pub fn activate_session_conversation(
         &self,
         session: &Session,
@@ -148,8 +146,8 @@ impl Workspace {
 
         mapping.activate(id, now);
 
-        let storage = self.storage.as_ref().ok_or(crate::Error::MissingStorage)?;
-        storage.save_session_data(session.id.as_str(), &mapping)?;
+        let value = serde_json::to_value(&mapping).map_err(jp_storage::Error::from)?;
+        self.sessions.save_session(session.id.as_str(), &value)?;
         Ok(())
     }
 
@@ -165,13 +163,13 @@ impl Workspace {
     ///   - **Env** (liveness unknown): falls back to conversation existence.
     ///     If none of the conversations in the history exist on disk, the
     ///     mapping is removed.
-    pub fn cleanup_stale_files(&self) {
-        let Some(storage) = self.storage.as_ref() else {
+    pub fn cleanup_stale_files(&self, fs: Option<&FsStorageBackend>) {
+        let Some(fs) = fs else {
             return;
         };
 
-        // Remove orphaned lock files.
-        for path in storage.list_orphaned_lock_files() {
+        // Remove orphaned lock files (filesystem-specific: needs file paths).
+        for path in fs.list_orphaned_lock_files() {
             debug!(path = %path, "Removing orphaned lock file.");
             drop(fs::remove_file(&path));
         }
@@ -179,16 +177,23 @@ impl Workspace {
         // Remove stale session mappings.
         //
         // Re-scan conversation IDs from disk instead of using the in-memory
-        // state. Other processes may have created conversations after our
-        // index was loaded at startup; using the stale snapshot would
-        // incorrectly mark their sessions as having "no live conversations"
-        // and delete them.
-        let conversation_ids: HashSet<_> =
-            storage.load_all_conversation_ids().into_iter().collect();
+        // state. Other processes may have created conversations after our index
+        // was loaded at startup; using the stale snapshot would incorrectly
+        // mark their sessions as having "no live conversations" and delete
+        // them.
+        let conversation_ids: HashSet<_> = self
+            .loader
+            .load_all_conversation_ids()
+            .into_iter()
+            .collect();
 
-        for path in storage.list_session_files() {
+        // Use filesystem-specific file listing for path-based removal.
+        for path in fs.list_session_files() {
             let session_key = path.file_stem().unwrap_or_default();
-            let Ok(Some(mapping)) = storage.load_session_data::<SessionMapping>(session_key) else {
+            let Ok(Some(value)) = self.sessions.load_session(session_key) else {
+                continue;
+            };
+            let Ok(mapping) = serde_json::from_value::<SessionMapping>(value) else {
                 continue;
             };
 
@@ -196,11 +201,11 @@ impl Workspace {
             // authoritative: if the process is alive the session is valid,
             // regardless of whether we can see its conversations right now
             // (another process may be mid-persist, or the conversation was
-            // created after our index loaded). Only delete when the process
-            // is confirmed dead.
+            // created after our index loaded). Only delete when the process is
+            // confirmed dead.
             //
-            // For Env sources we can't check liveness, so we fall back to
-            // the conversation-existence heuristic.
+            // For Env sources we can't check liveness, so we fall back to the
+            // conversation-existence heuristic.
             let liveness = is_session_process_liveness(&mapping.source, session_key);
 
             let should_remove = match liveness {
@@ -216,7 +221,7 @@ impl Workspace {
                 Liveness::Unknown => {
                     let has_live = mapping.history.iter().any(|entry| {
                         conversation_ids.contains(&entry.id)
-                            || storage.is_conversation_locked(&entry.id.to_string())
+                            || self.locker.lock_info(&entry.id.to_string()).is_some()
                     });
 
                     if !has_live {
@@ -249,7 +254,7 @@ impl Workspace {
                     // Not on disk — check if another process holds the lock. If
                     // locked, keep the entry (mid-persist). If unlocked (or no
                     // lock file), the conversation is genuinely gone.
-                    storage.is_conversation_locked(&entry.id.to_string())
+                    self.locker.lock_info(&entry.id.to_string()).is_some()
                 })
                 .cloned()
                 .collect();
@@ -266,7 +271,14 @@ impl Workspace {
                     source: mapping.source,
                 };
 
-                if let Err(error) = storage.save_session_data(session_key, &pruned_mapping) {
+                let Ok(pruned_value) = serde_json::to_value(&pruned_mapping) else {
+                    warn!(
+                        path = path.to_string(),
+                        "Failed to serialize pruned session mapping."
+                    );
+                    continue;
+                };
+                if let Err(error) = self.sessions.save_session(session_key, &pruned_value) {
                     warn!(
                         path = path.to_string(),
                         error = error.to_string(),
@@ -279,16 +291,24 @@ impl Workspace {
 
     /// Load the session mapping for the given session.
     ///
-    /// Returns `None` if there is no storage, no user storage, no mapping file,
-    /// or the file cannot be parsed.
+    /// Returns `None` if no mapping exists for the session, or if the mapping
+    /// cannot be parsed.
     fn load_session_mapping(&self, session: &Session) -> Option<SessionMapping> {
-        let storage = self.storage.as_ref()?;
-
-        match storage.load_session_data(session.id.as_str()) {
-            Ok(Some(mapping)) => {
-                debug!(session = session.id.as_str(), "Loaded session mapping.");
-                Some(mapping)
-            }
+        match self.sessions.load_session(session.id.as_str()) {
+            Ok(Some(value)) => match serde_json::from_value(value) {
+                Ok(mapping) => {
+                    debug!(session = session.id.as_str(), "Loaded session mapping.");
+                    Some(mapping)
+                }
+                Err(error) => {
+                    warn!(
+                        session = session.id.as_str(),
+                        error = error.to_string(),
+                        "Failed to parse session mapping, ignoring."
+                    );
+                    None
+                }
+            },
             Ok(None) => None,
             Err(error) => {
                 warn!(
@@ -306,10 +326,12 @@ impl Workspace {
 enum Liveness {
     /// The process is confirmed alive — do not delete the session.
     Alive,
+
     /// The process is confirmed dead — safe to delete.
     Dead,
-    /// Liveness cannot be determined (Env sources, parse failures).
-    /// Fall back to heuristics.
+
+    /// Liveness cannot be determined (Env sources, parse failures). Fall back
+    /// to heuristics.
     Unknown,
 }
 
@@ -343,8 +365,8 @@ fn pid_liveness(session_key: &str) -> Liveness {
         return Liveness::Alive;
     }
 
-    // ESRCH = no such process. Any other errno (e.g. EPERM) means the
-    // process exists but we can't signal it — treat as alive.
+    // ESRCH = no such process. Any other errno (e.g. EPERM) means the process
+    // exists but we can't signal it — treat as alive.
     if std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
         Liveness::Dead
     } else {

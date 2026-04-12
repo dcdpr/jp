@@ -278,5 +278,9 @@
   "072-command-plugin-system.md": {
     "hash": "ba499a02d408881ee6b9828f78239297cd01e72e75e762711ee92793938d9f70",
     "summary": "JSON-lines protocol enabling standalone binaries to extend JP with new subcommands in any language."
+  },
+  "073-layered-storage-backend-for-workspaces.md": {
+    "hash": "9f65b33af911d8e558796eb62e4b8c81a2fe4b7c62d0545a41c568dd257fecf6",
+    "summary": "Replace Workspace's optional Storage with four focused trait objects (Persist, Load, Lock, Session) for cleaner polymorphism."
   }
 }

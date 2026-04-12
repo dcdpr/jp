@@ -29,6 +29,7 @@ impl Set {
             &ctx.term.args.config,
             &base,
             Some(&ctx.workspace),
+            ctx.fs_backend.as_deref(),
         )?;
 
         if handles.is_empty() {

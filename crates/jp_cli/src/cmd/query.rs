@@ -318,14 +318,14 @@ impl Query {
         }
 
         let cid = lock.id();
-        let conversation_path = ctx
-            .workspace
-            .build_conversation_dir(&cid, conv_title.as_deref(), is_local)
-            .unwrap_or_else(|| {
+        let conversation_path = ctx.fs_backend.as_deref().map_or_else(
+            || {
                 ctx.workspace
                     .root()
                     .join(cid.to_dirname(conv_title.as_deref()))
-            });
+            },
+            |fs| fs.build_conversation_dir(&cid, conv_title.as_deref(), is_local),
+        );
 
         let (query_file, mut editor_provided_config, chat_request) = lock
             .as_mut()
@@ -762,10 +762,9 @@ impl Query {
             return fork_conversation(ctx, &handle, *fork_turns);
         }
 
-        // `--no-persist` still acquires a lock for API consistency.
         let req = LockRequest::from_ctx(handle, ctx)
-            .allow_new(!ctx.term.args.persist)
-            .allow_fork(!ctx.term.args.persist);
+            .allow_new(true)
+            .allow_fork(true);
 
         match acquire_lock(req).await? {
             LockOutcome::Acquired(lock) => Ok(lock),

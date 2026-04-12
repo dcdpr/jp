@@ -10,6 +10,7 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Utc;
+use relative_path::RelativePath;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
@@ -141,17 +142,6 @@ impl super::Storage {
         ConversationFileLock::try_acquire(path, session)
     }
 
-    /// Check whether a conversation's write lock is currently held by
-    /// another process.
-    ///
-    /// Returns `false` if no lock file exists or the lock is not held.
-    /// Does not create lock files — only probes existing ones.
-    #[must_use]
-    pub fn is_conversation_locked(&self, conversation_id: &str) -> bool {
-        self.lock_file_path(conversation_id)
-            .is_ok_and(|path| !is_orphaned_lock(&path))
-    }
-
     /// Read lock holder info for a conversation.
     ///
     /// Returns `None` if there's no lock file or the file can't be parsed.
@@ -171,9 +161,9 @@ impl super::Storage {
         &self,
         conversation_id: &str,
     ) -> std::result::Result<Utf8PathBuf, Utf8PathBuf> {
+        let locks_path = RelativePath::new(LOCKS_DIR);
         let name = format!("{conversation_id}.lock");
-        let base = self.user.as_deref().unwrap_or(&self.root);
-        let preferred = base.join(LOCKS_DIR).join(&name);
+        let preferred = self.user_or_root_with_path(locks_path).join(&name);
 
         if preferred.exists() {
             return Ok(preferred);
@@ -181,7 +171,7 @@ impl super::Storage {
 
         // Check the other location if user storage is configured.
         if self.user.is_some() {
-            let fallback = self.root.join(LOCKS_DIR).join(&name);
+            let fallback = self.root_with_path(locks_path).join(&name);
             if fallback.exists() {
                 return Ok(fallback);
             }
@@ -227,12 +217,17 @@ fn try_exclusive_lock(file: &File) -> bool {
         System::IO::OVERLAPPED,
     };
 
-    // Lock the first byte of the file exclusively, non-blocking.
     let handle = file.as_raw_handle();
     let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
     let flags = LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY;
 
-    // SAFETY: handle is valid (from an open File), overlapped is zeroed.
+    // Lock a single byte at a high offset, far past the diagnostic JSON
+    // written at offset 0. Windows exclusive byte-range locks prevent ALL
+    // other handles from reading the locked region, so placing the lock
+    // away from the file content lets other handles read the lock info.
+    overlapped.Anonymous.Anonymous.Offset = u32::MAX;
+
+    // SAFETY: handle is valid (from an open File), overlapped is initialized.
     unsafe { LockFileEx(handle, flags, 0, 1, 0, &mut overlapped) != 0 }
 }
 

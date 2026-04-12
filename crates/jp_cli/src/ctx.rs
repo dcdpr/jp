@@ -4,10 +4,12 @@ use std::{
     sync::Arc,
 };
 
+use camino::Utf8Path;
 use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
 use jp_mcp::id::{McpServerId, McpToolId};
 use jp_printer::Printer;
+use jp_storage::backend::FsStorageBackend;
 use jp_task::TaskHandler;
 use jp_workspace::{Workspace, session::Session};
 use tokio::{
@@ -21,6 +23,10 @@ use crate::{Globals, Result, signals::SignalPair};
 pub(crate) struct Ctx {
     /// The workspace.
     pub(crate) workspace: Workspace,
+
+    /// Filesystem-specific backend for path queries, config loading, and
+    /// file-level cleanup. `None` when running with an in-memory backend.
+    pub(crate) fs_backend: Option<Arc<FsStorageBackend>>,
 
     /// Merged file/CLI configuration.
     config: Arc<AppConfig>,
@@ -66,6 +72,7 @@ impl Ctx {
     /// Create a new context with the given workspace
     pub(crate) fn new(
         workspace: Workspace,
+        fs_backend: Option<Arc<FsStorageBackend>>,
         runtime: Runtime,
         args: Globals,
         config: impl Into<Arc<AppConfig>>,
@@ -77,6 +84,7 @@ impl Ctx {
 
         Self {
             workspace,
+            fs_backend,
             config,
             term: Term {
                 args,
@@ -108,6 +116,20 @@ impl Ctx {
     #[cfg(test)]
     pub(crate) fn set_now(&mut self, now: DateTime<Utc>) {
         self.stubbed_now = now;
+    }
+
+    /// Returns the storage path, if filesystem storage is configured.
+    pub(crate) fn storage_path(&self) -> Option<&Utf8Path> {
+        self.fs_backend
+            .as_deref()
+            .map(FsStorageBackend::storage_path)
+    }
+
+    /// Returns the user storage path, if filesystem storage is configured.
+    pub(crate) fn user_storage_path(&self) -> Option<&Utf8Path> {
+        self.fs_backend
+            .as_deref()
+            .and_then(FsStorageBackend::user_storage_path)
     }
 
     /// Get immutable access to the configuration.

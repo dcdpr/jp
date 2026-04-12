@@ -1,4 +1,4 @@
-use std::{env, fs, io, str::FromStr as _};
+use std::{env, fs, io, str::FromStr as _, sync::Arc};
 
 use camino::{FromPathBufError, Utf8PathBuf};
 use clean_path::Clean as _;
@@ -11,6 +11,7 @@ use jp_config::{
     model::id::{ModelIdConfig, Name, ProviderId},
 };
 use jp_printer::Printer;
+use jp_storage::backend::FsStorageBackend;
 use jp_workspace::Workspace;
 use schematic::ConfigEnum as _;
 
@@ -23,7 +24,6 @@ pub(crate) struct Init {
 }
 
 impl Init {
-    #[expect(unused_assignments)]
     pub(crate) fn run(&self, printer: &Printer) -> Output {
         let cwd: Utf8PathBuf = std::env::current_dir()?
             .try_into()
@@ -47,12 +47,10 @@ impl Init {
         let storage = root.join(DEFAULT_STORAGE_DIR);
         let id = jp_workspace::Id::new();
 
-        let mut workspace =
-            Workspace::new_with_id(root.clone(), id.clone()).persisted_at(&storage)?;
+        let fs = Arc::new(FsStorageBackend::new(&storage)?);
+        let _workspace = Workspace::new_with_id(root.clone(), id.clone()).with_backend(fs);
 
         id.store(&storage)?;
-
-        workspace = workspace.with_local_storage()?;
 
         // Interactive configuration
         let run_mode = Self::ask_run_mode(&mut printer.out_writer(), true)?;

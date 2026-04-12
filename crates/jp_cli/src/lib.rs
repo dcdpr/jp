@@ -14,7 +14,7 @@ mod timer;
 
 use std::{
     env, fmt,
-    io::{self, IsTerminal as _, stderr, stdout},
+    io::{self, IsTerminal as _, Write as _, stderr, stdout},
     num::{self, NonZeroUsize},
     process::ExitCode,
     str::FromStr,
@@ -47,13 +47,21 @@ use jp_config::{
     },
 };
 use jp_printer::{OutputFormat, Printer};
+use jp_storage::backend::{FsStorageBackend, NullLockBackend, NullPersistBackend};
 use jp_term::table::{details, details_markdown};
 use jp_workspace::{Workspace, user_data_dir};
+use relative_path::RelativePath;
 use serde_json::Value;
 use tokio::runtime::{self, Runtime};
 use tracing::{debug, info, trace, warn};
 
-use crate::{cmd::target::resolve_request, config_pipeline::ConfigPipeline};
+use crate::{
+    cmd::{
+        plugin::dispatch::{describe_plugin, discover_plugins},
+        target::resolve_request,
+    },
+    config_pipeline::ConfigPipeline,
+};
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
 
@@ -375,10 +383,8 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         return args.run(&printer).map_err(Into::into);
     }
 
-    let mut workspace = load_workspace(cli.globals.workspace.as_ref())?;
-    if !cli.globals.persist {
-        workspace.disable_persistence();
-    }
+    let (mut workspace, fs_backend) =
+        load_workspace(cli.globals.workspace.as_ref(), cli.globals.persist)?;
 
     trace!("Sanitizing workspace.");
     let report = workspace.sanitize()?;
@@ -400,8 +406,13 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     workspace.load_conversation_index();
 
     // Config Loading Phase 1: Load static sources (files + env + --cfg) once.
-    let base = load_base_partial(&workspace)?;
-    let pipeline = ConfigPipeline::new(base, &cli.globals.config, Some(&workspace))?;
+    let base = load_base_partial(fs_backend.as_deref())?;
+    let pipeline = ConfigPipeline::new(
+        base,
+        &cli.globals.config,
+        Some(&workspace),
+        fs_backend.as_deref(),
+    )?;
 
     // Extract default_id for conversation resolution. This builds a temporary
     // partial (base + --cfg + command-CLI) without the per-conversation layer.
@@ -446,7 +457,15 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
 
     let config = Arc::new(build(partial)?);
     let runtime = build_runtime(cli.root.threads, "jp-worker")?;
-    let mut ctx = Ctx::new(workspace, runtime, cli.globals, config, session, printer);
+    let mut ctx = Ctx::new(
+        workspace,
+        fs_backend,
+        runtime,
+        cli.globals,
+        config,
+        session,
+        printer,
+    );
     let rt = ctx.handle().clone();
 
     // Run the requested command.
@@ -480,7 +499,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     ctx.workspace.remove_ephemeral_conversations(&active_ids);
 
     // Remove orphaned lock files and stale session mappings.
-    ctx.workspace.cleanup_stale_files();
+    ctx.workspace.cleanup_stale_files(ctx.fs_backend.as_deref());
 
     output.map_err(Into::into)
 }
@@ -496,16 +515,14 @@ fn is_root_help_request() -> bool {
 
 /// Discover plugins on `$PATH`, describe them, and print a "Plugins:" section.
 fn print_plugin_help_section() {
-    use std::io::Write as _;
-
-    let plugins = cmd::plugin::dispatch::discover_plugins();
+    let plugins = discover_plugins();
     if plugins.is_empty() {
         return;
     }
 
     let mut descriptions: Vec<(String, String)> = Vec::new();
     for (name, binary) in &plugins {
-        let desc = cmd::plugin::dispatch::describe_plugin(binary);
+        let desc = describe_plugin(binary);
         let display_name = desc
             .as_ref()
             .filter(|d| !d.command.is_empty())
@@ -587,17 +604,18 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
 /// [`ConfigPipeline`]. No `--cfg` args or per-conversation config.
 ///
 /// See: <https://jp.computer/configuration>
-fn load_base_partial(workspace: &Workspace) -> Result<PartialAppConfig> {
-    let partials = load_partial_configs_from_files(Some(workspace), absolute_utf8(".").ok())?;
+fn load_base_partial(fs: Option<&FsStorageBackend>) -> Result<PartialAppConfig> {
+    let partials = load_partial_configs_from_files(fs, absolute_utf8(".").ok())?;
     let partial = load_partials_with_inheritance(partials)?;
 
     load_envs(partial).map_err(|error| Error::CliConfig(error.to_string()))
 }
 
 fn load_partial_configs_from_files(
-    workspace: Option<&Workspace>,
+    fs: Option<&FsStorageBackend>,
     cwd: Option<Utf8PathBuf>,
 ) -> Result<Vec<PartialAppConfig>> {
+    let config_path = RelativePath::new("config.toml");
     let mut partials = vec![];
 
     // Load `$XDG_CONFIG_HOME/jp/config.{toml,json,yaml}`.
@@ -610,9 +628,9 @@ fn load_partial_configs_from_files(
     }
 
     // Load `$WORKSPACE_ROOT/.jp/config.{toml,json,yaml}`.
-    if let Some(workspace_config) = workspace
-        .and_then(Workspace::storage_path)
-        .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
+    if let Some(workspace_config) = fs
+        .map(|f| f.root_with_path(config_path))
+        .and_then(|p| load_partial_at_path(p).transpose())
         .transpose()?
     {
         partials.push(workspace_config);
@@ -633,10 +651,10 @@ fn load_partial_configs_from_files(
         partials.push(cwd_config);
     }
 
-    // Load `$XDG_DATA_HOME/jp/<workspace_the id>config.{toml,json,yaml}`.
-    if let Some(user_workspace_config) = workspace
-        .and_then(Workspace::user_storage_path)
-        .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
+    // Load `$XDG_DATA_HOME/jp/<workspace_id>/config.{toml,json,yaml}`.
+    if let Some(user_workspace_config) = fs
+        .and_then(|f| f.user_storage_with_path(config_path))
+        .and_then(|p| load_partial_at_path(p).transpose())
         .transpose()?
     {
         partials.push(user_workspace_config);
@@ -646,7 +664,15 @@ fn load_partial_configs_from_files(
 }
 
 /// Find the workspace for the current directory.
-fn load_workspace(workspace: Option<&WorkspaceIdOrPath>) -> Result<Workspace> {
+///
+/// When `persist` is `false` (`--no-persist`), the persist backend is swapped
+/// to [`NullPersistBackend`] and the lock backend to [`NullLockBackend`] so
+/// that ephemeral queries never write to disk and never block on lock
+/// contention.
+fn load_workspace(
+    workspace: Option<&WorkspaceIdOrPath>,
+    persist: bool,
+) -> Result<(Workspace, Option<Arc<FsStorageBackend>>)> {
     let cwd = match workspace {
         None => absolute_utf8(".")?,
         Some(WorkspaceIdOrPath::Path(path)) => path.clone(),
@@ -687,13 +713,28 @@ fn load_workspace(workspace: Option<&WorkspaceIdOrPath>) -> Result<Workspace> {
 
     trace!(%id, "Loaded unique workspace ID.");
 
-    let workspace = Workspace::new_with_id(root, id)
-        .persisted_at(&storage)
-        .inspect(|ws| info!(workspace = %ws.root(), "Using existing workspace."))?;
+    let fs = FsStorageBackend::new(&storage).map_err(jp_workspace::Error::from)?;
+
+    let user_root = user_data_dir()?.join("workspace");
+    let name = root
+        .file_name()
+        .ok_or_else(|| jp_workspace::Error::NotDir(root.clone()))?;
+    let fs = fs
+        .with_user_storage(&user_root, name, id.to_string())
+        .map_err(jp_workspace::Error::from)?;
+
+    let fs = Arc::new(fs);
+    let mut workspace = Workspace::new_with_id(root, id).with_backend(fs.clone());
+    if !persist {
+        workspace = workspace
+            .with_persist(Arc::new(NullPersistBackend))
+            .with_locker(Arc::new(NullLockBackend));
+    }
+    info!(workspace = %workspace.root(), "Using existing workspace.");
 
     workspace.id().store(&storage)?;
 
-    workspace.with_local_storage().map_err(Into::into)
+    Ok((workspace, Some(fs)))
 }
 
 const JP_CRATES: &[&str] = &[

@@ -7,7 +7,7 @@ use tracing::{debug, trace};
 
 use crate::{
     BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, OLD_PREFIX, STAGING_PREFIX,
-    Storage, dir_entries, value::cleanup_tmp_files,
+    Storage, dir_entries, trash::trash_conversation, value::cleanup_tmp_files,
 };
 
 /// Result of validating all conversation directories across storage roots.
@@ -34,7 +34,8 @@ pub struct ValidConversation {
 #[derive(Debug)]
 pub struct InvalidConversation {
     /// The conversations root this entry lives under.
-    /// Callers pass this back to [`Storage::trash_conversation`].
+    ///
+    /// Callers pass this back to [`trash_invalid_conversation`].
     pub(crate) conversations_dir: Utf8PathBuf,
 
     /// What went wrong.
@@ -55,8 +56,8 @@ pub enum ValidationError {
     #[error("missing {METADATA_FILE}")]
     MissingMetadata,
 
-    /// The per-conversation metadata file exists but is not valid JSON or
-    /// is not a JSON object.
+    /// The per-conversation metadata file exists but is not valid JSON or is
+    /// not a JSON object.
     #[error("{METADATA_FILE}: {source}")]
     CorruptMetadata {
         /// The underlying parse error.
@@ -74,8 +75,8 @@ pub enum ValidationError {
     #[error("missing {EVENTS_FILE}")]
     MissingEvents,
 
-    /// The per-conversation events file exists but is not a valid JSON array
-    /// or its elements are missing required structural fields.
+    /// The per-conversation events file exists but is not a valid JSON array or
+    /// its elements are missing required structural fields.
     #[error("{EVENTS_FILE}: {source}")]
     CorruptEvents {
         /// The underlying parse error.
@@ -100,10 +101,10 @@ impl Storage {
     /// 3. An `events.json` file exists and is a JSON array where each
     ///    element contains `timestamp` and `kind` fields.
     ///
-    /// No field values are materialized — the check uses [`IgnoredAny`] to
-    /// skip values without allocating. Content-level issues (bad field
-    /// values, missing optional fields, schema mismatches) are handled at
-    /// load time by [`ConversationStream::sanitize`].
+    /// No field values are materialized — the check uses [`IgnoredAny`] to skip
+    /// values without allocating. Content-level issues (bad field values,
+    /// missing optional fields, schema mismatches) are handled at load time by
+    /// [`ConversationStream::sanitize`].
     ///
     /// Files and dot-prefixed directories (e.g., `.trash/`) are silently
     /// skipped.
@@ -137,16 +138,15 @@ impl Storage {
 
         result
     }
+}
 
-    /// Trash a conversation that failed validation.
-    ///
-    /// Moves the conversation directory to `.trash/` and writes a `TRASHED.md`
-    /// explaining the error. Uses the path information captured during
-    /// validation.
-    pub fn trash_conversation(&self, entry: &InvalidConversation) -> crate::error::Result<()> {
-        let error_msg = entry.error.to_string();
-        crate::trash::trash_conversation(&entry.conversations_dir, &entry.dirname, &error_msg)
-    }
+/// Trash a conversation that failed validation.
+///
+/// Moves the conversation directory to `.trash/` and writes a `TRASHED.md`
+/// explaining the error.
+pub(crate) fn trash_invalid_conversation(entry: &InvalidConversation) -> crate::error::Result<()> {
+    let error_msg = entry.error.to_string();
+    trash_conversation(&entry.conversations_dir, &entry.dirname, &error_msg)
 }
 
 fn validate_root(conversations_dir: &Utf8Path, result: &mut ValidationResult) {
@@ -240,8 +240,8 @@ fn validate_entry(
 
 /// Confirm `metadata.json` is a valid JSON object.
 ///
-/// Uses [`IgnoredAny`] to skip all field values — no allocations, no
-/// schema checks. Content validation happens at load time.
+/// Uses [`IgnoredAny`] to skip all field values — no allocations, no schema
+/// checks. Content validation happens at load time.
 ///
 /// [`IgnoredAny`]: serde::de::IgnoredAny
 fn validate_metadata(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -257,12 +257,12 @@ fn validate_json_file(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error +
     Ok(())
 }
 
-/// Confirm `events.json` is a JSON array of objects with `timestamp` and
-/// `type` fields.
+/// Confirm `events.json` is a JSON array of objects with `timestamp` and `type`
+/// fields.
 ///
 /// All elements in the array — both `ConfigDelta` and `ConversationEvent` —
-/// serialize with `timestamp` and `type` as top-level fields. `type` is the
-/// tag for the flattened `EventKind` enum on events, and an explicit
+/// serialize with `timestamp` and `type` as top-level fields. `type` is the tag
+/// for the flattened `EventKind` enum on events, and an explicit
 /// `"config_delta"` tag on config deltas.
 ///
 /// Uses [`IgnoredAny`] for field values — the parser skips over them without
@@ -294,8 +294,8 @@ fn validate_events(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Se
 /// 1. **`.staging-X` exists, `X` exists**: crash during staging writes or
 ///    before the swap started. Remove the staging dir.
 /// 2. **`.old-X` exists, `.staging-X` exists, `X` missing**: crash between
-///    rename-old and rename-staging (steps 3–4 in `persist_conversation`).
-///    Roll back: rename `.old-X` → `X`, remove `.staging-X`.
+///    rename-old and rename-staging (steps 3–4 in `persist_conversation`). Roll
+///    back: rename `.old-X` → `X`, remove `.staging-X`.
 /// 3. **`.old-X` exists, `X` exists**: crash after the swap completed but
 ///    before the backup was removed (step 5). Remove the `.old-X` dir.
 fn cleanup_staging_dirs(conversations_dir: &Utf8Path) {
@@ -331,8 +331,8 @@ fn cleanup_staging_dirs(conversations_dir: &Utf8Path) {
             let old_name = format!("{OLD_PREFIX}{dir_name}");
             let has_old = names.iter().any(|n| n == &old_name);
 
-            // If there's a matching .old- dir, it was handled above.
-            // Otherwise this is a stale staging dir from a failed write.
+            // If there's a matching .old- dir, it was handled above. Otherwise
+            // this is a stale staging dir from a failed write.
             if !has_old {
                 trace!(path = %entry.path(), "Removing orphaned staging directory.");
                 drop(std::fs::remove_dir_all(entry.path()));

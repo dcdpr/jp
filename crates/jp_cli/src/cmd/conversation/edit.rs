@@ -113,11 +113,16 @@ impl Edit {
         let config = ctx.config();
         let cmd = config.editor.command().ok_or(Error::MissingEditor)?;
 
+        let fs = ctx
+            .fs_backend
+            .as_deref()
+            .ok_or("no filesystem storage configured")?;
+
         let mut paths = Vec::new();
         for handle in handles {
             let id = handle.id();
             paths.extend(resolve_paths(
-                &ctx.workspace,
+                fs,
                 &id,
                 self.events,
                 self.metadata,

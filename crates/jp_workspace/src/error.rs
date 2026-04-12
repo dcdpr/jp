@@ -19,6 +19,9 @@ pub enum Error {
     #[error("Cannot persist workspace without storage")]
     MissingStorage,
 
+    #[error("Failed to acquire lock on conversation {0}")]
+    LockFailed(String),
+
     #[error("Cannot persist workspace without valid home directory")]
     MissingHome,
 

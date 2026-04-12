@@ -86,8 +86,8 @@
 //! |                       | (`SessionMapping`, `Workspace` methods) |
 //! | `jp_cli::session`     | Resolution logic (`resolve()`, platform |
 //! |                       | APIs, env var checks)                   |
-//! | `jp_storage::Storage` | File I/O (`load_session_data`,          |
-//! |                       | `save_session_data`)                    |
+//! | `SessionBackend`      | Storage I/O (`load_session`,            |
+//! |                       | `save_session`)                         |
 //!
 //! See: `docs/rfd/020-parallel-conversations.md`
 //!

@@ -17,18 +17,18 @@
 //!
 //! ```text
 //! ConversationLock
-//! ├── Holds Option<Arc<ConversationFileLock>> — cross-process exclusion (if storage)
+//! ├── Holds Box<dyn ConversationLockGuard>   — cross-process exclusion
 //! ├── Holds Arc<RwLock<Conversation>>         — shared with Workspace
 //! ├── Holds Arc<RwLock<ConversationStream>>   — shared with Workspace
 //! ├── Read methods: metadata(), events()      — return RwLockReadGuard
-//! ├── as_mut()   → ConversationMut (borrows flock via Arc clone)
-//! └── into_mut() → ConversationMut (consumes lock, takes flock ownership)
+//! ├── as_mut()   → ConversationMut (borrows lock_guard via Arc clone)
+//! └── into_mut() → ConversationMut (consumes lock, takes ownership)
 //!
 //! ConversationMut
 //! ├── Read methods:  metadata(), events()           — return RwLockReadGuard
 //! ├── Write methods: update_events(), update_metadata() — callback-based, set dirty
 //! ├── flush(&mut self) → explicit persist with error propagation
-//! └── Drop: if dirty → read data → persist → flock released when last Arc drops
+//! └── Drop: if dirty → read data → persist → lock released when Arc drops
 //! ```
 //!
 //! # Callback-Based Mutation
@@ -68,11 +68,11 @@ use std::sync::{
 };
 
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
-use jp_storage::lock::ConversationFileLock;
+use jp_storage::backend::{ConversationLockGuard, PersistBackend};
 use parking_lot::{RwLock, RwLockReadGuard};
 use tracing::info;
 
-use crate::{handle::ConversationHandle, persist::PersistBackend};
+use crate::handle::ConversationHandle;
 
 /// Result of attempting to acquire a conversation lock.
 #[derive(Debug)]
@@ -98,10 +98,8 @@ pub struct ConversationLock {
     id: ConversationId,
     metadata: Arc<RwLock<Conversation>>,
     events: Arc<RwLock<ConversationStream>>,
-    writer: Option<Arc<dyn PersistBackend>>,
-
-    /// Cross-process flock. `None` for in-memory workspaces without storage.
-    file_lock: Option<Arc<ConversationFileLock>>,
+    writer: Arc<dyn PersistBackend>,
+    lock_guard: Arc<Box<dyn ConversationLockGuard>>,
 }
 
 impl ConversationLock {
@@ -114,15 +112,15 @@ impl ConversationLock {
         handle: ConversationHandle,
         metadata: Arc<RwLock<Conversation>>,
         events: Arc<RwLock<ConversationStream>>,
-        writer: Option<Arc<dyn PersistBackend>>,
-        file_lock: Option<ConversationFileLock>,
+        writer: Arc<dyn PersistBackend>,
+        lock_guard: Box<dyn ConversationLockGuard>,
     ) -> Self {
         Self {
             id: handle.into_inner(),
             metadata,
             events,
             writer,
-            file_lock: file_lock.map(Arc::new),
+            lock_guard: Arc::new(lock_guard),
         }
     }
 
@@ -154,8 +152,8 @@ impl ConversationLock {
             metadata: Arc::clone(&self.metadata),
             events: Arc::clone(&self.events),
             dirty: AtomicBool::new(false),
-            writer: self.writer.clone(),
-            _file_lock: self.file_lock.clone(),
+            writer: Arc::clone(&self.writer),
+            _lock_guard: Arc::clone(&self.lock_guard),
         }
     }
 
@@ -171,7 +169,7 @@ impl ConversationLock {
             events: self.events,
             dirty: AtomicBool::new(false),
             writer: self.writer,
-            _file_lock: self.file_lock,
+            _lock_guard: self.lock_guard,
         }
     }
 }
@@ -201,11 +199,10 @@ pub struct ConversationMut {
     metadata: Arc<RwLock<Conversation>>,
     events: Arc<RwLock<ConversationStream>>,
     dirty: AtomicBool,
-    writer: Option<Arc<dyn PersistBackend>>,
+    writer: Arc<dyn PersistBackend>,
 
-    // Holds the flock alive. Released when the last Arc reference drops. `None`
-    // for in-memory workspaces without storage.
-    _file_lock: Option<Arc<ConversationFileLock>>,
+    // Holds the lock guard alive. Released when the last Arc drops.
+    _lock_guard: Arc<Box<dyn ConversationLockGuard>>,
 }
 
 impl ConversationMut {
@@ -299,13 +296,9 @@ impl ConversationMut {
             return Ok(());
         }
 
-        let Some(writer) = &self.writer else {
-            return Ok(());
-        };
-
         let meta = self.metadata.read();
         let evts = self.events.read();
-        writer.write(&self.id, &meta, &evts)?;
+        self.writer.write(&self.id, &meta, &evts)?;
         self.dirty.store(false, Ordering::Relaxed);
 
         info!(id = %self.id, "Flushed conversation to disk.");
@@ -341,15 +334,11 @@ impl Drop for ConversationMut {
             return;
         }
 
-        let Some(writer) = &self.writer else {
-            return;
-        };
-
         let meta = self.metadata.read();
         let evts = self.events.read();
 
         #[expect(clippy::print_stderr)]
-        if let Err(e) = writer.write(&self.id, &meta, &evts) {
+        if let Err(e) = self.writer.write(&self.id, &meta, &evts) {
             eprintln!("Failed to persist conversation {}: {e}", self.id);
         }
     }

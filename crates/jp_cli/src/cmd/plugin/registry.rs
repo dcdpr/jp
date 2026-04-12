@@ -50,8 +50,7 @@ pub(crate) fn load_cached() -> Option<Registry> {
 
 /// Save the registry to the local cache file.
 pub(crate) fn save_cache(registry: &Registry) -> Result<(), cmd::Error> {
-    let path =
-        cache_path().ok_or_else(|| cmd::Error::from("cannot determine user data directory"))?;
+    let path = cache_path().ok_or("cannot determine user data directory")?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent.as_std_path())
             .map_err(|e| cmd::Error::from(format!("failed to create cache directory: {e}")))?;
@@ -134,8 +133,7 @@ pub(crate) async fn download_and_verify(
 ///
 /// Returns the path to the installed binary.
 pub(crate) fn install_binary(name: &str, data: &[u8]) -> Result<Utf8PathBuf, cmd::Error> {
-    let dir = bin_dir()
-        .ok_or_else(|| cmd::Error::from("cannot determine user data directory for plugins"))?;
+    let dir = bin_dir().ok_or("cannot determine user data directory for plugins")?;
     std::fs::create_dir_all(dir.as_std_path())
         .map_err(|e| cmd::Error::from(format!("failed to create plugin bin directory: {e}")))?;
 
